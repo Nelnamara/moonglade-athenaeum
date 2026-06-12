@@ -8,16 +8,6 @@ PixAI's terms grant users copyright of their own generations. This tool is rate-
 
 ---
 
-## Screenshots
-
-> *Replace the placeholders below with your own terminal screenshots.*
-
-| Download Run | Organize Output | Catalog Stats |
-|:---:|:---:|:---:|
-| ![Download run progress](docs/screenshot-download.png) | ![Organize folder output](docs/screenshot-organize.png) | ![Catalog stats summary](docs/screenshot-stats.png) |
-
----
-
 ## Features
 
 - **Full-resolution downloads** — bypasses the 20-image gallery limit; fetches every generation at the original size
