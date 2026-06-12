@@ -146,6 +146,7 @@ python pixai_gallery_backup.py --organize-adv-live --convert png   # download + 
 | `--organize-live` | Same naming applied live during download (default behavior made explicit) |
 | `--organize-adv` | Full sort: move files into `batches/` and `YYYY-MM/` folders, embed metadata |
 | `--organize-adv-live` | Full sort applied live during download — files land directly in batch/month folders |
+| `--convert-existing` | Convert all already-downloaded `.webp` files to `--convert` format (default `png`). No token needed. |
 
 ### Options
 
@@ -207,7 +208,7 @@ pixai_backup/
 | `promptsPreview` is truncated — full prompt, seed, and model are not available in task summaries | Requires a separate task-detail API query; on the roadmap |
 | WebP metadata embedding is unreliable | `--organize-adv` and `--organize-adv-live` skip WebP; pair with `--convert png` to get embedded metadata |
 | Windows MAX_PATH (260 chars) | Batch images use short names (`NN_<mediaid>.ext`) inside prompt-named folders; `--name-length` defaults to 60 |
-| `--convert` only affects new downloads | Already-downloaded WebP files are not converted on re-run; `--convert-existing` is on the roadmap |
+| `--convert` only affects new downloads | Use `--convert-existing` to convert already-downloaded `.webp` files in place |
 | Server errors above ~10,000 tasks per page | `--count-page-size` defaults to 10,000; lower it if you see `Internal server error` on `--count` |
 
 ---
@@ -220,6 +221,7 @@ pixai_backup/
 - `--organize-adv` mode: sort into `batches/` and `YYYY-MM/` folders, per-folder `_prompt.txt` and `_index.csv`, embedded PNG/JPEG metadata
 - `--organize-adv-live` mode: same folder sorting applied live as files download
 - `--organize` mode: rename files to `prompt_taskid_mediaid` scheme in-place
+- `--convert-existing` mode: batch-convert all `.webp` files in the backup tree; supports `--dry-run` and `--keep-webp`
 - `--convert` (WebP → PNG / JPEG) with Pillow, atomic `.part` temp writes
 - `--count`, `--probe`, `--catalog-stats`, `--collect-only` modes
 - Apollo CSRF headers (`apollo-require-preflight`, `x-apollo-operation-name`) required on all GraphQL requests
@@ -231,7 +233,7 @@ pixai_backup/
 
 - [x] **`config.json` for captured constants** — `USER_ID`, `U3T`, and `PERSISTED_QUERY_HASH` loaded from git-ignored `config.json`; `config.example.json` ships with the repo
 - [ ] **Full prompt + seed + model** — capture the task-detail persisted query to store complete generation parameters (currently only the truncated preview)
-- [ ] **`--convert-existing`** — convert already-downloaded WebP files in place
+- [x] **`--convert-existing`** — convert already-downloaded `.webp` files in place; supports `--dry-run`, `--keep-webp`, `--convert`, `--jpeg-quality`, `--jpeg-bg`
 - [x] **Foldering during live download** — `--organize-adv-live` sorts files into batch/month folders as they download; `--organize-live` for explicit prompt-naming intent
 - [ ] **`tests/` with pytest** — mocked network layer for offline testing of API logic
 - [ ] **GUI port** — C#/WinForms or Go/Wails desktop app with token field and progress bar (full API flow already mapped)

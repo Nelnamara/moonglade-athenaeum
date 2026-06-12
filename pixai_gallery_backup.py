@@ -463,6 +463,46 @@ def page_variables(page_size, before=None):
     return v
 
 
+def cmd_convert_existing(args, out):
+    """Convert all .webp files in the backup tree to the target format in-place."""
+    target = (args.convert or "png").lower()
+    out_ext = ".jpg" if target in ("jpg", "jpeg") else ".png"
+
+    webp_files = sorted(p for p in out.rglob("*.webp")
+                        if not p.name.endswith(".part") and p.stat().st_size > 0)
+    if not webp_files:
+        print("No .webp files found under {}.".format(out))
+        return
+
+    print("Found {} .webp file(s); converting to {}.".format(len(webp_files), target))
+    if args.keep_webp:
+        print("--keep-webp: originals kept alongside converted files.")
+
+    if args.dry_run:
+        for p in webp_files[:10]:
+            print("  {} -> {}".format(p.name, p.with_suffix(out_ext).name))
+        if len(webp_files) > 10:
+            print("  ... and {} more".format(len(webp_files) - 10))
+        print("\nDry run -- nothing converted. Re-run without --dry-run to apply.")
+        return
+
+    ok = failed = 0
+    for p in webp_files:
+        _, note = convert_image(p, target, args.jpeg_quality, args.jpeg_bg,
+                                keep_original=args.keep_webp)
+        if note == "pillow-missing":
+            sys.exit("--convert-existing needs Pillow:  pip install pillow")
+        if note == "ok":
+            ok += 1
+        else:
+            print("  FAILED {}: {}".format(p.name, note))
+            failed += 1
+
+    print("\nConverted: {}, failed: {}.".format(ok, failed))
+    if failed:
+        print("Failed files left as .webp -- re-run to retry.")
+
+
 def cmd_organize(args, out, img_dir, csv_path):
     """Reorganize already-downloaded files into batch/ and YYYY-MM/ folders using
     catalog.csv. Embeds prompt metadata, optionally converts, writes per-folder
@@ -654,6 +694,9 @@ def main():
                     help="background to flatten transparency onto for JPEG")
     ap.add_argument("--keep-webp", action="store_true",
                     help="keep the original .webp after converting")
+    ap.add_argument("--convert-existing", action="store_true",
+                    help="convert all already-downloaded .webp files to --convert format "
+                         "(default png). No token needed. Supports --dry-run and --keep-webp.")
     ap.add_argument("--organize", action="store_true",
                     help="rename already-downloaded files to the prompt_taskid_mediaid "
                          "scheme using catalog.csv, then exit")
@@ -704,6 +747,11 @@ def main():
             on_disk = sum(1 for p in img_dir.glob("*.*")
                           if not p.name.endswith(".part"))
             print("Image files on disk : {}".format(on_disk))
+        return
+
+    # ---- convert-existing: batch-convert .webp files, no token needed -----------
+    if args.convert_existing:
+        cmd_convert_existing(args, out)
         return
 
     # ---- organize-adv: full sort into batch/month folders (reads catalog.csv) ---
