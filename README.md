@@ -120,22 +120,32 @@ python pixai_gallery_backup.py                # download everything
 
 ### Organizing Downloads
 
+**Post-download (run after a download session):**
 ```
-python pixai_gallery_backup.py --organize --convert png --dry-run   # preview
-python pixai_gallery_backup.py --organize --convert png             # apply
+python pixai_gallery_backup.py --organize --dry-run        # preview rename plan
+python pixai_gallery_backup.py --organize                  # rename to prompt_taskid_mediaid
+python pixai_gallery_backup.py --organize-adv --dry-run    # preview full folder sort
+python pixai_gallery_backup.py --organize-adv --convert png  # sort into folders + convert
+```
+
+**Live (sort as files download — one step, no separate organize pass):**
+```
+python pixai_gallery_backup.py --organize-adv-live --convert png   # download + folder sort
 ```
 
 ### Modes
 
 | Flag | What it does |
 |---|---|
-| *(none)* | Download full history into `images/` and write `catalog.csv` |
+| *(none)* | Download full history into `images/`, named `prompt_taskid_mediaid.ext` |
 | `--probe` | Resolve one full-res URL and exit — connection sanity check |
 | `--count` | Tally total tasks and images via the API (no downloads) |
 | `--catalog-stats` | Summarize existing `catalog.csv` and count files on disk (no token needed) |
 | `--collect-only` | Page through and write the catalog, skip image downloads |
-| `--rename-existing` | Rename already-downloaded files to the prompt-based scheme using the catalog |
-| `--organize` | Sort files into `batches/` and `YYYY-MM/` folders, embed metadata |
+| `--organize` | Rename files in `images/` to `prompt_taskid_mediaid` scheme using `catalog.csv` |
+| `--organize-live` | Same naming applied live during download (default behavior made explicit) |
+| `--organize-adv` | Full sort: move files into `batches/` and `YYYY-MM/` folders, embed metadata |
+| `--organize-adv-live` | Full sort applied live during download — files land directly in batch/month folders |
 
 ### Options
 
@@ -153,7 +163,7 @@ python pixai_gallery_backup.py --organize --convert png             # apply
 | `--jpeg-quality N` | `92` | JPEG quality (1–100) |
 | `--jpeg-bg COLOR` | `white` | Background for transparency when converting to JPEG |
 | `--keep-webp` | off | Keep the original `.webp` after converting |
-| `--dry-run` | off | Preview `--organize` or `--rename-existing` without making changes |
+| `--dry-run` | off | Preview `--organize` or `--organize-adv` without making changes |
 
 ---
 
@@ -168,7 +178,7 @@ pixai_backup/
 └─ raw_tasks.jsonl         full raw task data (kept for re-processing)
 ```
 
-After `--organize`:
+After `--organize-adv` or `--organize-adv-live`:
 
 ```
 pixai_backup/
@@ -182,11 +192,11 @@ pixai_backup/
 │   └─ _index.csv
 ├─ 2026-06/
 │   └─ ...
-├─ images/                       (empties out as files are moved)
+├─ images/                       (empties out as files are moved by --organize-adv)
 └─ catalog.csv
 ```
 
-> **Keep `catalog.csv`.** It is the source of truth for full prompt previews, dates, and dimensions. Both `--organize` and `--rename-existing` read from it — filenames are shortened and stripped of punctuation, so the catalog is the complete record.
+> **Keep `catalog.csv`.** It is the source of truth for full prompt previews, dates, and dimensions. Both `--organize` and `--organize-adv` read from it — filenames are shortened and stripped of punctuation, so the catalog is the complete record.
 
 ---
 
@@ -195,7 +205,7 @@ pixai_backup/
 | Issue | Status |
 |---|---|
 | `promptsPreview` is truncated — full prompt, seed, and model are not available in task summaries | Requires a separate task-detail API query; on the roadmap |
-| WebP metadata embedding is unreliable | `--organize` skips WebP; pair with `--convert png` to get embedded metadata |
+| WebP metadata embedding is unreliable | `--organize-adv` and `--organize-adv-live` skip WebP; pair with `--convert png` to get embedded metadata |
 | Windows MAX_PATH (260 chars) | Batch images use short names (`NN_<mediaid>.ext`) inside prompt-named folders; `--name-length` defaults to 60 |
 | `--convert` only affects new downloads | Already-downloaded WebP files are not converted on re-run; `--convert-existing` is on the roadmap |
 | Server errors above ~10,000 tasks per page | `--count-page-size` defaults to 10,000; lower it if you see `Internal server error` on `--count` |
@@ -207,9 +217,11 @@ pixai_backup/
 ### v4.0
 - Switched to media object resolution: fetch `/v1/media/<id>` JSON and pick the `PUBLIC` (full-resolution) variant URL, replacing direct variant-URL probing
 - Backward pagination (`last` / `before` / `hasPreviousPage`) with full resume support
-- `--organize` mode: sort into `batches/` and `YYYY-MM/` folders, per-folder `_prompt.txt` and `_index.csv`, embedded PNG/JPEG metadata
+- `--organize-adv` mode: sort into `batches/` and `YYYY-MM/` folders, per-folder `_prompt.txt` and `_index.csv`, embedded PNG/JPEG metadata
+- `--organize-adv-live` mode: same folder sorting applied live as files download
+- `--organize` mode: rename files to `prompt_taskid_mediaid` scheme in-place
 - `--convert` (WebP → PNG / JPEG) with Pillow, atomic `.part` temp writes
-- `--count`, `--probe`, `--catalog-stats`, `--rename-existing`, `--collect-only` modes
+- `--count`, `--probe`, `--catalog-stats`, `--collect-only` modes
 - Apollo CSRF headers (`apollo-require-preflight`, `x-apollo-operation-name`) required on all GraphQL requests
 - `truststore` integration for corporate/antivirus HTTPS interception
 
@@ -220,7 +232,7 @@ pixai_backup/
 - [x] **`config.json` for captured constants** — `USER_ID`, `U3T`, and `PERSISTED_QUERY_HASH` loaded from git-ignored `config.json`; `config.example.json` ships with the repo
 - [ ] **Full prompt + seed + model** — capture the task-detail persisted query to store complete generation parameters (currently only the truncated preview)
 - [ ] **`--convert-existing`** — convert already-downloaded WebP files in place
-- [ ] **Foldering during live download** — apply the `--organize` layout as files arrive (one step instead of download-then-organize)
+- [x] **Foldering during live download** — `--organize-adv-live` sorts files into batch/month folders as they download; `--organize-live` for explicit prompt-naming intent
 - [ ] **`tests/` with pytest** — mocked network layer for offline testing of API logic
 - [ ] **GUI port** — C#/WinForms or Go/Wails desktop app with token field and progress bar (full API flow already mapped)
 
