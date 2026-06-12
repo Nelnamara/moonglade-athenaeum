@@ -3,6 +3,7 @@ token.txt
 .env
 config.json
 CLAUDE.md
+pixai_gui_settings.json
 
 # ---- Personal output: your images, prompts, catalogs ----
 # Contains your generated images, prompt text, and dates. Keep out of git.

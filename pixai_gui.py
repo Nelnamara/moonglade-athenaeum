@@ -1,0 +1,1026 @@
+#!/usr/bin/env python3
+"""
+pixai_gui.py  —  PySide6 desktop front-end for pixai_gallery_backup
+
+Requirements:
+    pip install PySide6
+
+Run:
+    python pixai_gui.py
+"""
+import io
+import json
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+    QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel,
+    QLineEdit, QMainWindow, QPushButton, QRadioButton, QButtonGroup,
+    QSpinBox, QTabWidget, QTextEdit, QVBoxLayout, QWidget, QSizePolicy,
+)
+
+try:
+    import pixai_gallery_backup as core
+except ImportError:
+    print("pixai_gallery_backup.py must be in the same folder as this script.")
+    sys.exit(1)
+
+SETTINGS_FILE = Path("pixai_gui_settings.json")
+
+# ---------------------------------------------------------------------------
+# Dark theme — Catppuccin Mocha palette
+# ---------------------------------------------------------------------------
+DARK_QSS = """
+QWidget {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    font-size: 10pt;
+}
+QMainWindow {
+    background-color: #181825;
+}
+QTabWidget::pane {
+    border: 1px solid #313244;
+    background-color: #1e1e2e;
+    border-top: none;
+}
+QTabBar::tab {
+    background-color: #181825;
+    color: #a6adc8;
+    padding: 7px 20px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    min-width: 90px;
+}
+QTabBar::tab:selected {
+    background-color: #1e1e2e;
+    color: #cba6f7;
+    font-weight: bold;
+}
+QTabBar::tab:hover:!selected {
+    background-color: #313244;
+    color: #cdd6f4;
+}
+QGroupBox {
+    border: 1px solid #313244;
+    border-radius: 6px;
+    margin-top: 14px;
+    padding: 10px 8px 8px 8px;
+    color: #89dceb;
+    font-weight: bold;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 6px;
+    left: 10px;
+}
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+    background-color: #313244;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: #cdd6f4;
+    selection-background-color: #cba6f7;
+    selection-color: #1e1e2e;
+    min-height: 22px;
+}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border-color: #cba6f7;
+}
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
+    color: #585b70;
+    border-color: #313244;
+}
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+    background-color: #45475a;
+    border: none;
+    width: 16px;
+}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+    background-color: #585b70;
+}
+QPushButton {
+    background-color: #313244;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    padding: 5px 14px;
+    color: #cdd6f4;
+    min-height: 24px;
+}
+QPushButton:hover {
+    background-color: #45475a;
+    border-color: #cba6f7;
+    color: #cba6f7;
+}
+QPushButton:pressed  { background-color: #585b70; }
+QPushButton:disabled { color: #45475a; border-color: #313244; background-color: #1e1e2e; }
+QPushButton#btn_start {
+    background-color: #a6e3a1; color: #1e1e2e;
+    border-color: #a6e3a1; font-weight: bold; min-width: 110px;
+}
+QPushButton#btn_start:hover    { background-color: #94e2d5; border-color: #94e2d5; }
+QPushButton#btn_start:disabled { background-color: #313244; color: #45475a; border-color: #313244; }
+QPushButton#btn_stop {
+    background-color: #f38ba8; color: #1e1e2e;
+    border-color: #f38ba8; font-weight: bold; min-width: 80px;
+}
+QPushButton#btn_stop:hover    { background-color: #eba0ac; border-color: #eba0ac; }
+QPushButton#btn_stop:disabled { background-color: #313244; color: #45475a; border-color: #313244; }
+QPushButton#btn_probe {
+    background-color: #f9e2af; color: #1e1e2e; border-color: #f9e2af;
+}
+QPushButton#btn_probe:hover { background-color: #fab387; border-color: #fab387; }
+QPushButton#btn_count {
+    background-color: #89b4fa; color: #1e1e2e; border-color: #89b4fa;
+}
+QPushButton#btn_count:hover { background-color: #74c7ec; border-color: #74c7ec; }
+QPushButton#btn_run {
+    background-color: #cba6f7; color: #1e1e2e;
+    border-color: #cba6f7; font-weight: bold; min-width: 120px;
+}
+QPushButton#btn_run:hover    { background-color: #b4befe; border-color: #b4befe; }
+QPushButton#btn_run:disabled { background-color: #313244; color: #45475a; border-color: #313244; }
+QTextEdit {
+    background-color: #11111b;
+    border: 1px solid #313244;
+    border-radius: 4px;
+    color: #a6e3a1;
+    font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+    font-size: 9pt;
+}
+QCheckBox { spacing: 6px; }
+QCheckBox::indicator {
+    width: 15px; height: 15px;
+    border: 1px solid #45475a; border-radius: 3px; background-color: #313244;
+}
+QCheckBox::indicator:checked  { background-color: #cba6f7; border-color: #cba6f7; }
+QCheckBox::indicator:disabled { background-color: #1e1e2e; border-color: #313244; }
+QRadioButton { spacing: 6px; }
+QRadioButton::indicator {
+    width: 14px; height: 14px;
+    border: 1px solid #45475a; border-radius: 7px; background-color: #313244;
+}
+QRadioButton::indicator:checked { background-color: #cba6f7; border-color: #cba6f7; }
+QScrollBar:vertical {
+    background-color: #181825; width: 10px; margin: 0;
+}
+QScrollBar::handle:vertical {
+    background-color: #45475a; border-radius: 5px; min-height: 24px; margin: 2px;
+}
+QScrollBar::handle:vertical:hover    { background-color: #585b70; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal {
+    background-color: #181825; height: 10px;
+}
+QScrollBar::handle:horizontal {
+    background-color: #45475a; border-radius: 5px; min-width: 24px; margin: 2px;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView {
+    background-color: #313244; border: 1px solid #45475a; outline: none;
+    selection-background-color: #cba6f7; selection-color: #1e1e2e;
+}
+QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #313244; }
+"""
+
+
+# ---------------------------------------------------------------------------
+# Persistence
+# ---------------------------------------------------------------------------
+
+def _load_settings():
+    if SETTINGS_FILE.exists():
+        try:
+            return json.loads(SETTINGS_FILE.read_text("utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_settings(data):
+    try:
+        SETTINGS_FILE.write_text(json.dumps(data, indent=2), "utf-8")
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Reusable widgets
+# ---------------------------------------------------------------------------
+
+class FolderRow(QWidget):
+    """QLineEdit + Browse button for picking a directory."""
+
+    def __init__(self, placeholder="", default="", parent=None):
+        super().__init__(parent)
+        self._edit = QLineEdit(default)
+        self._edit.setPlaceholderText(placeholder)
+        btn = QPushButton("Browse…")
+        btn.setFixedWidth(80)
+        btn.clicked.connect(self._browse)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._edit)
+        lay.addWidget(btn)
+
+    def _browse(self):
+        start = self._edit.text().strip() or str(Path.home())
+        d = QFileDialog.getExistingDirectory(self, "Select folder", start)
+        if d:
+            self._edit.setText(d)
+
+    @property
+    def path(self):
+        return self._edit.text().strip()
+
+    @path.setter
+    def path(self, v):
+        self._edit.setText(str(v))
+
+
+class LogWidget(QTextEdit):
+    """Read-only auto-scrolling monospace log."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setLineWrapMode(QTextEdit.NoWrap)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def append_line(self, text):
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(text + "\n")
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+
+    def clear_log(self):
+        self.clear()
+
+
+class _LogStream(io.RawIOBase):
+    """Write-only stream that calls emit_fn for each completed line."""
+
+    def __init__(self, emit_fn):
+        super().__init__()
+        self._emit = emit_fn
+        self._buf = ""
+
+    def write(self, text):
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            self._emit(line)
+        return len(text)
+
+    def flush(self):
+        if self._buf:
+            self._emit(self._buf)
+            self._buf = ""
+
+
+# ---------------------------------------------------------------------------
+# Worker thread
+# ---------------------------------------------------------------------------
+
+class Worker(QThread):
+    """Run fn(*args) in a background thread, capturing stdout → log signal."""
+
+    log = Signal(str)
+    done = Signal(bool, str)   # (success, error_message)
+
+    def __init__(self, fn, *args):
+        super().__init__()
+        self._fn = fn
+        self._args = args
+
+    def run(self):
+        stream = _LogStream(self.log.emit)
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = stream
+        sys.stderr = stream
+        try:
+            self._fn(*self._args)
+            self.done.emit(True, "")
+        except core.PixAIError as e:
+            self.done.emit(False, str(e))
+        except SystemExit as e:
+            msg = str(e.code) if e.code not in (None, 0) else ""
+            self.done.emit(e.code in (None, 0), msg)
+        except Exception:
+            import traceback
+            self.done.emit(False, traceback.format_exc())
+        finally:
+            stream.flush()
+            sys.stdout, sys.stderr = old_out, old_err
+
+
+# ---------------------------------------------------------------------------
+# Shared settings bar  (token + output folder, always visible)
+# ---------------------------------------------------------------------------
+
+class SettingsBar(QGroupBox):
+
+    def __init__(self, settings, parent=None):
+        super().__init__("Connection & Output", parent)
+
+        lbl_tok = QLabel("Token:")
+        lbl_tok.setFixedWidth(60)
+        self.token_edit = QLineEdit()
+        self.token_edit.setEchoMode(QLineEdit.Password)
+        self.token_edit.setPlaceholderText(
+            "Bearer JWT  (or set PIXAI_TOKEN env var / create token.txt)")
+        self.token_edit.setText(settings.get("token", ""))
+
+        eye = QPushButton("👁")
+        eye.setFixedWidth(34)
+        eye.setCheckable(True)
+        eye.setToolTip("Show / hide token")
+        eye.toggled.connect(
+            lambda v: self.token_edit.setEchoMode(
+                QLineEdit.Normal if v else QLineEdit.Password))
+
+        load_btn = QPushButton("Load token.txt")
+        load_btn.setFixedWidth(110)
+        load_btn.clicked.connect(self._load_token_file)
+
+        tok_row = QHBoxLayout()
+        tok_row.addWidget(lbl_tok)
+        tok_row.addWidget(self.token_edit)
+        tok_row.addWidget(eye)
+        tok_row.addWidget(load_btn)
+
+        lbl_out = QLabel("Output:")
+        lbl_out.setFixedWidth(60)
+        self.out_folder = FolderRow(
+            placeholder="pixai_backup",
+            default=settings.get("out", "pixai_backup"),
+        )
+
+        out_row = QHBoxLayout()
+        out_row.addWidget(lbl_out)
+        out_row.addWidget(self.out_folder)
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(tok_row)
+        lay.addLayout(out_row)
+
+    def _load_token_file(self):
+        p, _ = QFileDialog.getOpenFileName(
+            self, "Load token file", "", "Text files (*.txt);;All files (*)")
+        if p:
+            self.token_edit.setText(Path(p).read_text("utf-8").strip())
+
+    @property
+    def token(self):
+        return self.token_edit.text().strip() or None
+
+    @property
+    def out(self):
+        return self.out_folder.path or "pixai_backup"
+
+
+# ---------------------------------------------------------------------------
+# Download tab
+# ---------------------------------------------------------------------------
+
+class DownloadTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        opts = QGroupBox("Download Options")
+        g = QVBoxLayout(opts)
+
+        # Row 1: page size, max tasks, delay
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel("Page size:"))
+        self.page_size = QSpinBox()
+        self.page_size.setRange(1, 500)
+        self.page_size.setValue(settings.get("page_size", 20))
+        self.page_size.setFixedWidth(70)
+        r1.addWidget(self.page_size)
+        r1.addSpacing(16)
+        r1.addWidget(QLabel("Max tasks (0=all):"))
+        self.max_tasks = QSpinBox()
+        self.max_tasks.setRange(0, 999999)
+        self.max_tasks.setValue(settings.get("max_tasks", 0))
+        self.max_tasks.setFixedWidth(80)
+        r1.addWidget(self.max_tasks)
+        r1.addSpacing(16)
+        r1.addWidget(QLabel("Delay (s):"))
+        self.delay = QDoubleSpinBox()
+        self.delay.setRange(0.0, 30.0)
+        self.delay.setSingleStep(0.1)
+        self.delay.setDecimals(1)
+        self.delay.setValue(settings.get("delay", 0.4))
+        self.delay.setFixedWidth(65)
+        r1.addWidget(self.delay)
+        r1.addStretch()
+        g.addLayout(r1)
+
+        # Row 2: name length, separator
+        r2 = QHBoxLayout()
+        r2.addWidget(QLabel("Name length:"))
+        self.name_len = QSpinBox()
+        self.name_len.setRange(10, 200)
+        self.name_len.setValue(settings.get("name_length", 60))
+        self.name_len.setFixedWidth(65)
+        r2.addWidget(self.name_len)
+        r2.addSpacing(16)
+        r2.addWidget(QLabel("Separator:"))
+        self.name_sep = QComboBox()
+        self.name_sep.addItems(["_", "-"])
+        self.name_sep.setCurrentText(settings.get("name_sep", "_"))
+        self.name_sep.setFixedWidth(50)
+        r2.addWidget(self.name_sep)
+        r2.addStretch()
+        g.addLayout(r2)
+
+        # Row 3: live organize mode
+        r3 = QHBoxLayout()
+        r3.addWidget(QLabel("Organize:"))
+        self._org_grp = QButtonGroup(self)
+        self.org_flat     = QRadioButton("Flat (images/ folder)")
+        self.org_live     = QRadioButton("Prompt naming (live)")
+        self.org_adv_live = QRadioButton("Batch + Month folders (live)")
+        for rb in (self.org_flat, self.org_live, self.org_adv_live):
+            self._org_grp.addButton(rb)
+            r3.addWidget(rb)
+        mode = settings.get("org_mode", "flat")
+        (self.org_adv_live if mode == "adv_live" else
+         self.org_live if mode == "live" else self.org_flat).setChecked(True)
+        r3.addStretch()
+        g.addLayout(r3)
+
+        # Row 4: convert on download + JPEG options
+        r4 = QHBoxLayout()
+        r4.addWidget(QLabel("Convert:"))
+        self.convert_combo = QComboBox()
+        self.convert_combo.addItem("None (keep original)", None)
+        self.convert_combo.addItem("→ PNG", "png")
+        self.convert_combo.addItem("→ JPEG", "jpeg")
+        idx = self.convert_combo.findData(settings.get("convert", None))
+        self.convert_combo.setCurrentIndex(max(0, idx))
+        self.convert_combo.setFixedWidth(150)
+        r4.addWidget(self.convert_combo)
+        r4.addSpacing(12)
+        self._lbl_jq = QLabel("JPEG quality:")
+        r4.addWidget(self._lbl_jq)
+        self.jpeg_qual = QSpinBox()
+        self.jpeg_qual.setRange(1, 100)
+        self.jpeg_qual.setValue(settings.get("jpeg_quality", 92))
+        self.jpeg_qual.setFixedWidth(55)
+        r4.addWidget(self.jpeg_qual)
+        r4.addSpacing(8)
+        self._lbl_bg = QLabel("BG:")
+        r4.addWidget(self._lbl_bg)
+        self.jpeg_bg = QComboBox()
+        self.jpeg_bg.addItems(["white", "black"])
+        self.jpeg_bg.setCurrentText(settings.get("jpeg_bg", "white"))
+        self.jpeg_bg.setFixedWidth(70)
+        r4.addWidget(self.jpeg_bg)
+        r4.addSpacing(10)
+        self.keep_webp = QCheckBox("Keep .webp")
+        self.keep_webp.setChecked(settings.get("keep_webp", False))
+        r4.addWidget(self.keep_webp)
+        r4.addStretch()
+        g.addLayout(r4)
+
+        self.convert_combo.currentIndexChanged.connect(self._on_convert_change)
+        self._on_convert_change()
+
+        # Buttons
+        self.btn_start = QPushButton("▶  Start Download")
+        self.btn_start.setObjectName("btn_start")
+        self.btn_probe = QPushButton("Probe API")
+        self.btn_probe.setObjectName("btn_probe")
+        self.btn_count = QPushButton("Count Library")
+        self.btn_count.setObjectName("btn_count")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_start)
+        btn_row.addWidget(self.btn_probe)
+        btn_row.addWidget(self.btn_count)
+        btn_row.addStretch()
+        btn_row.addWidget(self.btn_stop)
+
+        self.btn_start.clicked.connect(self._start_download)
+        self.btn_probe.clicked.connect(self._start_probe)
+        self.btn_count.clicked.connect(self._start_count)
+        self.btn_stop.clicked.connect(self._stop)
+
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(opts)
+        lay.addLayout(btn_row)
+        lay.addWidget(self.log, stretch=1)
+
+    def _on_convert_change(self):
+        jpeg = self.convert_combo.currentData() in ("jpeg", "jpg")
+        for w in (self._lbl_jq, self.jpeg_qual, self._lbl_bg,
+                  self.jpeg_bg, self.keep_webp):
+            w.setEnabled(jpeg)
+
+    def _build_args(self):
+        return SimpleNamespace(
+            token=self._bar.token,
+            out=self._bar.out,
+            page_size=self.page_size.value(),
+            max=self.max_tasks.value(),
+            delay=self.delay.value(),
+            name_length=self.name_len.value(),
+            name_sep=self.name_sep.currentText(),
+            organize_live=self.org_live.isChecked(),
+            organize_adv_live=self.org_adv_live.isChecked(),
+            convert=self.convert_combo.currentData(),
+            jpeg_quality=self.jpeg_qual.value(),
+            jpeg_bg=self.jpeg_bg.currentText(),
+            keep_webp=self.keep_webp.isChecked(),
+            collect_only=False,
+            count_page_size=10000,
+        )
+
+    def _run(self, fn, *args):
+        if self._worker and self._worker.isRunning():
+            return
+        self.log.clear_log()
+        self._set_running(True)
+        self._worker = Worker(fn, *args)
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _start_download(self): self._run(core.run_download, self._build_args())
+    def _start_probe(self):    self._run(core.run_probe,    self._build_args())
+    def _start_count(self):    self._run(core.run_count,    self._build_args())
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._set_running(False)
+
+    def _on_done(self, success, msg):
+        self._set_running(False)
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def _set_running(self, running):
+        for w in (self.btn_start, self.btn_probe, self.btn_count):
+            w.setEnabled(not running)
+        self.btn_stop.setEnabled(running)
+
+    def collect_settings(self):
+        return {
+            "page_size":    self.page_size.value(),
+            "max_tasks":    self.max_tasks.value(),
+            "delay":        self.delay.value(),
+            "name_length":  self.name_len.value(),
+            "name_sep":     self.name_sep.currentText(),
+            "org_mode":     ("adv_live" if self.org_adv_live.isChecked()
+                             else "live" if self.org_live.isChecked() else "flat"),
+            "convert":      self.convert_combo.currentData(),
+            "jpeg_quality": self.jpeg_qual.value(),
+            "jpeg_bg":      self.jpeg_bg.currentText(),
+            "keep_webp":    self.keep_webp.isChecked(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Organize tab
+# ---------------------------------------------------------------------------
+
+class OrganizeTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        opts = QGroupBox("Organize Options")
+        g = QVBoxLayout(opts)
+
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel("Mode:"))
+        self._mode_grp = QButtonGroup(self)
+        self.rb_simple = QRadioButton("Simple rename  (prompt_taskid_mediaid)")
+        self.rb_adv    = QRadioButton("Advanced  (batch/ + YYYY-MM/ folders + metadata)")
+        for rb in (self.rb_simple, self.rb_adv):
+            self._mode_grp.addButton(rb)
+            r1.addWidget(rb)
+        (self.rb_adv if settings.get("org_adv", False)
+         else self.rb_simple).setChecked(True)
+        r1.addStretch()
+        g.addLayout(r1)
+
+        r2 = QHBoxLayout()
+        self.dry_run = QCheckBox("Dry run (preview only)")
+        self.dry_run.setChecked(settings.get("org_dry_run", False))
+        r2.addWidget(self.dry_run)
+        r2.addSpacing(20)
+        r2.addWidget(QLabel("Name length:"))
+        self.name_len = QSpinBox()
+        self.name_len.setRange(10, 200)
+        self.name_len.setValue(settings.get("name_length", 60))
+        self.name_len.setFixedWidth(65)
+        r2.addWidget(self.name_len)
+        r2.addSpacing(10)
+        r2.addWidget(QLabel("Sep:"))
+        self.name_sep = QComboBox()
+        self.name_sep.addItems(["_", "-"])
+        self.name_sep.setCurrentText(settings.get("name_sep", "_"))
+        self.name_sep.setFixedWidth(50)
+        r2.addWidget(self.name_sep)
+        r2.addStretch()
+        g.addLayout(r2)
+
+        r3 = QHBoxLayout()
+        r3.addWidget(QLabel("Convert during organize:"))
+        self.convert_combo = QComboBox()
+        self.convert_combo.addItem("None", None)
+        self.convert_combo.addItem("→ PNG", "png")
+        self.convert_combo.addItem("→ JPEG", "jpeg")
+        self.convert_combo.setFixedWidth(110)
+        r3.addWidget(self.convert_combo)
+        r3.addSpacing(10)
+        self.keep_webp = QCheckBox("Keep .webp")
+        r3.addWidget(self.keep_webp)
+        r3.addSpacing(10)
+        r3.addWidget(QLabel("JPEG quality:"))
+        self.jpeg_qual = QSpinBox()
+        self.jpeg_qual.setRange(1, 100)
+        self.jpeg_qual.setValue(92)
+        self.jpeg_qual.setFixedWidth(55)
+        r3.addWidget(self.jpeg_qual)
+        r3.addStretch()
+        g.addLayout(r3)
+
+        self.btn_run = QPushButton("▶  Run Organize")
+        self.btn_run.setObjectName("btn_run")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_run)
+        btn_row.addStretch()
+        btn_row.addWidget(self.btn_stop)
+        self.btn_run.clicked.connect(self._run_organize)
+        self.btn_stop.clicked.connect(self._stop)
+
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(opts)
+        lay.addLayout(btn_row)
+        lay.addWidget(self.log, stretch=1)
+
+    def _build_args(self):
+        return SimpleNamespace(
+            out=self._bar.out,
+            dry_run=self.dry_run.isChecked(),
+            name_length=self.name_len.value(),
+            name_sep=self.name_sep.currentText(),
+            convert=self.convert_combo.currentData(),
+            jpeg_quality=self.jpeg_qual.value(),
+            jpeg_bg="white",
+            keep_webp=self.keep_webp.isChecked(),
+        )
+
+    def _run_organize(self):
+        if self._worker and self._worker.isRunning():
+            return
+        self.log.clear_log()
+        args = self._build_args()
+        out = Path(args.out)
+        img_dir = out / "images"
+        csv_path = out / "catalog.csv"
+        if self.rb_adv.isChecked():
+            fn = lambda: core.cmd_organize(args, out, img_dir, csv_path)
+        else:
+            fn = lambda: core.cmd_rename(args, out, img_dir, csv_path)
+        self.btn_run.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self._worker = Worker(fn)
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._on_done(False, "")
+
+    def _on_done(self, success, msg):
+        self.btn_run.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def collect_settings(self):
+        return {
+            "org_adv":     self.rb_adv.isChecked(),
+            "org_dry_run": self.dry_run.isChecked(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Convert tab
+# ---------------------------------------------------------------------------
+
+class ConvertTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        opts = QGroupBox("Convert Existing .webp Files")
+        g = QVBoxLayout(opts)
+
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel("Target format:"))
+        self.fmt_combo = QComboBox()
+        self.fmt_combo.addItem("PNG", "png")
+        self.fmt_combo.addItem("JPEG", "jpeg")
+        idx = self.fmt_combo.findData(settings.get("conv_fmt", "png"))
+        self.fmt_combo.setCurrentIndex(max(0, idx))
+        self.fmt_combo.setFixedWidth(90)
+        r1.addWidget(self.fmt_combo)
+        r1.addSpacing(16)
+        self._lbl_jq = QLabel("JPEG quality:")
+        r1.addWidget(self._lbl_jq)
+        self.jpeg_qual = QSpinBox()
+        self.jpeg_qual.setRange(1, 100)
+        self.jpeg_qual.setValue(settings.get("jpeg_quality", 92))
+        self.jpeg_qual.setFixedWidth(55)
+        r1.addWidget(self.jpeg_qual)
+        r1.addSpacing(8)
+        self._lbl_bg = QLabel("BG:")
+        r1.addWidget(self._lbl_bg)
+        self.jpeg_bg = QComboBox()
+        self.jpeg_bg.addItems(["white", "black"])
+        self.jpeg_bg.setCurrentText(settings.get("jpeg_bg", "white"))
+        self.jpeg_bg.setFixedWidth(70)
+        r1.addWidget(self.jpeg_bg)
+        r1.addStretch()
+        g.addLayout(r1)
+
+        r2 = QHBoxLayout()
+        self.keep_webp = QCheckBox("Keep original .webp alongside converted file")
+        self.keep_webp.setChecked(settings.get("conv_keep_webp", False))
+        r2.addWidget(self.keep_webp)
+        r2.addSpacing(20)
+        self.dry_run = QCheckBox("Dry run (preview only)")
+        r2.addWidget(self.dry_run)
+        r2.addStretch()
+        g.addLayout(r2)
+
+        self.btn_run = QPushButton("▶  Convert Existing .webp")
+        self.btn_run.setObjectName("btn_run")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_run)
+        btn_row.addStretch()
+        btn_row.addWidget(self.btn_stop)
+        self.btn_run.clicked.connect(self._run_convert)
+        self.btn_stop.clicked.connect(self._stop)
+
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(opts)
+        lay.addLayout(btn_row)
+        lay.addWidget(self.log, stretch=1)
+
+        self.fmt_combo.currentIndexChanged.connect(self._on_fmt_change)
+        self._on_fmt_change()
+
+    def _on_fmt_change(self):
+        jpeg = self.fmt_combo.currentData() in ("jpeg", "jpg")
+        for w in (self._lbl_jq, self.jpeg_qual, self._lbl_bg, self.jpeg_bg):
+            w.setEnabled(jpeg)
+
+    def _build_args(self):
+        return SimpleNamespace(
+            out=self._bar.out,
+            convert=self.fmt_combo.currentData(),
+            jpeg_quality=self.jpeg_qual.value(),
+            jpeg_bg=self.jpeg_bg.currentText(),
+            keep_webp=self.keep_webp.isChecked(),
+            dry_run=self.dry_run.isChecked(),
+        )
+
+    def _run_convert(self):
+        if self._worker and self._worker.isRunning():
+            return
+        self.log.clear_log()
+        args = self._build_args()
+        self.btn_run.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self._worker = Worker(core.cmd_convert_existing, args, Path(args.out))
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._on_done(False, "")
+
+    def _on_done(self, success, msg):
+        self.btn_run.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def collect_settings(self):
+        return {
+            "conv_fmt":      self.fmt_combo.currentData(),
+            "conv_keep_webp": self.keep_webp.isChecked(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Utilities tab
+# ---------------------------------------------------------------------------
+
+class UtilitiesTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        def _info(text):
+            lbl = QLabel(text)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("color: #a6adc8; font-size: 9pt; padding: 2px 0;")
+            return lbl
+
+        self.btn_probe = QPushButton("▶  Probe API")
+        self.btn_probe.setObjectName("btn_probe")
+        self.btn_count = QPushButton("▶  Count Library")
+        self.btn_count.setObjectName("btn_count")
+        self.btn_stats = QPushButton("▶  Catalog Stats")
+        self.btn_stats.setObjectName("btn_run")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_probe)
+        btn_row.addWidget(self.btn_count)
+        btn_row.addWidget(self.btn_stats)
+        btn_row.addStretch()
+        btn_row.addWidget(self.btn_stop)
+
+        self.btn_probe.clicked.connect(self._run_probe)
+        self.btn_count.clicked.connect(self._run_count)
+        self.btn_stats.clicked.connect(self._run_stats)
+        self.btn_stop.clicked.connect(self._stop)
+
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(_info(
+            "Probe — fetches the newest page and resolves the full-res URL for the "
+            "first task.  Good sanity-check before a full download."))
+        lay.addWidget(_info(
+            "Count — pages through your entire history and tallies tasks and images "
+            "without downloading anything."))
+        lay.addWidget(_info(
+            "Catalog Stats — reads the local catalog.csv and reports download / "
+            "pending / missing counts."))
+        lay.addLayout(btn_row)
+        lay.addWidget(self.log, stretch=1)
+
+    def _base_args(self):
+        return SimpleNamespace(
+            token=self._bar.token,
+            out=self._bar.out,
+            page_size=20,
+            delay=0.4,
+            count_page_size=10000,
+        )
+
+    def _run(self, fn, *args):
+        if self._worker and self._worker.isRunning():
+            return
+        self.log.clear_log()
+        self._set_running(True)
+        self._worker = Worker(fn, *args)
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _run_probe(self): self._run(core.run_probe,         self._base_args())
+    def _run_count(self): self._run(core.run_count,         self._base_args())
+    def _run_stats(self): self._run(core.run_catalog_stats, self._base_args())
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._set_running(False)
+
+    def _on_done(self, success, msg):
+        self._set_running(False)
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def _set_running(self, running):
+        for b in (self.btn_probe, self.btn_count, self.btn_stats):
+            b.setEnabled(not running)
+        self.btn_stop.setEnabled(running)
+
+
+# ---------------------------------------------------------------------------
+# Main window
+# ---------------------------------------------------------------------------
+
+class MainWindow(QMainWindow):
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("PixAI Gallery Backup")
+        self.setMinimumSize(860, 640)
+        self.resize(960, 720)
+
+        settings = _load_settings()
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
+
+        self._sbar = SettingsBar(settings)
+        root.addWidget(self._sbar)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        root.addWidget(sep)
+
+        self._tabs = QTabWidget()
+        self._dl_tab   = DownloadTab(self._sbar, settings)
+        self._org_tab  = OrganizeTab(self._sbar, settings)
+        self._conv_tab = ConvertTab(self._sbar, settings)
+        self._util_tab = UtilitiesTab(self._sbar, settings)
+        self._tabs.addTab(self._dl_tab,   "  Download  ")
+        self._tabs.addTab(self._org_tab,  "  Organize  ")
+        self._tabs.addTab(self._conv_tab, "  Convert   ")
+        self._tabs.addTab(self._util_tab, "  Utilities ")
+        self._tabs.setCurrentIndex(settings.get("last_tab", 0))
+        root.addWidget(self._tabs, stretch=1)
+
+    def closeEvent(self, event):
+        s = {
+            "token":    self._sbar.token or "",
+            "out":      self._sbar.out,
+            "last_tab": self._tabs.currentIndex(),
+        }
+        s.update(self._dl_tab.collect_settings())
+        s.update(self._org_tab.collect_settings())
+        s.update(self._conv_tab.collect_settings())
+        _save_settings(s)
+        super().closeEvent(event)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(DARK_QSS)
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
