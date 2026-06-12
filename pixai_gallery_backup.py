@@ -654,14 +654,20 @@ def main():
                     help="background to flatten transparency onto for JPEG")
     ap.add_argument("--keep-webp", action="store_true",
                     help="keep the original .webp after converting")
-    ap.add_argument("--rename-existing", action="store_true",
-                    help="rename already-downloaded files to the prompt-based scheme "
-                         "using catalog.csv, then exit")
     ap.add_argument("--organize", action="store_true",
+                    help="rename already-downloaded files to the prompt_taskid_mediaid "
+                         "scheme using catalog.csv, then exit")
+    ap.add_argument("--organize-live", action="store_true",
+                    help="apply prompt_taskid_mediaid naming to files as they download "
+                         "(same as default naming; flag makes intent explicit)")
+    ap.add_argument("--organize-adv", action="store_true",
                     help="sort already-downloaded files into batches/ and YYYY-MM/ "
                          "folders with info files + embedded metadata, then exit")
+    ap.add_argument("--organize-adv-live", action="store_true",
+                    help="sort files into batches/ and YYYY-MM/ folders live as they "
+                         "download, writing _prompt.txt and _index.csv per folder")
     ap.add_argument("--dry-run", action="store_true",
-                    help="with --rename-existing, show planned renames without doing them")
+                    help="with --organize or --organize-adv, show plan without making changes")
     args = ap.parse_args()
 
     if args.probe and args.count:
@@ -700,13 +706,13 @@ def main():
             print("Image files on disk : {}".format(on_disk))
         return
 
-    # ---- organize existing files (reads catalog.csv, no token needed) ---
-    if args.organize:
+    # ---- organize-adv: full sort into batch/month folders (reads catalog.csv) ---
+    if args.organize_adv:
         cmd_organize(args, out, img_dir, csv_path)
         return
 
-    # ---- rename existing files (reads catalog.csv, no token needed) -----
-    if args.rename_existing:
+    # ---- organize: rename to prompt_taskid_mediaid scheme (reads catalog.csv) ---
+    if args.organize:
         if not csv_path.exists():
             sys.exit("No catalog found at {}. The catalog records each image's "
                      "prompt; run a download first.".format(csv_path))
@@ -779,7 +785,8 @@ def main():
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
 
     token = load_token(args.token)
-    img_dir.mkdir(parents=True, exist_ok=True)
+    if not args.organize_adv_live:
+        img_dir.mkdir(parents=True, exist_ok=True)
 
     session = requests.Session()
     session.headers.update({
@@ -892,7 +899,26 @@ def main():
                 node = edge.get("node", edge)
                 raw_f.write(json.dumps(node, ensure_ascii=False) + "\n")
                 meta = extract_meta(node)
-                for mid in media_ids_for(node):
+                all_mids = media_ids_for(node)
+                is_batch = len(all_mids) > 1
+
+                # Determine destination folder for --organize-adv-live.
+                if args.organize_adv_live:
+                    if is_batch:
+                        folder_name = build_stem_name(
+                            meta["prompt_preview"], meta["task_id"], "",
+                            args.name_length, args.name_sep)
+                        task_folder = out / "batches" / folder_name
+                    else:
+                        month = (meta.get("created_at") or "")[:7] or "unknown-date"
+                        task_folder = out / month
+                    if not args.collect_only:
+                        task_folder.mkdir(parents=True, exist_ok=True)
+                else:
+                    task_folder = img_dir
+
+                batch_results = []  # (idx, mid, path, info) for info-file writing
+                for idx, mid in enumerate(all_mids):
                     # Resume by media_id regardless of the readable name in front.
                     existing = (None if args.collect_only
                                 else already_downloaded(out, mid))
@@ -902,10 +928,13 @@ def main():
                                          "", "", meta["prompt_preview"],
                                          meta["status"], meta["created_at"]])
                         continue
-                    stem_name = build_stem_name(
-                        meta["prompt_preview"], meta["task_id"], mid,
-                        args.name_length, args.name_sep)
-                    stem = img_dir / stem_name
+                    if args.organize_adv_live and is_batch:
+                        stem_name = "{:02d}_{}".format(idx + 1, mid)
+                    else:
+                        stem_name = build_stem_name(
+                            meta["prompt_preview"], meta["task_id"], mid,
+                            args.name_length, args.name_sep)
+                    stem = task_folder / stem_name
                     url, info = resolve_media(session, mid)
                     w, h = info.get("width", ""), info.get("height", "")
                     if not url:
@@ -927,8 +956,49 @@ def main():
                     writer.writerow([meta["task_id"], mid, path.name if path else "",
                                      url, w, h, meta["prompt_preview"],
                                      meta["status"], meta["created_at"]])
+                    if path and status in ("ok", "skip"):
+                        batch_results.append((idx, mid, path, info))
                     if status == "ok":
                         time.sleep(args.delay)
+
+                # Write per-folder info files for --organize-adv-live.
+                if args.organize_adv_live and batch_results:
+                    if is_batch:
+                        prompt_txt = task_folder / "_prompt.txt"
+                        if not prompt_txt.exists():
+                            lines = [
+                                "Prompt (preview): {}".format(meta["prompt_preview"]),
+                                "Task ID         : {}".format(meta["task_id"]),
+                                "Created         : {}".format(meta["created_at"]),
+                                "Status          : {}".format(meta["status"]),
+                                "Source          : PixAI",
+                                "", "Images in this batch:",
+                            ]
+                            for _, _, bp, bi in batch_results:
+                                lines.append("  {}  ({}x{})".format(
+                                    bp.name, bi.get("width", "?"), bi.get("height", "?")))
+                            prompt_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                    else:
+                        idx_path = task_folder / "_index.csv"
+                        new_file = not idx_path.exists()
+                        with open(idx_path, "a", newline="", encoding="utf-8") as f_idx:
+                            w_idx = csv.DictWriter(f_idx, fieldnames=[
+                                "filename", "media_id", "task_id", "prompt_preview",
+                                "width", "height", "created_at", "status"])
+                            if new_file:
+                                w_idx.writeheader()
+                            for _, bi_mid, bi_path, bi_info in batch_results:
+                                w_idx.writerow({
+                                    "filename": bi_path.name,
+                                    "media_id": bi_mid,
+                                    "task_id": meta["task_id"],
+                                    "prompt_preview": meta["prompt_preview"],
+                                    "width": bi_info.get("width", ""),
+                                    "height": bi_info.get("height", ""),
+                                    "created_at": meta["created_at"],
+                                    "status": meta["status"],
+                                })
+
                 seen += 1
                 if args.max and seen >= args.max:
                     break

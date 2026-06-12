@@ -1,7 +1,8 @@
-# ---- Secrets: NEVER commit ----
+# ---- Secrets / dev-only files: NEVER commit ----
 token.txt
 .env
 config.json
+CLAUDE.md
 
 # ---- Personal output: your images, prompts, catalogs ----
 # Contains your generated images, prompt text, and dates. Keep out of git.
