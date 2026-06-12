@@ -59,6 +59,11 @@ try:
 except Exception:
     pass
 
+
+class PixAIError(Exception):
+    """Raised instead of sys.exit() so the GUI and tests can catch errors cleanly."""
+
+
 API_URL = "https://api.pixai.art/graphql"
 
 # ===========================================================================
@@ -106,7 +111,7 @@ def load_token(cli_token=None):
     f = Path("token.txt")
     if f.exists():
         return f.read_text(encoding="utf-8").strip()
-    sys.exit("No token found. Set PIXAI_TOKEN, pass --token, or create token.txt.")
+    raise PixAIError("No token found. Set PIXAI_TOKEN, pass --token, or create token.txt.")
 
 
 def _ssl_help():
@@ -134,7 +139,7 @@ def gql(session, variables, retries=4):
         try:
             r = session.get(API_URL, params=params, timeout=60)
         except requests.exceptions.SSLError:
-            sys.exit(_ssl_help())
+            raise PixAIError(_ssl_help())
         except requests.RequestException as e:
             if attempt == retries:
                 raise
@@ -142,7 +147,7 @@ def gql(session, variables, retries=4):
             time.sleep(delay); delay *= 2; continue
 
         if r.status_code == 401:
-            sys.exit("\n401 Unauthorized -- token missing/expired. Refresh and re-run.")
+            raise PixAIError("401 Unauthorized -- token missing/expired. Refresh and re-run.")
         if r.status_code == 429 or r.status_code >= 500:
             if attempt == retries:
                 r.raise_for_status()
@@ -152,18 +157,18 @@ def gql(session, variables, retries=4):
         try:
             data = r.json()
         except ValueError:
-            print("\nHTTP {} non-JSON:\n{}".format(r.status_code, r.text[:800]))
-            sys.exit(1)
+            raise PixAIError("HTTP {} non-JSON response:\n{}".format(
+                r.status_code, r.text[:800]))
         if data.get("errors"):
             if "PersistedQueryNotFound" in json.dumps(data["errors"]):
-                sys.exit("\nPersisted-query hash not recognized. Recapture the hash "
-                         "(see RECAPTURE at the bottom of this file).")
+                raise PixAIError("Persisted-query hash not recognized. Recapture the hash "
+                                 "(see RECAPTURE at the bottom of this file).")
             print("\n=== GraphQL error (HTTP {}) ===".format(r.status_code))
             print(json.dumps(data["errors"], indent=2)[:3000])
-            sys.exit(1)
+            raise PixAIError("GraphQL error (see log above).")
         if r.status_code >= 400:
             print("\nHTTP {}:\n{}".format(r.status_code, json.dumps(data, indent=2)[:1500]))
-            sys.exit(1)
+            raise PixAIError("HTTP {} error (see log above).".format(r.status_code))
         return data["data"]
     raise RuntimeError("unreachable")
 
@@ -441,14 +446,14 @@ def download(session, url, stem, retries=3, convert=None,
                 dest, note = convert_image(dest, convert, jpeg_quality,
                                            jpeg_bg, keep_original=keep_webp)
                 if note == "pillow-missing":
-                    sys.exit("\n--convert needs Pillow. Run:  pip install pillow\n"
-                             "(The image downloaded fine; just install Pillow and "
-                             "re-run -- finished files are skipped.)")
+                    raise PixAIError("--convert needs Pillow. Run:  pip install pillow\n"
+                                     "(The image downloaded fine; just install Pillow and "
+                                     "re-run -- finished files are skipped.)")
                 if note.startswith("convert-error"):
                     print("    convert warning for {}: {}".format(dest.name, note))
             return ("ok", dest)
         except requests.exceptions.SSLError:
-            sys.exit(_ssl_help())
+            raise PixAIError(_ssl_help())
         except requests.RequestException as e:
             if attempt == retries:
                 print("    FAILED {} ({})".format(url, e))
@@ -491,7 +496,7 @@ def cmd_convert_existing(args, out):
         _, note = convert_image(p, target, args.jpeg_quality, args.jpeg_bg,
                                 keep_original=args.keep_webp)
         if note == "pillow-missing":
-            sys.exit("--convert-existing needs Pillow:  pip install pillow")
+            raise PixAIError("--convert-existing needs Pillow:  pip install pillow")
         if note == "ok":
             ok += 1
         else:
@@ -508,10 +513,10 @@ def cmd_organize(args, out, img_dir, csv_path):
     catalog.csv. Embeds prompt metadata, optionally converts, writes per-folder
     info files. Idempotent (only touches flat files in images/) and dry-runnable."""
     if not csv_path.exists():
-        sys.exit("No catalog at {}. Run a download first (the catalog holds the "
-                 "prompts and dates this needs).".format(csv_path))
+        raise PixAIError("No catalog at {}. Run a download first (the catalog holds the "
+                         "prompts and dates this needs).".format(csv_path))
     if not img_dir.exists():
-        sys.exit("No images folder at {}.".format(img_dir))
+        raise PixAIError("No images folder at {}.".format(img_dir))
 
     # catalog: media_id -> row, and task_id -> [media_ids]
     meta_by_mid, mids_by_task = {}, defaultdict(list)
@@ -591,7 +596,7 @@ def cmd_organize(args, out, img_dir, csv_path):
             final, note = convert_image(final, args.convert, args.jpeg_quality,
                                         args.jpeg_bg, keep_original=args.keep_webp)
             if note == "pillow-missing":
-                sys.exit("--convert needs Pillow:  pip install pillow")
+                raise PixAIError("--convert needs Pillow:  pip install pillow")
             if note == "ok":
                 converted += 1
         # embed metadata
@@ -660,6 +665,354 @@ def cmd_organize(args, out, img_dir, csv_path):
 
 
 # ---------------------------------------------------------------------------
+# Callable API (used by the GUI; also called by main() for the CLI)
+# ---------------------------------------------------------------------------
+def _make_session(token_val):
+    """Validate config, load token, return a configured requests.Session."""
+    if not all([PERSISTED_QUERY_HASH, U3T, USER_ID]):
+        raise PixAIError(
+            "config.json is missing or incomplete "
+            "(need PERSISTED_QUERY_HASH, U3T, USER_ID).\n"
+            "Copy config.example.json to config.json and fill in your captured values.\n"
+            "See the README -> Configuration for instructions."
+        )
+    token = load_token(token_val)
+    session = requests.Session()
+    session.headers.update({
+        "Authorization": "Bearer {}".format(token),
+        "Accept": "application/json",
+        "User-Agent": "pixai-personal-backup/1.0",
+        "apollo-require-preflight": "true",
+        "x-apollo-operation-name": OPERATION_NAME,
+    })
+    return session
+
+
+def run_probe(args):
+    """Test API connection and resolve full-res media URL for the newest task."""
+    session = _make_session(getattr(args, "token", None))
+    print("SSL trust store via truststore: {}".format(
+        "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
+    print("Fetching newest page...\n")
+    conn = find_connection(gql(session, page_variables(args.page_size)))
+    if not conn:
+        print("No connection found.")
+        return
+    edges = conn.get("edges", [])
+    pi = conn.get("pageInfo", {})
+    print("OK -- {} items. hasPreviousPage={}".format(
+        len(edges), pi.get("hasPreviousPage")))
+    node = edges[0].get("node", edges[0]) if edges else {}
+    meta = extract_meta(node)
+    mids = media_ids_for(node)
+    print("First task: id={} media_ids={}".format(meta["task_id"], mids))
+    print("Prompt preview:", meta["prompt_preview"][:80])
+    if mids:
+        url, info = resolve_media(session, mids[0])
+        print("\nResolved full-res URL:", url or "(none!)")
+        print("Dimensions: {}x{}".format(info.get("width"), info.get("height")))
+        if url:
+            print("\nLooks right? Run a download to back up everything.")
+        else:
+            print("\nCouldn't find a URL in the media object -- paste this back.")
+
+
+def run_count(args):
+    """Tally total tasks and images in the library without downloading."""
+    session = _make_session(getattr(args, "token", None))
+    count_size = getattr(args, "count_page_size", 10000)
+    print("Counting your whole library (page size {})...".format(count_size))
+    before = None
+    tasks = images = page = 0
+    batched_tasks = 0
+    while True:
+        page += 1
+        conn = find_connection(gql(session, page_variables(count_size, before)))
+        if not conn:
+            break
+        edges = conn.get("edges", [])
+        if not edges:
+            break
+        for edge in edges:
+            node = edge.get("node", edge)
+            tasks += 1
+            n = len(media_ids_for(node))
+            images += n
+            if n > 1:
+                batched_tasks += 1
+        pi = conn.get("pageInfo", {})
+        more = pi.get("hasPreviousPage")
+        print("  page {}: {} tasks so far, {} images so far{}".format(
+            page, tasks, images, "" if more else "  (reached the end)"))
+        if not more:
+            break
+        before = pi.get("startCursor")
+        time.sleep(args.delay)
+    print("\n================ LIBRARY TOTALS ================")
+    print("Total tasks (generations) : {}".format(tasks))
+    print("Total images              : {}  (mediaId + batchMediaIds)".format(images))
+    print("Tasks that are batches    : {}  (>1 image each)".format(batched_tasks))
+    print("Fetched in {} request(s).".format(page))
+    if images > tasks:
+        print("\nNote: image count exceeds task count because some older tasks\n"
+              "produced batches of several images -- all of them get downloaded.")
+
+
+def run_catalog_stats(args):
+    """Summarize the existing catalog.csv (no network needed)."""
+    out = Path(args.out)
+    csv_path = out / "catalog.csv"
+    img_dir = out / "images"
+    if not csv_path.exists():
+        raise PixAIError("No catalog found at {}. Run a download (or --collect-only) "
+                         "first.".format(csv_path))
+    total = downloaded = missing = pending = 0
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            total += 1
+            if row.get("filename"):
+                downloaded += 1
+            elif not row.get("url"):
+                missing += 1
+            else:
+                pending += 1
+    print("Catalog: {}".format(csv_path))
+    print("Total image entries : {}".format(total))
+    print("  downloaded files  : {}".format(downloaded))
+    print("  resolved, pending : {}".format(pending))
+    print("  no URL (missing)  : {}".format(missing))
+    if img_dir.exists():
+        on_disk = sum(1 for p in img_dir.glob("*.*")
+                      if not p.name.endswith(".part"))
+        print("Image files on disk : {}".format(on_disk))
+
+
+def cmd_rename(args, out, img_dir, csv_path):
+    """Rename already-downloaded files to the prompt_taskid_mediaid scheme."""
+    if not csv_path.exists():
+        raise PixAIError("No catalog found at {}. The catalog records each image's "
+                         "prompt; run a download first.".format(csv_path))
+    if not img_dir.exists():
+        raise PixAIError("No images folder at {}.".format(img_dir))
+    info_by_mid = {}
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            mid = row.get("media_id")
+            if mid:
+                info_by_mid[mid] = (row.get("task_id", ""),
+                                    row.get("prompt_preview", ""))
+    renamed = skipped = unmatched = clash = 0
+    planned = []
+    used_names = set()
+    for p in sorted(img_dir.glob("*.*")):
+        if p.name.endswith(".part"):
+            continue
+        stem, ext = p.stem, p.suffix
+        mid = stem.split("_")[-1]
+        if mid not in info_by_mid:
+            unmatched += 1
+            continue
+        task_id, prompt = info_by_mid[mid]
+        new_stem = build_stem_name(prompt, task_id, mid,
+                                   args.name_length, args.name_sep)
+        new_name = new_stem + ext
+        if new_name == p.name:
+            skipped += 1
+            continue
+        target = img_dir / new_name
+        if new_name in used_names or (target.exists() and target != p):
+            clash += 1
+            continue
+        used_names.add(new_name)
+        planned.append((p, target))
+
+    print("Rename plan: {} to rename, {} already correct, {} unmatched in "
+          "catalog, {} skipped (name clash).".format(
+              len(planned), skipped, unmatched, clash))
+    for src, dst in planned[:8]:
+        print("  {}  ->  {}".format(src.name, dst.name))
+    if len(planned) > 8:
+        print("  ... and {} more".format(len(planned) - 8))
+
+    if getattr(args, "dry_run", False):
+        print("\nDry run -- nothing changed. Re-run without --dry-run to apply.")
+        return
+    for src, dst in planned:
+        try:
+            src.rename(dst)
+            renamed += 1
+        except OSError as e:
+            print("  FAILED {} ({})".format(src.name, e))
+    print("\nRenamed {} files.".format(renamed))
+
+
+def run_download(args):
+    """Run the full paginated download + catalog loop."""
+    out = Path(args.out)
+    img_dir = out / "images"
+    raw_path = out / "raw_tasks.jsonl"
+    csv_path = out / "catalog.csv"
+
+    session = _make_session(getattr(args, "token", None))
+    print("SSL trust store via truststore: {}".format(
+        "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
+
+    if not getattr(args, "organize_adv_live", False):
+        img_dir.mkdir(parents=True, exist_ok=True)
+
+    print("Walking your generation history (newest -> oldest)...")
+    csv_f = open(csv_path, "w", newline="", encoding="utf-8")
+    writer = csv.writer(csv_f)
+    writer.writerow(["task_id", "media_id", "filename", "url", "width", "height",
+                     "prompt_preview", "status", "created_at"])
+    raw_f = open(raw_path, "w", encoding="utf-8")
+
+    before = None
+    seen = 0
+    dl = {"ok": 0, "skip": 0, "missing": 0, "fail": 0}
+    page = 0
+    try:
+        while True:
+            page += 1
+            conn = find_connection(gql(session, page_variables(args.page_size, before)))
+            if not conn:
+                print("No connection; stopping.")
+                break
+            edges = conn.get("edges", [])
+            if not edges:
+                break
+            print("Page {}: {} tasks (total {})".format(page, len(edges), seen + len(edges)))
+
+            for edge in edges:
+                node = edge.get("node", edge)
+                raw_f.write(json.dumps(node, ensure_ascii=False) + "\n")
+                meta = extract_meta(node)
+                all_mids = media_ids_for(node)
+                is_batch = len(all_mids) > 1
+
+                if getattr(args, "organize_adv_live", False):
+                    if is_batch:
+                        folder_name = build_stem_name(
+                            meta["prompt_preview"], meta["task_id"], "",
+                            args.name_length, args.name_sep)
+                        task_folder = out / "batches" / folder_name
+                    else:
+                        month = (meta.get("created_at") or "")[:7] or "unknown-date"
+                        task_folder = out / month
+                    if not getattr(args, "collect_only", False):
+                        task_folder.mkdir(parents=True, exist_ok=True)
+                else:
+                    task_folder = img_dir
+
+                batch_results = []
+                for idx, mid in enumerate(all_mids):
+                    existing = (None if getattr(args, "collect_only", False)
+                                else already_downloaded(out, mid))
+                    if existing:
+                        dl["skip"] += 1
+                        writer.writerow([meta["task_id"], mid, existing.name, "",
+                                         "", "", meta["prompt_preview"],
+                                         meta["status"], meta["created_at"]])
+                        continue
+                    if getattr(args, "organize_adv_live", False) and is_batch:
+                        stem_name = "{:02d}_{}".format(idx + 1, mid)
+                    else:
+                        stem_name = build_stem_name(
+                            meta["prompt_preview"], meta["task_id"], mid,
+                            args.name_length, args.name_sep)
+                    stem = task_folder / stem_name
+                    url, info = resolve_media(session, mid)
+                    w, h = info.get("width", ""), info.get("height", "")
+                    if not url:
+                        dl["missing"] += 1
+                        writer.writerow([meta["task_id"], mid, "", "", w, h,
+                                         meta["prompt_preview"], meta["status"],
+                                         meta["created_at"]])
+                        continue
+                    if getattr(args, "collect_only", False):
+                        writer.writerow([meta["task_id"], mid, "", url, w, h,
+                                         meta["prompt_preview"], meta["status"],
+                                         meta["created_at"]])
+                        continue
+                    status, path = download(
+                        session, url, stem,
+                        convert=getattr(args, "convert", None),
+                        jpeg_quality=getattr(args, "jpeg_quality", 92),
+                        jpeg_bg=getattr(args, "jpeg_bg", "white"),
+                        keep_webp=getattr(args, "keep_webp", False))
+                    dl[status] += 1
+                    writer.writerow([meta["task_id"], mid, path.name if path else "",
+                                     url, w, h, meta["prompt_preview"],
+                                     meta["status"], meta["created_at"]])
+                    if path and status in ("ok", "skip"):
+                        batch_results.append((idx, mid, path, info))
+                    if status == "ok":
+                        time.sleep(args.delay)
+
+                if getattr(args, "organize_adv_live", False) and batch_results:
+                    if is_batch:
+                        prompt_txt = task_folder / "_prompt.txt"
+                        if not prompt_txt.exists():
+                            lines = [
+                                "Prompt (preview): {}".format(meta["prompt_preview"]),
+                                "Task ID         : {}".format(meta["task_id"]),
+                                "Created         : {}".format(meta["created_at"]),
+                                "Status          : {}".format(meta["status"]),
+                                "Source          : PixAI",
+                                "", "Images in this batch:",
+                            ]
+                            for _, _, bp, bi in batch_results:
+                                lines.append("  {}  ({}x{})".format(
+                                    bp.name, bi.get("width", "?"), bi.get("height", "?")))
+                            prompt_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                    else:
+                        idx_path = task_folder / "_index.csv"
+                        new_file = not idx_path.exists()
+                        with open(idx_path, "a", newline="", encoding="utf-8") as f_idx:
+                            w_idx = csv.DictWriter(f_idx, fieldnames=[
+                                "filename", "media_id", "task_id", "prompt_preview",
+                                "width", "height", "created_at", "status"])
+                            if new_file:
+                                w_idx.writeheader()
+                            for _, bi_mid, bi_path, bi_info in batch_results:
+                                w_idx.writerow({
+                                    "filename": bi_path.name,
+                                    "media_id": bi_mid,
+                                    "task_id": meta["task_id"],
+                                    "prompt_preview": meta["prompt_preview"],
+                                    "width": bi_info.get("width", ""),
+                                    "height": bi_info.get("height", ""),
+                                    "created_at": meta["created_at"],
+                                    "status": meta["status"],
+                                })
+
+                seen += 1
+                if args.max and seen >= args.max:
+                    break
+
+            csv_f.flush()
+            raw_f.flush()
+            if args.max and seen >= args.max:
+                print("Reached --max limit.")
+                break
+            pi = conn.get("pageInfo", {})
+            if not pi.get("hasPreviousPage"):
+                break
+            before = pi.get("startCursor")
+            time.sleep(args.delay)
+    finally:
+        csv_f.close()
+        raw_f.close()
+
+    print("\nDone. Tasks seen: {}".format(seen))
+    print("Images -> downloaded {}, skipped {}, missing {}, failed {}".format(
+        dl["ok"], dl["skip"], dl["missing"], dl["fail"]))
+    print("Catalog: {}\nRaw: {}\nImages: {}".format(csv_path, raw_path, img_dir))
+    if dl["fail"]:
+        print("Some failed -- just re-run; finished files are skipped.")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -720,355 +1073,30 @@ def main():
 
     out = Path(args.out)
     img_dir = out / "images"
-    raw_path = out / "raw_tasks.jsonl"
     csv_path = out / "catalog.csv"
 
-    # ---- catalog stats: reads a local file, needs no token/network ------
-    if args.catalog_stats:
-        if not csv_path.exists():
-            sys.exit("No catalog found at {}. Run a download (or --collect-only) "
-                     "first.".format(csv_path))
-        total = downloaded = missing = pending = 0
-        with open(csv_path, newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                total += 1
-                if row.get("filename"):
-                    downloaded += 1
-                elif not row.get("url"):
-                    missing += 1
-                else:
-                    pending += 1
-        print("Catalog: {}".format(csv_path))
-        print("Total image entries : {}".format(total))
-        print("  downloaded files  : {}".format(downloaded))
-        print("  resolved, pending : {}".format(pending))
-        print("  no URL (missing)  : {}".format(missing))
-        if img_dir.exists():
-            on_disk = sum(1 for p in img_dir.glob("*.*")
-                          if not p.name.endswith(".part"))
-            print("Image files on disk : {}".format(on_disk))
-        return
-
-    # ---- convert-existing: batch-convert .webp files, no token needed -----------
-    if args.convert_existing:
-        cmd_convert_existing(args, out)
-        return
-
-    # ---- organize-adv: full sort into batch/month folders (reads catalog.csv) ---
-    if args.organize_adv:
-        cmd_organize(args, out, img_dir, csv_path)
-        return
-
-    # ---- organize: rename to prompt_taskid_mediaid scheme (reads catalog.csv) ---
-    if args.organize:
-        if not csv_path.exists():
-            sys.exit("No catalog found at {}. The catalog records each image's "
-                     "prompt; run a download first.".format(csv_path))
-        if not img_dir.exists():
-            sys.exit("No images folder at {}.".format(img_dir))
-        # Map media_id -> (task_id, prompt_preview) from the catalog.
-        info_by_mid = {}
-        with open(csv_path, newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                mid = row.get("media_id")
-                if mid:
-                    info_by_mid[mid] = (row.get("task_id", ""),
-                                        row.get("prompt_preview", ""))
-        renamed = skipped = unmatched = clash = 0
-        planned = []
-        used_names = set()
-        for p in sorted(img_dir.glob("*.*")):
-            if p.name.endswith(".part"):
-                continue
-            # media_id is the last underscore-delimited chunk of the stem.
-            stem, ext = p.stem, p.suffix
-            mid = stem.split("_")[-1]
-            if mid not in info_by_mid:
-                unmatched += 1
-                continue
-            task_id, prompt = info_by_mid[mid]
-            new_stem = build_stem_name(prompt, task_id, mid,
-                                       args.name_length, args.name_sep)
-            new_name = new_stem + ext
-            if new_name == p.name:
-                skipped += 1
-                continue
-            # Avoid collisions with files we've already planned/renamed.
-            target = img_dir / new_name
-            if new_name in used_names or (target.exists() and target != p):
-                clash += 1
-                continue
-            used_names.add(new_name)
-            planned.append((p, target))
-
-        print("Rename plan: {} to rename, {} already correct, {} unmatched in "
-              "catalog, {} skipped (name clash).".format(
-                  len(planned), skipped, unmatched, clash))
-        for src, dst in planned[:8]:
-            print("  {}  ->  {}".format(src.name, dst.name))
-        if len(planned) > 8:
-            print("  ... and {} more".format(len(planned) - 8))
-
-        if args.dry_run:
-            print("\nDry run -- nothing changed. Re-run without --dry-run to apply.")
-            return
-        for src, dst in planned:
-            try:
-                src.rename(dst)
-                renamed += 1
-            except OSError as e:
-                print("  FAILED {} ({})".format(src.name, e))
-        print("\nRenamed {} files.".format(renamed))
-        return
-
-    if not all([PERSISTED_QUERY_HASH, U3T, USER_ID]):
-        sys.exit(
-            "config.json is missing or incomplete "
-            "(need PERSISTED_QUERY_HASH, U3T, USER_ID).\n"
-            "Copy config.example.json to config.json and fill in your captured values.\n"
-            "See the README -> Configuration for instructions."
-        )
-
-    print("SSL trust store via truststore: {}".format(
-        "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
-
-    token = load_token(args.token)
-    if not args.organize_adv_live:
-        img_dir.mkdir(parents=True, exist_ok=True)
-
-    session = requests.Session()
-    session.headers.update({
-        "Authorization": "Bearer {}".format(token),
-        "Accept": "application/json",
-        "User-Agent": "pixai-personal-backup/1.0",
-        "apollo-require-preflight": "true",
-        "x-apollo-operation-name": OPERATION_NAME,
-    })
-
-    # ---- probe ----------------------------------------------------------
-    if args.probe:
-        print("Fetching newest page...\n")
-        conn = find_connection(gql(session, page_variables(args.page_size)))
-        if not conn:
-            print("No connection found.")
-            return
-        edges = conn.get("edges", [])
-        pi = conn.get("pageInfo", {})
-        print("OK -- {} items. hasPreviousPage={}".format(
-            len(edges), pi.get("hasPreviousPage")))
-        node = edges[0].get("node", edges[0]) if edges else {}
-        meta = extract_meta(node)
-        mids = media_ids_for(node)
-        print("First task: id={} media_ids={}".format(meta["task_id"], mids))
-        print("Prompt preview:", meta["prompt_preview"][:80])
-        if mids:
-            url, info = resolve_media(session, mids[0])
-            print("\nResolved full-res URL:", url or "(none!)")
-            print("Dimensions: {}x{}".format(info.get("width"), info.get("height")))
-            if url:
-                print("\nLooks right? Run without --probe to download everything.")
-            else:
-                print("\nCouldn't find a URL in the media object -- paste this back.")
-        return
-
-    # ---- count only: tally the whole history without downloading --------
-    if args.count:
-        # Use a large page so the whole history usually comes back in ONE request.
-        # hasPreviousPage=False on that response means we got everything. If the
-        # server errors on a huge page, fall back to smaller pages and loop.
-        count_size = args.count_page_size
-        print("Counting your whole library (page size {})...".format(count_size))
-        before = None
-        tasks = images = page = 0
-        batched_tasks = 0
-        while True:
-            page += 1
-            try:
-                conn = find_connection(
-                    gql(session, page_variables(count_size, before)))
-            except SystemExit:
-                # gql() exits on hard errors; for counting we'd rather degrade.
-                raise
-            if not conn:
-                break
-            edges = conn.get("edges", [])
-            if not edges:
-                break
-            for edge in edges:
-                node = edge.get("node", edge)
-                tasks += 1
-                n = len(media_ids_for(node))
-                images += n
-                if n > 1:
-                    batched_tasks += 1
-            pi = conn.get("pageInfo", {})
-            more = pi.get("hasPreviousPage")
-            print("  page {}: {} tasks so far, {} images so far{}".format(
-                page, tasks, images, "" if more else "  (reached the end)"))
-            if not more:
-                break
-            before = pi.get("startCursor")
-            time.sleep(args.delay)
-        print("\n================ LIBRARY TOTALS ================")
-        print("Total tasks (generations) : {}".format(tasks))
-        print("Total images              : {}  (mediaId + batchMediaIds)".format(images))
-        print("Tasks that are batches    : {}  (>1 image each)".format(batched_tasks))
-        print("Fetched in {} request(s).".format(page))
-        if images > tasks:
-            print("\nNote: image count exceeds task count because some older tasks\n"
-                  "produced batches of several images -- all of them get downloaded.")
-        return
-
-    # ---- paginate backward + download ----------------------------------
-    print("Walking your generation history (newest -> oldest)...")
-    csv_f = open(csv_path, "w", newline="", encoding="utf-8")
-    writer = csv.writer(csv_f)
-    writer.writerow(["task_id", "media_id", "filename", "url", "width", "height",
-                     "prompt_preview", "status", "created_at"])
-    raw_f = open(raw_path, "w", encoding="utf-8")
-
-    before = None
-    seen = 0
-    dl = {"ok": 0, "skip": 0, "missing": 0, "fail": 0}
-    page = 0
     try:
-        while True:
-            page += 1
-            conn = find_connection(gql(session, page_variables(args.page_size, before)))
-            if not conn:
-                print("No connection; stopping.")
-                break
-            edges = conn.get("edges", [])
-            if not edges:
-                break
-            print("Page {}: {} tasks (total {})".format(page, len(edges), seen + len(edges)))
-
-            for edge in edges:
-                node = edge.get("node", edge)
-                raw_f.write(json.dumps(node, ensure_ascii=False) + "\n")
-                meta = extract_meta(node)
-                all_mids = media_ids_for(node)
-                is_batch = len(all_mids) > 1
-
-                # Determine destination folder for --organize-adv-live.
-                if args.organize_adv_live:
-                    if is_batch:
-                        folder_name = build_stem_name(
-                            meta["prompt_preview"], meta["task_id"], "",
-                            args.name_length, args.name_sep)
-                        task_folder = out / "batches" / folder_name
-                    else:
-                        month = (meta.get("created_at") or "")[:7] or "unknown-date"
-                        task_folder = out / month
-                    if not args.collect_only:
-                        task_folder.mkdir(parents=True, exist_ok=True)
-                else:
-                    task_folder = img_dir
-
-                batch_results = []  # (idx, mid, path, info) for info-file writing
-                for idx, mid in enumerate(all_mids):
-                    # Resume by media_id regardless of the readable name in front.
-                    existing = (None if args.collect_only
-                                else already_downloaded(out, mid))
-                    if existing:
-                        dl["skip"] += 1
-                        writer.writerow([meta["task_id"], mid, existing.name, "",
-                                         "", "", meta["prompt_preview"],
-                                         meta["status"], meta["created_at"]])
-                        continue
-                    if args.organize_adv_live and is_batch:
-                        stem_name = "{:02d}_{}".format(idx + 1, mid)
-                    else:
-                        stem_name = build_stem_name(
-                            meta["prompt_preview"], meta["task_id"], mid,
-                            args.name_length, args.name_sep)
-                    stem = task_folder / stem_name
-                    url, info = resolve_media(session, mid)
-                    w, h = info.get("width", ""), info.get("height", "")
-                    if not url:
-                        dl["missing"] += 1
-                        writer.writerow([meta["task_id"], mid, "", "", w, h,
-                                         meta["prompt_preview"], meta["status"],
-                                         meta["created_at"]])
-                        continue
-                    if args.collect_only:
-                        writer.writerow([meta["task_id"], mid, "", url, w, h,
-                                         meta["prompt_preview"], meta["status"],
-                                         meta["created_at"]])
-                        continue
-                    status, path = download(
-                        session, url, stem, convert=args.convert,
-                        jpeg_quality=args.jpeg_quality, jpeg_bg=args.jpeg_bg,
-                        keep_webp=args.keep_webp)
-                    dl[status] += 1
-                    writer.writerow([meta["task_id"], mid, path.name if path else "",
-                                     url, w, h, meta["prompt_preview"],
-                                     meta["status"], meta["created_at"]])
-                    if path and status in ("ok", "skip"):
-                        batch_results.append((idx, mid, path, info))
-                    if status == "ok":
-                        time.sleep(args.delay)
-
-                # Write per-folder info files for --organize-adv-live.
-                if args.organize_adv_live and batch_results:
-                    if is_batch:
-                        prompt_txt = task_folder / "_prompt.txt"
-                        if not prompt_txt.exists():
-                            lines = [
-                                "Prompt (preview): {}".format(meta["prompt_preview"]),
-                                "Task ID         : {}".format(meta["task_id"]),
-                                "Created         : {}".format(meta["created_at"]),
-                                "Status          : {}".format(meta["status"]),
-                                "Source          : PixAI",
-                                "", "Images in this batch:",
-                            ]
-                            for _, _, bp, bi in batch_results:
-                                lines.append("  {}  ({}x{})".format(
-                                    bp.name, bi.get("width", "?"), bi.get("height", "?")))
-                            prompt_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                    else:
-                        idx_path = task_folder / "_index.csv"
-                        new_file = not idx_path.exists()
-                        with open(idx_path, "a", newline="", encoding="utf-8") as f_idx:
-                            w_idx = csv.DictWriter(f_idx, fieldnames=[
-                                "filename", "media_id", "task_id", "prompt_preview",
-                                "width", "height", "created_at", "status"])
-                            if new_file:
-                                w_idx.writeheader()
-                            for _, bi_mid, bi_path, bi_info in batch_results:
-                                w_idx.writerow({
-                                    "filename": bi_path.name,
-                                    "media_id": bi_mid,
-                                    "task_id": meta["task_id"],
-                                    "prompt_preview": meta["prompt_preview"],
-                                    "width": bi_info.get("width", ""),
-                                    "height": bi_info.get("height", ""),
-                                    "created_at": meta["created_at"],
-                                    "status": meta["status"],
-                                })
-
-                seen += 1
-                if args.max and seen >= args.max:
-                    break
-
-            csv_f.flush(); raw_f.flush()
-            if args.max and seen >= args.max:
-                print("Reached --max limit.")
-                break
-            pi = conn.get("pageInfo", {})
-            if not pi.get("hasPreviousPage"):
-                break
-            before = pi.get("startCursor")
-            time.sleep(args.delay)
-    finally:
-        csv_f.close(); raw_f.close()
-
-    print("\nDone. Tasks seen: {}".format(seen))
-    print("Images -> downloaded {}, skipped {}, missing {}, failed {}".format(
-        dl["ok"], dl["skip"], dl["missing"], dl["fail"]))
-    print("Catalog: {}\nRaw: {}\nImages: {}".format(csv_path, raw_path, img_dir))
-    if dl["fail"]:
-        print("Some failed -- just re-run; finished files are skipped.")
+        if args.catalog_stats:
+            run_catalog_stats(args)
+            return
+        if args.convert_existing:
+            cmd_convert_existing(args, out)
+            return
+        if args.organize_adv:
+            cmd_organize(args, out, img_dir, csv_path)
+            return
+        if args.organize:
+            cmd_rename(args, out, img_dir, csv_path)
+            return
+        if args.probe:
+            run_probe(args)
+            return
+        if args.count:
+            run_count(args)
+            return
+        run_download(args)
+    except PixAIError as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":

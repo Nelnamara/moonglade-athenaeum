@@ -24,6 +24,27 @@ PixAI's terms grant users copyright of their own generations. This tool is rate-
 
 ---
 
+## GUI
+
+A PySide6 desktop GUI (`pixai_gui.py`) is included alongside the CLI. It wraps the full backup workflow in a tabbed window with a dark Catppuccin Mocha theme, background download thread, and live log output.
+
+| Tab | What it does |
+|---|---|
+| **Download** | Configure token, output folder, page size, organize mode, and conversion; Start / Stop |
+| **Organize** | Post-download rename (`--organize`) or full folder sort (`--organize-adv`); dry-run preview |
+| **Convert** | Batch-convert existing `.webp` files to PNG or JPEG in place |
+| **Utilities** | Probe, Count, and Catalog Stats buttons |
+
+Settings (token, output folder, options) are saved to `pixai_gui_settings.json` next to the script (git-ignored).
+
+**Run the GUI:**
+```
+pip install PySide6
+python pixai_gui.py
+```
+
+---
+
 ## Requirements
 
 | Package | Required | Notes |
@@ -31,11 +52,12 @@ PixAI's terms grant users copyright of their own generations. This tool is rate-
 | `requests` | ✅ | All network operations |
 | `truststore` | ❌ | Recommended — fixes HTTPS cert errors from corporate proxies or antivirus (Python 3.10+) |
 | `pillow` | ❌ | Only needed for `--convert` and metadata embedding in `--organize` |
+| `PySide6` | ❌ | Only needed for the GUI (`pixai_gui.py`) |
 
 Install all at once:
 
 ```
-pip install requests truststore pillow
+pip install requests truststore pillow PySide6
 ```
 
 ---
@@ -205,6 +227,11 @@ pixai_backup/
 
 ## Changelog
 
+### v4.1
+- PySide6 GUI (`pixai_gui.py`) — tabbed Download / Organize / Convert / Utilities window with dark Catppuccin Mocha theme, background Worker thread, and settings persistence
+- Callable API surface extracted from CLI for GUI integration: `run_download`, `run_probe`, `run_count`, `run_catalog_stats`, `cmd_rename`, `_make_session`
+- `PixAIError` exception class; all `sys.exit()` in library functions replaced with raises so GUI can display clean error messages
+
 ### v4.0
 - Switched to media object resolution: fetch `/v1/media/<id>` JSON and pick the `PUBLIC` (full-resolution) variant URL, replacing direct variant-URL probing
 - Backward pagination (`last` / `before` / `hasPreviousPage`) with full resume support
@@ -226,7 +253,7 @@ pixai_backup/
 - [x] **`--convert-existing`** — convert already-downloaded `.webp` files in place; supports `--dry-run`, `--keep-webp`, `--convert`, `--jpeg-quality`, `--jpeg-bg`
 - [x] **Foldering during live download** — `--organize-adv-live` sorts files into batch/month folders as they download; `--organize-live` for explicit prompt-naming intent
 - [ ] **`tests/` with pytest** — mocked network layer for offline testing of API logic
-- [ ] **GUI port** — C#/WinForms or Go/Wails desktop app with token field and progress bar (full API flow already mapped)
+- [x] **GUI port** — PySide6 desktop app (`pixai_gui.py`) with tabbed layout, dark theme, background worker thread, and settings persistence
 
 ---
 
