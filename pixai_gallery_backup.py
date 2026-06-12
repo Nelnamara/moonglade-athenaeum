@@ -62,13 +62,32 @@ except Exception:
 API_URL = "https://api.pixai.art/graphql"
 
 # ===========================================================================
-# CAPTURED FROM YOUR BROWSER -- update if the site changes (see RECAPTURE)
+# CAPTURED FROM YOUR BROWSER -- loaded from config.json (see config.example.json)
+# Update config.json when the site changes (see RECAPTURE at the bottom).
 # ===========================================================================
 OPERATION_NAME = "listUserTaskSummaries"
-PERSISTED_QUERY_HASH = "d30424c72dc7d75d14c09d9fe447e1ac3dea8e767668092e2113efb8c817573e"
-U3T = "o_37Tr0pASHUzRyCBvYZiMV8FJ3FuqtFwxduA8IaCI7RU"
-USER_ID = "1666037157045879258"
 CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
+
+
+def _load_config():
+    """Read config.json. Returns {} quietly if absent so --help and offline modes
+    (--organize, --catalog-stats) work without it; main() validates before API calls."""
+    cfg_path = Path("config.json")
+    if not cfg_path.exists():
+        return {}
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (ValueError, OSError) as e:
+        print("Warning: could not read config.json: {}".format(e))
+        return {}
+
+
+_cfg = _load_config()
+PERSISTED_QUERY_HASH = _cfg.get("PERSISTED_QUERY_HASH", "")
+U3T = _cfg.get("U3T", "")
+USER_ID = _cfg.get("USER_ID", "")
+# ===========================================================================
 
 # Media URL: https://api.pixai.art/v1/media/<id>/<variant>
 MEDIA_TMPL = "https://api.pixai.art/v1/media/{id}/{variant}"
@@ -748,6 +767,14 @@ def main():
         print("\nRenamed {} files.".format(renamed))
         return
 
+    if not all([PERSISTED_QUERY_HASH, U3T, USER_ID]):
+        sys.exit(
+            "config.json is missing or incomplete "
+            "(need PERSISTED_QUERY_HASH, U3T, USER_ID).\n"
+            "Copy config.example.json to config.json and fill in your captured values.\n"
+            "See the README -> Configuration for instructions."
+        )
+
     print("SSL trust store via truststore: {}".format(
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
 
@@ -930,7 +957,7 @@ if __name__ == "__main__":
     main()
 
 # ===========================================================================
-# RECAPTURE (only if the site changes): re-grab OPERATION_NAME, the persisted
-# sha256Hash, U3T, and USER_ID from Network tab -> graphql row -> Payload, and
-# update the constants near the top. Keep your token private.
+# RECAPTURE (only if the site changes): re-grab the persisted sha256Hash, U3T,
+# and USER_ID from Network tab -> graphql row -> Payload, and update config.json.
+# Keep your token private.
 # ===========================================================================

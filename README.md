@@ -54,10 +54,30 @@ pip install requests truststore pillow
 
 1. Install Python 3.8 or newer — check with `python --version`
 2. Install dependencies (above)
-3. Put `pixai_gallery_backup.py` in a folder of its own (e.g. a `pixai` folder on your Desktop)
-4. All output is created next to the script
+3. Put `pixai_gallery_backup.py` and `config.example.json` in a folder of their own (e.g. a `pixai` folder on your Desktop)
+4. Copy `config.example.json` to `config.json` in the same folder and fill in your values (see Configuration below)
+5. All output is created next to the script
 
 > **Tip:** Use a dedicated folder — the script creates a `pixai_backup/` output directory alongside itself.
+
+---
+
+## Configuration
+
+The script reads three values from `config.json` next to the script. These are captured once from your browser and stay until PixAI changes their frontend.
+
+1. Copy `config.example.json` to `config.json`
+2. Fill in the three fields:
+
+| Field | Where to find it |
+|---|---|
+| `USER_ID` | Your PixAI profile URL — the numeric ID at the end |
+| `U3T` | Network tab → `graphql` row → Payload → `u3t` parameter |
+| `PERSISTED_QUERY_HASH` | Network tab → `graphql` row → Payload → `extensions.persistedQuery.sha256Hash` |
+
+To capture from the browser: log in to [pixai.art](https://pixai.art), open your gallery, press **F12 → Network**, filter by `graphql`, scroll once so a request appears, then click the `listUserTaskSummaries` row and read from the **Payload** tab.
+
+> **`config.json` is git-ignored** and will never be committed. Keep it next to the script only.
 
 ---
 
@@ -197,7 +217,7 @@ pixai_backup/
 
 ## Roadmap
 
-- [ ] **`config.json` for captured constants** — move `USER_ID`, `U3T`, and `PERSISTED_QUERY_HASH` to a git-ignored file for safe public sharing
+- [x] **`config.json` for captured constants** — `USER_ID`, `U3T`, and `PERSISTED_QUERY_HASH` loaded from git-ignored `config.json`; `config.example.json` ships with the repo
 - [ ] **Full prompt + seed + model** — capture the task-detail persisted query to store complete generation parameters (currently only the truncated preview)
 - [ ] **`--convert-existing`** — convert already-downloaded WebP files in place
 - [ ] **Foldering during live download** — apply the `--organize` layout as files arrive (one step instead of download-then-organize)

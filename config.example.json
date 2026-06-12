@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy this file to config.json and fill in your values. config.json is git-ignored and will never be committed.",
+  "USER_ID": "YOUR_PIXAI_USER_ID",
+  "U3T": "YOUR_U3T_VALUE",
+  "PERSISTED_QUERY_HASH": "YOUR_PERSISTED_QUERY_HASH"
+}

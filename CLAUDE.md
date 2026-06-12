@@ -136,11 +136,10 @@ These are load-bearing. Several features silently depend on each.
 - **Never commit the downloaded library.** The output folder (`pixai_backup/`)
   contains the user's images, prompts (some may be private/NSFW), and `catalog.csv`.
   It's git-ignored. Keep it that way.
-- **The script currently hardcodes `USER_ID`, `U3T`, and `PERSISTED_QUERY_HASH`.**
-  `USER_ID` is public (it's in the profile URL). `U3T` is a captured request token of
-  unclear lifetime/sensitivity. **Recommendation:** either keep this repo **private**,
-  or refactor these into a git-ignored `config.json` (roadmap item) before making the
-  repo public.
+- **`USER_ID`, `U3T`, and `PERSISTED_QUERY_HASH` are loaded from the git-ignored
+  `config.json`** — they are no longer hardcoded in the script. `config.example.json`
+  (committed) shows the required structure. The repo is safe to make public once
+  any other personal data is reviewed.
 - All traffic is HTTPS with verification on; do not add `verify=False` anywhere.
 
 ---
@@ -148,9 +147,8 @@ These are load-bearing. Several features silently depend on each.
 ## Recapture procedure (when PixAI changes their site)
 
 Symptoms: `PersistedQueryNotFound`, "Cannot query field…", or sudden 400s.
-Fix: update the `# CAPTURED FROM YOUR BROWSER` constants at the top of the script.
-Get fresh values from DevTools → Network → filter `graphql` → click the
-`listUserTaskSummaries` row → Payload tab (`operationName`, `variables`,
+Fix: update `config.json` with fresh values from DevTools → Network → filter `graphql` →
+click the `listUserTaskSummaries` row → Payload tab (`operationName`, `variables`,
 `persistedQuery.sha256Hash`). `USER_ID` is in the profile URL. Keep the token
 private. The RECAPTURE note is also at the bottom of the script.
 
@@ -182,8 +180,8 @@ layer (`gql`, `resolve_media`, `session.get`) so the API logic can be tested off
 
 In rough priority order:
 
-1. **`config.json` for captured constants** (`USER_ID`, `U3T`, hash, output dir),
-   git-ignored — improves shareability and lets the repo go public safely.
+1. ~~**`config.json` for captured constants**~~ ✅ Done — `USER_ID`, `U3T`, and hash
+   loaded from git-ignored `config.json`; `config.example.json` ships with the repo.
 2. **Full prompt + seed + model:** capture the task-detail persisted query and store
    complete generation parameters (currently only the truncated preview).
 3. **`--convert-existing`:** convert already-downloaded WebP files in place.
