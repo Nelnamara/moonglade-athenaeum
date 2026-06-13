@@ -135,25 +135,31 @@ def _progress_line(done, total, width=40):
     return "\r  Downloading: {done} files...  ".format(done=done)
 
 
-def _quick_count(session):
-    """Paginate once at max page size to count total images. Used for the
-    progress meter — one or two API calls for most libraries."""
+def _quick_count(session, page_size=500):
+    """Paginate through the library to count total images for the progress meter.
+    Uses a conservative page size (default 500) to avoid server-side Prisma
+    errors that occur at large page sizes. Returns 0 on any API error so the
+    download still proceeds — the progress bar degrades to a running total."""
     print("Counting library size for progress meter...")
-    before = None
-    total = 0
-    while True:
-        conn = find_connection(gql(session, page_variables(10000, before)))
-        if not conn:
-            break
-        for edge in conn.get("edges", []):
-            node = edge.get("node", edge)
-            total += len(media_ids_for(node))
-        pi = conn.get("pageInfo", {})
-        if not pi.get("hasPreviousPage"):
-            break
-        before = pi.get("startCursor")
-    print("Library total: {} images\n".format(total))
-    return total
+    try:
+        before = None
+        total = 0
+        while True:
+            conn = find_connection(gql(session, page_variables(page_size, before)))
+            if not conn:
+                break
+            for edge in conn.get("edges", []):
+                node = edge.get("node", edge)
+                total += len(media_ids_for(node))
+            pi = conn.get("pageInfo", {})
+            if not pi.get("hasPreviousPage"):
+                break
+            before = pi.get("startCursor")
+        print("Library total: {} images\n".format(total))
+        return total
+    except PixAIError as e:
+        print("  (count failed: {}) -- progress bar will show running total only\n".format(e))
+        return 0
 
 
 # ---------------------------------------------------------------------------
