@@ -1092,15 +1092,15 @@ class _GalleryServerThread(QThread):
             self.log.emit("[ERROR] Flask not installed — run: pip install flask")
             return
         try:
-            import threading
-            app = gallery_mod.create_app(self._out_dir)
+            out = Path(self._out_dir)
+            app = gallery_mod.create_app(out)
             if self._rebuild_thumbs:
                 from pixai_gallery import load_catalog, build_thumbnails
-                thumb_dir = Path(self._out_dir) / "gallery" / "thumbs"
+                thumb_dir = out / "gallery" / "thumbs"
                 thumb_dir.mkdir(parents=True, exist_ok=True)
-                rows = load_catalog(Path(self._out_dir) / "catalog.csv")
+                rows = load_catalog(out / "catalog.csv")
                 self.log.emit(f"Building thumbnails for {len(rows)} rows…")
-                build_thumbnails(rows, self._out_dir, thumb_dir, force=True)
+                build_thumbnails(rows, out, thumb_dir, force=True)
                 self.log.emit("Thumbnails done.")
             self.log.emit(f"Gallery server starting on http://127.0.0.1:{self._port}/")
             self.ready.emit()
