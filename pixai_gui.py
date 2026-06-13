@@ -296,7 +296,7 @@ class Worker(QThread):
 
     log = Signal(str)
     done = Signal(bool, str)       # (success, error_message)
-    progress = Signal(int, int)    # (done, total)
+    progress = Signal(int, int, int)  # (done, total, new_downloads)
 
     def __init__(self, fn, *args):
         super().__init__()
@@ -587,7 +587,6 @@ class DownloadTab(QWidget):
         self.prog_bar.setValue(0)
         self.prog_bar.setRange(0, 100)
         self.prog_label.setText("Counting library...")
-        self._dl_started = False
         self._set_running(True)
         self._worker = Worker(core.run_download, args)
         # Inject progress callback BEFORE start so the worker thread sees it
@@ -597,18 +596,20 @@ class DownloadTab(QWidget):
         self._worker.done.connect(self._on_done)
         self._worker.start()
 
-    def _update_progress(self, done, total):
+    def _update_progress(self, done, total, new=0):
+        new_str = "  (+{} new)".format(new) if new else ""
         if total:
             self.prog_bar.setRange(0, total)
             self.prog_bar.setValue(done)
-            if not self._dl_started and done > 0:
+            if new == 0 and done > 0:
                 self.prog_label.setText("Resuming — {}/{} already done".format(done, total))
+            elif new > 0:
+                self.prog_label.setText("Checked {}/{}{}".format(done, total, new_str))
             else:
-                self._dl_started = True
-                self.prog_label.setText("Downloading {}/{} files".format(done, total))
+                self.prog_label.setText("Counting library...")
         else:
             self.prog_bar.setRange(0, 0)  # indeterminate bounce
-            self.prog_label.setText("Downloading {} files...".format(done))
+            self.prog_label.setText("Checking {}{}...".format(done, new_str))
 
     def _start_probe(self):    self._run(core.run_probe,    self._build_args())
     def _start_count(self):    self._run(core.run_count,    self._build_args())

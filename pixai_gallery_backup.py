@@ -132,16 +132,17 @@ def _format_size(num_bytes):
     return "{:.1f} PB".format(num_bytes)
 
 
-def _progress_line(done, total, width=40):
+def _progress_line(done, total, new=0, width=40):
     """Return a \r-overwriting progress line for terminal output."""
+    new_str = "  +{} new".format(new) if new else ""
     if total:
         pct = min(done / total, 1.0)
         filled = int(width * pct)
         bar = ("=" * filled + ">" + " " * (width - filled - 1)
                if filled < width else "=" * width)
-        return "\r  [{bar}] {done}/{total} files ({pct:.1f}%)  ".format(
-            bar=bar, done=done, total=total, pct=pct * 100)
-    return "\r  Downloading: {done} files...  ".format(done=done)
+        return "\r  [{bar}] {done}/{total} checked ({pct:.1f}%){new}  ".format(
+            bar=bar, done=done, total=total, pct=pct * 100, new=new_str)
+    return "\r  Checking: {done} images...{new}  ".format(done=done, new=new_str)
 
 
 def _quick_count(session, page_size=500):
@@ -981,13 +982,13 @@ def run_download(args, progress=None):
         nonlocal processed
         processed += 1
         if progress:
-            progress(processed, total_images)
+            progress(processed, total_images, dl["ok"])
         elif sys.stdout.isatty():
-            sys.stdout.write(_progress_line(processed, total_images))
+            sys.stdout.write(_progress_line(processed, total_images, dl["ok"]))
             sys.stdout.flush()
 
     if progress:
-        progress(processed, total_images)
+        progress(processed, total_images, 0)
 
     print("Walking your generation history (newest -> oldest)...")
     csv_f = open(csv_path, "w", newline="", encoding="utf-8")
