@@ -1,0 +1,208 @@
+"""Tests for pure / stateless functions (no network, no filesystem)."""
+import pytest
+
+import pixai_gallery_backup as core
+
+
+# ---------------------------------------------------------------------------
+# _format_size
+# ---------------------------------------------------------------------------
+
+def test_format_size_bytes():
+    assert core._format_size(0) == "0.0 B"
+    assert core._format_size(500) == "500.0 B"
+    assert core._format_size(1023) == "1023.0 B"
+
+
+def test_format_size_kilobytes():
+    assert core._format_size(1024) == "1.0 KB"
+    assert core._format_size(2048) == "2.0 KB"
+
+
+def test_format_size_megabytes():
+    assert core._format_size(1024 ** 2) == "1.0 MB"
+
+
+def test_format_size_gigabytes():
+    assert core._format_size(1024 ** 3) == "1.0 GB"
+
+
+def test_format_size_terabytes():
+    assert core._format_size(1024 ** 4) == "1.0 TB"
+
+
+# ---------------------------------------------------------------------------
+# _progress_line
+# ---------------------------------------------------------------------------
+
+def test_progress_line_with_total():
+    line = core._progress_line(50, 100)
+    assert "50/100" in line
+    assert "50.0%" in line
+    assert "checked" in line
+
+
+def test_progress_line_full():
+    line = core._progress_line(100, 100)
+    assert "100/100" in line
+    assert "100.0%" in line
+
+
+def test_progress_line_no_total():
+    line = core._progress_line(42, 0)
+    assert "42" in line
+    assert "Checking" in line
+
+
+def test_progress_line_new_suffix():
+    line = core._progress_line(50, 100, new=7)
+    assert "+7 new" in line
+
+
+def test_progress_line_no_new_suffix_when_zero():
+    line = core._progress_line(50, 100, new=0)
+    assert "new" not in line
+
+
+def test_progress_line_starts_with_cr():
+    assert core._progress_line(1, 10).startswith("\r")
+
+
+# ---------------------------------------------------------------------------
+# slug_from_prompt
+# ---------------------------------------------------------------------------
+
+def test_slug_basic():
+    s = core.slug_from_prompt("a beautiful cat", 60)
+    assert s == "a_beautiful_cat"
+
+
+def test_slug_removes_forbidden_chars():
+    s = core.slug_from_prompt('cat: "meow"', 60)
+    assert ":" not in s
+    assert '"' not in s
+
+
+def test_slug_truncates():
+    s = core.slug_from_prompt("word " * 20, 10)
+    assert len(s) <= 10
+
+
+def test_slug_empty():
+    assert core.slug_from_prompt("", 60) == ""
+
+    assert core.slug_from_prompt(None, 60) == ""
+
+
+# ---------------------------------------------------------------------------
+# build_stem_name
+# ---------------------------------------------------------------------------
+
+def test_build_stem_name_contains_ids():
+    stem = core.build_stem_name("a cat", "task123", "mid456", 60, "_")
+    assert "task123" in stem
+    assert "mid456" in stem
+
+
+def test_build_stem_name_media_id_last():
+    stem = core.build_stem_name("a cat", "task123", "mid456", 60, "_")
+    assert stem.endswith("mid456")
+
+
+def test_build_stem_name_no_prompt():
+    stem = core.build_stem_name("", "task1", "mid1", 60, "_")
+    assert "task1" in stem
+    assert "mid1" in stem
+
+
+def test_build_stem_name_sep():
+    stem = core.build_stem_name("hello world", "t1", "m1", 60, "-")
+    assert "_" not in stem
+    assert "-" in stem
+
+
+# ---------------------------------------------------------------------------
+# media_ids_for
+# ---------------------------------------------------------------------------
+
+def test_media_ids_for_single():
+    node = {"mediaId": "abc123", "batchMediaIds": None}
+    assert core.media_ids_for(node) == ["abc123"]
+
+
+def test_media_ids_for_batch_dedup():
+    node = {"mediaId": "abc123", "batchMediaIds": ["abc123", "def456", "ghi789"]}
+    assert core.media_ids_for(node) == ["abc123", "def456", "ghi789"]
+
+
+def test_media_ids_for_empty_node():
+    assert core.media_ids_for({}) == []
+
+
+def test_media_ids_for_batch_only():
+    node = {"mediaId": None, "batchMediaIds": ["a", "b"]}
+    assert core.media_ids_for(node) == ["a", "b"]
+
+
+def test_media_ids_for_falsy_batch_entries_skipped():
+    node = {"mediaId": "x", "batchMediaIds": ["x", "", None, "y"]}
+    result = core.media_ids_for(node)
+    assert "" not in result
+    assert None not in result
+    assert "y" in result
+
+
+# ---------------------------------------------------------------------------
+# extract_meta
+# ---------------------------------------------------------------------------
+
+def test_extract_meta_basic():
+    node = {
+        "id": "task1",
+        "createdAt": "2024-01-15T10:00:00Z",
+        "promptsPreview": "a beautiful cat",
+        "status": "succeeded",
+    }
+    meta = core.extract_meta(node)
+    assert meta["task_id"] == "task1"
+    assert meta["created_at"] == "2024-01-15T10:00:00Z"
+    assert meta["prompt_preview"] == "a beautiful cat"
+    assert meta["status"] == "succeeded"
+
+
+def test_extract_meta_missing_fields():
+    meta = core.extract_meta({})
+    assert meta["task_id"] == ""
+    assert meta["prompt_preview"] == ""
+
+
+def test_extract_meta_null_prompt():
+    node = {"id": "t", "promptsPreview": None}
+    assert core.extract_meta(node)["prompt_preview"] == ""
+
+
+# ---------------------------------------------------------------------------
+# find_connection
+# ---------------------------------------------------------------------------
+
+def test_find_connection_nested():
+    data = {"user": {"taskSummaries": {"edges": [], "pageInfo": {"hasPreviousPage": False}}}}
+    conn = core.find_connection(data)
+    assert conn is not None
+    assert "edges" in conn
+    assert "pageInfo" in conn
+
+
+def test_find_connection_returns_none_on_empty():
+    assert core.find_connection({}) is None
+    assert core.find_connection(None) is None
+
+
+def test_find_connection_returns_none_no_match():
+    assert core.find_connection({"a": 1, "b": 2}) is None
+
+
+def test_find_connection_inside_list():
+    data = [{"edges": [], "pageInfo": {}}]
+    conn = core.find_connection(data)
+    assert conn is not None
