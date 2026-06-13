@@ -918,19 +918,23 @@ def run_download(args, progress=None):
 
     total_images = _quick_count(session)
 
-    # Seed progress from already-completed files so a resume run opens at
-    # the correct position instead of restarting at 0/total.
+    # Seed progress by counting image files already on disk — more reliable
+    # than the catalog (which is overwritten each run and only reflects the
+    # current session). Works for flat, --organize-adv, and --organize-adv-live
+    # since rglob finds files in batches/ and YYYY-MM/ equally.
+    _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
     already_done = 0
-    if csv_path.exists():
-        try:
-            with open(csv_path, newline="", encoding="utf-8") as _f:
-                already_done = sum(1 for r in csv.DictReader(_f) if r.get("filename"))
-        except OSError:
-            pass
+    if out.exists():
+        already_done = sum(
+            1 for p in out.rglob("*")
+            if p.is_file()
+            and p.suffix.lower() in _IMAGE_EXTS
+            and not p.name.endswith(".part")
+        )
     processed = already_done
 
     if already_done:
-        print("Resuming: {} files already in catalog.\n".format(already_done))
+        print("Resuming: {} image files already on disk.\n".format(already_done))
 
     def _tick():
         nonlocal processed
