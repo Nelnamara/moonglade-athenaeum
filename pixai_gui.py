@@ -587,6 +587,7 @@ class DownloadTab(QWidget):
         self.prog_bar.setValue(0)
         self.prog_bar.setRange(0, 100)
         self.prog_label.setText("Counting library...")
+        self._dl_started = False
         self._set_running(True)
         self._worker = Worker(core.run_download, args)
         # Inject progress callback BEFORE start so the worker thread sees it
@@ -600,7 +601,11 @@ class DownloadTab(QWidget):
         if total:
             self.prog_bar.setRange(0, total)
             self.prog_bar.setValue(done)
-            self.prog_label.setText("Downloading {}/{} files".format(done, total))
+            if not self._dl_started and done > 0:
+                self.prog_label.setText("Resuming — {}/{} already done".format(done, total))
+            else:
+                self._dl_started = True
+                self.prog_label.setText("Downloading {}/{} files".format(done, total))
         else:
             self.prog_bar.setRange(0, 0)  # indeterminate bounce
             self.prog_label.setText("Downloading {} files...".format(done))

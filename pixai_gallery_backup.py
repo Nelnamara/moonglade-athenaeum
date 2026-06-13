@@ -917,7 +917,20 @@ def run_download(args, progress=None):
         img_dir.mkdir(parents=True, exist_ok=True)
 
     total_images = _quick_count(session)
-    processed = 0
+
+    # Seed progress from already-completed files so a resume run opens at
+    # the correct position instead of restarting at 0/total.
+    already_done = 0
+    if csv_path.exists():
+        try:
+            with open(csv_path, newline="", encoding="utf-8") as _f:
+                already_done = sum(1 for r in csv.DictReader(_f) if r.get("filename"))
+        except OSError:
+            pass
+    processed = already_done
+
+    if already_done:
+        print("Resuming: {} files already in catalog.\n".format(already_done))
 
     def _tick():
         nonlocal processed
@@ -929,7 +942,7 @@ def run_download(args, progress=None):
             sys.stdout.flush()
 
     if progress:
-        progress(0, total_images)
+        progress(processed, total_images)
 
     print("Walking your generation history (newest -> oldest)...")
     csv_f = open(csv_path, "w", newline="", encoding="utf-8")
