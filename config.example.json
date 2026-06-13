@@ -2,5 +2,8 @@
   "_comment": "Copy this file to config.json and fill in your values. config.json is git-ignored and will never be committed.",
   "USER_ID": "YOUR_PIXAI_USER_ID",
   "U3T": "YOUR_U3T_VALUE",
-  "PERSISTED_QUERY_HASH": "YOUR_PERSISTED_QUERY_HASH"
+  "PERSISTED_QUERY_HASH": "YOUR_PERSISTED_QUERY_HASH",
+  "_comment_full_meta": "Optional -- required only for --full-meta and --backfill-full-meta. Capture from DevTools on a task detail page (see README -> Full Meta).",
+  "TASK_DETAIL_HASH": "YOUR_TASK_DETAIL_HASH",
+  "MODEL_DETAIL_HASH": "YOUR_MODEL_DETAIL_HASH"
 }

@@ -95,6 +95,8 @@ _cfg = _load_config()
 PERSISTED_QUERY_HASH = _cfg.get("PERSISTED_QUERY_HASH", "")
 U3T = _cfg.get("U3T", "")
 USER_ID = _cfg.get("USER_ID", "")
+TASK_DETAIL_HASH = _cfg.get("TASK_DETAIL_HASH", "")
+MODEL_DETAIL_HASH = _cfg.get("MODEL_DETAIL_HASH", "")
 # ===========================================================================
 
 # Media URL: https://api.pixai.art/v1/media/<id>/<variant>
@@ -520,6 +522,98 @@ def page_variables(page_size, before=None):
     return v
 
 
+# ---------------------------------------------------------------------------
+# Full-meta API (task detail + model name)
+# ---------------------------------------------------------------------------
+_FULL_META_FIELDS = (
+    "prompt_full", "natural_prompt", "seed", "steps",
+    "sampler", "cfg_scale", "model_id", "model_name",
+)
+
+
+def task_detail_gql(session, task_id):
+    """GET getTaskById for one task. Returns the task dict or None on failure."""
+    if not TASK_DETAIL_HASH:
+        raise PixAIError(
+            "TASK_DETAIL_HASH missing from config.json. "
+            "Capture it from DevTools (see README -> Full Meta) and add it.")
+    params = {
+        "operation": "getTaskById",
+        "u3t": U3T,
+        "operationName": "getTaskById",
+        "variables": json.dumps({"id": str(task_id)}, separators=(",", ":")),
+        "extensions": json.dumps(
+            {"clientLibrary": CLIENT_LIBRARY,
+             "persistedQuery": {"version": 1, "sha256Hash": TASK_DETAIL_HASH}},
+            separators=(",", ":")),
+    }
+    try:
+        r = session.get(API_URL, params=params, timeout=60)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        return (data.get("data") or {}).get("task")
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def model_name_gql(session, model_version_id, _cache={}):
+    """GET getGenerationModelByVersionId; result cached by ID (few unique models)."""
+    if not model_version_id:
+        return ""
+    mid = str(model_version_id)
+    if mid in _cache:
+        return _cache[mid]
+    if not MODEL_DETAIL_HASH:
+        _cache[mid] = mid
+        return mid
+    params = {
+        "operation": "getGenerationModelByVersionId",
+        "u3t": U3T,
+        "operationName": "getGenerationModelByVersionId",
+        "variables": json.dumps({"id": mid}, separators=(",", ":")),
+        "extensions": json.dumps(
+            {"clientLibrary": CLIENT_LIBRARY,
+             "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
+            separators=(",", ":")),
+    }
+    try:
+        r = session.get(API_URL, params=params, timeout=60)
+        r.raise_for_status()
+        mv = (r.json().get("data") or {}).get("generationModelVersion") or {}
+        title = (mv.get("model") or {}).get("title", "")
+        version = mv.get("name", "")
+        name = "{} {}".format(title, version).strip() if title else mid
+    except Exception:
+        name = mid
+    _cache[mid] = name
+    return name
+
+
+def extract_full_meta(task):
+    """Pull the 8 extended fields out of a getTaskById task dict."""
+    if not task:
+        return {}
+    params = task.get("parameters") or {}
+    outputs = task.get("outputs") or {}
+    detail = outputs.get("detailParameters") or {}
+    return {
+        "prompt_full":    params.get("prompts", ""),
+        "natural_prompt": (params.get("extra") or {}).get("naturalPrompts", ""),
+        "seed":           str(outputs.get("seed") or ""),
+        "steps":          str(detail.get("steps") or ""),
+        "sampler":        detail.get("sampler", ""),
+        "cfg_scale":      str(detail.get("cfg_scale") or ""),
+        "model_id":       str(params.get("modelId") or ""),
+        "model_name":     "",  # filled in by caller after model_name_gql
+    }
+
+
+def _merge_full(fm, kr):
+    """Merge full-meta fields: prefer fresh fm, fall back to known-row kr."""
+    return {f: (fm.get(f) or kr.get(f, "")) for f in _FULL_META_FIELDS}
+
+
 def cmd_convert_existing(args, out):
     """Convert all .webp files in the backup tree to the target format in-place."""
     target = (args.convert or "png").lower()
@@ -723,12 +817,14 @@ def _make_session(token_val):
     """Validate config, load token, return a configured requests.Session.
     Re-reads config.json at call time so the GUI works even when the module
     was imported before the working directory was set correctly."""
-    global PERSISTED_QUERY_HASH, U3T, USER_ID
+    global PERSISTED_QUERY_HASH, U3T, USER_ID, TASK_DETAIL_HASH, MODEL_DETAIL_HASH
     fresh = _load_config()
     if fresh:
         PERSISTED_QUERY_HASH = fresh.get("PERSISTED_QUERY_HASH", "") or PERSISTED_QUERY_HASH
         U3T = fresh.get("U3T", "") or U3T
         USER_ID = fresh.get("USER_ID", "") or USER_ID
+        TASK_DETAIL_HASH = fresh.get("TASK_DETAIL_HASH", "") or TASK_DETAIL_HASH
+        MODEL_DETAIL_HASH = fresh.get("MODEL_DETAIL_HASH", "") or MODEL_DETAIL_HASH
     if not all([PERSISTED_QUERY_HASH, U3T, USER_ID]):
         raise PixAIError(
             "config.json is missing or incomplete "
@@ -780,7 +876,7 @@ def run_probe(args):
 def run_count(args):
     """Tally total tasks and images in the library without downloading."""
     session = _make_session(getattr(args, "token", None))
-    count_size = getattr(args, "count_page_size", 10000)
+    count_size = getattr(args, "count_page_size", 5000)
     print("Counting your whole library (page size {})...".format(count_size))
     before = None
     tasks = images = page = 0
@@ -863,6 +959,144 @@ def run_catalog_stats(args):
         print("Image files on disk : {}  ({})".format(disk_count, _format_size(disk_bytes)))
 
 
+def run_backfill_meta(args):
+    """Fill in missing url/width/height for catalog rows via resolve_media().
+    Safe to re-run -- skips rows that already have all three fields."""
+    out = Path(args.out)
+    csv_path = out / "catalog.csv"
+    if not csv_path.exists():
+        raise PixAIError("No catalog.csv found at {}.".format(csv_path))
+
+    session = _make_session(getattr(args, "token", None))
+
+    CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
+                      "prompt_preview", "status", "created_at",
+                      "prompt_full", "natural_prompt", "seed", "steps",
+                      "sampler", "cfg_scale", "model_id", "model_name"]
+
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    to_fill = [r for r in rows if not (r.get("url") and r.get("width") and r.get("height"))]
+    print("Found {:,} rows missing url/width/height (out of {:,} total).".format(
+        len(to_fill), len(rows)))
+    if not to_fill:
+        print("Nothing to backfill.")
+        return
+
+    updated = failed = 0
+    for i, row in enumerate(to_fill):
+        url, info = resolve_media(session, row["media_id"])
+        if url:
+            row["url"] = url
+            row["width"] = str(info.get("width") or "")
+            row["height"] = str(info.get("height") or "")
+            updated += 1
+        else:
+            failed += 1
+        sys.stdout.write("\r  {:,}/{:,}  updated {:,}  failed {:,}  ".format(
+            i + 1, len(to_fill), updated, failed))
+        sys.stdout.flush()
+        time.sleep(args.delay)
+
+    print("\nWriting catalog...")
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CATALOG_FIELDS)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({field: r.get(field, "") for field in CATALOG_FIELDS})
+    print("Done. Updated {:,} rows, {:,} still missing.".format(updated, failed))
+
+
+def run_backfill_full_meta(args):
+    """Fill in prompt_full/natural_prompt/seed/steps/sampler/cfg_scale/model_id/model_name
+    for catalog rows missing them, using getTaskById + getGenerationModelByVersionId.
+    Also fills url/width/height from the task's media object as a free side effect.
+    Safe to re-run -- skips rows that already have prompt_full."""
+    out = Path(args.out)
+    csv_path = out / "catalog.csv"
+    if not csv_path.exists():
+        raise PixAIError("No catalog.csv found at {}.".format(csv_path))
+    if not TASK_DETAIL_HASH:
+        raise PixAIError(
+            "--backfill-full-meta requires TASK_DETAIL_HASH in config.json. "
+            "See README -> Full Meta for capture instructions.")
+
+    session = _make_session(getattr(args, "token", None))
+
+    CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
+                      "prompt_preview", "status", "created_at",
+                      "prompt_full", "natural_prompt", "seed", "steps",
+                      "sampler", "cfg_scale", "model_id", "model_name"]
+
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    # Work per unique task_id (one API call covers all media in that task)
+    needs_fill = [r for r in rows if not r.get("prompt_full")]
+    task_ids = list(dict.fromkeys(r["task_id"] for r in needs_fill if r.get("task_id")))
+    print("Found {:,} rows missing full meta across {:,} unique tasks.".format(
+        len(needs_fill), len(task_ids)))
+    if not task_ids:
+        print("Nothing to backfill.")
+        return
+
+    # Fetch and cache full meta per task_id
+    task_cache = {}  # task_id -> full meta dict
+    fetched = failed = 0
+    for i, tid in enumerate(task_ids):
+        task_data = task_detail_gql(session, tid)
+        fm = extract_full_meta(task_data)
+        if fm.get("model_id"):
+            fm["model_name"] = model_name_gql(session, fm["model_id"])
+
+        # Also grab media URL/dimensions from the task's media object if present
+        media_obj = (task_data or {}).get("media") or {}
+        if media_obj:
+            media_urls = media_obj.get("urls") or []
+            by_v = {str(u.get("variant", "")).upper(): u["url"]
+                    for u in media_urls if isinstance(u, dict) and u.get("url")}
+            for pref in ("PUBLIC", "ORIGINAL", "ORIG", "FULL", "THUMBNAIL"):
+                if pref in by_v:
+                    fm["_media_url"] = by_v[pref]
+                    break
+            fm["_media_width"] = str(media_obj.get("width") or "")
+            fm["_media_height"] = str(media_obj.get("height") or "")
+
+        task_cache[tid] = fm
+        if fm.get("prompt_full"):
+            fetched += 1
+        else:
+            failed += 1
+        sys.stdout.write("\r  Tasks {:,}/{:,}  fetched {:,}  failed {:,}  ".format(
+            i + 1, len(task_ids), fetched, failed))
+        sys.stdout.flush()
+        time.sleep(args.delay)
+
+    print("\nApplying to {:,} catalog rows...".format(len(rows)))
+    for row in rows:
+        fm = task_cache.get(row.get("task_id"), {})
+        if not fm:
+            continue
+        for f in _FULL_META_FIELDS:
+            if not row.get(f) and fm.get(f):
+                row[f] = fm[f]
+        # Backfill url/width/height from task media as bonus
+        if not row.get("url") and fm.get("_media_url"):
+            row["url"] = fm["_media_url"]
+        if not row.get("width") and fm.get("_media_width"):
+            row["width"] = fm["_media_width"]
+        if not row.get("height") and fm.get("_media_height"):
+            row["height"] = fm["_media_height"]
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CATALOG_FIELDS)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({field: r.get(field, "") for field in CATALOG_FIELDS})
+    print("Done. Fetched {:,} tasks, {:,} failed, catalog updated.".format(fetched, failed))
+
+
 def cmd_rename(args, out, img_dir, csv_path):
     """Rename already-downloaded files to the prompt_taskid_mediaid scheme."""
     if not csv_path.exists():
@@ -936,7 +1170,9 @@ def run_download(args, progress=None):
     csv_path = out / "catalog.csv"
 
     CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
-                      "prompt_preview", "status", "created_at"]
+                      "prompt_preview", "status", "created_at",
+                      "prompt_full", "natural_prompt", "seed", "steps",
+                      "sampler", "cfg_scale", "model_id", "model_name"]
 
     # Load existing catalog so prior-session rows are never lost
     known = {}
@@ -996,6 +1232,13 @@ def run_download(args, progress=None):
     writer.writeheader()
     raw_f = open(raw_path, "w", encoding="utf-8")
 
+    use_full_meta = getattr(args, "full_meta", False)
+    if use_full_meta and not TASK_DETAIL_HASH:
+        raise PixAIError(
+            "--full-meta requires TASK_DETAIL_HASH in config.json. "
+            "See README -> Full Meta for capture instructions.")
+    _full_meta_cache = {}  # task_id -> full meta dict
+
     before = None
     seen = 0
     written = set()   # media_ids written this session
@@ -1019,6 +1262,19 @@ def run_download(args, progress=None):
                 meta = extract_meta(node)
                 all_mids = media_ids_for(node)
                 is_batch = len(all_mids) > 1
+
+                # Fetch full task detail once per task_id (cached; batches cost 1 call)
+                full_meta = {}
+                if use_full_meta:
+                    tid = meta["task_id"]
+                    if tid not in _full_meta_cache:
+                        task_data = task_detail_gql(session, tid)
+                        fm = extract_full_meta(task_data)
+                        if fm.get("model_id"):
+                            fm["model_name"] = model_name_gql(session, fm["model_id"])
+                        _full_meta_cache[tid] = fm
+                        time.sleep(args.delay)
+                    full_meta = _full_meta_cache.get(meta["task_id"], {})
 
                 if getattr(args, "organize_adv_live", False):
                     if is_batch:
@@ -1051,6 +1307,7 @@ def run_download(args, progress=None):
                             "prompt_preview": k.get("prompt_preview") or meta["prompt_preview"],
                             "status":         k.get("status") or meta["status"],
                             "created_at":     k.get("created_at") or meta["created_at"],
+                            **_merge_full(full_meta, k),
                         })
                         written.add(mid)
                         _tick()
@@ -1071,6 +1328,7 @@ def run_download(args, progress=None):
                             "filename": "", "url": "", "width": w, "height": h,
                             "prompt_preview": meta["prompt_preview"],
                             "status": meta["status"], "created_at": meta["created_at"],
+                            **_merge_full(full_meta, known.get(mid, {})),
                         })
                         written.add(mid)
                         _tick()
@@ -1081,6 +1339,7 @@ def run_download(args, progress=None):
                             "filename": "", "url": url, "width": w, "height": h,
                             "prompt_preview": meta["prompt_preview"],
                             "status": meta["status"], "created_at": meta["created_at"],
+                            **_merge_full(full_meta, known.get(mid, {})),
                         })
                         written.add(mid)
                         _tick()
@@ -1099,6 +1358,7 @@ def run_download(args, progress=None):
                         "url": url, "width": w, "height": h,
                         "prompt_preview": meta["prompt_preview"],
                         "status": meta["status"], "created_at": meta["created_at"],
+                        **_merge_full(full_meta, known.get(mid, {})),
                     })
                     written.add(mid)
                     if path and status in ("ok", "skip"):
@@ -1232,6 +1492,16 @@ def main():
                          "download, writing _prompt.txt and _index.csv per folder")
     ap.add_argument("--dry-run", action="store_true",
                     help="with --organize or --organize-adv, show plan without making changes")
+    ap.add_argument("--full-meta", action="store_true",
+                    help="fetch full prompt, seed, steps, sampler, CFG, and model name for each "
+                         "task via a second API call (requires TASK_DETAIL_HASH + MODEL_DETAIL_HASH "
+                         "in config.json). One extra call per unique task; batch images share one call.")
+    ap.add_argument("--backfill-meta", action="store_true",
+                    help="fill in missing url/width/height in catalog.csv via resolve_media "
+                         "for rows that lack them, then exit")
+    ap.add_argument("--backfill-full-meta", action="store_true",
+                    help="fill in prompt_full/seed/model/etc in catalog.csv via getTaskById "
+                         "for rows that lack them; also backfills url/width/height as a bonus, then exit")
     args = ap.parse_args()
 
     if args.probe and args.count:
@@ -1246,6 +1516,12 @@ def main():
     try:
         if args.catalog_stats:
             run_catalog_stats(args)
+            return
+        if args.backfill_meta:
+            run_backfill_meta(args)
+            return
+        if args.backfill_full_meta:
+            run_backfill_full_meta(args)
             return
         if args.convert_existing:
             cmd_convert_existing(args, out)
