@@ -169,7 +169,7 @@ python pixai_gallery_backup.py --organize-adv-live --convert png   # download + 
 | `--page-size N` | `20` | Tasks per request during download (try `5000` for speed; keep ≤ ~8000) |
 | `--max N` | `0` (all) | Stop after N tasks — use small numbers for testing |
 | `--delay SECONDS` | `0.4` | Pause between requests |
-| `--count-page-size N` | `10000` | Page size for `--count` |
+| `--count-page-size N` | `5000` | Page size for `--count` |
 | `--name-length N` | `60` | Max prompt characters used in filenames |
 | `--name-sep CHAR` | `_` | Word separator in filenames (`_` or `-`) |
 | `--convert FMT` | off | Convert downloads: `png` or `jpeg` |
@@ -220,8 +220,7 @@ pixai_backup/
 | `promptsPreview` is truncated — full prompt, seed, and model are not available in task summaries | Requires a separate task-detail API query; on the roadmap |
 | WebP metadata embedding is unreliable | `--organize-adv` and `--organize-adv-live` skip WebP; pair with `--convert png` to get embedded metadata |
 | Windows MAX_PATH (260 chars) | Batch images use short names (`NN_<mediaid>.ext`) inside prompt-named folders; `--name-length` defaults to 60 |
-| `--convert` only affects new downloads | Use `--convert-existing` to convert already-downloaded `.webp` files in place |
-| Server errors above ~10,000 tasks per page | `--count-page-size` defaults to 10,000; lower it if you see `Internal server error` on `--count` |
+| Server errors above ~10,000 tasks per page | `--count-page-size` defaults to 5,000; lower further if you see `Internal server error` on `--count` |
 
 ---
 

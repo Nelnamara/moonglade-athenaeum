@@ -1196,9 +1196,9 @@ def main():
                     help="show first page + auto-detect the full-res variant, then exit")
     ap.add_argument("--count", action="store_true",
                     help="tally total tasks + images via the API (no downloads), then exit")
-    ap.add_argument("--count-page-size", type=int, default=10000,
-                    help="page size used by --count (big = whole library in 1 request; "
-                         "the server errors above ~10000)")
+    ap.add_argument("--count-page-size", type=int, default=5000,
+                    help="page size used by --count (bigger = fewer requests; "
+                         "server errors above ~10000 so default is 5000)")
     ap.add_argument("--catalog-stats", action="store_true",
                     help="summarize the existing catalog.csv (counts only), then exit")
     ap.add_argument("--collect-only", action="store_true")
