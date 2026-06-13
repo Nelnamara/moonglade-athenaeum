@@ -295,7 +295,8 @@ class Worker(QThread):
     """Run fn(*args) in a background thread, capturing stdout → log signal."""
 
     log = Signal(str)
-    done = Signal(bool, str)   # (success, error_message)
+    done = Signal(bool, str)       # (success, error_message)
+    progress = Signal(int, int)    # (done, total)
 
     def __init__(self, fn, *args):
         super().__init__()
@@ -526,9 +527,21 @@ class DownloadTab(QWidget):
 
         self.log = LogWidget()
 
+        self.prog_bar = QProgressBar()
+        self.prog_bar.setRange(0, 100)
+        self.prog_bar.setValue(0)
+        self.prog_bar.setTextVisible(False)
+        self.prog_bar.setFixedHeight(14)
+        self.prog_label = QLabel("Ready")
+        self.prog_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        prog_row = QHBoxLayout()
+        prog_row.addWidget(self.prog_bar, stretch=1)
+        prog_row.addWidget(self.prog_label)
+
         lay = QVBoxLayout(self)
         lay.addWidget(opts)
         lay.addLayout(btn_row)
+        lay.addLayout(prog_row)
         lay.addWidget(self.log, stretch=1)
 
     def _on_convert_change(self):
@@ -566,7 +579,32 @@ class DownloadTab(QWidget):
         self._worker.done.connect(self._on_done)
         self._worker.start()
 
-    def _start_download(self): self._run(core.run_download, self._build_args())
+    def _start_download(self):
+        if self._worker and self._worker.isRunning():
+            return
+        args = self._build_args()
+        self.log.clear_log()
+        self.prog_bar.setValue(0)
+        self.prog_bar.setRange(0, 100)
+        self.prog_label.setText("Counting library...")
+        self._set_running(True)
+        self._worker = Worker(core.run_download, args)
+        # Inject progress callback BEFORE start so the worker thread sees it
+        args.progress = self._worker.progress.emit
+        self._worker.log.connect(self.log.append_line)
+        self._worker.progress.connect(self._update_progress)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _update_progress(self, done, total):
+        if total:
+            self.prog_bar.setRange(0, total)
+            self.prog_bar.setValue(done)
+            self.prog_label.setText("Downloading {}/{} files".format(done, total))
+        else:
+            self.prog_bar.setRange(0, 0)  # indeterminate bounce
+            self.prog_label.setText("Downloading {} files...".format(done))
+
     def _start_probe(self):    self._run(core.run_probe,    self._build_args())
     def _start_count(self):    self._run(core.run_count,    self._build_args())
 
@@ -575,12 +613,17 @@ class DownloadTab(QWidget):
             self._worker.terminate()
             self._worker.wait(2000)
             self.log.append_line("\n[Stopped by user]")
+            self.prog_label.setText("Stopped")
             self._set_running(False)
 
     def _on_done(self, success, msg):
         self._set_running(False)
-        if not success and msg:
-            self.log.append_line("\n[ERROR] " + msg)
+        if success:
+            self.prog_label.setText("Complete")
+        else:
+            self.prog_label.setText("Error")
+            if msg:
+                self.log.append_line("\n[ERROR] " + msg)
 
     def _set_running(self, running):
         for w in (self.btn_start, self.btn_probe, self.btn_count):
