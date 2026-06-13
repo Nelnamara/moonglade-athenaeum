@@ -970,7 +970,7 @@ def run_backfill_meta(args):
     CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
                       "prompt_preview", "status", "created_at",
                       "prompt_full", "natural_prompt", "seed", "steps",
-                      "sampler", "cfg_scale", "model_id", "model_name"]
+                      "sampler", "cfg_scale", "model_id", "model_name", "rating"]
 
     with open(csv_path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -1026,7 +1026,7 @@ def run_backfill_full_meta(args):
     CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
                       "prompt_preview", "status", "created_at",
                       "prompt_full", "natural_prompt", "seed", "steps",
-                      "sampler", "cfg_scale", "model_id", "model_name"]
+                      "sampler", "cfg_scale", "model_id", "model_name", "rating"]
 
     with open(csv_path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -1171,7 +1171,7 @@ def run_download(args, progress=None):
     CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
                       "prompt_preview", "status", "created_at",
                       "prompt_full", "natural_prompt", "seed", "steps",
-                      "sampler", "cfg_scale", "model_id", "model_name"]
+                      "sampler", "cfg_scale", "model_id", "model_name", "rating"]
 
     # Load existing catalog so prior-session rows are never lost
     known = {}
