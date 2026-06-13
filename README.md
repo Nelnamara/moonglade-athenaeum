@@ -17,8 +17,7 @@ PixAI's terms grant users copyright of their own generations. This tool is rate-
 - **Progress meter** — pre-flight library count feeds a live progress bar; resume runs open at the correct position based on files already on disk
 - **Backward pagination** — walks newest → oldest through your entire generation history
 - **Format conversion** — optionally convert WebP to PNG (lossless) or JPEG on download, or batch-convert existing files with `--convert-existing`
-- **Organize mode** — sorts files into `batches/` folders (multi-image generations) and `YYYY-MM/` month folders (singles); writes per-folder `_prompt.txt` and `_index.csv`
-- **Embedded metadata** — writes prompt, IDs, and date directly into PNG text chunks or JPEG EXIF on organize
+- **Organize mode** — sorts files into `batches/` folders (multi-image generations) and `YYYY-MM/` month folders (singles); writes per-folder `_prompt.txt` and `_index.csv`; embeds prompt, IDs, and date directly into PNG/JPEG metadata
 - **Count mode** — tallies total tasks and images via the API without downloading
 - **Probe mode** — connection sanity check; confirms it can see and resolve a full-res URL before committing to a run
 - **Rate limiting** — configurable delay between requests (default 0.4 s)
@@ -32,10 +31,11 @@ A PySide6 desktop GUI (`pixai_gui.py`) wraps the full backup workflow in a tabbe
 
 | Tab | What it does |
 |---|---|
-| **Download** | Configure token, output folder, page size, organize mode, conversion, and full-meta fetch; Start / Stop |
+| **Download** | Configure token, output folder, page size, organize mode, conversion, collect-only, and full-meta fetch; Start / Stop |
 | **Organize** | Post-download rename (`--organize`) or full folder sort (`--organize-adv`); dry-run preview |
 | **Convert** | Batch-convert existing `.webp` files to PNG or JPEG in place |
-| **Utilities** | Probe, Count, Catalog Stats, Backfill url/width/height, Backfill Full Meta |
+| **Utilities** | Probe, Count, Catalog Stats, Backfill url/width/height, Backfill Full Meta; configurable API delay |
+| **Gallery** | Launch / stop the local Flask gallery server; configurable port; auto-builds missing thumbnails on start |
 
 Settings (token, output folder, options) are saved to `pixai_gui_settings.json` next to the script (git-ignored).
 
@@ -55,7 +55,7 @@ python pixai_gui.py
 | `truststore` | ❌ | Recommended — fixes HTTPS cert errors from corporate proxies or antivirus (Python 3.10+) |
 | `pillow` | ❌ | Needed for `--convert`, `--convert-existing`, and metadata embedding in `--organize` |
 | `PySide6` | ❌ | Desktop GUI only (`pixai_gui.py`) |
-| `flask` | ❌ | Local web gallery only (`pixai_gallery.py`, coming soon) |
+| `flask` | ❌ | Local web gallery (`pixai_gallery.py`) — filter, browse, and delete from a browser |
 | `pytest` + `pytest-mock` | ❌ | Development / testing only |
 
 Install everything at once:
@@ -171,8 +171,8 @@ python pixai_gallery_backup.py --organize-adv-live --convert png   # download + 
 | `--backfill-full-meta` | Fill full prompt/seed/model/etc in catalog via `getTaskById`; also fills url/width/height |
 | `--organize` | Rename files in `images/` to `prompt_taskid_mediaid` scheme using `catalog.csv` |
 | `--organize-live` | Same naming applied live during download (makes intent explicit) |
-| `--organize-adv` | Full sort: move files into `batches/` and `YYYY-MM/` folders, embed metadata |
-| `--organize-adv-live` | Full sort applied live during download |
+| `--organize-adv` | Folder sort: move files into `batches/` and `YYYY-MM/` folders; embed metadata into PNG/JPEG; no prompt-based renaming |
+| `--organize-adv-live` | Same folder sort applied live during download |
 | `--convert-existing` | Convert all already-downloaded `.webp` files to `--convert` format (default `png`) |
 
 ### Options
@@ -217,7 +217,7 @@ pixai_backup/
 │       ├─ 02_<mediaid>.png
 │       └─ _prompt.txt           shared prompt, IDs, date, image list
 ├─ 2025-03/                      single-image generations grouped by month
-│   ├─ <prompt>_<taskid>_<mediaid>.png
+│   ├─ <mediaid>.png
 │   └─ _index.csv
 ├─ 2026-06/
 │   └─ ...
@@ -225,7 +225,7 @@ pixai_backup/
 └─ catalog.csv
 ```
 
-> **Keep `catalog.csv`.** It is the source of truth for full prompts, seeds, dates, and dimensions. Filenames are shortened and stripped of punctuation so the catalog is the only complete record.
+> **Keep `catalog.csv`.** It is the source of truth for full prompts, seeds, dates, model names, and generation parameters. Single images are named by `media_id` only — the catalog is the only complete record. Use `--organize` (separate step) if you also want prompt-based filenames.
 
 ### Catalog Columns
 
@@ -290,11 +290,19 @@ python pixai_gallery_backup.py --backfill-full-meta
 |---|---|
 | WebP metadata embedding is unreliable | `--organize-adv` skips WebP files; pair with `--convert png` to get embedded metadata |
 | Windows MAX_PATH (260 chars) | Batch images use short names (`NN_<mediaid>.ext`) inside prompt-named folders; `--name-length` defaults to 60 |
-| Server errors above ~10,000 tasks per page | `--count-page-size` defaults to 5,000; lower further if you see `Internal server error` on `--count` |
+| `--count-page-size` server errors | Default is 5,000; lower to 1,000–2,000 if you see `Internal server error` on `--count` (PixAI rejects very large page requests) |
+| Gallery thumbnails after `--organize-adv` | Thumbnails are keyed by `media_id` and unaffected; gallery falls back to media-ID glob if `catalog.csv` `filename` column is stale after a move |
 
 ---
 
 ## Changelog
+
+### v4.5
+- **Gallery tab** in GUI — launches/stops a local Flask gallery server in a background thread; configurable port; auto-builds missing thumbnails on start with progress log; Open in Browser button
+- **`--collect-only` checkbox** on GUI Download tab — catalogs tasks without downloading images
+- **Configurable API delay** on GUI Utilities tab — replaces hardcoded 0.4 s; persisted in settings
+- **`--organize-adv` simplified** — single images now named `<mediaid>.ext` in `YYYY-MM/` folders; prompt-based renaming removed (use `--organize` if you want prompt filenames); batch folder names unchanged
+- Gallery thumbnail progress reporting every 5% via GUI log
 
 ### v4.4
 - `--full-meta` flag — fetches full prompt, seed, steps, sampler, CFG, and model name per task via `getTaskById` + `getGenerationModelByVersionId`; model lookups cached in memory; one extra call per unique task_id (batches share one call)
@@ -344,7 +352,7 @@ python pixai_gallery_backup.py --backfill-full-meta
 - [x] **Persistent catalog** — deduplicated, append-safe `catalog.csv` keyed by `media_id`
 - [x] **`tests/` with pytest** — 68 tests with mocked network layer
 - [x] **GUI port** — PySide6 desktop app with tabbed layout, dark theme, and background worker
-- [ ] **Local web gallery** — Flask + Jinja2 gallery server (`pixai_gallery.py`) with filters, pagination, and delete
+- [x] **Local web gallery** — Flask + Jinja2 gallery server (`pixai_gallery.py`) with filters, pagination, and delete
 
 ---
 
