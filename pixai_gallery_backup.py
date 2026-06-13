@@ -813,17 +813,17 @@ def run_count(args):
     print("Tasks that are batches    : {}  (>1 image each)".format(batched_tasks))
     print("Fetched in {} request(s).".format(page))
     out = Path(args.out)
+    _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
+    disk_count = disk_bytes = 0
     if out.exists():
-        _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
-        disk_count = disk_bytes = 0
         for p in out.rglob("*"):
             if p.is_file() and p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
                 disk_count += 1
                 disk_bytes += p.stat().st_size
-        if disk_count:
-            print("\n--- On disk ({}) ---".format(args.out))
-            print("Image files on disk       : {}".format(disk_count))
-            print("Total collection size     : {}".format(_format_size(disk_bytes)))
+    print("\n--- On disk ({}) ---".format(args.out))
+    print("Image files on disk       : {}".format(disk_count))
+    print("Total collection size     : {}".format(
+        _format_size(disk_bytes) if disk_bytes else "0 B (folder empty or not found)"))
     if images > tasks:
         print("\nNote: image count exceeds task count because some older tasks\n"
               "produced batches of several images -- all of them get downloaded.")
@@ -934,6 +934,23 @@ def run_download(args, progress=None):
     raw_path = out / "raw_tasks.jsonl"
     csv_path = out / "catalog.csv"
 
+    CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
+                      "prompt_preview", "status", "created_at"]
+
+    # Load existing catalog so prior-session rows are never lost
+    known = {}
+    if csv_path.exists():
+        try:
+            with open(csv_path, newline="", encoding="utf-8") as _kf:
+                for _row in csv.DictReader(_kf):
+                    _mid = _row.get("media_id")
+                    if _mid:
+                        known[_mid] = _row
+        except OSError:
+            pass
+    if known:
+        print("Loaded {} existing catalog entries.\n".format(len(known)))
+
     session = _make_session(getattr(args, "token", None))
     print("SSL trust store via truststore: {}".format(
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
@@ -943,10 +960,9 @@ def run_download(args, progress=None):
 
     total_images = _quick_count(session)
 
-    # Seed progress by counting image files already on disk — more reliable
-    # than the catalog (which is overwritten each run and only reflects the
-    # current session). Works for flat, --organize-adv, and --organize-adv-live
-    # since rglob finds files in batches/ and YYYY-MM/ equally.
+    # Seed progress by counting image files already on disk. Works for flat,
+    # --organize-adv, and --organize-adv-live since rglob finds files in
+    # batches/ and YYYY-MM/ equally.
     _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
     already_done = 0
     disk_bytes = 0
@@ -975,13 +991,13 @@ def run_download(args, progress=None):
 
     print("Walking your generation history (newest -> oldest)...")
     csv_f = open(csv_path, "w", newline="", encoding="utf-8")
-    writer = csv.writer(csv_f)
-    writer.writerow(["task_id", "media_id", "filename", "url", "width", "height",
-                     "prompt_preview", "status", "created_at"])
+    writer = csv.DictWriter(csv_f, fieldnames=CATALOG_FIELDS)
+    writer.writeheader()
     raw_f = open(raw_path, "w", encoding="utf-8")
 
     before = None
     seen = 0
+    written = set()   # media_ids written this session
     dl = {"ok": 0, "skip": 0, "missing": 0, "fail": 0}
     page = 0
     try:
@@ -1023,9 +1039,19 @@ def run_download(args, progress=None):
                                 else already_downloaded(out, mid))
                     if existing:
                         dl["skip"] += 1
-                        writer.writerow([meta["task_id"], mid, existing.name, "",
-                                         "", "", meta["prompt_preview"],
-                                         meta["status"], meta["created_at"]])
+                        k = known.get(mid, {})
+                        writer.writerow({
+                            "task_id":        k.get("task_id") or meta["task_id"],
+                            "media_id":       mid,
+                            "filename":       existing.name,
+                            "url":            k.get("url", ""),
+                            "width":          k.get("width", ""),
+                            "height":         k.get("height", ""),
+                            "prompt_preview": k.get("prompt_preview") or meta["prompt_preview"],
+                            "status":         k.get("status") or meta["status"],
+                            "created_at":     k.get("created_at") or meta["created_at"],
+                        })
+                        written.add(mid)
                         _tick()
                         continue
                     if getattr(args, "organize_adv_live", False) and is_batch:
@@ -1039,15 +1065,23 @@ def run_download(args, progress=None):
                     w, h = info.get("width", ""), info.get("height", "")
                     if not url:
                         dl["missing"] += 1
-                        writer.writerow([meta["task_id"], mid, "", "", w, h,
-                                         meta["prompt_preview"], meta["status"],
-                                         meta["created_at"]])
+                        writer.writerow({
+                            "task_id": meta["task_id"], "media_id": mid,
+                            "filename": "", "url": "", "width": w, "height": h,
+                            "prompt_preview": meta["prompt_preview"],
+                            "status": meta["status"], "created_at": meta["created_at"],
+                        })
+                        written.add(mid)
                         _tick()
                         continue
                     if getattr(args, "collect_only", False):
-                        writer.writerow([meta["task_id"], mid, "", url, w, h,
-                                         meta["prompt_preview"], meta["status"],
-                                         meta["created_at"]])
+                        writer.writerow({
+                            "task_id": meta["task_id"], "media_id": mid,
+                            "filename": "", "url": url, "width": w, "height": h,
+                            "prompt_preview": meta["prompt_preview"],
+                            "status": meta["status"], "created_at": meta["created_at"],
+                        })
+                        written.add(mid)
                         _tick()
                         continue
                     status, path = download(
@@ -1058,9 +1092,14 @@ def run_download(args, progress=None):
                         keep_webp=getattr(args, "keep_webp", False))
                     dl[status] += 1
                     _tick()
-                    writer.writerow([meta["task_id"], mid, path.name if path else "",
-                                     url, w, h, meta["prompt_preview"],
-                                     meta["status"], meta["created_at"]])
+                    writer.writerow({
+                        "task_id": meta["task_id"], "media_id": mid,
+                        "filename": path.name if path else "",
+                        "url": url, "width": w, "height": h,
+                        "prompt_preview": meta["prompt_preview"],
+                        "status": meta["status"], "created_at": meta["created_at"],
+                    })
+                    written.add(mid)
                     if path and status in ("ok", "skip"):
                         batch_results.append((idx, mid, path, info))
                     if status == "ok":
@@ -1117,6 +1156,14 @@ def run_download(args, progress=None):
                 break
             before = pi.get("startCursor")
             time.sleep(args.delay)
+
+        # Preserve rows from prior sessions not encountered this run
+        leftover = [r for m, r in known.items() if m not in written]
+        if leftover:
+            print("Preserving {} catalog entries from previous sessions.".format(
+                len(leftover)))
+            for r in leftover:
+                writer.writerow({f: r.get(f, "") for f in CATALOG_FIELDS})
     finally:
         csv_f.close()
         raw_f.close()
