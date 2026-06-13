@@ -90,7 +90,7 @@ Copy `config.example.json` to `config.json` and fill in the five fields below.
 
 1. Log in to [pixai.art](https://pixai.art)
 2. Click your avatar → **Profile**
-3. Copy the long numeric ID from the URL — e.g. `https://pixai.art/profile/1666037157045879258` → `1666037157045879258`
+3. Copy the long numeric ID from the URL — e.g. `https://pixai.art/profile/1234567890123456789` → `1234567890123456789`
 4. Paste it as `USER_ID` in `config.json`
 
 ---
@@ -113,10 +113,10 @@ These two values come from a single network request your browser makes when load
   "variables": { ... },
   "extensions": {
     "persistedQuery": {
-      "sha256Hash": "d30424c72dc7d75d14c09d9fe447e1ac3dea8e767668092e2113efb8c817573e"
+      "sha256Hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
     }
   },
-  "u3t": "d_Sm2DThwQ5daxav7ATWtmZnp3twYdIikE-lshajXwH5U"
+  "u3t": "your_u3t_value_here"
 }
 ```
 
@@ -294,8 +294,8 @@ By default the download only captures `prompt_preview` — a truncated ~100-char
 Add these two keys to your `config.json`:
 
 ```json
-"TASK_DETAIL_HASH": "2526f64c73c59fcfeff938b0f4a8b3b610f2294bc6eb6b6b281aa671ac81a08e",
-"MODEL_DETAIL_HASH": "0d2ab28b2991e3fd74672ffec0adf8947e599d79e0039348a7d2642e0bf8c9bc"
+"TASK_DETAIL_HASH": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+"MODEL_DETAIL_HASH": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3"
 ```
 
 If PixAI updates their frontend and these hashes stop working, recapture them:
