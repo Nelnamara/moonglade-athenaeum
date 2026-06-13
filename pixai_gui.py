@@ -20,7 +20,7 @@ from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QPushButton, QRadioButton, QButtonGroup,
+    QLineEdit, QMainWindow, QProgressBar, QPushButton, QRadioButton, QButtonGroup,
     QSpinBox, QTabWidget, QTextEdit, QVBoxLayout, QWidget, QSizePolicy,
 )
 
