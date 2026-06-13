@@ -136,6 +136,73 @@ class TestResolveMedia:
 # _quick_count() — verify it returns 0 on PixAIError without raising
 # ---------------------------------------------------------------------------
 
+class TestTaskDetailGql:
+    def test_returns_task_on_success(self, mock_session, mocker):
+        task = {"id": "t1", "parameters": {"prompts": "full prompt"}, "outputs": {}}
+        resp = mocker.MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"data": {"task": task}}
+        mock_session.get.return_value = resp
+        # Inject hash so the function doesn't raise
+        import pixai_gallery_backup as c
+        orig = c.TASK_DETAIL_HASH
+        c.TASK_DETAIL_HASH = "fakehash"
+        try:
+            result = c.task_detail_gql(mock_session, "t1")
+        finally:
+            c.TASK_DETAIL_HASH = orig
+        assert result["id"] == "t1"
+
+    def test_returns_none_on_non_200(self, mock_session, mocker):
+        import pixai_gallery_backup as c
+        resp = mocker.MagicMock()
+        resp.status_code = 500
+        mock_session.get.return_value = resp
+        orig = c.TASK_DETAIL_HASH
+        c.TASK_DETAIL_HASH = "fakehash"
+        try:
+            result = c.task_detail_gql(mock_session, "t1")
+        finally:
+            c.TASK_DETAIL_HASH = orig
+        assert result is None
+
+    def test_raises_when_hash_missing(self, mock_session):
+        import pixai_gallery_backup as c
+        orig = c.TASK_DETAIL_HASH
+        c.TASK_DETAIL_HASH = ""
+        try:
+            with pytest.raises(c.PixAIError, match="TASK_DETAIL_HASH"):
+                c.task_detail_gql(mock_session, "t1")
+        finally:
+            c.TASK_DETAIL_HASH = orig
+
+
+class TestModelNameGql:
+    def test_returns_model_title_and_version(self, mock_session, mocker):
+        import pixai_gallery_backup as c
+        mv = {"name": "v1", "model": {"title": "Tsubaki.2"}}
+        resp = mocker.MagicMock()
+        resp.status_code = 200
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"data": {"generationModelVersion": mv}}
+        mock_session.get.return_value = resp
+        orig_hash = c.MODEL_DETAIL_HASH
+        c.MODEL_DETAIL_HASH = "fakehash"
+        # Clear module-level cache before test
+        c.model_name_gql.__defaults__  # ensure it's the right function
+        # Use a fresh call with a unique ID not in cache
+        try:
+            result = c.model_name_gql(mock_session, "unique_model_id_test_123")
+        finally:
+            c.MODEL_DETAIL_HASH = orig_hash
+        assert result == "Tsubaki.2 v1"
+
+    def test_returns_empty_for_empty_id(self, mock_session):
+        import pixai_gallery_backup as c
+        assert c.model_name_gql(mock_session, "") == ""
+        assert c.model_name_gql(mock_session, None) == ""
+
+
 class TestQuickCount:
     def test_returns_zero_on_api_error(self, mock_session, mocker):
         payload = {"errors": [{"message": "INTERNAL_SERVER_ERROR"}]}

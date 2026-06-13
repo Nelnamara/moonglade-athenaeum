@@ -206,3 +206,77 @@ def test_find_connection_inside_list():
     data = [{"edges": [], "pageInfo": {}}]
     conn = core.find_connection(data)
     assert conn is not None
+
+
+# ---------------------------------------------------------------------------
+# extract_full_meta
+# ---------------------------------------------------------------------------
+
+_SAMPLE_TASK = {
+    "parameters": {
+        "prompts": "A night elf druid with lavender skin",
+        "modelId": "1983308862240288769",
+        "extra": {"naturalPrompts": "night elf female druid lavender skin"},
+    },
+    "outputs": {
+        "seed": 2973364003509396,
+        "detailParameters": {
+            "steps": 4,
+            "sampler": "Euler a",
+            "cfg_scale": 7,
+        },
+    },
+}
+
+
+def test_extract_full_meta_all_fields():
+    m = core.extract_full_meta(_SAMPLE_TASK)
+    assert m["prompt_full"] == "A night elf druid with lavender skin"
+    assert m["natural_prompt"] == "night elf female druid lavender skin"
+    assert m["seed"] == "2973364003509396"
+    assert m["steps"] == "4"
+    assert m["sampler"] == "Euler a"
+    assert m["cfg_scale"] == "7"
+    assert m["model_id"] == "1983308862240288769"
+
+
+def test_extract_full_meta_none_returns_empty():
+    assert core.extract_full_meta(None) == {}
+
+
+def test_extract_full_meta_partial():
+    task = {"parameters": {"prompts": "cat"}, "outputs": {}}
+    m = core.extract_full_meta(task)
+    assert m["prompt_full"] == "cat"
+    assert m["seed"] == ""
+    assert m["steps"] == ""
+
+
+# ---------------------------------------------------------------------------
+# _merge_full
+# ---------------------------------------------------------------------------
+
+def test_merge_full_prefers_fm():
+    fm = {"prompt_full": "new", "natural_prompt": "", "seed": "123",
+          "steps": "4", "sampler": "Euler a", "cfg_scale": "7",
+          "model_id": "m1", "model_name": "Tsubaki.2 v1"}
+    kr = {"prompt_full": "old", "seed": "999", "model_name": "OldModel v0"}
+    result = core._merge_full(fm, kr)
+    assert result["prompt_full"] == "new"
+    assert result["seed"] == "123"
+    assert result["model_name"] == "Tsubaki.2 v1"
+
+
+def test_merge_full_falls_back_to_known():
+    fm = {}
+    kr = {"prompt_full": "stored prompt", "seed": "777", "model_name": "OldModel",
+          "natural_prompt": "", "steps": "", "sampler": "", "cfg_scale": "", "model_id": ""}
+    result = core._merge_full(fm, kr)
+    assert result["prompt_full"] == "stored prompt"
+    assert result["seed"] == "777"
+
+
+def test_merge_full_empty_both():
+    result = core._merge_full({}, {})
+    for f in core._FULL_META_FIELDS:
+        assert result[f] == ""

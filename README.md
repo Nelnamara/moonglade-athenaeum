@@ -170,6 +170,9 @@ python pixai_gallery_backup.py --organize-adv-live --convert png   # download + 
 | `--max N` | `0` (all) | Stop after N tasks — use small numbers for testing |
 | `--delay SECONDS` | `0.4` | Pause between requests |
 | `--count-page-size N` | `5000` | Page size for `--count` |
+| `--full-meta` | off | Fetch full prompt, seed, steps, sampler, CFG, and model name per task via `getTaskById` (requires `TASK_DETAIL_HASH` + `MODEL_DETAIL_HASH` in `config.json`) |
+| `--backfill-meta` | — | Fill missing `url`/`width`/`height` in `catalog.csv` via `resolve_media`; no download |
+| `--backfill-full-meta` | — | Fill missing full-meta fields in `catalog.csv` via `getTaskById`; also fills `url`/`width`/`height` as a bonus |
 | `--name-length N` | `60` | Max prompt characters used in filenames |
 | `--name-sep CHAR` | `_` | Word separator in filenames (`_` or `-`) |
 | `--convert FMT` | off | Convert downloads: `png` or `jpeg` |
@@ -213,11 +216,59 @@ pixai_backup/
 
 ---
 
+## Full Meta (Full Prompt, Seed, Model)
+
+By default the download only captures `promptsPreview` — a truncated ~100-character summary. The `--full-meta` flag fetches the complete generation parameters for every task.
+
+### New catalog columns added by `--full-meta`
+
+| Column | What it contains |
+|---|---|
+| `prompt_full` | Full untruncated prompt |
+| `natural_prompt` | Auto-generated natural language version of the prompt |
+| `seed` | Generation seed |
+| `steps` | Inference steps |
+| `sampler` | Sampler name (e.g. "Euler a") |
+| `cfg_scale` | CFG scale |
+| `model_id` | Model version ID (numeric) |
+| `model_name` | Human-readable model name (e.g. "Tsubaki.2 v1") |
+
+### One-time config setup
+
+Add these two keys to your `config.json` (see `config.example.json`):
+
+```json
+"TASK_DETAIL_HASH": "2526f64c73c59fcfeff938b0f4a8b3b610f2294bc6eb6b6b281aa671ac81a08e",
+"MODEL_DETAIL_HASH": "0d2ab28b2991e3fd74672ffec0adf8947e599d79e0039348a7d2642e0bf8c9bc"
+```
+
+If PixAI ever updates their frontend and these hashes stop working, recapture them:
+1. Log in to [pixai.art](https://pixai.art) and click any image to open its detail view
+2. DevTools → Network → filter `graphql`
+3. Find `getTaskById` — copy its `extensions.persistedQuery.sha256Hash` → `TASK_DETAIL_HASH`
+4. Find `getGenerationModelByVersionId` — copy its hash → `MODEL_DETAIL_HASH`
+
+### Usage
+
+```
+# Fetch full meta on new downloads (one extra API call per unique task):
+python pixai_gallery_backup.py --full-meta
+
+# Backfill existing catalog rows (works with your existing 32K-row catalog):
+python pixai_gallery_backup.py --backfill-full-meta
+```
+
+`--backfill-full-meta` makes one `getTaskById` call per unique `task_id` (not per media ID), so a 5-image batch costs only one call. At 0.4 s delay for ~8,857 unique tasks that is roughly 60 minutes.
+
+`--backfill-full-meta` also fills in any missing `url`/`width`/`height` values as a free bonus, making a separate `--backfill-meta` run unnecessary if you intend to run both.
+
+---
+
 ## Known Issues
 
 | Issue | Status |
 |---|---|
-| `promptsPreview` is truncated — full prompt, seed, and model are not available in task summaries | Requires a separate task-detail API query; on the roadmap |
+| `promptsPreview` is truncated in task summaries | Use `--full-meta` (on new downloads) or `--backfill-full-meta` (on existing catalog) to fetch the complete prompt, seed, model, steps, and sampler |
 | WebP metadata embedding is unreliable | `--organize-adv` and `--organize-adv-live` skip WebP; pair with `--convert png` to get embedded metadata |
 | Windows MAX_PATH (260 chars) | Batch images use short names (`NN_<mediaid>.ext`) inside prompt-named folders; `--name-length` defaults to 60 |
 | Server errors above ~10,000 tasks per page | `--count-page-size` defaults to 5,000; lower further if you see `Internal server error` on `--count` |
@@ -225,6 +276,17 @@ pixai_backup/
 ---
 
 ## Changelog
+
+### v4.4
+- `--full-meta` flag — fetches full prompt, seed, steps, sampler, CFG, and model name per task via `getTaskById` + `getGenerationModelByVersionId`; model lookups cached in memory (few unique models per library); one extra API call per unique task_id (batch images share one call)
+- `--backfill-full-meta` — fills 8 new catalog fields for all existing rows; also backfills url/width/height from the task's media object as a free side effect; works per unique task_id (~8,857 calls for a 32K-row catalog)
+- `--backfill-meta` — lighter alternative that fills only missing url/width/height via `resolve_media` without fetching full task detail
+- 8 new catalog columns: `prompt_full`, `natural_prompt`, `seed`, `steps`, `sampler`, `cfg_scale`, `model_id`, `model_name` — backward compatible (existing rows get empty strings until backfilled)
+- `config.json` gains two new optional keys: `TASK_DETAIL_HASH` and `MODEL_DETAIL_HASH`
+- GUI Download tab: **Fetch full prompt / seed / model** checkbox wired to `--full-meta`
+- GUI Utilities tab: **Backfill url/width/height** and **Backfill Full Meta** buttons
+- Test suite expanded to 68 tests covering `extract_full_meta`, `_merge_full`, `task_detail_gql`, `model_name_gql`
+- `--count-page-size` fallback default corrected to 5,000 in `run_count()`
 
 ### v4.3
 - `tests/` with pytest — 57 tests covering pure functions (`_format_size`, `_progress_line`, `slug_from_prompt`, `build_stem_name`, `media_ids_for`, `extract_meta`, `find_connection`), filesystem functions (`already_downloaded`, `load_token`, `_load_config`, catalog persistence), and network functions (`gql`, `resolve_media`, `_quick_count`) with mocked `requests.Session`
@@ -262,7 +324,7 @@ pixai_backup/
 ## Roadmap
 
 - [x] **`config.json` for captured constants** — `USER_ID`, `U3T`, and `PERSISTED_QUERY_HASH` loaded from git-ignored `config.json`; `config.example.json` ships with the repo
-- [ ] **Full prompt + seed + model** — capture the task-detail persisted query to store complete generation parameters (currently only the truncated preview)
+- [x] **Full prompt + seed + model** — `--full-meta` fetches complete prompt, seed, steps, sampler, CFG, and model name per task via `getTaskById` + `getGenerationModelByVersionId`; `--backfill-full-meta` fills existing catalog rows; new catalog fields: `prompt_full`, `natural_prompt`, `seed`, `steps`, `sampler`, `cfg_scale`, `model_id`, `model_name`
 - [x] **`--convert-existing`** — convert already-downloaded `.webp` files in place; supports `--dry-run`, `--keep-webp`, `--convert`, `--jpeg-quality`, `--jpeg-bg`
 - [x] **Foldering during live download** — `--organize-adv-live` sorts files into batch/month folders as they download; `--organize-live` for explicit prompt-naming intent
 - [x] **Persistent catalog** — change `catalog.csv` from a per-session overwrite to a persistent, deduplicated database keyed by `media_id`; download runs update `filename` in-place so `--collect-only` can be used as a true phase-1 pre-flight and `--organize-adv` always has complete prompt data regardless of how many sessions the download took

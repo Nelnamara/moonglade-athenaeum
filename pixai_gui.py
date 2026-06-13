@@ -502,6 +502,14 @@ class DownloadTab(QWidget):
         self.convert_combo.currentIndexChanged.connect(self._on_convert_change)
         self._on_convert_change()
 
+        # Full meta row
+        r5 = QHBoxLayout()
+        self.full_meta = QCheckBox("Fetch full prompt / seed / model  (--full-meta, requires TASK_DETAIL_HASH in config.json)")
+        self.full_meta.setChecked(settings.get("full_meta", False))
+        r5.addWidget(self.full_meta)
+        r5.addStretch()
+        g.addLayout(r5)
+
         # Buttons
         self.btn_start = QPushButton("▶  Start Download")
         self.btn_start.setObjectName("btn_start")
@@ -566,7 +574,8 @@ class DownloadTab(QWidget):
             jpeg_bg=self.jpeg_bg.currentText(),
             keep_webp=self.keep_webp.isChecked(),
             collect_only=False,
-            count_page_size=10000,
+            full_meta=self.full_meta.isChecked(),
+            count_page_size=5000,
         )
 
     def _run(self, fn, *args):
@@ -649,6 +658,7 @@ class DownloadTab(QWidget):
             "jpeg_quality": self.jpeg_qual.value(),
             "jpeg_bg":      self.jpeg_bg.currentText(),
             "keep_webp":    self.keep_webp.isChecked(),
+            "full_meta":    self.full_meta.isChecked(),
         }
 
 
@@ -951,6 +961,19 @@ class UtilitiesTab(QWidget):
         self.btn_stats.clicked.connect(self._run_stats)
         self.btn_stop.clicked.connect(self._stop)
 
+        self.btn_backfill = QPushButton("▶  Backfill url/width/height")
+        self.btn_backfill.setObjectName("btn_run")
+        self.btn_backfill_full = QPushButton("▶  Backfill Full Meta")
+        self.btn_backfill_full.setObjectName("btn_run")
+
+        backfill_row = QHBoxLayout()
+        backfill_row.addWidget(self.btn_backfill)
+        backfill_row.addWidget(self.btn_backfill_full)
+        backfill_row.addStretch()
+
+        self.btn_backfill.clicked.connect(self._run_backfill)
+        self.btn_backfill_full.clicked.connect(self._run_backfill_full)
+
         self.log = LogWidget()
 
         lay = QVBoxLayout(self)
@@ -964,6 +987,14 @@ class UtilitiesTab(QWidget):
             "Catalog Stats — reads the local catalog.csv and reports download / "
             "pending / missing counts."))
         lay.addLayout(btn_row)
+        lay.addWidget(_info(
+            "Backfill url/width/height — resolves the media URL and dimensions for "
+            "catalog rows that are missing them (uses resolve_media; token required)."))
+        lay.addWidget(_info(
+            "Backfill Full Meta — fetches the full prompt, seed, steps, sampler, "
+            "CFG, and model name for rows missing them via getTaskById "
+            "(requires TASK_DETAIL_HASH in config.json; also fills url/width/height)."))
+        lay.addLayout(backfill_row)
         lay.addWidget(self.log, stretch=1)
 
     def _base_args(self):
@@ -972,7 +1003,7 @@ class UtilitiesTab(QWidget):
             out=self._bar.out,
             page_size=20,
             delay=0.4,
-            count_page_size=10000,
+            count_page_size=5000,
         )
 
     def _run(self, fn, *args):
@@ -985,9 +1016,11 @@ class UtilitiesTab(QWidget):
         self._worker.done.connect(self._on_done)
         self._worker.start()
 
-    def _run_probe(self): self._run(core.run_probe,         self._base_args())
-    def _run_count(self): self._run(core.run_count,         self._base_args())
-    def _run_stats(self): self._run(core.run_catalog_stats, self._base_args())
+    def _run_probe(self):         self._run(core.run_probe,              self._base_args())
+    def _run_count(self):         self._run(core.run_count,              self._base_args())
+    def _run_stats(self):         self._run(core.run_catalog_stats,      self._base_args())
+    def _run_backfill(self):      self._run(core.run_backfill_meta,      self._base_args())
+    def _run_backfill_full(self): self._run(core.run_backfill_full_meta, self._base_args())
 
     def _stop(self):
         if self._worker:
