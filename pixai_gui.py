@@ -360,9 +360,10 @@ class SettingsBar(QGroupBox):
 
         lbl_out = QLabel("Output:")
         lbl_out.setFixedWidth(60)
+        _default_out = str(Path(__file__).parent / "pixai_backup")
         self.out_folder = FolderRow(
-            placeholder="pixai_backup",
-            default=settings.get("out", "pixai_backup"),
+            placeholder=_default_out,
+            default=settings.get("out", _default_out),
         )
 
         out_row = QHBoxLayout()
@@ -385,7 +386,7 @@ class SettingsBar(QGroupBox):
 
     @property
     def out(self):
-        return self.out_folder.path or "pixai_backup"
+        return self.out_folder.path or str(Path(__file__).parent / "pixai_backup")
 
 
 # ---------------------------------------------------------------------------

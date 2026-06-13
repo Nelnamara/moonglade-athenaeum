@@ -76,9 +76,12 @@ CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
 
 def _load_config():
     """Read config.json. Returns {} quietly if absent so --help and offline modes
-    (--organize, --catalog-stats) work without it; main() validates before API calls."""
-    cfg_path = Path("config.json")
-    if not cfg_path.exists():
+    (--organize, --catalog-stats) work without it; main() validates before API calls.
+    Looks next to the script file first, then the current working directory."""
+    for cfg_path in (Path(__file__).parent / "config.json", Path("config.json")):
+        if cfg_path.exists():
+            break
+    else:
         return {}
     try:
         with open(cfg_path, encoding="utf-8") as f:
@@ -108,9 +111,9 @@ def load_token(cli_token=None):
     env = os.environ.get("PIXAI_TOKEN")
     if env:
         return env.strip()
-    f = Path("token.txt")
-    if f.exists():
-        return f.read_text(encoding="utf-8").strip()
+    for f in (Path(__file__).parent / "token.txt", Path("token.txt")):
+        if f.exists():
+            return f.read_text(encoding="utf-8").strip()
     raise PixAIError("No token found. Set PIXAI_TOKEN, pass --token, or create token.txt.")
 
 
