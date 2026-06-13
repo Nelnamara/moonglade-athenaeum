@@ -1017,12 +1017,13 @@ def run_backfill_full_meta(args):
     csv_path = out / "catalog.csv"
     if not csv_path.exists():
         raise PixAIError("No catalog.csv found at {}.".format(csv_path))
+
+    session = _make_session(getattr(args, "token", None))
+
     if not TASK_DETAIL_HASH:
         raise PixAIError(
             "--backfill-full-meta requires TASK_DETAIL_HASH in config.json. "
             "See README -> Full Meta for capture instructions.")
-
-    session = _make_session(getattr(args, "token", None))
 
     CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
                       "prompt_preview", "status", "created_at",
@@ -1192,6 +1193,11 @@ def run_download(args, progress=None):
     print("SSL trust store via truststore: {}".format(
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
 
+    if use_full_meta and not TASK_DETAIL_HASH:
+        raise PixAIError(
+            "--full-meta requires TASK_DETAIL_HASH in config.json. "
+            "See README -> Full Meta for capture instructions.")
+
     if not getattr(args, "organize_adv_live", False):
         img_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1233,10 +1239,6 @@ def run_download(args, progress=None):
     raw_f = open(raw_path, "w", encoding="utf-8")
 
     use_full_meta = getattr(args, "full_meta", False)
-    if use_full_meta and not TASK_DETAIL_HASH:
-        raise PixAIError(
-            "--full-meta requires TASK_DETAIL_HASH in config.json. "
-            "See README -> Full Meta for capture instructions.")
     _full_meta_cache = {}  # task_id -> full meta dict
 
     before = None
