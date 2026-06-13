@@ -123,6 +123,39 @@ def _ssl_help():
             "(truststore active this run: {})\n".format(_TRUSTSTORE_ACTIVE))
 
 
+def _progress_line(done, total, width=40):
+    """Return a \r-overwriting progress line for terminal output."""
+    if total:
+        pct = min(done / total, 1.0)
+        filled = int(width * pct)
+        bar = ("=" * filled + ">" + " " * (width - filled - 1)
+               if filled < width else "=" * width)
+        return "\r  [{bar}] {done}/{total} files ({pct:.1f}%)  ".format(
+            bar=bar, done=done, total=total, pct=pct * 100)
+    return "\r  Downloading: {done} files...  ".format(done=done)
+
+
+def _quick_count(session):
+    """Paginate once at max page size to count total images. Used for the
+    progress meter — one or two API calls for most libraries."""
+    print("Counting library size for progress meter...")
+    before = None
+    total = 0
+    while True:
+        conn = find_connection(gql(session, page_variables(10000, before)))
+        if not conn:
+            break
+        for edge in conn.get("edges", []):
+            node = edge.get("node", edge)
+            total += len(media_ids_for(node))
+        pi = conn.get("pageInfo", {})
+        if not pi.get("hasPreviousPage"):
+            break
+        before = pi.get("startCursor")
+    print("Library total: {} images\n".format(total))
+    return total
+
+
 # ---------------------------------------------------------------------------
 # Persisted GraphQL GET (with Apollo CSRF headers)
 # ---------------------------------------------------------------------------
@@ -857,8 +890,14 @@ def cmd_rename(args, out, img_dir, csv_path):
     print("\nRenamed {} files.".format(renamed))
 
 
-def run_download(args):
-    """Run the full paginated download + catalog loop."""
+def run_download(args, progress=None):
+    """Run the full paginated download + catalog loop.
+
+    progress: optional callable(done: int, total: int) invoked after each
+    image is processed (downloaded or skipped). Used by the GUI progress bar.
+    When stdout is a real terminal and no progress callback is provided, a
+    \r-overwriting ASCII progress bar is printed instead.
+    """
     out = Path(args.out)
     img_dir = out / "images"
     raw_path = out / "raw_tasks.jsonl"
@@ -870,6 +909,21 @@ def run_download(args):
 
     if not getattr(args, "organize_adv_live", False):
         img_dir.mkdir(parents=True, exist_ok=True)
+
+    total_images = _quick_count(session)
+    processed = 0
+
+    def _tick():
+        nonlocal processed
+        processed += 1
+        if progress:
+            progress(processed, total_images)
+        elif sys.stdout.isatty():
+            sys.stdout.write(_progress_line(processed, total_images))
+            sys.stdout.flush()
+
+    if progress:
+        progress(0, total_images)
 
     print("Walking your generation history (newest -> oldest)...")
     csv_f = open(csv_path, "w", newline="", encoding="utf-8")
@@ -924,6 +978,7 @@ def run_download(args):
                         writer.writerow([meta["task_id"], mid, existing.name, "",
                                          "", "", meta["prompt_preview"],
                                          meta["status"], meta["created_at"]])
+                        _tick()
                         continue
                     if getattr(args, "organize_adv_live", False) and is_batch:
                         stem_name = "{:02d}_{}".format(idx + 1, mid)
@@ -939,11 +994,13 @@ def run_download(args):
                         writer.writerow([meta["task_id"], mid, "", "", w, h,
                                          meta["prompt_preview"], meta["status"],
                                          meta["created_at"]])
+                        _tick()
                         continue
                     if getattr(args, "collect_only", False):
                         writer.writerow([meta["task_id"], mid, "", url, w, h,
                                          meta["prompt_preview"], meta["status"],
                                          meta["created_at"]])
+                        _tick()
                         continue
                     status, path = download(
                         session, url, stem,
@@ -952,6 +1009,7 @@ def run_download(args):
                         jpeg_bg=getattr(args, "jpeg_bg", "white"),
                         keep_webp=getattr(args, "keep_webp", False))
                     dl[status] += 1
+                    _tick()
                     writer.writerow([meta["task_id"], mid, path.name if path else "",
                                      url, w, h, meta["prompt_preview"],
                                      meta["status"], meta["created_at"]])
@@ -1014,6 +1072,9 @@ def run_download(args):
     finally:
         csv_f.close()
         raw_f.close()
+
+    if not progress and sys.stdout.isatty() and processed:
+        print()  # move past the \r progress bar line
 
     print("\nDone. Tasks seen: {}".format(seen))
     print("Images -> downloaded {}, skipped {}, missing {}, failed {}".format(
