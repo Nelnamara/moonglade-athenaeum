@@ -43,7 +43,7 @@ CATALOG_FIELDS = [
     "task_id", "media_id", "filename", "url", "width", "height",
     "prompt_preview", "status", "created_at",
     "prompt_full", "natural_prompt", "seed", "steps",
-    "sampler", "cfg_scale", "model_id", "model_name",
+    "sampler", "cfg_scale", "model_id", "model_name", "rating",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -68,15 +68,21 @@ def save_catalog(csv_path, rows):
 
 
 def find_image_file(out_dir, media_id, filename):
-    """Locate an image file: try catalog filename first, then rglob fallback."""
+    """Locate an image file: try catalog filename first, then rglob fallbacks."""
     if filename:
         for candidate in out_dir.rglob(filename):
             if candidate.is_file():
                 return candidate
     mid = str(media_id)
+    # prompt_taskid_mediaid.ext layout (flat / --organize)
     for p in out_dir.rglob("*_{}.*".format(mid)):
         if p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
             return p
+    # mediaid.ext layout (--organize-adv single images)
+    for ext in _IMAGE_EXTS:
+        for p in out_dir.rglob("{}{}".format(mid, ext)):
+            if p.is_file():
+                return p
     return None
 
 
@@ -219,6 +225,16 @@ def create_app(out_dir: Path):
 
   /* Empty */
   .empty { text-align: center; padding: 60px 20px; color: var(--overlay0); }
+
+  /* Stars */
+  .stars { display: flex; gap: 2px; }
+  .stars button { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0; line-height: 1; color: var(--overlay0); }
+  .stars button.on { color: #f9e2af; }
+  .stars button:hover { color: #f9e2af; opacity: 0.7; }
+  .card .stars { padding: 3px 6px 5px; }
+  .detail-stars { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
+  .detail-stars .stars button { font-size: 22px; }
+  .detail-stars .rating-label { color: var(--subtext); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -247,6 +263,36 @@ function confirmDelete(url, msg) {
 document.getElementById('del-modal').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });
+function setRating(mediaId, value, starsEl) {
+  fetch('/rate/' + mediaId, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rating: value})
+  }).then(r => r.json()).then(data => {
+    if (data.ok) updateStars(starsEl, data.rating);
+  });
+}
+function updateStars(el, rating) {
+  el.querySelectorAll('button').forEach((btn, i) => {
+    btn.classList.toggle('on', i < rating);
+  });
+  const lbl = el.parentElement.querySelector('.rating-label');
+  if (lbl) lbl.textContent = rating > 0 ? rating + ' / 5' : 'unrated';
+}
+function buildStars(mediaId, rating, containerEl) {
+  for (let i = 1; i <= 5; i++) {
+    const btn = document.createElement('button');
+    btn.textContent = '★';
+    if (i <= rating) btn.classList.add('on');
+    btn.addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      const newVal = (rating === i) ? 0 : i;
+      rating = newVal;
+      setRating(mediaId, newVal, containerEl);
+    });
+    containerEl.appendChild(btn);
+  }
+}
 </script>
 </body>
 </html>
@@ -284,8 +330,13 @@ document.getElementById('del-modal').addEventListener('click', function(e) {
   <div>
     <label>Sort</label><br>
     <select name="sort">
-      <option value="newest" {% if sort=='newest' %}selected{% endif %}>Newest first</option>
-      <option value="oldest" {% if sort=='oldest' %}selected{% endif %}>Oldest first</option>
+      <option value="newest"      {% if sort=='newest' %}selected{% endif %}>Newest first</option>
+      <option value="oldest"      {% if sort=='oldest' %}selected{% endif %}>Oldest first</option>
+      <option value="rating_desc" {% if sort=='rating_desc' %}selected{% endif %}>Rating ↓</option>
+      <option value="rating_asc"  {% if sort=='rating_asc' %}selected{% endif %}>Rating ↑</option>
+      <option value="model"       {% if sort=='model' %}selected{% endif %}>Model name</option>
+      <option value="width"       {% if sort=='width' %}selected{% endif %}>Width ↓</option>
+      <option value="height"      {% if sort=='height' %}selected{% endif %}>Height ↓</option>
     </select>
   </div>
   <div style="align-self:flex-end">
@@ -312,7 +363,7 @@ document.getElementById('del-modal').addEventListener('click', function(e) {
         <input type="checkbox" name="media_ids" value="{{ row.media_id }}"
                onchange="onCheck()" onclick="event.stopPropagation()">
       </div>
-      <a class="cover" href="{{ url_for('detail', media_id=row.media_id) }}"></a>
+      <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"></a>
       {% if row._has_thumb %}
       <img src="{{ url_for('thumb', media_id=row.media_id) }}" loading="lazy"
            alt="{{ row.prompt_preview[:60] }}">
@@ -323,6 +374,8 @@ document.getElementById('del-modal').addEventListener('click', function(e) {
         <div class="model">{{ row.model_name or row.model_id or '—' }}</div>
         <div class="date">{{ row.created_at[:10] if row.created_at else '' }}</div>
       </div>
+      <div class="stars" id="stars-{{ row.media_id }}"
+           data-mid="{{ row.media_id }}" data-rating="{{ row.rating or 0 }}"></div>
     </div>
     {% endfor %}
   </div>
@@ -379,6 +432,9 @@ function confirmBulkDelete() {
   };
   document.getElementById('del-modal-form').action = '#';
 }
+document.querySelectorAll('.stars[data-mid]').forEach(el => {
+  buildStars(el.dataset.mid, parseInt(el.dataset.rating) || 0, el);
+});
 </script>
 """)
 
@@ -388,7 +444,9 @@ function confirmBulkDelete() {
 
   <div class="detail-img">
     {% if img_url %}
-    <img src="{{ img_url }}" alt="{{ row.prompt_preview }}">
+    <a href="{{ img_url }}" target="_blank" title="Click to open full resolution">
+      <img src="{{ img_url }}" alt="{{ row.prompt_preview }}">
+    </a>
     {% else %}
     <div style="color:var(--overlay0);padding:40px">Image file not found on disk.</div>
     {% endif %}
@@ -427,9 +485,18 @@ function confirmBulkDelete() {
     <span class="val" style="font-size:11px;color:var(--overlay0)">{{ row.filename }}</span>
   </div>
 
+  <div class="detail-stars">
+    <div class="stars" id="detail-stars"
+         data-mid="{{ row.media_id }}" data-rating="{{ row.rating or 0 }}"></div>
+    <span class="rating-label">{{ row.rating + ' / 5' if row.rating else 'unrated' }}</span>
+  </div>
+
   <div class="detail-actions">
     {% if img_url %}
-    <a class="btn" href="{{ img_url }}" target="_blank">Open Full Size</a>
+    <a class="btn" href="{{ img_url }}" target="_blank">Open Full Size (local)</a>
+    {% endif %}
+    {% if row.url %}
+    <a class="btn" href="{{ row.url }}" target="_blank">Open on PixAI CDN</a>
     {% endif %}
     <button class="btn btn-danger"
       onclick="confirmDelete('{{ url_for('delete_one', media_id=row.media_id) }}?back={{ back|urlencode }}',
@@ -438,6 +505,12 @@ function confirmBulkDelete() {
     </button>
   </div>
 </div>
+<script>
+(function() {
+  const el = document.getElementById('detail-stars');
+  buildStars(el.dataset.mid, parseInt(el.dataset.rating) || 0, el);
+})();
+</script>
 """)
 
     # ------------------------------------------------------------------
@@ -509,6 +582,16 @@ function confirmBulkDelete() {
         filtered = _filter_rows(rows, q, model_filter, date_from, date_to)
         if sort == "oldest":
             filtered.sort(key=lambda r: r.get("created_at") or "")
+        elif sort == "rating_desc":
+            filtered.sort(key=lambda r: int(r.get("rating") or 0), reverse=True)
+        elif sort == "rating_asc":
+            filtered.sort(key=lambda r: int(r.get("rating") or 0))
+        elif sort == "model":
+            filtered.sort(key=lambda r: (r.get("model_name") or r.get("model_id") or "").lower())
+        elif sort == "width":
+            filtered.sort(key=lambda r: int(r.get("width") or 0), reverse=True)
+        elif sort == "height":
+            filtered.sort(key=lambda r: int(r.get("height") or 0), reverse=True)
         else:
             filtered.sort(key=lambda r: r.get("created_at") or "", reverse=True)
 
@@ -530,6 +613,7 @@ function confirmBulkDelete() {
             q=q, model_filter=model_filter, date_from=date_from,
             date_to=date_to, sort=sort, models=models,
             page_url=page_url, request=request,
+            current_url=request.url,
         )
 
     @app.route("/image/<media_id>")
@@ -584,6 +668,21 @@ function confirmBulkDelete() {
         rows = [r for r in rows if r["media_id"] not in media_ids]
         save_catalog(csv_path, rows)
         return redirect(back)
+
+    @app.route("/rate/<media_id>", methods=["POST"])
+    def rate(media_id):
+        data = request.get_json(silent=True) or {}
+        try:
+            value = max(0, min(5, int(data.get("rating", 0))))
+        except (TypeError, ValueError):
+            return json.dumps({"ok": False}), 400, {"Content-Type": "application/json"}
+        rows = load_catalog(csv_path)
+        for r in rows:
+            if r["media_id"] == media_id:
+                r["rating"] = str(value) if value else ""
+                break
+        save_catalog(csv_path, rows)
+        return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
 
     @app.route("/thumbs/<media_id>.jpg")
     def thumb(media_id):
