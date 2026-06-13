@@ -80,26 +80,60 @@ pip install requests truststore pillow PySide6
 
 ## Configuration
 
-`config.json` lives next to the script and is git-ignored. It holds values captured once from your browser.
+`config.json` lives next to the script and is git-ignored. It holds values captured once from your browser. You only need to do this once — these values change only if PixAI updates their frontend.
 
-### Required keys
+Copy `config.example.json` to `config.json` and fill in the five fields below.
 
-| Field | Where to find it |
-|---|---|
-| `USER_ID` | Your PixAI profile URL — the numeric ID at the end |
-| `U3T` | Network tab → `graphql` row → Payload → `u3t` parameter |
-| `PERSISTED_QUERY_HASH` | Network tab → `graphql` row → Payload → `extensions.persistedQuery.sha256Hash` |
+---
 
-To capture: log in to [pixai.art](https://pixai.art), open your gallery, press **F12 → Network**, filter by `graphql`, scroll once so a request appears, then click the `listUserTaskSummaries` row and read from the **Payload** tab.
+### Step 1 — Find your User ID
 
-### Optional keys (full meta)
+1. Log in to [pixai.art](https://pixai.art)
+2. Click your avatar → **Profile**
+3. Copy the long numeric ID from the URL — e.g. `https://pixai.art/profile/1666037157045879258` → `1666037157045879258`
+4. Paste it as `USER_ID` in `config.json`
 
-See [Full Meta](#full-meta-full-prompt-seed-model) for details and capture instructions.
+---
 
-| Field | Purpose |
-|---|---|
-| `TASK_DETAIL_HASH` | Required for `--full-meta` and `--backfill-full-meta` |
-| `MODEL_DETAIL_HASH` | Required for human-readable model names alongside `TASK_DETAIL_HASH` |
+### Step 2 — Capture U3T and PERSISTED_QUERY_HASH from DevTools
+
+These two values come from a single network request your browser makes when loading your gallery.
+
+1. Log in to [pixai.art](https://pixai.art) and open your gallery
+2. Press **F12** to open DevTools → click the **Network** tab
+3. Type `graphql` in the filter box at the top of the Network panel
+4. Scroll your gallery page slightly so a request fires
+5. Click the row named **`graphql`** (or `listUserTaskSummaries`) in the request list
+6. Click the **Payload** tab (Chrome) or **Request** tab (Firefox) in the right panel
+7. You will see JSON like:
+
+```json
+{
+  "operationName": "listUserTaskSummaries",
+  "variables": { ... },
+  "extensions": {
+    "persistedQuery": {
+      "sha256Hash": "d30424c72dc7d75d14c09d9fe447e1ac3dea8e767668092e2113efb8c817573e"
+    }
+  },
+  "u3t": "d_Sm2DThwQ5daxav7ATWtmZnp3twYdIikE-lshajXwH5U"
+}
+```
+
+8. Copy the `u3t` value → paste as `U3T` in `config.json`
+9. Copy the `sha256Hash` value → paste as `PERSISTED_QUERY_HASH` in `config.json`
+
+---
+
+### Step 3 — Capture your Bearer token
+
+The token is not stored in `config.json` — it expires in hours or days and needs to be re-captured periodically. See [Getting Your Token](#getting-your-token) below.
+
+---
+
+### Optional — Full meta hashes (TASK_DETAIL_HASH and MODEL_DETAIL_HASH)
+
+Only needed for `--full-meta` and `--backfill-full-meta`. See [Full Meta](#full-meta-full-prompt-seed-model) for capture instructions.
 
 > **`config.json` is git-ignored** and will never be committed.
 
