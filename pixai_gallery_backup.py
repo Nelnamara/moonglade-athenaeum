@@ -78,7 +78,7 @@ def _load_config():
     """Read config.json. Returns {} quietly if absent so --help and offline modes
     (--organize, --catalog-stats) work without it; main() validates before API calls.
     Looks next to the script file first, then the current working directory."""
-    for cfg_path in (Path(__file__).parent / "config.json", Path("config.json")):
+    for cfg_path in (Path(__file__).resolve().parent / "config.json", Path("config.json")):
         if cfg_path.exists():
             break
     else:
@@ -111,7 +111,7 @@ def load_token(cli_token=None):
     env = os.environ.get("PIXAI_TOKEN")
     if env:
         return env.strip()
-    for f in (Path(__file__).parent / "token.txt", Path("token.txt")):
+    for f in (Path(__file__).resolve().parent / "token.txt", Path("token.txt")):
         if f.exists():
             return f.read_text(encoding="utf-8").strip()
     raise PixAIError("No token found. Set PIXAI_TOKEN, pass --token, or create token.txt.")
@@ -671,7 +671,15 @@ def cmd_organize(args, out, img_dir, csv_path):
 # Callable API (used by the GUI; also called by main() for the CLI)
 # ---------------------------------------------------------------------------
 def _make_session(token_val):
-    """Validate config, load token, return a configured requests.Session."""
+    """Validate config, load token, return a configured requests.Session.
+    Re-reads config.json at call time so the GUI works even when the module
+    was imported before the working directory was set correctly."""
+    global PERSISTED_QUERY_HASH, U3T, USER_ID
+    fresh = _load_config()
+    if fresh:
+        PERSISTED_QUERY_HASH = fresh.get("PERSISTED_QUERY_HASH", "") or PERSISTED_QUERY_HASH
+        U3T = fresh.get("U3T", "") or U3T
+        USER_ID = fresh.get("USER_ID", "") or USER_ID
     if not all([PERSISTED_QUERY_HASH, U3T, USER_ID]):
         raise PixAIError(
             "config.json is missing or incomplete "
