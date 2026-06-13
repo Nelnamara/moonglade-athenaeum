@@ -105,7 +105,7 @@ These two values come from a single network request your browser makes when load
 4. Scroll your gallery page slightly so a request fires
 5. Click the row named **`graphql`** (or `listUserTaskSummaries`) in the request list
 6. Click the **Payload** tab (Chrome) or **Request** tab (Firefox) in the right panel
-7. You will see JSON like:
+7. You will see JSON like the example below. **The values shown are placeholders — yours will be different. Copy your own values from the Payload tab.**
 
 ```json
 {
@@ -113,10 +113,10 @@ These two values come from a single network request your browser makes when load
   "variables": { ... },
   "extensions": {
     "persistedQuery": {
-      "sha256Hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+      "sha256Hash": "<your PERSISTED_QUERY_HASH goes here>"
     }
   },
-  "u3t": "your_u3t_value_here"
+  "u3t": "<your U3T goes here>"
 }
 ```
 
@@ -291,11 +291,11 @@ By default the download only captures `prompt_preview` — a truncated ~100-char
 
 ### One-time config setup
 
-Add these two keys to your `config.json`:
+Add these two keys to your `config.json` with the values you capture from DevTools (see steps below — **do not copy the placeholders shown here**):
 
 ```json
-"TASK_DETAIL_HASH": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-"MODEL_DETAIL_HASH": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3"
+"TASK_DETAIL_HASH": "<your value from getTaskById>",
+"MODEL_DETAIL_HASH": "<your value from getGenerationModelByVersionId>"
 ```
 
 If PixAI updates their frontend and these hashes stop working, recapture them:
