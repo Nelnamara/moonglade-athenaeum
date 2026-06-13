@@ -227,6 +227,10 @@ pixai_backup/
 
 ## Changelog
 
+### v4.3
+- `tests/` with pytest — 57 tests covering pure functions (`_format_size`, `_progress_line`, `slug_from_prompt`, `build_stem_name`, `media_ids_for`, `extract_meta`, `find_connection`), filesystem functions (`already_downloaded`, `load_token`, `_load_config`, catalog persistence), and network functions (`gql`, `resolve_media`, `_quick_count`) with mocked `requests.Session`
+- `pytest-mock` added to `requirements.txt`; `pytest.ini` added at repo root
+
 ### v4.2
 - Download progress meter — pre-flight `_quick_count()` pass (500/page, safe page size) followed by `\r`-overwriting ASCII bar in the CLI and a `QProgressBar` + label in the GUI
 - Resume-aware progress — seeds the bar from actual image files on disk via recursive glob, so a resume run opens at the correct position (`Resuming: 17234 image files already on disk`) rather than restarting at 0; works for flat, `--organize-adv`, and `--organize-adv-live` layouts
@@ -263,7 +267,7 @@ pixai_backup/
 - [x] **`--convert-existing`** — convert already-downloaded `.webp` files in place; supports `--dry-run`, `--keep-webp`, `--convert`, `--jpeg-quality`, `--jpeg-bg`
 - [x] **Foldering during live download** — `--organize-adv-live` sorts files into batch/month folders as they download; `--organize-live` for explicit prompt-naming intent
 - [x] **Persistent catalog** — change `catalog.csv` from a per-session overwrite to a persistent, deduplicated database keyed by `media_id`; download runs update `filename` in-place so `--collect-only` can be used as a true phase-1 pre-flight and `--organize-adv` always has complete prompt data regardless of how many sessions the download took
-- [ ] **`tests/` with pytest** — mocked network layer for offline testing of API logic
+- [x] **`tests/` with pytest** — mocked network layer for offline testing of API logic; 57 tests across pure functions, filesystem, and network mocks
 - [x] **GUI port** — PySide6 desktop app (`pixai_gui.py`) with tabbed layout, dark theme, background worker thread, and settings persistence
 
 ---
