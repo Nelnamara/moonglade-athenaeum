@@ -252,6 +252,7 @@ pixai_backup/
 - [ ] **Full prompt + seed + model** — capture the task-detail persisted query to store complete generation parameters (currently only the truncated preview)
 - [x] **`--convert-existing`** — convert already-downloaded `.webp` files in place; supports `--dry-run`, `--keep-webp`, `--convert`, `--jpeg-quality`, `--jpeg-bg`
 - [x] **Foldering during live download** — `--organize-adv-live` sorts files into batch/month folders as they download; `--organize-live` for explicit prompt-naming intent
+- [ ] **Persistent catalog** — change `catalog.csv` from a per-session overwrite to a persistent, deduplicated database keyed by `media_id`; download runs update `filename` in-place so `--collect-only` can be used as a true phase-1 pre-flight and `--organize-adv` always has complete prompt data regardless of how many sessions the download took
 - [ ] **`tests/` with pytest** — mocked network layer for offline testing of API logic
 - [x] **GUI port** — PySide6 desktop app (`pixai_gui.py`) with tabbed layout, dark theme, background worker thread, and settings persistence
 
