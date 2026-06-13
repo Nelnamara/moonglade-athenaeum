@@ -123,6 +123,15 @@ def _ssl_help():
             "(truststore active this run: {})\n".format(_TRUSTSTORE_ACTIVE))
 
 
+def _format_size(num_bytes):
+    """Return a human-readable file size string."""
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if num_bytes < 1024:
+            return "{:.1f} {}".format(num_bytes, unit)
+        num_bytes /= 1024
+    return "{:.1f} PB".format(num_bytes)
+
+
 def _progress_line(done, total, width=40):
     """Return a \r-overwriting progress line for terminal output."""
     if total:
@@ -803,6 +812,18 @@ def run_count(args):
     print("Total images              : {}  (mediaId + batchMediaIds)".format(images))
     print("Tasks that are batches    : {}  (>1 image each)".format(batched_tasks))
     print("Fetched in {} request(s).".format(page))
+    out = Path(args.out)
+    if out.exists():
+        _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
+        disk_count = disk_bytes = 0
+        for p in out.rglob("*"):
+            if p.is_file() and p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
+                disk_count += 1
+                disk_bytes += p.stat().st_size
+        if disk_count:
+            print("\n--- On disk ({}) ---".format(args.out))
+            print("Image files on disk       : {}".format(disk_count))
+            print("Total collection size     : {}".format(_format_size(disk_bytes)))
     if images > tasks:
         print("\nNote: image count exceeds task count because some older tasks\n"
               "produced batches of several images -- all of them get downloaded.")
@@ -831,10 +852,14 @@ def run_catalog_stats(args):
     print("  downloaded files  : {}".format(downloaded))
     print("  resolved, pending : {}".format(pending))
     print("  no URL (missing)  : {}".format(missing))
-    if img_dir.exists():
-        on_disk = sum(1 for p in img_dir.glob("*.*")
-                      if not p.name.endswith(".part"))
-        print("Image files on disk : {}".format(on_disk))
+    _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
+    disk_count = disk_bytes = 0
+    for p in out.rglob("*"):
+        if p.is_file() and p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
+            disk_count += 1
+            disk_bytes += p.stat().st_size
+    if disk_count:
+        print("Image files on disk : {}  ({})".format(disk_count, _format_size(disk_bytes)))
 
 
 def cmd_rename(args, out, img_dir, csv_path):
@@ -924,17 +949,17 @@ def run_download(args, progress=None):
     # since rglob finds files in batches/ and YYYY-MM/ equally.
     _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
     already_done = 0
+    disk_bytes = 0
     if out.exists():
-        already_done = sum(
-            1 for p in out.rglob("*")
-            if p.is_file()
-            and p.suffix.lower() in _IMAGE_EXTS
-            and not p.name.endswith(".part")
-        )
+        for p in out.rglob("*"):
+            if p.is_file() and p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
+                already_done += 1
+                disk_bytes += p.stat().st_size
     processed = already_done
 
     if already_done:
-        print("Resuming: {} image files already on disk.\n".format(already_done))
+        print("Resuming: {} image files already on disk ({}).\n".format(
+            already_done, _format_size(disk_bytes)))
 
     def _tick():
         nonlocal processed
