@@ -11,6 +11,7 @@ Run:
 import io
 import json
 import sys
+import webbrowser
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +20,7 @@ from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QPushButton, QRadioButton, QButtonGroup,
+    QLineEdit, QMainWindow, QProgressBar, QPushButton, QRadioButton, QButtonGroup,
     QSpinBox, QTabWidget, QTextEdit, QVBoxLayout, QWidget, QSizePolicy,
 )
 
@@ -28,6 +29,12 @@ try:
 except ImportError:
     print("pixai_gallery_backup.py must be in the same folder as this script.")
     sys.exit(1)
+
+try:
+    import pixai_gallery as gallery_mod
+    _GALLERY_AVAILABLE = True
+except ImportError:
+    _GALLERY_AVAILABLE = False
 
 SETTINGS_FILE = Path("pixai_gui_settings.json")
 
@@ -510,6 +517,14 @@ class DownloadTab(QWidget):
         r5.addStretch()
         g.addLayout(r5)
 
+        # Collect-only row
+        r6 = QHBoxLayout()
+        self.collect_only = QCheckBox("Collect only — catalog tasks without downloading images  (--collect-only)")
+        self.collect_only.setChecked(settings.get("collect_only", False))
+        r6.addWidget(self.collect_only)
+        r6.addStretch()
+        g.addLayout(r6)
+
         # Buttons
         self.btn_start = QPushButton("▶  Start Download")
         self.btn_start.setObjectName("btn_start")
@@ -573,7 +588,7 @@ class DownloadTab(QWidget):
             jpeg_quality=self.jpeg_qual.value(),
             jpeg_bg=self.jpeg_bg.currentText(),
             keep_webp=self.keep_webp.isChecked(),
-            collect_only=False,
+            collect_only=self.collect_only.isChecked(),
             full_meta=self.full_meta.isChecked(),
             count_page_size=5000,
         )
@@ -659,6 +674,7 @@ class DownloadTab(QWidget):
             "jpeg_bg":      self.jpeg_bg.currentText(),
             "keep_webp":    self.keep_webp.isChecked(),
             "full_meta":    self.full_meta.isChecked(),
+            "collect_only": self.collect_only.isChecked(),
         }
 
 
@@ -974,6 +990,17 @@ class UtilitiesTab(QWidget):
         self.btn_backfill.clicked.connect(self._run_backfill)
         self.btn_backfill_full.clicked.connect(self._run_backfill_full)
 
+        delay_row = QHBoxLayout()
+        delay_row.addWidget(QLabel("API delay (s):"))
+        self.delay = QDoubleSpinBox()
+        self.delay.setRange(0.0, 30.0)
+        self.delay.setSingleStep(0.1)
+        self.delay.setDecimals(1)
+        self.delay.setValue(settings.get("util_delay", 0.4))
+        self.delay.setFixedWidth(65)
+        delay_row.addWidget(self.delay)
+        delay_row.addStretch()
+
         self.log = LogWidget()
 
         lay = QVBoxLayout(self)
@@ -995,6 +1022,7 @@ class UtilitiesTab(QWidget):
             "CFG, and model name for rows missing them via getTaskById "
             "(requires TASK_DETAIL_HASH in config.json; also fills url/width/height)."))
         lay.addLayout(backfill_row)
+        lay.addLayout(delay_row)
         lay.addWidget(self.log, stretch=1)
 
     def _base_args(self):
@@ -1002,9 +1030,12 @@ class UtilitiesTab(QWidget):
             token=self._bar.token,
             out=self._bar.out,
             page_size=20,
-            delay=0.4,
+            delay=self.delay.value(),
             count_page_size=5000,
         )
+
+    def collect_settings(self):
+        return {"util_delay": self.delay.value()}
 
     def _run(self, fn, *args):
         if self._worker and self._worker.isRunning():
@@ -1035,9 +1066,170 @@ class UtilitiesTab(QWidget):
             self.log.append_line("\n[ERROR] " + msg)
 
     def _set_running(self, running):
-        for b in (self.btn_probe, self.btn_count, self.btn_stats):
+        for b in (self.btn_probe, self.btn_count, self.btn_stats,
+                  self.btn_backfill, self.btn_backfill_full):
             b.setEnabled(not running)
         self.btn_stop.setEnabled(running)
+
+
+# ---------------------------------------------------------------------------
+# Gallery tab
+# ---------------------------------------------------------------------------
+
+class _GalleryServerThread(QThread):
+    log   = Signal(str)
+    ready = Signal()
+
+    def __init__(self, out_dir, port, rebuild_thumbs, parent=None):
+        super().__init__(parent)
+        self._out_dir = out_dir
+        self._port = port
+        self._rebuild_thumbs = rebuild_thumbs
+        self._server = None
+
+    def run(self):
+        if not _GALLERY_AVAILABLE:
+            self.log.emit("[ERROR] Flask not installed — run: pip install flask")
+            return
+        try:
+            out = Path(self._out_dir)
+            app = gallery_mod.create_app(out)
+            from pixai_gallery import load_catalog, build_thumbnails
+            thumb_dir = out / "gallery" / "thumbs"
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+            rows = load_catalog(out / "catalog.csv")
+            missing = sum(1 for r in rows if r.get("filename") and
+                          not (thumb_dir / f"{r['media_id']}.jpg").exists())
+            if missing or self._rebuild_thumbs:
+                label = "Rebuilding" if self._rebuild_thumbs else "Building"
+                self.log.emit(f"{label} thumbnails ({missing if not self._rebuild_thumbs else len(rows)} images)…")
+                _last_pct = [-1]
+                def _thumb_progress(done, total, pct):
+                    if pct - _last_pct[0] >= 5 or done == total:
+                        self.log.emit(f"  Thumbnails: {done}/{total}  ({pct}%)")
+                        _last_pct[0] = pct
+                build_thumbnails(rows, out, thumb_dir,
+                                 force=self._rebuild_thumbs,
+                                 progress_cb=_thumb_progress)
+                self.log.emit("Thumbnails done.")
+            self.log.emit(f"Gallery server starting on http://127.0.0.1:{self._port}/")
+            self.ready.emit()
+            from werkzeug.serving import make_server
+            self._server = make_server("127.0.0.1", self._port, app)
+            self._server.serve_forever()
+        except Exception as exc:
+            self.log.emit(f"[ERROR] {exc}")
+
+    def stop(self):
+        if self._server:
+            self._server.shutdown()
+
+
+class GalleryTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._server_thread = None
+
+        if not _GALLERY_AVAILABLE:
+            lay = QVBoxLayout(self)
+            lbl = QLabel("Flask is not installed.  Run:  pip install flask")
+            lbl.setStyleSheet("color: #f38ba8; font-size: 10pt; padding: 20px;")
+            lay.addWidget(lbl)
+            lay.addStretch()
+            return
+
+        # Controls
+        ctrl = QGroupBox("Gallery Server")
+        cg = QVBoxLayout(ctrl)
+
+        port_row = QHBoxLayout()
+        port_row.addWidget(QLabel("Port:"))
+        self.port = QSpinBox()
+        self.port.setRange(1024, 65535)
+        self.port.setValue(settings.get("gallery_port", 5757))
+        self.port.setFixedWidth(80)
+        port_row.addWidget(self.port)
+        port_row.addStretch()
+        cg.addLayout(port_row)
+
+        self.rebuild_thumbs = QCheckBox("Rebuild thumbnails on launch")
+        self.rebuild_thumbs.setChecked(settings.get("gallery_rebuild_thumbs", False))
+        cg.addWidget(self.rebuild_thumbs)
+
+        btn_row = QHBoxLayout()
+        self.btn_launch = QPushButton("▶  Launch Server")
+        self.btn_launch.setObjectName("btn_start")
+        self.btn_stop = QPushButton("■  Stop Server")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+        self.btn_open = QPushButton("Open in Browser")
+        self.btn_open.setEnabled(False)
+        btn_row.addWidget(self.btn_launch)
+        btn_row.addWidget(self.btn_stop)
+        btn_row.addWidget(self.btn_open)
+        btn_row.addStretch()
+        cg.addLayout(btn_row)
+
+        self._status = QLabel("Server stopped")
+        self._status.setStyleSheet("color: #a6adc8; font-size: 9pt; padding: 2px 0;")
+        cg.addWidget(self._status)
+
+        self.btn_launch.clicked.connect(self._launch)
+        self.btn_stop.clicked.connect(self._stop)
+        self.btn_open.clicked.connect(self._open_browser)
+
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(ctrl)
+        lay.addWidget(self.log, stretch=1)
+
+    def _launch(self):
+        if self._server_thread and self._server_thread.isRunning():
+            return
+        port = self.port.value()
+        self.log.clear_log()
+        self._server_thread = _GalleryServerThread(
+            self._bar.out, port, self.rebuild_thumbs.isChecked()
+        )
+        self._server_thread.log.connect(self.log.append_line)
+        self._server_thread.ready.connect(self._on_ready)
+        self._server_thread.finished.connect(self._on_stopped)
+        self._server_thread.start()
+        self._status.setText(f"Starting on port {port}…")
+        self.btn_launch.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.btn_open.setEnabled(False)
+
+    def _on_ready(self):
+        self._status.setText(f"Running — http://127.0.0.1:{self.port.value()}/")
+        self._status.setStyleSheet("color: #a6e3a1; font-size: 9pt; padding: 2px 0;")
+        self.btn_open.setEnabled(True)
+
+    def _stop(self):
+        if self._server_thread:
+            self._server_thread.stop()
+            self._server_thread.wait(3000)
+
+    def _on_stopped(self):
+        self._status.setText("Server stopped")
+        self._status.setStyleSheet("color: #a6adc8; font-size: 9pt; padding: 2px 0;")
+        self.btn_launch.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.btn_open.setEnabled(False)
+
+    def _open_browser(self):
+        webbrowser.open(f"http://127.0.0.1:{self.port.value()}/")
+
+    def collect_settings(self):
+        if not _GALLERY_AVAILABLE:
+            return {}
+        return {
+            "gallery_port":           self.port.value(),
+            "gallery_rebuild_thumbs": self.rebuild_thumbs.isChecked(),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -1068,14 +1260,16 @@ class MainWindow(QMainWindow):
         root.addWidget(sep)
 
         self._tabs = QTabWidget()
-        self._dl_tab   = DownloadTab(self._sbar, settings)
-        self._org_tab  = OrganizeTab(self._sbar, settings)
-        self._conv_tab = ConvertTab(self._sbar, settings)
-        self._util_tab = UtilitiesTab(self._sbar, settings)
-        self._tabs.addTab(self._dl_tab,   "  Download  ")
-        self._tabs.addTab(self._org_tab,  "  Organize  ")
-        self._tabs.addTab(self._conv_tab, "  Convert   ")
-        self._tabs.addTab(self._util_tab, "  Utilities ")
+        self._dl_tab      = DownloadTab(self._sbar, settings)
+        self._org_tab     = OrganizeTab(self._sbar, settings)
+        self._conv_tab    = ConvertTab(self._sbar, settings)
+        self._util_tab    = UtilitiesTab(self._sbar, settings)
+        self._gallery_tab = GalleryTab(self._sbar, settings)
+        self._tabs.addTab(self._dl_tab,      "  Download  ")
+        self._tabs.addTab(self._org_tab,     "  Organize  ")
+        self._tabs.addTab(self._conv_tab,    "  Convert   ")
+        self._tabs.addTab(self._util_tab,    "  Utilities ")
+        self._tabs.addTab(self._gallery_tab, "  Gallery   ")
         self._tabs.setCurrentIndex(settings.get("last_tab", 0))
         root.addWidget(self._tabs, stretch=1)
 
@@ -1088,6 +1282,8 @@ class MainWindow(QMainWindow):
         s.update(self._dl_tab.collect_settings())
         s.update(self._org_tab.collect_settings())
         s.update(self._conv_tab.collect_settings())
+        s.update(self._util_tab.collect_settings())
+        s.update(self._gallery_tab.collect_settings())
         _save_settings(s)
         super().closeEvent(event)
 
