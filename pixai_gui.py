@@ -982,14 +982,22 @@ class UtilitiesTab(QWidget):
         self.btn_backfill.setObjectName("btn_run")
         self.btn_backfill_full = QPushButton("▶  Backfill Full Meta")
         self.btn_backfill_full.setObjectName("btn_run")
+        self.btn_export_csv = QPushButton("▶  Export CSV")
+        self.btn_export_csv.setObjectName("btn_run")
+        self.btn_export_csv.setToolTip("Export catalog.db to catalog_export.csv in your output folder")
 
         backfill_row = QHBoxLayout()
         backfill_row.addWidget(self.btn_backfill)
         backfill_row.addWidget(self.btn_backfill_full)
         backfill_row.addStretch()
 
+        export_row = QHBoxLayout()
+        export_row.addWidget(self.btn_export_csv)
+        export_row.addStretch()
+
         self.btn_backfill.clicked.connect(self._run_backfill)
         self.btn_backfill_full.clicked.connect(self._run_backfill_full)
+        self.btn_export_csv.clicked.connect(self._run_export_csv)
 
         delay_row = QHBoxLayout()
         delay_row.addWidget(QLabel("API delay (s):"))
@@ -1012,7 +1020,7 @@ class UtilitiesTab(QWidget):
             "Count — pages through your entire history and tallies tasks and images "
             "without downloading anything."))
         lay.addWidget(_info(
-            "Catalog Stats — reads the local catalog.csv and reports download / "
+            "Catalog Stats — reads catalog.db and reports download / "
             "pending / missing counts."))
         lay.addLayout(btn_row)
         lay.addWidget(_info(
@@ -1023,6 +1031,10 @@ class UtilitiesTab(QWidget):
             "CFG, and model name for rows missing them via getTaskById "
             "(requires TASK_DETAIL_HASH in config.json; also fills url/width/height)."))
         lay.addLayout(backfill_row)
+        lay.addWidget(_info(
+            "Export CSV — saves a copy of catalog.db as catalog_export.csv "
+            "in your output folder (useful for spreadsheets or backup)."))
+        lay.addLayout(export_row)
         lay.addLayout(delay_row)
         lay.addWidget(self.log, stretch=1)
 
@@ -1054,6 +1066,20 @@ class UtilitiesTab(QWidget):
     def _run_backfill(self):      self._run(core.run_backfill_meta,      self._base_args())
     def _run_backfill_full(self): self._run(core.run_backfill_full_meta, self._base_args())
 
+    def _run_export_csv(self):
+        out = Path(self._bar.out)
+        db_path = out / "catalog.db"
+        csv_path = out / "catalog_export.csv"
+        if not db_path.exists():
+            self.log.append_line("[ERROR] catalog.db not found in output folder.")
+            return
+        try:
+            from pixai_gallery import export_csv
+            export_csv(db_path, csv_path)
+            self.log.append_line("Exported catalog to: {}".format(csv_path))
+        except Exception as exc:
+            self.log.append_line("[ERROR] " + str(exc))
+
     def _stop(self):
         if self._worker:
             self._worker.terminate()
@@ -1068,7 +1094,7 @@ class UtilitiesTab(QWidget):
 
     def _set_running(self, running):
         for b in (self.btn_probe, self.btn_count, self.btn_stats,
-                  self.btn_backfill, self.btn_backfill_full):
+                  self.btn_backfill, self.btn_backfill_full, self.btn_export_csv):
             b.setEnabled(not running)
         self.btn_stop.setEnabled(running)
 
@@ -1241,7 +1267,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PixAI Gallery Backup")
+        self.setWindowTitle("PixAI Gallery Backup v{}".format(core.__version__))
         self.setMinimumSize(860, 640)
         self.resize(960, 720)
 

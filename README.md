@@ -12,7 +12,7 @@ PixAI's terms grant users copyright of their own generations. This tool is rate-
 
 - **Full-resolution downloads** — bypasses the 20-image gallery limit; fetches every generation at the original size
 - **Automatic resume** — interrupt any time and re-run; already-saved images are skipped by media ID
-- **Persistent catalog** — `catalog.csv` is a deduplicated, append-safe database keyed by `media_id`; prior-session rows are never lost across interrupted or multi-session downloads
+- **Persistent catalog** — `catalog.db` (SQLite) is a deduplicated, indexed database keyed by `media_id`; prior-session rows are never lost across interrupted or multi-session downloads; auto-migrates from `catalog.csv` if upgrading
 - **Full generation metadata** — `--full-meta` captures the complete prompt, seed, steps, sampler, CFG scale, and human-readable model name; `--backfill-full-meta` fills existing catalog rows retroactively
 - **Local web gallery** — browse, filter, rate, and delete your images from a browser via the built-in Flask gallery server
 - **Progress meter** — pre-flight library count feeds a live progress bar; resume runs open at the correct position
@@ -32,7 +32,7 @@ A PySide6 desktop GUI (`pixai_gui.py`) wraps the full workflow in a tabbed windo
 | **Download** | Configure token, output folder, page size, organize mode, conversion, collect-only, and full-meta; Start / Stop |
 | **Organize** | Post-download rename (`--organize`) or full folder sort (`--organize-adv`); dry-run preview |
 | **Convert** | Batch-convert existing `.webp` files to PNG or JPEG in place |
-| **Utilities** | Probe, Count, Catalog Stats, Backfill url/width/height, Backfill Full Meta; configurable API delay |
+| **Utilities** | Probe, Count, Catalog Stats, Backfill url/width/height, Backfill Full Meta, Export CSV; configurable API delay |
 | **Gallery** | Launch / stop the local gallery server; configurable port; auto-builds thumbnails on start |
 
 ![GUI Download tab](screenshots/04_gui_download.png)
@@ -200,11 +200,12 @@ Or use the **Gallery tab** in the GUI to launch and stop the server with one cli
 | *(none)* | Download full history into `images/`, named `prompt_taskid_mediaid.ext` |
 | `--probe` | Resolve one full-res URL and exit — connection sanity check |
 | `--count` | Tally total tasks and images via the API (no downloads) |
-| `--catalog-stats` | Summarize existing `catalog.csv` and count files on disk (no token needed) |
+| `--catalog-stats` | Summarize `catalog.db` and count files on disk (no token needed) |
 | `--collect-only` | Page through and write the catalog without downloading images |
 | `--backfill-meta` | Fill missing `url`/`width`/`height` in catalog via `resolve_media` |
 | `--backfill-full-meta` | Fill full prompt/seed/model in catalog via `getTaskById`; also fills url/width/height |
-| `--organize` | Rename files in `images/` to `prompt_taskid_mediaid` scheme using `catalog.csv` |
+| `--export-csv` | Export `catalog.db` to `catalog_export.csv` (interop / spreadsheet backup) |
+| `--organize` | Rename files in `images/` to `prompt_taskid_mediaid` scheme using `catalog.db` |
 | `--organize-live` | Same naming applied live during download |
 | `--organize-adv` | Folder sort: move files into `batches/` and `YYYY-MM/` folders; embed metadata into PNG/JPEG |
 | `--organize-adv-live` | Same folder sort applied live during download |
@@ -238,7 +239,7 @@ After a plain download:
 ```
 pixai_backup/
 ├─ images/                 all images, flat — <prompt>_<taskid>_<mediaid>.<ext>
-├─ catalog.csv             one row per image (see Catalog Columns below)
+├─ catalog.db              SQLite database — one row per image (see Catalog Columns below)
 └─ raw_tasks.jsonl         full raw task data (kept for re-processing)
 ```
 
@@ -257,10 +258,10 @@ pixai_backup/
 ├─ 2026-06/
 │   └─ ...
 ├─ images/                       (empties out as files are moved)
-└─ catalog.csv
+└─ catalog.db
 ```
 
-> **Keep `catalog.csv`.** It is the source of truth for full prompts, seeds, dates, model names, ratings, and generation parameters. Single images are named by `media_id` only — the catalog is the only complete record. Use `--organize` if you also want prompt-based filenames.
+> **Keep `catalog.db`.** It is the source of truth for full prompts, seeds, dates, model names, ratings, batch names, and generation parameters. Single images are named by `media_id` only — the catalog is the only complete record. Use `--organize` if you also want prompt-based filenames. Use `--export-csv` to get a spreadsheet-compatible copy.
 
 ### Catalog Columns
 
@@ -283,6 +284,7 @@ pixai_backup/
 | `cfg_scale` | CFG scale (`--full-meta`) |
 | `model_id` | Model version ID (`--full-meta`) |
 | `model_name` | Human-readable model name, e.g. "Tsubaki.2 v1" (`--full-meta`) |
+| `batch` | Batch folder name populated by `--organize-adv` (blank for single-image months) |
 | `rating` | Star rating 1–5 set in the gallery (0 or blank = unrated) |
 
 ---
@@ -334,12 +336,27 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ## Changelog
 
+### v1.1.0 — SQLite catalog, gallery performance, batch filter, focus mode
+
+- **SQLite catalog** — `catalog.csv` replaced by `catalog.db`; faster indexed queries, crash-safe upserts, no corruption on large libraries; existing `catalog.csv` auto-migrated on first run; `--export-csv` for interop backup
+- **Gallery SQL performance** — all filtering, sorting, and pagination now done in SQL (~20× faster index page on large libraries); prev/next navigation respects active filters
+- **Batch filter** — `--organize-adv` writes the batch folder name to the catalog; gallery filter bar shows a Batch dropdown; auto-backfilled from disk on gallery startup for previously organized libraries
+- **Focus / theater mode** — `F` key or Focus button on detail page hides metadata and expands image to ~90% viewport; preference persisted in `localStorage`
+- **GUI: Export CSV button** added to Utilities tab
+- **GUI: version** shown in window title bar
+- **Token.txt file dialog** now opens in the script directory instead of a system folder
+- **`--version` flag** on CLI
+- **81 tests** (up from 68)
+- Various bug fixes (stale module cache, Unicode crash, gallery thumbnail false-match after organize)
+
+---
+
 ### v1.0.0 — First stable release
 
 This release merges the `feature/gallery-server` branch and marks the completion of all planned features.
 
 - **Local web gallery** (`pixai_gallery.py`) — browse, filter by prompt/model/date, paginate, and delete images from a browser; Flask + Jinja2 with Catppuccin Mocha theme
-- **Star ratings** (0–5) per image — stored in `catalog.csv`; set via the gallery with no page reload; sort by rating high/low
+- **Star ratings** (0–5) per image — stored in `catalog.db`; set via the gallery with no page reload; sort by rating high/low
 - **Gallery tab in GUI** — launch/stop the Flask server in a background thread; configurable port; auto-builds missing thumbnails on start with progress log; Open in Browser button
 - **Back-navigation state** — returning from a detail page lands back on the correct gallery page and filters
 - **Clickable full-res image** on detail page; separate "Open on PixAI CDN" button
@@ -347,7 +364,7 @@ This release merges the `feature/gallery-server` branch and marks the completion
 - **`--collect-only` checkbox** on GUI Download tab
 - **Configurable API delay** on GUI Utilities tab
 - **`--organize-adv` simplified** — single images named `<mediaid>.ext` in `YYYY-MM/` folders; prompt-based renaming removed; use `--organize` separately if you want prompt filenames
-- **`rating` column** added to `catalog.csv` (backward compatible)
+- **`rating` column** added to catalog (backward compatible)
 - Screenshots added to documentation
 
 ---
@@ -378,7 +395,7 @@ This release merges the `feature/gallery-server` branch and marks the completion
 ### v4.0
 - Apollo persisted GraphQL GET queries; backward pagination; full resume support
 - `--organize-adv`, `--organize`, `--convert-existing`, `--count`, `--probe`, `--catalog-stats`, `--collect-only`
-- Persistent `catalog.csv`; `truststore` integration
+- Persistent catalog; `truststore` integration
 
 </details>
 
@@ -389,8 +406,7 @@ This release merges the `feature/gallery-server` branch and marks the completion
 Planned future enhancements, grouped by area:
 
 ### Backend / Catalog
-- **SQLite catalog backend** — replace `catalog.csv` with a single `catalog.db` file for indexed queries, faster filter/sort, and cleaner single-row rating updates. CSV export will be retained for interop. Tracked on branch `feature/sqlite-catalog`.
-- **Tag system** — freeform tags per image stored as a catalog relation; becomes straightforward once SQLite is in place.
+- **Tag system** — freeform tags per image stored as a catalog relation.
 
 ### Gallery UI
 - **Persistent cross-page selection** — checkbox selections that survive pagination

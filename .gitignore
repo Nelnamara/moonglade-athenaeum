@@ -2,7 +2,6 @@
 token.txt
 .env
 config.json
-CLAUDE.md
 pixai_gui_settings.json
 
 # ---- Gallery server generated files ----
