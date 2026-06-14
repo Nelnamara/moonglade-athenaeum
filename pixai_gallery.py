@@ -4,9 +4,9 @@ pixai_gallery.py
 ================
 Local Flask web gallery for your PixAI backup collection.
 
-Reads catalog.csv and serves a browseable, filterable, paginated image gallery
-at http://localhost:5000 . Supports single and bulk delete (removes image file,
-thumbnail, and catalog row).
+Reads catalog.db (SQLite) and serves a browseable, filterable, paginated image
+gallery at http://localhost:5000 . Supports single and bulk delete (removes
+image file, thumbnail, and catalog row).
 
 Requirements:
     pip install flask pillow
@@ -20,6 +20,7 @@ import argparse
 import csv
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -52,14 +53,134 @@ THUMB_QUALITY = 85
 PAGE_SIZE = 100
 
 
-def load_catalog(csv_path):
-    if not csv_path.exists():
+_CREATE_TABLE = """
+CREATE TABLE IF NOT EXISTS catalog (
+    media_id        TEXT PRIMARY KEY,
+    task_id         TEXT,
+    filename        TEXT,
+    url             TEXT,
+    width           TEXT,
+    height          TEXT,
+    prompt_preview  TEXT,
+    status          TEXT,
+    created_at      TEXT,
+    prompt_full     TEXT,
+    natural_prompt  TEXT,
+    seed            TEXT,
+    steps           TEXT,
+    sampler         TEXT,
+    cfg_scale       TEXT,
+    model_id        TEXT,
+    model_name      TEXT,
+    rating          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
+CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
+CREATE INDEX IF NOT EXISTS idx_rating     ON catalog(rating);
+"""
+
+_UPSERT = """
+INSERT INTO catalog ({fields})
+VALUES ({placeholders})
+ON CONFLICT(media_id) DO UPDATE SET
+{updates};
+""".format(
+    fields=", ".join(CATALOG_FIELDS),
+    placeholders=", ".join("?" for _ in CATALOG_FIELDS),
+    updates=", ".join(
+        "{f}=excluded.{f}".format(f=f) for f in CATALOG_FIELDS if f != "media_id"
+    ),
+)
+
+
+def init_db(db_path):
+    """Create the catalog table and indexes if they don't exist yet."""
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(str(db_path))
+    con.executescript(_CREATE_TABLE)
+    con.commit()
+    con.close()
+
+
+def _connect(db_path):
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def load_catalog(db_path):
+    """Return all rows as a list of plain dicts, oldest-first."""
+    db_path = Path(db_path)
+    if not db_path.exists():
         return []
+    con = _connect(db_path)
+    try:
+        rows = con.execute("SELECT * FROM catalog").fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        con.close()
+
+
+def save_catalog(db_path, rows):
+    """Upsert a list of dicts into the catalog (replaces the old full-rewrite)."""
+    db_path = Path(db_path)
+    init_db(db_path)
+    con = _connect(db_path)
+    try:
+        con.executemany(
+            _UPSERT,
+            [tuple(r.get(f, "") or "" for f in CATALOG_FIELDS) for r in rows],
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def update_rating(db_path, media_id, value):
+    """Update a single row's rating without touching the rest of the catalog."""
+    con = _connect(db_path)
+    try:
+        con.execute(
+            "UPDATE catalog SET rating=? WHERE media_id=?",
+            (str(value) if value else "", media_id),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def delete_from_catalog(db_path, media_id):
+    """Remove a single row by media_id."""
+    con = _connect(db_path)
+    try:
+        con.execute("DELETE FROM catalog WHERE media_id=?", (media_id,))
+        con.commit()
+    finally:
+        con.close()
+
+
+def migrate_csv_to_db(csv_path, db_path):
+    """One-time migration: import catalog.csv into catalog.db.
+
+    Safe to re-run — existing rows are upserted, not duplicated.
+    Returns the number of rows imported.
+    """
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        return 0
     with open(csv_path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return 0
+    save_catalog(db_path, rows)
+    return len(rows)
 
 
-def save_catalog(csv_path, rows):
+def export_csv(db_path, csv_path):
+    """Export catalog.db back to a CSV file (backup / interop)."""
+    rows = load_catalog(db_path)
+    csv_path = Path(csv_path)
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CATALOG_FIELDS)
         writer.writeheader()
@@ -133,7 +254,8 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None):
 
 def create_app(out_dir: Path):
     app = Flask(__name__)
-    csv_path = out_dir / "catalog.csv"
+    db_path = out_dir / "catalog.db"
+    init_db(db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
 
@@ -613,7 +735,7 @@ document.addEventListener('DOMContentLoaded', function() {
     # ------------------------------------------------------------------
     @app.route("/")
     def index():
-        rows = load_catalog(csv_path)
+        rows = load_catalog(db_path)
         q            = request.args.get("q", "")
         model_filter = request.args.get("model", "")
         date_from    = request.args.get("date_from", "")
@@ -647,7 +769,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     @app.route("/image/<media_id>")
     def detail(media_id):
-        rows = load_catalog(csv_path)
+        rows = load_catalog(db_path)
         row = next((r for r in rows if r["media_id"] == media_id), None)
         if not row:
             return "Image not found.", 404
@@ -690,7 +812,7 @@ document.addEventListener('DOMContentLoaded', function() {
     @app.route("/delete/<media_id>", methods=["POST"])
     def delete_one(media_id):
         back = request.args.get("back") or url_for("index")
-        rows = load_catalog(csv_path)
+        rows = load_catalog(db_path)
         row = next((r for r in rows if r["media_id"] == media_id), None)
         if row:
             img_path = find_image_file(out_dir, media_id, row.get("filename"))
@@ -699,8 +821,7 @@ document.addEventListener('DOMContentLoaded', function() {
             thumb_path = thumb_dir / "{}.jpg".format(media_id)
             if thumb_path.exists():
                 thumb_path.unlink()
-            rows = [r for r in rows if r["media_id"] != media_id]
-            save_catalog(csv_path, rows)
+            delete_from_catalog(db_path, media_id)
         return redirect(back)
 
     @app.route("/delete-bulk", methods=["POST"])
@@ -710,7 +831,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if not media_ids:
             return redirect(back)
 
-        rows = load_catalog(csv_path)
+        rows = load_catalog(db_path)
         to_delete = {r["media_id"]: r for r in rows if r["media_id"] in media_ids}
 
         for mid, row in to_delete.items():
@@ -720,9 +841,8 @@ document.addEventListener('DOMContentLoaded', function() {
             thumb_path = thumb_dir / "{}.jpg".format(mid)
             if thumb_path.exists():
                 thumb_path.unlink()
+            delete_from_catalog(db_path, mid)
 
-        rows = [r for r in rows if r["media_id"] not in media_ids]
-        save_catalog(csv_path, rows)
         return redirect(back)
 
     @app.route("/rate/<media_id>", methods=["POST"])
@@ -732,12 +852,7 @@ document.addEventListener('DOMContentLoaded', function() {
             value = max(0, min(5, int(data.get("rating", 0))))
         except (TypeError, ValueError):
             return json.dumps({"ok": False}), 400, {"Content-Type": "application/json"}
-        rows = load_catalog(csv_path)
-        for r in rows:
-            if r["media_id"] == media_id:
-                r["rating"] = str(value) if value else ""
-                break
-        save_catalog(csv_path, rows)
+        update_rating(db_path, media_id, value)
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
 
     @app.route("/thumbs/<media_id>.jpg")
@@ -769,13 +884,20 @@ def main():
     if not out_dir.exists():
         sys.exit("Output folder not found: {}".format(out_dir))
 
+    db_path  = out_dir / "catalog.db"
     csv_path = out_dir / "catalog.csv"
-    if not csv_path.exists():
-        sys.exit("No catalog.csv found at {}. Run a download first.".format(csv_path))
+
+    # Auto-migrate existing catalog.csv on first run
+    if not db_path.exists() and csv_path.exists():
+        print("Migrating catalog.csv → catalog.db ...")
+        n = migrate_csv_to_db(csv_path, db_path)
+        print("Migrated {:,} rows.".format(n))
+    elif not db_path.exists():
+        sys.exit("No catalog found in {}. Run a download first.".format(out_dir))
 
     thumb_dir = out_dir / "gallery" / "thumbs"
     print("Loading catalog...")
-    rows = load_catalog(csv_path)
+    rows = load_catalog(db_path)
     print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
     build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
 
