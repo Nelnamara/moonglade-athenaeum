@@ -928,7 +928,7 @@ def main():
     build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
 
     app = create_app(out_dir)
-    print("\nGallery ready →  http://{}:{}/".format(
+    print("\nGallery ready ->  http://{}:{}/".format(
         "localhost" if args.host == "127.0.0.1" else args.host, args.port))
     print("Press Ctrl+C to stop.\n")
     app.run(host=args.host, port=args.port, debug=False)
