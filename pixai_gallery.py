@@ -212,8 +212,12 @@ def create_app(out_dir: Path):
   .detail-meta .val { color: var(--text); font-size: 13px; word-break: break-word; }
   .detail-meta .val.prompt { font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
   .detail-actions { margin-top: 16px; display: flex; gap: 10px; }
-  .back-link { display: inline-block; margin-bottom: 14px; color: var(--blue); text-decoration: none; font-size: 13px; }
+  .back-link { display: inline-block; color: var(--blue); text-decoration: none; font-size: 13px; }
   .back-link:hover { text-decoration: underline; }
+  .detail-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .nav-arrow { color: var(--blue); text-decoration: none; font-size: 13px; padding: 4px 10px; border: 1px solid var(--surface1); border-radius: 4px; }
+  .nav-arrow:hover { background: var(--surface1); text-decoration: none; }
+  .nav-disabled { color: var(--overlay0); font-size: 13px; padding: 4px 10px; border: 1px solid var(--surface0); border-radius: 4px; cursor: default; }
 
   /* Modal */
   .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 200; align-items: center; justify-content: center; }
@@ -441,8 +445,34 @@ function confirmBulkDelete() {
 """)
 
     DETAIL_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  document.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'ArrowLeft' || e.keyCode === 37) {
+      var el = document.getElementById('nav-prev');
+      if (el) window.location.href = el.href;
+    } else if (e.key === 'ArrowRight' || e.keyCode === 39) {
+      var el = document.getElementById('nav-next');
+      if (el) window.location.href = el.href;
+    }
+  });
+});
+</script>
 <div class="detail-wrap">
-  <a class="back-link" href="{{ back }}">← Back to gallery</a>
+  <div class="detail-nav">
+    {% if prev_id %}
+    <a id="nav-prev" class="nav-arrow" href="{{ url_for('detail', media_id=prev_id, back=back) }}" title="Previous (← arrow key)">&#8592; Prev</a>
+    {% else %}
+    <span class="nav-arrow nav-disabled">&#8592; Prev</span>
+    {% endif %}
+    <a class="back-link" href="{{ back }}">↑ Gallery</a>
+    {% if next_id %}
+    <a id="nav-next" class="nav-arrow" href="{{ url_for('detail', media_id=next_id, back=back) }}" title="Next (→ arrow key)">Next &#8594;</a>
+    {% else %}
+    <span class="nav-arrow nav-disabled">Next &#8594;</span>
+    {% endif %}
+  </div>
 
   <div class="detail-img">
     {% if img_url %}
@@ -553,6 +583,23 @@ function confirmBulkDelete() {
             prev = p
         return result
 
+    def _sort_rows(filtered, sort):
+        if sort == "oldest":
+            filtered.sort(key=lambda r: r.get("created_at") or "")
+        elif sort == "rating_desc":
+            filtered.sort(key=lambda r: int(r.get("rating") or 0), reverse=True)
+        elif sort == "rating_asc":
+            filtered.sort(key=lambda r: int(r.get("rating") or 0))
+        elif sort == "model":
+            filtered.sort(key=lambda r: (r.get("model_name") or r.get("model_id") or "").lower())
+        elif sort == "width":
+            filtered.sort(key=lambda r: int(r.get("width") or 0), reverse=True)
+        elif sort == "height":
+            filtered.sort(key=lambda r: int(r.get("height") or 0), reverse=True)
+        else:
+            filtered.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+        return filtered
+
     def _unique_models(rows):
         seen = []
         for r in rows:
@@ -575,21 +622,7 @@ function confirmBulkDelete() {
         page         = int(request.args.get("page", 1))
 
         models = _unique_models(rows)
-        filtered = _filter_rows(rows, q, model_filter, date_from, date_to)
-        if sort == "oldest":
-            filtered.sort(key=lambda r: r.get("created_at") or "")
-        elif sort == "rating_desc":
-            filtered.sort(key=lambda r: int(r.get("rating") or 0), reverse=True)
-        elif sort == "rating_asc":
-            filtered.sort(key=lambda r: int(r.get("rating") or 0))
-        elif sort == "model":
-            filtered.sort(key=lambda r: (r.get("model_name") or r.get("model_id") or "").lower())
-        elif sort == "width":
-            filtered.sort(key=lambda r: int(r.get("width") or 0), reverse=True)
-        elif sort == "height":
-            filtered.sort(key=lambda r: int(r.get("height") or 0), reverse=True)
-        else:
-            filtered.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+        filtered = _sort_rows(_filter_rows(rows, q, model_filter, date_from, date_to), sort)
 
         total = len(filtered)
         page_rows, page, total_pages = _paginate(filtered, page, PAGE_SIZE)
@@ -625,7 +658,34 @@ function confirmBulkDelete() {
             img_url = url_for("serve_image", rel=str(img_path.relative_to(out_dir)).replace("\\", "/"))
 
         back = request.args.get("back", url_for("index"))
-        return render_template_string(DETAIL_HTML, row=row, img_url=img_url, back=back)
+
+        # Parse filter/sort state from back URL to compute prev/next
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(back)
+        qs = parse_qs(parsed.query)
+        def _qs1(key, default=""):
+            vals = qs.get(key, [])
+            return vals[0] if vals else default
+        _q         = _qs1("q")
+        _model     = _qs1("model")
+        _date_from = _qs1("date_from")
+        _date_to   = _qs1("date_to")
+        _sort      = _qs1("sort", "newest")
+        nav_filtered = _sort_rows(
+            _filter_rows(rows, _q, _model, _date_from, _date_to), _sort
+        )
+        nav_ids = [r["media_id"] for r in nav_filtered]
+        try:
+            idx = nav_ids.index(media_id)
+        except ValueError:
+            idx = -1
+        prev_id = nav_ids[idx - 1] if idx > 0 else None
+        next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
+
+        return render_template_string(
+            DETAIL_HTML, row=row, img_url=img_url, back=back,
+            prev_id=prev_id, next_id=next_id,
+        )
 
     @app.route("/delete/<media_id>", methods=["POST"])
     def delete_one(media_id):
