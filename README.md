@@ -386,13 +386,18 @@ This release merges the `feature/gallery-server` branch and marks the completion
 
 ## Feature Requests
 
-Planned future enhancements:
+Planned future enhancements, grouped by area:
 
+### Backend / Catalog
 - **SQLite catalog backend** — replace `catalog.csv` with a single `catalog.db` file for indexed queries, faster filter/sort, and cleaner single-row rating updates. CSV export will be retained for interop. Tracked on branch `feature/sqlite-catalog`.
+- **Tag system** — freeform tags per image stored as a catalog relation; becomes straightforward once SQLite is in place.
+
+### Gallery UI
 - **Persistent cross-page selection** — checkbox selections that survive pagination
-- **Bulk prompt edit** — edit `prompt_full` in the gallery and write back to `catalog.csv`
-- **Tag system** — freeform tags stored as an extra catalog column
+- **Bulk prompt edit** — edit `prompt_full` in the gallery and write back to the catalog
 - **Export selected** — download a ZIP of checked images from the gallery
+
+### Download & Sync
 - **PixAI favorites sync** — filter downloads to only favorited generations via `favoritedAt`
 
 ---
