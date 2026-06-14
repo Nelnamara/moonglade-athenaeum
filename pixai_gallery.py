@@ -110,9 +110,19 @@ def init_db(db_path):
     con.close()
 
 
+_MIGRATIONS = [
+    "ALTER TABLE catalog ADD COLUMN batch TEXT DEFAULT ''",
+]
+
 def _connect(db_path):
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
+    for sql in _MIGRATIONS:
+        try:
+            con.execute(sql)
+            con.commit()
+        except sqlite3.OperationalError:
+            pass  # column/index already exists
     return con
 
 
