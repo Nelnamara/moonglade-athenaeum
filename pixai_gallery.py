@@ -310,6 +310,42 @@ def unique_models(db_path):
         con.close()
 
 
+def backfill_batches(out_dir, db_path):
+    """Scan batches/ on disk and populate the batch column for already-organized images.
+
+    Safe to re-run — only updates rows where batch is currently empty.
+    Returns number of rows updated.
+    """
+    batches_root = Path(out_dir) / "batches"
+    if not batches_root.exists():
+        return 0
+    updates = {}  # media_id -> batch_name
+    for batch_dir in batches_root.iterdir():
+        if not batch_dir.is_dir():
+            continue
+        batch_name = batch_dir.name
+        for p in batch_dir.rglob("*"):
+            if p.suffix.lower() not in _IMAGE_EXTS:
+                continue
+            mid = p.stem.split("_")[-1]
+            updates[mid] = batch_name
+    if not updates:
+        return 0
+    con = _connect(db_path)
+    try:
+        updated = 0
+        for mid, batch_name in updates.items():
+            cur = con.execute(
+                "UPDATE catalog SET batch=? WHERE media_id=? AND (batch='' OR batch IS NULL)",
+                (batch_name, mid),
+            )
+            updated += cur.rowcount
+        con.commit()
+        return updated
+    finally:
+        con.close()
+
+
 def unique_batches(db_path):
     """Return sorted list of distinct non-empty batch names in the catalog."""
     con = _connect(db_path)
@@ -402,6 +438,7 @@ def create_app(out_dir: Path):
     app = Flask(__name__)
     db_path = out_dir / "catalog.db"
     init_db(db_path)
+    backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
 
