@@ -452,7 +452,10 @@ def create_app(out_dir: Path):
   .focus-mode .detail-meta,
   .focus-mode .detail-stars,
   .focus-mode .detail-actions { display: none; }
-  .focus-mode .detail-img img { max-height: 90vh; max-width: 95vw; }
+  .focus-mode { max-width: 100% !important; padding: 8px !important; display: flex; flex-direction: column; align-items: center; }
+  .focus-mode .detail-nav { width: 100%; max-width: 900px; }
+  .focus-mode .detail-img { width: 100%; display: flex; justify-content: center; }
+  .focus-mode .detail-img img { max-height: 90vh; max-width: 95vw; width: auto; height: auto; }
   .back-link { display: inline-block; color: var(--blue); text-decoration: none; font-size: 13px; }
   .back-link:hover { text-decoration: underline; }
   .detail-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
