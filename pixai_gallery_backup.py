@@ -36,6 +36,8 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
+__version__ = "1.1.0-dev"
+
 import argparse
 import csv
 import json
@@ -1414,6 +1416,7 @@ def run_download(args, progress=None):
 # ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="Back up your own PixAI gallery.")
+    ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
     ap.add_argument("--token",
                     help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
                          "and token.txt)")
