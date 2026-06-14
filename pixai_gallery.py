@@ -447,6 +447,12 @@ def create_app(out_dir: Path):
   .detail-meta .val { color: var(--text); font-size: 13px; word-break: break-word; }
   .detail-meta .val.prompt { font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
   .detail-actions { margin-top: 16px; display: flex; gap: 10px; }
+  .focus-btn { font-size: 12px; padding: 3px 10px; cursor: pointer; background: var(--surface0); border: 1px solid var(--surface1); border-radius: 4px; color: var(--text); }
+  .focus-btn:hover { background: var(--surface1); }
+  .focus-mode .detail-meta,
+  .focus-mode .detail-stars,
+  .focus-mode .detail-actions { display: none; }
+  .focus-mode .detail-img img { max-height: 90vh; max-width: 95vw; }
   .back-link { display: inline-block; color: var(--blue); text-decoration: none; font-size: 13px; }
   .back-link:hover { text-decoration: underline; }
   .detail-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
@@ -681,7 +687,17 @@ function confirmBulkDelete() {
 
     DETAIL_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <script>
+function toggleFocus() {
+  var wrap = document.querySelector('.detail-wrap');
+  var on = wrap.classList.toggle('focus-mode');
+  localStorage.setItem('gallery_focus', on ? '1' : '');
+  document.getElementById('focus-btn').textContent = on ? 'Details' : 'Focus';
+}
 document.addEventListener('DOMContentLoaded', function() {
+  if (localStorage.getItem('gallery_focus')) {
+    document.querySelector('.detail-wrap').classList.add('focus-mode');
+    document.getElementById('focus-btn').textContent = 'Details';
+  }
   document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     if (e.key === 'ArrowLeft' || e.keyCode === 37) {
@@ -690,6 +706,8 @@ document.addEventListener('DOMContentLoaded', function() {
     } else if (e.key === 'ArrowRight' || e.keyCode === 39) {
       var el = document.getElementById('nav-next');
       if (el) window.location.href = el.href;
+    } else if (e.key === 'f' || e.key === 'F') {
+      toggleFocus();
     }
   });
 });
@@ -702,6 +720,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <span class="nav-arrow nav-disabled">&#8592; Prev</span>
     {% endif %}
     <a class="back-link" href="{{ back }}">↑ Gallery</a>
+    <button id="focus-btn" class="focus-btn" onclick="toggleFocus()" title="Toggle focus mode (F key)">Focus</button>
     {% if next_id %}
     <a id="nav-next" class="nav-arrow" href="{{ url_for('detail', media_id=next_id, back=back) }}" title="Next (→ arrow key)">Next &#8594;</a>
     {% else %}
