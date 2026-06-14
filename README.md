@@ -88,10 +88,9 @@ Copy `config.example.json` to `config.json` and fill in the five fields below.
 
 ### Step 1 — Find your User ID
 
-1. Log in to [pixai.art](https://pixai.art)
-2. Click your avatar → **Profile**
-3. Copy the long numeric ID from the URL — e.g. `https://pixai.art/profile/1234567890123456789` → `1234567890123456789`
-4. Paste it as `USER_ID` in `config.json`
+PixAI uses your username in the profile URL (`@nelnamara`), not your numeric ID — so you can't get it from the address bar. It's in the same DevTools Network payload as the other values, captured in Step 2.
+
+When you open the `listUserTaskSummaries` payload in Step 2, look inside the `variables` object for a field called `userId` — that long number is your `USER_ID`.
 
 ---
 
