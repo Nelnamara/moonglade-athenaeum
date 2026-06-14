@@ -383,8 +383,9 @@ class SettingsBar(QGroupBox):
         lay.addLayout(out_row)
 
     def _load_token_file(self):
+        start_dir = str(Path(__file__).parent)
         p, _ = QFileDialog.getOpenFileName(
-            self, "Load token file", "", "Text files (*.txt);;All files (*)")
+            self, "Load token file", start_dir, "Text files (*.txt);;All files (*)")
         if p:
             self.token_edit.setText(Path(p).read_text("utf-8").strip())
 
