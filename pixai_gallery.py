@@ -203,20 +203,32 @@ def export_csv(db_path, csv_path):
 
 
 def find_image_file(out_dir, media_id, filename):
-    """Locate an image file: try catalog filename first, then rglob fallbacks."""
+    """Locate an image file: try catalog filename first, then rglob fallbacks.
+
+    Excludes out_dir/gallery/ so thumbnails are never returned as full-res images.
+    """
+    gallery_dir = out_dir / "gallery"
+
+    def _is_gallery(p):
+        try:
+            p.relative_to(gallery_dir)
+            return True
+        except ValueError:
+            return False
+
     if filename:
         for candidate in out_dir.rglob(filename):
-            if candidate.is_file():
+            if candidate.is_file() and not _is_gallery(candidate):
                 return candidate
     mid = str(media_id)
     # prompt_taskid_mediaid.ext layout (flat / --organize)
     for p in out_dir.rglob("*_{}.*".format(mid)):
-        if p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
+        if p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part") and not _is_gallery(p):
             return p
     # mediaid.ext layout (--organize-adv single images)
     for ext in _IMAGE_EXTS:
         for p in out_dir.rglob("{}{}".format(mid, ext)):
-            if p.is_file():
+            if p.is_file() and not _is_gallery(p):
                 return p
     return None
 
