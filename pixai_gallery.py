@@ -4,9 +4,9 @@ pixai_gallery.py
 ================
 Local Flask web gallery for your PixAI backup collection.
 
-Reads catalog.csv and serves a browseable, filterable, paginated image gallery
-at http://localhost:5000 . Supports single and bulk delete (removes image file,
-thumbnail, and catalog row).
+Reads catalog.db (SQLite) and serves a browseable, filterable, paginated image
+gallery at http://localhost:5000 . Supports single and bulk delete (removes
+image file, thumbnail, and catalog row).
 
 Requirements:
     pip install flask pillow
@@ -20,6 +20,7 @@ import argparse
 import csv
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -40,7 +41,7 @@ except ImportError:
 # Catalog helpers
 # ---------------------------------------------------------------------------
 CATALOG_FIELDS = [
-    "task_id", "media_id", "filename", "url", "width", "height",
+    "task_id", "media_id", "filename", "batch", "url", "width", "height",
     "prompt_preview", "status", "created_at",
     "prompt_full", "natural_prompt", "seed", "steps",
     "sampler", "cfg_scale", "model_id", "model_name", "rating",
@@ -52,14 +53,165 @@ THUMB_QUALITY = 85
 PAGE_SIZE = 100
 
 
-def load_catalog(csv_path):
-    if not csv_path.exists():
+_CREATE_TABLE = """
+CREATE TABLE IF NOT EXISTS catalog (
+    media_id        TEXT PRIMARY KEY,
+    task_id         TEXT,
+    filename        TEXT,
+    batch           TEXT DEFAULT '',
+    url             TEXT,
+    width           TEXT,
+    height          TEXT,
+    prompt_preview  TEXT,
+    status          TEXT,
+    created_at      TEXT,
+    prompt_full     TEXT,
+    natural_prompt  TEXT,
+    seed            TEXT,
+    steps           TEXT,
+    sampler         TEXT,
+    cfg_scale       TEXT,
+    model_id        TEXT,
+    model_name      TEXT,
+    rating          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
+CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
+CREATE INDEX IF NOT EXISTS idx_rating     ON catalog(rating);
+CREATE INDEX IF NOT EXISTS idx_batch      ON catalog(batch);
+"""
+
+_UPSERT = """
+INSERT INTO catalog ({fields})
+VALUES ({placeholders})
+ON CONFLICT(media_id) DO UPDATE SET
+{updates};
+""".format(
+    fields=", ".join(CATALOG_FIELDS),
+    placeholders=", ".join("?" for _ in CATALOG_FIELDS),
+    updates=", ".join(
+        "{f}=excluded.{f}".format(f=f) for f in CATALOG_FIELDS if f != "media_id"
+    ),
+)
+
+
+def init_db(db_path):
+    """Create the catalog table and indexes if they don't exist yet."""
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(str(db_path))
+    con.executescript(_CREATE_TABLE)
+    # Add batch column to pre-existing databases that lack it
+    try:
+        con.execute("ALTER TABLE catalog ADD COLUMN batch TEXT DEFAULT ''")
+        con.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    con.close()
+
+
+_MIGRATIONS = [
+    "ALTER TABLE catalog ADD COLUMN batch TEXT DEFAULT ''",
+]
+
+def _connect(db_path):
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
+    for sql in _MIGRATIONS:
+        try:
+            con.execute(sql)
+            con.commit()
+        except sqlite3.OperationalError:
+            pass  # column/index already exists
+    return con
+
+
+def load_catalog(db_path):
+    """Return all rows as a list of plain dicts, oldest-first."""
+    db_path = Path(db_path)
+    if not db_path.exists():
         return []
+    con = _connect(db_path)
+    try:
+        rows = con.execute("SELECT * FROM catalog").fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        con.close()
+
+
+def save_catalog(db_path, rows):
+    """Upsert a list of dicts into the catalog (replaces the old full-rewrite)."""
+    db_path = Path(db_path)
+    init_db(db_path)
+    con = _connect(db_path)
+    try:
+        con.executemany(
+            _UPSERT,
+            [tuple(r.get(f, "") or "" for f in CATALOG_FIELDS) for r in rows],
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def update_rating(db_path, media_id, value):
+    """Update a single row's rating without touching the rest of the catalog."""
+    con = _connect(db_path)
+    try:
+        con.execute(
+            "UPDATE catalog SET rating=? WHERE media_id=?",
+            (str(value) if value else "", media_id),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def delete_from_catalog(db_path, media_id):
+    """Remove a single row by media_id."""
+    con = _connect(db_path)
+    try:
+        con.execute("DELETE FROM catalog WHERE media_id=?", (media_id,))
+        con.commit()
+    finally:
+        con.close()
+
+
+def _db_is_empty(db_path):
+    """Return True if the database has no rows (missing or freshly initialised)."""
+    db_path = Path(db_path)
+    if not db_path.exists():
+        return True
+    try:
+        con = sqlite3.connect(str(db_path))
+        count = con.execute("SELECT COUNT(*) FROM catalog").fetchone()[0]
+        con.close()
+        return count == 0
+    except sqlite3.OperationalError:
+        return True
+
+
+def migrate_csv_to_db(csv_path, db_path):
+    """One-time migration: import catalog.csv into catalog.db.
+
+    Safe to re-run — existing rows are upserted, not duplicated.
+    Returns the number of rows imported.
+    """
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        return 0
     with open(csv_path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return 0
+    save_catalog(db_path, rows)
+    return len(rows)
 
 
-def save_catalog(csv_path, rows):
+def export_csv(db_path, csv_path):
+    """Export catalog.db back to a CSV file (backup / interop)."""
+    rows = load_catalog(db_path)
+    csv_path = Path(csv_path)
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CATALOG_FIELDS)
         writer.writeheader()
@@ -67,21 +219,135 @@ def save_catalog(csv_path, rows):
             writer.writerow({field: r.get(field, "") for field in CATALOG_FIELDS})
 
 
+_SORT_SQL = {
+    "oldest":      "created_at ASC",
+    "rating_desc": "CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) DESC, created_at DESC",
+    "rating_asc":  "CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) ASC,  created_at DESC",
+    "model":       "LOWER(COALESCE(NULLIF(model_name,''), NULLIF(model_id,''), '')) ASC",
+    "width":       "CAST(COALESCE(NULLIF(width,''),'0')  AS INTEGER) DESC",
+    "height":      "CAST(COALESCE(NULLIF(height,''),'0') AS INTEGER) DESC",
+}
+_DEFAULT_SORT_SQL = "created_at DESC"
+
+
+def _build_where(q, model, date_from, date_to, batch=""):
+    """Return (where_clause, params) for the common filter set."""
+    clauses = ["filename != ''"]
+    params  = []
+    if q:
+        clauses.append("(LOWER(COALESCE(prompt_full,'')) LIKE ? OR LOWER(COALESCE(prompt_preview,'')) LIKE ?)")
+        like = "%" + q.strip().lower() + "%"
+        params += [like, like]
+    if model:
+        clauses.append("model_name = ?")
+        params.append(model)
+    if batch:
+        clauses.append("batch = ?")
+        params.append(batch)
+    if date_from:
+        clauses.append("SUBSTR(created_at,1,7) >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("SUBSTR(created_at,1,7) <= ?")
+        params.append(date_to)
+    return " AND ".join(clauses), params
+
+
+def get_row(db_path, media_id):
+    """Return a single catalog row dict by media_id, or None."""
+    con = _connect(db_path)
+    try:
+        row = con.execute("SELECT * FROM catalog WHERE media_id=?", (media_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        con.close()
+
+
+def query_catalog(db_path, q="", model="", date_from="", date_to="",
+                  sort="newest", page=1, page_size=100, batch=""):
+    """Return (rows, total) with filtering, sorting and pagination done in SQL."""
+    where, params = _build_where(q, model, date_from, date_to, batch)
+    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    offset = (max(1, page) - 1) * page_size
+    con = _connect(db_path)
+    try:
+        total = con.execute(
+            "SELECT COUNT(*) FROM catalog WHERE {}".format(where), params
+        ).fetchone()[0]
+        rows = con.execute(
+            "SELECT * FROM catalog WHERE {} ORDER BY {} LIMIT ? OFFSET ?".format(where, order),
+            params + [page_size, offset],
+        ).fetchall()
+        return [dict(r) for r in rows], total
+    finally:
+        con.close()
+
+
+def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest", batch=""):
+    """Return ordered list of media_ids matching the filter (no row data)."""
+    where, params = _build_where(q, model, date_from, date_to, batch)
+    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT media_id FROM catalog WHERE {} ORDER BY {}".format(where, order), params
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        con.close()
+
+
+def unique_models(db_path):
+    """Return sorted list of distinct non-empty model names in the catalog."""
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT DISTINCT model_name FROM catalog WHERE model_name != '' ORDER BY model_name"
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        con.close()
+
+
+def unique_batches(db_path):
+    """Return sorted list of distinct non-empty batch names in the catalog."""
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT DISTINCT batch FROM catalog WHERE batch != '' ORDER BY batch"
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        con.close()
+
+
 def find_image_file(out_dir, media_id, filename):
-    """Locate an image file: try catalog filename first, then rglob fallbacks."""
+    """Locate an image file: try catalog filename first, then rglob fallbacks.
+
+    Excludes out_dir/gallery/ so thumbnails are never returned as full-res images.
+    """
+    gallery_dir = out_dir / "gallery"
+
+    def _is_gallery(p):
+        try:
+            p.relative_to(gallery_dir)
+            return True
+        except ValueError:
+            return False
+
     if filename:
         for candidate in out_dir.rglob(filename):
-            if candidate.is_file():
+            if candidate.is_file() and not _is_gallery(candidate):
                 return candidate
     mid = str(media_id)
     # prompt_taskid_mediaid.ext layout (flat / --organize)
     for p in out_dir.rglob("*_{}.*".format(mid)):
-        if p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
+        if p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part") and not _is_gallery(p):
             return p
     # mediaid.ext layout (--organize-adv single images)
     for ext in _IMAGE_EXTS:
         for p in out_dir.rglob("{}{}".format(mid, ext)):
-            if p.is_file():
+            if p.is_file() and not _is_gallery(p):
                 return p
     return None
 
@@ -133,7 +399,8 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None):
 
 def create_app(out_dir: Path):
     app = Flask(__name__)
-    csv_path = out_dir / "catalog.csv"
+    db_path = out_dir / "catalog.db"
+    init_db(db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
 
@@ -212,6 +479,15 @@ def create_app(out_dir: Path):
   .detail-meta .val { color: var(--text); font-size: 13px; word-break: break-word; }
   .detail-meta .val.prompt { font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
   .detail-actions { margin-top: 16px; display: flex; gap: 10px; }
+  .focus-btn { font-size: 12px; padding: 3px 10px; cursor: pointer; background: var(--surface0); border: 1px solid var(--surface1); border-radius: 4px; color: var(--text); }
+  .focus-btn:hover { background: var(--surface1); }
+  .focus-mode .detail-meta,
+  .focus-mode .detail-stars,
+  .focus-mode .detail-actions { display: none; }
+  .focus-mode { max-width: 100% !important; padding: 8px !important; display: flex; flex-direction: column; align-items: center; }
+  .focus-mode .detail-nav { width: 100%; max-width: 900px; }
+  .focus-mode .detail-img { width: 100%; display: flex; justify-content: center; }
+  .focus-mode .detail-img img { max-height: 90vh; max-width: 95vw; width: auto; height: auto; }
   .back-link { display: inline-block; color: var(--blue); text-decoration: none; font-size: 13px; }
   .back-link:hover { text-decoration: underline; }
   .detail-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
@@ -328,6 +604,17 @@ document.addEventListener('DOMContentLoaded', function() {
       {% endfor %}
     </select>
   </div>
+  {% if batches %}
+  <div>
+    <label>Batch</label><br>
+    <select name="batch">
+      <option value="">All batches</option>
+      {% for b in batches %}
+      <option value="{{ b }}" {% if b == batch_filter %}selected{% endif %}>{{ b }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
   <div>
     <label>From</label><br>
     <input type="month" name="date_from" value="{{ date_from }}" style="width:140px">
@@ -446,7 +733,17 @@ function confirmBulkDelete() {
 
     DETAIL_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <script>
+function toggleFocus() {
+  var wrap = document.querySelector('.detail-wrap');
+  var on = wrap.classList.toggle('focus-mode');
+  localStorage.setItem('gallery_focus', on ? '1' : '');
+  document.getElementById('focus-btn').textContent = on ? 'Details' : 'Focus';
+}
 document.addEventListener('DOMContentLoaded', function() {
+  if (localStorage.getItem('gallery_focus')) {
+    document.querySelector('.detail-wrap').classList.add('focus-mode');
+    document.getElementById('focus-btn').textContent = 'Details';
+  }
   document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     if (e.key === 'ArrowLeft' || e.keyCode === 37) {
@@ -455,6 +752,8 @@ document.addEventListener('DOMContentLoaded', function() {
     } else if (e.key === 'ArrowRight' || e.keyCode === 39) {
       var el = document.getElementById('nav-next');
       if (el) window.location.href = el.href;
+    } else if (e.key === 'f' || e.key === 'F') {
+      toggleFocus();
     }
   });
 });
@@ -467,6 +766,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <span class="nav-arrow nav-disabled">&#8592; Prev</span>
     {% endif %}
     <a class="back-link" href="{{ back }}">↑ Gallery</a>
+    <button id="focus-btn" class="focus-btn" onclick="toggleFocus()" title="Toggle focus mode (F key)">Focus</button>
     {% if next_id %}
     <a id="nav-next" class="nav-arrow" href="{{ url_for('detail', media_id=next_id, back=back) }}" title="Next (→ arrow key)">Next &#8594;</a>
     {% else %}
@@ -542,33 +842,6 @@ document.addEventListener('DOMContentLoaded', function() {
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _filter_rows(rows, q, model_filter, date_from, date_to):
-        q = q.strip().lower()
-        result = []
-        for r in rows:
-            if not r.get("filename"):
-                continue
-            if q:
-                haystack = (r.get("prompt_full") or r.get("prompt_preview") or "").lower()
-                if q not in haystack:
-                    continue
-            if model_filter and r.get("model_name") != model_filter:
-                continue
-            dt = (r.get("created_at") or "")[:7]
-            if date_from and dt and dt < date_from:
-                continue
-            if date_to and dt and dt > date_to:
-                continue
-            result.append(r)
-        return result
-
-    def _paginate(rows, page, page_size):
-        total = len(rows)
-        total_pages = max(1, (total + page_size - 1) // page_size)
-        page = max(1, min(page, total_pages))
-        start = (page - 1) * page_size
-        return rows[start:start + page_size], page, total_pages
-
     def _page_range(page, total_pages, window=2):
         pages = []
         for p in range(1, total_pages + 1):
@@ -583,49 +856,27 @@ document.addEventListener('DOMContentLoaded', function() {
             prev = p
         return result
 
-    def _sort_rows(filtered, sort):
-        if sort == "oldest":
-            filtered.sort(key=lambda r: r.get("created_at") or "")
-        elif sort == "rating_desc":
-            filtered.sort(key=lambda r: int(r.get("rating") or 0), reverse=True)
-        elif sort == "rating_asc":
-            filtered.sort(key=lambda r: int(r.get("rating") or 0))
-        elif sort == "model":
-            filtered.sort(key=lambda r: (r.get("model_name") or r.get("model_id") or "").lower())
-        elif sort == "width":
-            filtered.sort(key=lambda r: int(r.get("width") or 0), reverse=True)
-        elif sort == "height":
-            filtered.sort(key=lambda r: int(r.get("height") or 0), reverse=True)
-        else:
-            filtered.sort(key=lambda r: r.get("created_at") or "", reverse=True)
-        return filtered
-
-    def _unique_models(rows):
-        seen = []
-        for r in rows:
-            m = r.get("model_name") or ""
-            if m and m not in seen:
-                seen.append(m)
-        return sorted(seen)
-
     # ------------------------------------------------------------------
     # Routes
     # ------------------------------------------------------------------
     @app.route("/")
     def index():
-        rows = load_catalog(csv_path)
         q            = request.args.get("q", "")
         model_filter = request.args.get("model", "")
+        batch_filter = request.args.get("batch", "")
         date_from    = request.args.get("date_from", "")
         date_to      = request.args.get("date_to", "")
         sort         = request.args.get("sort", "newest")
         page         = int(request.args.get("page", 1))
 
-        models = _unique_models(rows)
-        filtered = _sort_rows(_filter_rows(rows, q, model_filter, date_from, date_to), sort)
-
-        total = len(filtered)
-        page_rows, page, total_pages = _paginate(filtered, page, PAGE_SIZE)
+        models  = unique_models(db_path)
+        batches = unique_batches(db_path)
+        page_rows, total = query_catalog(
+            db_path, q, model_filter, date_from, date_to, sort, page, PAGE_SIZE,
+            batch=batch_filter,
+        )
+        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = max(1, min(page, total_pages))
 
         for r in page_rows:
             r["_has_thumb"] = (thumb_dir / "{}.jpg".format(r["media_id"])).exists()
@@ -639,16 +890,16 @@ document.addEventListener('DOMContentLoaded', function() {
             INDEX_HTML,
             rows=page_rows, total=total, page=page,
             total_pages=total_pages, page_range=_page_range(page, total_pages),
-            q=q, model_filter=model_filter, date_from=date_from,
-            date_to=date_to, sort=sort, models=models,
+            q=q, model_filter=model_filter, batch_filter=batch_filter,
+            date_from=date_from,
+            date_to=date_to, sort=sort, models=models, batches=batches,
             page_url=page_url, request=request,
             current_url=request.url,
         )
 
     @app.route("/image/<media_id>")
     def detail(media_id):
-        rows = load_catalog(csv_path)
-        row = next((r for r in rows if r["media_id"] == media_id), None)
+        row = get_row(db_path, media_id)
         if not row:
             return "Image not found.", 404
 
@@ -666,15 +917,12 @@ document.addEventListener('DOMContentLoaded', function() {
         def _qs1(key, default=""):
             vals = qs.get(key, [])
             return vals[0] if vals else default
-        _q         = _qs1("q")
-        _model     = _qs1("model")
-        _date_from = _qs1("date_from")
-        _date_to   = _qs1("date_to")
-        _sort      = _qs1("sort", "newest")
-        nav_filtered = _sort_rows(
-            _filter_rows(rows, _q, _model, _date_from, _date_to), _sort
+        nav_ids = list_media_ids(
+            db_path,
+            q=_qs1("q"), model=_qs1("model"),
+            date_from=_qs1("date_from"), date_to=_qs1("date_to"),
+            sort=_qs1("sort", "newest"), batch=_qs1("batch"),
         )
-        nav_ids = [r["media_id"] for r in nav_filtered]
         try:
             idx = nav_ids.index(media_id)
         except ValueError:
@@ -690,8 +938,7 @@ document.addEventListener('DOMContentLoaded', function() {
     @app.route("/delete/<media_id>", methods=["POST"])
     def delete_one(media_id):
         back = request.args.get("back") or url_for("index")
-        rows = load_catalog(csv_path)
-        row = next((r for r in rows if r["media_id"] == media_id), None)
+        row = get_row(db_path, media_id)
         if row:
             img_path = find_image_file(out_dir, media_id, row.get("filename"))
             if img_path and img_path.exists():
@@ -699,8 +946,7 @@ document.addEventListener('DOMContentLoaded', function() {
             thumb_path = thumb_dir / "{}.jpg".format(media_id)
             if thumb_path.exists():
                 thumb_path.unlink()
-            rows = [r for r in rows if r["media_id"] != media_id]
-            save_catalog(csv_path, rows)
+            delete_from_catalog(db_path, media_id)
         return redirect(back)
 
     @app.route("/delete-bulk", methods=["POST"])
@@ -710,8 +956,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if not media_ids:
             return redirect(back)
 
-        rows = load_catalog(csv_path)
-        to_delete = {r["media_id"]: r for r in rows if r["media_id"] in media_ids}
+        to_delete = {mid: get_row(db_path, mid) for mid in media_ids}
+        to_delete = {mid: r for mid, r in to_delete.items() if r}
 
         for mid, row in to_delete.items():
             img_path = find_image_file(out_dir, mid, row.get("filename"))
@@ -720,9 +966,8 @@ document.addEventListener('DOMContentLoaded', function() {
             thumb_path = thumb_dir / "{}.jpg".format(mid)
             if thumb_path.exists():
                 thumb_path.unlink()
+            delete_from_catalog(db_path, mid)
 
-        rows = [r for r in rows if r["media_id"] not in media_ids]
-        save_catalog(csv_path, rows)
         return redirect(back)
 
     @app.route("/rate/<media_id>", methods=["POST"])
@@ -732,12 +977,7 @@ document.addEventListener('DOMContentLoaded', function() {
             value = max(0, min(5, int(data.get("rating", 0))))
         except (TypeError, ValueError):
             return json.dumps({"ok": False}), 400, {"Content-Type": "application/json"}
-        rows = load_catalog(csv_path)
-        for r in rows:
-            if r["media_id"] == media_id:
-                r["rating"] = str(value) if value else ""
-                break
-        save_catalog(csv_path, rows)
+        update_rating(db_path, media_id, value)
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
 
     @app.route("/thumbs/<media_id>.jpg")
@@ -769,18 +1009,25 @@ def main():
     if not out_dir.exists():
         sys.exit("Output folder not found: {}".format(out_dir))
 
+    db_path  = out_dir / "catalog.db"
     csv_path = out_dir / "catalog.csv"
-    if not csv_path.exists():
-        sys.exit("No catalog.csv found at {}. Run a download first.".format(csv_path))
+
+    # Auto-migrate existing catalog.csv when db is missing or empty
+    if _db_is_empty(db_path) and csv_path.exists():
+        print("Migrating catalog.csv → catalog.db ...")
+        n = migrate_csv_to_db(csv_path, db_path)
+        print("Migrated {:,} rows.".format(n))
+    elif _db_is_empty(db_path):
+        sys.exit("No catalog found in {}. Run a download first.".format(out_dir))
 
     thumb_dir = out_dir / "gallery" / "thumbs"
     print("Loading catalog...")
-    rows = load_catalog(csv_path)
+    rows = load_catalog(db_path)
     print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
     build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
 
     app = create_app(out_dir)
-    print("\nGallery ready →  http://{}:{}/".format(
+    print("\nGallery ready ->  http://{}:{}/".format(
         "localhost" if args.host == "127.0.0.1" else args.host, args.port))
     print("Press Ctrl+C to stop.\n")
     app.run(host=args.host, port=args.port, debug=False)
