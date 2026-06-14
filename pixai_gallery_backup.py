@@ -1414,11 +1414,15 @@ def run_download(args, progress=None):
 # ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="Back up your own PixAI gallery.")
-    ap.add_argument("--token")
-    ap.add_argument("--out", default="pixai_backup")
+    ap.add_argument("--token",
+                    help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
+                         "and token.txt)")
+    ap.add_argument("--out", default="pixai_backup",
+                    help="output folder for images and catalog (default: pixai_backup)")
     ap.add_argument("--page-size", type=int, default=20, help="items per page (try 50)")
     ap.add_argument("--max", type=int, default=0, help="stop after N tasks (0=all)")
-    ap.add_argument("--delay", type=float, default=0.4)
+    ap.add_argument("--delay", type=float, default=0.4,
+                    help="seconds to wait between API requests (default: 0.4)")
     ap.add_argument("--variant", default=None,
                     help="force a media variant (skip auto-detect), e.g. original")
     ap.add_argument("--probe", action="store_true",
@@ -1429,8 +1433,9 @@ def main():
                     help="page size used by --count (bigger = fewer requests; "
                          "server errors above ~10000 so default is 5000)")
     ap.add_argument("--catalog-stats", action="store_true",
-                    help="summarize the existing catalog.csv (counts only), then exit")
-    ap.add_argument("--collect-only", action="store_true")
+                    help="summarize the existing catalog.db (counts only), then exit")
+    ap.add_argument("--collect-only", action="store_true",
+                    help="scan and catalog images without downloading files")
     ap.add_argument("--name-length", type=int, default=60,
                     help="max characters of the prompt used in filenames (default 60)")
     ap.add_argument("--name-sep", default="_", choices=["_", "-"],
@@ -1449,7 +1454,7 @@ def main():
                          "(default png). No token needed. Supports --dry-run and --keep-webp.")
     ap.add_argument("--organize", action="store_true",
                     help="rename already-downloaded files to the prompt_taskid_mediaid "
-                         "scheme using catalog.csv, then exit")
+                         "scheme using catalog.db, then exit")
     ap.add_argument("--organize-live", action="store_true",
                     help="apply prompt_taskid_mediaid naming to files as they download "
                          "(same as default naming; flag makes intent explicit)")
