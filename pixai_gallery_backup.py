@@ -704,9 +704,7 @@ def cmd_organize(args, out, img_dir, csv_path):
             else:
                 month = (row.get("created_at") or "")[:7] or "unknown-date"
                 folder = out / month
-                dst = folder / (build_stem_name(
-                    row.get("prompt_preview", ""), tid, mid,
-                    args.name_length, args.name_sep) + ext)
+                dst = folder / (mid + ext)
             plan.append((src, dst, is_batch, mid, row))
 
     print("Organize plan: {} flat files to sort ({} not found on disk are skipped)."
@@ -718,7 +716,7 @@ def cmd_organize(args, out, img_dir, csv_path):
     if args.convert:
         print("Will also convert to {} ({}).".format(
             args.convert, "keeping .webp" if args.keep_webp else "replacing .webp"))
-    print("Embedding prompt metadata into PNG/JPEG (WebP skipped).")
+    print("Will embed prompt metadata into PNG/JPEG files (WebP skipped).")
 
     if args.dry_run:
         print("\nDry run -- nothing moved. Re-run without --dry-run to apply.")
@@ -972,7 +970,7 @@ def run_backfill_meta(args):
     CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
                       "prompt_preview", "status", "created_at",
                       "prompt_full", "natural_prompt", "seed", "steps",
-                      "sampler", "cfg_scale", "model_id", "model_name"]
+                      "sampler", "cfg_scale", "model_id", "model_name", "rating"]
 
     with open(csv_path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -1028,7 +1026,7 @@ def run_backfill_full_meta(args):
     CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
                       "prompt_preview", "status", "created_at",
                       "prompt_full", "natural_prompt", "seed", "steps",
-                      "sampler", "cfg_scale", "model_id", "model_name"]
+                      "sampler", "cfg_scale", "model_id", "model_name", "rating"]
 
     with open(csv_path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -1173,7 +1171,7 @@ def run_download(args, progress=None):
     CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
                       "prompt_preview", "status", "created_at",
                       "prompt_full", "natural_prompt", "seed", "steps",
-                      "sampler", "cfg_scale", "model_id", "model_name"]
+                      "sampler", "cfg_scale", "model_id", "model_name", "rating"]
 
     # Load existing catalog so prior-session rows are never lost
     known = {}
