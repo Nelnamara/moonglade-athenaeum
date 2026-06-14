@@ -47,7 +47,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from pixai_gallery import (CATALOG_FIELDS, init_db, load_catalog, save_catalog,
-                            migrate_csv_to_db, export_csv)
+                            migrate_csv_to_db, export_csv, _db_is_empty)
 
 try:
     import requests
@@ -1147,9 +1147,9 @@ def run_download(args, progress=None):
     raw_path = out / "raw_tasks.jsonl"
     db_path  = out / "catalog.db"
 
-    # Auto-migrate existing catalog.csv on first run with new version
+    # Auto-migrate existing catalog.csv when db is missing or empty
     csv_path = out / "catalog.csv"
-    if not db_path.exists() and csv_path.exists():
+    if _db_is_empty(db_path) and csv_path.exists():
         print("Migrating catalog.csv → catalog.db ...")
         n = migrate_csv_to_db(csv_path, db_path)
         print("Migrated {:,} rows.".format(n))

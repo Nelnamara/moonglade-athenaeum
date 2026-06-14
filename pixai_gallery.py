@@ -160,6 +160,20 @@ def delete_from_catalog(db_path, media_id):
         con.close()
 
 
+def _db_is_empty(db_path):
+    """Return True if the database has no rows (missing or freshly initialised)."""
+    db_path = Path(db_path)
+    if not db_path.exists():
+        return True
+    try:
+        con = sqlite3.connect(str(db_path))
+        count = con.execute("SELECT COUNT(*) FROM catalog").fetchone()[0]
+        con.close()
+        return count == 0
+    except sqlite3.OperationalError:
+        return True
+
+
 def migrate_csv_to_db(csv_path, db_path):
     """One-time migration: import catalog.csv into catalog.db.
 
@@ -887,12 +901,12 @@ def main():
     db_path  = out_dir / "catalog.db"
     csv_path = out_dir / "catalog.csv"
 
-    # Auto-migrate existing catalog.csv on first run
-    if not db_path.exists() and csv_path.exists():
+    # Auto-migrate existing catalog.csv when db is missing or empty
+    if _db_is_empty(db_path) and csv_path.exists():
         print("Migrating catalog.csv → catalog.db ...")
         n = migrate_csv_to_db(csv_path, db_path)
         print("Migrated {:,} rows.".format(n))
-    elif not db_path.exists():
+    elif _db_is_empty(db_path):
         sys.exit("No catalog found in {}. Run a download first.".format(out_dir))
 
     thumb_dir = out_dir / "gallery" / "thumbs"

@@ -113,12 +113,28 @@ def test_load_config_missing_returns_empty(tmp_path, monkeypatch):
 
 from pixai_gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catalog,
                             update_rating, delete_from_catalog,
-                            migrate_csv_to_db, export_csv)
+                            migrate_csv_to_db, export_csv, _db_is_empty)
 
 
 def _make_row(**kwargs):
     """Return a full catalog row dict with blank defaults for unset fields."""
     return {f: "" for f in CATALOG_FIELDS} | kwargs
+
+
+def test_db_is_empty_missing_file(tmp_path):
+    assert _db_is_empty(tmp_path / "nonexistent.db") is True
+
+
+def test_db_is_empty_fresh_init(tmp_path):
+    db = tmp_path / "catalog.db"
+    init_db(db)
+    assert _db_is_empty(db) is True
+
+
+def test_db_is_empty_after_rows_saved(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_make_row(media_id="m1")])
+    assert _db_is_empty(db) is False
 
 
 def test_init_db_creates_table(tmp_path):
