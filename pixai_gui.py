@@ -1183,13 +1183,14 @@ class UtilitiesTab(QWidget):
 
 class _GalleryServerThread(QThread):
     log   = Signal(str)
-    ready = Signal()
+    ready = Signal(str)   # emits the base URL when server is ready
 
-    def __init__(self, out_dir, port, rebuild_thumbs, parent=None):
+    def __init__(self, out_dir, port, rebuild_thumbs, host="127.0.0.1", parent=None):
         super().__init__(parent)
         self._out_dir = out_dir
         self._port = port
         self._rebuild_thumbs = rebuild_thumbs
+        self._host = host
         self._server = None
 
     def run(self):
@@ -1217,10 +1218,22 @@ class _GalleryServerThread(QThread):
                                  force=self._rebuild_thumbs,
                                  progress_cb=_thumb_progress)
                 self.log.emit("Thumbnails done.")
-            self.log.emit(f"Gallery server starting on http://127.0.0.1:{self._port}/")
-            self.ready.emit()
+            # Resolve display address for LAN mode
+            if self._host == "0.0.0.0":
+                import socket
+                try:
+                    display_ip = socket.gethostbyname(socket.gethostname())
+                except Exception:
+                    display_ip = "0.0.0.0"
+            else:
+                display_ip = self._host
+            base_url = f"http://{display_ip}:{self._port}/"
+            self.log.emit(f"Gallery server starting on {base_url}")
+            if self._host == "0.0.0.0":
+                self.log.emit(f"  (also accessible at http://127.0.0.1:{self._port}/ locally)")
+            self.ready.emit(base_url)
             from werkzeug.serving import make_server
-            self._server = make_server("127.0.0.1", self._port, app)
+            self._server = make_server(self._host, self._port, app)
             self._server.serve_forever()
         except Exception as exc:
             self.log.emit(f"[ERROR] {exc}")
@@ -1263,6 +1276,14 @@ class GalleryTab(QWidget):
         self.rebuild_thumbs.setChecked(settings.get("gallery_rebuild_thumbs", False))
         cg.addWidget(self.rebuild_thumbs)
 
+        self.lan_mode = QCheckBox("Allow access from other computers on local network  (bind 0.0.0.0)")
+        self.lan_mode.setChecked(settings.get("gallery_lan", False))
+        self.lan_mode.setToolTip(
+            "When checked the gallery is reachable from any device on your LAN.\n"
+            "Your local IP will be shown in the status bar after launch.\n"
+            "Note: Windows Firewall may prompt you to allow access the first time.")
+        cg.addWidget(self.lan_mode)
+
         btn_row = QHBoxLayout()
         self.btn_launch = QPushButton("▶  Launch Server")
         self.btn_launch.setObjectName("btn_start")
@@ -1295,9 +1316,10 @@ class GalleryTab(QWidget):
         if self._server_thread and self._server_thread.isRunning():
             return
         port = self.port.value()
+        host = "0.0.0.0" if self.lan_mode.isChecked() else "127.0.0.1"
         self.log.clear_log()
         self._server_thread = _GalleryServerThread(
-            self._bar.out, port, self.rebuild_thumbs.isChecked()
+            self._bar.out, port, self.rebuild_thumbs.isChecked(), host=host
         )
         self._server_thread.log.connect(self.log.append_line)
         self._server_thread.ready.connect(self._on_ready)
@@ -1308,8 +1330,9 @@ class GalleryTab(QWidget):
         self.btn_stop.setEnabled(True)
         self.btn_open.setEnabled(False)
 
-    def _on_ready(self):
-        self._status.setText(f"Running — http://127.0.0.1:{self.port.value()}/")
+    def _on_ready(self, base_url):
+        self._base_url = base_url
+        self._status.setText(f"Running — {base_url}")
         self._status.setStyleSheet("color: #a6e3a1; font-size: 9pt; padding: 2px 0;")
         self.btn_open.setEnabled(True)
 
@@ -1326,7 +1349,7 @@ class GalleryTab(QWidget):
         self.btn_open.setEnabled(False)
 
     def _open_browser(self):
-        webbrowser.open(f"http://127.0.0.1:{self.port.value()}/")
+        webbrowser.open(getattr(self, "_base_url", f"http://127.0.0.1:{self.port.value()}/"))
 
     def collect_settings(self):
         if not _GALLERY_AVAILABLE:
@@ -1334,6 +1357,7 @@ class GalleryTab(QWidget):
         return {
             "gallery_port":           self.port.value(),
             "gallery_rebuild_thumbs": self.rebuild_thumbs.isChecked(),
+            "gallery_lan":            self.lan_mode.isChecked(),
         }
 
 
