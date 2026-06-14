@@ -202,6 +202,93 @@ def export_csv(db_path, csv_path):
             writer.writerow({field: r.get(field, "") for field in CATALOG_FIELDS})
 
 
+_SORT_SQL = {
+    "oldest":      "created_at ASC",
+    "rating_desc": "CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) DESC, created_at DESC",
+    "rating_asc":  "CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) ASC,  created_at DESC",
+    "model":       "LOWER(COALESCE(NULLIF(model_name,''), NULLIF(model_id,''), '')) ASC",
+    "width":       "CAST(COALESCE(NULLIF(width,''),'0')  AS INTEGER) DESC",
+    "height":      "CAST(COALESCE(NULLIF(height,''),'0') AS INTEGER) DESC",
+}
+_DEFAULT_SORT_SQL = "created_at DESC"
+
+
+def _build_where(q, model, date_from, date_to):
+    """Return (where_clause, params) for the common filter set."""
+    clauses = ["filename != ''"]
+    params  = []
+    if q:
+        clauses.append("(LOWER(COALESCE(prompt_full,'')) LIKE ? OR LOWER(COALESCE(prompt_preview,'')) LIKE ?)")
+        like = "%" + q.strip().lower() + "%"
+        params += [like, like]
+    if model:
+        clauses.append("model_name = ?")
+        params.append(model)
+    if date_from:
+        clauses.append("SUBSTR(created_at,1,7) >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("SUBSTR(created_at,1,7) <= ?")
+        params.append(date_to)
+    return " AND ".join(clauses), params
+
+
+def get_row(db_path, media_id):
+    """Return a single catalog row dict by media_id, or None."""
+    con = _connect(db_path)
+    try:
+        row = con.execute("SELECT * FROM catalog WHERE media_id=?", (media_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        con.close()
+
+
+def query_catalog(db_path, q="", model="", date_from="", date_to="",
+                  sort="newest", page=1, page_size=100):
+    """Return (rows, total) with filtering, sorting and pagination done in SQL."""
+    where, params = _build_where(q, model, date_from, date_to)
+    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    offset = (max(1, page) - 1) * page_size
+    con = _connect(db_path)
+    try:
+        total = con.execute(
+            "SELECT COUNT(*) FROM catalog WHERE {}".format(where), params
+        ).fetchone()[0]
+        rows = con.execute(
+            "SELECT * FROM catalog WHERE {} ORDER BY {} LIMIT ? OFFSET ?".format(where, order),
+            params + [page_size, offset],
+        ).fetchall()
+        return [dict(r) for r in rows], total
+    finally:
+        con.close()
+
+
+def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest"):
+    """Return ordered list of media_ids matching the filter (no row data)."""
+    where, params = _build_where(q, model, date_from, date_to)
+    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT media_id FROM catalog WHERE {} ORDER BY {}".format(where, order), params
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        con.close()
+
+
+def unique_models(db_path):
+    """Return sorted list of distinct non-empty model names in the catalog."""
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT DISTINCT model_name FROM catalog WHERE model_name != '' ORDER BY model_name"
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        con.close()
+
+
 def find_image_file(out_dir, media_id, filename):
     """Locate an image file: try catalog filename first, then rglob fallbacks.
 
@@ -690,33 +777,6 @@ document.addEventListener('DOMContentLoaded', function() {
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _filter_rows(rows, q, model_filter, date_from, date_to):
-        q = q.strip().lower()
-        result = []
-        for r in rows:
-            if not r.get("filename"):
-                continue
-            if q:
-                haystack = (r.get("prompt_full") or r.get("prompt_preview") or "").lower()
-                if q not in haystack:
-                    continue
-            if model_filter and r.get("model_name") != model_filter:
-                continue
-            dt = (r.get("created_at") or "")[:7]
-            if date_from and dt and dt < date_from:
-                continue
-            if date_to and dt and dt > date_to:
-                continue
-            result.append(r)
-        return result
-
-    def _paginate(rows, page, page_size):
-        total = len(rows)
-        total_pages = max(1, (total + page_size - 1) // page_size)
-        page = max(1, min(page, total_pages))
-        start = (page - 1) * page_size
-        return rows[start:start + page_size], page, total_pages
-
     def _page_range(page, total_pages, window=2):
         pages = []
         for p in range(1, total_pages + 1):
@@ -731,37 +791,11 @@ document.addEventListener('DOMContentLoaded', function() {
             prev = p
         return result
 
-    def _sort_rows(filtered, sort):
-        if sort == "oldest":
-            filtered.sort(key=lambda r: r.get("created_at") or "")
-        elif sort == "rating_desc":
-            filtered.sort(key=lambda r: int(r.get("rating") or 0), reverse=True)
-        elif sort == "rating_asc":
-            filtered.sort(key=lambda r: int(r.get("rating") or 0))
-        elif sort == "model":
-            filtered.sort(key=lambda r: (r.get("model_name") or r.get("model_id") or "").lower())
-        elif sort == "width":
-            filtered.sort(key=lambda r: int(r.get("width") or 0), reverse=True)
-        elif sort == "height":
-            filtered.sort(key=lambda r: int(r.get("height") or 0), reverse=True)
-        else:
-            filtered.sort(key=lambda r: r.get("created_at") or "", reverse=True)
-        return filtered
-
-    def _unique_models(rows):
-        seen = []
-        for r in rows:
-            m = r.get("model_name") or ""
-            if m and m not in seen:
-                seen.append(m)
-        return sorted(seen)
-
     # ------------------------------------------------------------------
     # Routes
     # ------------------------------------------------------------------
     @app.route("/")
     def index():
-        rows = load_catalog(db_path)
         q            = request.args.get("q", "")
         model_filter = request.args.get("model", "")
         date_from    = request.args.get("date_from", "")
@@ -769,11 +803,12 @@ document.addEventListener('DOMContentLoaded', function() {
         sort         = request.args.get("sort", "newest")
         page         = int(request.args.get("page", 1))
 
-        models = _unique_models(rows)
-        filtered = _sort_rows(_filter_rows(rows, q, model_filter, date_from, date_to), sort)
-
-        total = len(filtered)
-        page_rows, page, total_pages = _paginate(filtered, page, PAGE_SIZE)
+        models = unique_models(db_path)
+        page_rows, total = query_catalog(
+            db_path, q, model_filter, date_from, date_to, sort, page, PAGE_SIZE
+        )
+        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = max(1, min(page, total_pages))
 
         for r in page_rows:
             r["_has_thumb"] = (thumb_dir / "{}.jpg".format(r["media_id"])).exists()
@@ -795,8 +830,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     @app.route("/image/<media_id>")
     def detail(media_id):
-        rows = load_catalog(db_path)
-        row = next((r for r in rows if r["media_id"] == media_id), None)
+        row = get_row(db_path, media_id)
         if not row:
             return "Image not found.", 404
 
@@ -814,15 +848,12 @@ document.addEventListener('DOMContentLoaded', function() {
         def _qs1(key, default=""):
             vals = qs.get(key, [])
             return vals[0] if vals else default
-        _q         = _qs1("q")
-        _model     = _qs1("model")
-        _date_from = _qs1("date_from")
-        _date_to   = _qs1("date_to")
-        _sort      = _qs1("sort", "newest")
-        nav_filtered = _sort_rows(
-            _filter_rows(rows, _q, _model, _date_from, _date_to), _sort
+        nav_ids = list_media_ids(
+            db_path,
+            q=_qs1("q"), model=_qs1("model"),
+            date_from=_qs1("date_from"), date_to=_qs1("date_to"),
+            sort=_qs1("sort", "newest"),
         )
-        nav_ids = [r["media_id"] for r in nav_filtered]
         try:
             idx = nav_ids.index(media_id)
         except ValueError:
@@ -838,8 +869,7 @@ document.addEventListener('DOMContentLoaded', function() {
     @app.route("/delete/<media_id>", methods=["POST"])
     def delete_one(media_id):
         back = request.args.get("back") or url_for("index")
-        rows = load_catalog(db_path)
-        row = next((r for r in rows if r["media_id"] == media_id), None)
+        row = get_row(db_path, media_id)
         if row:
             img_path = find_image_file(out_dir, media_id, row.get("filename"))
             if img_path and img_path.exists():
@@ -857,8 +887,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if not media_ids:
             return redirect(back)
 
-        rows = load_catalog(db_path)
-        to_delete = {r["media_id"]: r for r in rows if r["media_id"] in media_ids}
+        to_delete = {mid: get_row(db_path, mid) for mid in media_ids}
+        to_delete = {mid: r for mid, r in to_delete.items() if r}
 
         for mid, row in to_delete.items():
             img_path = find_image_file(out_dir, mid, row.get("filename"))
