@@ -236,6 +236,53 @@ def create_app(out_dir: Path):
   .detail-stars .stars button { font-size: 22px; }
   .detail-stars .rating-label { color: var(--subtext); font-size: 12px; }
 </style>
+<script>
+function closeModal() { document.getElementById('del-modal').classList.remove('open'); }
+function confirmDelete(url, msg) {
+  document.getElementById('del-modal-msg').textContent = msg;
+  document.getElementById('del-modal-form').action = url;
+  document.getElementById('del-modal').classList.add('open');
+}
+function setRating(mediaId, value, starsEl) {
+  fetch('/rate/' + mediaId, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rating: value})
+  }).then(r => r.json()).then(data => {
+    if (data.ok) updateStars(starsEl, data.rating);
+  });
+}
+function updateStars(el, rating) {
+  el.querySelectorAll('button').forEach(function(btn, i) {
+    btn.classList.toggle('on', i < rating);
+  });
+  var lbl = el.parentElement.querySelector('.rating-label');
+  if (lbl) lbl.textContent = rating > 0 ? rating + ' / 5' : 'unrated';
+}
+function buildStars(mediaId, rating, containerEl) {
+  for (var i = 1; i <= 5; i++) {
+    (function(star) {
+      var btn = document.createElement('button');
+      btn.textContent = '★';
+      if (star <= rating) btn.classList.add('on');
+      btn.addEventListener('click', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        var newVal = (rating === star) ? 0 : star;
+        rating = newVal;
+        setRating(mediaId, newVal, containerEl);
+      });
+      containerEl.appendChild(btn);
+    })(i);
+  }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  var modal = document.getElementById('del-modal');
+  if (modal) modal.addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+  document.querySelectorAll('.stars[data-mid]').forEach(function(el) {
+    buildStars(el.dataset.mid, parseInt(el.dataset.rating) || 0, el);
+  });
+});
+</script>
 </head>
 <body>
 {% block body %}{% endblock %}
@@ -252,48 +299,6 @@ def create_app(out_dir: Path):
     </div>
   </div>
 </div>
-
-<script>
-function closeModal() { document.getElementById('del-modal').classList.remove('open'); }
-function confirmDelete(url, msg) {
-  document.getElementById('del-modal-msg').textContent = msg;
-  document.getElementById('del-modal-form').action = url;
-  document.getElementById('del-modal').classList.add('open');
-}
-document.getElementById('del-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
-});
-function setRating(mediaId, value, starsEl) {
-  fetch('/rate/' + mediaId, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({rating: value})
-  }).then(r => r.json()).then(data => {
-    if (data.ok) updateStars(starsEl, data.rating);
-  });
-}
-function updateStars(el, rating) {
-  el.querySelectorAll('button').forEach((btn, i) => {
-    btn.classList.toggle('on', i < rating);
-  });
-  const lbl = el.parentElement.querySelector('.rating-label');
-  if (lbl) lbl.textContent = rating > 0 ? rating + ' / 5' : 'unrated';
-}
-function buildStars(mediaId, rating, containerEl) {
-  for (let i = 1; i <= 5; i++) {
-    const btn = document.createElement('button');
-    btn.textContent = '★';
-    if (i <= rating) btn.classList.add('on');
-    btn.addEventListener('click', function(e) {
-      e.preventDefault(); e.stopPropagation();
-      const newVal = (rating === i) ? 0 : i;
-      rating = newVal;
-      setRating(mediaId, newVal, containerEl);
-    });
-    containerEl.appendChild(btn);
-  }
-}
-</script>
 </body>
 </html>
 """
@@ -432,9 +437,6 @@ function confirmBulkDelete() {
   };
   document.getElementById('del-modal-form').action = '#';
 }
-document.querySelectorAll('.stars[data-mid]').forEach(el => {
-  buildStars(el.dataset.mid, parseInt(el.dataset.rating) || 0, el);
-});
 </script>
 """)
 
@@ -505,12 +507,6 @@ document.querySelectorAll('.stars[data-mid]').forEach(el => {
     </button>
   </div>
 </div>
-<script>
-(function() {
-  const el = document.getElementById('detail-stars');
-  buildStars(el.dataset.mid, parseInt(el.dataset.rating) || 0, el);
-})();
-</script>
 """)
 
     # ------------------------------------------------------------------
