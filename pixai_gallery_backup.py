@@ -46,6 +46,9 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+from pixai_gallery import (CATALOG_FIELDS, init_db, load_catalog, save_catalog,
+                            migrate_csv_to_db, export_csv)
+
 try:
     import requests
 except ImportError:
@@ -654,25 +657,24 @@ def cmd_convert_existing(args, out):
         print("Failed files left as .webp -- re-run to retry.")
 
 
-def cmd_organize(args, out, img_dir, csv_path):
+def cmd_organize(args, out, img_dir, db_path):
     """Reorganize already-downloaded files into batch/ and YYYY-MM/ folders using
-    catalog.csv. Embeds prompt metadata, optionally converts, writes per-folder
+    the catalog. Embeds prompt metadata, optionally converts, writes per-folder
     info files. Idempotent (only touches flat files in images/) and dry-runnable."""
-    if not csv_path.exists():
+    if not db_path.exists():
         raise PixAIError("No catalog at {}. Run a download first (the catalog holds the "
-                         "prompts and dates this needs).".format(csv_path))
+                         "prompts and dates this needs).".format(db_path))
     if not img_dir.exists():
         raise PixAIError("No images folder at {}.".format(img_dir))
 
     # catalog: media_id -> row, and task_id -> [media_ids]
     meta_by_mid, mids_by_task = {}, defaultdict(list)
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            mid = row.get("media_id")
-            if not mid:
-                continue
-            meta_by_mid[mid] = row
-            mids_by_task[row.get("task_id", "")].append(mid)
+    for row in load_catalog(db_path):
+        mid = row.get("media_id")
+        if not mid:
+            continue
+        meta_by_mid[mid] = row
+        mids_by_task[row.get("task_id", "")].append(mid)
 
     # Sources = flat files in images/ only, so re-runs are idempotent (already
     # organized files live in sibling folders and are left alone).
@@ -925,24 +927,23 @@ def run_count(args):
 
 
 def run_catalog_stats(args):
-    """Summarize the existing catalog.csv (no network needed)."""
+    """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
-    csv_path = out / "catalog.csv"
+    db_path = out / "catalog.db"
     img_dir = out / "images"
-    if not csv_path.exists():
+    if not db_path.exists():
         raise PixAIError("No catalog found at {}. Run a download (or --collect-only) "
-                         "first.".format(csv_path))
+                         "first.".format(db_path))
     total = downloaded = missing = pending = 0
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            total += 1
-            if row.get("filename"):
-                downloaded += 1
-            elif not row.get("url"):
-                missing += 1
-            else:
-                pending += 1
-    print("Catalog: {}".format(csv_path))
+    for row in load_catalog(db_path):
+        total += 1
+        if row.get("filename"):
+            downloaded += 1
+        elif not row.get("url"):
+            missing += 1
+        else:
+            pending += 1
+    print("Catalog: {}".format(db_path))
     print("Total image entries : {}".format(total))
     print("  downloaded files  : {}".format(downloaded))
     print("  resolved, pending : {}".format(pending))
@@ -961,19 +962,12 @@ def run_backfill_meta(args):
     """Fill in missing url/width/height for catalog rows via resolve_media().
     Safe to re-run -- skips rows that already have all three fields."""
     out = Path(args.out)
-    csv_path = out / "catalog.csv"
-    if not csv_path.exists():
-        raise PixAIError("No catalog.csv found at {}.".format(csv_path))
+    db_path = out / "catalog.db"
+    if not db_path.exists():
+        raise PixAIError("No catalog found at {}.".format(db_path))
 
     session = _make_session(getattr(args, "token", None))
-
-    CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
-                      "prompt_preview", "status", "created_at",
-                      "prompt_full", "natural_prompt", "seed", "steps",
-                      "sampler", "cfg_scale", "model_id", "model_name", "rating"]
-
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+    rows = load_catalog(db_path)
 
     to_fill = [r for r in rows if not (r.get("url") and r.get("width") and r.get("height"))]
     print("Found {:,} rows missing url/width/height (out of {:,} total).".format(
@@ -998,11 +992,7 @@ def run_backfill_meta(args):
         time.sleep(args.delay)
 
     print("\nWriting catalog...")
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CATALOG_FIELDS)
-        writer.writeheader()
-        for r in rows:
-            writer.writerow({field: r.get(field, "") for field in CATALOG_FIELDS})
+    save_catalog(db_path, to_fill)
     print("Done. Updated {:,} rows, {:,} still missing.".format(updated, failed))
 
 
@@ -1012,9 +1002,9 @@ def run_backfill_full_meta(args):
     Also fills url/width/height from the task's media object as a free side effect.
     Safe to re-run -- skips rows that already have prompt_full."""
     out = Path(args.out)
-    csv_path = out / "catalog.csv"
-    if not csv_path.exists():
-        raise PixAIError("No catalog.csv found at {}.".format(csv_path))
+    db_path = out / "catalog.db"
+    if not db_path.exists():
+        raise PixAIError("No catalog found at {}.".format(db_path))
 
     session = _make_session(getattr(args, "token", None))
 
@@ -1023,13 +1013,7 @@ def run_backfill_full_meta(args):
             "--backfill-full-meta requires TASK_DETAIL_HASH in config.json. "
             "See README -> Full Meta for capture instructions.")
 
-    CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
-                      "prompt_preview", "status", "created_at",
-                      "prompt_full", "natural_prompt", "seed", "steps",
-                      "sampler", "cfg_scale", "model_id", "model_name", "rating"]
-
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+    rows = load_catalog(db_path)
 
     # Work per unique task_id (one API call covers all media in that task)
     needs_fill = [r for r in rows if not r.get("prompt_full")]
@@ -1088,28 +1072,23 @@ def run_backfill_full_meta(args):
         if not row.get("height") and fm.get("_media_height"):
             row["height"] = fm["_media_height"]
 
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CATALOG_FIELDS)
-        writer.writeheader()
-        for r in rows:
-            writer.writerow({field: r.get(field, "") for field in CATALOG_FIELDS})
+    save_catalog(db_path, rows)
     print("Done. Fetched {:,} tasks, {:,} failed, catalog updated.".format(fetched, failed))
 
 
-def cmd_rename(args, out, img_dir, csv_path):
+def cmd_rename(args, out, img_dir, db_path):
     """Rename already-downloaded files to the prompt_taskid_mediaid scheme."""
-    if not csv_path.exists():
+    if not db_path.exists():
         raise PixAIError("No catalog found at {}. The catalog records each image's "
-                         "prompt; run a download first.".format(csv_path))
+                         "prompt; run a download first.".format(db_path))
     if not img_dir.exists():
         raise PixAIError("No images folder at {}.".format(img_dir))
     info_by_mid = {}
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            mid = row.get("media_id")
-            if mid:
-                info_by_mid[mid] = (row.get("task_id", ""),
-                                    row.get("prompt_preview", ""))
+    for row in load_catalog(db_path):
+        mid = row.get("media_id")
+        if mid:
+            info_by_mid[mid] = (row.get("task_id", ""),
+                                row.get("prompt_preview", ""))
     renamed = skipped = unmatched = clash = 0
     planned = []
     used_names = set()
@@ -1166,24 +1145,19 @@ def run_download(args, progress=None):
     out = Path(args.out)
     img_dir = out / "images"
     raw_path = out / "raw_tasks.jsonl"
-    csv_path = out / "catalog.csv"
+    db_path  = out / "catalog.db"
 
-    CATALOG_FIELDS = ["task_id", "media_id", "filename", "url", "width", "height",
-                      "prompt_preview", "status", "created_at",
-                      "prompt_full", "natural_prompt", "seed", "steps",
-                      "sampler", "cfg_scale", "model_id", "model_name", "rating"]
+    # Auto-migrate existing catalog.csv on first run with new version
+    csv_path = out / "catalog.csv"
+    if not db_path.exists() and csv_path.exists():
+        print("Migrating catalog.csv → catalog.db ...")
+        n = migrate_csv_to_db(csv_path, db_path)
+        print("Migrated {:,} rows.".format(n))
+    else:
+        init_db(db_path)
 
     # Load existing catalog so prior-session rows are never lost
-    known = {}
-    if csv_path.exists():
-        try:
-            with open(csv_path, newline="", encoding="utf-8") as _kf:
-                for _row in csv.DictReader(_kf):
-                    _mid = _row.get("media_id")
-                    if _mid:
-                        known[_mid] = _row
-        except OSError:
-            pass
+    known = {r["media_id"]: r for r in load_catalog(db_path) if r.get("media_id")}
     if known:
         print("Loaded {} existing catalog entries.\n".format(len(known)))
 
@@ -1231,9 +1205,6 @@ def run_download(args, progress=None):
         progress(processed, total_images, 0)
 
     print("Walking your generation history (newest -> oldest)...")
-    csv_f = open(csv_path, "w", newline="", encoding="utf-8")
-    writer = csv.DictWriter(csv_f, fieldnames=CATALOG_FIELDS)
-    writer.writeheader()
     raw_f = open(raw_path, "w", encoding="utf-8")
 
     use_full_meta = getattr(args, "full_meta", False)
@@ -1255,6 +1226,8 @@ def run_download(args, progress=None):
             if not edges:
                 break
             print("Page {}: {} tasks (total {})".format(page, len(edges), seen + len(edges)))
+
+            page_rows = []  # rows accumulated this page; upserted after each page
 
             for edge in edges:
                 node = edge.get("node", edge)
@@ -1297,7 +1270,7 @@ def run_download(args, progress=None):
                     if existing:
                         dl["skip"] += 1
                         k = known.get(mid, {})
-                        writer.writerow({
+                        page_rows.append({
                             "task_id":        k.get("task_id") or meta["task_id"],
                             "media_id":       mid,
                             "filename":       existing.name,
@@ -1323,7 +1296,7 @@ def run_download(args, progress=None):
                     w, h = info.get("width", ""), info.get("height", "")
                     if not url:
                         dl["missing"] += 1
-                        writer.writerow({
+                        page_rows.append({
                             "task_id": meta["task_id"], "media_id": mid,
                             "filename": "", "url": "", "width": w, "height": h,
                             "prompt_preview": meta["prompt_preview"],
@@ -1334,7 +1307,7 @@ def run_download(args, progress=None):
                         _tick()
                         continue
                     if getattr(args, "collect_only", False):
-                        writer.writerow({
+                        page_rows.append({
                             "task_id": meta["task_id"], "media_id": mid,
                             "filename": "", "url": url, "width": w, "height": h,
                             "prompt_preview": meta["prompt_preview"],
@@ -1352,7 +1325,7 @@ def run_download(args, progress=None):
                         keep_webp=getattr(args, "keep_webp", False))
                     dl[status] += 1
                     _tick()
-                    writer.writerow({
+                    page_rows.append({
                         "task_id": meta["task_id"], "media_id": mid,
                         "filename": path.name if path else "",
                         "url": url, "width": w, "height": h,
@@ -1365,6 +1338,10 @@ def run_download(args, progress=None):
                         batch_results.append((idx, mid, path, info))
                     if status == "ok":
                         time.sleep(args.delay)
+
+            # Upsert this page's rows so progress is durable even on interrupt
+            if page_rows:
+                save_catalog(db_path, page_rows)
 
                 if getattr(args, "organize_adv_live", False) and batch_results:
                     if is_batch:
@@ -1418,15 +1395,7 @@ def run_download(args, progress=None):
             before = pi.get("startCursor")
             time.sleep(args.delay)
 
-        # Preserve rows from prior sessions not encountered this run
-        leftover = [r for m, r in known.items() if m not in written]
-        if leftover:
-            print("Preserving {} catalog entries from previous sessions.".format(
-                len(leftover)))
-            for r in leftover:
-                writer.writerow({f: r.get(f, "") for f in CATALOG_FIELDS})
     finally:
-        csv_f.close()
         raw_f.close()
 
     if not progress and sys.stdout.isatty() and processed:
@@ -1435,7 +1404,7 @@ def run_download(args, progress=None):
     print("\nDone. Tasks seen: {}".format(seen))
     print("Images -> downloaded {}, skipped {}, missing {}, failed {}".format(
         dl["ok"], dl["skip"], dl["missing"], dl["fail"]))
-    print("Catalog: {}\nRaw: {}\nImages: {}".format(csv_path, raw_path, img_dir))
+    print("Catalog: {}\nRaw: {}\nImages: {}".format(db_path, raw_path, img_dir))
     if dl["fail"]:
         print("Some failed -- just re-run; finished files are skipped.")
 
@@ -1497,11 +1466,13 @@ def main():
                          "task via a second API call (requires TASK_DETAIL_HASH + MODEL_DETAIL_HASH "
                          "in config.json). One extra call per unique task; batch images share one call.")
     ap.add_argument("--backfill-meta", action="store_true",
-                    help="fill in missing url/width/height in catalog.csv via resolve_media "
+                    help="fill in missing url/width/height in catalog.db via resolve_media "
                          "for rows that lack them, then exit")
     ap.add_argument("--backfill-full-meta", action="store_true",
-                    help="fill in prompt_full/seed/model/etc in catalog.csv via getTaskById "
+                    help="fill in prompt_full/seed/model/etc in catalog.db via getTaskById "
                          "for rows that lack them; also backfills url/width/height as a bonus, then exit")
+    ap.add_argument("--export-csv", action="store_true",
+                    help="export catalog.db to catalog.csv for interop/backup, then exit")
     args = ap.parse_args()
 
     if args.probe and args.count:
@@ -1511,11 +1482,19 @@ def main():
 
     out = Path(args.out)
     img_dir = out / "images"
+    db_path  = out / "catalog.db"
     csv_path = out / "catalog.csv"
 
     try:
         if args.catalog_stats:
             run_catalog_stats(args)
+            return
+        if args.export_csv:
+            if not db_path.exists():
+                sys.exit("No catalog.db found at {}.".format(db_path))
+            export_csv(db_path, csv_path)
+            print("Exported {:,} rows to {}.".format(
+                len(load_catalog(db_path)), csv_path))
             return
         if args.backfill_meta:
             run_backfill_meta(args)
@@ -1527,10 +1506,10 @@ def main():
             cmd_convert_existing(args, out)
             return
         if args.organize_adv:
-            cmd_organize(args, out, img_dir, csv_path)
+            cmd_organize(args, out, img_dir, db_path)
             return
         if args.organize:
-            cmd_rename(args, out, img_dir, csv_path)
+            cmd_rename(args, out, img_dir, db_path)
             return
         if args.probe:
             run_probe(args)

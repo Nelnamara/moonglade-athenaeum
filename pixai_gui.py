@@ -785,11 +785,11 @@ class OrganizeTab(QWidget):
         args = self._build_args()
         out = Path(args.out)
         img_dir = out / "images"
-        csv_path = out / "catalog.csv"
+        db_path = out / "catalog.db"
         if self.rb_adv.isChecked():
-            fn = lambda: core.cmd_organize(args, out, img_dir, csv_path)
+            fn = lambda: core.cmd_organize(args, out, img_dir, db_path)
         else:
-            fn = lambda: core.cmd_rename(args, out, img_dir, csv_path)
+            fn = lambda: core.cmd_rename(args, out, img_dir, db_path)
         self.btn_run.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self._worker = Worker(fn)
@@ -1097,7 +1097,7 @@ class _GalleryServerThread(QThread):
             from pixai_gallery import load_catalog, build_thumbnails
             thumb_dir = out / "gallery" / "thumbs"
             thumb_dir.mkdir(parents=True, exist_ok=True)
-            rows = load_catalog(out / "catalog.csv")
+            rows = load_catalog(out / "catalog.db")
             missing = sum(1 for r in rows if r.get("filename") and
                           not (thumb_dir / f"{r['media_id']}.jpg").exists())
             if missing or self._rebuild_thumbs:
