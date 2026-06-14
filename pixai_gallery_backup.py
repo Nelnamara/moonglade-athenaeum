@@ -48,8 +48,8 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-from pixai_gallery import (CATALOG_FIELDS, init_db, load_catalog, save_catalog,
-                            migrate_csv_to_db, export_csv, _db_is_empty)
+from pixai_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
+                            save_catalog, migrate_csv_to_db, export_csv, _db_is_empty)
 
 
 def _ensure_db(out):
@@ -942,7 +942,6 @@ def run_count(args):
     print("Tasks that are batches    : {}  (>1 image each)".format(batched_tasks))
     print("Fetched in {} request(s).".format(page))
     out = Path(args.out)
-    _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
     disk_count = disk_bytes = 0
     if out.exists():
         for p in out.rglob("*"):
@@ -977,7 +976,6 @@ def run_catalog_stats(args):
     print("  downloaded files  : {}".format(downloaded))
     print("  resolved, pending : {}".format(pending))
     print("  no URL (missing)  : {}".format(missing))
-    _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
     disk_count = disk_bytes = 0
     for p in out.rglob("*"):
         if p.is_file() and p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
@@ -1197,7 +1195,6 @@ def run_download(args, progress=None):
     # Seed progress by counting image files already on disk. Works for flat,
     # --organize-adv, and --organize-adv-live since rglob finds files in
     # batches/ and YYYY-MM/ equally.
-    _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
     already_done = 0
     disk_bytes = 0
     if out.exists():
@@ -1403,7 +1400,6 @@ def run_download(args, progress=None):
                 if args.max and seen >= args.max:
                     break
 
-            csv_f.flush()
             raw_f.flush()
             if args.max and seen >= args.max:
                 print("Reached --max limit.")
