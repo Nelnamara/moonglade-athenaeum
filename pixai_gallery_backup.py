@@ -1205,6 +1205,8 @@ def run_download(args, progress=None):
     if known:
         print("Loaded {} existing catalog entries.\n".format(len(known)))
 
+    use_full_meta = getattr(args, "full_meta", False)
+
     session = _make_session(getattr(args, "token", None))
     print("SSL trust store via truststore: {}".format(
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
@@ -1250,7 +1252,6 @@ def run_download(args, progress=None):
     print("Walking your generation history (newest -> oldest)...")
     raw_f = open(raw_path, "w", encoding="utf-8")
 
-    use_full_meta = getattr(args, "full_meta", False)
     _full_meta_cache = {}  # task_id -> full meta dict
 
     before = None
