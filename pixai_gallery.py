@@ -644,15 +644,18 @@ def create_app(out_dir: Path):
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
 <style>
   :root {
-    /* Palette sampled from 731004762264180451.webp (deep indigo ground, teal
-       magic glow, violet, green gems, rare gold armor trim). */
-    --base:    #0c1322; --mantle:  #080e18; --surface0:#1b2c3a;
-    --surface1:#2b4250; --overlay0:#5d6f7b; --text:    #d2d9de;
-    --subtext: #93a0ab; --lavender:#b692e6; --mauve:   #c4a6f0;
+    /* Palette sampled from two reference images:
+       731004762264180451.webp — teal "magic glow", green gems, rare gold trim.
+       s1_06.png              — the deep violet armor (#33236d/#241f5b/#36345a/#643aac)
+                                that tints the ground and surfaces below. */
+    --base:    #0c0a1c; --mantle:  #0a0818; --surface0:#211f3a;
+    --surface1:#3a3460; --overlay0:#6a6088; --text:    #d6d2e2;
+    --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
     --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
     --blue:    #47cbc3; --sapphire:#3a8a93;
     /* Accent system: purple leads, teal is the "magic" highlight, gold is rare. */
     --accent:  #b692e6; --accent-soft:#47cbc3; --gold: #d4af37;
+    --purple-deep: #33236d; --purple-bright: #643aac;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--base); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
@@ -708,7 +711,7 @@ def create_app(out_dir: Path):
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 200px), 1fr)); gap: 12px; padding: 16px 20px; }
   .card { background: var(--mantle); border-radius: 8px; overflow: hidden; border: 2px solid transparent; transition: border-color .15s; position: relative; cursor: pointer; }
   .card:hover { border-color: var(--surface1); }
-  .card.selected { border-color: var(--lavender); }
+  .card.selected { border-color: var(--purple-bright); box-shadow: 0 0 0 1px var(--purple-bright); }
   .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--surface0); }
   .card .no-thumb { width: 100%; aspect-ratio: 1; background: var(--surface0); display: flex; align-items: center; justify-content: center; color: var(--overlay0); font-size: 11px; }
   .card .meta { padding: 6px 8px; }
