@@ -186,3 +186,17 @@ def test_verify_flags_genuine_pixel_difference(tmp_path):
     (tmp_path / "_duplicates" / "images" / "p_t1_444.webp").write_bytes(b"CONTENT-B-DIFFERENT")
     res = core.verify_quarantine(tmp_path)
     assert len(res["differs"]) == 1
+
+
+def test_dedup_apply_then_verify_reports_safe(tmp_path):
+    """After dedup quarantines, a verify pass should confirm every moved file is
+    redundant (the coupling that closes dedup's no-byte-check gap)."""
+    _make_class_a_tree(tmp_path)
+    db = tmp_path / "catalog.db"
+    init_db(db)
+    save_catalog(db, [{"media_id": "111", "filename": "a_prompt_t1_111.webp",
+                       "batch": "", "task_id": "t1"}])
+    core.cmd_dedup(_args(apply=True), tmp_path, db)
+    res = core.verify_quarantine(tmp_path)
+    assert res["safe"] + res["meta_only"] == res["total"]
+    assert res["differs"] == [] and res["orphan"] == []

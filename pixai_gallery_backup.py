@@ -980,6 +980,24 @@ def cmd_dedup(args, out, db_path):
     if have_catalog:
         n = reconcile_catalog_with_disk(out, db_path)
         print("Reconciled catalog: updated {:,} filename/batch entries to match disk.".format(n))
+
+    # Auto-verify after quarantining. Dedup chose losers by media_id WITHOUT
+    # comparing bytes, so this is the only step that confirms each quarantined
+    # file truly matches a surviving keeper. Never auto-deletes -- the human does.
+    if not delete and moved:
+        print("\n--- Verifying the quarantine (confirming every moved file is "
+              "redundant) ---")
+        vr = verify_quarantine(out, progress=getattr(args, "progress", None))
+        ok = vr["safe"] + vr["meta_only"]
+        print("Verify: {:,} confirmed safe ({:,} byte-identical + {:,} metadata-only), "
+              "{:,} differ, {:,} orphan.".format(
+                  ok, vr["safe"], vr["meta_only"], len(vr["differs"]), len(vr["orphan"])))
+        if vr["differs"] or vr["orphan"]:
+            print("REVIEW NEEDED before deleting _duplicates/ -- run --verify-dupes "
+                  "to write verify_report.csv with the flagged items.")
+        else:
+            print("All quarantined files confirmed redundant -- _duplicates/ is safe "
+                  "to delete to reclaim the space.")
     return rep
 
 
