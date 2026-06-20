@@ -644,13 +644,15 @@ def create_app(out_dir: Path):
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
 <style>
   :root {
-    --base:    #1e1e2e; --mantle:  #181825; --surface0:#313244;
-    --surface1:#45475a; --overlay0:#6c7086; --text:    #cdd6f4;
-    --subtext: #a6adc8; --lavender:#b4befe; --mauve:   #cba6f7;
-    --red:     #f38ba8; --peach:   #fab387; --green:   #a6e3a1;
-    --blue:    #89b4fa; --sapphire:#74c7ec;
-    /* Accent system: purple leads, gold is a rare highlight only. */
-    --accent:  #cba6f7; --accent-soft:#b4befe; --gold: #d4af37;
+    /* Palette sampled from 731004762264180451.webp (deep indigo ground, teal
+       magic glow, violet, green gems, rare gold armor trim). */
+    --base:    #0c1322; --mantle:  #080e18; --surface0:#1b2c3a;
+    --surface1:#2b4250; --overlay0:#5d6f7b; --text:    #d2d9de;
+    --subtext: #93a0ab; --lavender:#b692e6; --mauve:   #c4a6f0;
+    --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
+    --blue:    #47cbc3; --sapphire:#3a8a93;
+    /* Accent system: purple leads, teal is the "magic" highlight, gold is rare. */
+    --accent:  #b692e6; --accent-soft:#47cbc3; --gold: #d4af37;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--base); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
@@ -667,7 +669,7 @@ def create_app(out_dir: Path):
   .filters { background: var(--mantle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--surface0); }
   .filters input, .filters select { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
   .filters input { width: 280px; }
-  .filters input:focus, .filters select:focus { outline: none; border-color: var(--lavender); }
+  .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(71,203,195,.25); }
   .filters label { color: var(--subtext); font-size: 12px; }
   .btn { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 13px; }
   .btn:hover { background: var(--surface1); }
@@ -1216,7 +1218,7 @@ function copyPrompt(btn) {
     <div style="display:flex;align-items:center;gap:10px;font-size:12px;">
       <span style="width:64px;color:var(--subtext);">{{ m }}</span>
       <div style="flex:1;background:var(--mantle);border-radius:4px;overflow:hidden;height:16px;">
-        <div style="height:100%;width:{{ (100*c/maxm)|round(1) }}%;background:#7f77dd;"></div>
+        <div style="height:100%;width:{{ (100*c/maxm)|round(1) }}%;background:var(--accent);"></div>
       </div>
       <span style="width:52px;text-align:right;color:var(--subtext);">{{ '{:,}'.format(c) }}</span>
     </div>
@@ -1231,7 +1233,7 @@ function copyPrompt(btn) {
       <span style="width:180px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
             title="{{ name }}">{{ name }}</span>
       <div style="flex:1;background:var(--mantle);border-radius:4px;overflow:hidden;height:16px;">
-        <div style="height:100%;width:{{ (100*c/maxt)|round(1) }}%;background:#1d9e75;"></div>
+        <div style="height:100%;width:{{ (100*c/maxt)|round(1) }}%;background:var(--accent-soft);"></div>
       </div>
       <a style="width:52px;text-align:right;color:var(--subtext);"
          href="{{ url_for('index', model=name) }}">{{ '{:,}'.format(c) }}</a>
