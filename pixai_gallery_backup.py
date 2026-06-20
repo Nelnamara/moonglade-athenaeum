@@ -1300,6 +1300,17 @@ def run_count(args):
               "produced batches of several images -- all of them get downloaded.")
 
 
+def run_audit(args):
+    """GUI/CLI wrapper: read-only duplicate audit."""
+    cmd_audit(args, Path(args.out))
+
+
+def run_dedup(args):
+    """GUI/CLI wrapper: dedup (quarantine/delete + catalog reconcile)."""
+    out = Path(args.out)
+    cmd_dedup(args, out, out / "catalog.db")
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
