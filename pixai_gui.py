@@ -1062,6 +1062,33 @@ class UtilitiesTab(QWidget):
         self.btn_backfill_full.clicked.connect(self._run_backfill_full)
         self.btn_export_csv.clicked.connect(self._run_export_csv)
 
+        # ---- Duplicate audit / dedup ----
+        self.btn_audit = QPushButton("▶  Audit Duplicates")
+        self.btn_audit.setObjectName("btn_run")
+        self.btn_audit.setToolTip("Read-only scan of the whole backup folder; "
+                                  "writes audit_report.csv. Changes nothing.")
+        self.btn_dedup = QPushButton("▶  Dedup")
+        self.btn_dedup.setObjectName("btn_run")
+        self.chk_dedup_dry = QCheckBox("Dry run (preview)")
+        self.chk_dedup_dry.setChecked(True)
+        self.chk_dedup_dry.setToolTip("Preview only. Uncheck to actually move/delete.")
+        self.chk_dedup_delete = QCheckBox("Delete (not quarantine)")
+        self.chk_dedup_delete.setToolTip("Permanently delete instead of moving to _duplicates/.")
+        self.chk_no_content = QCheckBox("Skip content hash")
+        self.chk_no_content.setToolTip("Faster: only same-media_id location dupes (Class A), "
+                                       "skip byte-identical content dupes (Class B).")
+
+        audit_row = QHBoxLayout()
+        audit_row.addWidget(self.btn_audit)
+        audit_row.addWidget(self.btn_dedup)
+        audit_row.addWidget(self.chk_dedup_dry)
+        audit_row.addWidget(self.chk_dedup_delete)
+        audit_row.addWidget(self.chk_no_content)
+        audit_row.addStretch()
+
+        self.btn_audit.clicked.connect(self._run_audit)
+        self.btn_dedup.clicked.connect(self._run_dedup)
+
         delay_row = QHBoxLayout()
         delay_row.addWidget(QLabel("API delay (s):"))
         self.delay = QDoubleSpinBox()
@@ -1098,6 +1125,13 @@ class UtilitiesTab(QWidget):
             "Export CSV — saves a copy of catalog.db as catalog_export.csv "
             "in your output folder (useful for spreadsheets or backup)."))
         lay.addLayout(export_row)
+        lay.addWidget(_info(
+            "Audit Duplicates — read-only scan of the whole backup folder for "
+            "duplicate images (same media_id across folders, plus byte-identical "
+            "copies). Writes audit_report.csv. Dedup — removes the redundant copies, "
+            "keeping the most-organized one; quarantines to _duplicates/ by default. "
+            "Leave Dry run checked to preview first."))
+        lay.addLayout(audit_row)
         lay.addLayout(delay_row)
 
         prog_row, self.prog_bar, self.prog_label = _make_progress_row()
@@ -1142,6 +1176,22 @@ class UtilitiesTab(QWidget):
         args.progress = self._worker.progress.emit
         self._worker.progress.connect(self._update_progress)
 
+    def _run_audit(self):
+        args = self._base_args()
+        args.no_content = self.chk_no_content.isChecked()
+        self._run(core.run_audit, args)
+        args.progress = self._worker.progress.emit
+        self._worker.progress.connect(self._update_progress)
+
+    def _run_dedup(self):
+        args = self._base_args()
+        args.no_content = self.chk_no_content.isChecked()
+        args.apply = not self.chk_dedup_dry.isChecked()
+        args.dedup_delete = self.chk_dedup_delete.isChecked()
+        self._run(core.run_dedup, args)
+        args.progress = self._worker.progress.emit
+        self._worker.progress.connect(self._update_progress)
+
     def _run_export_csv(self):
         out = Path(self._bar.out)
         db_path = out / "catalog.db"
@@ -1181,7 +1231,8 @@ class UtilitiesTab(QWidget):
 
     def _set_running(self, running):
         for b in (self.btn_probe, self.btn_count, self.btn_stats,
-                  self.btn_backfill, self.btn_backfill_full, self.btn_export_csv):
+                  self.btn_backfill, self.btn_backfill_full, self.btn_export_csv,
+                  self.btn_audit, self.btn_dedup):
             b.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         if running:
