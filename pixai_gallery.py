@@ -399,6 +399,117 @@ def catalog_years(db_path):
         con.close()
 
 
+def _fmt_size(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return "{:.1f} {}".format(n, unit)
+        n /= 1024
+
+
+def collection_health(out_dir, db_path):
+    """Compute at-a-glance metrics for the health dashboard. One disk walk
+    (sizes + buckets + Class-A duplicate detection) plus a few catalog queries.
+
+    Returns a dict consumed by the /health route. Cheap (no content hashing) so
+    it's safe to render on every page load.
+    """
+    from collections import defaultdict, Counter
+    gallery_dir = out_dir / "gallery"
+    quarantine_dir = out_dir / "_duplicates"
+
+    def _under(p, parent):
+        try:
+            p.relative_to(parent); return True
+        except ValueError:
+            return False
+
+    per_bucket = Counter()
+    total_files = 0
+    total_bytes = 0
+    on_disk_ids = set()
+    locs = defaultdict(set)   # media_id -> set of bucket names (Class A dup detection)
+    dup_redundant = 0
+    dup_bytes = 0
+    mid_sizes = defaultdict(list)  # media_id -> [sizes] to estimate reclaimable
+
+    for p in out_dir.rglob("*"):
+        if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
+            continue
+        if p.name.endswith(".part") or _under(p, gallery_dir) or _under(p, quarantine_dir):
+            continue
+        rel = p.relative_to(out_dir)
+        top = str(rel).replace("\\", "/").split("/")[0]
+        if top == "images":
+            bucket = "images"
+        elif top == "batches":
+            bucket = "batches"
+        elif top == "unknown-date" or (len(top) == 7 and top[4] == "-" and top[:4].isdigit()):
+            bucket = "month"
+        else:
+            bucket = "other"
+        try:
+            sz = p.stat().st_size
+        except OSError:
+            continue
+        total_files += 1
+        total_bytes += sz
+        per_bucket[bucket] += 1
+        mid = media_id_of(p)
+        on_disk_ids.add(mid)
+        locs[mid].add(bucket)
+        mid_sizes[mid].append(sz)
+
+    for mid, buckets in locs.items():
+        if len(buckets) > 1:
+            extra = len(mid_sizes[mid]) - 1
+            dup_redundant += extra
+            sizes = sorted(mid_sizes[mid])
+            dup_bytes += sum(sizes[:-1])  # all but the largest counted as reclaimable
+
+    con = _connect(db_path)
+    try:
+        def _scalar(sql):
+            return con.execute(sql).fetchone()[0]
+        total_rows   = _scalar("SELECT COUNT(*) FROM catalog")
+        with_image   = _scalar("SELECT COUNT(*) FROM catalog WHERE filename != ''")
+        with_full    = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(prompt_full,'') != ''")
+        rated        = _scalar("SELECT COUNT(*) FROM catalog "
+                               "WHERE COALESCE(NULLIF(rating,''),'0') NOT IN ('0')")
+        by_month = con.execute(
+            "SELECT SUBSTR(created_at,1,7) AS m, COUNT(*) FROM catalog "
+            "WHERE created_at != '' GROUP BY m ORDER BY m"
+        ).fetchall()
+        top_models = con.execute(
+            "SELECT COALESCE(NULLIF(model_name,''), NULLIF(model_id,''), 'unknown') AS mdl, "
+            "COUNT(*) AS c FROM catalog WHERE filename != '' GROUP BY mdl ORDER BY c DESC LIMIT 8"
+        ).fetchall()
+        # catalog rows that claim a file but whose media_id isn't on disk
+        cat_ids = [r[0] for r in con.execute(
+            "SELECT media_id FROM catalog WHERE filename != ''").fetchall()]
+    finally:
+        con.close()
+
+    missing = sum(1 for mid in cat_ids if mid and mid not in on_disk_ids)
+
+    return {
+        "total_files": total_files,
+        "total_bytes": total_bytes,
+        "total_size_h": _fmt_size(total_bytes),
+        "per_bucket": dict(per_bucket),
+        "dup_redundant": dup_redundant,
+        "dup_bytes": dup_bytes,
+        "dup_bytes_h": _fmt_size(dup_bytes),
+        "catalog_rows": total_rows,
+        "with_image": with_image,
+        "with_full_meta": with_full,
+        "full_meta_pct": round(100 * with_full / with_image) if with_image else 0,
+        "rated": rated,
+        "missing": missing,
+        "by_month": [(m, c) for (m, c) in by_month],
+        "top_models": [(m, c) for (m, c) in top_models],
+    }
+
+
 def media_id_of(path):
     """Canonical media_id extraction (INVARIANT 1): the last underscore-delimited
     chunk of the filename stem. Works for every naming layout the tool produces:
@@ -720,6 +831,7 @@ document.addEventListener('DOMContentLoaded', function() {
 <header>
   <h1>PixAI Gallery</h1>
   <span class="header-stats">{{ total }} images</span>
+  <a class="back-link" href="{{ url_for('health') }}" style="margin-left:auto;">Collection health →</a>
 </header>
 
 <form method="get" action="/" id="filter-form">
@@ -1030,6 +1142,76 @@ function copyPrompt(btn) {
 </script>
 """)
 
+    HEALTH_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
+{% macro stat(label, value, flag='') %}
+<div style="background:var(--mantle);border-radius:8px;padding:14px 16px;">
+  <div style="font-size:12px;color:var(--subtext);margin-bottom:6px;">{{ label }}</div>
+  <div style="font-size:22px;font-weight:500;color:{{ '#e2a04a' if flag=='warn' else ('#e25555' if flag=='bad' else 'var(--text)') }};">{{ value }}</div>
+</div>
+{% endmacro %}
+<header>
+  <h1>Collection Health</h1>
+  <a class="back-link" href="{{ url_for('index') }}">↑ Back to gallery</a>
+</header>
+
+<div style="padding:8px 20px 24px;max-width:1100px;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+    {{ stat('Images on disk', '{:,}'.format(h.total_files)) }}
+    {{ stat('Storage used', h.total_size_h) }}
+    {{ stat('Catalog rows', '{:,}'.format(h.catalog_rows)) }}
+    {{ stat('Full-meta', h.full_meta_pct|string + '%') }}
+    {{ stat('Rated', '{:,}'.format(h.rated)) }}
+    {{ stat('Duplicates', '{:,}'.format(h.dup_redundant), 'warn' if h.dup_redundant else '') }}
+    {{ stat('Reclaimable', h.dup_bytes_h, 'warn' if h.dup_bytes else '') }}
+    {{ stat('Missing files', '{:,}'.format(h.missing), 'bad' if h.missing else '') }}
+  </div>
+
+  <h2 style="margin:28px 0 10px;font-size:16px;">Images by month</h2>
+  <div style="display:flex;flex-direction:column;gap:4px;">
+    {% set maxm = (h.by_month|map(attribute=1)|max) if h.by_month else 1 %}
+    {% for m, c in h.by_month %}
+    <div style="display:flex;align-items:center;gap:10px;font-size:12px;">
+      <span style="width:64px;color:var(--subtext);">{{ m }}</span>
+      <div style="flex:1;background:var(--mantle);border-radius:4px;overflow:hidden;height:16px;">
+        <div style="height:100%;width:{{ (100*c/maxm)|round(1) }}%;background:#7f77dd;"></div>
+      </div>
+      <span style="width:52px;text-align:right;color:var(--subtext);">{{ '{:,}'.format(c) }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <h2 style="margin:28px 0 10px;font-size:16px;">Top models</h2>
+  <div style="display:flex;flex-direction:column;gap:4px;">
+    {% set maxt = (h.top_models|map(attribute=1)|max) if h.top_models else 1 %}
+    {% for name, c in h.top_models %}
+    <div style="display:flex;align-items:center;gap:10px;font-size:12px;">
+      <span style="width:180px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+            title="{{ name }}">{{ name }}</span>
+      <div style="flex:1;background:var(--mantle);border-radius:4px;overflow:hidden;height:16px;">
+        <div style="height:100%;width:{{ (100*c/maxt)|round(1) }}%;background:#1d9e75;"></div>
+      </div>
+      <a style="width:52px;text-align:right;color:var(--subtext);"
+         href="{{ url_for('index', model=name) }}">{{ '{:,}'.format(c) }}</a>
+    </div>
+    {% endfor %}
+  </div>
+
+  <h2 style="margin:28px 0 10px;font-size:16px;">Folder breakdown</h2>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--subtext);">
+    {% for b, c in h.per_bucket.items() %}
+    <span><strong style="color:var(--text);">{{ '{:,}'.format(c) }}</strong> {{ b }}</span>
+    {% endfor %}
+  </div>
+
+  {% if h.dup_redundant or h.missing %}
+  <div style="margin-top:24px;padding:12px 16px;background:var(--mantle);border-radius:8px;font-size:13px;color:var(--subtext);">
+    {% if h.dup_redundant %}<div>· {{ '{:,}'.format(h.dup_redundant) }} duplicate copies ({{ h.dup_bytes_h }}). Run <code>--dedup</code> to quarantine.</div>{% endif %}
+    {% if h.missing %}<div>· {{ '{:,}'.format(h.missing) }} catalog rows reference a file that's missing on disk. Re-run a download to refetch.</div>{% endif %}
+  </div>
+  {% endif %}
+</div>
+""")
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -1050,6 +1232,11 @@ function copyPrompt(btn) {
     # ------------------------------------------------------------------
     # Routes
     # ------------------------------------------------------------------
+    @app.route("/health")
+    def health():
+        return render_template_string(
+            HEALTH_HTML, h=collection_health(out_dir, db_path))
+
     @app.route("/")
     def index():
         q            = request.args.get("q", "")
