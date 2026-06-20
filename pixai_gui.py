@@ -1069,6 +1069,10 @@ class UtilitiesTab(QWidget):
                                   "writes audit_report.csv. Changes nothing.")
         self.btn_dedup = QPushButton("▶  Dedup")
         self.btn_dedup.setObjectName("btn_run")
+        self.btn_verify = QPushButton("▶  Verify Quarantine")
+        self.btn_verify.setObjectName("btn_run")
+        self.btn_verify.setToolTip("After dedup: confirm every file in _duplicates/ is "
+                                   "redundant (pixel-identical to a kept copy) before you delete it.")
         self.chk_dedup_dry = QCheckBox("Dry run (preview)")
         self.chk_dedup_dry.setChecked(True)
         self.chk_dedup_dry.setToolTip("Preview only. Uncheck to actually move/delete.")
@@ -1081,6 +1085,7 @@ class UtilitiesTab(QWidget):
         audit_row = QHBoxLayout()
         audit_row.addWidget(self.btn_audit)
         audit_row.addWidget(self.btn_dedup)
+        audit_row.addWidget(self.btn_verify)
         audit_row.addWidget(self.chk_dedup_dry)
         audit_row.addWidget(self.chk_dedup_delete)
         audit_row.addWidget(self.chk_no_content)
@@ -1088,6 +1093,7 @@ class UtilitiesTab(QWidget):
 
         self.btn_audit.clicked.connect(self._run_audit)
         self.btn_dedup.clicked.connect(self._run_dedup)
+        self.btn_verify.clicked.connect(self._run_verify)
 
         delay_row = QHBoxLayout()
         delay_row.addWidget(QLabel("API delay (s):"))
@@ -1192,6 +1198,13 @@ class UtilitiesTab(QWidget):
         args.progress = self._worker.progress.emit
         self._worker.progress.connect(self._update_progress)
 
+    def _run_verify(self):
+        args = self._base_args()
+        args.restore_orphans = False
+        self._run(core.run_verify_dupes, args)
+        args.progress = self._worker.progress.emit
+        self._worker.progress.connect(self._update_progress)
+
     def _run_export_csv(self):
         out = Path(self._bar.out)
         db_path = out / "catalog.db"
@@ -1232,7 +1245,7 @@ class UtilitiesTab(QWidget):
     def _set_running(self, running):
         for b in (self.btn_probe, self.btn_count, self.btn_stats,
                   self.btn_backfill, self.btn_backfill_full, self.btn_export_csv,
-                  self.btn_audit, self.btn_dedup):
+                  self.btn_audit, self.btn_dedup, self.btn_verify):
             b.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         if running:
