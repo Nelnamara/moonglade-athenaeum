@@ -3,7 +3,7 @@ year dropdowns, and per-page (via query_catalog)."""
 import pytest
 
 from pixai_gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog,
-                           catalog_years, _like_pattern)
+                           catalog_years, _like_pattern, collection_health)
 
 
 def _row(**kw):
@@ -115,3 +115,36 @@ def test_sort_pixels_orders_by_area(tmp_path):
     ])
     rows, _ = query_catalog(p, sort="pixels")
     assert rows[0]["media_id"] == "big"
+
+
+# ---- collection_health -----------------------------------------------------
+
+def test_collection_health_counts_and_missing(tmp_path):
+    db = tmp_path / "catalog.db"
+    # one row whose file exists, one whose file is missing on disk
+    save_catalog(db, [
+        _row(media_id="111", filename="111.webp", prompt_full="a full prompt",
+             created_at="2024-03-01", model_name="ModelA", rating="4"),
+        _row(media_id="222", filename="b_222.webp", created_at="2024-03-02",
+             model_name="ModelA"),
+    ])
+    (tmp_path / "2024-03").mkdir()
+    (tmp_path / "2024-03" / "111.webp").write_bytes(b"data")
+    h = collection_health(tmp_path, db)
+    assert h["total_files"] == 1
+    assert h["catalog_rows"] == 2
+    assert h["with_full_meta"] == 1
+    assert h["rated"] == 1
+    assert h["missing"] == 1          # row 222 has no file on disk
+    assert h["per_bucket"].get("month") == 1
+
+
+def test_collection_health_detects_duplicate(tmp_path):
+    db = tmp_path / "catalog.db"
+    init_db(db)
+    (tmp_path / "images").mkdir()
+    (tmp_path / "2024-03").mkdir()
+    (tmp_path / "images" / "p_t1_111.webp").write_bytes(b"data")
+    (tmp_path / "2024-03" / "111.webp").write_bytes(b"data")
+    h = collection_health(tmp_path, db)
+    assert h["dup_redundant"] == 1
