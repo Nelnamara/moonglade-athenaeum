@@ -54,6 +54,9 @@ Built by reverse-engineering site network traffic. There is no official PixAI AP
 | `already_downloaded()` | Resume check: rglob the whole tree for `*_<mediaId>.*` |
 | `cmd_organize()` | Sort flat files into `batches/` and `YYYY-MM/`; writes batch name to catalog |
 | `_ensure_db()` | Auto-migrates catalog.csv → catalog.db if needed; used by all commands |
+| `audit_collection()` | Filesystem-truth duplicate audit: Class A (same media_id in >1 folder) + Class B (byte-identical, different id via size-bucketed hashing) |
+| `cmd_audit()` / `cmd_dedup()` | Read-only report / quarantine-or-delete redundant copies, keep most-organized, reconcile catalog |
+| `reconcile_catalog_with_disk()` | Repoint each catalog row's filename/batch at the surviving on-disk file |
 
 ### Key helpers in `pixai_gallery.py`
 
@@ -67,6 +70,8 @@ Built by reverse-engineering site network traffic. There is no official PixAI AP
 | `query_catalog()` | SQL-backed filter/sort/paginate for gallery index |
 | `list_media_ids()` | Returns ordered media IDs for prev/next navigation |
 | `backfill_batches()` | Scans `batches/` on disk and fills empty `batch` column; called on gallery startup |
+| `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). INVARIANT 1, single source |
+| `find_files_for_media_id()` | SHARED matcher: all on-disk files for a media_id, BOTH layouts (prefixed `*_<mid>.*` AND bare `<mid>.*`), exact-id checked, gallery excluded. Resume, gallery, and audit all use it so they never drift apart |
 | `create_app()` | Flask app factory; calls `init_db` + `backfill_batches` before serving |
 
 ---
@@ -99,6 +104,8 @@ Built by reverse-engineering site network traffic. There is no official PixAI AP
 5. **`--organize` only moves flat files in `images/`** (non-recursive glob). This makes it idempotent. Do not switch to rglob.
 
 6. **`find_image_file` excludes `out_dir/gallery/`** to prevent thumbnails from being returned as full-res images.
+
+7. **Media-id → file resolution goes through `find_files_for_media_id` ONLY.** It matches BOTH naming layouts — prefixed `*_<mid>.*` (flat/batch) and bare `<mid>.*` (single-image month files). Resume (`already_downloaded`), the gallery (`find_image_file`), and the audit all share it. Never reintroduce a `*_<mid>.*`-only glob: that mismatch (bare month files invisible to resume) is exactly what caused the historical images/+month duplication — re-downloads recreated flat copies that organize then orphaned.
 
 ---
 
@@ -157,5 +164,10 @@ python pixai_gallery_backup.py --organize-adv --dry-run   # preview folder sort
 python pixai_gallery_backup.py --organize-adv             # sort into batches/ + YYYY-MM/
 python pixai_gallery_backup.py --catalog-stats            # summarize catalog.db
 python pixai_gallery_backup.py --export-csv               # export catalog.db → CSV
+python pixai_gallery_backup.py --audit                    # read-only duplicate report → audit_report.csv
+python pixai_gallery_backup.py --audit --no-content       # fast: same-media_id location dupes only
+python pixai_gallery_backup.py --dedup                    # dry-run dedup plan (nothing changes)
+python pixai_gallery_backup.py --dedup --apply            # quarantine redundant copies to _duplicates/
+python pixai_gallery_backup.py --dedup --apply --dedup-delete  # delete instead of quarantine
 python pixai_gallery.py --out pixai_backup                # launch gallery at :5000
 ```

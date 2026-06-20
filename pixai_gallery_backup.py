@@ -45,11 +45,12 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict
+from collections import defaultdict, Counter
 from pathlib import Path
 
 from pixai_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
-                            save_catalog, migrate_csv_to_db, export_csv, _db_is_empty)
+                            save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
+                            media_id_of, find_files_for_media_id)
 
 
 def _ensure_db(out):
@@ -303,13 +304,60 @@ def build_stem_name(prompt_preview, task_id, media_id, max_len, sep="_"):
 def already_downloaded(root, media_id):
     """Return an existing image file for this media_id anywhere under root,
     regardless of its prompt prefix, task id, or which subfolder it's in.
-    Matches `*_<media_id>.<ext>`. Searching recursively is what lets resume keep
-    working after files have been moved into batch/month subfolders."""
-    mid = str(media_id)
-    for p in root.rglob("*_{}.*".format(mid)):
-        if not p.name.endswith(".part") and p.stat().st_size > 0:
-            return p
-    return None
+
+    Uses the shared `find_files_for_media_id` matcher so resume recognizes BOTH
+    naming layouts — prefixed `*_<mid>.*` AND bare `<mid>.*` (the single-image
+    --organize month layout). Before this was aligned, bare month files were
+    invisible to resume, so every re-download re-fetched them as flat files and
+    organize left the flat copy orphaned -> the images/+month duplication."""
+    matches = find_files_for_media_id(root, media_id)
+    return matches[0] if matches else None
+
+
+# ---------------------------------------------------------------------------
+# Content hashing (shared by --audit content dedup and organize's same-bytes check)
+# ---------------------------------------------------------------------------
+def _file_sha(path, _chunk=1 << 20):
+    """Streamed blake2b digest of a file. Returns hex str, or None on read error."""
+    import hashlib
+    h = hashlib.blake2b(digest_size=16)
+    try:
+        with open(path, "rb") as f:
+            for block in iter(lambda: f.read(_chunk), b""):
+                h.update(block)
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
+def _same_bytes(a, b):
+    """True if two files are byte-identical. Cheap size check first, then hash."""
+    try:
+        sa, sb = a.stat().st_size, b.stat().st_size
+    except OSError:
+        return False
+    if sa != sb:
+        return False
+    ha = _file_sha(a)
+    return ha is not None and ha == _file_sha(b)
+
+
+def _same_pixels(a, b):
+    """True if two images have identical pixel content, ignoring container/metadata
+    differences (e.g. a PNG with embedded prompt text vs the same image without).
+    Returns None if Pillow is unavailable or either file can't be decoded."""
+    try:
+        from PIL import Image, ImageChops
+    except ImportError:
+        return None
+    try:
+        with Image.open(a) as ia, Image.open(b) as ib:
+            if ia.size != ib.size:
+                return False
+            ra, rb = ia.convert("RGBA"), ib.convert("RGBA")
+            return ImageChops.difference(ra, rb).getbbox() is None
+    except Exception:
+        return None
 
 
 def media_ids_for(node):
@@ -686,6 +734,409 @@ def cmd_convert_existing(args, out):
         print("Failed files left as .webp -- re-run to retry.")
 
 
+# ---------------------------------------------------------------------------
+# Duplicate audit + dedup (filesystem-truth; independent of catalog.db)
+# ---------------------------------------------------------------------------
+# Keeper priority when the same image lives in several buckets: lower wins
+# (i.e. we KEEP the most-organized copy and remove the rest). This reinforces
+# --organize's layout instead of fighting it.
+_BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
+
+
+def _bucket_of(rel_path):
+    """Classify a path (relative to out_dir) into a top-level bucket name."""
+    top = str(rel_path).replace("\\", "/").split("/")[0]
+    if top == "images":
+        return "images"
+    if top == "batches":
+        return "batches"
+    if top == "unknown-date":
+        return "month"
+    if len(top) == 7 and top[4] == "-" and top[:4].isdigit():
+        return "month"
+    return "other"
+
+
+def _scan_media_files(out_dir):
+    """One walk of the tree. Yields (path, rel, bucket, media_id) for every image
+    file outside gallery/ and _duplicates/. Single source of truth for the audit."""
+    gallery_dir = out_dir / "gallery"
+    quarantine_dir = out_dir / "_duplicates"
+    for p in out_dir.rglob("*"):
+        if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
+            continue
+        if p.name.endswith(".part"):
+            continue
+        if _is_under_dir(p, gallery_dir) or _is_under_dir(p, quarantine_dir):
+            continue
+        rel = p.relative_to(out_dir)
+        yield p, rel, _bucket_of(rel), media_id_of(p)
+
+
+def _is_under_dir(path, parent):
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def audit_collection(out_dir, content=True, progress=None):
+    """Filesystem-truth duplicate audit. Returns a dict:
+        per_bucket       : {bucket: count}
+        class_a          : [ {media_id, files:[(rel,bucket,size)], keeper, losers} ]
+        class_b          : [ {sha, files:[(rel,bucket,size,media_id)], keeper, losers} ]
+        totals           : counts + reclaimable bytes
+    Class A = same media_id in >1 location (no hashing needed).
+    Class B = byte-identical content under DIFFERENT media_ids (size-bucketed hash).
+    """
+    by_mid = defaultdict(list)      # mid -> [(path, rel, bucket, size)]
+    by_size = defaultdict(list)     # size -> [(path, rel, bucket, mid)]
+    per_bucket = Counter()
+    all_files = list(_scan_media_files(out_dir))
+    total = len(all_files)
+    for i, (p, rel, bucket, mid) in enumerate(all_files):
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+        per_bucket[bucket] += 1
+        by_mid[mid].append((p, rel, bucket, size))
+        by_size[size].append((p, rel, bucket, mid))
+        if progress and (i % 500 == 0 or i + 1 == total):
+            progress(i + 1, total, 0)
+
+    def _keeper(items, key_bucket):
+        # items: list of tuples; key_bucket(item) -> bucket name. Prefer organized,
+        # then shortest path (stable), so the canonical copy is deterministic.
+        return min(items, key=lambda it: (_BUCKET_PRIORITY.get(key_bucket(it), 9),
+                                          len(str(it[1]))))
+
+    # ---- Class A: same media_id across >1 distinct bucket -------------------
+    class_a = []
+    for mid, items in by_mid.items():
+        buckets = {b for (_, _, b, _) in items}
+        if len(items) > 1 and len(buckets) > 1:
+            keeper = _keeper(items, lambda it: it[2])
+            losers = [it for it in items if it[0] != keeper[0]]
+            class_a.append({"media_id": mid, "files": items,
+                            "keeper": keeper, "losers": losers})
+
+    # ---- Class B: identical bytes, different media_id -----------------------
+    class_b = []
+    if content:
+        # Only hash within same-size groups that span >1 distinct media_id.
+        candidates = [(s, grp) for s, grp in by_size.items()
+                      if len({m for (_, _, _, m) in grp}) > 1]
+        hashed = 0
+        n_to_hash = sum(len(grp) for _, grp in candidates)
+        by_sha = defaultdict(list)
+        for s, grp in candidates:
+            for (p, rel, bucket, mid) in grp:
+                sha = _file_sha(p)
+                hashed += 1
+                if sha:
+                    by_sha[sha].append((p, rel, bucket, s, mid))
+                if progress and (hashed % 200 == 0 or hashed == n_to_hash):
+                    progress(hashed, max(n_to_hash, 1), 1)
+        for sha, items in by_sha.items():
+            mids = {m for (_, _, _, _, m) in items}
+            if len(items) > 1 and len(mids) > 1:
+                keeper = _keeper(items, lambda it: it[2])
+                losers = [it for it in items if it[0] != keeper[0]]
+                class_b.append({"sha": sha, "files": items,
+                                "keeper": keeper, "losers": losers})
+
+    reclaim_a = sum(sz for g in class_a for (_, _, _, sz) in g["losers"])
+    reclaim_b = sum(it[3] for g in class_b for it in g["losers"])
+    return {
+        "per_bucket": dict(per_bucket),
+        "class_a": class_a,
+        "class_b": class_b,
+        "totals": {
+            "files": total,
+            "class_a_groups": len(class_a),
+            "class_a_redundant": sum(len(g["losers"]) for g in class_a),
+            "class_b_groups": len(class_b),
+            "class_b_redundant": sum(len(g["losers"]) for g in class_b),
+            "reclaimable_bytes": reclaim_a + reclaim_b,
+        },
+    }
+
+
+def _fmt_bytes(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return "{:.1f} {}".format(n, unit)
+        n /= 1024
+
+
+def cmd_audit(args, out):
+    """Read-only duplicate audit. Prints a summary and writes audit_report.csv.
+    Touches nothing on disk. Independent of catalog.db."""
+    content = not getattr(args, "no_content", False)
+    print("Auditing {} (content hashing: {})...".format(
+        out, "on" if content else "off"))
+    _prog = getattr(args, "progress", None)
+    rep = audit_collection(out, content=content, progress=_prog)
+    t = rep["totals"]
+
+    print("\nFiles per bucket:")
+    for b, c in sorted(rep["per_bucket"].items(), key=lambda kv: -kv[1]):
+        print("  {:<10} {:,}".format(b, c))
+
+    print("\nClass A  - same media_id in >1 folder : {:,} groups, {:,} redundant files"
+          .format(t["class_a_groups"], t["class_a_redundant"]))
+    print("Class B  - identical bytes, diff id   : {:,} groups, {:,} redundant files"
+          .format(t["class_b_groups"], t["class_b_redundant"]))
+    print("Reclaimable if deduped                : {}".format(
+        _fmt_bytes(t["reclaimable_bytes"])))
+
+    # Write detailed CSV
+    report_path = out / "audit_report.csv"
+    with open(report_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["class", "group_key", "role", "bucket", "media_id", "size", "path"])
+        for g in rep["class_a"]:
+            kp, kr, kb, ksz = g["keeper"]
+            w.writerow(["A", g["media_id"], "keep", kb, g["media_id"], ksz, str(kr)])
+            for (_, rel, b, sz) in g["losers"]:
+                w.writerow(["A", g["media_id"], "remove", b, g["media_id"], sz, str(rel)])
+        for g in rep["class_b"]:
+            kp, kr, kb, ksz, kmid = g["keeper"]
+            w.writerow(["B", g["sha"][:12], "keep", kb, kmid, ksz, str(kr)])
+            for (_, rel, b, sz, mid) in g["losers"]:
+                w.writerow(["B", g["sha"][:12], "remove", b, mid, sz, str(rel)])
+    print("\nDetailed report -> {}".format(report_path.relative_to(out.parent)
+                                            if out.parent else report_path))
+    print("Run --dedup to act on this (quarantine by default; nothing deleted yet).")
+    return rep
+
+
+def cmd_dedup(args, out, db_path):
+    """Act on the audit: move redundant copies to _duplicates/ (default) or delete
+    them (--dedup-delete). Keeps the most-organized copy. Dry-run by default.
+    Reconciles catalog.db with what's left on disk afterward."""
+    # Dedup is filesystem-truth: it does not need a catalog to run. Reconcile is
+    # a bonus, applied only if a catalog exists.
+    try:
+        db_path = _ensure_db(out)
+        have_catalog = True
+    except PixAIError:
+        have_catalog = False
+    content = not getattr(args, "no_content", False)
+    delete = getattr(args, "dedup_delete", False)
+    apply = getattr(args, "apply", False)  # default is dry-run unless --apply
+
+    rep = audit_collection(out, content=content, progress=getattr(args, "progress", None))
+    losers = []  # (rel_path, abs_path)
+    for g in rep["class_a"]:
+        for (p, rel, b, sz) in g["losers"]:
+            losers.append((rel, p))
+    for g in rep["class_b"]:
+        for (p, rel, b, sz, mid) in g["losers"]:
+            losers.append((rel, p))
+
+    action = "DELETE" if delete else "quarantine to _duplicates/"
+    print("\nDedup plan: {:,} redundant files to {} ({})".format(
+        len(losers), action, _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
+    for rel, _ in losers[:8]:
+        print("  {}".format(rel))
+    if len(losers) > 8:
+        print("  ... and {:,} more".format(len(losers) - 8))
+
+    if not apply:
+        print("\nDry run -- nothing changed. Re-run with --apply to perform it.")
+        return rep
+
+    quarantine_root = out / "_duplicates"
+    moved = removed = failed = 0
+    _prog = getattr(args, "progress", None)
+    for i, (rel, p) in enumerate(losers):
+        try:
+            if delete:
+                p.unlink()
+                removed += 1
+            else:
+                dest = quarantine_root / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if dest.exists():
+                    dest = dest.with_name(dest.stem + "_dup" + dest.suffix)
+                p.replace(dest)
+                moved += 1
+        except OSError as e:
+            print("  failed {} ({})".format(rel, e))
+            failed += 1
+        if _prog:
+            _prog(i + 1, len(losers), 0)
+
+    if delete:
+        print("\nDeleted {:,} files, {:,} failed.".format(removed, failed))
+    else:
+        print("\nQuarantined {:,} files to {}, {:,} failed.".format(
+            moved, quarantine_root.relative_to(out.parent) if out.parent else quarantine_root,
+            failed))
+
+    if have_catalog:
+        n = reconcile_catalog_with_disk(out, db_path)
+        print("Reconciled catalog: updated {:,} filename/batch entries to match disk.".format(n))
+
+    # Auto-verify after quarantining. Dedup chose losers by media_id WITHOUT
+    # comparing bytes, so this is the only step that confirms each quarantined
+    # file truly matches a surviving keeper. Never auto-deletes -- the human does.
+    if not delete and moved:
+        print("\n--- Verifying the quarantine (confirming every moved file is "
+              "redundant) ---")
+        vr = verify_quarantine(out, progress=getattr(args, "progress", None))
+        ok = vr["safe"] + vr["meta_only"]
+        print("Verify: {:,} confirmed safe ({:,} byte-identical + {:,} metadata-only), "
+              "{:,} differ, {:,} orphan.".format(
+                  ok, vr["safe"], vr["meta_only"], len(vr["differs"]), len(vr["orphan"])))
+        if vr["differs"] or vr["orphan"]:
+            print("REVIEW NEEDED before deleting _duplicates/ -- run --verify-dupes "
+                  "to write verify_report.csv with the flagged items.")
+        else:
+            print("All quarantined files confirmed redundant -- _duplicates/ is safe "
+                  "to delete to reclaim the space.")
+    return rep
+
+
+def verify_quarantine(out_dir, restore_orphans=False, progress=None):
+    """Final-pass safety check on _duplicates/ BEFORE you delete it.
+
+    For every quarantined file, find the surviving keeper with the same media_id
+    (outside _duplicates/) and compare bytes. Classifies each as:
+      * safe    - a keeper exists AND bytes are identical -> truly redundant
+      * differs - a keeper exists but bytes DIFFER -> same media_id, different
+                  content (a naming collision the sort/backfill missed) -> REVIEW
+      * orphan  - no surviving keeper at all -> quarantining it lost the only copy
+    Optionally restores orphans back to images/. Returns a result dict.
+    """
+    quarantine_root = out_dir / "_duplicates"
+    if not quarantine_root.exists():
+        return {"safe": 0, "differs": [], "orphan": [], "total": 0}
+
+    files = [p for p in quarantine_root.rglob("*")
+             if p.is_file() and p.suffix.lower() in _IMAGE_EXTS]
+    # Index surviving keepers (everything outside _duplicates/ and gallery/) once,
+    # in a single walk, so we don't rglob the whole tree per quarantined file.
+    survivors = defaultdict(list)
+    for p, rel, bucket, mid in _scan_media_files(out_dir):
+        survivors[mid].append(p)
+
+    safe = 0
+    meta_only = 0  # bytes differ but pixels identical (e.g. embedded PNG metadata)
+    differs = []   # (quarantined_path, keeper_path) - genuinely different pixels
+    orphan = []    # quarantined_path
+    total = len(files)
+    for i, q in enumerate(files):
+        keepers = survivors.get(media_id_of(q), [])
+        if not keepers:
+            orphan.append(q)
+        elif _same_bytes(q, keepers[0]):
+            safe += 1
+        else:
+            # Bytes differ. Fall back to a pixel compare: identical pixels mean the
+            # difference is just container/metadata (the keeper has prompt text
+            # embedded), so it's still safe to delete the quarantined copy.
+            px = _same_pixels(q, keepers[0])
+            if px is True:
+                meta_only += 1
+            else:
+                differs.append((q, keepers[0]))
+        if progress and (i % 200 == 0 or i + 1 == total):
+            progress(i + 1, total, 0)
+
+    restored = 0
+    if restore_orphans and orphan:
+        images_dir = out_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        for q in orphan:
+            dest = images_dir / q.name
+            try:
+                q.replace(dest)
+                restored += 1
+            except OSError as e:
+                print("  restore failed {} ({})".format(q.name, e))
+
+    return {"safe": safe, "meta_only": meta_only, "differs": differs,
+            "orphan": orphan, "total": total, "restored": restored}
+
+
+def cmd_verify_dupes(args, out):
+    """Verify the _duplicates/ quarantine is safe to delete. Read-only unless
+    --restore-orphans is passed."""
+    restore = getattr(args, "restore_orphans", False)
+    print("Verifying quarantine in {}/_duplicates ...".format(out))
+    res = verify_quarantine(out, restore_orphans=restore,
+                            progress=getattr(args, "progress", None))
+    if res["total"] == 0:
+        print("No _duplicates/ folder (nothing quarantined yet).")
+        return res
+
+    print("\nQuarantined files checked : {:,}".format(res["total"]))
+    print("  safe - byte-identical keeper exists       : {:,}".format(res["safe"]))
+    print("  safe - pixels identical (metadata-only)   : {:,}".format(res["meta_only"]))
+    print("  DIFFERS - same id, DIFFERENT pixels       : {:,}".format(len(res["differs"])))
+    print("  ORPHAN  - no surviving keeper             : {:,}".format(len(res["orphan"])))
+
+    if res["differs"] or res["orphan"]:
+        report = out / "verify_report.csv"
+        with open(report, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["status", "quarantined_file", "surviving_keeper"])
+            for q, k in res["differs"]:
+                w.writerow(["differs", str(q.relative_to(out)), str(k.relative_to(out))])
+            for q in res["orphan"]:
+                w.writerow(["orphan", str(q.relative_to(out)), ""])
+        print("\nFlagged items written to {}".format(report.relative_to(out.parent)
+                                                     if out.parent else report))
+
+    if res.get("restored"):
+        print("Restored {:,} orphaned files to images/.".format(res["restored"]))
+
+    if not res["differs"] and not res["orphan"]:
+        print("\nAll clear: every quarantined file is byte-identical to a surviving "
+              "copy. Safe to delete _duplicates/.")
+    else:
+        print("\nDo NOT blanket-delete yet -- review the flagged items above first.")
+        if res["orphan"] and not restore:
+            print("Re-run with --restore-orphans to move orphans back to images/.")
+    return res
+
+
+def run_verify_dupes(args):
+    """GUI/CLI wrapper for quarantine verification."""
+    cmd_verify_dupes(args, Path(args.out))
+
+
+def reconcile_catalog_with_disk(out_dir, db_path):
+    """After files move/disappear, point each catalog row's filename+batch at the
+    surviving on-disk file for that media_id. Rows whose file is gone keep their
+    last-known filename but are left intact (the image may be re-downloadable)."""
+    rows = load_catalog(db_path)
+    updated = 0
+    for r in rows:
+        mid = r.get("media_id")
+        if not mid:
+            continue
+        matches = find_files_for_media_id(out_dir, mid)
+        if not matches:
+            continue
+        survivor = matches[0]
+        rel = survivor.relative_to(out_dir)
+        bucket = _bucket_of(rel)
+        new_batch = rel.parts[1] if bucket == "batches" and len(rel.parts) > 2 else (
+            "" if bucket != "batches" else r.get("batch", ""))
+        if r.get("filename") != survivor.name or r.get("batch", "") != new_batch:
+            r["filename"] = survivor.name
+            r["batch"] = new_batch
+            updated += 1
+    if updated:
+        save_catalog(db_path, rows)
+    return updated
+
+
 def cmd_organize(args, out, img_dir, db_path):
     """Reorganize already-downloaded files into batch/ and YYYY-MM/ folders using
     the catalog. Embeds prompt metadata, optionally converts, writes per-folder
@@ -753,10 +1204,25 @@ def cmd_organize(args, out, img_dir, db_path):
 
     catalog_updates = {}  # media_id -> (new filename, batch name)
     _prog = getattr(args, "progress", None)
+    deduped = 0  # redundant flat sources removed because dst already holds the same bytes
 
     for n, (src, dst, is_batch, mid, row) in enumerate(plan):
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists() and dst.resolve() != src.resolve():
+            # The organized copy already exists. Historically we left `src` in
+            # images/ here, which is exactly what produced the images/+month
+            # duplication. If src is byte-identical to the existing dst, the flat
+            # copy is pure redundancy -> remove it. If they differ, leave both
+            # untouched and report so nothing is lost.
+            if _same_bytes(src, dst):
+                try:
+                    src.unlink()
+                    deduped += 1
+                except OSError as e:
+                    print("  could not remove redundant flat copy {} ({})".format(src.name, e))
+            else:
+                print("  KEPT both (differ): {} vs existing {}".format(
+                    src.name, dst.relative_to(out)))
             skipped += 1
             final = dst
         else:
@@ -854,6 +1320,9 @@ def cmd_organize(args, out, img_dir, db_path):
         print("Updated {:,} catalog filename/batch entries.".format(len(catalog_updates)))
 
     print("\nOrganized: moved {}, already-in-place {}.".format(moved, skipped))
+    if deduped:
+        print("Removed {:,} redundant flat copies (byte-identical to the "
+              "organized version).".format(deduped))
     if args.convert:
         print("Converted to {}: {}.".format(args.convert, converted))
     print("Embedded metadata into {} images.".format(embedded))
@@ -974,6 +1443,17 @@ def run_count(args):
     if images > tasks:
         print("\nNote: image count exceeds task count because some older tasks\n"
               "produced batches of several images -- all of them get downloaded.")
+
+
+def run_audit(args):
+    """GUI/CLI wrapper: read-only duplicate audit."""
+    cmd_audit(args, Path(args.out))
+
+
+def run_dedup(args):
+    """GUI/CLI wrapper: dedup (quarantine/delete + catalog reconcile)."""
+    out = Path(args.out)
+    cmd_dedup(args, out, out / "catalog.db")
 
 
 def run_catalog_stats(args):
@@ -1522,6 +2002,26 @@ def main():
                          "for rows that lack them; also backfills url/width/height as a bonus, then exit")
     ap.add_argument("--export-csv", action="store_true",
                     help="export catalog.db to catalog.csv for interop/backup, then exit")
+    ap.add_argument("--audit", action="store_true",
+                    help="read-only duplicate audit of the whole backup folder; writes "
+                         "audit_report.csv and prints a summary, then exit. Independent of catalog.db.")
+    ap.add_argument("--dedup", action="store_true",
+                    help="act on the audit: move redundant copies to _duplicates/ (keeping the "
+                         "most-organized copy), then reconcile catalog.db. Dry-run unless --apply.")
+    ap.add_argument("--apply", action="store_true",
+                    help="with --dedup, actually perform the moves/deletes (default is dry-run)")
+    ap.add_argument("--dedup-delete", action="store_true",
+                    help="with --dedup --apply, delete redundant copies instead of quarantining them")
+    ap.add_argument("--no-content", action="store_true",
+                    help="with --audit/--dedup, skip content hashing (Class B); only do the fast "
+                         "same-media_id location dedup (Class A)")
+    ap.add_argument("--verify-dupes", action="store_true",
+                    help="final-pass safety check on _duplicates/: confirm every quarantined file "
+                         "is byte-identical to a surviving keeper before you delete. Flags orphans "
+                         "and same-id-different-bytes mismatches. Read-only unless --restore-orphans.")
+    ap.add_argument("--restore-orphans", action="store_true",
+                    help="with --verify-dupes, move any orphaned quarantined files (no surviving "
+                         "keeper) back to images/")
     args = ap.parse_args()
 
     if args.probe and args.count:
@@ -1544,6 +2044,15 @@ def main():
             export_csv(db_path, csv_path)
             print("Exported {:,} rows to {}.".format(
                 len(load_catalog(db_path)), csv_path))
+            return
+        if args.audit:
+            cmd_audit(args, out)
+            return
+        if args.dedup:
+            cmd_dedup(args, out, db_path)
+            return
+        if args.verify_dupes:
+            cmd_verify_dupes(args, out)
             return
         if args.backfill_meta:
             run_backfill_meta(args)
