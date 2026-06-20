@@ -358,35 +358,68 @@ def unique_batches(db_path):
         con.close()
 
 
+def media_id_of(path):
+    """Canonical media_id extraction (INVARIANT 1): the last underscore-delimited
+    chunk of the filename stem. Works for every naming layout the tool produces:
+    flat (`prompt_task_<mid>`), batch (`NN_<mid>`), and bare (`<mid>`)."""
+    from pathlib import Path
+    return Path(path).stem.split("_")[-1]
+
+
+def _is_under(path, parent):
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def find_files_for_media_id(out_dir, media_id, include_gallery=False):
+    """All on-disk image files whose media_id matches, anywhere under out_dir.
+
+    Single source of truth for media-id -> file resolution, shared by resume
+    (`already_downloaded`), the gallery (`find_image_file`), and the duplicate
+    audit. Matches BOTH naming layouts in one pass:
+      * prefixed   `prompt_task_<mid>.ext` / `NN_<mid>.ext`
+      * bare       `<mid>.ext`   (single-image --organize month files)
+
+    The exact `media_id_of(p) == mid` check prevents substring collisions (a
+    longer id ending in these digits). Skips `.part`, zero-byte files, and
+    gallery thumbnails (unless include_gallery=True). Returns a list of Paths.
+    """
+    mid = str(media_id)
+    gallery_dir = out_dir / "gallery"
+    matches = []
+    for p in out_dir.rglob("*{}.*".format(mid)):
+        if p.suffix.lower() not in _IMAGE_EXTS:
+            continue
+        if p.name.endswith(".part"):
+            continue
+        if media_id_of(p) != mid:
+            continue
+        if not include_gallery and _is_under(p, gallery_dir):
+            continue
+        try:
+            if not p.is_file() or p.stat().st_size == 0:
+                continue
+        except OSError:
+            continue
+        matches.append(p)
+    return matches
+
+
 def find_image_file(out_dir, media_id, filename):
-    """Locate an image file: try catalog filename first, then rglob fallbacks.
+    """Locate an image file: try catalog filename first, then media-id fallback.
 
     Excludes out_dir/gallery/ so thumbnails are never returned as full-res images.
     """
     gallery_dir = out_dir / "gallery"
-
-    def _is_gallery(p):
-        try:
-            p.relative_to(gallery_dir)
-            return True
-        except ValueError:
-            return False
-
     if filename:
         for candidate in out_dir.rglob(filename):
-            if candidate.is_file() and not _is_gallery(candidate):
+            if candidate.is_file() and not _is_under(candidate, gallery_dir):
                 return candidate
-    mid = str(media_id)
-    # prompt_taskid_mediaid.ext layout (flat / --organize)
-    for p in out_dir.rglob("*_{}.*".format(mid)):
-        if p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part") and not _is_gallery(p):
-            return p
-    # mediaid.ext layout (--organize-adv single images)
-    for ext in _IMAGE_EXTS:
-        for p in out_dir.rglob("{}{}".format(mid, ext)):
-            if p.is_file() and not _is_gallery(p):
-                return p
-    return None
+    matches = find_files_for_media_id(out_dir, media_id)
+    return matches[0] if matches else None
 
 
 def make_thumbnail(img_path, thumb_path):
