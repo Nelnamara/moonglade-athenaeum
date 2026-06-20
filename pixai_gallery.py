@@ -384,11 +384,14 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False):
       * bare       `<mid>.ext`   (single-image --organize month files)
 
     The exact `media_id_of(p) == mid` check prevents substring collisions (a
-    longer id ending in these digits). Skips `.part`, zero-byte files, and
-    gallery thumbnails (unless include_gallery=True). Returns a list of Paths.
+    longer id ending in these digits). Skips `.part`, zero-byte files, gallery
+    thumbnails (unless include_gallery=True), and quarantined files under
+    _duplicates/ (so a quarantined copy never counts as a live "survivor" and
+    resume treats it as not-present). Returns a list of Paths.
     """
     mid = str(media_id)
     gallery_dir = out_dir / "gallery"
+    quarantine_dir = out_dir / "_duplicates"
     matches = []
     for p in out_dir.rglob("*{}.*".format(mid)):
         if p.suffix.lower() not in _IMAGE_EXTS:
@@ -398,6 +401,8 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False):
         if media_id_of(p) != mid:
             continue
         if not include_gallery and _is_under(p, gallery_dir):
+            continue
+        if _is_under(p, quarantine_dir):
             continue
         try:
             if not p.is_file() or p.stat().st_size == 0:
