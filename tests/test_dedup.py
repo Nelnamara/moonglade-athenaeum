@@ -145,3 +145,44 @@ def test_dedup_apply_quarantines_loser_keeps_keeper(tmp_path):
     # catalog reconciled to point at the surviving bare filename
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert rows["111"]["filename"] == "111.webp"
+
+
+# ---------------------------------------------------------------------------
+# verify_quarantine
+# ---------------------------------------------------------------------------
+
+def test_verify_safe_when_identical_keeper_exists(tmp_path):
+    (tmp_path / "2023-10").mkdir()
+    (tmp_path / "_duplicates" / "images").mkdir(parents=True)
+    (tmp_path / "2023-10" / "111.webp").write_bytes(b"SAME")
+    (tmp_path / "_duplicates" / "images" / "p_t1_111.webp").write_bytes(b"SAME")
+    res = core.verify_quarantine(tmp_path)
+    assert res["safe"] == 1
+    assert res["differs"] == [] and res["orphan"] == []
+
+
+def test_verify_flags_orphan(tmp_path):
+    # quarantined file with NO surviving keeper anywhere
+    (tmp_path / "_duplicates" / "images").mkdir(parents=True)
+    (tmp_path / "_duplicates" / "images" / "p_t1_222.webp").write_bytes(b"LONELY")
+    res = core.verify_quarantine(tmp_path)
+    assert len(res["orphan"]) == 1
+
+
+def test_verify_restore_orphans_moves_back(tmp_path):
+    (tmp_path / "_duplicates" / "images").mkdir(parents=True)
+    (tmp_path / "_duplicates" / "images" / "p_t1_333.webp").write_bytes(b"LONELY")
+    res = core.verify_quarantine(tmp_path, restore_orphans=True)
+    assert res["restored"] == 1
+    assert (tmp_path / "images" / "p_t1_333.webp").exists()
+
+
+def test_verify_flags_genuine_pixel_difference(tmp_path):
+    # same media_id, different bytes AND non-image content (Pillow can't decode ->
+    # _same_pixels returns None -> treated as a genuine differ, not auto-safe)
+    (tmp_path / "2023-10").mkdir()
+    (tmp_path / "_duplicates" / "images").mkdir(parents=True)
+    (tmp_path / "2023-10" / "444.webp").write_bytes(b"CONTENT-A")
+    (tmp_path / "_duplicates" / "images" / "p_t1_444.webp").write_bytes(b"CONTENT-B-DIFFERENT")
+    res = core.verify_quarantine(tmp_path)
+    assert len(res["differs"]) == 1

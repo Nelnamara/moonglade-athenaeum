@@ -342,6 +342,24 @@ def _same_bytes(a, b):
     return ha is not None and ha == _file_sha(b)
 
 
+def _same_pixels(a, b):
+    """True if two images have identical pixel content, ignoring container/metadata
+    differences (e.g. a PNG with embedded prompt text vs the same image without).
+    Returns None if Pillow is unavailable or either file can't be decoded."""
+    try:
+        from PIL import Image, ImageChops
+    except ImportError:
+        return None
+    try:
+        with Image.open(a) as ia, Image.open(b) as ib:
+            if ia.size != ib.size:
+                return False
+            ra, rb = ia.convert("RGBA"), ib.convert("RGBA")
+            return ImageChops.difference(ra, rb).getbbox() is None
+    except Exception:
+        return None
+
+
 def media_ids_for(node):
     ids = []
     if node.get("mediaId"):
@@ -963,6 +981,115 @@ def cmd_dedup(args, out, db_path):
         n = reconcile_catalog_with_disk(out, db_path)
         print("Reconciled catalog: updated {:,} filename/batch entries to match disk.".format(n))
     return rep
+
+
+def verify_quarantine(out_dir, restore_orphans=False, progress=None):
+    """Final-pass safety check on _duplicates/ BEFORE you delete it.
+
+    For every quarantined file, find the surviving keeper with the same media_id
+    (outside _duplicates/) and compare bytes. Classifies each as:
+      * safe    - a keeper exists AND bytes are identical -> truly redundant
+      * differs - a keeper exists but bytes DIFFER -> same media_id, different
+                  content (a naming collision the sort/backfill missed) -> REVIEW
+      * orphan  - no surviving keeper at all -> quarantining it lost the only copy
+    Optionally restores orphans back to images/. Returns a result dict.
+    """
+    quarantine_root = out_dir / "_duplicates"
+    if not quarantine_root.exists():
+        return {"safe": 0, "differs": [], "orphan": [], "total": 0}
+
+    files = [p for p in quarantine_root.rglob("*")
+             if p.is_file() and p.suffix.lower() in _IMAGE_EXTS]
+    # Index surviving keepers (everything outside _duplicates/ and gallery/) once,
+    # in a single walk, so we don't rglob the whole tree per quarantined file.
+    survivors = defaultdict(list)
+    for p, rel, bucket, mid in _scan_media_files(out_dir):
+        survivors[mid].append(p)
+
+    safe = 0
+    meta_only = 0  # bytes differ but pixels identical (e.g. embedded PNG metadata)
+    differs = []   # (quarantined_path, keeper_path) - genuinely different pixels
+    orphan = []    # quarantined_path
+    total = len(files)
+    for i, q in enumerate(files):
+        keepers = survivors.get(media_id_of(q), [])
+        if not keepers:
+            orphan.append(q)
+        elif _same_bytes(q, keepers[0]):
+            safe += 1
+        else:
+            # Bytes differ. Fall back to a pixel compare: identical pixels mean the
+            # difference is just container/metadata (the keeper has prompt text
+            # embedded), so it's still safe to delete the quarantined copy.
+            px = _same_pixels(q, keepers[0])
+            if px is True:
+                meta_only += 1
+            else:
+                differs.append((q, keepers[0]))
+        if progress and (i % 200 == 0 or i + 1 == total):
+            progress(i + 1, total, 0)
+
+    restored = 0
+    if restore_orphans and orphan:
+        images_dir = out_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        for q in orphan:
+            dest = images_dir / q.name
+            try:
+                q.replace(dest)
+                restored += 1
+            except OSError as e:
+                print("  restore failed {} ({})".format(q.name, e))
+
+    return {"safe": safe, "meta_only": meta_only, "differs": differs,
+            "orphan": orphan, "total": total, "restored": restored}
+
+
+def cmd_verify_dupes(args, out):
+    """Verify the _duplicates/ quarantine is safe to delete. Read-only unless
+    --restore-orphans is passed."""
+    restore = getattr(args, "restore_orphans", False)
+    print("Verifying quarantine in {}/_duplicates ...".format(out))
+    res = verify_quarantine(out, restore_orphans=restore,
+                            progress=getattr(args, "progress", None))
+    if res["total"] == 0:
+        print("No _duplicates/ folder (nothing quarantined yet).")
+        return res
+
+    print("\nQuarantined files checked : {:,}".format(res["total"]))
+    print("  safe - byte-identical keeper exists       : {:,}".format(res["safe"]))
+    print("  safe - pixels identical (metadata-only)   : {:,}".format(res["meta_only"]))
+    print("  DIFFERS - same id, DIFFERENT pixels       : {:,}".format(len(res["differs"])))
+    print("  ORPHAN  - no surviving keeper             : {:,}".format(len(res["orphan"])))
+
+    if res["differs"] or res["orphan"]:
+        report = out / "verify_report.csv"
+        with open(report, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["status", "quarantined_file", "surviving_keeper"])
+            for q, k in res["differs"]:
+                w.writerow(["differs", str(q.relative_to(out)), str(k.relative_to(out))])
+            for q in res["orphan"]:
+                w.writerow(["orphan", str(q.relative_to(out)), ""])
+        print("\nFlagged items written to {}".format(report.relative_to(out.parent)
+                                                     if out.parent else report))
+
+    if res.get("restored"):
+        print("Restored {:,} orphaned files to images/.".format(res["restored"]))
+
+    if not res["differs"] and not res["orphan"]:
+        print("\nAll clear: every quarantined file is byte-identical to a surviving "
+              "copy. Safe to delete _duplicates/.")
+    else:
+        print("\nDo NOT blanket-delete yet -- review the flagged items above first.")
+        if res["orphan"] and not restore:
+            print("Re-run with --restore-orphans to move orphans back to images/.")
+    return res
+
+
+def run_verify_dupes(args):
+    """GUI/CLI wrapper for quarantine verification."""
+    cmd_verify_dupes(args, Path(args.out))
 
 
 def reconcile_catalog_with_disk(out_dir, db_path):
@@ -1870,6 +1997,13 @@ def main():
     ap.add_argument("--no-content", action="store_true",
                     help="with --audit/--dedup, skip content hashing (Class B); only do the fast "
                          "same-media_id location dedup (Class A)")
+    ap.add_argument("--verify-dupes", action="store_true",
+                    help="final-pass safety check on _duplicates/: confirm every quarantined file "
+                         "is byte-identical to a surviving keeper before you delete. Flags orphans "
+                         "and same-id-different-bytes mismatches. Read-only unless --restore-orphans.")
+    ap.add_argument("--restore-orphans", action="store_true",
+                    help="with --verify-dupes, move any orphaned quarantined files (no surviving "
+                         "keeper) back to images/")
     args = ap.parse_args()
 
     if args.probe and args.count:
@@ -1898,6 +2032,9 @@ def main():
             return
         if args.dedup:
             cmd_dedup(args, out, db_path)
+            return
+        if args.verify_dupes:
+            cmd_verify_dupes(args, out)
             return
         if args.backfill_meta:
             run_backfill_meta(args)
