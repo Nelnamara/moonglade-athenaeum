@@ -91,3 +91,27 @@ def test_page_size_limits_rows(db):
 def test_page_size_second_page(db):
     rows, total = query_catalog(db, page_size=2, page=2)
     assert len(rows) == 1 and total == 3
+
+
+# ---- rating filter + new sorts --------------------------------------------
+
+def test_rating_min_filters(tmp_path):
+    p = tmp_path / "catalog.db"
+    save_catalog(p, [
+        _row(media_id="1", filename="a_1.png", rating="5", created_at="2024-01-01"),
+        _row(media_id="2", filename="b_2.png", rating="2", created_at="2024-01-02"),
+        _row(media_id="3", filename="c_3.png", rating="",  created_at="2024-01-03"),
+    ])
+    assert query_catalog(p, rating_min=3)[1] == 1
+    assert query_catalog(p, rating_min=1)[1] == 2
+    assert query_catalog(p, rating_min=0)[1] == 3
+
+
+def test_sort_pixels_orders_by_area(tmp_path):
+    p = tmp_path / "catalog.db"
+    save_catalog(p, [
+        _row(media_id="small", filename="s_small.png", width="100", height="100"),
+        _row(media_id="big",   filename="b_big.png",   width="800", height="800"),
+    ])
+    rows, _ = query_catalog(p, sort="pixels")
+    assert rows[0]["media_id"] == "big"

@@ -227,6 +227,10 @@ _SORT_SQL = {
     "model":       "LOWER(COALESCE(NULLIF(model_name,''), NULLIF(model_id,''), '')) ASC",
     "width":       "CAST(COALESCE(NULLIF(width,''),'0')  AS INTEGER) DESC",
     "height":      "CAST(COALESCE(NULLIF(height,''),'0') AS INTEGER) DESC",
+    "pixels":      "(CAST(COALESCE(NULLIF(width,''),'0') AS INTEGER) * "
+                   "CAST(COALESCE(NULLIF(height,''),'0') AS INTEGER)) DESC",
+    "aspect":      "(CAST(COALESCE(NULLIF(width,''),'0') AS REAL) / "
+                   "NULLIF(CAST(COALESCE(NULLIF(height,''),'0') AS REAL),0)) DESC",
 }
 _DEFAULT_SORT_SQL = "created_at DESC"
 
@@ -247,10 +251,13 @@ def _like_pattern(term):
     return t if has_wild else "%" + t + "%"
 
 
-def _build_where(q, model, date_from, date_to, batch=""):
+def _build_where(q, model, date_from, date_to, batch="", rating_min=0):
     """Return (where_clause, params) for the common filter set."""
     clauses = ["filename != ''"]
     params  = []
+    if rating_min:
+        clauses.append("CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) >= ?")
+        params.append(int(rating_min))
     if q:
         # Whitespace-separated terms are ANDed; each may use * / ? wildcards.
         for term in q.split():
@@ -284,9 +291,9 @@ def get_row(db_path, media_id):
 
 
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
-                  sort="newest", page=1, page_size=100, batch=""):
+                  sort="newest", page=1, page_size=100, batch="", rating_min=0):
     """Return (rows, total) with filtering, sorting and pagination done in SQL."""
-    where, params = _build_where(q, model, date_from, date_to, batch)
+    where, params = _build_where(q, model, date_from, date_to, batch, rating_min)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     offset = (max(1, page) - 1) * page_size
     con = _connect(db_path)
@@ -303,9 +310,10 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
         con.close()
 
 
-def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest", batch=""):
+def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
+                   batch="", rating_min=0):
     """Return ordered list of media_ids matching the filter (no row data)."""
-    where, params = _build_where(q, model, date_from, date_to, batch)
+    where, params = _build_where(q, model, date_from, date_to, batch, rating_min)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     con = _connect(db_path)
     try:
@@ -557,7 +565,7 @@ def create_app(out_dir: Path):
   #sel-count { color: var(--peach); font-weight: 600; }
 
   /* Grid */
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; padding: 16px 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 200px), 1fr)); gap: 12px; padding: 16px 20px; }
   .card { background: var(--mantle); border-radius: 8px; overflow: hidden; border: 2px solid transparent; transition: border-color .15s; position: relative; cursor: pointer; }
   .card:hover { border-color: var(--surface1); }
   .card.selected { border-color: var(--lavender); }
@@ -748,6 +756,15 @@ document.addEventListener('DOMContentLoaded', function() {
     {{ date_select('to', date_to, years) }}
   </div>
   <div>
+    <label>Min rating</label><br>
+    <select name="rating_min">
+      <option value="0" {% if rating_min==0 %}selected{% endif %}>Any</option>
+      {% for r in [1,2,3,4,5] %}
+      <option value="{{ r }}" {% if rating_min==r %}selected{% endif %}>{{ '★' * r }}+</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
     <label>Per page</label><br>
     <select name="per_page">
       {% for n in per_page_opts %}
@@ -763,9 +780,16 @@ document.addEventListener('DOMContentLoaded', function() {
       <option value="rating_desc" {% if sort=='rating_desc' %}selected{% endif %}>Rating ↓</option>
       <option value="rating_asc"  {% if sort=='rating_asc' %}selected{% endif %}>Rating ↑</option>
       <option value="model"       {% if sort=='model' %}selected{% endif %}>Model name</option>
+      <option value="pixels"      {% if sort=='pixels' %}selected{% endif %}>Resolution ↓</option>
+      <option value="aspect"      {% if sort=='aspect' %}selected{% endif %}>Aspect (wide→tall)</option>
       <option value="width"       {% if sort=='width' %}selected{% endif %}>Width ↓</option>
       <option value="height"      {% if sort=='height' %}selected{% endif %}>Height ↓</option>
     </select>
+  </div>
+  <div>
+    <label>Thumb size</label><br>
+    <input type="range" id="thumb-size" min="120" max="320" step="20" value="200"
+           title="Thumbnail size" style="width:110px;vertical-align:middle">
   </div>
   <div style="align-self:flex-end">
     <button type="submit" class="btn btn-primary">Filter</button>
@@ -834,6 +858,18 @@ document.addEventListener('DOMContentLoaded', function() {
 </div>
 
 <script>
+(function(){
+  var grid = document.querySelector('.grid');
+  var slider = document.getElementById('thumb-size');
+  if (grid && slider) {
+    var saved = localStorage.getItem('gallery_thumb');
+    if (saved) { slider.value = saved; grid.style.setProperty('--thumb', saved + 'px'); }
+    slider.addEventListener('input', function(){
+      grid.style.setProperty('--thumb', slider.value + 'px');
+      localStorage.setItem('gallery_thumb', slider.value);
+    });
+  }
+})();
 function onCheck() {
   const checked = document.querySelectorAll('input[name=media_ids]:checked');
   document.getElementById('sel-count').textContent = checked.length;
@@ -962,6 +998,19 @@ document.addEventListener('DOMContentLoaded', function() {
     {% if row.url %}
     <a class="btn" href="{{ row.url }}" target="_blank">Open on PixAI CDN</a>
     {% endif %}
+    {% set _prompt = row.prompt_full or row.prompt_preview or '' %}
+    {% if _prompt %}
+    <button class="btn" id="copy-prompt-btn"
+      data-prompt="{{ _prompt|e }}" onclick="copyPrompt(this)">Copy Prompt</button>
+    {% endif %}
+    {% if row.model_name %}
+    <a class="btn" href="{{ url_for('index', model=row.model_name) }}"
+       title="Show all images from this model">Find Similar (model)</a>
+    {% endif %}
+    {% if row.batch %}
+    <a class="btn" href="{{ url_for('index', batch=row.batch) }}"
+       title="Show the rest of this batch">View Batch</a>
+    {% endif %}
     <button class="btn btn-danger"
       onclick="confirmDelete('{{ url_for('delete_one', media_id=row.media_id) }}?back={{ back|urlencode }}',
         'Permanently delete this image? This cannot be undone.')">
@@ -969,6 +1018,16 @@ document.addEventListener('DOMContentLoaded', function() {
     </button>
   </div>
 </div>
+<script>
+function copyPrompt(btn) {
+  var text = btn.getAttribute('data-prompt');
+  navigator.clipboard.writeText(text).then(function(){
+    var old = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function(){ btn.textContent = old; }, 1200);
+  });
+}
+</script>
 """)
 
     # ------------------------------------------------------------------
@@ -1018,12 +1077,17 @@ document.addEventListener('DOMContentLoaded', function() {
         if per_page not in per_page_opts:
             per_page = PAGE_SIZE
 
+        try:
+            rating_min = max(0, min(5, int(request.args.get("rating_min", 0))))
+        except ValueError:
+            rating_min = 0
+
         models  = unique_models(db_path)
         batches = unique_batches(db_path)
         years   = catalog_years(db_path)
         page_rows, total = query_catalog(
             db_path, q, model_filter, date_from, date_to, sort, page, per_page,
-            batch=batch_filter,
+            batch=batch_filter, rating_min=rating_min,
         )
         total_pages = max(1, (total + per_page - 1) // per_page)
         page = max(1, min(page, total_pages))
@@ -1044,6 +1108,7 @@ document.addEventListener('DOMContentLoaded', function() {
             date_from=date_from,
             date_to=date_to, sort=sort, models=models, batches=batches,
             years=years, per_page=per_page, per_page_opts=per_page_opts,
+            rating_min=rating_min,
             page_url=page_url, request=request,
             current_url=request.url,
         )
@@ -1073,11 +1138,15 @@ document.addEventListener('DOMContentLoaded', function() {
         def _ym(prefix, month_default):
             y = _qs1(prefix + "_year")
             return "{}-{}".format(y, _qs1(prefix + "_month") or month_default) if y else ""
+        try:
+            _rmin = max(0, min(5, int(_qs1("rating_min", "0"))))
+        except ValueError:
+            _rmin = 0
         nav_ids = list_media_ids(
             db_path,
             q=_qs1("q"), model=_qs1("model"),
             date_from=_ym("from", "01"), date_to=_ym("to", "12"),
-            sort=_qs1("sort", "newest"), batch=_qs1("batch"),
+            sort=_qs1("sort", "newest"), batch=_qs1("batch"), rating_min=_rmin,
         )
         try:
             idx = nav_ids.index(media_id)
