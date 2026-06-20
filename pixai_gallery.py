@@ -641,6 +641,7 @@ def create_app(out_dir: Path):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PixAI Gallery</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
 <style>
   :root {
     --base:    #1e1e2e; --mantle:  #181825; --surface0:#313244;
@@ -648,13 +649,18 @@ def create_app(out_dir: Path):
     --subtext: #a6adc8; --lavender:#b4befe; --mauve:   #cba6f7;
     --red:     #f38ba8; --peach:   #fab387; --green:   #a6e3a1;
     --blue:    #89b4fa; --sapphire:#74c7ec;
+    /* Accent system: purple leads, gold is a rare highlight only. */
+    --accent:  #cba6f7; --accent-soft:#b4befe; --gold: #d4af37;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--base); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
 
   /* Header */
-  header { background: var(--mantle); padding: 12px 20px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--surface0); position: sticky; top: 0; z-index: 100; }
-  header h1 { font-size: 18px; color: var(--lavender); flex-shrink: 0; }
+  header { background: var(--mantle); padding: 12px 20px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--surface0); position: sticky; top: 0; z-index: 100; }
+  .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .brand .mark { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: var(--base); font-weight: 700; font-size: 15px; position: relative; }
+  .brand .mark::after { content: ''; position: absolute; top: 5px; right: 5px; width: 4px; height: 4px; border-radius: 50%; background: var(--gold); }
+  header h1 { font-size: 18px; color: var(--text); flex-shrink: 0; font-weight: 600; border-bottom: 2px solid var(--gold); padding-bottom: 1px; line-height: 1.1; }
   .header-stats { color: var(--subtext); font-size: 12px; }
 
   /* Filters */
@@ -670,10 +676,31 @@ def create_app(out_dir: Path):
   .btn-primary { background: var(--lavender); color: var(--base); border-color: var(--lavender); font-weight: 600; }
   .btn-primary:hover { opacity: 0.85; }
 
+  /* Active-filter chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px 0; align-items: center; }
+  .chips .chips-label { color: var(--overlay0); font-size: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface0); border: 1px solid var(--surface1); border-left: 3px solid var(--gold); border-radius: 4px; padding: 3px 8px; font-size: 12px; color: var(--text); }
+  .chip .k { color: var(--subtext); }
+  .chip a { color: var(--overlay0); text-decoration: none; font-weight: 700; padding-left: 2px; }
+  .chip a:hover { color: var(--red); }
+  .chips .clear-all { color: var(--accent-soft); font-size: 12px; text-decoration: none; }
+  .chips .clear-all:hover { text-decoration: underline; }
+
   /* Bulk toolbar */
   .bulk-bar { background: var(--surface0); padding: 8px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--surface1); min-height: 40px; }
   .bulk-bar span { color: var(--subtext); font-size: 13px; }
-  #sel-count { color: var(--peach); font-weight: 600; }
+  #sel-count { color: var(--gold); font-weight: 600; }
+
+  /* Thumbnail loading skeleton */
+  @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
+  .card img { background-image: linear-gradient(90deg, var(--surface0) 0px, var(--surface1) 100px, var(--surface0) 200px); background-size: 400px 100%; animation: shimmer 1.2s infinite linear; }
+  .card img.loaded { animation: none; background: var(--surface0); }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 64px 20px; color: var(--subtext); }
+  .empty .big { font-size: 40px; margin-bottom: 8px; color: var(--overlay0); }
+  .empty a { color: var(--accent-soft); text-decoration: none; }
+  .empty a:hover { text-decoration: underline; }
 
   /* Grid */
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 200px), 1fr)); gap: 12px; padding: 16px 20px; }
@@ -829,8 +856,8 @@ document.addEventListener('DOMContentLoaded', function() {
   </select>
 {% endmacro %}
 <header>
-  <h1>PixAI Gallery</h1>
-  <span class="header-stats">{{ total }} images</span>
+  <div class="brand"><span class="mark">P</span><h1>PixAI Gallery</h1></div>
+  <span class="header-stats">{{ '{:,}'.format(total) }} images</span>
   <a class="back-link" href="{{ url_for('health') }}" style="margin-left:auto;">Collection health →</a>
 </header>
 
@@ -910,6 +937,17 @@ document.addEventListener('DOMContentLoaded', function() {
 </div>
 </form>
 
+{% if chips %}
+<div class="chips">
+  <span class="chips-label">Active:</span>
+  {% for c in chips %}
+  <span class="chip"><span class="k">{{ c.k }}:</span> {{ c.v }}
+    <a href="{{ c.url }}" title="Remove this filter">×</a></span>
+  {% endfor %}
+  <a class="clear-all" href="{{ url_for('index') }}">Clear all</a>
+</div>
+{% endif %}
+
 <div class="bulk-bar">
   <button class="btn" onclick="selectAll()">Select All</button>
   <button class="btn" onclick="clearAll()">Clear</button>
@@ -930,6 +968,7 @@ document.addEventListener('DOMContentLoaded', function() {
       <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"></a>
       {% if row._has_thumb %}
       <img src="{{ url_for('thumb', media_id=row.media_id) }}" loading="lazy"
+           onload="this.classList.add('loaded')"
            alt="{{ row.prompt_preview[:60] }}">
       {% else %}
       <div class="no-thumb">no preview</div>
@@ -946,7 +985,11 @@ document.addEventListener('DOMContentLoaded', function() {
 </form>
 
 {% if not rows %}
-<div class="empty">No images match your filters.</div>
+<div class="empty">
+  <div class="big">⌕</div>
+  <div>No images match your filters.</div>
+  {% if chips %}<div style="margin-top:8px;font-size:13px;">Try <a href="{{ url_for('index') }}">clearing all filters</a> or widening the date range.</div>{% endif %}
+</div>
 {% endif %}
 
 <div class="pagination">
@@ -1150,8 +1193,8 @@ function copyPrompt(btn) {
 </div>
 {% endmacro %}
 <header>
-  <h1>Collection Health</h1>
-  <a class="back-link" href="{{ url_for('index') }}">↑ Back to gallery</a>
+  <div class="brand"><span class="mark">P</span><h1>Collection Health</h1></div>
+  <a class="back-link" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 
 <div style="padding:8px 20px 24px;max-width:1100px;">
@@ -1287,8 +1330,32 @@ function copyPrompt(btn) {
             args["page"] = p
             return url_for("index", **args)
 
+        def _without(*keys):
+            args = {k: v for k, v in request.args.items() if k not in keys}
+            args.pop("page", None)
+            return url_for("index", **args)
+
+        # Active-filter chips (label + a URL that removes just that filter).
+        chips = []
+        if q:
+            chips.append({"k": "search", "v": q, "url": _without("q")})
+        if model_filter:
+            chips.append({"k": "model", "v": model_filter, "url": _without("model")})
+        if batch_filter:
+            chips.append({"k": "batch", "v": batch_filter, "url": _without("batch")})
+        if rating_min:
+            chips.append({"k": "rating", "v": "★" * rating_min + "+",
+                          "url": _without("rating_min")})
+        if date_from:
+            chips.append({"k": "from", "v": date_from,
+                          "url": _without("from_year", "from_month")})
+        if date_to:
+            chips.append({"k": "to", "v": date_to,
+                          "url": _without("to_year", "to_month")})
+
         return render_template_string(
             INDEX_HTML,
+            chips=chips,
             rows=page_rows, total=total, page=page,
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
