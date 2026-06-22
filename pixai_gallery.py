@@ -26,7 +26,7 @@ from pathlib import Path
 
 try:
     from flask import (Flask, redirect, render_template_string, request,
-                       send_from_directory, url_for)
+                       send_file, send_from_directory, url_for)
 except ImportError:
     sys.exit("Flask is required for the gallery server.\n"
              "Install it with:  pip install flask")
@@ -725,6 +725,24 @@ def create_app(out_dir: Path):
   .card { background: var(--mantle); border-radius: 8px; overflow: hidden; border: 2px solid transparent; transition: border-color .15s; position: relative; cursor: pointer; }
   .card:hover { border-color: var(--surface1); }
   .card.selected { border-color: var(--purple-bright); box-shadow: 0 0 0 1px var(--purple-bright); }
+  .card.kbd-focus { border-color: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+  /* Lightbox */
+  .lb { display: none; position: fixed; inset: 0; z-index: 300; background: rgba(8,6,18,.92);
+        flex-direction: column; align-items: center; justify-content: center; }
+  .lb.open { display: flex; }
+  .lb-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center;
+            justify-content: space-between; gap: 12px; padding: 10px 16px; background: rgba(10,8,24,.6); }
+  #lb-caption { color: var(--subtext); font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; max-width: 60%; }
+  .lb-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  #lb-img { max-width: 94vw; max-height: 86vh; object-fit: contain; border-radius: 6px; }
+  .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(10,8,24,.5);
+            color: var(--text); border: 1px solid var(--surface1); border-radius: 8px; font-size: 28px;
+            line-height: 1; padding: 10px 16px; cursor: pointer; }
+  .lb-nav:hover { background: var(--surface0); }
+  .lb-prev { left: 14px; } .lb-next { right: 14px; }
+  @media (max-width: 680px) { .lb-nav { padding: 8px 12px; font-size: 22px; } #lb-caption { max-width: 40%; } }
   .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--surface0); }
   .card .no-thumb { width: 100%; aspect-ratio: 1; background: var(--surface0); display: flex; align-items: center; justify-content: center; color: var(--overlay0); font-size: 11px; }
   .card .meta { padding: 6px 8px; }
@@ -969,23 +987,27 @@ document.addEventListener('DOMContentLoaded', function() {
 {% endif %}
 
 <div class="bulk-bar">
-  <button class="btn" onclick="selectAll()">Select All</button>
+  <button class="btn" onclick="selectAll()">Select All (page)</button>
   <button class="btn" onclick="clearAll()">Clear</button>
   <span><span id="sel-count">0</span> selected</span>
+  <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
   <button class="btn btn-danger" id="bulk-del-btn" style="display:none"
     onclick="confirmBulkDelete()">Delete Selected</button>
+  <span style="margin-left:auto;color:var(--overlay0);font-size:12px;">tip: click an image to open the lightbox · arrow keys to browse · F for slideshow</span>
 </div>
 
 <form id="bulk-form" method="post" action="/delete-bulk">
   <input type="hidden" name="back" value="{{ request.url }}">
   <div class="grid">
     {% for row in rows %}
-    <div class="card" id="card-{{ row.media_id }}">
+    <div class="card" id="card-{{ row.media_id }}" data-mid="{{ row.media_id }}"
+         data-prompt="{{ (row.prompt_preview or '')|e }}">
       <div class="cb-wrap">
         <input type="checkbox" name="media_ids" value="{{ row.media_id }}"
                onchange="onCheck()" onclick="event.stopPropagation()">
       </div>
-      <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"></a>
+      <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"
+         data-idx="{{ loop.index0 }}" onclick="return openLightbox(event, {{ loop.index0 }})"></a>
       {% if row._has_thumb %}
       <img src="{{ url_for('thumb', media_id=row.media_id) }}" loading="lazy"
            decoding="async" onload="this.classList.add('loaded')"
@@ -1003,6 +1025,20 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endfor %}
   </div>
 </form>
+
+<div id="lightbox" class="lb" onclick="if(event.target===this)closeLightbox()">
+  <div class="lb-bar">
+    <span id="lb-caption"></span>
+    <span class="lb-actions">
+      <a id="lb-details" class="btn" href="#">Details</a>
+      <button class="btn" id="lb-play" onclick="toggleSlideshow()">▶ Slideshow</button>
+      <button class="btn" onclick="closeLightbox()">✕ Close</button>
+    </span>
+  </div>
+  <button class="lb-nav lb-prev" onclick="lbStep(-1)" aria-label="Previous">&#8249;</button>
+  <img id="lb-img" alt="">
+  <button class="lb-nav lb-next" onclick="lbStep(1)" aria-label="Next">&#8250;</button>
+</div>
 
 {% if not rows %}
 <div class="empty">
@@ -1058,32 +1094,131 @@ function toggleFilters() {
     });
   }
 })();
-function onCheck() {
-  const checked = document.querySelectorAll('input[name=media_ids]:checked');
-  document.getElementById('sel-count').textContent = checked.length;
-  document.getElementById('bulk-del-btn').style.display = checked.length ? 'inline-block' : 'none';
-  checked.forEach(cb => cb.closest('.card').classList.add('selected'));
-  document.querySelectorAll('input[name=media_ids]:not(:checked)').forEach(cb => {
-    cb.closest('.card').classList.remove('selected');
+/* ---- Cross-page selection (persisted in localStorage) ---- */
+function selGet() { try { return new Set(JSON.parse(localStorage.getItem('gallery_sel') || '[]')); } catch(e) { return new Set(); } }
+function selSave(s) { localStorage.setItem('gallery_sel', JSON.stringify([...s])); }
+function refreshSelUI() {
+  var sel = selGet();
+  document.querySelectorAll('input[name=media_ids]').forEach(function(cb){
+    var on = sel.has(cb.value);
+    cb.checked = on;
+    cb.closest('.card').classList.toggle('selected', on);
   });
+  document.getElementById('sel-count').textContent = sel.size;
+  document.getElementById('bulk-del-btn').style.display = sel.size ? 'inline-block' : 'none';
+  document.getElementById('bulk-zip-btn').style.display = sel.size ? 'inline-block' : 'none';
+}
+function onCheck() {
+  var sel = selGet();
+  document.querySelectorAll('input[name=media_ids]').forEach(function(cb){
+    if (cb.checked) sel.add(cb.value); else sel.delete(cb.value);
+  });
+  selSave(sel); refreshSelUI();
 }
 function selectAll() {
-  document.querySelectorAll('input[name=media_ids]').forEach(cb => { cb.checked = true; });
-  onCheck();
+  var sel = selGet();
+  document.querySelectorAll('input[name=media_ids]').forEach(function(cb){ sel.add(cb.value); });
+  selSave(sel); refreshSelUI();
 }
-function clearAll() {
-  document.querySelectorAll('input[name=media_ids]').forEach(cb => { cb.checked = false; });
-  onCheck();
+function clearAll() { selSave(new Set()); refreshSelUI(); }
+function downloadZip() {
+  var sel = [...selGet()];
+  if (!sel.length) return;
+  var f = document.createElement('form');
+  f.method = 'post'; f.action = '/export-zip';
+  sel.forEach(function(mid){
+    var i = document.createElement('input');
+    i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; f.appendChild(i);
+  });
+  document.body.appendChild(f); f.submit(); f.remove();
 }
 function confirmBulkDelete() {
-  const n = document.querySelectorAll('input[name=media_ids]:checked').length;
-  confirmDelete('/delete-bulk', 'Permanently delete ' + n + ' image' + (n !== 1 ? 's' : '') + '? This cannot be undone.');
+  var ids = [...selGet()];
+  if (!ids.length) return;
+  confirmDelete('/delete-bulk', 'Permanently delete ' + ids.length + ' image' + (ids.length !== 1 ? 's' : '') + '? This cannot be undone.');
   document.getElementById('del-modal-form').onsubmit = function() {
-    document.getElementById('bulk-form').submit();
-    return false;
+    var bf = document.getElementById('bulk-form');
+    // ensure all cross-page selections are submitted, not just this page's
+    ids.forEach(function(mid){
+      if (!bf.querySelector('input[name=media_ids][value="' + mid + '"]')) {
+        var i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; bf.appendChild(i);
+      }
+    });
+    localStorage.removeItem('gallery_sel');
+    bf.submit(); return false;
   };
   document.getElementById('del-modal-form').action = '#';
 }
+
+/* ---- Lightbox + keyboard navigation ---- */
+var lbCards = [], lbIdx = -1, lbTimer = null;
+function lbUrl(mid) { return '/full/' + mid; }
+function openLightbox(ev, idx) {
+  if (ev) { if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return true; ev.preventDefault(); }
+  lbCards = Array.from(document.querySelectorAll('.card'));
+  if (!lbCards.length) return false;
+  lbIdx = idx;
+  lbShow();
+  document.getElementById('lightbox').classList.add('open');
+  return false;
+}
+function lbShow() {
+  var card = lbCards[lbIdx]; if (!card) return;
+  var mid = card.dataset.mid;
+  document.getElementById('lb-img').src = lbUrl(mid);
+  document.getElementById('lb-caption').textContent =
+    (lbIdx + 1) + ' / ' + lbCards.length + '   ' + (card.dataset.prompt || '');
+  document.getElementById('lb-details').href = '/image/' + mid + '?back=' + encodeURIComponent(location.href);
+}
+function lbStep(d) {
+  if (!lbCards.length) return;
+  lbIdx = (lbIdx + d + lbCards.length) % lbCards.length;
+  lbShow();
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  stopSlideshow();
+}
+function toggleSlideshow() { lbTimer ? stopSlideshow() : startSlideshow(); }
+function startSlideshow() {
+  lbTimer = setInterval(function(){ lbStep(1); }, 3000);
+  document.getElementById('lb-play').textContent = '❚❚ Pause';
+}
+function stopSlideshow() {
+  if (lbTimer) { clearInterval(lbTimer); lbTimer = null; }
+  var b = document.getElementById('lb-play'); if (b) b.textContent = '▶ Slideshow';
+}
+var kbdIdx = -1;
+function kbdFocus(i) {
+  var cards = document.querySelectorAll('.card'); if (!cards.length) return;
+  if (kbdIdx >= 0 && cards[kbdIdx]) cards[kbdIdx].classList.remove('kbd-focus');
+  kbdIdx = Math.max(0, Math.min(i, cards.length - 1));
+  cards[kbdIdx].classList.add('kbd-focus');
+  cards[kbdIdx].scrollIntoView({block: 'nearest'});
+}
+function gridCols() {
+  var g = document.querySelector('.grid'); if (!g) return 1;
+  return getComputedStyle(g).gridTemplateColumns.split(' ').length;
+}
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  var open = document.getElementById('lightbox').classList.contains('open');
+  if (open) {
+    if (e.key === 'ArrowRight') { lbStep(1); }
+    else if (e.key === 'ArrowLeft') { lbStep(-1); }
+    else if (e.key === 'Escape') { closeLightbox(); }
+    else if (e.key === 'f' || e.key === 'F' || e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
+    return;
+  }
+  var cols = gridCols();
+  if (e.key === 'ArrowRight') { kbdFocus(kbdIdx + 1); }
+  else if (e.key === 'ArrowLeft') { kbdFocus(kbdIdx - 1); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); kbdFocus(kbdIdx < 0 ? 0 : kbdIdx + cols); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); kbdFocus(kbdIdx - cols); }
+  else if (e.key === 'Enter' && kbdIdx >= 0) { openLightbox(null, kbdIdx); }
+});
+document.addEventListener('DOMContentLoaded', refreshSelUI);
 </script>
 """)
 
@@ -1510,6 +1645,48 @@ function copyPrompt(btn) {
         resp = send_from_directory(str(out_dir), rel, max_age=31536000)
         resp.headers["Cache-Control"] = _IMMUTABLE
         return resp
+
+    @app.route("/full/<media_id>")
+    def full_image(media_id):
+        # Resolve a media_id to its full-res file on the fly (used by the
+        # lightbox so the index page doesn't precompute 250 image paths).
+        row = get_row(db_path, media_id)
+        p = find_image_file(out_dir, media_id, row.get("filename") if row else "")
+        if not p or not p.exists():
+            return "Not found", 404
+        resp = send_from_directory(str(p.parent), p.name, max_age=31536000)
+        resp.headers["Cache-Control"] = _IMMUTABLE
+        return resp
+
+    @app.route("/export-zip", methods=["POST"])
+    def export_zip():
+        # Stream a ZIP of the selected images' full-res files. Stored (no
+        # recompression) since images are already compressed.
+        import io
+        import zipfile
+        ids = request.form.getlist("media_ids")
+        mem = io.BytesIO()
+        n = 0
+        with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
+            seen_names = set()
+            for mid in ids[:2000]:  # safety cap
+                row = get_row(db_path, mid)
+                if not row:
+                    continue
+                p = find_image_file(out_dir, mid, row.get("filename"))
+                if not p or not p.exists():
+                    continue
+                name = p.name
+                if name in seen_names:
+                    name = "{}_{}".format(mid, p.name)
+                seen_names.add(name)
+                z.write(p, arcname=name)
+                n += 1
+        if not n:
+            return "No matching images found.", 404
+        mem.seek(0)
+        return send_file(mem, mimetype="application/zip", as_attachment=True,
+                         download_name="pixai_selection_{}.zip".format(n))
 
     @app.after_request
     def _gzip_html(resp):

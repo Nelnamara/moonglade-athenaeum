@@ -139,6 +139,28 @@ def test_collection_health_counts_and_missing(tmp_path):
     assert h["per_bucket"].get("month") == 1
 
 
+def test_full_image_and_export_zip_routes(tmp_path):
+    import io
+    import zipfile
+    from pixai_gallery import create_app
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_row(media_id="111", filename="a_111.png", prompt_preview="p")])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a_111.png").write_bytes(b"\x89PNG\r\n\x1a\nfakeimage")
+    client = create_app(tmp_path).test_client()
+
+    r = client.get("/full/111")
+    assert r.status_code == 200
+    assert r.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+    assert client.get("/full/nope").status_code == 404
+
+    z = client.post("/export-zip", data={"media_ids": "111"})
+    assert z.status_code == 200 and z.headers["Content-Type"] == "application/zip"
+    names = zipfile.ZipFile(io.BytesIO(z.data)).namelist()
+    assert names == ["a_111.png"]
+    assert client.post("/export-zip", data={"media_ids": "ghost"}).status_code == 404
+
+
 def test_collection_health_detects_duplicate(tmp_path):
     db = tmp_path / "catalog.db"
     init_db(db)
