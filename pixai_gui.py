@@ -553,6 +553,14 @@ class DownloadTab(QWidget):
         r6.addStretch()
         g.addLayout(r6)
 
+        # Incremental update row
+        r7 = QHBoxLayout()
+        self.update_mode = QCheckBox("Update mode — stop early once new items are caught up  (--update, faster follow-ups)")
+        self.update_mode.setChecked(settings.get("update_mode", False))
+        r7.addWidget(self.update_mode)
+        r7.addStretch()
+        g.addLayout(r7)
+
         # Buttons
         self.btn_start = QPushButton("▶  Start Download")
         self.btn_start.setObjectName("btn_start")
@@ -618,6 +626,8 @@ class DownloadTab(QWidget):
             keep_webp=self.keep_webp.isChecked(),
             collect_only=self.collect_only.isChecked(),
             full_meta=self.full_meta.isChecked(),
+            update=self.update_mode.isChecked(),
+            update_grace=2,
             count_page_size=5000,
         )
 
@@ -703,6 +713,7 @@ class DownloadTab(QWidget):
             "keep_webp":    self.keep_webp.isChecked(),
             "full_meta":    self.full_meta.isChecked(),
             "collect_only": self.collect_only.isChecked(),
+            "update_mode":  self.update_mode.isChecked(),
         }
 
 
