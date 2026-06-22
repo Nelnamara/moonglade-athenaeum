@@ -1699,46 +1699,57 @@ def run_download(args, progress=None):
     if not getattr(args, "organize_adv_live", False):
         img_dir.mkdir(parents=True, exist_ok=True)
 
-    total_images = _quick_count(session)
-
-    # ONE tree walk at startup: seed the progress count AND build the on-disk
-    # media_id index. Resume then becomes an O(1) dict lookup instead of an
-    # O(whole-tree) rglob per media_id -- the latter made follow-up runs scale
-    # quadratically with collection size (the "follow-up feels slower" problem).
-    # Excludes gallery/ thumbnails and _duplicates/ quarantine, matching
-    # find_files_for_media_id semantics.
+    # ONE fast tree walk at startup (os.scandir, ~free stat() on Windows): seed
+    # the progress count AND build the on-disk media_id index. Resume is then an
+    # O(1) dict lookup instead of an O(whole-tree) rglob per media_id -- the
+    # latter made follow-up runs scale quadratically with collection size.
+    # Prunes gallery/ thumbnails and _duplicates/ quarantine.
     already_done = 0
     disk_bytes = 0
     on_disk_by_mid = {}   # media_id -> Path of an existing full-res image
-    gallery_dir = out / "gallery"
-    quarantine_dir = out / "_duplicates"
 
-    def _excluded(p):
-        for parent in (gallery_dir, quarantine_dir):
+    def _iter_image_entries(root):
+        skip_dirs = {"gallery", "_duplicates"}
+        stack = [str(root)]
+        while stack:
             try:
-                p.relative_to(parent)
-                return True
-            except ValueError:
-                pass
-        return False
+                with os.scandir(stack.pop()) as it:
+                    for e in it:
+                        if e.is_dir(follow_symlinks=False):
+                            if e.name not in skip_dirs:
+                                stack.append(e.path)
+                        elif e.is_file(follow_symlinks=False):
+                            yield e
+            except OSError:
+                continue
 
     if out.exists():
-        for p in out.rglob("*"):
-            if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS:
-                continue
-            if p.name.endswith(".part") or _excluded(p):
+        for e in _iter_image_entries(out):
+            name = e.name
+            if name.endswith(".part") or os.path.splitext(name)[1].lower() not in _IMAGE_EXTS:
                 continue
             already_done += 1
             try:
-                disk_bytes += p.stat().st_size
+                disk_bytes += e.stat().st_size
             except OSError:
                 pass
-            on_disk_by_mid.setdefault(media_id_of(p), p)
+            on_disk_by_mid.setdefault(media_id_of(name), Path(e.path))
     processed = already_done
 
     if already_done:
         print("Resuming: {} image files already on disk ({}).\n".format(
             already_done, _format_size(disk_bytes)))
+
+    # Progress denominator: avoid a full-history NETWORK pre-count on every run.
+    # For a populated library the catalog size is an instant, good-enough estimate
+    # (the progress bar already tolerates over/under). Only walk the API to count
+    # on a fresh library (empty catalog) or when the user asks for --accurate-count.
+    if getattr(args, "accurate_count", False) or not known:
+        total_images = _quick_count(session)
+    else:
+        total_images = max(already_done, len(known))
+        print("Library size (catalog estimate): ~{} images "
+              "(use --accurate-count for an exact API count)\n".format(total_images))
 
     def _tick():
         nonlocal processed
@@ -1997,6 +2008,9 @@ def main():
     ap.add_argument("--update-grace", type=int, default=2,
                     help="with --update, number of consecutive all-on-disk pages before "
                          "stopping (default 2; raise if your history has gaps)")
+    ap.add_argument("--accurate-count", action="store_true",
+                    help="walk the whole API to count library size for the progress bar "
+                         "(slow). Default uses the catalog size as a fast estimate.")
     ap.add_argument("--delay", type=float, default=0.4,
                     help="seconds to wait between API requests (default: 0.4)")
     ap.add_argument("--variant", default=None,

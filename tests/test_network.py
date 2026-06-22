@@ -298,3 +298,21 @@ def test_update_mode_stops_early(tmp_path, mocker):
     core.run_download(_dl_args(tmp_path, update=True, update_grace=1))
 
     assert gql.call_count == 2  # page3 never requested
+
+
+def test_populated_catalog_skips_network_count(tmp_path, mocker):
+    # With a populated catalog, the progress total comes from the catalog size --
+    # no full-history _quick_count network walk.
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
+                      {"media_id": "old", "filename": "x_old.webp"}])
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
+    _patch_download_layer(mocker)
+    qc = mocker.patch.object(core, "_quick_count", return_value=999)
+    mocker.patch.object(core, "gql", side_effect=[_page("old", False)])
+
+    core.run_download(_dl_args(tmp_path, update=True, update_grace=1))
+
+    assert qc.call_count == 0  # catalog estimate used, no network pre-count

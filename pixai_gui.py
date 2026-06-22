@@ -628,6 +628,7 @@ class DownloadTab(QWidget):
             full_meta=self.full_meta.isChecked(),
             update=self.update_mode.isChecked(),
             update_grace=2,
+            accurate_count=False,
             count_page_size=5000,
         )
 
