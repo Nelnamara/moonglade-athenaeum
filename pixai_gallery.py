@@ -530,6 +530,9 @@ def collection_health(out_dir, db_path):
             "SELECT art_tags FROM catalog WHERE COALESCE(art_tags,'') != ''").fetchall()
         lora_rows = con.execute(
             "SELECT loras FROM catalog WHERE COALESCE(loras,'') != ''").fetchall()
+        prompt_rows = con.execute(
+            "SELECT prompt_preview FROM catalog WHERE COALESCE(prompt_preview,'') != ''"
+        ).fetchall()
         # catalog rows that claim a file but whose media_id isn't on disk
         cat_ids = [r[0] for r in con.execute(
             "SELECT media_id FROM catalog WHERE filename != ''").fetchall()]
@@ -551,6 +554,19 @@ def collection_health(out_dir, db_path):
             if name:
                 lora_counter[name] += 1
     top_loras = lora_counter.most_common(10)
+
+    # Prompt word-cloud: most common meaningful words across prompt previews.
+    import re as _re
+    stop = {"the", "and", "a", "an", "of", "with", "in", "on", "at", "to", "for",
+            "is", "by", "as", "or", "from", "best", "quality", "masterpiece",
+            "highres", "detailed", "very", "high", "score", "up", "1girl", "1boy",
+            "solo", "looking", "viewer"}
+    word_counter = Counter()
+    for (pp,) in prompt_rows:
+        for w in _re.findall(r"[a-z][a-z']{2,}", (pp or "").lower()):
+            if w not in stop:
+                word_counter[w] += 1
+    top_words = word_counter.most_common(40)
 
     missing = sum(1 for mid in cat_ids if mid and mid not in on_disk_ids)
 
@@ -574,6 +590,7 @@ def collection_health(out_dir, db_path):
         "total_likes": total_likes,
         "top_tags": top_tags,
         "top_loras": top_loras,
+        "top_words": top_words,
     }
 
 
@@ -1095,6 +1112,9 @@ document.addEventListener('DOMContentLoaded', function() {
   <span><span id="sel-count">0</span> selected</span>
   <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
   <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
+  <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
+          title="Saved views"><option value="">Saved views…</option></select>
+  <button class="btn" onclick="savePreset()" title="Save current filters as a named view">Save view</button>
   <button class="btn btn-danger" id="bulk-del-btn" style="display:none"
     onclick="confirmBulkDelete()">Delete Selected</button>
   <span style="margin-left:auto;color:var(--overlay0);font-size:12px;">tip: click an image to open the lightbox · arrow keys to browse · F for slideshow</span>
@@ -1191,6 +1211,26 @@ function toggleBlur() {
   var on = localStorage.getItem('gallery_privacy_blur') === '1';
   localStorage.setItem('gallery_privacy_blur', on ? '' : '1');
   applyBlur();
+}
+function presetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
+function refreshPresets() {
+  var s = document.getElementById('preset-select'); if (!s) return;
+  var p = presetsGet();
+  s.innerHTML = '<option value="">Saved views…</option>';
+  Object.keys(p).forEach(function(n){ var o = document.createElement('option'); o.value = n; o.textContent = n; s.appendChild(o); });
+}
+function savePreset() {
+  var n = prompt('Name this view (the current filters):'); if (!n) return;
+  var p = presetsGet(); p[n] = location.search || '?';
+  localStorage.setItem('gallery_presets', JSON.stringify(p)); refreshPresets();
+}
+function loadPreset(n) {
+  if (!n) return;
+  if (n.charAt(0) === '✕') { // not used; reserved
+    return;
+  }
+  var p = presetsGet();
+  if (p[n] !== undefined) location.href = '/' + p[n];
 }
 (function(){
   // On mobile, auto-open the filter bar if any filter is active so the user sees
@@ -1338,7 +1378,7 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'Enter' && kbdIdx >= 0) { openLightbox(null, kbdIdx); }
 });
 document.addEventListener('DOMContentLoaded', function(){
-  refreshSelUI(); applyBlur();
+  refreshSelUI(); applyBlur(); refreshPresets();
   // Lightbox touch: swipe left/right to navigate, double-tap to zoom 2x.
   var im = document.getElementById('lb-img');
   if (im) {
@@ -1571,6 +1611,17 @@ function copyPrompt(btn) {
     <a href="{{ url_for('index', tag=name) }}"
        style="display:inline-flex;align-items:center;gap:6px;background:var(--mantle);border:0.5px solid var(--surface1);border-left:3px solid var(--gold);border-radius:4px;padding:4px 10px;font-size:12px;color:var(--text);text-decoration:none;">
       {{ name }} <span style="color:var(--subtext);">{{ c }}</span></a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if h.top_words %}
+  <h2 style="margin:28px 0 10px;font-size:16px;">Prompt word cloud</h2>
+  {% set wmax = h.top_words[0][1] %}
+  <div style="display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;line-height:1.6;">
+    {% for word, c in h.top_words %}
+    <a href="{{ url_for('index', q=word) }}" title="{{ c }} images"
+       style="text-decoration:none;color:var(--lavender);font-size:{{ (12 + (16 * c / wmax))|round|int }}px;">{{ word }}</a>
     {% endfor %}
   </div>
   {% endif %}
