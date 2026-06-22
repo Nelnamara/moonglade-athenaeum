@@ -1701,16 +1701,39 @@ def run_download(args, progress=None):
 
     total_images = _quick_count(session)
 
-    # Seed progress by counting image files already on disk. Works for flat,
-    # --organize-adv, and --organize-adv-live since rglob finds files in
-    # batches/ and YYYY-MM/ equally.
+    # ONE tree walk at startup: seed the progress count AND build the on-disk
+    # media_id index. Resume then becomes an O(1) dict lookup instead of an
+    # O(whole-tree) rglob per media_id -- the latter made follow-up runs scale
+    # quadratically with collection size (the "follow-up feels slower" problem).
+    # Excludes gallery/ thumbnails and _duplicates/ quarantine, matching
+    # find_files_for_media_id semantics.
     already_done = 0
     disk_bytes = 0
+    on_disk_by_mid = {}   # media_id -> Path of an existing full-res image
+    gallery_dir = out / "gallery"
+    quarantine_dir = out / "_duplicates"
+
+    def _excluded(p):
+        for parent in (gallery_dir, quarantine_dir):
+            try:
+                p.relative_to(parent)
+                return True
+            except ValueError:
+                pass
+        return False
+
     if out.exists():
         for p in out.rglob("*"):
-            if p.is_file() and p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
-                already_done += 1
+            if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS:
+                continue
+            if p.name.endswith(".part") or _excluded(p):
+                continue
+            already_done += 1
+            try:
                 disk_bytes += p.stat().st_size
+            except OSError:
+                pass
+            on_disk_by_mid.setdefault(media_id_of(p), p)
     processed = already_done
 
     if already_done:
@@ -1739,6 +1762,9 @@ def run_download(args, progress=None):
     written = set()   # media_ids written this session
     dl = {"ok": 0, "skip": 0, "missing": 0, "fail": 0}
     page = 0
+    update_mode = getattr(args, "update", False)
+    update_grace = getattr(args, "update_grace", 2)
+    consecutive_known_pages = 0
     try:
         while True:
             page += 1
@@ -1752,6 +1778,7 @@ def run_download(args, progress=None):
             print("Page {}: {} tasks (total {})".format(page, len(edges), seen + len(edges)))
 
             page_rows = []  # rows accumulated this page; upserted after each page
+            page_new = 0    # media_ids on this page NOT already on disk (for --update)
 
             for edge in edges:
                 node = edge.get("node", edge)
@@ -1790,7 +1817,7 @@ def run_download(args, progress=None):
                 batch_results = []
                 for idx, mid in enumerate(all_mids):
                     existing = (None if getattr(args, "collect_only", False)
-                                else already_downloaded(out, mid))
+                                else on_disk_by_mid.get(mid))
                     if existing:
                         dl["skip"] += 1
                         k = known.get(mid, {})
@@ -1809,6 +1836,7 @@ def run_download(args, progress=None):
                         written.add(mid)
                         _tick()
                         continue
+                    page_new += 1  # this media_id is not yet on disk
                     if getattr(args, "organize_adv_live", False) and is_batch:
                         stem_name = "{:02d}_{}".format(idx + 1, mid)
                     else:
@@ -1859,6 +1887,7 @@ def run_download(args, progress=None):
                     })
                     written.add(mid)
                     if path and status in ("ok", "skip"):
+                        on_disk_by_mid[mid] = path  # keep index current within the run
                         batch_results.append((idx, mid, path, info))
                     if status == "ok":
                         time.sleep(args.delay)
@@ -1912,6 +1941,22 @@ def run_download(args, progress=None):
             if args.max and seen >= args.max:
                 print("Reached --max limit.")
                 break
+
+            # Incremental --update: pages come newest -> oldest, so once we hit
+            # a run of pages where everything is already on disk, the rest of the
+            # history is older and already downloaded -> stop early. The grace
+            # window tolerates occasional gaps (a few missing/failed items).
+            if update_mode:
+                if page_new == 0:
+                    consecutive_known_pages += 1
+                    if consecutive_known_pages >= update_grace:
+                        print("\n--update: {} consecutive pages already on disk; "
+                              "stopping (older items are already downloaded)."
+                              .format(consecutive_known_pages))
+                        break
+                else:
+                    consecutive_known_pages = 0
+
             pi = conn.get("pageInfo", {})
             if not pi.get("hasPreviousPage"):
                 break
@@ -1945,6 +1990,13 @@ def main():
                     help="output folder for images and catalog (default: pixai_backup)")
     ap.add_argument("--page-size", type=int, default=20, help="items per page (try 50)")
     ap.add_argument("--max", type=int, default=0, help="stop after N tasks (0=all)")
+    ap.add_argument("--update", action="store_true",
+                    help="incremental follow-up run: stop paging once a run of pages is "
+                         "already fully on disk (newest-first, so older items are already "
+                         "downloaded). Much faster than re-walking the whole history.")
+    ap.add_argument("--update-grace", type=int, default=2,
+                    help="with --update, number of consecutive all-on-disk pages before "
+                         "stopping (default 2; raise if your history has gaps)")
     ap.add_argument("--delay", type=float, default=0.4,
                     help="seconds to wait between API requests (default: 0.4)")
     ap.add_argument("--variant", default=None,
