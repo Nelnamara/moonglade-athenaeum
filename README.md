@@ -410,6 +410,10 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ## Changelog
 
+### Unreleased
+
+- **Parallel workers across the slow jobs** — `--workers N` now also speeds up the latency-bound and CPU-bound batch operations, not just downloads: `--backfill-full-meta` (incl. `--with-loras`), `--backfill-meta`, `--fix-model-names`, `--sync-artworks --with-videos`, `--convert-existing`, and gallery **thumbnail generation**. A shared `_parallel_map` helper pools the work, keeps catalog writes + progress on the main thread, and defaults to serial (`workers=1`). The GUI Utilities tab gains a **Workers** control (default 4). On the stable API key these network jobs run dramatically faster.
+
 ### v1.3.0 — API-key auth, artwork sync, LoRA tracking, dashboards, mobile & video
 
 - **Backfill LoRAs into existing rows** — `--backfill-full-meta --with-loras` (GUI: "incl. LoRAs" checkbox) re-fetches older rows that have full meta but no LoRA data yet, populating the `loras` column so the LoRA filter and "Top LoRAs" dashboard work for your whole library.

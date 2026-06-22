@@ -764,23 +764,31 @@ def cmd_convert_existing(args, out):
 
     ok = failed = 0
     total = len(webp_files)
+    workers = max(1, getattr(args, "workers", 1) or 1)
+    if workers > 1:
+        print("Converting with {} parallel workers.".format(workers))
     _prog = getattr(args, "progress", None)
-    for i, p in enumerate(webp_files):
-        _, note = convert_image(p, target, args.jpeg_quality, args.jpeg_bg,
-                                keep_original=args.keep_webp)
+    pillow_missing = False
+    for p, res in _parallel_map(
+            webp_files,
+            lambda f: convert_image(f, target, args.jpeg_quality, args.jpeg_bg,
+                                    keep_original=args.keep_webp),
+            workers, _prog):
+        note = res[1] if res else "error"
         if note == "pillow-missing":
-            raise PixAIError("--convert-existing needs Pillow:  pip install pillow")
+            pillow_missing = True
+            break
         if note == "ok":
             ok += 1
         else:
             print("  FAILED {}: {}".format(p.name, note))
             failed += 1
-        if _prog:
-            _prog(i + 1, total, 0)
-        else:
+        if not _prog and workers <= 1:
             sys.stdout.write("\r  {:,}/{:,}  ok {:,}  failed {:,}  ".format(
-                i + 1, total, ok, failed))
+                ok + failed, total, ok, failed))
             sys.stdout.flush()
+    if pillow_missing:
+        raise PixAIError("--convert-existing needs Pillow:  pip install pillow")
 
     print("\nConverted: {}, failed: {}.".format(ok, failed))
     if failed:
@@ -1627,24 +1635,29 @@ def run_sync_artworks(args):
     if with_videos and videos:
         vdir = out / "videos"
         vdir.mkdir(parents=True, exist_ok=True)
-        print("\nDownloading {} animated artwork video(s) -> videos/ ...".format(len(videos)))
-        for i, (vmid, title) in enumerate(videos):
+        workers = max(1, getattr(args, "workers", 1) or 1)
+        print("\nDownloading {} animated artwork video(s) -> videos/ {}...".format(
+            len(videos), "({} workers) ".format(workers) if workers > 1 else ""))
+
+        def _fetch_video(item):
+            vmid, title = item
             if already_downloaded(out, vmid):
-                vids_ok += 1
-                continue
+                return "skip"
             url, info = resolve_media(session, vmid)
             if not url:
-                print("  no media url for video {} ({})".format(vmid, title))
-                continue
+                return "missing"
             stem = vdir / build_stem_name(title or "", "", vmid,
                                           getattr(args, "name_length", 60),
                                           getattr(args, "name_sep", "_"))
             status, path = download(session, url, stem)
+            return status
+
+        for item, status in _parallel_map(videos, _fetch_video, workers, _prog,
+                                          delay=getattr(args, "delay", 0.4)):
             if status in ("ok", "skip"):
                 vids_ok += 1
-            if _prog:
-                _prog(i + 1, len(videos), 0)
-            time.sleep(getattr(args, "delay", 0.4))
+            elif status == "missing":
+                print("  no media url for video {} ({})".format(item[0], item[1]))
         print("Videos saved/present: {} of {}.".format(vids_ok, len(videos)))
     elif videos and not with_videos:
         print("({} animated artworks have video; re-run with --with-videos to download them.)"
@@ -1689,12 +1702,15 @@ def run_fix_models(args):
 
     relabel = getattr(args, "relabel_removed", False)
     removed_label = "Unknown or removed model"
-    print("Resolving {} distinct model id(s) across {} rows...".format(
-        len(to_resolve), sum(len(v) for v in to_resolve.values())))
+    workers = max(1, getattr(args, "workers", 1) or 1)
+    print("Resolving {} distinct model id(s) across {} rows{}...".format(
+        len(to_resolve), sum(len(v) for v in to_resolve.values()),
+        " ({} workers)".format(workers) if workers > 1 else ""))
     _prog = getattr(args, "progress", None)
     fixed = relabeled = unresolved = 0
-    for i, vid in enumerate(sorted(to_resolve)):
-        name = model_name_gql(session, vid)
+    for vid, name in _parallel_map(sorted(to_resolve),
+                                   lambda v: model_name_gql(session, v),
+                                   workers, _prog, delay=getattr(args, "delay", 0.4)):
         if name and name != vid and not str(name).isdigit():
             for r in to_resolve[vid]:
                 r["model_name"] = name
@@ -1708,9 +1724,6 @@ def run_fix_models(args):
                 print("  {} unresolved -> '{}'".format(vid, removed_label))
             else:
                 print("  could not resolve model {} (left as-is)".format(vid))
-        if _prog:
-            _prog(i + 1, len(to_resolve), 0)
-        time.sleep(getattr(args, "delay", 0.4))
 
     if fixed or relabeled:
         save_catalog(db_path, rows)
@@ -1787,6 +1800,40 @@ def run_catalog_stats(args):
         print("Image files on disk : {}  ({})".format(disk_count, _format_size(disk_bytes)))
 
 
+def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0):
+    """Run work_fn(item) over items, yielding (item, result) as each finishes.
+
+    workers<=1 runs serially (in order, sleeping `delay` between items to stay
+    polite); higher uses a bounded thread pool for latency-bound network calls
+    (no delay -- concurrency itself paces). progress(done, total, 0) is called on
+    THIS thread, so the caller may safely mutate shared state in the yield body.
+    Exceptions in a worker yield a None result rather than crashing the run."""
+    items = list(items)
+    total = len(items)
+    if workers <= 1:
+        for i, it in enumerate(items):
+            yield it, work_fn(it)
+            if progress:
+                progress(i + 1, total, 0)
+            if delay:
+                time.sleep(delay)
+        return
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(work_fn, it): it for it in items}
+        for fut in as_completed(futs):
+            it = futs[fut]
+            done += 1
+            try:
+                res = fut.result()
+            except Exception:
+                res = None
+            yield it, res
+            if progress:
+                progress(done, total, 0)
+
+
 def run_backfill_meta(args):
     """Fill in missing url/width/height for catalog rows via resolve_media().
     Safe to re-run -- skips rows that already have all three fields."""
@@ -1802,10 +1849,14 @@ def run_backfill_meta(args):
         print("Nothing to backfill.")
         return
 
+    workers = max(1, getattr(args, "workers", 1) or 1)
+    if workers > 1:
+        print("Resolving with {} parallel workers.".format(workers))
     updated = failed = 0
     _prog = getattr(args, "progress", None)
-    for i, row in enumerate(to_fill):
-        url, info = resolve_media(session, row["media_id"])
+    for row, res in _parallel_map(to_fill, lambda r: resolve_media(session, r["media_id"]),
+                                  workers, _prog, delay=args.delay):
+        url, info = res if res else (None, {})
         if url:
             row["url"] = url
             row["width"] = str(info.get("width") or "")
@@ -1813,13 +1864,10 @@ def run_backfill_meta(args):
             updated += 1
         else:
             failed += 1
-        if _prog:
-            _prog(i + 1, len(to_fill), 0)
-        else:
+        if not _prog and workers <= 1:
             sys.stdout.write("\r  {:,}/{:,}  updated {:,}  failed {:,}  ".format(
-                i + 1, len(to_fill), updated, failed))
+                updated + failed, len(to_fill), updated, failed))
             sys.stdout.flush()
-        time.sleep(args.delay)
 
     print("\nWriting catalog...")
     save_catalog(db_path, to_fill)
@@ -1861,42 +1909,44 @@ def run_backfill_full_meta(args):
         print("Nothing to backfill.")
         return
 
-    # Fetch and cache full meta per task_id
-    task_cache = {}  # task_id -> full meta dict
-    fetched = failed = 0
-    _prog = getattr(args, "progress", None)
-    for i, tid in enumerate(task_ids):
+    # Fetch and cache full meta per task_id (parallelizable -- each task is an
+    # independent getTaskById round-trip).
+    workers = max(1, getattr(args, "workers", 1) or 1)
+    if workers > 1:
+        print("Fetching with {} parallel workers.".format(workers))
+
+    def _fetch_task(tid):
         task_data = task_detail_gql(session, tid)
         fm = extract_full_meta(task_data)
         if fm.get("model_id"):
             fm["model_name"] = model_name_gql(session, fm["model_id"])
         fm["loras"] = resolve_loras(session, task_data)
-
-        # Also grab media URL/dimensions from the task's media object if present
         media_obj = (task_data or {}).get("media") or {}
         if media_obj:
-            media_urls = media_obj.get("urls") or []
             by_v = {str(u.get("variant", "")).upper(): u["url"]
-                    for u in media_urls if isinstance(u, dict) and u.get("url")}
+                    for u in (media_obj.get("urls") or []) if isinstance(u, dict) and u.get("url")}
             for pref in ("PUBLIC", "ORIGINAL", "ORIG", "FULL", "THUMBNAIL"):
                 if pref in by_v:
                     fm["_media_url"] = by_v[pref]
                     break
             fm["_media_width"] = str(media_obj.get("width") or "")
             fm["_media_height"] = str(media_obj.get("height") or "")
+        return fm
 
+    task_cache = {}  # task_id -> full meta dict
+    fetched = failed = 0
+    _prog = getattr(args, "progress", None)
+    for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay):
+        fm = fm or {}
         task_cache[tid] = fm
         if fm.get("prompt_full"):
             fetched += 1
         else:
             failed += 1
-        if _prog:
-            _prog(i + 1, len(task_ids), 0)
-        else:
+        if not _prog and workers <= 1:
             sys.stdout.write("\r  Tasks {:,}/{:,}  fetched {:,}  failed {:,}  ".format(
-                i + 1, len(task_ids), fetched, failed))
+                fetched + failed, len(task_ids), fetched, failed))
             sys.stdout.flush()
-        time.sleep(args.delay)
 
     print("\nApplying to {:,} catalog rows...".format(len(rows)))
     for row in rows:
