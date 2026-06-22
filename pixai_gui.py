@@ -1245,6 +1245,7 @@ class UtilitiesTab(QWidget):
 
     def _run_fix_models(self):
         args = self._base_args()
+        args.relabel_removed = True  # clean menus: removed ids -> "Unknown or removed model"
         self._run(core.run_fix_models, args)
         args.progress = self._worker.progress.emit
         self._worker.progress.connect(self._update_progress)
