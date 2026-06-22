@@ -674,6 +674,19 @@ def create_app(out_dir: Path):
   .filters input { width: 280px; }
   .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(71,203,195,.25); }
   .filters label { color: var(--subtext); font-size: 12px; }
+  .filter-toggle { display: none; }
+  /* Mobile: collapse the filter bar behind a toggle so the grid leads. */
+  @media (max-width: 680px) {
+    header h1 { font-size: 16px; }
+    header .back-link { font-size: 12px; }
+    .filter-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 12px 0; }
+    .filters { display: none; flex-direction: column; align-items: stretch; padding: 10px 12px; }
+    .filters.open { display: flex; }
+    .filters > div { width: 100%; }
+    .filters input, .filters select { width: 100% !important; box-sizing: border-box; }
+    .grid { padding: 10px 12px; gap: 8px; }
+    .chips { padding: 8px 12px 0; }
+  }
   .btn { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 13px; }
   .btn:hover { background: var(--surface1); }
   .btn-danger { background: var(--red); color: var(--base); border-color: var(--red); font-weight: 600; }
@@ -866,6 +879,8 @@ document.addEventListener('DOMContentLoaded', function() {
   <a class="back-link" href="{{ url_for('health') }}" style="margin-left:auto;">Collection health →</a>
 </header>
 
+<button type="button" class="filter-toggle btn" onclick="toggleFilters()"
+        aria-expanded="false">Filters &#9662;</button>
 <form method="get" action="/" id="filter-form">
 <div class="filters">
   <div>
@@ -1018,7 +1033,20 @@ document.addEventListener('DOMContentLoaded', function() {
 </div>
 
 <script>
+function toggleFilters() {
+  var f = document.querySelector('.filters');
+  var btn = document.querySelector('.filter-toggle');
+  var open = f.classList.toggle('open');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
 (function(){
+  // On mobile, auto-open the filter bar if any filter is active so the user sees
+  // what's applied; otherwise keep it collapsed to give the grid the screen.
+  if (window.matchMedia('(max-width: 680px)').matches &&
+      document.querySelector('.chips')) {
+    var f = document.querySelector('.filters');
+    if (f) f.classList.add('open');
+  }
   var grid = document.querySelector('.grid');
   var slider = document.getElementById('thumb-size');
   if (grid && slider) {
