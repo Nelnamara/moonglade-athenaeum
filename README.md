@@ -389,6 +389,11 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ## Changelog
 
+### Unreleased
+
+- **Gallery performance** — the server now handles requests concurrently (thumbnails load in parallel instead of one-at-a-time, in both the CLI and GUI launchers); thumbnails and full images are served with immutable 1-year cache headers so pagination, back-navigation, and re-visits are instant with no re-download (big win on mobile / LAN); HTML pages are gzip-compressed; thumbnails decode asynchronously (`decoding="async"`).
+- **Mobile filter bar** — on narrow screens the filter controls collapse behind a "Filters" toggle so the image grid leads; controls go full-width and the bar auto-opens when a filter is active.
+
 ### v1.2.0 — Duplicate audit/dedup, gallery overhaul, parallel & incremental downloads
 
 **Downloads — much faster, especially follow-up runs**

@@ -1332,7 +1332,7 @@ class _GalleryServerThread(QThread):
                 self.log.emit(f"  (also accessible at http://127.0.0.1:{self._port}/ locally)")
             self.ready.emit(base_url)
             from werkzeug.serving import make_server
-            self._server = make_server(self._host, self._port, app)
+            self._server = make_server(self._host, self._port, app, threaded=True)
             self._server.serve_forever()
         except Exception as exc:
             self.log.emit(f"[ERROR] {exc}")
