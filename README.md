@@ -244,6 +244,7 @@ The same three actions are available as buttons in the GUI **Utilities** tab.
 | `--backfill-meta` | Fill missing `url`/`width`/`height` in catalog via `resolve_media` |
 | `--backfill-full-meta` | Fill full prompt/seed/model in catalog via `getTaskById`; also fills url/width/height |
 | `--export-csv` | Export `catalog.db` to `catalog_export.csv` (interop / spreadsheet backup) |
+| `--sync-artworks` | Fetch published-artwork metadata (title, NSFW, likes, comments, tags) via `listArtworks` and merge onto catalog rows by `media_id` |
 | `--audit` | Read-only duplicate report of the whole backup folder → `audit_report.csv` |
 | `--dedup` | Quarantine redundant duplicate copies to `_duplicates/` (dry-run unless `--apply`); reconciles the catalog |
 | `--verify-dupes` | Confirm every file in `_duplicates/` is redundant (byte/pixel-identical to a kept copy) before deleting |
@@ -339,6 +340,13 @@ pixai_backup/
 | `model_name` | Human-readable model name, e.g. "Tsubaki.2 v1" (`--full-meta`) |
 | `batch` | Batch folder name populated by `--organize-adv` (blank for single-image months) |
 | `rating` | Star rating 1–5 set in the gallery (0 or blank = unrated) |
+| `artwork_id` | PixAI artwork ID, if this image was published (`--sync-artworks`) |
+| `title` | Published-artwork title (`--sync-artworks`) |
+| `is_published` | `1` if published with PUBLIC visibility (`--sync-artworks`) |
+| `is_nsfw` | `1` if the published artwork is flagged NSFW (`--sync-artworks`) |
+| `liked_count` / `comment_count` | Engagement counts at sync time (`--sync-artworks`) |
+| `aes_score` | PixAI aesthetic score (`--sync-artworks`) |
+| `art_tags` | Comma-joined tag / contest labels from the artwork's tacks (`--sync-artworks`) |
 
 ---
 
@@ -391,10 +399,12 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ### Unreleased
 
+- **Published-artwork sync** (`--sync-artworks`) — pulls title, NSFW flag, like/comment counts, aesthetic score, and tag/contest labels for your published pieces (via `listArtworks`) into the catalog by `media_id`; 8 new catalog columns; GUI Utilities button.
 - **Gallery performance** — the server now handles requests concurrently (thumbnails load in parallel instead of one-at-a-time, in both the CLI and GUI launchers); thumbnails and full images are served with immutable 1-year cache headers so pagination, back-navigation, and re-visits are instant with no re-download (big win on mobile / LAN); HTML pages are gzip-compressed; thumbnails decode asynchronously (`decoding="async"`).
 - **Mobile filter bar** — on narrow screens the filter controls collapse behind a "Filters" toggle so the image grid leads; controls go full-width and the bar auto-opens when a filter is active.
 - **Lightbox + keyboard navigation** — click any thumbnail for an in-page lightbox with prev/next, a Details link, and an `F`/Space slideshow; in the grid, arrow keys move focus and Enter opens the lightbox.
 - **Cross-page selection + ZIP export** — image selections now persist across pages (stored in the browser); the bulk bar gains a **Download ZIP** button that streams the selected full-res images as a single archive.
+- **Published-artwork sync** — `--sync-artworks` fetches your published-artwork metadata (title, NSFW flag, like/comment counts, aesthetic score, and tag/contest labels) via the `listArtworks` API and merges it onto matching catalog rows by `media_id`. Adds catalog columns `artwork_id`, `title`, `is_published`, `is_nsfw`, `liked_count`, `comment_count`, `aes_score`, `art_tags`. Also a **Sync Artworks** button in the GUI Utilities tab.
 
 ### v1.2.0 — Duplicate audit/dedup, gallery overhaul, parallel & incremental downloads
 

@@ -45,6 +45,9 @@ CATALOG_FIELDS = [
     "prompt_preview", "status", "created_at",
     "prompt_full", "natural_prompt", "seed", "steps",
     "sampler", "cfg_scale", "model_id", "model_name", "rating",
+    # Published-artwork metadata, populated by --sync-artworks (blank otherwise)
+    "artwork_id", "title", "is_published", "is_nsfw",
+    "liked_count", "comment_count", "aes_score", "art_tags",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -73,7 +76,15 @@ CREATE TABLE IF NOT EXISTS catalog (
     cfg_scale       TEXT,
     model_id        TEXT,
     model_name      TEXT,
-    rating          TEXT
+    rating          TEXT,
+    artwork_id      TEXT DEFAULT '',
+    title           TEXT DEFAULT '',
+    is_published    TEXT DEFAULT '',
+    is_nsfw         TEXT DEFAULT '',
+    liked_count     TEXT DEFAULT '',
+    comment_count   TEXT DEFAULT '',
+    aes_score       TEXT DEFAULT '',
+    art_tags        TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -113,6 +124,14 @@ def init_db(db_path):
 
 _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN batch TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN artwork_id TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN title TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN is_published TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN is_nsfw TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN liked_count TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN comment_count TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN aes_score TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN art_tags TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):

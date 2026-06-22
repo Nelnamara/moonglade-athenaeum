@@ -365,6 +365,42 @@ def test_update_and_workers_compose(tmp_path, mocker):
     assert not any("old" in n for n in names)                   # on-disk skipped
 
 
+def test_extract_artwork_meta():
+    node = {"id": "aw1", "mediaId": "m1", "title": "Lollipop Elf",
+            "visibility": "PUBLIC", "isNsfw": True, "likedCount": 5,
+            "commentCount": 2, "aesScore": 7.5,
+            "tacks": [{"codeName": "contest_x", "displayName": "ContestX"},
+                      {"displayName": "tag2"}]}
+    m = core.extract_artwork_meta(node)
+    assert m["media_id"] == "m1" and m["artwork_id"] == "aw1"
+    assert m["title"] == "Lollipop Elf"
+    assert m["is_published"] == "1" and m["is_nsfw"] == "1"
+    assert m["liked_count"] == "5" and m["comment_count"] == "2"
+    assert m["art_tags"] == "ContestX, tag2"
+
+
+def test_sync_artworks_merges_by_media_id(tmp_path, mocker):
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
+                      {"media_id": "m1", "filename": "x_m1.png"}])
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    conn = {"edges": [{"node": {"id": "aw1", "mediaId": "m1", "title": "My Art",
+                                "visibility": "PUBLIC", "isNsfw": False,
+                                "likedCount": 3, "commentCount": 1,
+                                "aesScore": 6.0, "tacks": []}}],
+            "pageInfo": {"hasPreviousPage": False}}
+    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+
+    assert res == {"artworks": 1, "matched": 1}
+    row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
+    assert row["title"] == "My Art" and row["liked_count"] == "3"
+    assert row["is_published"] == "1" and row["artwork_id"] == "aw1"
+
+
 def test_progress_counter_does_not_double_count(tmp_path, mocker):
     # Regression: the progress counter must NOT be seeded with the on-disk count
     # (that double-counted already-downloaded items and overshot 100%).
