@@ -443,10 +443,19 @@ class DownloadTab(QWidget):
         r1 = QHBoxLayout()
         r1.addWidget(QLabel("Page size:"))
         self.page_size = QSpinBox()
-        self.page_size.setRange(1, 500)
-        self.page_size.setValue(settings.get("page_size", 20))
+        self.page_size.setRange(1, 8000)
+        self.page_size.setValue(settings.get("page_size", 250))
         self.page_size.setFixedWidth(70)
         r1.addWidget(self.page_size)
+        r1.addSpacing(16)
+        r1.addWidget(QLabel("Workers:"))
+        self.workers = QSpinBox()
+        self.workers.setRange(1, 16)
+        self.workers.setValue(settings.get("workers", 4))
+        self.workers.setFixedWidth(55)
+        self.workers.setToolTip("Parallel download workers. 1 = serial/polite; "
+                                "higher saturates bandwidth on bulk pulls.")
+        r1.addWidget(self.workers)
         r1.addSpacing(16)
         r1.addWidget(QLabel("Max tasks (0=all):"))
         self.max_tasks = QSpinBox()
@@ -553,6 +562,14 @@ class DownloadTab(QWidget):
         r6.addStretch()
         g.addLayout(r6)
 
+        # Incremental update row
+        r7 = QHBoxLayout()
+        self.update_mode = QCheckBox("Update mode — stop early once new items are caught up  (--update, faster follow-ups)")
+        self.update_mode.setChecked(settings.get("update_mode", False))
+        r7.addWidget(self.update_mode)
+        r7.addStretch()
+        g.addLayout(r7)
+
         # Buttons
         self.btn_start = QPushButton("▶  Start Download")
         self.btn_start.setObjectName("btn_start")
@@ -618,6 +635,10 @@ class DownloadTab(QWidget):
             keep_webp=self.keep_webp.isChecked(),
             collect_only=self.collect_only.isChecked(),
             full_meta=self.full_meta.isChecked(),
+            update=self.update_mode.isChecked(),
+            update_grace=2,
+            accurate_count=False,
+            workers=self.workers.value(),
             count_page_size=5000,
         )
 
@@ -703,6 +724,8 @@ class DownloadTab(QWidget):
             "keep_webp":    self.keep_webp.isChecked(),
             "full_meta":    self.full_meta.isChecked(),
             "collect_only": self.collect_only.isChecked(),
+            "update_mode":  self.update_mode.isChecked(),
+            "workers":      self.workers.value(),
         }
 
 
