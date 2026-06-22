@@ -975,6 +975,7 @@ class ConvertTab(QWidget):
             jpeg_bg=self.jpeg_bg.currentText(),
             keep_webp=self.keep_webp.isChecked(),
             dry_run=self.dry_run.isChecked(),
+            workers=4,
         )
 
     def _run_convert(self):
@@ -1152,6 +1153,15 @@ class UtilitiesTab(QWidget):
         self.delay.setValue(settings.get("util_delay", 0.4))
         self.delay.setFixedWidth(65)
         delay_row.addWidget(self.delay)
+        delay_row.addSpacing(16)
+        delay_row.addWidget(QLabel("Workers:"))
+        self.workers = QSpinBox()
+        self.workers.setRange(1, 16)
+        self.workers.setValue(settings.get("util_workers", 4))
+        self.workers.setFixedWidth(55)
+        self.workers.setToolTip("Parallel workers for backfill / fix-models / sync / convert "
+                                "(latency-bound network or CPU jobs). 1 = serial.")
+        delay_row.addWidget(self.workers)
         delay_row.addStretch()
 
         self.log = LogWidget()
@@ -1198,11 +1208,12 @@ class UtilitiesTab(QWidget):
             out=self._bar.out,
             page_size=20,
             delay=self.delay.value(),
+            workers=self.workers.value(),
             count_page_size=5000,
         )
 
     def collect_settings(self):
-        return {"util_delay": self.delay.value()}
+        return {"util_delay": self.delay.value(), "util_workers": self.workers.value()}
 
     def _run(self, fn, *args):
         if self._worker and self._worker.isRunning():
