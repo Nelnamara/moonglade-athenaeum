@@ -973,7 +973,7 @@ document.addEventListener('DOMContentLoaded', function() {
       <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"></a>
       {% if row._has_thumb %}
       <img src="{{ url_for('thumb', media_id=row.media_id) }}" loading="lazy"
-           onload="this.classList.add('loaded')"
+           decoding="async" onload="this.classList.add('loaded')"
            alt="{{ row.prompt_preview[:60] }}">
       {% else %}
       <div class="no-thumb">no preview</div>
@@ -1464,13 +1464,44 @@ function copyPrompt(btn) {
         update_rating(db_path, media_id, value)
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
 
+    # Thumbnails and full images are content-addressed (keyed by media_id /
+    # filename) and never change once written, so we can cache them in the browser
+    # essentially forever. This makes pagination, back-navigation, and re-visits
+    # instant with zero re-download -- the single biggest win on mobile / LAN.
+    _IMMUTABLE = "public, max-age=31536000, immutable"
+
     @app.route("/thumbs/<media_id>.jpg")
     def thumb(media_id):
-        return send_from_directory(str(thumb_dir), "{}.jpg".format(media_id))
+        resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
+                                   max_age=31536000)
+        resp.headers["Cache-Control"] = _IMMUTABLE
+        return resp
 
     @app.route("/img/<path:rel>")
     def serve_image(rel):
-        return send_from_directory(str(out_dir), rel)
+        resp = send_from_directory(str(out_dir), rel, max_age=31536000)
+        resp.headers["Cache-Control"] = _IMMUTABLE
+        return resp
+
+    @app.after_request
+    def _gzip_html(resp):
+        # Compress only HTML pages (the big card grids). File responses are
+        # direct_passthrough streams and are left untouched.
+        try:
+            if (resp.status_code == 200 and not resp.direct_passthrough
+                    and resp.content_type and resp.content_type.startswith("text/html")
+                    and "gzip" in request.headers.get("Accept-Encoding", "")):
+                data = resp.get_data()
+                if len(data) > 1024:
+                    import gzip as _gzip
+                    packed = _gzip.compress(data, 6)
+                    resp.set_data(packed)
+                    resp.headers["Content-Encoding"] = "gzip"
+                    resp.headers["Content-Length"] = str(len(packed))
+                    resp.headers["Vary"] = "Accept-Encoding"
+        except Exception:
+            pass
+        return resp
 
     return app
 
@@ -1514,7 +1545,7 @@ def main():
     print("\nGallery ready ->  http://{}:{}/".format(
         "localhost" if args.host == "127.0.0.1" else args.host, args.port))
     print("Press Ctrl+C to stop.\n")
-    app.run(host=args.host, port=args.port, debug=False)
+    app.run(host=args.host, port=args.port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":
