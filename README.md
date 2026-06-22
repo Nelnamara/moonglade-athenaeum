@@ -410,7 +410,7 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ## Changelog
 
-### Unreleased
+### v1.3.0 — API-key auth, artwork sync, LoRA tracking, dashboards, mobile & video
 
 - **Backfill LoRAs into existing rows** — `--backfill-full-meta --with-loras` (GUI: "incl. LoRAs" checkbox) re-fetches older rows that have full meta but no LoRA data yet, populating the `loras` column so the LoRA filter and "Top LoRAs" dashboard work for your whole library.
 - **Gallery HTTPS** — `python pixai_gallery.py --https` (GUI: "Serve over HTTPS" checkbox) serves the gallery over self-signed HTTPS, so a phone on your LAN can install it as a PWA and use the offline service worker (over plain HTTP, browsers block PWA install / service workers by design). Requires `pip install cryptography`; browsers show a one-time certificate warning.
