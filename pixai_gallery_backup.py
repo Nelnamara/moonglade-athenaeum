@@ -122,6 +122,14 @@ U3T = _cfg.get("U3T", "")
 USER_ID = _cfg.get("USER_ID", "")
 TASK_DETAIL_HASH = _cfg.get("TASK_DETAIL_HASH", "")
 MODEL_DETAIL_HASH = _cfg.get("MODEL_DETAIL_HASH", "")
+# Published-artwork ops (for --sync-artworks). These are public persisted-query
+# identifiers, not secrets; captured 2026-06-22. Override in config.json if a
+# PixAI frontend update rotates them.
+ARTWORK_LIST_HASH = _cfg.get("ARTWORK_LIST_HASH", "") or \
+    "ce6f4a6e63fe210c7f77b29c7b8bdce8b7ede4d4520c01de1d36e01b224918a5"
+ARTWORK_DETAIL_HASH = _cfg.get("ARTWORK_DETAIL_HASH", "") or \
+    "ac39a87c58451559f9dcbf2c04862c1ee3260f9645ed60fdfb574e41689a6766"
+CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 # ===========================================================================
 
 # Media URL: https://api.pixai.art/v1/media/<id>/<variant>
@@ -1456,6 +1464,113 @@ def run_dedup(args):
     cmd_dedup(args, out, out / "catalog.db")
 
 
+def artwork_list_gql(session, before=None, last=50):
+    """GET listArtworks for the owner's own authorId. Returns the Relay
+    connection dict (edges + pageInfo) or None on failure."""
+    variables = {"authorId": str(USER_ID), "last": last, "tackLanguage": "en"}
+    if before:
+        variables["before"] = before
+    params = {
+        "operation": "listArtworks",
+        "u3t": U3T,
+        "operationName": "listArtworks",
+        "variables": json.dumps(variables, separators=(",", ":")),
+        "extensions": json.dumps(
+            {"clientLibrary": CLIENT_LIBRARY_ARTWORK,
+             "persistedQuery": {"version": 1, "sha256Hash": ARTWORK_LIST_HASH}},
+            separators=(",", ":")),
+    }
+    try:
+        r = session.get(API_URL, params=params, timeout=60,
+                        headers={"x-apollo-operation-name": "listArtworks"})
+        if r.status_code != 200:
+            return None
+        return find_connection(r.json().get("data") or {})
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def extract_artwork_meta(node):
+    """Pull the published-artwork fields we store from a listArtworks node.
+    Keyed by media_id so it merges onto the existing catalog row."""
+    tacks = node.get("tacks") or []
+    tags = [t.get("displayName") or t.get("codeName") for t in tacks
+            if (t.get("displayName") or t.get("codeName"))]
+    return {
+        "media_id":      str(node.get("mediaId") or ""),
+        "artwork_id":    str(node.get("id") or ""),
+        "title":         node.get("title") or "",
+        "is_published":  "1" if (node.get("visibility") == "PUBLIC") else "0",
+        "is_nsfw":       "1" if node.get("isNsfw") else "0",
+        "liked_count":   str(node.get("likedCount") or 0),
+        "comment_count": str(node.get("commentCount") or 0),
+        "aes_score":     str(node.get("aesScore") or ""),
+        "art_tags":      ", ".join(tags),
+    }
+
+
+def run_sync_artworks(args):
+    """Page the owner's published artworks (listArtworks) and merge their
+    metadata (title, published flag, NSFW flag, likes, comments, aes score, tags)
+    onto matching catalog rows by media_id. Published artworks are a subset of
+    generations, so unmatched/undownloaded ones are simply skipped."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    if not USER_ID:
+        raise PixAIError("USER_ID missing from config.json.")
+    session = _make_session(getattr(args, "token", None))
+
+    by_mid = {}                      # media_id -> artwork fields
+    artworks = 0
+    before = None
+    page = 0
+    _prog = getattr(args, "progress", None)
+    print("Syncing published artworks (listArtworks)...")
+    while True:
+        page += 1
+        conn = artwork_list_gql(session, before=before, last=50)
+        if not conn:
+            if page == 1:
+                raise PixAIError(
+                    "listArtworks returned no data. The ARTWORK_LIST_HASH may have "
+                    "rotated after a PixAI update -- recapture it into config.json.")
+            break
+        edges = conn.get("edges", [])
+        if not edges:
+            break
+        for edge in edges:
+            node = edge.get("node", edge)
+            meta = extract_artwork_meta(node)
+            if meta["media_id"]:
+                by_mid[meta["media_id"]] = meta
+                artworks += 1
+        print("  page {}: {} artworks (total {})".format(page, len(edges), artworks))
+        if _prog:
+            _prog(artworks, artworks, 0)
+        pi = conn.get("pageInfo", {})
+        if not pi.get("hasPreviousPage"):
+            break
+        before = pi.get("startCursor")
+        time.sleep(getattr(args, "delay", 0.4))
+
+    # Merge onto existing catalog rows by media_id.
+    rows = load_catalog(db_path)
+    matched = 0
+    for r in rows:
+        m = by_mid.get(r.get("media_id"))
+        if not m:
+            continue
+        for k, v in m.items():
+            if k != "media_id":
+                r[k] = v
+        matched += 1
+    if matched:
+        save_catalog(db_path, rows)
+    print("\nArtworks fetched: {}.  Matched to catalog rows: {}.  "
+          "(Unmatched artworks have no downloaded image.)".format(artworks, matched))
+    return {"artworks": artworks, "matched": matched}
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
@@ -2197,6 +2312,10 @@ def main():
                          "for rows that lack them; also backfills url/width/height as a bonus, then exit")
     ap.add_argument("--export-csv", action="store_true",
                     help="export catalog.db to catalog.csv for interop/backup, then exit")
+    ap.add_argument("--sync-artworks", action="store_true",
+                    help="fetch your published-artwork metadata (title, NSFW flag, likes, "
+                         "comments, aes score, tags) via listArtworks and merge it onto "
+                         "matching catalog rows by media_id, then exit")
     ap.add_argument("--audit", action="store_true",
                     help="read-only duplicate audit of the whole backup folder; writes "
                          "audit_report.csv and prints a summary, then exit. Independent of catalog.db.")
@@ -2239,6 +2358,9 @@ def main():
             export_csv(db_path, csv_path)
             print("Exported {:,} rows to {}.".format(
                 len(load_catalog(db_path)), csv_path))
+            return
+        if args.sync_artworks:
+            run_sync_artworks(args)
             return
         if args.audit:
             cmd_audit(args, out)
