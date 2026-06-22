@@ -474,6 +474,15 @@ def ext_from_ct(ct):
         return ".webp"
     if "gif" in ct:
         return ".gif"
+    if "avif" in ct:
+        return ".avif"
+    # Animated artworks resolve to video files
+    if "mp4" in ct:
+        return ".mp4"
+    if "webm" in ct:
+        return ".webm"
+    if "quicktime" in ct or "mov" in ct:
+        return ".mov"
     return ".png"
 
 
@@ -1547,6 +1556,8 @@ def run_sync_artworks(args):
     session = _make_session(getattr(args, "token", None))
 
     by_mid = {}                      # media_id -> artwork fields
+    videos = []                      # (video_media_id, title) for animated artworks
+    with_videos = getattr(args, "with_videos", False)
     artworks = 0
     before = None
     page = 0
@@ -1570,6 +1581,9 @@ def run_sync_artworks(args):
             if meta["media_id"]:
                 by_mid[meta["media_id"]] = meta
                 artworks += 1
+            vmid = node.get("videoMediaId")
+            if vmid:
+                videos.append((str(vmid), meta.get("title") or node.get("id")))
         print("  page {}: {} artworks (total {})".format(page, len(edges), artworks))
         if _prog:
             _prog(artworks, artworks, 0)
@@ -1594,7 +1608,36 @@ def run_sync_artworks(args):
         save_catalog(db_path, rows)
     print("\nArtworks fetched: {}.  Matched to catalog rows: {}.  "
           "(Unmatched artworks have no downloaded image.)".format(artworks, matched))
-    return {"artworks": artworks, "matched": matched}
+
+    # Optionally download animated-artwork video files (videoMediaId) into videos/.
+    vids_ok = 0
+    if with_videos and videos:
+        vdir = out / "videos"
+        vdir.mkdir(parents=True, exist_ok=True)
+        print("\nDownloading {} animated artwork video(s) -> videos/ ...".format(len(videos)))
+        for i, (vmid, title) in enumerate(videos):
+            if already_downloaded(out, vmid):
+                vids_ok += 1
+                continue
+            url, info = resolve_media(session, vmid)
+            if not url:
+                print("  no media url for video {} ({})".format(vmid, title))
+                continue
+            stem = vdir / build_stem_name(title or "", "", vmid,
+                                          getattr(args, "name_length", 60),
+                                          getattr(args, "name_sep", "_"))
+            status, path = download(session, url, stem)
+            if status in ("ok", "skip"):
+                vids_ok += 1
+            if _prog:
+                _prog(i + 1, len(videos), 0)
+            time.sleep(getattr(args, "delay", 0.4))
+        print("Videos saved/present: {} of {}.".format(vids_ok, len(videos)))
+    elif videos and not with_videos:
+        print("({} animated artworks have video; re-run with --with-videos to download them.)"
+              .format(len(videos)))
+
+    return {"artworks": artworks, "matched": matched, "videos": vids_ok}
 
 
 def _needs_model_fix(row):
@@ -2451,6 +2494,9 @@ def main():
                     help="fetch your published-artwork metadata (title, NSFW flag, likes, "
                          "comments, aes score, tags) via listArtworks and merge it onto "
                          "matching catalog rows by media_id, then exit")
+    ap.add_argument("--with-videos", action="store_true",
+                    help="with --sync-artworks, also download animated-artwork video files "
+                         "(videoMediaId) into a videos/ folder")
     ap.add_argument("--fix-model-names", action="store_true",
                     help="re-resolve readable model names for catalog rows whose model_name "
                          "is blank or a raw numeric id (one API call per distinct model), then exit")

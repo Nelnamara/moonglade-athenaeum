@@ -395,7 +395,7 @@ def test_sync_artworks_merges_by_media_id(tmp_path, mocker):
 
     res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
-    assert res == {"artworks": 1, "matched": 1}
+    assert res["artworks"] == 1 and res["matched"] == 1
     row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
     assert row["title"] == "My Art" and row["liked_count"] == "3"
     assert row["is_published"] == "1" and row["artwork_id"] == "aw1"
