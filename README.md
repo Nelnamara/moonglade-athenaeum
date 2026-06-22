@@ -393,6 +393,8 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 - **Gallery performance** — the server now handles requests concurrently (thumbnails load in parallel instead of one-at-a-time, in both the CLI and GUI launchers); thumbnails and full images are served with immutable 1-year cache headers so pagination, back-navigation, and re-visits are instant with no re-download (big win on mobile / LAN); HTML pages are gzip-compressed; thumbnails decode asynchronously (`decoding="async"`).
 - **Mobile filter bar** — on narrow screens the filter controls collapse behind a "Filters" toggle so the image grid leads; controls go full-width and the bar auto-opens when a filter is active.
+- **Lightbox + keyboard navigation** — click any thumbnail for an in-page lightbox with prev/next, a Details link, and an `F`/Space slideshow; in the grid, arrow keys move focus and Enter opens the lightbox.
+- **Cross-page selection + ZIP export** — image selections now persist across pages (stored in the browser); the bulk bar gains a **Download ZIP** button that streams the selected full-res images as a single archive.
 
 ### v1.2.0 — Duplicate audit/dedup, gallery overhaul, parallel & incremental downloads
 
