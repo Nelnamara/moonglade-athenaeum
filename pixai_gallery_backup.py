@@ -1734,7 +1734,10 @@ def run_download(args, progress=None):
             except OSError:
                 pass
             on_disk_by_mid.setdefault(media_id_of(name), Path(e.path))
-    processed = already_done
+    # Progress counts items as the walk visits them (skips included), starting at
+    # zero -- it must NOT be seeded with already_done, or the on-disk images get
+    # counted twice (seed + re-check) and the bar overshoots past 100%.
+    processed = 0
 
     if already_done:
         print("Resuming: {} image files already on disk ({}).\n".format(
