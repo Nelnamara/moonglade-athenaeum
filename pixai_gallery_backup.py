@@ -1699,23 +1699,57 @@ def run_download(args, progress=None):
     if not getattr(args, "organize_adv_live", False):
         img_dir.mkdir(parents=True, exist_ok=True)
 
-    total_images = _quick_count(session)
-
-    # Seed progress by counting image files already on disk. Works for flat,
-    # --organize-adv, and --organize-adv-live since rglob finds files in
-    # batches/ and YYYY-MM/ equally.
+    # ONE fast tree walk at startup (os.scandir, ~free stat() on Windows): seed
+    # the progress count AND build the on-disk media_id index. Resume is then an
+    # O(1) dict lookup instead of an O(whole-tree) rglob per media_id -- the
+    # latter made follow-up runs scale quadratically with collection size.
+    # Prunes gallery/ thumbnails and _duplicates/ quarantine.
     already_done = 0
     disk_bytes = 0
+    on_disk_by_mid = {}   # media_id -> Path of an existing full-res image
+
+    def _iter_image_entries(root):
+        skip_dirs = {"gallery", "_duplicates"}
+        stack = [str(root)]
+        while stack:
+            try:
+                with os.scandir(stack.pop()) as it:
+                    for e in it:
+                        if e.is_dir(follow_symlinks=False):
+                            if e.name not in skip_dirs:
+                                stack.append(e.path)
+                        elif e.is_file(follow_symlinks=False):
+                            yield e
+            except OSError:
+                continue
+
     if out.exists():
-        for p in out.rglob("*"):
-            if p.is_file() and p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
-                already_done += 1
-                disk_bytes += p.stat().st_size
+        for e in _iter_image_entries(out):
+            name = e.name
+            if name.endswith(".part") or os.path.splitext(name)[1].lower() not in _IMAGE_EXTS:
+                continue
+            already_done += 1
+            try:
+                disk_bytes += e.stat().st_size
+            except OSError:
+                pass
+            on_disk_by_mid.setdefault(media_id_of(name), Path(e.path))
     processed = already_done
 
     if already_done:
         print("Resuming: {} image files already on disk ({}).\n".format(
             already_done, _format_size(disk_bytes)))
+
+    # Progress denominator: avoid a full-history NETWORK pre-count on every run.
+    # For a populated library the catalog size is an instant, good-enough estimate
+    # (the progress bar already tolerates over/under). Only walk the API to count
+    # on a fresh library (empty catalog) or when the user asks for --accurate-count.
+    if getattr(args, "accurate_count", False) or not known:
+        total_images = _quick_count(session)
+    else:
+        total_images = max(already_done, len(known))
+        print("Library size (catalog estimate): ~{} images "
+              "(use --accurate-count for an exact API count)\n".format(total_images))
 
     def _tick():
         nonlocal processed
@@ -1739,6 +1773,30 @@ def run_download(args, progress=None):
     written = set()   # media_ids written this session
     dl = {"ok": 0, "skip": 0, "missing": 0, "fail": 0}
     page = 0
+    update_mode = getattr(args, "update", False)
+    update_grace = getattr(args, "update_grace", 2)
+    consecutive_known_pages = 0
+
+    # Parallel downloads: only for the common flat-download case. collect_only does
+    # no downloads, and organize-adv-live has per-folder side effects that assume
+    # serial ordering -- both fall back to the serial path.
+    workers = max(1, getattr(args, "workers", 1) or 1)
+    parallel = (workers > 1
+                and not getattr(args, "collect_only", False)
+                and not getattr(args, "organize_adv_live", False))
+    if parallel:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        print("Parallel downloads: {} workers.\n".format(workers))
+
+    def _row_for(meta, mid, full_meta, filename="", url="", w="", h=""):
+        return {
+            "task_id": meta["task_id"], "media_id": mid,
+            "filename": filename, "url": url, "width": w, "height": h,
+            "prompt_preview": meta["prompt_preview"],
+            "status": meta["status"], "created_at": meta["created_at"],
+            **_merge_full(full_meta, known.get(mid, {})),
+        }
+
     try:
         while True:
             page += 1
@@ -1752,6 +1810,107 @@ def run_download(args, progress=None):
             print("Page {}: {} tasks (total {})".format(page, len(edges), seen + len(edges)))
 
             page_rows = []  # rows accumulated this page; upserted after each page
+            page_new = 0    # media_ids on this page NOT already on disk (for --update)
+
+            if parallel:
+                # Pass 1 (serial, local): emit raw json, handle on-disk skips, and
+                # build a worklist of media_ids that actually need fetching.
+                worklist = []
+                for edge in edges:
+                    node = edge.get("node", edge)
+                    raw_f.write(json.dumps(node, ensure_ascii=False) + "\n")
+                    meta = extract_meta(node)
+                    all_mids = media_ids_for(node)
+                    full_meta = {}
+                    if use_full_meta:
+                        tid = meta["task_id"]
+                        if tid not in _full_meta_cache:
+                            task_data = task_detail_gql(session, tid)
+                            fm = extract_full_meta(task_data)
+                            if fm.get("model_id"):
+                                fm["model_name"] = model_name_gql(session, fm["model_id"])
+                            _full_meta_cache[tid] = fm
+                            time.sleep(args.delay)
+                        full_meta = _full_meta_cache.get(tid, {})
+                    for mid in all_mids:
+                        existing = on_disk_by_mid.get(mid)
+                        if existing:
+                            dl["skip"] += 1
+                            k = known.get(mid, {})
+                            row = _row_for(meta, mid, full_meta,
+                                           filename=existing.name, url=k.get("url", ""),
+                                           w=k.get("width", ""), h=k.get("height", ""))
+                            row["prompt_preview"] = k.get("prompt_preview") or meta["prompt_preview"]
+                            row["status"] = k.get("status") or meta["status"]
+                            row["created_at"] = k.get("created_at") or meta["created_at"]
+                            page_rows.append(row)
+                            written.add(mid)
+                            _tick()
+                            continue
+                        page_new += 1
+                        stem = img_dir / build_stem_name(
+                            meta["prompt_preview"], meta["task_id"], mid,
+                            args.name_length, args.name_sep)
+                        worklist.append({"meta": meta, "mid": mid, "stem": stem,
+                                         "full_meta": full_meta})
+
+                # Pass 2 (parallel): resolve + download. Only the per-item network
+                # and file write run in threads; all shared state is mutated here
+                # in the main thread as futures complete.
+                def _work(item):
+                    url, info = resolve_media(session, item["mid"])
+                    if not url:
+                        return item, "missing", "", info, None
+                    status, path = download(
+                        session, url, item["stem"],
+                        convert=getattr(args, "convert", None),
+                        jpeg_quality=getattr(args, "jpeg_quality", 92),
+                        jpeg_bg=getattr(args, "jpeg_bg", "white"),
+                        keep_webp=getattr(args, "keep_webp", False))
+                    return item, status, url, info, path
+
+                if worklist:
+                    with ThreadPoolExecutor(max_workers=workers) as ex:
+                        for fut in as_completed([ex.submit(_work, it) for it in worklist]):
+                            item, status, url, info, path = fut.result()
+                            meta, mid, full_meta = item["meta"], item["mid"], item["full_meta"]
+                            w, h = info.get("width", ""), info.get("height", "")
+                            if status == "missing":
+                                dl["missing"] += 1
+                                page_rows.append(_row_for(meta, mid, full_meta, w=w, h=h))
+                            else:
+                                dl[status] += 1
+                                page_rows.append(_row_for(
+                                    meta, mid, full_meta,
+                                    filename=path.name if path else "", url=url, w=w, h=h))
+                                if path and status in ("ok", "skip"):
+                                    on_disk_by_mid[mid] = path
+                            written.add(mid)
+                            _tick()
+
+                if page_rows:
+                    save_catalog(db_path, page_rows)
+                seen += len(edges)
+                if args.max and seen >= args.max:
+                    print("Reached --max limit.")
+                    break
+                if update_mode:
+                    if page_new == 0:
+                        consecutive_known_pages += 1
+                        if consecutive_known_pages >= update_grace:
+                            print("\n--update: {} consecutive pages already on disk; "
+                                  "stopping (older items are already downloaded)."
+                                  .format(consecutive_known_pages))
+                            break
+                    else:
+                        consecutive_known_pages = 0
+                raw_f.flush()
+                pi = conn.get("pageInfo", {})
+                if not pi.get("hasPreviousPage"):
+                    break
+                before = pi.get("startCursor")
+                time.sleep(args.delay)
+                continue
 
             for edge in edges:
                 node = edge.get("node", edge)
@@ -1790,7 +1949,7 @@ def run_download(args, progress=None):
                 batch_results = []
                 for idx, mid in enumerate(all_mids):
                     existing = (None if getattr(args, "collect_only", False)
-                                else already_downloaded(out, mid))
+                                else on_disk_by_mid.get(mid))
                     if existing:
                         dl["skip"] += 1
                         k = known.get(mid, {})
@@ -1809,6 +1968,7 @@ def run_download(args, progress=None):
                         written.add(mid)
                         _tick()
                         continue
+                    page_new += 1  # this media_id is not yet on disk
                     if getattr(args, "organize_adv_live", False) and is_batch:
                         stem_name = "{:02d}_{}".format(idx + 1, mid)
                     else:
@@ -1859,6 +2019,7 @@ def run_download(args, progress=None):
                     })
                     written.add(mid)
                     if path and status in ("ok", "skip"):
+                        on_disk_by_mid[mid] = path  # keep index current within the run
                         batch_results.append((idx, mid, path, info))
                     if status == "ok":
                         time.sleep(args.delay)
@@ -1912,6 +2073,22 @@ def run_download(args, progress=None):
             if args.max and seen >= args.max:
                 print("Reached --max limit.")
                 break
+
+            # Incremental --update: pages come newest -> oldest, so once we hit
+            # a run of pages where everything is already on disk, the rest of the
+            # history is older and already downloaded -> stop early. The grace
+            # window tolerates occasional gaps (a few missing/failed items).
+            if update_mode:
+                if page_new == 0:
+                    consecutive_known_pages += 1
+                    if consecutive_known_pages >= update_grace:
+                        print("\n--update: {} consecutive pages already on disk; "
+                              "stopping (older items are already downloaded)."
+                              .format(consecutive_known_pages))
+                        break
+                else:
+                    consecutive_known_pages = 0
+
             pi = conn.get("pageInfo", {})
             if not pi.get("hasPreviousPage"):
                 break
@@ -1943,8 +2120,23 @@ def main():
                          "and token.txt)")
     ap.add_argument("--out", default="pixai_backup",
                     help="output folder for images and catalog (default: pixai_backup)")
-    ap.add_argument("--page-size", type=int, default=20, help="items per page (try 50)")
+    ap.add_argument("--page-size", type=int, default=250,
+                    help="tasks per API page (default 250; fewer round-trips. Keep <~8000)")
+    ap.add_argument("--workers", type=int, default=4,
+                    help="parallel download workers (default 4). 1 = serial/polite. "
+                         "Higher saturates bandwidth on bulk first-time pulls; ignored for "
+                         "--collect-only and --organize-adv-live.")
     ap.add_argument("--max", type=int, default=0, help="stop after N tasks (0=all)")
+    ap.add_argument("--update", action="store_true",
+                    help="incremental follow-up run: stop paging once a run of pages is "
+                         "already fully on disk (newest-first, so older items are already "
+                         "downloaded). Much faster than re-walking the whole history.")
+    ap.add_argument("--update-grace", type=int, default=2,
+                    help="with --update, number of consecutive all-on-disk pages before "
+                         "stopping (default 2; raise if your history has gaps)")
+    ap.add_argument("--accurate-count", action="store_true",
+                    help="walk the whole API to count library size for the progress bar "
+                         "(slow). Default uses the catalog size as a fast estimate.")
     ap.add_argument("--delay", type=float, default=0.4,
                     help="seconds to wait between API requests (default: 0.4)")
     ap.add_argument("--variant", default=None,

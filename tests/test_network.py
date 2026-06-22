@@ -231,3 +231,135 @@ class TestQuickCount:
         # edge 1 → 1 id, edge 2 → 2 ids  (m2 deduped + m3)
         result = core._quick_count(mock_session, page_size=10)
         assert result == 3
+
+
+# ---------------------------------------------------------------------------
+# run_download: resume index + --update early-stop (perf-critical paths)
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+
+def _dl_args(out, **kw):
+    base = dict(
+        out=str(out), token="t", page_size=20, max=0, delay=0,
+        name_length=40, name_sep="_", organize_live=False, organize_adv_live=False,
+        convert=None, jpeg_quality=92, jpeg_bg="white", keep_webp=False,
+        collect_only=False, full_meta=False, update=False, update_grace=2,
+    )
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def _page(mid, has_prev, cursor=""):
+    node = {"id": "task_" + mid, "mediaId": mid, "batchMediaIds": [],
+            "createdAt": "2024-01-01T00:00:00", "promptsPreview": "p", "status": "ok"}
+    return {"user": {"taskSummaries": {
+        "edges": [{"node": node}],
+        "pageInfo": {"hasPreviousPage": has_prev, "startCursor": cursor}}}}
+
+
+def _patch_download_layer(mocker):
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "_quick_count", return_value=3)
+    mocker.patch.object(core, "resolve_media",
+                        return_value=("http://x/img", {"width": "1", "height": "1"}))
+
+    def fake_download(session, url, stem, **kw):
+        dest = stem.with_suffix(".webp")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"img")
+        return ("ok", dest)
+    return mocker.patch.object(core, "download", side_effect=fake_download)
+
+
+def test_resume_skips_on_disk_without_redownload(tmp_path, mocker):
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_known.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+    mocker.patch.object(core, "gql", side_effect=[_page("new1", True, "c1"),
+                                                  _page("known", False)])
+
+    core.run_download(_dl_args(tmp_path))
+
+    names = [str(c.args[2]) for c in dl.call_args_list]  # stem is 3rd positional
+    assert any("new1" in n for n in names)
+    assert not any("known" in n for n in names)
+
+
+def test_update_mode_stops_early(tmp_path, mocker):
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
+    _patch_download_layer(mocker)
+    gql = mocker.patch.object(core, "gql", side_effect=[
+        _page("fresh", True, "c1"), _page("old", True, "c2"),
+        _page("should_not_fetch", False)])
+
+    core.run_download(_dl_args(tmp_path, update=True, update_grace=1))
+
+    assert gql.call_count == 2  # page3 never requested
+
+
+def test_populated_catalog_skips_network_count(tmp_path, mocker):
+    # With a populated catalog, the progress total comes from the catalog size --
+    # no full-history _quick_count network walk.
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
+                      {"media_id": "old", "filename": "x_old.webp"}])
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
+    _patch_download_layer(mocker)
+    qc = mocker.patch.object(core, "_quick_count", return_value=999)
+    mocker.patch.object(core, "gql", side_effect=[_page("old", False)])
+
+    core.run_download(_dl_args(tmp_path, update=True, update_grace=1))
+
+    assert qc.call_count == 0  # catalog estimate used, no network pre-count
+
+
+def test_parallel_workers_download_new_skip_known(tmp_path, mocker):
+    # workers>1 path: new items fetched concurrently, on-disk items skipped.
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_known.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+
+    def _multi_page(mids, has_prev, cursor=""):
+        edges = [{"node": {"id": "t_" + m, "mediaId": m, "batchMediaIds": [],
+                           "createdAt": "2024-01-01", "promptsPreview": "p", "status": "ok"}}
+                 for m in mids]
+        return {"user": {"taskSummaries": {
+            "edges": edges, "pageInfo": {"hasPreviousPage": has_prev, "startCursor": cursor}}}}
+
+    mocker.patch.object(core, "gql", side_effect=[_multi_page(["a", "b", "known"], False)])
+    core.run_download(_dl_args(tmp_path, workers=4))
+
+    names = [str(c.args[2]) for c in dl.call_args_list]
+    assert sum("known" in n for n in names) == 0          # on-disk skipped
+    assert any("_a" in n for n in names) and any("_b" in n for n in names)  # both new fetched
+
+
+def test_update_and_workers_compose(tmp_path, mocker):
+    # --update (early-stop) + --workers (parallel) together: new items fetched
+    # concurrently at the top, then stop once a page is fully on disk.
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+
+    def _mp(mids, has_prev, c=""):
+        edges = [{"node": {"id": "t_" + m, "mediaId": m, "batchMediaIds": [],
+                           "createdAt": "2024-01-01", "promptsPreview": "p", "status": "ok"}}
+                 for m in mids]
+        return {"user": {"taskSummaries": {
+            "edges": edges, "pageInfo": {"hasPreviousPage": has_prev, "startCursor": c}}}}
+
+    gql = mocker.patch.object(core, "gql", side_effect=[
+        _mp(["new1", "new2"], True, "c1"), _mp(["old"], True, "c2"),
+        _mp(["should_not_fetch"], False)])
+
+    core.run_download(_dl_args(tmp_path, update=True, update_grace=1, workers=4))
+
+    names = [str(c.args[2]) for c in dl.call_args_list]
+    assert gql.call_count == 2                                   # stopped before page 3
+    assert any("new1" in n for n in names) and any("new2" in n for n in names)
+    assert not any("old" in n for n in names)                   # on-disk skipped
