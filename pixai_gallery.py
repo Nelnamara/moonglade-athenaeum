@@ -795,9 +795,12 @@ def create_app(out_dir: Path):
   .card .meta .title { font-size: 12px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card .meta .model { font-size: 11px; color: var(--mauve); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card .meta .date  { font-size: 10px; color: var(--overlay0); }
-  /* NSFW blur (opt-in via the Blur NSFW toggle; hover or open to reveal) */
-  body.blur-nsfw .card[data-nsfw="1"] img { filter: blur(20px); transition: filter .15s; }
-  body.blur-nsfw .card[data-nsfw="1"]:hover img { filter: none; }
+  /* Privacy blur (opt-in toggle): blur every thumbnail until hover. Useful on
+     LAN / mobile / over-the-shoulder. NSFW-flagged cards (data-nsfw="1") blur
+     more heavily when the flag is known. */
+  body.privacy-blur .card img { filter: blur(16px); transition: filter .12s; }
+  body.privacy-blur .card[data-nsfw="1"] img { filter: blur(28px); }
+  body.privacy-blur .card:hover img { filter: none; }
   .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
   .card .cb-wrap input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--lavender); cursor: pointer; }
   .card a.cover { position: absolute; inset: 0; z-index: 1; }
@@ -1052,7 +1055,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <button class="btn" onclick="clearAll()">Clear</button>
   <span><span id="sel-count">0</span> selected</span>
   <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
-  <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Blur NSFW thumbnails (hover to reveal)">Blur NSFW</button>
+  <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
   <button class="btn btn-danger" id="bulk-del-btn" style="display:none"
     onclick="confirmBulkDelete()">Delete Selected</button>
   <span style="margin-left:auto;color:var(--overlay0);font-size:12px;">tip: click an image to open the lightbox · arrow keys to browse · F for slideshow</span>
@@ -1140,14 +1143,14 @@ function toggleFilters() {
   btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 function applyBlur() {
-  var on = localStorage.getItem('gallery_blur_nsfw') === '1';
-  document.body.classList.toggle('blur-nsfw', on);
+  var on = localStorage.getItem('gallery_privacy_blur') === '1';
+  document.body.classList.toggle('privacy-blur', on);
   var b = document.getElementById('blur-btn');
-  if (b) b.textContent = on ? 'Unblur NSFW' : 'Blur NSFW';
+  if (b) b.textContent = on ? 'Unblur' : 'Privacy blur';
 }
 function toggleBlur() {
-  var on = localStorage.getItem('gallery_blur_nsfw') === '1';
-  localStorage.setItem('gallery_blur_nsfw', on ? '' : '1');
+  var on = localStorage.getItem('gallery_privacy_blur') === '1';
+  localStorage.setItem('gallery_privacy_blur', on ? '' : '1');
   applyBlur();
 }
 (function(){
