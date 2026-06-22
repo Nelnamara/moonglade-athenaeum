@@ -1608,30 +1608,38 @@ def run_fix_models(args):
         print("No model names need fixing -- catalog already has readable names.")
         return {"fixed": 0, "models": 0, "unresolved": 0}
 
+    relabel = getattr(args, "relabel_removed", False)
+    removed_label = "Unknown or removed model"
     print("Resolving {} distinct model id(s) across {} rows...".format(
         len(to_resolve), sum(len(v) for v in to_resolve.values())))
     _prog = getattr(args, "progress", None)
-    fixed = unresolved = 0
-    names = {}
+    fixed = relabeled = unresolved = 0
     for i, vid in enumerate(sorted(to_resolve)):
         name = model_name_gql(session, vid)
-        names[vid] = name
         if name and name != vid and not str(name).isdigit():
             for r in to_resolve[vid]:
                 r["model_name"] = name
                 fixed += 1
         else:
             unresolved += 1
-            print("  could not resolve model {} (left as-is)".format(vid))
+            if relabel:
+                for r in to_resolve[vid]:
+                    r["model_name"] = removed_label  # model_id kept for reference
+                    relabeled += 1
+                print("  {} unresolved -> '{}'".format(vid, removed_label))
+            else:
+                print("  could not resolve model {} (left as-is)".format(vid))
         if _prog:
             _prog(i + 1, len(to_resolve), 0)
         time.sleep(getattr(args, "delay", 0.4))
 
-    if fixed:
+    if fixed or relabeled:
         save_catalog(db_path, rows)
-    print("\nFixed {} row(s) across {} model(s); {} id(s) unresolved.".format(
-        fixed, len(to_resolve) - unresolved, unresolved))
-    return {"fixed": fixed, "models": len(to_resolve) - unresolved, "unresolved": unresolved}
+    print("\nFixed {} row(s) across {} model(s); {} id(s) unresolved{}.".format(
+        fixed, len(to_resolve) - unresolved, unresolved,
+        " (relabeled {} rows to '{}')".format(relabeled, removed_label) if relabeled else ""))
+    return {"fixed": fixed, "relabeled": relabeled, "models": len(to_resolve) - unresolved,
+            "unresolved": unresolved}
 
 
 def run_catalog_stats(args):
@@ -2382,6 +2390,9 @@ def main():
     ap.add_argument("--fix-model-names", action="store_true",
                     help="re-resolve readable model names for catalog rows whose model_name "
                          "is blank or a raw numeric id (one API call per distinct model), then exit")
+    ap.add_argument("--relabel-removed", action="store_true",
+                    help="with --fix-model-names, relabel ids that no longer resolve (deleted "
+                         "models) to 'Unknown or removed model' instead of leaving the raw number")
     ap.add_argument("--audit", action="store_true",
                     help="read-only duplicate audit of the whole backup folder; writes "
                          "audit_report.csv and prints a summary, then exit. Independent of catalog.db.")
