@@ -121,7 +121,10 @@ PERSISTED_QUERY_HASH = _cfg.get("PERSISTED_QUERY_HASH", "")
 U3T = _cfg.get("U3T", "")
 USER_ID = _cfg.get("USER_ID", "")
 TASK_DETAIL_HASH = _cfg.get("TASK_DETAIL_HASH", "")
-MODEL_DETAIL_HASH = _cfg.get("MODEL_DETAIL_HASH", "")
+# Default to the captured getGenerationModelByVersionId hash so model-name
+# resolution works out of the box (override in config.json if it rotates).
+MODEL_DETAIL_HASH = _cfg.get("MODEL_DETAIL_HASH", "") or \
+    "0d2ab28b2991e3fd74672ffec0adf8947e599d79e0039348a7d2642e0bf8c9bc"
 # Published-artwork ops (for --sync-artworks). These are public persisted-query
 # identifiers, not secrets; captured 2026-06-22. Override in config.json if a
 # PixAI frontend update rotates them.
@@ -1571,6 +1574,66 @@ def run_sync_artworks(args):
     return {"artworks": artworks, "matched": matched}
 
 
+def _needs_model_fix(row):
+    """Return the model version-id to resolve if this row's model_name is missing
+    or still a raw numeric id; else ''. Handles the case where model_name was
+    set to the numeric id (MODEL_DETAIL_HASH was absent on an earlier run)."""
+    mid = (row.get("model_id") or "").strip()
+    name = (row.get("model_name") or "").strip()
+    if not mid and name.isdigit():
+        mid = name  # model_name itself is the numeric id
+    if not mid:
+        return ""
+    if not name or name == mid or name.isdigit():
+        return mid
+    return ""
+
+
+def run_fix_models(args):
+    """Re-resolve human-readable model names for catalog rows whose model_name is
+    blank or still a numeric version-id (e.g. saved before MODEL_DETAIL_HASH was
+    configured). One API call per distinct model id (cached)."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    session = _make_session(getattr(args, "token", None))
+    rows = load_catalog(db_path)
+
+    to_resolve = {}   # version_id -> rows needing it
+    for r in rows:
+        vid = _needs_model_fix(r)
+        if vid:
+            to_resolve.setdefault(vid, []).append(r)
+
+    if not to_resolve:
+        print("No model names need fixing -- catalog already has readable names.")
+        return {"fixed": 0, "models": 0, "unresolved": 0}
+
+    print("Resolving {} distinct model id(s) across {} rows...".format(
+        len(to_resolve), sum(len(v) for v in to_resolve.values())))
+    _prog = getattr(args, "progress", None)
+    fixed = unresolved = 0
+    names = {}
+    for i, vid in enumerate(sorted(to_resolve)):
+        name = model_name_gql(session, vid)
+        names[vid] = name
+        if name and name != vid and not str(name).isdigit():
+            for r in to_resolve[vid]:
+                r["model_name"] = name
+                fixed += 1
+        else:
+            unresolved += 1
+            print("  could not resolve model {} (left as-is)".format(vid))
+        if _prog:
+            _prog(i + 1, len(to_resolve), 0)
+        time.sleep(getattr(args, "delay", 0.4))
+
+    if fixed:
+        save_catalog(db_path, rows)
+    print("\nFixed {} row(s) across {} model(s); {} id(s) unresolved.".format(
+        fixed, len(to_resolve) - unresolved, unresolved))
+    return {"fixed": fixed, "models": len(to_resolve) - unresolved, "unresolved": unresolved}
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
@@ -2316,6 +2379,9 @@ def main():
                     help="fetch your published-artwork metadata (title, NSFW flag, likes, "
                          "comments, aes score, tags) via listArtworks and merge it onto "
                          "matching catalog rows by media_id, then exit")
+    ap.add_argument("--fix-model-names", action="store_true",
+                    help="re-resolve readable model names for catalog rows whose model_name "
+                         "is blank or a raw numeric id (one API call per distinct model), then exit")
     ap.add_argument("--audit", action="store_true",
                     help="read-only duplicate audit of the whole backup folder; writes "
                          "audit_report.csv and prints a summary, then exit. Independent of catalog.db.")
@@ -2361,6 +2427,9 @@ def main():
             return
         if args.sync_artworks:
             run_sync_artworks(args)
+            return
+        if args.fix_model_names:
+            run_fix_models(args)
             return
         if args.audit:
             cmd_audit(args, out)

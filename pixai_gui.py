@@ -1075,6 +1075,10 @@ class UtilitiesTab(QWidget):
         self.btn_sync_artworks.setObjectName("btn_run")
         self.btn_sync_artworks.setToolTip("Fetch your published-artwork metadata (title, NSFW flag, "
                                           "likes, comments, tags) and merge it onto catalog rows by media_id")
+        self.btn_fix_models = QPushButton("▶  Fix Model Names")
+        self.btn_fix_models.setObjectName("btn_run")
+        self.btn_fix_models.setToolTip("Re-resolve readable model names for rows showing a raw "
+                                       "numeric id (one API call per distinct model)")
 
         backfill_row = QHBoxLayout()
         backfill_row.addWidget(self.btn_backfill)
@@ -1084,12 +1088,14 @@ class UtilitiesTab(QWidget):
         export_row = QHBoxLayout()
         export_row.addWidget(self.btn_export_csv)
         export_row.addWidget(self.btn_sync_artworks)
+        export_row.addWidget(self.btn_fix_models)
         export_row.addStretch()
 
         self.btn_backfill.clicked.connect(self._run_backfill)
         self.btn_backfill_full.clicked.connect(self._run_backfill_full)
         self.btn_export_csv.clicked.connect(self._run_export_csv)
         self.btn_sync_artworks.clicked.connect(self._run_sync_artworks)
+        self.btn_fix_models.clicked.connect(self._run_fix_models)
 
         # ---- Duplicate audit / dedup ----
         self.btn_audit = QPushButton("▶  Audit Duplicates")
@@ -1237,6 +1243,12 @@ class UtilitiesTab(QWidget):
     def _run_sync_artworks(self):
         self._run(core.run_sync_artworks, self._base_args())
 
+    def _run_fix_models(self):
+        args = self._base_args()
+        self._run(core.run_fix_models, args)
+        args.progress = self._worker.progress.emit
+        self._worker.progress.connect(self._update_progress)
+
     def _run_export_csv(self):
         out = Path(self._bar.out)
         db_path = out / "catalog.db"
@@ -1278,7 +1290,7 @@ class UtilitiesTab(QWidget):
         for b in (self.btn_probe, self.btn_count, self.btn_stats,
                   self.btn_backfill, self.btn_backfill_full, self.btn_export_csv,
                   self.btn_audit, self.btn_dedup, self.btn_verify,
-                  self.btn_sync_artworks):
+                  self.btn_sync_artworks, self.btn_fix_models):
             b.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         if running:
