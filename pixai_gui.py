@@ -1091,6 +1091,10 @@ class UtilitiesTab(QWidget):
         export_row = QHBoxLayout()
         export_row.addWidget(self.btn_export_csv)
         export_row.addWidget(self.btn_sync_artworks)
+        self.chk_with_videos = QCheckBox("incl. videos")
+        self.chk_with_videos.setToolTip("With Sync Artworks, also download animated-artwork "
+                                        "video files into a videos/ folder")
+        export_row.addWidget(self.chk_with_videos)
         export_row.addWidget(self.btn_fix_models)
         export_row.addWidget(self.btn_account)
         export_row.addStretch()
@@ -1246,7 +1250,13 @@ class UtilitiesTab(QWidget):
         self._worker.progress.connect(self._update_progress)
 
     def _run_sync_artworks(self):
-        self._run(core.run_sync_artworks, self._base_args())
+        args = self._base_args()
+        args.with_videos = self.chk_with_videos.isChecked()
+        args.name_length = 60
+        args.name_sep = "_"
+        self._run(core.run_sync_artworks, args)
+        args.progress = self._worker.progress.emit
+        self._worker.progress.connect(self._update_progress)
 
     def _run_fix_models(self):
         args = self._base_args()
