@@ -270,13 +270,19 @@ def _like_pattern(term):
     return t if has_wild else "%" + t + "%"
 
 
-def _build_where(q, model, date_from, date_to, batch="", rating_min=0):
+def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
+                 published_only=False, art_tag=""):
     """Return (where_clause, params) for the common filter set."""
     clauses = ["filename != ''"]
     params  = []
     if rating_min:
         clauses.append("CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) >= ?")
         params.append(int(rating_min))
+    if published_only:
+        clauses.append("is_published = '1'")
+    if art_tag:
+        clauses.append("LOWER(COALESCE(art_tags,'')) LIKE ?")
+        params.append("%" + art_tag.strip().lower() + "%")
     if q:
         # Whitespace-separated terms are ANDed; each may use * / ? wildcards.
         for term in q.split():
@@ -310,9 +316,11 @@ def get_row(db_path, media_id):
 
 
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
-                  sort="newest", page=1, page_size=100, batch="", rating_min=0):
+                  sort="newest", page=1, page_size=100, batch="", rating_min=0,
+                  published_only=False, art_tag=""):
     """Return (rows, total) with filtering, sorting and pagination done in SQL."""
-    where, params = _build_where(q, model, date_from, date_to, batch, rating_min)
+    where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
+                                 published_only, art_tag)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     offset = (max(1, page) - 1) * page_size
     con = _connect(db_path)
@@ -330,9 +338,10 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
 
 
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
-                   batch="", rating_min=0):
+                   batch="", rating_min=0, published_only=False, art_tag=""):
     """Return ordered list of media_ids matching the filter (no row data)."""
-    where, params = _build_where(q, model, date_from, date_to, batch, rating_min)
+    where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
+                                 published_only, art_tag)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     con = _connect(db_path)
     try:
@@ -502,11 +511,26 @@ def collection_health(out_dir, db_path):
             "SELECT COALESCE(NULLIF(model_name,''), NULLIF(model_id,''), 'unknown') AS mdl, "
             "COUNT(*) AS c FROM catalog WHERE filename != '' GROUP BY mdl ORDER BY c DESC LIMIT 8"
         ).fetchall()
+        # Published-artwork analytics (populated by --sync-artworks)
+        published = _scalar("SELECT COUNT(*) FROM catalog WHERE is_published = '1'")
+        total_likes = _scalar(
+            "SELECT COALESCE(SUM(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),0) "
+            "FROM catalog WHERE is_published = '1'")
+        tag_rows = con.execute(
+            "SELECT art_tags FROM catalog WHERE COALESCE(art_tags,'') != ''").fetchall()
         # catalog rows that claim a file but whose media_id isn't on disk
         cat_ids = [r[0] for r in con.execute(
             "SELECT media_id FROM catalog WHERE filename != ''").fetchall()]
     finally:
         con.close()
+
+    tag_counter = Counter()
+    for (tags,) in tag_rows:
+        for t in (tags or "").split(","):
+            t = t.strip()
+            if t:
+                tag_counter[t] += 1
+    top_tags = tag_counter.most_common(10)
 
     missing = sum(1 for mid in cat_ids if mid and mid not in on_disk_ids)
 
@@ -526,6 +550,9 @@ def collection_health(out_dir, db_path):
         "missing": missing,
         "by_month": [(m, c) for (m, c) in by_month],
         "top_models": [(m, c) for (m, c) in top_models],
+        "published": published,
+        "total_likes": total_likes,
+        "top_tags": top_tags,
     }
 
 
@@ -765,8 +792,12 @@ def create_app(out_dir: Path):
   .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--surface0); }
   .card .no-thumb { width: 100%; aspect-ratio: 1; background: var(--surface0); display: flex; align-items: center; justify-content: center; color: var(--overlay0); font-size: 11px; }
   .card .meta { padding: 6px 8px; }
+  .card .meta .title { font-size: 12px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card .meta .model { font-size: 11px; color: var(--mauve); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card .meta .date  { font-size: 10px; color: var(--overlay0); }
+  /* NSFW blur (opt-in via the Blur NSFW toggle; hover or open to reveal) */
+  body.blur-nsfw .card[data-nsfw="1"] img { filter: blur(20px); transition: filter .15s; }
+  body.blur-nsfw .card[data-nsfw="1"]:hover img { filter: none; }
   .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
   .card .cb-wrap input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--lavender); cursor: pointer; }
   .card a.cover { position: absolute; inset: 0; z-index: 1; }
@@ -961,6 +992,17 @@ document.addEventListener('DOMContentLoaded', function() {
     </select>
   </div>
   <div>
+    <label>Tag / contest</label><br>
+    <input type="text" name="tag" value="{{ art_tag }}" placeholder="published tag…" style="width:140px">
+  </div>
+  <div>
+    <label>&nbsp;</label><br>
+    <label style="color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:6px;">
+      <input type="checkbox" name="published" value="1" {% if published_only %}checked{% endif %}
+             style="width:auto;"> Published only
+    </label>
+  </div>
+  <div>
     <label>Per page</label><br>
     <select name="per_page">
       {% for n in per_page_opts %}
@@ -1010,6 +1052,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <button class="btn" onclick="clearAll()">Clear</button>
   <span><span id="sel-count">0</span> selected</span>
   <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
+  <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Blur NSFW thumbnails (hover to reveal)">Blur NSFW</button>
   <button class="btn btn-danger" id="bulk-del-btn" style="display:none"
     onclick="confirmBulkDelete()">Delete Selected</button>
   <span style="margin-left:auto;color:var(--overlay0);font-size:12px;">tip: click an image to open the lightbox · arrow keys to browse · F for slideshow</span>
@@ -1020,7 +1063,8 @@ document.addEventListener('DOMContentLoaded', function() {
   <div class="grid">
     {% for row in rows %}
     <div class="card" id="card-{{ row.media_id }}" data-mid="{{ row.media_id }}"
-         data-prompt="{{ (row.prompt_preview or '')|e }}">
+         data-prompt="{{ (row.title or row.prompt_preview or '')|e }}"
+         {% if row.is_nsfw == '1' %}data-nsfw="1"{% endif %}>
       <div class="cb-wrap">
         <input type="checkbox" name="media_ids" value="{{ row.media_id }}"
                onchange="onCheck()" onclick="event.stopPropagation()">
@@ -1035,8 +1079,9 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="no-thumb">no preview</div>
       {% endif %}
       <div class="meta">
+        {% if row.title %}<div class="title" title="{{ row.title }}">{{ row.title }}</div>{% endif %}
         <div class="model">{{ row.model_name or row.model_id or '—' }}</div>
-        <div class="date">{{ row.created_at[:10] if row.created_at else '' }}</div>
+        <div class="date">{{ row.created_at[:10] if row.created_at else '' }}{% if row.liked_count and row.liked_count not in ('0','') %} · ♥ {{ row.liked_count }}{% endif %}</div>
       </div>
       <div class="stars" id="stars-{{ row.media_id }}"
            data-mid="{{ row.media_id }}" data-rating="{{ row.rating or 0 }}"></div>
@@ -1093,6 +1138,17 @@ function toggleFilters() {
   var btn = document.querySelector('.filter-toggle');
   var open = f.classList.toggle('open');
   btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function applyBlur() {
+  var on = localStorage.getItem('gallery_blur_nsfw') === '1';
+  document.body.classList.toggle('blur-nsfw', on);
+  var b = document.getElementById('blur-btn');
+  if (b) b.textContent = on ? 'Unblur NSFW' : 'Blur NSFW';
+}
+function toggleBlur() {
+  var on = localStorage.getItem('gallery_blur_nsfw') === '1';
+  localStorage.setItem('gallery_blur_nsfw', on ? '' : '1');
+  applyBlur();
 }
 (function(){
   // On mobile, auto-open the filter bar if any filter is active so the user sees
@@ -1237,7 +1293,7 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'ArrowUp') { e.preventDefault(); kbdFocus(kbdIdx - cols); }
   else if (e.key === 'Enter' && kbdIdx >= 0) { openLightbox(null, kbdIdx); }
 });
-document.addEventListener('DOMContentLoaded', refreshSelUI);
+document.addEventListener('DOMContentLoaded', function(){ refreshSelUI(); applyBlur(); });
 </script>
 """)
 
@@ -1391,6 +1447,8 @@ function copyPrompt(btn) {
     {{ stat('Catalog rows', '{:,}'.format(h.catalog_rows)) }}
     {{ stat('Full-meta', h.full_meta_pct|string + '%') }}
     {{ stat('Rated', '{:,}'.format(h.rated)) }}
+    {{ stat('Published', '{:,}'.format(h.published)) }}
+    {{ stat('Total likes', '{:,}'.format(h.total_likes)) }}
     {{ stat('Duplicates', '{:,}'.format(h.dup_redundant), 'warn' if h.dup_redundant else '') }}
     {{ stat('Reclaimable', h.dup_bytes_h, 'warn' if h.dup_bytes else '') }}
     {{ stat('Missing files', '{:,}'.format(h.missing), 'bad' if h.missing else '') }}
@@ -1425,6 +1483,17 @@ function copyPrompt(btn) {
     </div>
     {% endfor %}
   </div>
+
+  {% if h.top_tags %}
+  <h2 style="margin:28px 0 10px;font-size:16px;">Top tags &amp; contests</h2>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;">
+    {% for name, c in h.top_tags %}
+    <a href="{{ url_for('index', tag=name) }}"
+       style="display:inline-flex;align-items:center;gap:6px;background:var(--mantle);border:0.5px solid var(--surface1);border-left:3px solid var(--gold);border-radius:4px;padding:4px 10px;font-size:12px;color:var(--text);text-decoration:none;">
+      {{ name }} <span style="color:var(--subtext);">{{ c }}</span></a>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <h2 style="margin:28px 0 10px;font-size:16px;">Folder breakdown</h2>
   <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--subtext);">
@@ -1498,6 +1567,8 @@ function copyPrompt(btn) {
             rating_min = max(0, min(5, int(request.args.get("rating_min", 0))))
         except ValueError:
             rating_min = 0
+        published_only = request.args.get("published") == "1"
+        art_tag = request.args.get("tag", "")
 
         models  = unique_models(db_path)
         batches = unique_batches(db_path)
@@ -1505,6 +1576,7 @@ function copyPrompt(btn) {
         page_rows, total = query_catalog(
             db_path, q, model_filter, date_from, date_to, sort, page, per_page,
             batch=batch_filter, rating_min=rating_min,
+            published_only=published_only, art_tag=art_tag,
         )
         total_pages = max(1, (total + per_page - 1) // per_page)
         page = max(1, min(page, total_pages))
@@ -1539,10 +1611,14 @@ function copyPrompt(btn) {
         if date_to:
             chips.append({"k": "to", "v": date_to,
                           "url": _without("to_year", "to_month")})
+        if published_only:
+            chips.append({"k": "published", "v": "yes", "url": _without("published")})
+        if art_tag:
+            chips.append({"k": "tag", "v": art_tag, "url": _without("tag")})
 
         return render_template_string(
             INDEX_HTML,
-            chips=chips,
+            chips=chips, published_only=published_only, art_tag=art_tag,
             rows=page_rows, total=total, page=page,
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
@@ -1588,6 +1664,7 @@ function copyPrompt(btn) {
             q=_qs1("q"), model=_qs1("model"),
             date_from=_ym("from", "01"), date_to=_ym("to", "12"),
             sort=_qs1("sort", "newest"), batch=_qs1("batch"), rating_min=_rmin,
+            published_only=(_qs1("published") == "1"), art_tag=_qs1("tag"),
         )
         try:
             idx = nav_ids.index(media_id)
