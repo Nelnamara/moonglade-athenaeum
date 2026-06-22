@@ -337,3 +337,29 @@ def test_parallel_workers_download_new_skip_known(tmp_path, mocker):
     names = [str(c.args[2]) for c in dl.call_args_list]
     assert sum("known" in n for n in names) == 0          # on-disk skipped
     assert any("_a" in n for n in names) and any("_b" in n for n in names)  # both new fetched
+
+
+def test_update_and_workers_compose(tmp_path, mocker):
+    # --update (early-stop) + --workers (parallel) together: new items fetched
+    # concurrently at the top, then stop once a page is fully on disk.
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+
+    def _mp(mids, has_prev, c=""):
+        edges = [{"node": {"id": "t_" + m, "mediaId": m, "batchMediaIds": [],
+                           "createdAt": "2024-01-01", "promptsPreview": "p", "status": "ok"}}
+                 for m in mids]
+        return {"user": {"taskSummaries": {
+            "edges": edges, "pageInfo": {"hasPreviousPage": has_prev, "startCursor": c}}}}
+
+    gql = mocker.patch.object(core, "gql", side_effect=[
+        _mp(["new1", "new2"], True, "c1"), _mp(["old"], True, "c2"),
+        _mp(["should_not_fetch"], False)])
+
+    core.run_download(_dl_args(tmp_path, update=True, update_grace=1, workers=4))
+
+    names = [str(c.args[2]) for c in dl.call_args_list]
+    assert gql.call_count == 2                                   # stopped before page 3
+    assert any("new1" in n for n in names) and any("new2" in n for n in names)
+    assert not any("old" in n for n in names)                   # on-disk skipped
