@@ -401,6 +401,41 @@ def test_sync_artworks_merges_by_media_id(tmp_path, mocker):
     assert row["is_published"] == "1" and row["artwork_id"] == "aw1"
 
 
+def test_needs_model_fix():
+    # numeric model_name with matching id -> needs fixing
+    assert core._needs_model_fix({"model_id": "123", "model_name": "123"}) == "123"
+    # blank name but has id -> needs fixing
+    assert core._needs_model_fix({"model_id": "456", "model_name": ""}) == "456"
+    # model_name itself is the numeric id, no model_id column -> use it
+    assert core._needs_model_fix({"model_id": "", "model_name": "789"}) == "789"
+    # already readable -> no fix
+    assert core._needs_model_fix({"model_id": "123", "model_name": "Tsubaki v1"}) == ""
+    # nothing to go on -> no fix
+    assert core._needs_model_fix({"model_id": "", "model_name": ""}) == ""
+
+
+def test_fix_models_resolves_numeric_names(tmp_path, mocker):
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "a.png",
+                                           "model_id": "999", "model_name": "999"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m2", "filename": "b.png",
+                                           "model_id": "999", "model_name": "999"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m3", "filename": "c.png",
+                                           "model_id": "111", "model_name": "Already Named"},
+    ])
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "model_name_gql", return_value="Tsubaki.2 v1")
+
+    res = core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+
+    assert res["fixed"] == 2          # both m1/m2 (model 999) fixed
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["m1"]["model_name"] == "Tsubaki.2 v1"
+    assert rows["m3"]["model_name"] == "Already Named"   # untouched
+
+
 def test_progress_counter_does_not_double_count(tmp_path, mocker):
     # Regression: the progress counter must NOT be seeded with the on-disk count
     # (that double-counted already-downloaded items and overshot 100%).
