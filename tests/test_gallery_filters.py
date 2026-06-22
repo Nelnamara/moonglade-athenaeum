@@ -139,6 +139,19 @@ def test_collection_health_counts_and_missing(tmp_path):
     assert h["per_bucket"].get("month") == 1
 
 
+def test_published_and_tag_filters(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="1", filename="a_1.png", is_published="1", art_tags="ContestX, elf"),
+        _row(media_id="2", filename="b_2.png", is_published="1", art_tags="cityscape"),
+        _row(media_id="3", filename="c_3.png", is_published="0", art_tags=""),
+    ])
+    assert query_catalog(db, published_only=True)[1] == 2
+    assert query_catalog(db, art_tag="elf")[1] == 1
+    assert query_catalog(db, art_tag="contestx")[1] == 1   # case-insensitive
+    assert query_catalog(db, published_only=True, art_tag="city")[1] == 1
+
+
 def test_full_image_and_export_zip_routes(tmp_path):
     import io
     import zipfile
