@@ -384,7 +384,6 @@ python pixai_gallery_backup.py --backfill-full-meta
 | Windows MAX_PATH (260 chars) | Batch images use short names (`NN_<mediaid>.ext`); `--name-length` defaults to 60 |
 | `--count` server errors | Lower `--count-page-size` to 1,000–2,000 if you see `Internal server error` (PixAI rejects very large page requests) |
 | Gallery after `--organize-adv` | Thumbnails are keyed by `media_id` and unaffected; gallery falls back to media-ID search if the `filename` column is stale |
-| Progress bar overshoots 100% | Cosmetic only — on resume runs the bar seeds with the on-disk count and also ticks each item as it's re-checked, so the "checked" number can read past the total. The run itself is correct. |
 
 ---
 
@@ -420,7 +419,8 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 **Other**
 - Fixed an `UnboundLocalError` when running with `--full-meta`.
-- **120 tests** (up from 81).
+- Fixed the progress bar overshooting 100% on resume runs (it no longer seeds the counter with the on-disk count and then re-ticks each skipped item).
+- **121 tests** (up from 81).
 
 ### v1.1.0 — SQLite catalog, gallery performance, batch filter, focus mode
 

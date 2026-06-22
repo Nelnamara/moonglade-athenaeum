@@ -363,3 +363,30 @@ def test_update_and_workers_compose(tmp_path, mocker):
     assert gql.call_count == 2                                   # stopped before page 3
     assert any("new1" in n for n in names) and any("new2" in n for n in names)
     assert not any("old" in n for n in names)                   # on-disk skipped
+
+
+def test_progress_counter_does_not_double_count(tmp_path, mocker):
+    # Regression: the progress counter must NOT be seeded with the on-disk count
+    # (that double-counted already-downloaded items and overshot 100%).
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
+                      {"media_id": m, "filename": "x_%s.webp" % m} for m in ("a", "b")])
+    (tmp_path / "images").mkdir(parents=True)
+    for m in ("a", "b"):
+        (tmp_path / "images" / ("x_%s.webp" % m)).write_bytes(b"img")
+    _patch_download_layer(mocker)
+    edges = [{"node": {"id": "t_" + m, "mediaId": m, "batchMediaIds": [],
+                       "createdAt": "2024-01-01", "promptsPreview": "p", "status": "ok"}}
+             for m in ("a", "b")]
+    mocker.patch.object(core, "gql", side_effect=[
+        {"user": {"taskSummaries": {"edges": edges,
+                                    "pageInfo": {"hasPreviousPage": False}}}}])
+
+    seen = []
+    core.run_download(_dl_args(tmp_path), progress=lambda d, t, n: seen.append((d, t)))
+
+    max_done = max(d for d, t in seen)
+    total = seen[-1][1]
+    assert max_done <= total          # never overshoots the denominator
+    assert max_done == 2              # two items walked, counted once each
