@@ -139,7 +139,7 @@ Fix: DevTools → Network → filter `graphql` → click `listUserTaskSummaries`
 
 ## Test suite
 
-121 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
+124 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
 
 ---
 
@@ -167,6 +167,7 @@ python pixai_gallery_backup.py --organize-adv --dry-run   # preview folder sort
 python pixai_gallery_backup.py --organize-adv             # sort into batches/ + YYYY-MM/
 python pixai_gallery_backup.py --catalog-stats            # summarize catalog.db
 python pixai_gallery_backup.py --export-csv               # export catalog.db → CSV
+python pixai_gallery_backup.py --sync-artworks            # merge published-artwork metadata (title/likes/tags) by media_id
 python pixai_gallery_backup.py --audit                    # read-only duplicate report → audit_report.csv
 python pixai_gallery_backup.py --audit --no-content       # fast: same-media_id location dupes only
 python pixai_gallery_backup.py --dedup                    # dry-run dedup plan (nothing changes)

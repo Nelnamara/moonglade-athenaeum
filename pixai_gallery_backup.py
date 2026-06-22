@@ -121,7 +121,18 @@ PERSISTED_QUERY_HASH = _cfg.get("PERSISTED_QUERY_HASH", "")
 U3T = _cfg.get("U3T", "")
 USER_ID = _cfg.get("USER_ID", "")
 TASK_DETAIL_HASH = _cfg.get("TASK_DETAIL_HASH", "")
-MODEL_DETAIL_HASH = _cfg.get("MODEL_DETAIL_HASH", "")
+# Default to the captured getGenerationModelByVersionId hash so model-name
+# resolution works out of the box (override in config.json if it rotates).
+MODEL_DETAIL_HASH = _cfg.get("MODEL_DETAIL_HASH", "") or \
+    "0d2ab28b2991e3fd74672ffec0adf8947e599d79e0039348a7d2642e0bf8c9bc"
+# Published-artwork ops (for --sync-artworks). These are public persisted-query
+# identifiers, not secrets; captured 2026-06-22. Override in config.json if a
+# PixAI frontend update rotates them.
+ARTWORK_LIST_HASH = _cfg.get("ARTWORK_LIST_HASH", "") or \
+    "ce6f4a6e63fe210c7f77b29c7b8bdce8b7ede4d4520c01de1d36e01b224918a5"
+ARTWORK_DETAIL_HASH = _cfg.get("ARTWORK_DETAIL_HASH", "") or \
+    "ac39a87c58451559f9dcbf2c04862c1ee3260f9645ed60fdfb574e41689a6766"
+CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 # ===========================================================================
 
 # Media URL: https://api.pixai.art/v1/media/<id>/<variant>
@@ -133,15 +144,25 @@ VARIANT_CANDIDATES = ["original", "orig", "full", "hd", "public", "raw", "thumbn
 
 
 def load_token(cli_token=None):
+    # Priority: explicit --token > PIXAI_API_KEY (config) > PIXAI_TOKEN env > token.txt.
+    # The official API key is preferred because it's long-lived (up to ~2 years) and
+    # authenticates the same Bearer endpoint -- no expiring browser JWT to recapture.
     if cli_token:
         return cli_token.strip()
+    api_key = (_cfg.get("PIXAI_API_KEY", "") or "").strip()
+    if not api_key:
+        fresh = _load_config()
+        api_key = (fresh.get("PIXAI_API_KEY", "") if fresh else "").strip()
+    if api_key:
+        return api_key
     env = os.environ.get("PIXAI_TOKEN")
     if env:
         return env.strip()
     for f in (Path(__file__).resolve().parent / "token.txt", Path("token.txt")):
         if f.exists():
             return f.read_text(encoding="utf-8").strip()
-    raise PixAIError("No token found. Set PIXAI_TOKEN, pass --token, or create token.txt.")
+    raise PixAIError("No credential found. Add PIXAI_API_KEY to config.json (preferred), "
+                     "set PIXAI_TOKEN, pass --token, or create token.txt.")
 
 
 def _ssl_help():
@@ -463,6 +484,15 @@ def ext_from_ct(ct):
         return ".webp"
     if "gif" in ct:
         return ".gif"
+    if "avif" in ct:
+        return ".avif"
+    # Animated artworks resolve to video files
+    if "mp4" in ct:
+        return ".mp4"
+    if "webm" in ct:
+        return ".webm"
+    if "quicktime" in ct or "mov" in ct:
+        return ".mov"
     return ".png"
 
 
@@ -599,7 +629,7 @@ def page_variables(page_size, before=None):
 # ---------------------------------------------------------------------------
 _FULL_META_FIELDS = (
     "prompt_full", "natural_prompt", "seed", "steps",
-    "sampler", "cfg_scale", "model_id", "model_name",
+    "sampler", "cfg_scale", "model_id", "model_name", "loras",
 )
 
 
@@ -663,7 +693,7 @@ def model_name_gql(session, model_version_id, _cache={}):
 
 
 def extract_full_meta(task):
-    """Pull the 8 extended fields out of a getTaskById task dict."""
+    """Pull the extended fields out of a getTaskById task dict."""
     if not task:
         return {}
     params = task.get("parameters") or {}
@@ -678,7 +708,30 @@ def extract_full_meta(task):
         "cfg_scale":      str(detail.get("cfg_scale") or ""),
         "model_id":       str(params.get("modelId") or ""),
         "model_name":     "",  # filled in by caller after model_name_gql
+        "loras":          "",  # filled in by caller via resolve_loras()
     }
+
+
+def resolve_loras(session, task):
+    """Read parameters.lora ({loraVersionId: weight}) from a getTaskById task and
+    return a readable "Name:0.7, Name2:0.5" string, resolving each LoRA id to a
+    name via getGenerationModelByVersionId (cached). Unresolvable ids keep the
+    number. Empty string if the task used no LoRAs."""
+    params = (task or {}).get("parameters") or {}
+    lora = params.get("lora") or {}
+    if not isinstance(lora, dict) or not lora:
+        return ""
+    parts = []
+    for vid, weight in lora.items():
+        name = model_name_gql(session, vid)
+        if not name or str(name) == str(vid) or str(name).isdigit():
+            name = "lora {}".format(vid)
+        try:
+            w = "{:g}".format(float(weight))
+        except (TypeError, ValueError):
+            w = str(weight)
+        parts.append("{}:{}".format(name, w))
+    return ", ".join(parts)
 
 
 def _merge_full(fm, kr):
@@ -1345,13 +1398,16 @@ def _make_session(token_val):
         USER_ID = fresh.get("USER_ID", "") or USER_ID
         TASK_DETAIL_HASH = fresh.get("TASK_DETAIL_HASH", "") or TASK_DETAIL_HASH
         MODEL_DETAIL_HASH = fresh.get("MODEL_DETAIL_HASH", "") or MODEL_DETAIL_HASH
-    if not all([PERSISTED_QUERY_HASH, U3T, USER_ID]):
+    # With an API key (sent as Bearer) the per-session u3t is not required; the
+    # browser-JWT path still wants it. Always need the persisted hash + USER_ID.
+    have_api_key = bool((fresh or {}).get("PIXAI_API_KEY") or _cfg.get("PIXAI_API_KEY"))
+    required = [PERSISTED_QUERY_HASH, USER_ID] if have_api_key else [PERSISTED_QUERY_HASH, U3T, USER_ID]
+    if not all(required):
         raise PixAIError(
-            "config.json is missing or incomplete "
-            "(need PERSISTED_QUERY_HASH, U3T, USER_ID).\n"
-            "Copy config.example.json to config.json and fill in your captured values.\n"
-            "See the README -> Configuration for instructions."
-        )
+            "config.json is missing or incomplete (need PERSISTED_QUERY_HASH, USER_ID"
+            "{}).\nCopy config.example.json to config.json and fill in your values.\n"
+            "See the README -> Configuration for instructions.".format(
+                "" if have_api_key else ", U3T"))
     token = load_token(token_val)
     session = requests.Session()
     session.headers.update({
@@ -1456,6 +1512,253 @@ def run_dedup(args):
     cmd_dedup(args, out, out / "catalog.db")
 
 
+def artwork_list_gql(session, before=None, last=50):
+    """GET listArtworks for the owner's own authorId. Returns the Relay
+    connection dict (edges + pageInfo) or None on failure."""
+    variables = {"authorId": str(USER_ID), "last": last, "tackLanguage": "en"}
+    if before:
+        variables["before"] = before
+    params = {
+        "operation": "listArtworks",
+        "u3t": U3T,
+        "operationName": "listArtworks",
+        "variables": json.dumps(variables, separators=(",", ":")),
+        "extensions": json.dumps(
+            {"clientLibrary": CLIENT_LIBRARY_ARTWORK,
+             "persistedQuery": {"version": 1, "sha256Hash": ARTWORK_LIST_HASH}},
+            separators=(",", ":")),
+    }
+    try:
+        r = session.get(API_URL, params=params, timeout=60,
+                        headers={"x-apollo-operation-name": "listArtworks"})
+        if r.status_code != 200:
+            return None
+        return find_connection(r.json().get("data") or {})
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def extract_artwork_meta(node):
+    """Pull the published-artwork fields we store from a listArtworks node.
+    Keyed by media_id so it merges onto the existing catalog row."""
+    tacks = node.get("tacks") or []
+    tags = [t.get("displayName") or t.get("codeName") for t in tacks
+            if (t.get("displayName") or t.get("codeName"))]
+    return {
+        "media_id":      str(node.get("mediaId") or ""),
+        "artwork_id":    str(node.get("id") or ""),
+        "title":         node.get("title") or "",
+        "is_published":  "1" if (node.get("visibility") == "PUBLIC") else "0",
+        "is_nsfw":       "1" if node.get("isNsfw") else "0",
+        "liked_count":   str(node.get("likedCount") or 0),
+        "comment_count": str(node.get("commentCount") or 0),
+        "aes_score":     str(node.get("aesScore") or ""),
+        "art_tags":      ", ".join(tags),
+    }
+
+
+def run_sync_artworks(args):
+    """Page the owner's published artworks (listArtworks) and merge their
+    metadata (title, published flag, NSFW flag, likes, comments, aes score, tags)
+    onto matching catalog rows by media_id. Published artworks are a subset of
+    generations, so unmatched/undownloaded ones are simply skipped."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    if not USER_ID:
+        raise PixAIError("USER_ID missing from config.json.")
+    session = _make_session(getattr(args, "token", None))
+
+    by_mid = {}                      # media_id -> artwork fields
+    videos = []                      # (video_media_id, title) for animated artworks
+    with_videos = getattr(args, "with_videos", False)
+    artworks = 0
+    before = None
+    page = 0
+    _prog = getattr(args, "progress", None)
+    print("Syncing published artworks (listArtworks)...")
+    while True:
+        page += 1
+        conn = artwork_list_gql(session, before=before, last=50)
+        if not conn:
+            if page == 1:
+                raise PixAIError(
+                    "listArtworks returned no data. The ARTWORK_LIST_HASH may have "
+                    "rotated after a PixAI update -- recapture it into config.json.")
+            break
+        edges = conn.get("edges", [])
+        if not edges:
+            break
+        for edge in edges:
+            node = edge.get("node", edge)
+            meta = extract_artwork_meta(node)
+            if meta["media_id"]:
+                by_mid[meta["media_id"]] = meta
+                artworks += 1
+            vmid = node.get("videoMediaId")
+            if vmid:
+                videos.append((str(vmid), meta.get("title") or node.get("id")))
+        print("  page {}: {} artworks (total {})".format(page, len(edges), artworks))
+        if _prog:
+            _prog(artworks, artworks, 0)
+        pi = conn.get("pageInfo", {})
+        if not pi.get("hasPreviousPage"):
+            break
+        before = pi.get("startCursor")
+        time.sleep(getattr(args, "delay", 0.4))
+
+    # Merge onto existing catalog rows by media_id.
+    rows = load_catalog(db_path)
+    matched = 0
+    for r in rows:
+        m = by_mid.get(r.get("media_id"))
+        if not m:
+            continue
+        for k, v in m.items():
+            if k != "media_id":
+                r[k] = v
+        matched += 1
+    if matched:
+        save_catalog(db_path, rows)
+    print("\nArtworks fetched: {}.  Matched to catalog rows: {}.  "
+          "(Unmatched artworks have no downloaded image.)".format(artworks, matched))
+
+    # Optionally download animated-artwork video files (videoMediaId) into videos/.
+    vids_ok = 0
+    if with_videos and videos:
+        vdir = out / "videos"
+        vdir.mkdir(parents=True, exist_ok=True)
+        print("\nDownloading {} animated artwork video(s) -> videos/ ...".format(len(videos)))
+        for i, (vmid, title) in enumerate(videos):
+            if already_downloaded(out, vmid):
+                vids_ok += 1
+                continue
+            url, info = resolve_media(session, vmid)
+            if not url:
+                print("  no media url for video {} ({})".format(vmid, title))
+                continue
+            stem = vdir / build_stem_name(title or "", "", vmid,
+                                          getattr(args, "name_length", 60),
+                                          getattr(args, "name_sep", "_"))
+            status, path = download(session, url, stem)
+            if status in ("ok", "skip"):
+                vids_ok += 1
+            if _prog:
+                _prog(i + 1, len(videos), 0)
+            time.sleep(getattr(args, "delay", 0.4))
+        print("Videos saved/present: {} of {}.".format(vids_ok, len(videos)))
+    elif videos and not with_videos:
+        print("({} animated artworks have video; re-run with --with-videos to download them.)"
+              .format(len(videos)))
+
+    return {"artworks": artworks, "matched": matched, "videos": vids_ok}
+
+
+def _needs_model_fix(row):
+    """Return the model version-id to resolve if this row's model_name is missing
+    or still a raw numeric id; else ''. Handles the case where model_name was
+    set to the numeric id (MODEL_DETAIL_HASH was absent on an earlier run)."""
+    mid = (row.get("model_id") or "").strip()
+    name = (row.get("model_name") or "").strip()
+    if not mid and name.isdigit():
+        mid = name  # model_name itself is the numeric id
+    if not mid:
+        return ""
+    if not name or name == mid or name.isdigit():
+        return mid
+    return ""
+
+
+def run_fix_models(args):
+    """Re-resolve human-readable model names for catalog rows whose model_name is
+    blank or still a numeric version-id (e.g. saved before MODEL_DETAIL_HASH was
+    configured). One API call per distinct model id (cached)."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    session = _make_session(getattr(args, "token", None))
+    rows = load_catalog(db_path)
+
+    to_resolve = {}   # version_id -> rows needing it
+    for r in rows:
+        vid = _needs_model_fix(r)
+        if vid:
+            to_resolve.setdefault(vid, []).append(r)
+
+    if not to_resolve:
+        print("No model names need fixing -- catalog already has readable names.")
+        return {"fixed": 0, "models": 0, "unresolved": 0}
+
+    relabel = getattr(args, "relabel_removed", False)
+    removed_label = "Unknown or removed model"
+    print("Resolving {} distinct model id(s) across {} rows...".format(
+        len(to_resolve), sum(len(v) for v in to_resolve.values())))
+    _prog = getattr(args, "progress", None)
+    fixed = relabeled = unresolved = 0
+    for i, vid in enumerate(sorted(to_resolve)):
+        name = model_name_gql(session, vid)
+        if name and name != vid and not str(name).isdigit():
+            for r in to_resolve[vid]:
+                r["model_name"] = name
+                fixed += 1
+        else:
+            unresolved += 1
+            if relabel:
+                for r in to_resolve[vid]:
+                    r["model_name"] = removed_label  # model_id kept for reference
+                    relabeled += 1
+                print("  {} unresolved -> '{}'".format(vid, removed_label))
+            else:
+                print("  could not resolve model {} (left as-is)".format(vid))
+        if _prog:
+            _prog(i + 1, len(to_resolve), 0)
+        time.sleep(getattr(args, "delay", 0.4))
+
+    if fixed or relabeled:
+        save_catalog(db_path, rows)
+    print("\nFixed {} row(s) across {} model(s); {} id(s) unresolved{}.".format(
+        fixed, len(to_resolve) - unresolved, unresolved,
+        " (relabeled {} rows to '{}')".format(relabeled, removed_label) if relabeled else ""))
+    return {"fixed": fixed, "relabeled": relabeled, "models": len(to_resolve) - unresolved,
+            "unresolved": unresolved}
+
+
+def _simple_gql(session, op, sha256, variables=None):
+    """Replay a no-arg (or simple) persisted GET op; return data dict or {}."""
+    params = {
+        "operation": op, "u3t": U3T, "operationName": op,
+        "variables": json.dumps(variables or {}, separators=(",", ":")),
+        "extensions": json.dumps(
+            {"clientLibrary": CLIENT_LIBRARY_ARTWORK,
+             "persistedQuery": {"version": 1, "sha256Hash": sha256}},
+            separators=(",", ":")),
+    }
+    try:
+        r = session.get(API_URL, params=params, timeout=60,
+                        headers={"x-apollo-operation-name": op})
+        if r.status_code != 200:
+            return {}
+        return r.json().get("data") or {}
+    except (requests.RequestException, ValueError):
+        return {}
+
+
+_QUOTA_HASH = "9356b42a4ff6e987347a1f1ee3de7aba4bd103b1cdbfbbc4c5c5fcf52767ad66"
+_MEMBERSHIP_HASH = "53dbad3c972e775222a4a6344727b3d2809fc3f08f6787f56500abb8245f9e88"
+
+
+def run_account_info(args):
+    """Print account quota (credits) and membership/plan info."""
+    session = _make_session(getattr(args, "token", None))
+    quota = _simple_gql(session, "getMyQuota", _QUOTA_HASH)
+    me = quota.get("me") or {}
+    print("Account: {}".format(me.get("id") or USER_ID))
+    print("Quota / credits: {}".format(me.get("quotaAmount", "unknown")))
+    member = _simple_gql(session, "getMyMembership", _MEMBERSHIP_HASH)
+    m = member.get("me") or member.get("membership") or member
+    if m:
+        print("Membership: {}".format(json.dumps(m)[:300]))
+    return {"quota": me.get("quotaAmount")}
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
@@ -1538,12 +1841,22 @@ def run_backfill_full_meta(args):
             "See README -> Full Meta for capture instructions.")
 
     rows = load_catalog(db_path)
+    with_loras = getattr(args, "with_loras", False)
 
-    # Work per unique task_id (one API call covers all media in that task)
-    needs_fill = [r for r in rows if not r.get("prompt_full")]
+    # Work per unique task_id (one API call covers all media in that task).
+    # --with-loras also re-processes rows that have full meta but a blank `loras`
+    # column (e.g. backfilled before LoRA tracking existed). It re-fetches their
+    # getTaskById to extract parameters.lora.
+    def _needs(r):
+        if not r.get("prompt_full"):
+            return True
+        if with_loras and r.get("task_id") and not r.get("loras"):
+            return True
+        return False
+    needs_fill = [r for r in rows if _needs(r)]
     task_ids = list(dict.fromkeys(r["task_id"] for r in needs_fill if r.get("task_id")))
-    print("Found {:,} rows missing full meta across {:,} unique tasks.".format(
-        len(needs_fill), len(task_ids)))
+    print("Found {:,} rows to fill across {:,} unique tasks{}.".format(
+        len(needs_fill), len(task_ids), " (incl. LoRAs)" if with_loras else ""))
     if not task_ids:
         print("Nothing to backfill.")
         return
@@ -1557,6 +1870,7 @@ def run_backfill_full_meta(args):
         fm = extract_full_meta(task_data)
         if fm.get("model_id"):
             fm["model_name"] = model_name_gql(session, fm["model_id"])
+        fm["loras"] = resolve_loras(session, task_data)
 
         # Also grab media URL/dimensions from the task's media object if present
         media_obj = (task_data or {}).get("media") or {}
@@ -1832,6 +2146,7 @@ def run_download(args, progress=None):
                             fm = extract_full_meta(task_data)
                             if fm.get("model_id"):
                                 fm["model_name"] = model_name_gql(session, fm["model_id"])
+                            fm["loras"] = resolve_loras(session, task_data)
                             _full_meta_cache[tid] = fm
                             time.sleep(args.delay)
                         full_meta = _full_meta_cache.get(tid, {})
@@ -1931,6 +2246,7 @@ def run_download(args, progress=None):
                         fm = extract_full_meta(task_data)
                         if fm.get("model_id"):
                             fm["model_name"] = model_name_gql(session, fm["model_id"])
+                        fm["loras"] = resolve_loras(session, task_data)
                         _full_meta_cache[tid] = fm
                         time.sleep(args.delay)
                     full_meta = _full_meta_cache.get(meta["task_id"], {})
@@ -2195,8 +2511,24 @@ def main():
     ap.add_argument("--backfill-full-meta", action="store_true",
                     help="fill in prompt_full/seed/model/etc in catalog.db via getTaskById "
                          "for rows that lack them; also backfills url/width/height as a bonus, then exit")
+    ap.add_argument("--with-loras", action="store_true",
+                    help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
+                         "no LoRA data yet (populates the loras column for older images; long run)")
     ap.add_argument("--export-csv", action="store_true",
                     help="export catalog.db to catalog.csv for interop/backup, then exit")
+    ap.add_argument("--sync-artworks", action="store_true",
+                    help="fetch your published-artwork metadata (title, NSFW flag, likes, "
+                         "comments, aes score, tags) via listArtworks and merge it onto "
+                         "matching catalog rows by media_id, then exit")
+    ap.add_argument("--with-videos", action="store_true",
+                    help="with --sync-artworks, also download animated-artwork video files "
+                         "(videoMediaId) into a videos/ folder")
+    ap.add_argument("--fix-model-names", action="store_true",
+                    help="re-resolve readable model names for catalog rows whose model_name "
+                         "is blank or a raw numeric id (one API call per distinct model), then exit")
+    ap.add_argument("--relabel-removed", action="store_true",
+                    help="with --fix-model-names, relabel ids that no longer resolve (deleted "
+                         "models) to 'Unknown or removed model' instead of leaving the raw number")
     ap.add_argument("--audit", action="store_true",
                     help="read-only duplicate audit of the whole backup folder; writes "
                          "audit_report.csv and prints a summary, then exit. Independent of catalog.db.")
@@ -2239,6 +2571,12 @@ def main():
             export_csv(db_path, csv_path)
             print("Exported {:,} rows to {}.".format(
                 len(load_catalog(db_path)), csv_path))
+            return
+        if args.sync_artworks:
+            run_sync_artworks(args)
+            return
+        if args.fix_model_names:
+            run_fix_models(args)
             return
         if args.audit:
             cmd_audit(args, out)
