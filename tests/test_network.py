@@ -365,6 +365,87 @@ def test_update_and_workers_compose(tmp_path, mocker):
     assert not any("old" in n for n in names)                   # on-disk skipped
 
 
+def test_extract_artwork_meta():
+    node = {"id": "aw1", "mediaId": "m1", "title": "Lollipop Elf",
+            "visibility": "PUBLIC", "isNsfw": True, "likedCount": 5,
+            "commentCount": 2, "aesScore": 7.5,
+            "tacks": [{"codeName": "contest_x", "displayName": "ContestX"},
+                      {"displayName": "tag2"}]}
+    m = core.extract_artwork_meta(node)
+    assert m["media_id"] == "m1" and m["artwork_id"] == "aw1"
+    assert m["title"] == "Lollipop Elf"
+    assert m["is_published"] == "1" and m["is_nsfw"] == "1"
+    assert m["liked_count"] == "5" and m["comment_count"] == "2"
+    assert m["art_tags"] == "ContestX, tag2"
+
+
+def test_sync_artworks_merges_by_media_id(tmp_path, mocker):
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
+                      {"media_id": "m1", "filename": "x_m1.png"}])
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    conn = {"edges": [{"node": {"id": "aw1", "mediaId": "m1", "title": "My Art",
+                                "visibility": "PUBLIC", "isNsfw": False,
+                                "likedCount": 3, "commentCount": 1,
+                                "aesScore": 6.0, "tacks": []}}],
+            "pageInfo": {"hasPreviousPage": False}}
+    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+
+    assert res["artworks"] == 1 and res["matched"] == 1
+    row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
+    assert row["title"] == "My Art" and row["liked_count"] == "3"
+    assert row["is_published"] == "1" and row["artwork_id"] == "aw1"
+
+
+def test_resolve_loras(mocker):
+    mocker.patch.object(core, "model_name_gql",
+                        side_effect=lambda s, vid: {"111": "DetailLora", "222": "222"}.get(str(vid), str(vid)))
+    task = {"parameters": {"lora": {"111": 0.7, "222": 0.5}}}
+    out = core.resolve_loras(mocker.MagicMock(), task)
+    assert "DetailLora:0.7" in out
+    assert "lora 222:0.5" in out          # unresolved id gets a "lora <id>" label
+    assert core.resolve_loras(mocker.MagicMock(), {"parameters": {}}) == ""
+
+
+def test_needs_model_fix():
+    # numeric model_name with matching id -> needs fixing
+    assert core._needs_model_fix({"model_id": "123", "model_name": "123"}) == "123"
+    # blank name but has id -> needs fixing
+    assert core._needs_model_fix({"model_id": "456", "model_name": ""}) == "456"
+    # model_name itself is the numeric id, no model_id column -> use it
+    assert core._needs_model_fix({"model_id": "", "model_name": "789"}) == "789"
+    # already readable -> no fix
+    assert core._needs_model_fix({"model_id": "123", "model_name": "Tsubaki v1"}) == ""
+    # nothing to go on -> no fix
+    assert core._needs_model_fix({"model_id": "", "model_name": ""}) == ""
+
+
+def test_fix_models_resolves_numeric_names(tmp_path, mocker):
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "a.png",
+                                           "model_id": "999", "model_name": "999"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m2", "filename": "b.png",
+                                           "model_id": "999", "model_name": "999"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m3", "filename": "c.png",
+                                           "model_id": "111", "model_name": "Already Named"},
+    ])
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "model_name_gql", return_value="Tsubaki.2 v1")
+
+    res = core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+
+    assert res["fixed"] == 2          # both m1/m2 (model 999) fixed
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["m1"]["model_name"] == "Tsubaki.2 v1"
+    assert rows["m3"]["model_name"] == "Already Named"   # untouched
+
+
 def test_progress_counter_does_not_double_count(tmp_path, mocker):
     # Regression: the progress counter must NOT be seeded with the on-disk count
     # (that double-counted already-downloaded items and overshot 100%).

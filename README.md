@@ -85,7 +85,19 @@ pip install requests truststore pillow PySide6 flask
 
 ## Configuration
 
-`config.json` lives next to the scripts and is git-ignored. It holds values captured once from your browser. You only need to do this once — they only change if PixAI updates their frontend.
+`config.json` lives next to the scripts and is git-ignored.
+
+### Recommended: use an official API key (no expiring login)
+
+Generate an API key at [platform.pixai.art](https://platform.pixai.art) (you can set its lifetime up to ~2 years) and put it in `config.json` as `PIXAI_API_KEY`. It's sent as the Bearer credential for **every** call — listing, media resolution, full-meta, model names — so you **don't need `U3T` or a browser token**, and you never have to recapture an expiring login. You still need `USER_ID` and `PERSISTED_QUERY_HASH` (captured once from DevTools, below); they only change if PixAI updates their frontend.
+
+```json
+"PIXAI_API_KEY": "your-key",
+"USER_ID": "your-numeric-id",
+"PERSISTED_QUERY_HASH": "captured-hash"
+```
+
+If you'd rather not create a key, leave `PIXAI_API_KEY` blank and use the browser-JWT path (capture `U3T` too, and supply a token via `token.txt` / `PIXAI_TOKEN` / `--token`).
 
 Copy `config.example.json` to `config.json` and fill in the fields below.
 
@@ -244,6 +256,8 @@ The same three actions are available as buttons in the GUI **Utilities** tab.
 | `--backfill-meta` | Fill missing `url`/`width`/`height` in catalog via `resolve_media` |
 | `--backfill-full-meta` | Fill full prompt/seed/model in catalog via `getTaskById`; also fills url/width/height |
 | `--export-csv` | Export `catalog.db` to `catalog_export.csv` (interop / spreadsheet backup) |
+| `--sync-artworks` | Fetch published-artwork metadata (title, NSFW, likes, comments, tags) via `listArtworks` and merge onto catalog rows by `media_id` |
+| `--fix-model-names` | Re-resolve readable model names for rows whose `model_name` is blank or a raw numeric id (one API call per distinct model) |
 | `--audit` | Read-only duplicate report of the whole backup folder → `audit_report.csv` |
 | `--dedup` | Quarantine redundant duplicate copies to `_duplicates/` (dry-run unless `--apply`); reconciles the catalog |
 | `--verify-dupes` | Confirm every file in `_duplicates/` is redundant (byte/pixel-identical to a kept copy) before deleting |
@@ -339,6 +353,13 @@ pixai_backup/
 | `model_name` | Human-readable model name, e.g. "Tsubaki.2 v1" (`--full-meta`) |
 | `batch` | Batch folder name populated by `--organize-adv` (blank for single-image months) |
 | `rating` | Star rating 1–5 set in the gallery (0 or blank = unrated) |
+| `artwork_id` | PixAI artwork ID, if this image was published (`--sync-artworks`) |
+| `title` | Published-artwork title (`--sync-artworks`) |
+| `is_published` | `1` if published with PUBLIC visibility (`--sync-artworks`) |
+| `is_nsfw` | `1` if the published artwork is flagged NSFW (`--sync-artworks`) |
+| `liked_count` / `comment_count` | Engagement counts at sync time (`--sync-artworks`) |
+| `aes_score` | PixAI aesthetic score (`--sync-artworks`) |
+| `art_tags` | Comma-joined tag / contest labels from the artwork's tacks (`--sync-artworks`) |
 
 ---
 
@@ -391,8 +412,19 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ### Unreleased
 
+- **Backfill LoRAs into existing rows** — `--backfill-full-meta --with-loras` (GUI: "incl. LoRAs" checkbox) re-fetches older rows that have full meta but no LoRA data yet, populating the `loras` column so the LoRA filter and "Top LoRAs" dashboard work for your whole library.
+- **Gallery HTTPS** — `python pixai_gallery.py --https` (GUI: "Serve over HTTPS" checkbox) serves the gallery over self-signed HTTPS, so a phone on your LAN can install it as a PWA and use the offline service worker (over plain HTTP, browsers block PWA install / service workers by design). Requires `pip install cryptography`; browsers show a one-time certificate warning.
+- **Official API-key auth (stable, no expiring login)** — set `PIXAI_API_KEY` in `config.json` (an official key from platform.pixai.art, lifetime up to ~2 years) and it's used as the Bearer credential for **all** calls, including the bulk `listUserTaskSummaries` listing. Verified end-to-end: listing, media resolution, full-meta, and model lookups all authenticate with the key — so `U3T` and the browser token become unnecessary and there's nothing to recapture as it expires. The browser-JWT path remains as a fallback.
+- **Animated-artwork (video) backup** — `--sync-artworks --with-videos` downloads animated-artwork video files (`videoMediaId`) into a `videos/` folder; `ext_from_ct` now recognizes mp4/webm/mov/avif so video files are saved with the correct extension. GUI: "incl. videos" checkbox next to Sync Artworks.
+- **Aesthetic-score / Most-liked sorts**, **lightbox swipe + double-tap zoom**, **tablet breakpoint**, **PWA** (offline thumbnails / add-to-home-screen), **LoRA tracking** (filter + detail display + dashboard "Top LoRAs"), **Account info** (quota/membership), **prompt word-cloud**, **saved filter presets**, **privacy blur**.
+- **Published-artwork sync** (`--sync-artworks`) — pulls title, NSFW flag, like/comment counts, aesthetic score, and tag/contest labels for your published pieces (via `listArtworks`) into the catalog by `media_id`; 8 new catalog columns; GUI Utilities button.
+- **Model-name cleanup** (`--fix-model-names`) — re-resolves readable model names for rows that show a raw numeric id (caused by an earlier run without `MODEL_DETAIL_HASH`, which now ships with a working default). GUI "Fix Model Names" button. Ids PixAI no longer recognizes (deleted models) are relabeled to "Unknown or removed model" with `--relabel-removed` (on by default from the GUI button), collapsing them into one tidy menu entry.
+- **Artwork data in the gallery** — synced titles show on cards (with like counts); a **Published-only** checkbox and a **Tag / contest** filter in the filter bar; a **Privacy blur** toggle (blurs all thumbnails until hover — useful on LAN/mobile; NSFW-flagged cards blur more heavily); and **Published / Total-likes** stat cards plus a clickable **Top tags & contests** panel on the Collection Health dashboard.
 - **Gallery performance** — the server now handles requests concurrently (thumbnails load in parallel instead of one-at-a-time, in both the CLI and GUI launchers); thumbnails and full images are served with immutable 1-year cache headers so pagination, back-navigation, and re-visits are instant with no re-download (big win on mobile / LAN); HTML pages are gzip-compressed; thumbnails decode asynchronously (`decoding="async"`).
 - **Mobile filter bar** — on narrow screens the filter controls collapse behind a "Filters" toggle so the image grid leads; controls go full-width and the bar auto-opens when a filter is active.
+- **Lightbox + keyboard navigation** — click any thumbnail for an in-page lightbox with prev/next, a Details link, and an `F`/Space slideshow; in the grid, arrow keys move focus and Enter opens the lightbox.
+- **Cross-page selection + ZIP export** — image selections now persist across pages (stored in the browser); the bulk bar gains a **Download ZIP** button that streams the selected full-res images as a single archive.
+- **Published-artwork sync** — `--sync-artworks` fetches your published-artwork metadata (title, NSFW flag, like/comment counts, aesthetic score, and tag/contest labels) via the `listArtworks` API and merges it onto matching catalog rows by `media_id`. Adds catalog columns `artwork_id`, `title`, `is_published`, `is_nsfw`, `liked_count`, `comment_count`, `aes_score`, `art_tags`. Also a **Sync Artworks** button in the GUI Utilities tab.
 
 ### v1.2.0 — Duplicate audit/dedup, gallery overhaul, parallel & incremental downloads
 

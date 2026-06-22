@@ -117,6 +117,17 @@ def test_sort_pixels_orders_by_area(tmp_path):
     assert rows[0]["media_id"] == "big"
 
 
+def test_sort_aesthetic_and_likes(tmp_path):
+    p = tmp_path / "catalog.db"
+    save_catalog(p, [
+        _row(media_id="lo", filename="lo.png", aes_score="3.2", liked_count="1"),
+        _row(media_id="hi", filename="hi.png", aes_score="8.9", liked_count="50"),
+    ])
+    assert query_catalog(p, sort="aes_desc")[0][0]["media_id"] == "hi"
+    assert query_catalog(p, sort="aes_asc")[0][0]["media_id"] == "lo"
+    assert query_catalog(p, sort="likes")[0][0]["media_id"] == "hi"
+
+
 # ---- collection_health -----------------------------------------------------
 
 def test_collection_health_counts_and_missing(tmp_path):
@@ -137,6 +148,52 @@ def test_collection_health_counts_and_missing(tmp_path):
     assert h["rated"] == 1
     assert h["missing"] == 1          # row 222 has no file on disk
     assert h["per_bucket"].get("month") == 1
+
+
+def test_published_and_tag_filters(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="1", filename="a_1.png", is_published="1", art_tags="ContestX, elf"),
+        _row(media_id="2", filename="b_2.png", is_published="1", art_tags="cityscape"),
+        _row(media_id="3", filename="c_3.png", is_published="0", art_tags=""),
+    ])
+    assert query_catalog(db, published_only=True)[1] == 2
+    assert query_catalog(db, art_tag="elf")[1] == 1
+    assert query_catalog(db, art_tag="contestx")[1] == 1   # case-insensitive
+    assert query_catalog(db, published_only=True, art_tag="city")[1] == 1
+
+
+def test_lora_filter(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="1", filename="a.png", loras="Detail Tweaker:0.7, Anime:0.5"),
+        _row(media_id="2", filename="b.png", loras="Anime:0.6"),
+        _row(media_id="3", filename="c.png", loras=""),
+    ])
+    assert query_catalog(db, lora="anime")[1] == 2
+    assert query_catalog(db, lora="detail")[1] == 1
+
+
+def test_full_image_and_export_zip_routes(tmp_path):
+    import io
+    import zipfile
+    from pixai_gallery import create_app
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_row(media_id="111", filename="a_111.png", prompt_preview="p")])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a_111.png").write_bytes(b"\x89PNG\r\n\x1a\nfakeimage")
+    client = create_app(tmp_path).test_client()
+
+    r = client.get("/full/111")
+    assert r.status_code == 200
+    assert r.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+    assert client.get("/full/nope").status_code == 404
+
+    z = client.post("/export-zip", data={"media_ids": "111"})
+    assert z.status_code == 200 and z.headers["Content-Type"] == "application/zip"
+    names = zipfile.ZipFile(io.BytesIO(z.data)).namelist()
+    assert names == ["a_111.png"]
+    assert client.post("/export-zip", data={"media_ids": "ghost"}).status_code == 404
 
 
 def test_collection_health_detects_duplicate(tmp_path):

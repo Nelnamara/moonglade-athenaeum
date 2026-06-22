@@ -26,7 +26,7 @@ from pathlib import Path
 
 try:
     from flask import (Flask, redirect, render_template_string, request,
-                       send_from_directory, url_for)
+                       send_file, send_from_directory, url_for)
 except ImportError:
     sys.exit("Flask is required for the gallery server.\n"
              "Install it with:  pip install flask")
@@ -45,6 +45,11 @@ CATALOG_FIELDS = [
     "prompt_preview", "status", "created_at",
     "prompt_full", "natural_prompt", "seed", "steps",
     "sampler", "cfg_scale", "model_id", "model_name", "rating",
+    # Published-artwork metadata, populated by --sync-artworks (blank otherwise)
+    "artwork_id", "title", "is_published", "is_nsfw",
+    "liked_count", "comment_count", "aes_score", "art_tags",
+    # LoRAs used, populated by --full-meta / --backfill-full-meta ("Name:0.7, …")
+    "loras",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -73,7 +78,16 @@ CREATE TABLE IF NOT EXISTS catalog (
     cfg_scale       TEXT,
     model_id        TEXT,
     model_name      TEXT,
-    rating          TEXT
+    rating          TEXT,
+    artwork_id      TEXT DEFAULT '',
+    title           TEXT DEFAULT '',
+    is_published    TEXT DEFAULT '',
+    is_nsfw         TEXT DEFAULT '',
+    liked_count     TEXT DEFAULT '',
+    comment_count   TEXT DEFAULT '',
+    aes_score       TEXT DEFAULT '',
+    art_tags        TEXT DEFAULT '',
+    loras           TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -113,6 +127,15 @@ def init_db(db_path):
 
 _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN batch TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN artwork_id TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN title TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN is_published TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN is_nsfw TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN liked_count TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN comment_count TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN aes_score TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN art_tags TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN loras TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -231,6 +254,9 @@ _SORT_SQL = {
                    "CAST(COALESCE(NULLIF(height,''),'0') AS INTEGER)) DESC",
     "aspect":      "(CAST(COALESCE(NULLIF(width,''),'0') AS REAL) / "
                    "NULLIF(CAST(COALESCE(NULLIF(height,''),'0') AS REAL),0)) DESC",
+    "aes_desc":    "CAST(COALESCE(NULLIF(aes_score,''),'0') AS REAL) DESC, created_at DESC",
+    "aes_asc":     "CAST(COALESCE(NULLIF(aes_score,''),'0') AS REAL) ASC,  created_at DESC",
+    "likes":       "CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) DESC, created_at DESC",
 }
 _DEFAULT_SORT_SQL = "created_at DESC"
 
@@ -251,13 +277,22 @@ def _like_pattern(term):
     return t if has_wild else "%" + t + "%"
 
 
-def _build_where(q, model, date_from, date_to, batch="", rating_min=0):
+def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
+                 published_only=False, art_tag="", lora=""):
     """Return (where_clause, params) for the common filter set."""
     clauses = ["filename != ''"]
     params  = []
     if rating_min:
         clauses.append("CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) >= ?")
         params.append(int(rating_min))
+    if published_only:
+        clauses.append("is_published = '1'")
+    if art_tag:
+        clauses.append("LOWER(COALESCE(art_tags,'')) LIKE ?")
+        params.append("%" + art_tag.strip().lower() + "%")
+    if lora:
+        clauses.append("LOWER(COALESCE(loras,'')) LIKE ?")
+        params.append("%" + lora.strip().lower() + "%")
     if q:
         # Whitespace-separated terms are ANDed; each may use * / ? wildcards.
         for term in q.split():
@@ -291,9 +326,11 @@ def get_row(db_path, media_id):
 
 
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
-                  sort="newest", page=1, page_size=100, batch="", rating_min=0):
+                  sort="newest", page=1, page_size=100, batch="", rating_min=0,
+                  published_only=False, art_tag="", lora=""):
     """Return (rows, total) with filtering, sorting and pagination done in SQL."""
-    where, params = _build_where(q, model, date_from, date_to, batch, rating_min)
+    where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
+                                 published_only, art_tag, lora)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     offset = (max(1, page) - 1) * page_size
     con = _connect(db_path)
@@ -311,9 +348,10 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
 
 
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
-                   batch="", rating_min=0):
+                   batch="", rating_min=0, published_only=False, art_tag="", lora=""):
     """Return ordered list of media_ids matching the filter (no row data)."""
-    where, params = _build_where(q, model, date_from, date_to, batch, rating_min)
+    where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
+                                 published_only, art_tag, lora)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     con = _connect(db_path)
     try:
@@ -483,11 +521,52 @@ def collection_health(out_dir, db_path):
             "SELECT COALESCE(NULLIF(model_name,''), NULLIF(model_id,''), 'unknown') AS mdl, "
             "COUNT(*) AS c FROM catalog WHERE filename != '' GROUP BY mdl ORDER BY c DESC LIMIT 8"
         ).fetchall()
+        # Published-artwork analytics (populated by --sync-artworks)
+        published = _scalar("SELECT COUNT(*) FROM catalog WHERE is_published = '1'")
+        total_likes = _scalar(
+            "SELECT COALESCE(SUM(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),0) "
+            "FROM catalog WHERE is_published = '1'")
+        tag_rows = con.execute(
+            "SELECT art_tags FROM catalog WHERE COALESCE(art_tags,'') != ''").fetchall()
+        lora_rows = con.execute(
+            "SELECT loras FROM catalog WHERE COALESCE(loras,'') != ''").fetchall()
+        prompt_rows = con.execute(
+            "SELECT prompt_preview FROM catalog WHERE COALESCE(prompt_preview,'') != ''"
+        ).fetchall()
         # catalog rows that claim a file but whose media_id isn't on disk
         cat_ids = [r[0] for r in con.execute(
             "SELECT media_id FROM catalog WHERE filename != ''").fetchall()]
     finally:
         con.close()
+
+    tag_counter = Counter()
+    for (tags,) in tag_rows:
+        for t in (tags or "").split(","):
+            t = t.strip()
+            if t:
+                tag_counter[t] += 1
+    top_tags = tag_counter.most_common(10)
+
+    lora_counter = Counter()
+    for (loras,) in lora_rows:
+        for part in (loras or "").split(","):
+            name = part.strip().rsplit(":", 1)[0].strip()  # drop ":weight"
+            if name:
+                lora_counter[name] += 1
+    top_loras = lora_counter.most_common(10)
+
+    # Prompt word-cloud: most common meaningful words across prompt previews.
+    import re as _re
+    stop = {"the", "and", "a", "an", "of", "with", "in", "on", "at", "to", "for",
+            "is", "by", "as", "or", "from", "best", "quality", "masterpiece",
+            "highres", "detailed", "very", "high", "score", "up", "1girl", "1boy",
+            "solo", "looking", "viewer"}
+    word_counter = Counter()
+    for (pp,) in prompt_rows:
+        for w in _re.findall(r"[a-z][a-z']{2,}", (pp or "").lower()):
+            if w not in stop:
+                word_counter[w] += 1
+    top_words = word_counter.most_common(40)
 
     missing = sum(1 for mid in cat_ids if mid and mid not in on_disk_ids)
 
@@ -507,6 +586,11 @@ def collection_health(out_dir, db_path):
         "missing": missing,
         "by_month": [(m, c) for (m, c) in by_month],
         "top_models": [(m, c) for (m, c) in top_models],
+        "published": published,
+        "total_likes": total_likes,
+        "top_tags": top_tags,
+        "top_loras": top_loras,
+        "top_words": top_words,
     }
 
 
@@ -639,9 +723,12 @@ def create_app(out_dir: Path):
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<meta name="theme-color" content="#0c0a1c">
 <title>PixAI Gallery</title>
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
+<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
 <style>
   :root {
     /* Palette sampled from two reference images:
@@ -686,6 +773,14 @@ def create_app(out_dir: Path):
     .filters input, .filters select { width: 100% !important; box-sizing: border-box; }
     .grid { padding: 10px 12px; gap: 8px; }
     .chips { padding: 8px 12px 0; }
+    .filters input, .filters select { font-size: 16px; }  /* >=16px stops iOS zoom-on-focus */
+  }
+  /* Tablet: keep the filter bar visible but let wide text inputs shrink so the
+     row wraps tidily instead of running off-screen. */
+  @media (min-width: 681px) and (max-width: 1024px) {
+    .filters input { width: 180px; }
+    .filters { padding: 10px 14px; }
+    .grid { padding: 12px 14px; }
   }
   .btn { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 13px; }
   .btn:hover { background: var(--surface1); }
@@ -725,11 +820,36 @@ def create_app(out_dir: Path):
   .card { background: var(--mantle); border-radius: 8px; overflow: hidden; border: 2px solid transparent; transition: border-color .15s; position: relative; cursor: pointer; }
   .card:hover { border-color: var(--surface1); }
   .card.selected { border-color: var(--purple-bright); box-shadow: 0 0 0 1px var(--purple-bright); }
+  .card.kbd-focus { border-color: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+  /* Lightbox */
+  .lb { display: none; position: fixed; inset: 0; z-index: 300; background: rgba(8,6,18,.92);
+        flex-direction: column; align-items: center; justify-content: center; }
+  .lb.open { display: flex; }
+  .lb-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center;
+            justify-content: space-between; gap: 12px; padding: 10px 16px; background: rgba(10,8,24,.6); }
+  #lb-caption { color: var(--subtext); font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; max-width: 60%; }
+  .lb-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  #lb-img { max-width: 94vw; max-height: 86vh; object-fit: contain; border-radius: 6px; }
+  .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(10,8,24,.5);
+            color: var(--text); border: 1px solid var(--surface1); border-radius: 8px; font-size: 28px;
+            line-height: 1; padding: 10px 16px; cursor: pointer; }
+  .lb-nav:hover { background: var(--surface0); }
+  .lb-prev { left: 14px; } .lb-next { right: 14px; }
+  @media (max-width: 680px) { .lb-nav { padding: 8px 12px; font-size: 22px; } #lb-caption { max-width: 40%; } }
   .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--surface0); }
   .card .no-thumb { width: 100%; aspect-ratio: 1; background: var(--surface0); display: flex; align-items: center; justify-content: center; color: var(--overlay0); font-size: 11px; }
   .card .meta { padding: 6px 8px; }
+  .card .meta .title { font-size: 12px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card .meta .model { font-size: 11px; color: var(--mauve); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card .meta .date  { font-size: 10px; color: var(--overlay0); }
+  /* Privacy blur (opt-in toggle): blur every thumbnail until hover. Useful on
+     LAN / mobile / over-the-shoulder. NSFW-flagged cards (data-nsfw="1") blur
+     more heavily when the flag is known. */
+  body.privacy-blur .card img { filter: blur(16px); transition: filter .12s; }
+  body.privacy-blur .card[data-nsfw="1"] img { filter: blur(28px); }
+  body.privacy-blur .card:hover img { filter: none; }
   .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
   .card .cb-wrap input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--lavender); cursor: pointer; }
   .card a.cover { position: absolute; inset: 0; z-index: 1; }
@@ -924,6 +1044,21 @@ document.addEventListener('DOMContentLoaded', function() {
     </select>
   </div>
   <div>
+    <label>Tag / contest</label><br>
+    <input type="text" name="tag" value="{{ art_tag }}" placeholder="published tag…" style="width:140px">
+  </div>
+  <div>
+    <label>LoRA</label><br>
+    <input type="text" name="lora" value="{{ lora_filter }}" placeholder="lora name…" style="width:140px">
+  </div>
+  <div>
+    <label>&nbsp;</label><br>
+    <label style="color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:6px;">
+      <input type="checkbox" name="published" value="1" {% if published_only %}checked{% endif %}
+             style="width:auto;"> Published only
+    </label>
+  </div>
+  <div>
     <label>Per page</label><br>
     <select name="per_page">
       {% for n in per_page_opts %}
@@ -941,6 +1076,9 @@ document.addEventListener('DOMContentLoaded', function() {
       <option value="model"       {% if sort=='model' %}selected{% endif %}>Model name</option>
       <option value="pixels"      {% if sort=='pixels' %}selected{% endif %}>Resolution ↓</option>
       <option value="aspect"      {% if sort=='aspect' %}selected{% endif %}>Aspect (wide→tall)</option>
+      <option value="aes_desc"    {% if sort=='aes_desc' %}selected{% endif %}>Aesthetic score ↓</option>
+      <option value="aes_asc"     {% if sort=='aes_asc' %}selected{% endif %}>Aesthetic score ↑</option>
+      <option value="likes"       {% if sort=='likes' %}selected{% endif %}>Most liked</option>
       <option value="width"       {% if sort=='width' %}selected{% endif %}>Width ↓</option>
       <option value="height"      {% if sort=='height' %}selected{% endif %}>Height ↓</option>
     </select>
@@ -969,23 +1107,32 @@ document.addEventListener('DOMContentLoaded', function() {
 {% endif %}
 
 <div class="bulk-bar">
-  <button class="btn" onclick="selectAll()">Select All</button>
+  <button class="btn" onclick="selectAll()">Select All (page)</button>
   <button class="btn" onclick="clearAll()">Clear</button>
   <span><span id="sel-count">0</span> selected</span>
+  <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
+  <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
+  <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
+          title="Saved views"><option value="">Saved views…</option></select>
+  <button class="btn" onclick="savePreset()" title="Save current filters as a named view">Save view</button>
   <button class="btn btn-danger" id="bulk-del-btn" style="display:none"
     onclick="confirmBulkDelete()">Delete Selected</button>
+  <span style="margin-left:auto;color:var(--overlay0);font-size:12px;">tip: click an image to open the lightbox · arrow keys to browse · F for slideshow</span>
 </div>
 
 <form id="bulk-form" method="post" action="/delete-bulk">
   <input type="hidden" name="back" value="{{ request.url }}">
   <div class="grid">
     {% for row in rows %}
-    <div class="card" id="card-{{ row.media_id }}">
+    <div class="card" id="card-{{ row.media_id }}" data-mid="{{ row.media_id }}"
+         data-prompt="{{ (row.title or row.prompt_preview or '')|e }}"
+         {% if row.is_nsfw == '1' %}data-nsfw="1"{% endif %}>
       <div class="cb-wrap">
         <input type="checkbox" name="media_ids" value="{{ row.media_id }}"
                onchange="onCheck()" onclick="event.stopPropagation()">
       </div>
-      <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"></a>
+      <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"
+         data-idx="{{ loop.index0 }}" onclick="return openLightbox(event, {{ loop.index0 }})"></a>
       {% if row._has_thumb %}
       <img src="{{ url_for('thumb', media_id=row.media_id) }}" loading="lazy"
            decoding="async" onload="this.classList.add('loaded')"
@@ -994,8 +1141,9 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="no-thumb">no preview</div>
       {% endif %}
       <div class="meta">
+        {% if row.title %}<div class="title" title="{{ row.title }}">{{ row.title }}</div>{% endif %}
         <div class="model">{{ row.model_name or row.model_id or '—' }}</div>
-        <div class="date">{{ row.created_at[:10] if row.created_at else '' }}</div>
+        <div class="date">{{ row.created_at[:10] if row.created_at else '' }}{% if row.liked_count and row.liked_count not in ('0','') %} · ♥ {{ row.liked_count }}{% endif %}</div>
       </div>
       <div class="stars" id="stars-{{ row.media_id }}"
            data-mid="{{ row.media_id }}" data-rating="{{ row.rating or 0 }}"></div>
@@ -1003,6 +1151,20 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endfor %}
   </div>
 </form>
+
+<div id="lightbox" class="lb" onclick="if(event.target===this)closeLightbox()">
+  <div class="lb-bar">
+    <span id="lb-caption"></span>
+    <span class="lb-actions">
+      <a id="lb-details" class="btn" href="#">Details</a>
+      <button class="btn" id="lb-play" onclick="toggleSlideshow()">▶ Slideshow</button>
+      <button class="btn" onclick="closeLightbox()">✕ Close</button>
+    </span>
+  </div>
+  <button class="lb-nav lb-prev" onclick="lbStep(-1)" aria-label="Previous">&#8249;</button>
+  <img id="lb-img" alt="">
+  <button class="lb-nav lb-next" onclick="lbStep(1)" aria-label="Next">&#8250;</button>
+</div>
 
 {% if not rows %}
 <div class="empty">
@@ -1039,6 +1201,37 @@ function toggleFilters() {
   var open = f.classList.toggle('open');
   btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
+function applyBlur() {
+  var on = localStorage.getItem('gallery_privacy_blur') === '1';
+  document.body.classList.toggle('privacy-blur', on);
+  var b = document.getElementById('blur-btn');
+  if (b) b.textContent = on ? 'Unblur' : 'Privacy blur';
+}
+function toggleBlur() {
+  var on = localStorage.getItem('gallery_privacy_blur') === '1';
+  localStorage.setItem('gallery_privacy_blur', on ? '' : '1');
+  applyBlur();
+}
+function presetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
+function refreshPresets() {
+  var s = document.getElementById('preset-select'); if (!s) return;
+  var p = presetsGet();
+  s.innerHTML = '<option value="">Saved views…</option>';
+  Object.keys(p).forEach(function(n){ var o = document.createElement('option'); o.value = n; o.textContent = n; s.appendChild(o); });
+}
+function savePreset() {
+  var n = prompt('Name this view (the current filters):'); if (!n) return;
+  var p = presetsGet(); p[n] = location.search || '?';
+  localStorage.setItem('gallery_presets', JSON.stringify(p)); refreshPresets();
+}
+function loadPreset(n) {
+  if (!n) return;
+  if (n.charAt(0) === '✕') { // not used; reserved
+    return;
+  }
+  var p = presetsGet();
+  if (p[n] !== undefined) location.href = '/' + p[n];
+}
 (function(){
   // On mobile, auto-open the filter bar if any filter is active so the user sees
   // what's applied; otherwise keep it collapsed to give the grid the screen.
@@ -1058,32 +1251,157 @@ function toggleFilters() {
     });
   }
 })();
-function onCheck() {
-  const checked = document.querySelectorAll('input[name=media_ids]:checked');
-  document.getElementById('sel-count').textContent = checked.length;
-  document.getElementById('bulk-del-btn').style.display = checked.length ? 'inline-block' : 'none';
-  checked.forEach(cb => cb.closest('.card').classList.add('selected'));
-  document.querySelectorAll('input[name=media_ids]:not(:checked)').forEach(cb => {
-    cb.closest('.card').classList.remove('selected');
+/* ---- Cross-page selection (persisted in localStorage) ---- */
+function selGet() { try { return new Set(JSON.parse(localStorage.getItem('gallery_sel') || '[]')); } catch(e) { return new Set(); } }
+function selSave(s) { localStorage.setItem('gallery_sel', JSON.stringify([...s])); }
+function refreshSelUI() {
+  var sel = selGet();
+  document.querySelectorAll('input[name=media_ids]').forEach(function(cb){
+    var on = sel.has(cb.value);
+    cb.checked = on;
+    cb.closest('.card').classList.toggle('selected', on);
   });
+  document.getElementById('sel-count').textContent = sel.size;
+  document.getElementById('bulk-del-btn').style.display = sel.size ? 'inline-block' : 'none';
+  document.getElementById('bulk-zip-btn').style.display = sel.size ? 'inline-block' : 'none';
+}
+function onCheck() {
+  var sel = selGet();
+  document.querySelectorAll('input[name=media_ids]').forEach(function(cb){
+    if (cb.checked) sel.add(cb.value); else sel.delete(cb.value);
+  });
+  selSave(sel); refreshSelUI();
 }
 function selectAll() {
-  document.querySelectorAll('input[name=media_ids]').forEach(cb => { cb.checked = true; });
-  onCheck();
+  var sel = selGet();
+  document.querySelectorAll('input[name=media_ids]').forEach(function(cb){ sel.add(cb.value); });
+  selSave(sel); refreshSelUI();
 }
-function clearAll() {
-  document.querySelectorAll('input[name=media_ids]').forEach(cb => { cb.checked = false; });
-  onCheck();
+function clearAll() { selSave(new Set()); refreshSelUI(); }
+function downloadZip() {
+  var sel = [...selGet()];
+  if (!sel.length) return;
+  var f = document.createElement('form');
+  f.method = 'post'; f.action = '/export-zip';
+  sel.forEach(function(mid){
+    var i = document.createElement('input');
+    i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; f.appendChild(i);
+  });
+  document.body.appendChild(f); f.submit(); f.remove();
 }
 function confirmBulkDelete() {
-  const n = document.querySelectorAll('input[name=media_ids]:checked').length;
-  confirmDelete('/delete-bulk', 'Permanently delete ' + n + ' image' + (n !== 1 ? 's' : '') + '? This cannot be undone.');
+  var ids = [...selGet()];
+  if (!ids.length) return;
+  confirmDelete('/delete-bulk', 'Permanently delete ' + ids.length + ' image' + (ids.length !== 1 ? 's' : '') + '? This cannot be undone.');
   document.getElementById('del-modal-form').onsubmit = function() {
-    document.getElementById('bulk-form').submit();
-    return false;
+    var bf = document.getElementById('bulk-form');
+    // ensure all cross-page selections are submitted, not just this page's
+    ids.forEach(function(mid){
+      if (!bf.querySelector('input[name=media_ids][value="' + mid + '"]')) {
+        var i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; bf.appendChild(i);
+      }
+    });
+    localStorage.removeItem('gallery_sel');
+    bf.submit(); return false;
   };
   document.getElementById('del-modal-form').action = '#';
 }
+
+/* ---- Lightbox + keyboard navigation ---- */
+var lbCards = [], lbIdx = -1, lbTimer = null, lbZoom = false;
+function lbUrl(mid) { return '/full/' + mid; }
+function openLightbox(ev, idx) {
+  if (ev) { if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return true; ev.preventDefault(); }
+  lbCards = Array.from(document.querySelectorAll('.card'));
+  if (!lbCards.length) return false;
+  lbIdx = idx;
+  lbShow();
+  document.getElementById('lightbox').classList.add('open');
+  return false;
+}
+function lbShow() {
+  var card = lbCards[lbIdx]; if (!card) return;
+  var mid = card.dataset.mid;
+  var im = document.getElementById('lb-img');
+  lbZoom = false; im.style.transform = '';      // reset zoom on navigate
+  im.src = lbUrl(mid);
+  document.getElementById('lb-caption').textContent =
+    (lbIdx + 1) + ' / ' + lbCards.length + '   ' + (card.dataset.prompt || '');
+  document.getElementById('lb-details').href = '/image/' + mid + '?back=' + encodeURIComponent(location.href);
+}
+function lbStep(d) {
+  if (!lbCards.length) return;
+  lbIdx = (lbIdx + d + lbCards.length) % lbCards.length;
+  lbShow();
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  stopSlideshow();
+}
+function toggleSlideshow() { lbTimer ? stopSlideshow() : startSlideshow(); }
+function startSlideshow() {
+  lbTimer = setInterval(function(){ lbStep(1); }, 3000);
+  document.getElementById('lb-play').textContent = '❚❚ Pause';
+}
+function stopSlideshow() {
+  if (lbTimer) { clearInterval(lbTimer); lbTimer = null; }
+  var b = document.getElementById('lb-play'); if (b) b.textContent = '▶ Slideshow';
+}
+var kbdIdx = -1;
+function kbdFocus(i) {
+  var cards = document.querySelectorAll('.card'); if (!cards.length) return;
+  if (kbdIdx >= 0 && cards[kbdIdx]) cards[kbdIdx].classList.remove('kbd-focus');
+  kbdIdx = Math.max(0, Math.min(i, cards.length - 1));
+  cards[kbdIdx].classList.add('kbd-focus');
+  cards[kbdIdx].scrollIntoView({block: 'nearest'});
+}
+function gridCols() {
+  var g = document.querySelector('.grid'); if (!g) return 1;
+  return getComputedStyle(g).gridTemplateColumns.split(' ').length;
+}
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  var open = document.getElementById('lightbox').classList.contains('open');
+  if (open) {
+    if (e.key === 'ArrowRight') { lbStep(1); }
+    else if (e.key === 'ArrowLeft') { lbStep(-1); }
+    else if (e.key === 'Escape') { closeLightbox(); }
+    else if (e.key === 'f' || e.key === 'F' || e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
+    return;
+  }
+  var cols = gridCols();
+  if (e.key === 'ArrowRight') { kbdFocus(kbdIdx + 1); }
+  else if (e.key === 'ArrowLeft') { kbdFocus(kbdIdx - 1); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); kbdFocus(kbdIdx < 0 ? 0 : kbdIdx + cols); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); kbdFocus(kbdIdx - cols); }
+  else if (e.key === 'Enter' && kbdIdx >= 0) { openLightbox(null, kbdIdx); }
+});
+document.addEventListener('DOMContentLoaded', function(){
+  refreshSelUI(); applyBlur(); refreshPresets();
+  // Lightbox touch: swipe left/right to navigate, double-tap to zoom 2x.
+  var im = document.getElementById('lb-img');
+  if (im) {
+    var x0 = null, lastTap = 0;
+    im.addEventListener('touchstart', function(e){
+      if (e.touches.length === 1) x0 = e.touches[0].clientX;
+    }, {passive: true});
+    im.addEventListener('touchend', function(e){
+      var now = Date.now();
+      if (now - lastTap < 300) {            // double-tap zoom
+        lbZoom = !lbZoom;
+        im.style.transform = lbZoom ? 'scale(2)' : '';
+        lastTap = 0; x0 = null; return;
+      }
+      lastTap = now;
+      if (x0 !== null && !lbZoom) {         // horizontal swipe = navigate
+        var dx = e.changedTouches[0].clientX - x0;
+        if (Math.abs(dx) > 50) lbStep(dx < 0 ? 1 : -1);
+      }
+      x0 = null;
+    }, {passive: true});
+  }
+});
 </script>
 """)
 
@@ -1153,6 +1471,18 @@ document.addEventListener('DOMContentLoaded', function() {
     <span class="val">{{ row.prompt_preview }}</span>
     <span class="lbl">Model</span>
     <span class="val">{{ row.model_name or row.model_id or '—' }}</span>
+    {% if row.loras %}
+    <span class="lbl">LoRAs</span>
+    <span class="val">{{ row.loras }}</span>
+    {% endif %}
+    {% if row.title %}
+    <span class="lbl">Title</span>
+    <span class="val">{{ row.title }}</span>
+    {% endif %}
+    {% if row.art_tags %}
+    <span class="lbl">Tags</span>
+    <span class="val">{{ row.art_tags }}</span>
+    {% endif %}
     <span class="lbl">Seed</span>
     <span class="val">{{ row.seed or '—' }}</span>
     <span class="lbl">Steps</span>
@@ -1237,6 +1567,8 @@ function copyPrompt(btn) {
     {{ stat('Catalog rows', '{:,}'.format(h.catalog_rows)) }}
     {{ stat('Full-meta', h.full_meta_pct|string + '%') }}
     {{ stat('Rated', '{:,}'.format(h.rated)) }}
+    {{ stat('Published', '{:,}'.format(h.published)) }}
+    {{ stat('Total likes', '{:,}'.format(h.total_likes)) }}
     {{ stat('Duplicates', '{:,}'.format(h.dup_redundant), 'warn' if h.dup_redundant else '') }}
     {{ stat('Reclaimable', h.dup_bytes_h, 'warn' if h.dup_bytes else '') }}
     {{ stat('Missing files', '{:,}'.format(h.missing), 'bad' if h.missing else '') }}
@@ -1271,6 +1603,39 @@ function copyPrompt(btn) {
     </div>
     {% endfor %}
   </div>
+
+  {% if h.top_tags %}
+  <h2 style="margin:28px 0 10px;font-size:16px;">Top tags &amp; contests</h2>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;">
+    {% for name, c in h.top_tags %}
+    <a href="{{ url_for('index', tag=name) }}"
+       style="display:inline-flex;align-items:center;gap:6px;background:var(--mantle);border:0.5px solid var(--surface1);border-left:3px solid var(--gold);border-radius:4px;padding:4px 10px;font-size:12px;color:var(--text);text-decoration:none;">
+      {{ name }} <span style="color:var(--subtext);">{{ c }}</span></a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if h.top_words %}
+  <h2 style="margin:28px 0 10px;font-size:16px;">Prompt word cloud</h2>
+  {% set wmax = h.top_words[0][1] %}
+  <div style="display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;line-height:1.6;">
+    {% for word, c in h.top_words %}
+    <a href="{{ url_for('index', q=word) }}" title="{{ c }} images"
+       style="text-decoration:none;color:var(--lavender);font-size:{{ (12 + (16 * c / wmax))|round|int }}px;">{{ word }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if h.top_loras %}
+  <h2 style="margin:28px 0 10px;font-size:16px;">Top LoRAs</h2>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;">
+    {% for name, c in h.top_loras %}
+    <a href="{{ url_for('index', lora=name) }}"
+       style="display:inline-flex;align-items:center;gap:6px;background:var(--mantle);border:0.5px solid var(--surface1);border-left:3px solid var(--accent-soft);border-radius:4px;padding:4px 10px;font-size:12px;color:var(--text);text-decoration:none;">
+      {{ name }} <span style="color:var(--subtext);">{{ c }}</span></a>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <h2 style="margin:28px 0 10px;font-size:16px;">Folder breakdown</h2>
   <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--subtext);">
@@ -1344,6 +1709,9 @@ function copyPrompt(btn) {
             rating_min = max(0, min(5, int(request.args.get("rating_min", 0))))
         except ValueError:
             rating_min = 0
+        published_only = request.args.get("published") == "1"
+        art_tag = request.args.get("tag", "")
+        lora_filter = request.args.get("lora", "")
 
         models  = unique_models(db_path)
         batches = unique_batches(db_path)
@@ -1351,6 +1719,7 @@ function copyPrompt(btn) {
         page_rows, total = query_catalog(
             db_path, q, model_filter, date_from, date_to, sort, page, per_page,
             batch=batch_filter, rating_min=rating_min,
+            published_only=published_only, art_tag=art_tag, lora=lora_filter,
         )
         total_pages = max(1, (total + per_page - 1) // per_page)
         page = max(1, min(page, total_pages))
@@ -1385,10 +1754,17 @@ function copyPrompt(btn) {
         if date_to:
             chips.append({"k": "to", "v": date_to,
                           "url": _without("to_year", "to_month")})
+        if published_only:
+            chips.append({"k": "published", "v": "yes", "url": _without("published")})
+        if art_tag:
+            chips.append({"k": "tag", "v": art_tag, "url": _without("tag")})
+        if lora_filter:
+            chips.append({"k": "lora", "v": lora_filter, "url": _without("lora")})
 
         return render_template_string(
             INDEX_HTML,
-            chips=chips,
+            chips=chips, published_only=published_only, art_tag=art_tag,
+            lora_filter=lora_filter,
             rows=page_rows, total=total, page=page,
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
@@ -1434,6 +1810,8 @@ function copyPrompt(btn) {
             q=_qs1("q"), model=_qs1("model"),
             date_from=_ym("from", "01"), date_to=_ym("to", "12"),
             sort=_qs1("sort", "newest"), batch=_qs1("batch"), rating_min=_rmin,
+            published_only=(_qs1("published") == "1"), art_tag=_qs1("tag"),
+            lora=_qs1("lora"),
         )
         try:
             idx = nav_ids.index(media_id)
@@ -1511,6 +1889,79 @@ function copyPrompt(btn) {
         resp.headers["Cache-Control"] = _IMMUTABLE
         return resp
 
+    @app.route("/manifest.webmanifest")
+    def manifest():
+        icon = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
+                "viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E"
+                "%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' "
+                "fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' "
+                "fill='%23d4af37'/%3E%3C/svg%3E")
+        return app.response_class(
+            json.dumps({
+                "name": "PixAI Gallery", "short_name": "PixAI",
+                "start_url": "/", "display": "standalone",
+                "background_color": "#0c0a1c", "theme_color": "#0c0a1c",
+                "icons": [{"src": icon, "sizes": "any", "type": "image/svg+xml"}],
+            }),
+            mimetype="application/manifest+json")
+
+    @app.route("/sw.js")
+    def service_worker():
+        # Cache-first for immutable thumbnails/images; network for everything else.
+        sw = (
+            "const C='pixai-img-v1';\n"
+            "self.addEventListener('install',e=>self.skipWaiting());\n"
+            "self.addEventListener('activate',e=>self.clients.claim());\n"
+            "self.addEventListener('fetch',e=>{\n"
+            " const u=new URL(e.request.url);\n"
+            " if(e.request.method==='GET' && (u.pathname.startsWith('/thumbs/')||u.pathname.startsWith('/img/')||u.pathname.startsWith('/full/'))){\n"
+            "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>r||fetch(e.request).then(resp=>{c.put(e.request,resp.clone());return resp;}))));\n"
+            " }\n"
+            "});\n")
+        return app.response_class(sw, mimetype="application/javascript")
+
+    @app.route("/full/<media_id>")
+    def full_image(media_id):
+        # Resolve a media_id to its full-res file on the fly (used by the
+        # lightbox so the index page doesn't precompute 250 image paths).
+        row = get_row(db_path, media_id)
+        p = find_image_file(out_dir, media_id, row.get("filename") if row else "")
+        if not p or not p.exists():
+            return "Not found", 404
+        resp = send_from_directory(str(p.parent), p.name, max_age=31536000)
+        resp.headers["Cache-Control"] = _IMMUTABLE
+        return resp
+
+    @app.route("/export-zip", methods=["POST"])
+    def export_zip():
+        # Stream a ZIP of the selected images' full-res files. Stored (no
+        # recompression) since images are already compressed.
+        import io
+        import zipfile
+        ids = request.form.getlist("media_ids")
+        mem = io.BytesIO()
+        n = 0
+        with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
+            seen_names = set()
+            for mid in ids[:2000]:  # safety cap
+                row = get_row(db_path, mid)
+                if not row:
+                    continue
+                p = find_image_file(out_dir, mid, row.get("filename"))
+                if not p or not p.exists():
+                    continue
+                name = p.name
+                if name in seen_names:
+                    name = "{}_{}".format(mid, p.name)
+                seen_names.add(name)
+                z.write(p, arcname=name)
+                n += 1
+        if not n:
+            return "No matching images found.", 404
+        mem.seek(0)
+        return send_file(mem, mimetype="application/zip", as_attachment=True,
+                         download_name="pixai_selection_{}.zip".format(n))
+
     @app.after_request
     def _gzip_html(resp):
         # Compress only HTML pages (the big card grids). File responses are
@@ -1544,6 +1995,10 @@ def main():
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (default 127.0.0.1; use 0.0.0.0 for LAN)")
+    ap.add_argument("--https", action="store_true",
+                    help="serve over self-signed HTTPS (needed for PWA install / service "
+                         "worker on a phone over LAN; requires the 'cryptography' package; "
+                         "browsers show a one-time certificate warning)")
     ap.add_argument("--rebuild-thumbs", action="store_true",
                     help="regenerate all thumbnails even if they already exist")
     args = ap.parse_args()
@@ -1569,11 +2024,24 @@ def main():
     print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
     build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
 
+    ssl_context = None
+    scheme = "http"
+    if getattr(args, "https", False):
+        try:
+            import cryptography  # noqa: F401  (werkzeug 'adhoc' needs it)
+            ssl_context = "adhoc"
+            scheme = "https"
+        except ImportError:
+            print("--https needs the 'cryptography' package:  pip install cryptography\n"
+                  "Falling back to HTTP.")
+
     app = create_app(out_dir)
-    print("\nGallery ready ->  http://{}:{}/".format(
-        "localhost" if args.host == "127.0.0.1" else args.host, args.port))
+    print("\nGallery ready ->  {}://{}:{}/".format(
+        scheme, "localhost" if args.host == "127.0.0.1" else args.host, args.port))
+    if ssl_context:
+        print("(self-signed HTTPS: your browser/phone will show a one-time 'proceed anyway' warning)")
     print("Press Ctrl+C to stop.\n")
-    app.run(host=args.host, port=args.port, debug=False, threaded=True)
+    app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)
 
 
 if __name__ == "__main__":
