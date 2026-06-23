@@ -422,7 +422,7 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ## Changelog
 
-### Unreleased
+### v1.3.2 — fuller reproduction metadata, duplicate-review browser, prompt editing
 
 - **Negative prompt + clip-skip captured** — `getTaskById` carries `negativePrompts` and `clipSkip`; both are now stored (`negative_prompt`, `clip_skip` columns) and shown on the detail page. Re-run `--backfill-full-meta --with-loras` to fill them on existing rows. (Many newer "structured prompt" generations have no separate negative — that's expected, not a miss.)
 - **Duplicate-review browser** — a new `/duplicates` gallery page lists every media id that exists in more than one folder, side-by-side with thumbnails, marking the keeper vs. the copies `--dedup` would quarantine. Linked from `/health`. Read-only review; the actual move still happens via Dedup.
