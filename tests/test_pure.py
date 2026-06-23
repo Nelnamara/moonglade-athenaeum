@@ -244,6 +244,23 @@ def test_extract_full_meta_none_returns_empty():
     assert core.extract_full_meta(None) == {}
 
 
+def test_extract_full_meta_negative_and_clip_skip():
+    task = {
+        "parameters": {"prompts": "cat", "negativePrompts": "bad hands", "modelId": "m"},
+        "outputs": {"detailParameters": {"steps": 30, "clipSkip": 2}},
+    }
+    m = core.extract_full_meta(task)
+    assert m["negative_prompt"] == "bad hands"
+    assert m["clip_skip"] == "2"
+
+
+def test_extract_full_meta_no_negative_is_blank():
+    # newer "structured prompt" tasks have no separate negative
+    m = core.extract_full_meta({"parameters": {"prompts": "cat"}, "outputs": {}})
+    assert m["negative_prompt"] == ""
+    assert m["clip_skip"] == ""
+
+
 def test_extract_full_meta_partial():
     task = {"parameters": {"prompts": "cat"}, "outputs": {}}
     m = core.extract_full_meta(task)

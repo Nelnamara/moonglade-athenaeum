@@ -113,6 +113,7 @@ def test_load_config_missing_returns_empty(tmp_path, monkeypatch):
 
 from pixai_gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catalog,
                             update_rating, delete_from_catalog,
+                            update_prompt_full, bulk_replace_prompt,
                             migrate_csv_to_db, export_csv, _db_is_empty)
 
 
@@ -220,6 +221,39 @@ def test_delete_nonexistent_is_safe(tmp_path):
     save_catalog(db, [_make_row(media_id="m1")])
     delete_from_catalog(db, "does_not_exist")
     assert len(load_catalog(db)) == 1
+
+
+def test_update_prompt_full_edits_one_row(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _make_row(media_id="m1", prompt_full="old prompt"),
+        _make_row(media_id="m2", prompt_full="keep me"),
+    ])
+    update_prompt_full(db, "m1", "brand new prompt")
+    by_id = {r["media_id"]: r for r in load_catalog(db)}
+    assert by_id["m1"]["prompt_full"] == "brand new prompt"
+    assert by_id["m2"]["prompt_full"] == "keep me"  # untouched
+
+
+def test_bulk_replace_prompt_counts_only_changed(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _make_row(media_id="m1", prompt_full="red cat"),
+        _make_row(media_id="m2", prompt_full="red dog"),
+        _make_row(media_id="m3", prompt_full="blue bird"),  # no match -> unchanged
+    ])
+    n = bulk_replace_prompt(db, ["m1", "m2", "m3"], "red", "green")
+    assert n == 2
+    by_id = {r["media_id"]: r for r in load_catalog(db)}
+    assert by_id["m1"]["prompt_full"] == "green cat"
+    assert by_id["m2"]["prompt_full"] == "green dog"
+    assert by_id["m3"]["prompt_full"] == "blue bird"
+
+
+def test_bulk_replace_prompt_empty_find_is_noop(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_make_row(media_id="m1", prompt_full="x")])
+    assert bulk_replace_prompt(db, ["m1"], "", "y") == 0
 
 
 def test_migrate_csv_to_db(tmp_path):

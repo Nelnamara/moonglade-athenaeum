@@ -20,7 +20,8 @@ PixAI's terms grant users copyright of their own generations. This tool is rate-
 - **Published-artwork sync** — `--sync-artworks` pulls your published pieces' titles, tags/contest labels, NSFW flag, and like/comment/aesthetic data into the catalog; `--with-videos` backs up animated-artwork video files too
 - **Duplicate audit & dedup** — `--audit` scans the whole backup folder for duplicate images (same `media_id` across folders, plus byte-identical copies); `--dedup` quarantines the redundant copies (keeping the most-organized one) and `--verify-dupes` proves the quarantine is safe before you delete it
 - **Local web gallery** — browse, filter, rate, and delete from a browser: wildcard prompt search; searchable model/batch, tag/contest, LoRA, min-rating, and published-only filters; year/month date pickers; aesthetic/likes/resolution sorts; a lightbox (swipe + slideshow); cross-page selection with **Download ZIP**; saved filter presets; privacy blur; mobile/tablet layout and PWA
-- **Collection Health dashboard** — `/health` page: storage used, full-meta %, duplicates, missing files, total likes, images-by-month, top models, top LoRAs, top tags, and a prompt word-cloud
+- **Edit prompts in the gallery** — fix or annotate a single image's prompt inline on its detail page, or select many and **Find/Replace** a substring across all of them; writes straight to `catalog.db`
+- **Collection Health dashboard** — `/health` page: storage used, full-meta %, duplicates, missing files, total likes, images-by-month, top models, top LoRAs, top tags, and a prompt word-cloud; plus a **`/duplicates`** review page that shows cross-folder duplicate copies side-by-side before you dedup
 - **Format conversion** — convert WebP to PNG or JPEG on download, or batch-convert existing files
 - **Organize mode** — sorts files into `batches/` and `YYYY-MM/` folders; embeds metadata into PNG/JPEG files
 - **Rate limiting** — configurable delay between requests (default 0.4 s)
@@ -369,6 +370,8 @@ pixai_backup/
 | `aes_score` | PixAI aesthetic score (`--sync-artworks`) |
 | `art_tags` | Comma-joined tag / contest labels from the artwork's tacks (`--sync-artworks`) |
 | `loras` | LoRAs used, as `Name:weight, …` (`--full-meta` / `--backfill-full-meta --with-loras`) |
+| `negative_prompt` | Negative prompt, if the task had one (`--full-meta` / `--backfill-full-meta`) |
+| `clip_skip` | Clip-skip value (`--full-meta` / `--backfill-full-meta`) |
 
 ---
 
@@ -418,6 +421,12 @@ python pixai_gallery_backup.py --backfill-full-meta
 ---
 
 ## Changelog
+
+### Unreleased
+
+- **Negative prompt + clip-skip captured** — `getTaskById` carries `negativePrompts` and `clipSkip`; both are now stored (`negative_prompt`, `clip_skip` columns) and shown on the detail page. Re-run `--backfill-full-meta --with-loras` to fill them on existing rows. (Many newer "structured prompt" generations have no separate negative — that's expected, not a miss.)
+- **Duplicate-review browser** — a new `/duplicates` gallery page lists every media id that exists in more than one folder, side-by-side with thumbnails, marking the keeper vs. the copies `--dedup` would quarantine. Linked from `/health`. Read-only review; the actual move still happens via Dedup.
+- **Bulk prompt edit** — edit a single image's prompt inline on its detail page (**Edit Prompt** → Save), or select several thumbnails and **Find/Replace** a substring across all their prompts at once. Writes straight to `catalog.db`.
 
 ### v1.3.1 — parallel workers for the batch jobs
 
