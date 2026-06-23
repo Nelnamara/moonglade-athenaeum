@@ -935,6 +935,15 @@ class ConvertTab(QWidget):
         r2.addSpacing(20)
         self.dry_run = QCheckBox("Dry run (preview only)")
         r2.addWidget(self.dry_run)
+        r2.addSpacing(20)
+        r2.addWidget(QLabel("Workers:"))
+        self.workers = QSpinBox()
+        self.workers.setRange(1, 16)
+        self.workers.setValue(settings.get("conv_workers", 4))
+        self.workers.setFixedWidth(55)
+        self.workers.setToolTip("Parallel conversion workers (Pillow releases the GIL, "
+                                "so this scales across cores). 1 = serial.")
+        r2.addWidget(self.workers)
         r2.addStretch()
         g.addLayout(r2)
 
@@ -975,7 +984,7 @@ class ConvertTab(QWidget):
             jpeg_bg=self.jpeg_bg.currentText(),
             keep_webp=self.keep_webp.isChecked(),
             dry_run=self.dry_run.isChecked(),
-            workers=4,
+            workers=self.workers.value(),
         )
 
     def _run_convert(self):
@@ -1023,6 +1032,7 @@ class ConvertTab(QWidget):
         return {
             "conv_fmt":      self.fmt_combo.currentData(),
             "conv_keep_webp": self.keep_webp.isChecked(),
+            "conv_workers":  self.workers.value(),
         }
 
 

@@ -205,3 +205,54 @@ def test_collection_health_detects_duplicate(tmp_path):
     (tmp_path / "2024-03" / "111.webp").write_bytes(b"data")
     h = collection_health(tmp_path, db)
     assert h["dup_redundant"] == 1
+
+
+def test_duplicate_groups_finds_cross_folder_copies(tmp_path):
+    from pixai_gallery import duplicate_groups
+    (tmp_path / "images").mkdir()
+    (tmp_path / "2024-03").mkdir()
+    # 111 lives in two buckets -> a group; 222 lives only in images -> not a group
+    (tmp_path / "images" / "p_t1_111.webp").write_bytes(b"data")
+    (tmp_path / "2024-03" / "111.webp").write_bytes(b"data")
+    (tmp_path / "images" / "x_222.webp").write_bytes(b"solo")
+    groups = duplicate_groups(tmp_path)
+    assert len(groups) == 1
+    g = groups[0]
+    assert g["media_id"] == "111"
+    # most-organized copy (month) is the keeper over flat images/
+    assert g["keeper"].replace("\\", "/") == "2024-03/111.webp"
+    assert len(g["copies"]) == 2
+
+
+def test_duplicate_groups_ignores_gallery_and_quarantine(tmp_path):
+    from pixai_gallery import duplicate_groups
+    (tmp_path / "images").mkdir()
+    (tmp_path / "gallery" / "thumbs").mkdir(parents=True)
+    (tmp_path / "_duplicates").mkdir()
+    (tmp_path / "images" / "a_111.webp").write_bytes(b"d")
+    (tmp_path / "gallery" / "thumbs" / "111.jpg").write_bytes(b"d")
+    (tmp_path / "_duplicates" / "111.webp").write_bytes(b"d")
+    # only the images/ copy counts -> not a cross-bucket duplicate
+    assert duplicate_groups(tmp_path) == []
+
+
+def test_edit_prompt_and_bulk_replace_routes(tmp_path):
+    from pixai_gallery import create_app, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="m1", filename="a_m1.png", prompt_full="red cat"),
+        _row(media_id="m2", filename="b_m2.png", prompt_full="red dog"),
+    ])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a_m1.png").write_bytes(b"x")
+    (tmp_path / "images" / "b_m2.png").write_bytes(b"x")
+    client = create_app(tmp_path).test_client()
+
+    r = client.post("/edit-prompt/m1", json={"prompt": "blue cat"})
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+
+    r2 = client.post("/bulk-replace-prompt",
+                     data={"media_ids": ["m1", "m2"], "find": "cat", "replace": "lion", "back": "/"})
+    assert r2.status_code == 302 and "replaced=1" in r2.headers["Location"]
+    by_id = {x["media_id"]: x["prompt_full"] for x in load_catalog(db)}
+    assert by_id["m1"] == "blue lion" and by_id["m2"] == "red dog"

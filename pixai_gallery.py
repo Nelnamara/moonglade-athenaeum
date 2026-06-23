@@ -50,6 +50,8 @@ CATALOG_FIELDS = [
     "liked_count", "comment_count", "aes_score", "art_tags",
     # LoRAs used, populated by --full-meta / --backfill-full-meta ("Name:0.7, …")
     "loras",
+    # Extra reproduction params from getTaskById (full-meta)
+    "negative_prompt", "clip_skip",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -87,7 +89,9 @@ CREATE TABLE IF NOT EXISTS catalog (
     comment_count   TEXT DEFAULT '',
     aes_score       TEXT DEFAULT '',
     art_tags        TEXT DEFAULT '',
-    loras           TEXT DEFAULT ''
+    loras           TEXT DEFAULT '',
+    negative_prompt TEXT DEFAULT '',
+    clip_skip       TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -136,6 +140,8 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN aes_score TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN art_tags TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN loras TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN negative_prompt TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN clip_skip TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -199,6 +205,41 @@ def delete_from_catalog(db_path, media_id):
         con.commit()
     finally:
         con.close()
+
+
+def update_prompt_full(db_path, media_id, text):
+    """Overwrite a single row's prompt_full (manual annotation/correction)."""
+    con = _connect(db_path)
+    try:
+        con.execute("UPDATE catalog SET prompt_full=? WHERE media_id=?",
+                    (text or "", media_id))
+        con.commit()
+    finally:
+        con.close()
+
+
+def bulk_replace_prompt(db_path, media_ids, find, replace):
+    """Find/replace a substring in prompt_full across the given media_ids.
+    Returns the number of rows actually changed."""
+    if not find:
+        return 0
+    con = _connect(db_path)
+    changed = 0
+    try:
+        for mid in media_ids:
+            row = con.execute("SELECT prompt_full FROM catalog WHERE media_id=?",
+                              (mid,)).fetchone()
+            if not row:
+                continue
+            old = row[0] or ""
+            new = old.replace(find, replace)
+            if new != old:
+                con.execute("UPDATE catalog SET prompt_full=? WHERE media_id=?", (new, mid))
+                changed += 1
+        con.commit()
+    finally:
+        con.close()
+    return changed
 
 
 def _db_is_empty(db_path):
@@ -592,6 +633,46 @@ def collection_health(out_dir, db_path):
         "top_loras": top_loras,
         "top_words": top_words,
     }
+
+
+def duplicate_groups(out_dir, limit=300):
+    """Class-A duplicates for the gallery review browser: media_ids whose file
+    exists in more than one folder bucket. Cheap (no hashing). Returns a list of
+    {media_id, keeper(rel), copies:[{rel,bucket,size}]} sorted keeper-first."""
+    from collections import defaultdict
+    gallery_dir = out_dir / "gallery"
+    quarantine_dir = out_dir / "_duplicates"
+    prio = {"batches": 0, "month": 1, "images": 2, "other": 3}
+    locs = defaultdict(list)
+    for p in out_dir.rglob("*"):
+        if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
+            continue
+        if p.name.endswith(".part") or _is_under(p, gallery_dir) or _is_under(p, quarantine_dir):
+            continue
+        rel = p.relative_to(out_dir)
+        top = str(rel).replace("\\", "/").split("/")[0]
+        if top == "images":
+            bucket = "images"
+        elif top == "batches":
+            bucket = "batches"
+        elif top == "unknown-date" or (len(top) == 7 and top[4] == "-" and top[:4].isdigit()):
+            bucket = "month"
+        else:
+            bucket = "other"
+        try:
+            sz = p.stat().st_size
+        except OSError:
+            sz = 0
+        locs[media_id_of(p)].append({"rel": str(rel), "bucket": bucket, "size": sz})
+
+    groups = []
+    for mid, items in locs.items():
+        if len(items) > 1 and len({it["bucket"] for it in items}) > 1:
+            ordered = sorted(items, key=lambda it: (prio.get(it["bucket"], 9), len(it["rel"])))
+            groups.append({"media_id": mid, "keeper": ordered[0]["rel"], "copies": ordered})
+            if len(groups) >= limit:
+                break
+    return groups
 
 
 def media_id_of(path):
@@ -1132,11 +1213,17 @@ document.addEventListener('DOMContentLoaded', function() {
 </div>
 {% endif %}
 
+{% if request.args.get('replaced') %}
+<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--green);border-radius:4px;color:var(--text);font-size:13px;">
+  Replaced text in {{ request.args.get('replaced') }} prompt(s).</div>
+{% endif %}
+
 <div class="bulk-bar">
   <button class="btn" onclick="selectAll()">Select All (page)</button>
   <button class="btn" onclick="clearAll()">Clear</button>
   <span><span id="sel-count">0</span> selected</span>
   <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
+  <button class="btn" id="bulk-replace-btn" style="display:none" onclick="bulkReplacePrompt()" title="Find/replace text in the prompts of selected images">Find/Replace</button>
   <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
   <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
           title="Saved views"><option value="">Saved views…</option></select>
@@ -1290,6 +1377,8 @@ function refreshSelUI() {
   document.getElementById('sel-count').textContent = sel.size;
   document.getElementById('bulk-del-btn').style.display = sel.size ? 'inline-block' : 'none';
   document.getElementById('bulk-zip-btn').style.display = sel.size ? 'inline-block' : 'none';
+  var rb = document.getElementById('bulk-replace-btn');
+  if (rb) rb.style.display = sel.size ? 'inline-block' : 'none';
 }
 function onCheck() {
   var sel = selGet();
@@ -1314,6 +1403,21 @@ function downloadZip() {
     i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; f.appendChild(i);
   });
   document.body.appendChild(f); f.submit(); f.remove();
+}
+function bulkReplacePrompt() {
+  var sel = [...selGet()];
+  if (!sel.length) return;
+  var find = prompt('Find this text in the prompts of ' + sel.length + ' selected image(s):');
+  if (find === null || find === '') return;
+  var repl = prompt('Replace "' + find + '" with: (leave blank to delete it)');
+  if (repl === null) return;
+  if (!confirm('Replace "' + find + '" with "' + repl + '" across ' + sel.length + ' prompt(s)? This edits catalog.db.')) return;
+  var f = document.createElement('form');
+  f.method = 'post'; f.action = '/bulk-replace-prompt';
+  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
+  add('back', location.href); add('find', find); add('replace', repl);
+  sel.forEach(function(mid){ add('media_ids', mid); });
+  document.body.appendChild(f); f.submit();
 }
 function confirmBulkDelete() {
   var ids = [...selGet()];
@@ -1493,6 +1597,10 @@ document.addEventListener('DOMContentLoaded', function() {
     <span class="lbl">Natural Prompt</span>
     <span class="val prompt">{{ row.natural_prompt }}</span>
     {% endif %}
+    {% if row.negative_prompt %}
+    <span class="lbl">Negative Prompt</span>
+    <span class="val prompt">{{ row.negative_prompt }}</span>
+    {% endif %}
     <span class="lbl">Prompt Preview</span>
     <span class="val">{{ row.prompt_preview }}</span>
     <span class="lbl">Model</span>
@@ -1517,6 +1625,10 @@ document.addEventListener('DOMContentLoaded', function() {
     <span class="val">{{ row.sampler or '—' }}</span>
     <span class="lbl">CFG Scale</span>
     <span class="val">{{ row.cfg_scale or '—' }}</span>
+    {% if row.clip_skip %}
+    <span class="lbl">Clip Skip</span>
+    <span class="val">{{ row.clip_skip }}</span>
+    {% endif %}
     <span class="lbl">Dimensions</span>
     <span class="val">{{ row.width }}×{{ row.height }}</span>
     <span class="lbl">Date</span>
@@ -1555,11 +1667,20 @@ document.addEventListener('DOMContentLoaded', function() {
     <a class="btn" href="{{ url_for('index', batch=row.batch) }}"
        title="Show the rest of this batch">View Batch</a>
     {% endif %}
+    <button class="btn" id="edit-prompt-btn" onclick="toggleEdit()">Edit Prompt</button>
     <button class="btn btn-danger"
       onclick="confirmDelete('{{ url_for('delete_one', media_id=row.media_id) }}?back={{ back|urlencode }}',
         'Permanently delete this image? This cannot be undone.')">
       Delete
     </button>
+  </div>
+  <div id="prompt-editor" style="display:none;margin-top:12px;">
+    <textarea id="prompt-text" style="width:100%;min-height:120px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:8px;font-size:13px;font-family:var(--font-mono,monospace);">{{ row.prompt_full or row.prompt_preview or '' }}</textarea>
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+      <button class="btn btn-primary" onclick="savePrompt()">Save</button>
+      <button class="btn" onclick="toggleEdit()">Cancel</button>
+      <span id="save-status" style="color:var(--green);font-size:12px;"></span>
+    </div>
   </div>
 </div>
 <script>
@@ -1570,6 +1691,22 @@ function copyPrompt(btn) {
     btn.textContent = 'Copied!';
     setTimeout(function(){ btn.textContent = old; }, 1200);
   });
+}
+function toggleEdit() {
+  var e = document.getElementById('prompt-editor');
+  e.style.display = e.style.display === 'none' ? 'block' : 'none';
+}
+function savePrompt() {
+  var text = document.getElementById('prompt-text').value;
+  fetch('/edit-prompt/{{ row.media_id }}', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({prompt: text})})
+   .then(function(r){ return r.json(); })
+   .then(function(d){
+     var s = document.getElementById('save-status');
+     s.textContent = d.ok ? 'Saved ✓' : 'Error';
+     var cp = document.getElementById('copy-prompt-btn');
+     if (cp) cp.setAttribute('data-prompt', text);
+   });
 }
 </script>
 """)
@@ -1676,6 +1813,45 @@ function copyPrompt(btn) {
     {% if h.missing %}<div>· {{ '{:,}'.format(h.missing) }} catalog rows reference a file that's missing on disk. Re-run a download to refetch.</div>{% endif %}
   </div>
   {% endif %}
+  {% if h.dup_redundant %}
+  <div style="margin-top:14px;"><a class="back-link" href="{{ url_for('duplicates') }}">Review duplicates →</a></div>
+  {% endif %}
+</div>
+""")
+
+    DUPES_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
+<header>
+  <div class="brand"><span class="mark">P</span><h1>Duplicate Review</h1></div>
+  <a class="back-link" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
+</header>
+<div style="padding:10px 20px 28px;max-width:1100px;">
+  {% if not groups %}
+  <div class="empty"><div class="big">✓</div><div>No duplicate copies found.</div></div>
+  {% else %}
+  <p style="color:var(--subtext);font-size:13px;">
+    {{ groups|length }} media id(s) exist in more than one folder. The
+    <span style="color:var(--green);">keeper</span> is the most-organized copy;
+    <code>--dedup</code> would quarantine the rest. Review below, then run Dedup from the GUI Utilities tab.
+  </p>
+  {% for g in groups %}
+  <div style="display:flex;gap:14px;align-items:flex-start;background:var(--mantle);border-radius:8px;padding:12px;margin-bottom:10px;">
+    <img src="{{ url_for('thumb', media_id=g.media_id) }}" loading="lazy"
+         style="width:90px;height:90px;object-fit:cover;border-radius:6px;background:var(--surface0);flex-shrink:0;">
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:12px;color:var(--subtext);margin-bottom:4px;">media_id {{ g.media_id }}</div>
+      {% for c in g.copies %}
+      <div style="font-size:12px;font-family:var(--font-mono,monospace);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+                  color:{{ 'var(--green)' if c.rel == g.keeper else 'var(--subtext)' }};">
+        {{ 'KEEP  ' if c.rel == g.keeper else 'dupe  ' }}{{ c.rel }}
+        <span style="color:var(--overlay0);">({{ c.bucket }})</span>
+      </div>
+      {% endfor %}
+      <a class="back-link" style="font-size:12px;"
+         href="{{ url_for('detail', media_id=g.media_id) }}">open →</a>
+    </div>
+  </div>
+  {% endfor %}
+  {% endif %}
 </div>
 """)
 
@@ -1703,6 +1879,11 @@ function copyPrompt(btn) {
     def health():
         return render_template_string(
             HEALTH_HTML, h=collection_health(out_dir, db_path))
+
+    @app.route("/duplicates")
+    def duplicates():
+        return render_template_string(
+            DUPES_HTML, groups=duplicate_groups(out_dir))
 
     @app.route("/")
     def index():
@@ -1895,6 +2076,23 @@ function copyPrompt(btn) {
             return json.dumps({"ok": False}), 400, {"Content-Type": "application/json"}
         update_rating(db_path, media_id, value)
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
+
+    @app.route("/edit-prompt/<media_id>", methods=["POST"])
+    def edit_prompt(media_id):
+        data = request.get_json(silent=True) or {}
+        update_prompt_full(db_path, media_id, data.get("prompt", ""))
+        return json.dumps({"ok": True}), 200, {"Content-Type": "application/json"}
+
+    @app.route("/bulk-replace-prompt", methods=["POST"])
+    def bulk_replace():
+        back = request.form.get("back") or url_for("index")
+        ids = request.form.getlist("media_ids")
+        find = request.form.get("find", "")
+        replace = request.form.get("replace", "")
+        n = bulk_replace_prompt(db_path, ids, find, replace)
+        # stash a one-shot result in the query string for a small banner
+        sep = "&" if "?" in back else "?"
+        return redirect("{}{}replaced={}".format(back, sep, n))
 
     # Thumbnails and full images are content-addressed (keyed by media_id /
     # filename) and never change once written, so we can cache them in the browser
