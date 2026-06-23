@@ -145,7 +145,7 @@ Fix: DevTools → Network → filter `graphql` → click `listUserTaskSummaries`
 
 ## Current state
 
-- **Version:** `1.3.1` on `master`
+- **Version:** `1.3.2` on `master`
 - **Branch strategy:** feature branches, merge to master with `--no-ff`, tag releases
 - **Owner:** Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev
 

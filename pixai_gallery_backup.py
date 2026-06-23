@@ -36,7 +36,7 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 import argparse
 import csv
