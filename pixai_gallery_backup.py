@@ -630,6 +630,7 @@ def page_variables(page_size, before=None):
 _FULL_META_FIELDS = (
     "prompt_full", "natural_prompt", "seed", "steps",
     "sampler", "cfg_scale", "model_id", "model_name", "loras",
+    "negative_prompt", "clip_skip",
 )
 
 
@@ -699,9 +700,15 @@ def extract_full_meta(task):
     params = task.get("parameters") or {}
     outputs = task.get("outputs") or {}
     detail = outputs.get("detailParameters") or {}
+    extra = params.get("extra") or {}
+    # negativePrompts may live under a few keys depending on PixAI's flow; many
+    # newer "structured prompt" tasks have none at all.
+    neg = (params.get("negativePrompts") or detail.get("negativePrompts")
+           or extra.get("negativePrompts") or params.get("negativePrompt") or "")
+    clip = detail.get("clipSkip", params.get("clipSkip", ""))
     return {
         "prompt_full":    params.get("prompts", ""),
-        "natural_prompt": (params.get("extra") or {}).get("naturalPrompts", ""),
+        "natural_prompt": extra.get("naturalPrompts", ""),
         "seed":           str(outputs.get("seed") or ""),
         "steps":          str(detail.get("steps") or ""),
         "sampler":        detail.get("sampler", ""),
@@ -709,6 +716,8 @@ def extract_full_meta(task):
         "model_id":       str(params.get("modelId") or ""),
         "model_name":     "",  # filled in by caller after model_name_gql
         "loras":          "",  # filled in by caller via resolve_loras()
+        "negative_prompt": neg,
+        "clip_skip":      str(clip) if clip != "" else "",
     }
 
 
