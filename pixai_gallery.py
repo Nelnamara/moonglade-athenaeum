@@ -677,29 +677,55 @@ def make_thumbnail(img_path, thumb_path):
         return False
 
 
-def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None):
+def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=4):
+    """Generate JPEG thumbnails for rows that have a file. CPU-bound (Pillow),
+    so a thread pool gives a real multi-core speedup (Pillow releases the GIL
+    during decode/encode). workers<=1 runs serially. Each worker writes a distinct
+    thumb file; progress is reported on the calling thread."""
     if Image is None:
         print("Warning: Pillow not installed -- thumbnails will not be generated.")
         return
-    total = len([r for r in rows if r.get("filename")])
+    total = 0
     done = 0
+    work = []
     for row in rows:
         if not row.get("filename"):
             continue
-        mid = row["media_id"]
-        thumb_path = thumb_dir / "{}.jpg".format(mid)
+        total += 1
+        thumb_path = thumb_dir / "{}.jpg".format(row["media_id"])
         if not force and thumb_path.exists():
             done += 1
             continue
-        img_path = find_image_file(out_dir, mid, row.get("filename"))
-        if img_path and make_thumbnail(img_path, thumb_path):
-            done += 1
+        work.append((row["media_id"], thumb_path, row.get("filename")))
+
+    def _one(item):
+        mid, thumb_path, filename = item
+        img_path = find_image_file(out_dir, mid, filename)
+        return bool(img_path and make_thumbnail(img_path, thumb_path))
+
+    def _tick():
         pct = int(done / total * 100) if total else 100
         if progress_cb:
             progress_cb(done, total, pct)
         else:
             print("\r  Thumbnails: {}/{} ({:d}%)  ".format(done, total, pct),
                   end="", flush=True)
+
+    if work and workers and workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for fut in as_completed([ex.submit(_one, it) for it in work]):
+                try:
+                    if fut.result():
+                        done += 1
+                except Exception:
+                    pass
+                _tick()
+    else:
+        for it in work:
+            if _one(it):
+                done += 1
+            _tick()
     if total and not progress_cb:
         print()
 
