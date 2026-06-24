@@ -328,10 +328,14 @@ def _like_pattern(term):
 
 
 def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
-                 published_only=False, art_tag="", lora=""):
+                 published_only=False, art_tag="", lora="", media_type=""):
     """Return (where_clause, params) for the common filter set."""
     clauses = ["filename != ''"]
     params  = []
+    if media_type == "video":
+        clauses.append("is_video = '1'")
+    elif media_type == "image":
+        clauses.append("COALESCE(is_video,'') != '1'")
     if rating_min:
         clauses.append("CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) >= ?")
         params.append(int(rating_min))
@@ -377,10 +381,10 @@ def get_row(db_path, media_id):
 
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
                   sort="newest", page=1, page_size=100, batch="", rating_min=0,
-                  published_only=False, art_tag="", lora=""):
+                  published_only=False, art_tag="", lora="", media_type=""):
     """Return (rows, total) with filtering, sorting and pagination done in SQL."""
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
-                                 published_only, art_tag, lora)
+                                 published_only, art_tag, lora, media_type)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     offset = (max(1, page) - 1) * page_size
     con = _connect(db_path)
@@ -398,10 +402,11 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
 
 
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
-                   batch="", rating_min=0, published_only=False, art_tag="", lora=""):
+                   batch="", rating_min=0, published_only=False, art_tag="", lora="",
+                   media_type=""):
     """Return ordered list of media_ids matching the filter (no row data)."""
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
-                                 published_only, art_tag, lora)
+                                 published_only, art_tag, lora, media_type)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     con = _connect(db_path)
     try:
@@ -1167,6 +1172,14 @@ document.addEventListener('DOMContentLoaded', function() {
   <div>
     <label>LoRA</label><br>
     <input type="text" name="lora" value="{{ lora_filter }}" placeholder="lora name…" style="width:140px">
+  </div>
+  <div>
+    <label>Media</label><br>
+    <select name="media">
+      <option value="" {% if not media_type %}selected{% endif %}>All</option>
+      <option value="image" {% if media_type=='image' %}selected{% endif %}>Images</option>
+      <option value="video" {% if media_type=='video' %}selected{% endif %}>Videos</option>
+    </select>
   </div>
   <div>
     <label>&nbsp;</label><br>
@@ -1941,6 +1954,9 @@ function savePrompt() {
         published_only = request.args.get("published") == "1"
         art_tag = request.args.get("tag", "")
         lora_filter = request.args.get("lora", "")
+        media_type = request.args.get("media", "")
+        if media_type not in ("image", "video"):
+            media_type = ""
 
         models  = unique_models(db_path)
         batches = unique_batches(db_path)
@@ -1949,6 +1965,7 @@ function savePrompt() {
             db_path, q, model_filter, date_from, date_to, sort, page, per_page,
             batch=batch_filter, rating_min=rating_min,
             published_only=published_only, art_tag=art_tag, lora=lora_filter,
+            media_type=media_type,
         )
         total_pages = max(1, (total + per_page - 1) // per_page)
         page = max(1, min(page, total_pages))
@@ -1996,11 +2013,13 @@ function savePrompt() {
             chips.append({"k": "tag", "v": art_tag, "url": _without("tag")})
         if lora_filter:
             chips.append({"k": "lora", "v": lora_filter, "url": _without("lora")})
+        if media_type:
+            chips.append({"k": "media", "v": media_type + "s", "url": _without("media")})
 
         return render_template_string(
             INDEX_HTML,
             chips=chips, published_only=published_only, art_tag=art_tag,
-            lora_filter=lora_filter,
+            lora_filter=lora_filter, media_type=media_type,
             rows=page_rows, total=total, page=page,
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
@@ -2047,7 +2066,7 @@ function savePrompt() {
             date_from=_ym("from", "01"), date_to=_ym("to", "12"),
             sort=_qs1("sort", "newest"), batch=_qs1("batch"), rating_min=_rmin,
             published_only=(_qs1("published") == "1"), art_tag=_qs1("tag"),
-            lora=_qs1("lora"),
+            lora=_qs1("lora"), media_type=_qs1("media"),
         )
         try:
             idx = nav_ids.index(media_id)
