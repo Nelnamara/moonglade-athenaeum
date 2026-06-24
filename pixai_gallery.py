@@ -58,8 +58,8 @@ CATALOG_FIELDS = [
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
-THUMB_SIZE = (256, 256)
-THUMB_QUALITY = 85
+THUMB_SIZE = (512, 512)
+THUMB_QUALITY = 90
 PAGE_SIZE = 100
 
 
