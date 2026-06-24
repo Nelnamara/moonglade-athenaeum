@@ -1093,6 +1093,10 @@ class UtilitiesTab(QWidget):
         self.btn_account = QPushButton("▶  Account Info")
         self.btn_account.setObjectName("btn_run")
         self.btn_account.setToolTip("Show your PixAI quota/credits and membership")
+        self.btn_sync_videos = QPushButton("▶  Sync Videos")
+        self.btn_sync_videos.setObjectName("btn_run")
+        self.btn_sync_videos.setToolTip("Back up your image-to-video generations: find i2v tasks, "
+                                        "download each mp4 into videos/, and catalog them")
 
         backfill_row = QHBoxLayout()
         backfill_row.addWidget(self.btn_backfill)
@@ -1110,6 +1114,7 @@ class UtilitiesTab(QWidget):
         self.chk_with_videos.setToolTip("With Sync Artworks, also download animated-artwork "
                                         "video files into a videos/ folder")
         export_row.addWidget(self.chk_with_videos)
+        export_row.addWidget(self.btn_sync_videos)
         export_row.addWidget(self.btn_fix_models)
         export_row.addWidget(self.btn_account)
         export_row.addStretch()
@@ -1118,6 +1123,7 @@ class UtilitiesTab(QWidget):
         self.btn_backfill_full.clicked.connect(self._run_backfill_full)
         self.btn_export_csv.clicked.connect(self._run_export_csv)
         self.btn_sync_artworks.clicked.connect(self._run_sync_artworks)
+        self.btn_sync_videos.clicked.connect(self._run_sync_videos)
         self.btn_fix_models.clicked.connect(self._run_fix_models)
         self.btn_account.clicked.connect(lambda: self._run(core.run_account_info, self._base_args()))
 
@@ -1281,6 +1287,15 @@ class UtilitiesTab(QWidget):
         args.name_length = 60
         args.name_sep = "_"
         self._run(core.run_sync_artworks, args)
+        args.progress = self._worker.progress.emit
+        self._worker.progress.connect(self._update_progress)
+
+    def _run_sync_videos(self):
+        args = self._base_args()
+        args.page_size = 250          # the listing walk wants a big page size
+        args.name_length = 60
+        args.name_sep = "_"
+        self._run(core.run_sync_videos, args)
         args.progress = self._worker.progress.emit
         self._worker.progress.connect(self._update_progress)
 

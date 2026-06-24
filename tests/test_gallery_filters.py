@@ -236,6 +236,41 @@ def test_duplicate_groups_ignores_gallery_and_quarantine(tmp_path):
     assert duplicate_groups(tmp_path) == []
 
 
+def test_video_row_renders_and_serves(tmp_path):
+    from pixai_gallery import create_app
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="VID", filename="videos/dance_VID.mp4", is_video="1",
+             poster_media_id="POSTER", prompt_preview="night elf dance",
+             prompt_full="night elf dance", video_duration="10"),
+        _row(media_id="POSTER", filename="images/p_POSTER.png", prompt_preview="still"),
+    ])
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "dance_VID.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42FAKEMP4")
+    (tmp_path / "gallery" / "thumbs").mkdir(parents=True)
+    (tmp_path / "gallery" / "thumbs" / "POSTER.jpg").write_bytes(b"\xff\xd8\xff\xe0jpegposter")
+    client = create_app(tmp_path).test_client()
+
+    # grid: shows the play badge and points the thumb at the poster media id
+    idx = client.get("/").data
+    assert b"vbadge" in idx
+    assert b"/thumbs/POSTER.jpg" in idx
+
+    # detail: renders a <video> element pointing at the video-file route
+    d = client.get("/image/VID")
+    assert d.status_code == 200
+    assert b"<video" in d.data
+    assert b"/video-file/VID" in d.data
+
+    # the mp4 is actually served
+    v = client.get("/video-file/VID")
+    assert v.status_code == 200
+    assert v.data == b"\x00\x00\x00\x18ftypmp42FAKEMP4"
+
+    # a non-video media id is rejected by the video route
+    assert client.get("/video-file/POSTER").status_code == 404
+
+
 def test_edit_prompt_and_bulk_replace_routes(tmp_path):
     from pixai_gallery import create_app, load_catalog
     db = tmp_path / "catalog.db"
