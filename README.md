@@ -18,6 +18,7 @@ PixAI's terms grant users copyright of their own generations. This tool is rate-
 - **Persistent catalog** — `catalog.db` (SQLite) is a deduplicated, indexed database keyed by `media_id`; prior-session rows are never lost across interrupted or multi-session downloads; auto-migrates from `catalog.csv` if upgrading
 - **Full generation metadata** — `--full-meta` captures the complete prompt, seed, steps, sampler, CFG scale, human-readable model name, and **LoRAs**; `--backfill-full-meta` fills existing catalog rows retroactively
 - **Published-artwork sync** — `--sync-artworks` pulls your published pieces' titles, tags/contest labels, NSFW flag, and like/comment/aesthetic data into the catalog; `--with-videos` backs up animated-artwork video files too
+- **Image-to-video backup** — `--sync-videos` finds your image-to-video generations (which expose only a thumbnail in the normal listing), resolves the real mp4 for each, downloads them into `videos/`, and catalogs them so they play right in the gallery
 - **Duplicate audit & dedup** — `--audit` scans the whole backup folder for duplicate images (same `media_id` across folders, plus byte-identical copies); `--dedup` quarantines the redundant copies (keeping the most-organized one) and `--verify-dupes` proves the quarantine is safe before you delete it
 - **Local web gallery** — browse, filter, rate, and delete from a browser: wildcard prompt search; searchable model/batch, tag/contest, LoRA, min-rating, and published-only filters; year/month date pickers; aesthetic/likes/resolution sorts; a lightbox (swipe + slideshow); cross-page selection with **Download ZIP**; saved filter presets; privacy blur; mobile/tablet layout and PWA
 - **Edit prompts in the gallery** — fix or annotate a single image's prompt inline on its detail page, or select many and **Find/Replace** a substring across all of them; writes straight to `catalog.db`
@@ -38,7 +39,7 @@ A PySide6 desktop GUI (`pixai_gui.py`) wraps the full workflow in a tabbed windo
 | **Download** | Output folder, page size, **workers**, **update mode**, organize mode, conversion, collect-only, and full-meta; Start / Stop. (Auth comes from `PIXAI_API_KEY` in `config.json`; an optional Token field remains for the legacy browser-token path) |
 | **Organize** | Post-download rename (`--organize`) or full folder sort (`--organize-adv`); dry-run preview |
 | **Convert** | Batch-convert existing `.webp` files to PNG or JPEG in place (parallel) |
-| **Utilities** | Probe, Count, Catalog Stats, Backfill url/width/height, Backfill Full Meta (+ incl. LoRAs), Export CSV, **Sync Artworks** (+ incl. videos), **Fix Model Names**, **Account Info**, **Audit Duplicates / Dedup / Verify Quarantine**; configurable API delay and **Workers** |
+| **Utilities** | Probe, Count, Catalog Stats, Backfill url/width/height, Backfill Full Meta (+ incl. LoRAs), Export CSV, **Sync Artworks** (+ incl. videos), **Sync Videos**, **Fix Model Names**, **Account Info**, **Audit Duplicates / Dedup / Verify Quarantine**; configurable API delay and **Workers** |
 | **Gallery** | Launch / stop the local gallery server; configurable port; LAN mode; **HTTPS** option; auto-builds thumbnails on start (parallel) |
 
 Settings are saved to `pixai_gui_settings.json` next to the script (git-ignored).
@@ -210,6 +211,7 @@ The same three actions are available as buttons in the GUI **Utilities** tab.
 | `--backfill-full-meta` | Fill full prompt/seed/model/LoRAs in catalog via `getTaskById`; also fills url/width/height. Add `--with-loras` to re-fill older rows that predate LoRA tracking |
 | `--export-csv` | Export `catalog.db` to `catalog_export.csv` (interop / spreadsheet backup) |
 | `--sync-artworks` | Fetch published-artwork metadata (title, NSFW, likes, comments, tags) via `listArtworks` and merge onto catalog rows by `media_id`. Add `--with-videos` to also download animated-artwork video files into `videos/` |
+| `--sync-videos` | Back up image-to-video generations: find i2v tasks, resolve each mp4, download into `videos/`, and catalog them (`is_video`) so they play in the gallery |
 | `--fix-model-names` | Re-resolve readable model names for rows whose `model_name` is blank or a raw numeric id (one API call per distinct model) |
 | `--audit` | Read-only duplicate report of the whole backup folder → `audit_report.csv` |
 | `--dedup` | Quarantine redundant duplicate copies to `_duplicates/` (dry-run unless `--apply`); reconciles the catalog |
@@ -322,6 +324,9 @@ pixai_backup/
 | `loras` | LoRAs used, as `Name:weight, …` (`--full-meta` / `--backfill-full-meta --with-loras`) |
 | `negative_prompt` | Negative prompt, if the task had one (`--full-meta` / `--backfill-full-meta`) |
 | `clip_skip` | Clip-skip value (`--full-meta` / `--backfill-full-meta`) |
+| `is_video` | `1` for image-to-video rows whose `filename` is an mp4 (`--sync-videos`) |
+| `poster_media_id` | The still-frame media id used as the video's gallery poster (`--sync-videos`) |
+| `video_duration` | Requested video length in seconds (`--sync-videos`) |
 
 ---
 
@@ -367,6 +372,10 @@ python pixai_gallery_backup.py --backfill-full-meta
 ---
 
 ## Changelog
+
+### Unreleased
+
+- **Image-to-video backup (`--sync-videos`)** — PixAI image-to-video tasks expose only a *thumbnail still* in the normal generation listing; the real video is a separate media id buried in `getTaskById → outputs.videos[]`, with its mp4 URL on the GraphQL media object's `fileUrl` (the REST `/v1/media` endpoint returns an empty `urls[]` for videos). So the backup tool had been silently saving the still frame of every video and never the mp4. `--sync-videos` (GUI: Utilities → **Sync Videos**) finds i2v tasks via the `i2vProModel` flag, resolves each mp4, downloads them into `videos/`, and catalogs them (`is_video`, `poster_media_id`, `video_duration`). The gallery shows a ▶ badge on the grid and plays the mp4 inline on the detail page (with the still as poster); a new `/video-file/<media_id>` route serves the file with HTTP range support for seeking.
 
 ### v1.3.2 — fuller reproduction metadata, duplicate-review browser, prompt editing
 

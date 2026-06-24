@@ -660,6 +660,47 @@ def task_detail_gql(session, task_id):
         return None
 
 
+def media_file_gql(session, media_id):
+    """Resolve a VIDEO media's actual file URL. The REST /v1/media endpoint
+    returns an empty urls[] for videos; the GraphQL `media` object carries the
+    real mp4 in `fileUrl`. Uses an ad-hoc (non-persisted) query, which the API
+    key authenticates as Bearer. Returns {'fileUrl','type','duration'} or {}."""
+    query = ("query($id:String!){ media(id:$id){ id type duration fileUrl "
+             "hlsUrl size } }")
+    try:
+        r = session.post(API_URL, json={"query": query, "variables": {"id": str(media_id)}},
+                         timeout=60)
+        if r.status_code != 200:
+            return {}
+        return (r.json().get("data") or {}).get("media") or {}
+    except (requests.RequestException, ValueError):
+        return {}
+
+
+def video_outputs(task):
+    """Extract image-to-video outputs from a getTaskById result. Returns a list of
+    {video_media_id, poster_media_id, seed} plus the shared prompt/duration."""
+    if not task:
+        return [], {}
+    params = task.get("parameters") or {}
+    rv = params.get("referenceVideo") or {}
+    shared = {
+        "prompt": rv.get("prompt", ""),
+        "duration": rv.get("duration", ""),
+        "i2v_model": rv.get("model", ""),
+    }
+    outs = []
+    for v in ((task.get("outputs") or {}).get("videos") or []):
+        vmid = v.get("mediaId")
+        if vmid:
+            outs.append({
+                "video_media_id": str(vmid),
+                "poster_media_id": str(v.get("thumbnailMediaId") or ""),
+                "seed": str(v.get("seed") or ""),
+            })
+    return outs, shared
+
+
 def model_name_gql(session, model_version_id, _cache={}):
     """GET getGenerationModelByVersionId; result cached by ID (few unique models)."""
     if not model_version_id:
@@ -1675,6 +1716,111 @@ def run_sync_artworks(args):
     return {"artworks": artworks, "matched": matched, "videos": vids_ok}
 
 
+def run_sync_videos(args):
+    """Back up image-to-video generations. The task listing exposes only a video's
+    THUMBNAIL media id; the real video media id lives in getTaskById ->
+    outputs.videos[].mediaId, and its mp4 URL in the GraphQL media object's
+    fileUrl. So: find i2v tasks (i2vProModel set in the summary), fetch each task,
+    resolve + download the mp4 into videos/, and catalog it as a video row
+    (is_video=1) with the still frame as its poster."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    session = _make_session(getattr(args, "token", None))
+    vdir = out / "videos"
+    workers = max(1, getattr(args, "workers", 1) or 1)
+    name_length = getattr(args, "name_length", 60)
+    name_sep = getattr(args, "name_sep", "_")
+    _prog = getattr(args, "progress", None)
+
+    # 1. Page the whole feed; collect the cheap i2v task summaries.
+    print("Scanning generation history for image-to-video tasks...")
+    i2v_nodes, before, scanned = [], None, 0
+    while True:
+        conn = find_connection(gql(session, page_variables(
+            getattr(args, "page_size", 250) or 250, before)))
+        if not conn:
+            break
+        edges = conn.get("edges") or []
+        if not edges:
+            break
+        for e in edges:
+            n = e.get("node") or {}
+            scanned += 1
+            if n.get("i2vProModel"):
+                i2v_nodes.append(n)
+        pi = conn.get("pageInfo") or {}
+        if not pi.get("hasPreviousPage"):
+            break
+        before = pi.get("startCursor")
+    print("Found {} image-to-video task(s) across {} generations.".format(
+        len(i2v_nodes), scanned))
+    if not i2v_nodes:
+        return {"i2v_tasks": 0, "videos": 0}
+    vdir.mkdir(parents=True, exist_ok=True)
+
+    # 2. Per task: getTaskById -> video outputs -> fileUrl -> download mp4.
+    def _do_task(node):
+        task = task_detail_gql(session, node["id"])
+        outs, shared = video_outputs(task)
+        detail = ((task or {}).get("outputs") or {}).get("detailParameters") or {}
+        params = (task or {}).get("parameters") or {}
+        rows = []
+        for o in outs:
+            vmid = o["video_media_id"]
+            hit = [p for p in vdir.glob("*_{}.*".format(vmid))
+                   if not p.name.endswith(".part") and p.stat().st_size > 0]
+            if hit:
+                path, status = hit[0], "skip"
+            else:
+                fm = media_file_gql(session, vmid)
+                url = fm.get("fileUrl")
+                if not url:
+                    rows.append("missing")
+                    continue
+                stem = vdir / build_stem_name(
+                    shared.get("prompt") or node.get("promptsPreview", ""),
+                    node["id"], vmid, name_length, name_sep)
+                status, path = download(session, url, stem)
+            if status in ("ok", "skip") and path:
+                full = {f: "" for f in CATALOG_FIELDS}
+                full.update({
+                    "task_id": str(node["id"]),
+                    "media_id": vmid,
+                    "filename": str(path.relative_to(out)).replace("\\", "/"),
+                    "prompt_full": shared.get("prompt", ""),
+                    "prompt_preview": (node.get("promptsPreview") or "")[:100],
+                    "seed": str(o.get("seed") or ""),
+                    "created_at": node.get("createdAt", ""),
+                    "width": str(detail.get("width") or ""),
+                    "height": str(detail.get("height") or ""),
+                    "model_id": str(params.get("modelId") or ""),
+                    "status": "completed",
+                    "is_video": "1",
+                    "poster_media_id": o.get("poster_media_id", ""),
+                    "video_duration": str(shared.get("duration") or ""),
+                })
+                rows.append(full)
+            else:
+                rows.append(status)
+        return rows
+
+    print("Resolving + downloading videos -> videos/ {}...".format(
+        "({} workers) ".format(workers) if workers > 1 else ""))
+    new_rows, ok, missing = [], 0, 0
+    for node, result in _parallel_map(i2v_nodes, _do_task, workers, _prog,
+                                      delay=getattr(args, "delay", 0.4)):
+        for item in (result or []):
+            if isinstance(item, dict):
+                new_rows.append(item); ok += 1
+            elif item == "missing":
+                missing += 1
+    if new_rows:
+        save_catalog(db_path, new_rows)
+    print("Videos saved/present: {}{}.".format(
+        ok, " | {} had no resolvable file url".format(missing) if missing else ""))
+    return {"i2v_tasks": len(i2v_nodes), "videos": ok}
+
+
 def _needs_model_fix(row):
     """Return the model version-id to resolve if this row's model_name is missing
     or still a raw numeric id; else ''. Handles the case where model_name was
@@ -2582,6 +2728,9 @@ def main():
     ap.add_argument("--with-videos", action="store_true",
                     help="with --sync-artworks, also download animated-artwork video files "
                          "(videoMediaId) into a videos/ folder")
+    ap.add_argument("--sync-videos", action="store_true",
+                    help="back up your image-to-video generations: find i2v tasks, download "
+                         "each mp4 into videos/, and catalog them (is_video), then exit")
     ap.add_argument("--fix-model-names", action="store_true",
                     help="re-resolve readable model names for catalog rows whose model_name "
                          "is blank or a raw numeric id (one API call per distinct model), then exit")
@@ -2633,6 +2782,9 @@ def main():
             return
         if args.sync_artworks:
             run_sync_artworks(args)
+            return
+        if args.sync_videos:
+            run_sync_videos(args)
             return
         if args.fix_model_names:
             run_fix_models(args)

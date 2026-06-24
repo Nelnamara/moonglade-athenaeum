@@ -52,6 +52,9 @@ CATALOG_FIELDS = [
     "loras",
     # Extra reproduction params from getTaskById (full-meta)
     "negative_prompt", "clip_skip",
+    # Image-to-video tasks (--sync-videos): is_video='1', poster_media_id is the
+    # still-frame media id (its image is the gallery poster), duration in seconds.
+    "is_video", "poster_media_id", "video_duration",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -91,7 +94,10 @@ CREATE TABLE IF NOT EXISTS catalog (
     art_tags        TEXT DEFAULT '',
     loras           TEXT DEFAULT '',
     negative_prompt TEXT DEFAULT '',
-    clip_skip       TEXT DEFAULT ''
+    clip_skip       TEXT DEFAULT '',
+    is_video        TEXT DEFAULT '',
+    poster_media_id TEXT DEFAULT '',
+    video_duration  TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -142,6 +148,9 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN loras TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN negative_prompt TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN clip_skip TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN is_video TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN poster_media_id TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN video_duration TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -770,8 +779,8 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     done = 0
     work = []
     for row in rows:
-        if not row.get("filename"):
-            continue
+        if not row.get("filename") or row.get("is_video") == "1":
+            continue  # videos have no still of their own; poster_media_id covers it
         total += 1
         thumb_path = thumb_dir / "{}.jpg".format(row["media_id"])
         if not force and thumb_path.exists():
@@ -961,6 +970,7 @@ def create_app(out_dir: Path):
   .card .cb-wrap input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--lavender); cursor: pointer; }
   .card a.cover { position: absolute; inset: 0; z-index: 1; }
   .card .cb-wrap { z-index: 2; }
+  .card .vbadge { position: absolute; top: 6px; right: 6px; z-index: 2; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 20px; pointer-events: none; }
 
   /* Pagination */
   .pagination { display: flex; justify-content: center; gap: 6px; padding: 20px; flex-wrap: wrap; }
@@ -1247,12 +1257,13 @@ document.addEventListener('DOMContentLoaded', function() {
       <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"
          data-idx="{{ loop.index0 }}" onclick="return openLightbox(event, {{ loop.index0 }})"></a>
       {% if row._has_thumb %}
-      <img src="{{ url_for('thumb', media_id=row.media_id) }}" loading="lazy"
+      <img src="{{ url_for('thumb', media_id=row._thumb_mid) }}" loading="lazy"
            decoding="async" onload="this.classList.add('loaded')"
            alt="{{ row.prompt_preview[:60] }}">
       {% else %}
       <div class="no-thumb">no preview</div>
       {% endif %}
+      {% if row.is_video == '1' %}<div class="vbadge" title="Video">▶</div>{% endif %}
       <div class="meta">
         {% if row.title %}<div class="title" title="{{ row.title }}">{{ row.title }}</div>{% endif %}
         <div class="model">{{ row.model_name or row.model_id or '—' }}</div>
@@ -1579,7 +1590,14 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
 
   <div class="detail-img">
-    {% if img_url %}
+    {% if row.is_video == '1' %}
+    <video controls autoplay loop playsinline preload="metadata"
+           style="max-width:100%;border-radius:8px;background:#000"
+           {% if poster_url %}poster="{{ poster_url }}"{% endif %}>
+      <source src="{{ url_for('video_file', media_id=row.media_id) }}" type="video/mp4">
+      Your browser can't play this video. <a href="{{ url_for('video_file', media_id=row.media_id) }}">Download it</a>.
+    </video>
+    {% elif img_url %}
     <a href="{{ img_url }}" target="_blank" title="Click to open full resolution">
       <img src="{{ img_url }}" alt="{{ row.prompt_preview }}">
     </a>
@@ -1932,7 +1950,11 @@ function savePrompt() {
         page = max(1, min(page, total_pages))
 
         for r in page_rows:
-            r["_has_thumb"] = (thumb_dir / "{}.jpg".format(r["media_id"])).exists()
+            # Videos have no thumbnail of their own; use the still-frame poster.
+            tmid = (r.get("poster_media_id") or r["media_id"]) if r.get("is_video") == "1" \
+                else r["media_id"]
+            r["_thumb_mid"] = tmid
+            r["_has_thumb"] = (thumb_dir / "{}.jpg".format(tmid)).exists()
 
         def page_url(p):
             args = dict(request.args)
@@ -2027,9 +2049,14 @@ function savePrompt() {
         prev_id = nav_ids[idx - 1] if idx > 0 else None
         next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
 
+        poster_url = None
+        if row.get("is_video") == "1" and row.get("poster_media_id"):
+            if (thumb_dir / "{}.jpg".format(row["poster_media_id"])).exists():
+                poster_url = url_for("thumb", media_id=row["poster_media_id"])
+
         return render_template_string(
             DETAIL_HTML, row=row, img_url=img_url, back=back,
-            prev_id=prev_id, next_id=next_id,
+            prev_id=prev_id, next_id=next_id, poster_url=poster_url,
         )
 
     @app.route("/delete/<media_id>", methods=["POST"])
@@ -2110,6 +2137,16 @@ function savePrompt() {
     @app.route("/img/<path:rel>")
     def serve_image(rel):
         resp = send_from_directory(str(out_dir), rel, max_age=31536000)
+        resp.headers["Cache-Control"] = _IMMUTABLE
+        return resp
+
+    @app.route("/video-file/<media_id>")
+    def video_file(media_id):
+        row = get_row(db_path, media_id)
+        if not row or row.get("is_video") != "1" or not row.get("filename"):
+            return "Video not found.", 404
+        # send_from_directory supports HTTP Range, so the <video> can seek
+        resp = send_from_directory(str(out_dir), row["filename"], max_age=31536000)
         resp.headers["Cache-Control"] = _IMMUTABLE
         return resp
 

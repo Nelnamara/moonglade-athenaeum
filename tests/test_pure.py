@@ -261,6 +261,29 @@ def test_extract_full_meta_no_negative_is_blank():
     assert m["clip_skip"] == ""
 
 
+# ---------------------------------------------------------------------------
+# video_outputs (image-to-video task parsing)
+# ---------------------------------------------------------------------------
+
+def test_video_outputs_extracts_video_and_poster():
+    task = {
+        "parameters": {"modelId": "M",
+                       "referenceVideo": {"prompt": "night elf dance",
+                                          "duration": 10, "model": "v4.0.1"}},
+        "outputs": {"mediaId": "THUMB", "detailParameters": {"width": 1248, "height": 716},
+                    "videos": [{"seed": 42, "mediaId": "VID1", "thumbnailMediaId": "THUMB"}]},
+    }
+    outs, shared = core.video_outputs(task)
+    assert outs == [{"video_media_id": "VID1", "poster_media_id": "THUMB", "seed": "42"}]
+    assert shared["prompt"] == "night elf dance"
+    assert shared["duration"] == 10
+
+
+def test_video_outputs_none_and_empty():
+    assert core.video_outputs(None) == ([], {})
+    assert core.video_outputs({"outputs": {}, "parameters": {}}) == ([], {"prompt": "", "duration": "", "i2v_model": ""})
+
+
 def test_extract_full_meta_partial():
     task = {"parameters": {"prompts": "cat"}, "outputs": {}}
     m = core.extract_full_meta(task)
