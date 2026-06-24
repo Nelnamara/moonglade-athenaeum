@@ -373,6 +373,11 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ## Changelog
 
+### v1.4.1 — video gallery fixes
+
+- **Video posters generated during sync** — `--sync-videos` now downloads each video's still frame and builds its gallery thumbnail (keyed by the video's media id), so previews work even when the still wasn't separately backed up. Re-run Sync Videos once to backfill posters for videos synced under v1.4.0 (it skips the already-downloaded mp4s).
+- **Clicking a video plays it** — video cards now open the detail page (which plays the mp4) instead of the image lightbox, which showed an empty pane. The grid shows the poster (or a placeholder) with the ▶ badge.
+
 ### v1.4.0 — image-to-video backup
 
 - **Image-to-video backup (`--sync-videos`)** — PixAI image-to-video tasks expose only a *thumbnail still* in the normal generation listing; the real video is a separate media id buried in `getTaskById → outputs.videos[]`, with its mp4 URL on the GraphQL media object's `fileUrl` (the REST `/v1/media` endpoint returns an empty `urls[]` for videos). So the backup tool had been silently saving the still frame of every video and never the mp4. `--sync-videos` (GUI: Utilities → **Sync Videos**) finds i2v tasks via the `i2vProModel` flag, resolves each mp4, downloads them into `videos/`, and catalogs them (`is_video`, `poster_media_id`, `video_duration`). The gallery shows a ▶ badge on the grid and plays the mp4 inline on the detail page (with the still as poster); a new `/video-file/<media_id>` route serves the file with HTTP range support for seeking.

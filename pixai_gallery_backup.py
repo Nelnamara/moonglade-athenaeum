@@ -36,7 +36,7 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 import argparse
 import csv
@@ -1758,6 +1758,28 @@ def run_sync_videos(args):
         return {"i2v_tasks": 0, "videos": 0}
     vdir.mkdir(parents=True, exist_ok=True)
 
+    # Generate a gallery poster thumbnail for a video (keyed by the VIDEO media
+    # id) from its still frame, so previews work without a separate image backup.
+    from pixai_gallery import make_thumbnail
+    thumb_dir = out / "gallery" / "thumbs"
+    poster_tmp = out / "gallery" / "_postertmp"
+
+    def _ensure_video_thumb(video_media_id, poster_media_id):
+        thumb_path = thumb_dir / "{}.jpg".format(video_media_id)
+        if thumb_path.exists() or not poster_media_id:
+            return
+        url, _info = resolve_media(session, poster_media_id)
+        if not url:
+            return
+        poster_tmp.mkdir(parents=True, exist_ok=True)
+        status, path = download(session, url, poster_tmp / str(poster_media_id))
+        if status in ("ok", "skip") and path:
+            make_thumbnail(path, thumb_path)
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
     # 2. Per task: getTaskById -> video outputs -> fileUrl -> download mp4.
     def _do_task(node):
         task = task_detail_gql(session, node["id"])
@@ -1799,6 +1821,7 @@ def run_sync_videos(args):
                     "poster_media_id": o.get("poster_media_id", ""),
                     "video_duration": str(shared.get("duration") or ""),
                 })
+                _ensure_video_thumb(vmid, o.get("poster_media_id"))
                 rows.append(full)
             else:
                 rows.append(status)

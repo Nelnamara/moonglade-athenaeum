@@ -1254,8 +1254,12 @@ document.addEventListener('DOMContentLoaded', function() {
         <input type="checkbox" name="media_ids" value="{{ row.media_id }}"
                onchange="onCheck()" onclick="event.stopPropagation()">
       </div>
+      {% if row.is_video == '1' %}
+      <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"></a>
+      {% else %}
       <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"
          data-idx="{{ loop.index0 }}" onclick="return openLightbox(event, {{ loop.index0 }})"></a>
+      {% endif %}
       {% if row._has_thumb %}
       <img src="{{ url_for('thumb', media_id=row._thumb_mid) }}" loading="lazy"
            decoding="async" onload="this.classList.add('loaded')"
@@ -1950,9 +1954,12 @@ function savePrompt() {
         page = max(1, min(page, total_pages))
 
         for r in page_rows:
-            # Videos have no thumbnail of their own; use the still-frame poster.
-            tmid = (r.get("poster_media_id") or r["media_id"]) if r.get("is_video") == "1" \
-                else r["media_id"]
+            mid = r["media_id"]
+            tmid = mid
+            if r.get("is_video") == "1" and not (thumb_dir / "{}.jpg".format(mid)).exists():
+                # fall back to the still-frame poster's thumb if the video's own
+                # poster thumb wasn't generated (older sync runs)
+                tmid = r.get("poster_media_id") or mid
             r["_thumb_mid"] = tmid
             r["_has_thumb"] = (thumb_dir / "{}.jpg".format(tmid)).exists()
 
@@ -2050,9 +2057,11 @@ function savePrompt() {
         next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
 
         poster_url = None
-        if row.get("is_video") == "1" and row.get("poster_media_id"):
-            if (thumb_dir / "{}.jpg".format(row["poster_media_id"])).exists():
-                poster_url = url_for("thumb", media_id=row["poster_media_id"])
+        if row.get("is_video") == "1":
+            for pmid in (media_id, row.get("poster_media_id")):
+                if pmid and (thumb_dir / "{}.jpg".format(pmid)).exists():
+                    poster_url = url_for("thumb", media_id=pmid)
+                    break
 
         return render_template_string(
             DETAIL_HTML, row=row, img_url=img_url, back=back,
