@@ -373,6 +373,10 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ## Changelog
 
+### v1.4.4 — media-type filter
+
+- **Media filter (All / Images / Videos)** — a new filter-bar dropdown to show only videos or only images. Threaded through search, sort, pagination, prev/next navigation, active-filter chips, and saved views.
+
 ### v1.4.2 — sharper thumbnails
 
 - **Higher-resolution thumbnails** — gallery thumbnails bumped to 768px at quality 90 (up from 256px/85), so they stay crisp on retina/tablet/high-DPI screens where cards render larger. Rebuild existing thumbnails to apply: gallery `--rebuild-thumbs`, or the GUI Gallery tab's "Rebuild thumbnails on launch" checkbox.

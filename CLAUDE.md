@@ -139,13 +139,13 @@ Fix: DevTools → Network → filter `graphql` → click `listUserTaskSummaries`
 
 ## Test suite
 
-145 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
+146 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
 
 ---
 
 ## Current state
 
-- **Version:** `1.4.3` on `master`
+- **Version:** `1.4.4` on `master`
 - **Branch strategy:** feature branches, merge to master with `--no-ff`, tag releases
 - **Owner:** Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev
 

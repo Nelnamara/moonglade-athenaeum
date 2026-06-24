@@ -163,6 +163,18 @@ def test_published_and_tag_filters(tmp_path):
     assert query_catalog(db, published_only=True, art_tag="city")[1] == 1
 
 
+def test_media_type_filter(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="i1", filename="a.png"),
+        _row(media_id="i2", filename="b.png"),
+        _row(media_id="v1", filename="videos/x_v1.mp4", is_video="1"),
+    ])
+    assert query_catalog(db, media_type="video")[1] == 1
+    assert query_catalog(db, media_type="image")[1] == 2
+    assert query_catalog(db, media_type="")[1] == 3  # all
+
+
 def test_lora_filter(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [
