@@ -373,7 +373,7 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ## Changelog
 
-### Unreleased
+### v1.4.0 — image-to-video backup
 
 - **Image-to-video backup (`--sync-videos`)** — PixAI image-to-video tasks expose only a *thumbnail still* in the normal generation listing; the real video is a separate media id buried in `getTaskById → outputs.videos[]`, with its mp4 URL on the GraphQL media object's `fileUrl` (the REST `/v1/media` endpoint returns an empty `urls[]` for videos). So the backup tool had been silently saving the still frame of every video and never the mp4. `--sync-videos` (GUI: Utilities → **Sync Videos**) finds i2v tasks via the `i2vProModel` flag, resolves each mp4, downloads them into `videos/`, and catalogs them (`is_video`, `poster_media_id`, `video_duration`). The gallery shows a ▶ badge on the grid and plays the mp4 inline on the detail page (with the still as poster); a new `/video-file/<media_id>` route serves the file with HTTP range support for seeking.
 
