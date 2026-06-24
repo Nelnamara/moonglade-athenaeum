@@ -375,7 +375,7 @@ python pixai_gallery_backup.py --backfill-full-meta
 
 ### v1.4.2 — sharper thumbnails
 
-- **Higher-resolution thumbnails** — gallery thumbnails are now 512px at quality 90 (up from 256px/85), so they stay crisp on retina/tablet/high-DPI screens where cards render larger. Rebuild existing thumbnails to apply: gallery `--rebuild-thumbs`, or the GUI Gallery tab's "Rebuild thumbnails on launch" checkbox.
+- **Higher-resolution thumbnails** — gallery thumbnails bumped to 768px at quality 90 (up from 256px/85), so they stay crisp on retina/tablet/high-DPI screens where cards render larger. Rebuild existing thumbnails to apply: gallery `--rebuild-thumbs`, or the GUI Gallery tab's "Rebuild thumbnails on launch" checkbox.
 
 ### v1.4.1 — video gallery fixes
 
