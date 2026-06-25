@@ -4,6 +4,48 @@ Reverse-engineered from the site bundle `graphql-C43wChcJ.js` (full operation
 documents) + `task-B1n13Pzx.js` (task hooks), 2026-06-25. This is the map for
 turning the backup tool into a full PixAI client.
 
+---
+
+## Build status (done / to-do)
+
+Status legend: ✅ shipped · 🔵 in progress (home machine) · ⬜ to-do (callable ad-hoc; not wired yet)
+
+### ✅ Done — wired into the tool
+| Capability | Operation(s) | Where |
+|---|---|---|
+| Back up generation history | `listUserTaskSummaries` (GET, persisted) | `run_download` / `--update` |
+| Full prompt/seed/model meta | `getTaskById`, `getGenerationModelByVersionId` | `--full-meta`, `--backfill-full-meta` |
+| Full-res / video URLs | REST `/v1/media`, ad-hoc `media` | `resolve_media`, `media_file_gql` |
+| Published-artwork sync | `listArtworks` | `--sync-artworks` |
+| Image-to-video backup | `getTaskById` + `media` | `--sync-videos` |
+| **Delete a cloud task** | **`deleteGenerationTask`** (POST, persisted) | **`--delete-task` (new, this branch)** |
+| Verbose diagnostics | — (not an API op) | `-v/--verbose` (new, this branch) |
+
+### 🔵 In progress (separate effort)
+| Capability | Operation(s) | Note |
+|---|---|---|
+| **Generation** | `createGenerationTask` + poll `getTaskById` | working test exists on the **home machine** — converge, don't duplicate |
+
+### ⬜ To-do — prioritized (all callable ad-hoc, no hash capture needed)
+| # | Capability | Operation(s) | Why this order |
+|---|---|---|---|
+| 1 | **`gql_adhoc()` helper** | — | unlocks every row below; one generic POST wrapper |
+| 2 | **`--account`** (read-only) | `getMyQuota`, `getMyMembership` | cheap + safe; proves the ad-hoc path end-to-end |
+| 3 | **`--cancel-task` / `--rerun-task`** | `cancelGenerationTask`, `rerunGenerationTask` | handlers already mapped; mirrors `--delete-task` guards |
+| 4 | Per-image delete | `deleteBatchMedia` (via task `input`) | delete one image from a batch |
+| 5 | **`--generate`** | `createGenerationTask` (+ poll) | the headline; fold in the home-machine payload |
+| 6 | Model picker | `listGenerationModels` | choose a model/LoRA for generation |
+| 7 | Reference upload | `uploadMedia` | enables img2img inputs |
+| 8 | Inbox (optional) | `listNotifications`, `markNotificationRead` | the captured `7b42…` hash; or ad-hoc |
+| 9 | Real-time (optional) | `subscribePersonalEvents`, `…GeneratorPreviewEvents` | WebSocket; live preview / watch daemon |
+
+### ⏸️ Parked (decisions pending, not API work)
+- **Logging** design (file-log vs `logging` migration) — awaiting your input.
+- **Local↔cloud delete drift** — `--delete-task` leaves `catalog.db`/files; no reconciliation yet.
+- **Test isolation** — 4 token tests fail when `config.json` has a `PIXAI_API_KEY`.
+
+---
+
 ## How to call these
 
 **Key fact:** the client bundle contains the *full* GraphQL query/mutation
@@ -19,7 +61,7 @@ GET is just an optimization the site uses; ad-hoc POST works for our API key.)
 - Mutations must be POST. Reuse the existing `_make_session()` + a generic
   `gql_adhoc(session, operationName, query, variables)` helper (to build).
 
-Status legend: ✅ in use · 🟡 have hash, not wired · 🔵 home-machine work · ⬜ not yet built
+Status legend (per-row): ✅ shipped · 🔵 in progress (home) · ⬜ to-do (callable ad-hoc) — see the Build status dashboard above for the prioritized roadmap.
 
 ---
 
