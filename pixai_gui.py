@@ -399,9 +399,23 @@ class SettingsBar(QGroupBox):
         out_row.addWidget(lbl_out)
         out_row.addWidget(self.out_folder)
 
+        # App-wide verbose toggle: flips the shared core flag so every operation
+        # (download, count, sync, dedup, ...) emits timestamped diagnostics into
+        # the log pane. Persisted across sessions via settings.
+        self.verbose_chk = QCheckBox(
+            "Verbose logging — timestamped per-page / per-image timing in the log")
+        self.verbose_chk.setChecked(bool(settings.get("verbose", False)))
+        self.verbose_chk.toggled.connect(core.set_verbose)
+        core.set_verbose(self.verbose_chk.isChecked())
+
         lay = QVBoxLayout(self)
         lay.addLayout(tok_row)
         lay.addLayout(out_row)
+        lay.addWidget(self.verbose_chk)
+
+    @property
+    def verbose(self):
+        return self.verbose_chk.isChecked()
 
     def _load_token_file(self):
         # If token.txt exists next to the script, load it directly
@@ -1608,6 +1622,7 @@ class MainWindow(QMainWindow):
             "token":    self._sbar.token or "",
             "out":      self._sbar.out,
             "last_tab": self._tabs.currentIndex(),
+            "verbose":  self._sbar.verbose,
         }
         s.update(self._dl_tab.collect_settings())
         s.update(self._org_tab.collect_settings())
