@@ -14,6 +14,9 @@
   "TASK_DETAIL_HASH": "YOUR_TASK_DETAIL_HASH",
   "MODEL_DETAIL_HASH": "",
 
+  "_comment_delete": "Optional - only for --delete-task (irreversible deletion). deleteGenerationTask's sha256Hash from DevTools (Network -> graphql -> a delete request -> Payload -> extensions.persistedQuery.sha256Hash). No default on purpose: deletion cannot run unless you set this yourself.",
+  "DELETE_TASK_HASH": "YOUR_DELETE_TASK_HASH",
+
   "_comment_legacy": "Legacy fallback ONLY if you are not using PIXAI_API_KEY. U3T is the 'u3t' field on the same Payload tab; the short-lived Bearer token then goes in token.txt / PIXAI_TOKEN / --token and must be re-captured every few hours. Leave U3T blank when using an API key.",
   "U3T": ""
 }

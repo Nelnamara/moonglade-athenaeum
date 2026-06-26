@@ -57,6 +57,9 @@ Built by reverse-engineering site network traffic. There is no official PixAI AP
 | `audit_collection()` | Filesystem-truth duplicate audit: Class A (same media_id in >1 folder) + Class B (byte-identical, different id via size-bucketed hashing) |
 | `cmd_audit()` / `cmd_dedup()` | Read-only report / quarantine-or-delete redundant copies, keep most-organized, reconcile catalog |
 | `reconcile_catalog_with_disk()` | Repoint each catalog row's filename/batch at the surviving on-disk file |
+| `delete_task_gql()` | Replay the `deleteGenerationTask` persisted **mutation** (POST, not the GET listing path). VOID mutation: returns `null` on success, raises on error. Single-attempt — no retry, so a flaky network can't double-fire a delete |
+| `run_delete_tasks()` | Guarded `--delete-task` driver: dry-run by default, `--apply` + typed `delete` confirm (or `--yes`), counts deleted/failed. Leaves local files + `catalog.db` untouched |
+| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout (the GUI log pane captures it). No-op until enabled |
 
 ### Key helpers in `pixai_gallery.py`
 
@@ -129,6 +132,47 @@ Built by reverse-engineering site network traffic. There is no official PixAI AP
 
 ---
 
+## Deleting tasks from your account (`--delete-task`)
+
+- `deleteGenerationTask` is a persisted **mutation** sent by POST (Apollo blocks mutations over GET), unlike the GET listing/query path. It is a **void mutation: it returns `null` on success** — the meaningful signal is the ABSENCE of a GraphQL error, NOT the payload. (Verified against a real task via the site, which shows a "Task has been deleted" toast off that same null/no-error response. `getTaskById` is NOT a valid post-delete existence check — it still resolves deleted tasks.)
+- Hash lives in `config.json` as `DELETE_TASK_HASH` with **no built-in default** — capturing it is a deliberate manual step so deletion can't fire without explicit setup.
+- Guards: dry-run by default; `--apply` to perform; typed `delete` confirmation unless `--yes` (refused on non-interactive stdin). Single-attempt per task.
+- Deletes ONLY the cloud generation; local image files + `catalog.db` are left intact.
+
+### Frontend handler (reverse-engineered from the site bundle, 2026-06-25)
+
+Located via DevTools → Network → the `deleteGenerationTask` request → **Initiator** tab → "Request call stack". Ignoring the `vendor-apollo` / `react-aria` frames, the app-code frames point to async function **`G`** in the bundle chunk **`ChatWorkspaceCreatorButton-B3KFiFFE.js`** (a misleadingly named chunk that bundles the task-action buttons together with chat-workspace components). Click chain: React click → react-aria `onClick`→`onPress` → `Button` → `G` → a GraphQL util wrapper (`utils-Dbi0XznS.js`) → Apollo `mutate`.
+
+`G(task, opts)` does, in order:
+1. `O()` resolves the task object (`getTask` if given an id string).
+2. Shows a confirm modal (`M.confirm`, i18n keys `artwork:delete-task.confirm-dialog.*`) **unless `opts.skipConfirm`** is set — the site's own equivalent of our `--yes`. A red "a favorite will be deleted" warning is shown if the task is favorited.
+3. Calls **`ke({ taskId })`** — this IS `deleteGenerationTask` (imported `o as ke` from `task-B1n13Pzx.js`).
+4. On no-throw: `p.success("artwork:delete-task.notice.success")` → the **"Task has been deleted"** toast. On throw: `p.error("artwork:delete-task.notice.fail (…)")`.
+
+Why this matters for our tool:
+- **Success = the awaited mutation didn't throw; the null return value is ignored.** The official client shows the success toast regardless of payload — *identical* to `delete_task_gql` (raise on error, else success). This is the authoritative confirmation that null == success, and it retroactively validates the fix.
+- The toast is **purely client-side** (`p` = a react-hot-toast-style lib with `.success/.error/.info`; text via i18next keys). There is **no network notification** for it; `listNotifications` is unrelated (that's the bell-icon / `NEWS` feed).
+
+### Sibling task mutations (same chunk; all imported from `task-B1n13Pzx.js`) — NOT yet implemented
+
+Candidates for future tool commands. Capture each persisted hash the same way as `DELETE_TASK_HASH`:
+
+| Action | Frontend call | Notes |
+|---|---|---|
+| Delete ONE image from a batch | `deleteBatchMedia` — `fe({ id: taskId, input: { deleteBatchMedia: { mediaId } } })` (handler `ve()`) | removes a single media, not the whole task |
+| Cancel a running generation | `he({ taskId })` (handler `Ye`) | toast "Task cancelled" |
+| Rerun a task | `we({ taskId })` (handler `aa`) | toast `artwork:task.rerun.success` |
+
+### Repeatable method to capture a new mutation
+
+1. Perform the action on the site with DevTools → Network open (filter `graphql`).
+2. Click the request → **Payload**: copy `operationName`, `variables`, and `extensions.persistedQuery.sha256Hash` into `config.json`.
+3. (Optional, to understand the flow) Click the request → **Initiator** → "Request call stack" → open the named app chunk in **Sources** → pretty-print (`{}`) → read the handler's success/error branches.
+
+## Verbose logging (`-v` / `--verbose`)
+
+- `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. No-op until enabled. GUI exposes it as a "Verbose logging" checkbox in the top bar (persisted in settings). NOT a full logging framework — file logging is a separate, still-open discussion.
+
 ## Recapture procedure (when PixAI changes their frontend)
 
 Symptoms: `PersistedQueryNotFound`, "Cannot query field…", or sudden 400s.
@@ -175,4 +219,7 @@ python pixai_gallery_backup.py --dedup --apply            # quarantine redundant
 python pixai_gallery_backup.py --dedup --apply --dedup-delete  # delete instead of quarantine
 python pixai_gallery_backup.py --verify-dupes             # confirm _duplicates/ is safe to delete
 python pixai_gallery.py --out pixai_backup                # launch gallery at :5000 (+ /health dashboard)
+python pixai_gallery_backup.py --delete-task <id> [<id> ...]        # DRY-RUN: list what would be deleted (nothing happens)
+python pixai_gallery_backup.py --delete-task <id> --apply --yes     # actually delete from your account (irreversible; null=success)
+python pixai_gallery_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
 ```

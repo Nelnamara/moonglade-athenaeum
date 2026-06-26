@@ -89,6 +89,34 @@ class PixAIError(Exception):
     """Raised instead of sys.exit() so the GUI and tests can catch errors cleanly."""
 
 
+# ---------------------------------------------------------------------------
+# Verbose diagnostics
+# ---------------------------------------------------------------------------
+# A single module-level switch shared by the CLI (--verbose) and the GUI
+# (Verbose logging checkbox). vlog() is a no-op until set_verbose(True) is
+# called, so normal runs and the test suite are completely unaffected.
+_VERBOSE = False
+_VERBOSE_T0 = None
+
+
+def set_verbose(on):
+    """Enable/disable timestamped diagnostic logging. Resets the elapsed clock
+    each time it is enabled so timings read from the start of the operation."""
+    global _VERBOSE, _VERBOSE_T0
+    _VERBOSE = bool(on)
+    if _VERBOSE:
+        _VERBOSE_T0 = time.monotonic()
+
+
+def vlog(msg):
+    """Print a diagnostic line prefixed with seconds-since-enabled, but only in
+    verbose mode. Writes to stdout so the GUI log pane captures it too."""
+    if not _VERBOSE:
+        return
+    t0 = _VERBOSE_T0 if _VERBOSE_T0 is not None else time.monotonic()
+    print("  [v +{:6.1f}s] {}".format(time.monotonic() - t0, msg), flush=True)
+
+
 API_URL = "https://api.pixai.art/graphql"
 
 # ===========================================================================
@@ -133,6 +161,11 @@ ARTWORK_LIST_HASH = _cfg.get("ARTWORK_LIST_HASH", "") or \
 ARTWORK_DETAIL_HASH = _cfg.get("ARTWORK_DETAIL_HASH", "") or \
     "ac39a87c58451559f9dcbf2c04862c1ee3260f9645ed60fdfb574e41689a6766"
 CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
+# Deletion mutation (deleteGenerationTask). Loaded ONLY from config.json with no
+# built-in default: capturing this hash is a deliberate manual step, so the
+# destructive --delete-task path cannot fire unless you've set it up yourself.
+DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "")
+DELETE_OPERATION = "deleteGenerationTask"
 # ===========================================================================
 
 # Media URL: https://api.pixai.art/v1/media/<id>/<variant>
@@ -237,6 +270,7 @@ def gql(session, variables, retries=4):
     delay = 2.0
     for attempt in range(retries + 1):
         try:
+            _t = time.monotonic()
             r = session.get(API_URL, params=params, timeout=60)
         except requests.exceptions.SSLError:
             raise PixAIError(_ssl_help())
@@ -269,6 +303,8 @@ def gql(session, variables, retries=4):
         if r.status_code >= 400:
             print("\nHTTP {}:\n{}".format(r.status_code, json.dumps(data, indent=2)[:1500]))
             raise PixAIError("HTTP {} error (see log above).".format(r.status_code))
+        vlog("{} page -> HTTP {} ({:,} bytes) in {:.2f}s".format(
+            OPERATION_NAME, r.status_code, len(r.content), time.monotonic() - _t))
         return data["data"]
     raise RuntimeError("unreachable")
 
@@ -419,11 +455,14 @@ def resolve_media(session, mid):
     Reads the object's `urls` list and picks the highest-quality variant
     (PUBLIC = full-resolution original on PixAI). Returns (None, {}) on failure.
     """
+    _t = time.monotonic()
     try:
         r = session.get(MEDIA_BASE.format(id=mid), timeout=30)
         r.raise_for_status()
         obj = r.json()
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as e:
+        vlog("resolve_media {} FAILED in {:.2f}s ({})".format(
+            mid, time.monotonic() - _t, e))
         return None, {}
     urls = obj.get("urls") or []
     by_variant = {}
@@ -439,6 +478,9 @@ def resolve_media(session, mid):
         chosen = next(iter(by_variant.values()))
     info = {"width": obj.get("width"), "height": obj.get("height"),
             "type": obj.get("type", "")}
+    vlog("resolve_media {} -> {} {}x{} in {:.2f}s".format(
+        mid, "url" if chosen else "NO-URL",
+        info.get("width"), info.get("height"), time.monotonic() - _t))
     return chosen, info
 
 
@@ -584,20 +626,27 @@ def download(session, url, stem, retries=3, convert=None,
                 if not p.name.endswith(".part") and p.stat().st_size > 0]
     if existing:
         return ("skip", existing[0])
+    _t = time.monotonic()
     delay = 2.0
     for attempt in range(retries + 1):
         try:
             with session.get(url, stream=True, timeout=120) as r:
                 if r.status_code == 404:
+                    vlog("download {} -> missing (404) in {:.2f}s".format(
+                        stem.name, time.monotonic() - _t))
                     return ("missing", None)
                 r.raise_for_status()
                 ext = ext_from_ct(r.headers.get("Content-Type"))
                 dest = stem.with_name(stem.name + ext)
                 tmp = dest.with_suffix(dest.suffix + ".part")
+                nbytes = 0
                 with open(tmp, "wb") as fh:
                     for chunk in r.iter_content(chunk_size=65536):
                         fh.write(chunk)
+                        nbytes += len(chunk)
                 tmp.replace(dest)
+                vlog("download {} -> {:,} bytes in {:.2f}s".format(
+                    dest.name, nbytes, time.monotonic() - _t))
             if convert:
                 dest, note = convert_image(dest, convert, jpeg_quality,
                                            jpeg_bg, keep_original=keep_webp)
@@ -658,6 +707,59 @@ def task_detail_gql(session, task_id):
         return (data.get("data") or {}).get("task")
     except (requests.RequestException, ValueError):
         return None
+
+
+def delete_task_gql(session, task_id):
+    """Replay the deleteGenerationTask persisted mutation for ONE task id.
+
+    DELETES the generation from your PixAI account -- irreversible. This is a void
+    mutation: on SUCCESS the server returns null (data.deleteGenerationTask == None),
+    so the meaningful signal is the ABSENCE of an error, not the payload. Raises
+    PixAIError with a clear message on any failure. Deliberately single-attempt (NO
+    retry/backoff loop) so a flaky network can never cause a delete to fire twice.
+    """
+    if not DELETE_TASK_HASH:
+        raise PixAIError(
+            "DELETE_TASK_HASH missing from config.json. Capture deleteGenerationTask's "
+            "sha256Hash from DevTools (Network -> graphql -> a delete request -> Payload "
+            "-> extensions.persistedQuery.sha256Hash) and add it. This is required on "
+            "purpose so deletion can't run without an explicit setup step.")
+    # Mutations are POST (Apollo blocks them over GET). Mirror the site's params.
+    params = {"operation": DELETE_OPERATION, "u3t": U3T}
+    body = {
+        "operationName": DELETE_OPERATION,
+        "variables": {"taskId": str(task_id)},
+        "extensions": {"clientLibrary": CLIENT_LIBRARY,
+                       "persistedQuery": {"version": 1, "sha256Hash": DELETE_TASK_HASH}},
+    }
+    _t = time.monotonic()
+    try:
+        r = session.post(API_URL, params=params, json=body, timeout=60)
+    except requests.exceptions.SSLError:
+        raise PixAIError(_ssl_help())
+    except requests.RequestException as e:
+        raise PixAIError("network error deleting task {}: {}".format(task_id, e))
+
+    if r.status_code == 401:
+        raise PixAIError("401 Unauthorized -- token missing/expired. Refresh and re-run.")
+    try:
+        data = r.json()
+    except ValueError:
+        raise PixAIError("HTTP {} non-JSON response deleting task {}:\n{}".format(
+            r.status_code, task_id, r.text[:500]))
+    if data.get("errors"):
+        msg = json.dumps(data["errors"])
+        if "PersistedQueryNotFound" in msg:
+            raise PixAIError("deleteGenerationTask hash not recognized -- recapture "
+                             "DELETE_TASK_HASH into config.json (see RECAPTURE).")
+        raise PixAIError("GraphQL error deleting task {}: {}".format(task_id, msg[:600]))
+    if r.status_code >= 400:
+        raise PixAIError("HTTP {} deleting task {}:\n{}".format(
+            r.status_code, task_id, json.dumps(data)[:600]))
+    result = (data.get("data") or {}).get(DELETE_OPERATION)
+    vlog("deleteGenerationTask {} -> {} in {:.2f}s".format(
+        task_id, result, time.monotonic() - _t))
+    return result
 
 
 def media_file_gql(session, media_id):
@@ -1449,6 +1551,7 @@ def _make_session(token_val):
     Re-reads config.json at call time so the GUI works even when the module
     was imported before the working directory was set correctly."""
     global PERSISTED_QUERY_HASH, U3T, USER_ID, TASK_DETAIL_HASH, MODEL_DETAIL_HASH
+    global DELETE_TASK_HASH
     fresh = _load_config()
     if fresh:
         PERSISTED_QUERY_HASH = fresh.get("PERSISTED_QUERY_HASH", "") or PERSISTED_QUERY_HASH
@@ -1456,6 +1559,7 @@ def _make_session(token_val):
         USER_ID = fresh.get("USER_ID", "") or USER_ID
         TASK_DETAIL_HASH = fresh.get("TASK_DETAIL_HASH", "") or TASK_DETAIL_HASH
         MODEL_DETAIL_HASH = fresh.get("MODEL_DETAIL_HASH", "") or MODEL_DETAIL_HASH
+        DELETE_TASK_HASH = fresh.get("DELETE_TASK_HASH", "") or DELETE_TASK_HASH
     # With an API key (sent as Bearer) the per-session u3t is not required; the
     # browser-JWT path still wants it. Always need the persisted hash + USER_ID.
     have_api_key = bool((fresh or {}).get("PIXAI_API_KEY") or _cfg.get("PIXAI_API_KEY"))
@@ -1505,6 +1609,69 @@ def run_probe(args):
             print("\nLooks right? Run a download to back up everything.")
         else:
             print("\nCouldn't find a URL in the media object -- paste this back.")
+
+
+def run_delete_tasks(args):
+    """Delete one or more generation tasks from your PixAI account (IRREVERSIBLE).
+
+    Guards, in order:
+      1. Dry-run by default -- prints the target list and stops. Requires --apply.
+      2. With --apply, a typed 'delete' confirmation (skippable with --yes, which
+         is refused on a non-interactive stdin unless explicitly passed).
+      3. Single-attempt per task (delete_task_gql does no retry).
+    Local backups (image files + catalog.db) are NOT touched -- this only removes
+    the generation from your account on PixAI's servers.
+    """
+    raw = getattr(args, "delete_task", None) or []
+    seen, ids = set(), []
+    for t in raw:
+        t = str(t).strip()
+        if t and t not in seen:
+            seen.add(t)
+            ids.append(t)
+    if not ids:
+        raise PixAIError("No task ids given. Usage: --delete-task <taskId> [<taskId> ...]")
+
+    print("Tasks targeted for deletion ({}):".format(len(ids)))
+    for t in ids:
+        print("  {}".format(t))
+
+    if not getattr(args, "apply", False):
+        print("\nDRY RUN -- nothing deleted. Re-run with --apply to permanently delete "
+              "these from your PixAI account.")
+        print("(Deletion is irreversible. Your local backups are NOT affected.)")
+        return {"targeted": len(ids), "deleted": 0, "failed": 0, "dry_run": True}
+
+    if not getattr(args, "yes", False):
+        if not getattr(sys.stdin, "isatty", lambda: False)():
+            raise PixAIError(
+                "--apply needs interactive confirmation. Re-run attached to a terminal, "
+                "or pass --yes to confirm non-interactively (irreversible -- be careful).")
+        ans = input("\nPermanently delete {} task(s) from your PixAI account? "
+                    "Type 'delete' to confirm: ".format(len(ids)))
+        if ans.strip().lower() != "delete":
+            print("Aborted -- nothing deleted.")
+            return {"targeted": len(ids), "deleted": 0, "failed": 0, "aborted": True}
+
+    session = _make_session(getattr(args, "token", None))
+    delay = getattr(args, "delay", 0.4)
+    deleted = failed = 0
+    for i, t in enumerate(ids, 1):
+        try:
+            # deleteGenerationTask is a void mutation: it returns null on a
+            # SUCCESSFUL delete and raises (GraphQL errors / 401 / PersistedQuery
+            # NotFound) on failure. So a clean return -- whatever the payload --
+            # means the task was deleted.
+            delete_task_gql(session, t)
+            deleted += 1
+            print("  [{}/{}] deleted task {}".format(i, len(ids), t))
+        except PixAIError as e:
+            failed += 1
+            print("  [{}/{}] FAILED task {}: {}".format(i, len(ids), t, e))
+        if i < len(ids):
+            time.sleep(delay)
+    print("\nDeletion complete: {} deleted, {} failed.".format(deleted, failed))
+    return {"targeted": len(ids), "deleted": deleted, "failed": failed}
 
 
 def run_count(args):
@@ -2266,6 +2433,7 @@ def run_download(args, progress=None):
                 continue
 
     if out.exists():
+        _t_scan = time.monotonic()
         for e in _iter_image_entries(out):
             name = e.name
             if name.endswith(".part") or os.path.splitext(name)[1].lower() not in _IMAGE_EXTS:
@@ -2276,6 +2444,8 @@ def run_download(args, progress=None):
             except OSError:
                 pass
             on_disk_by_mid.setdefault(media_id_of(name), Path(e.path))
+        vlog("startup disk scan: {} image files ({}) indexed in {:.2f}s".format(
+            already_done, _format_size(disk_bytes), time.monotonic() - _t_scan))
     # Progress counts items as the walk visits them (skips included), starting at
     # zero -- it must NOT be seeded with already_done, or the on-disk images get
     # counted twice (seed + re-check) and the bar overshoots past 100%.
@@ -2662,9 +2832,21 @@ def run_download(args, progress=None):
 def main():
     ap = argparse.ArgumentParser(description="Back up your own PixAI gallery.")
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="print timestamped diagnostics (per-page fetch, per-image "
+                         "resolve/download timing, disk-scan time) so you can see what a "
+                         "long-running operation is doing")
     ap.add_argument("--token",
                     help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
                          "and token.txt)")
+    ap.add_argument("--delete-task", nargs="+", metavar="TASK_ID", default=None,
+                    help="DELETE the given generation task id(s) from your PixAI account "
+                         "(irreversible). Dry-run unless --apply is also given; then asks "
+                         "for typed confirmation unless --yes. Local backups are untouched. "
+                         "Requires DELETE_TASK_HASH in config.json.")
+    ap.add_argument("--yes", action="store_true",
+                    help="skip the interactive confirmation for --delete-task --apply "
+                         "(use with care; deletion cannot be undone)")
     ap.add_argument("--out", default="pixai_backup",
                     help="output folder for images and catalog (default: pixai_backup)")
     ap.add_argument("--page-size", type=int, default=250,
@@ -2781,6 +2963,7 @@ def main():
                     help="with --verify-dupes, move any orphaned quarantined files (no surviving "
                          "keeper) back to images/")
     args = ap.parse_args()
+    set_verbose(getattr(args, "verbose", False))
 
     if args.probe and args.count:
         print("Note: --probe exits before --count runs. Run them separately:\n"
@@ -2793,6 +2976,9 @@ def main():
     csv_path = out / "catalog.csv"
 
     try:
+        if getattr(args, "delete_task", None):
+            run_delete_tasks(args)
+            return
         if args.catalog_stats:
             run_catalog_stats(args)
             return
