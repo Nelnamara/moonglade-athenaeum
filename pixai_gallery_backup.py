@@ -2123,16 +2123,29 @@ def run_import_local(args):
     except OSError:
         external = False
 
+    _prog = getattr(args, "progress", None)
     existing = {(r.get("filename") or "").replace("\\", "/")
                 for r in load_catalog(db_path) if r.get("filename")}
     gallery_dir = out / "gallery"
     quarantine = out / "_duplicates"
 
-    candidates = [p for p in src.rglob("*")
-                  if p.is_file() and p.suffix.lower() in media_exts
-                  and not p.name.endswith(".part")]
+    print("Scanning {} for media (this can take a moment on a large backup)...".format(src),
+          flush=True)
+    candidates, scanned = [], 0
+    for p in src.rglob("*"):
+        scanned += 1
+        if scanned % 5000 == 0:
+            vlog("scanned {} files, {} media so far...".format(scanned, len(candidates)))
+        if p.is_file() and p.suffix.lower() in media_exts and not p.name.endswith(".part"):
+            candidates.append(p)
+    total = len(candidates)
+    print("Found {} media file(s) among {} scanned; cataloging new ones...".format(
+        total, scanned), flush=True)
+
     rows, made, skipped = [], 0, 0
-    for p in candidates:
+    for idx, p in enumerate(candidates):
+        if _prog:
+            _prog(idx + 1, total, 0)
         if not external and (_under(p, gallery_dir) or _under(p, quarantine)):
             continue
         is_vid = p.suffix.lower() in _VIDEO_EXTS
@@ -2168,6 +2181,7 @@ def run_import_local(args):
         else:
             make_thumbnail(stored, thumb_dir / "{}.jpg".format(mid))
         made += 1
+        vlog("imported {} ({})".format(rel, "video" if is_vid else "image"))
 
     if rows:
         save_catalog(db_path, rows)
