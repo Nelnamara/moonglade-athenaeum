@@ -117,6 +117,46 @@ def test_load_config_missing_returns_empty(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# run_import_local + run_generate (preview)
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+from pixai_gallery import load_catalog as _load_cat
+
+
+def test_import_local_scans_and_is_idempotent(tmp_path):
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "myclip.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "art.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    assert res == {"imported": 2, "skipped": 0}
+    rows = {r["filename"]: r for r in _load_cat(tmp_path / "catalog.db")}
+    assert rows["videos/myclip.mp4"]["source"] == "local"
+    assert rows["videos/myclip.mp4"]["is_video"] == "1"
+    assert rows["images/art.png"]["source"] == "local"
+    assert rows["images/art.png"]["is_video"] == ""
+    # re-run imports nothing new
+    assert core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))["imported"] == 0
+
+
+def test_import_local_external_copies_in(tmp_path):
+    ext = tmp_path / "external"; ext.mkdir()
+    (ext / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    out = tmp_path / "backup"
+    res = core.run_import_local(SimpleNamespace(out=str(out), import_local=str(ext)))
+    assert res["imported"] == 1
+    assert (out / "imported" / "outside.png").exists()   # copied into the backup
+
+
+def test_generate_preview_spends_nothing(tmp_path):
+    a = SimpleNamespace(prompt="elf", negative="", model="", width=512, height=512,
+                        steps=25, cfg=7.0, count=1, seed=None, params_json="",
+                        confirm=False, out=str(tmp_path))
+    assert core.run_generate(a) == {"submitted": False}
+
+
+# ---------------------------------------------------------------------------
 # SQLite catalog helpers
 # ---------------------------------------------------------------------------
 
