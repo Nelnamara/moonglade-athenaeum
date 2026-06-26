@@ -1051,6 +1051,149 @@ class ConvertTab(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Generate tab
+# ---------------------------------------------------------------------------
+
+class GenerateTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        opts = QGroupBox("Generate images via PixAI (spends credits)")
+        g = QVBoxLayout(opts)
+
+        g.addWidget(QLabel("Prompt:"))
+        self.prompt = QTextEdit()
+        self.prompt.setPlaceholderText("e.g. a night elf druid, lavender skin, moonlit forest, masterpiece")
+        self.prompt.setFixedHeight(70)
+        g.addWidget(self.prompt)
+
+        r_neg = QHBoxLayout()
+        r_neg.addWidget(QLabel("Negative:"))
+        self.negative = QLineEdit()
+        self.negative.setPlaceholderText("lowres, text, watermark, extra limbs …")
+        r_neg.addWidget(self.negative)
+        g.addLayout(r_neg)
+
+        r_mod = QHBoxLayout()
+        r_mod.addWidget(QLabel("Model ID:"))
+        self.model = QLineEdit()
+        self.model.setPlaceholderText("blank = Tsubaki.2 (default)")
+        self.model.setText(settings.get("gen_model", ""))
+        r_mod.addWidget(self.model)
+        g.addLayout(r_mod)
+
+        r_dim = QHBoxLayout()
+        # note: attr names are sp_* to avoid shadowing QWidget.width()/height()
+        for label, attr, skey, lo, hi, dv in (
+                ("Width", "sp_w", "gen_width", 64, 2048, 512),
+                ("Height", "sp_h", "gen_height", 64, 2048, 512),
+                ("Steps", "sp_steps", "gen_steps", 1, 60, 25),
+                ("Count", "sp_count", "gen_count", 1, 8, 1)):
+            r_dim.addWidget(QLabel(label + ":"))
+            sb = QSpinBox(); sb.setRange(lo, hi); sb.setValue(settings.get(skey, dv))
+            sb.setFixedWidth(70 if attr in ("sp_w", "sp_h") else 55)
+            setattr(self, attr, sb); r_dim.addWidget(sb); r_dim.addSpacing(8)
+        r_dim.addWidget(QLabel("CFG:"))
+        self.cfg = QDoubleSpinBox(); self.cfg.setRange(1.0, 20.0); self.cfg.setSingleStep(0.5)
+        self.cfg.setValue(settings.get("gen_cfg", 7.0)); self.cfg.setFixedWidth(60)
+        r_dim.addWidget(self.cfg)
+        r_dim.addSpacing(8)
+        r_dim.addWidget(QLabel("Seed:"))
+        self.seed = QLineEdit(); self.seed.setPlaceholderText("random"); self.seed.setFixedWidth(120)
+        r_dim.addWidget(self.seed)
+        r_dim.addStretch()
+        g.addLayout(r_dim)
+
+        r_conf = QHBoxLayout()
+        self.confirm = QCheckBox("Confirm — actually submit (spends credits)")
+        self.confirm.setToolTip("Unchecked = preview the request only (no credits). "
+                                "Checked = create the images for real.")
+        r_conf.addWidget(self.confirm)
+        r_conf.addStretch()
+        g.addLayout(r_conf)
+
+        self.btn_run = QPushButton("▶  Generate")
+        self.btn_run.setObjectName("btn_run")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_run); btn_row.addStretch(); btn_row.addWidget(self.btn_stop)
+        self.btn_run.clicked.connect(self._run_generate)
+        self.btn_stop.clicked.connect(self._stop)
+
+        prog_row, self.prog_bar, self.prog_label = _make_progress_row()
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(opts)
+        lay.addLayout(btn_row)
+        lay.addLayout(prog_row)
+        lay.addWidget(self.log, stretch=1)
+
+    def _build_args(self):
+        seed_txt = self.seed.text().strip()
+        try:
+            seed = int(seed_txt) if seed_txt else None
+        except ValueError:
+            seed = None
+        return SimpleNamespace(
+            out=self._bar.out, token=self._bar.token,
+            prompt=self.prompt.toPlainText().strip(),
+            negative=self.negative.text().strip(),
+            model=self.model.text().strip(),
+            width=self.sp_w.value(), height=self.sp_h.value(),
+            steps=self.sp_steps.value(), cfg=self.cfg.value(), count=self.sp_count.value(),
+            seed=seed, params_json="", confirm=self.confirm.isChecked(),
+            poll_timeout=300, name_length=60, name_sep="_",
+        )
+
+    def _run_generate(self):
+        if self._worker and self._worker.isRunning():
+            return
+        args = self._build_args()
+        if not args.prompt and not args.params_json:
+            self.log.append_line("[ERROR] Enter a prompt first.")
+            return
+        self.log.clear_log()
+        self.prog_bar.setRange(0, 0)
+        self.prog_label.setText("Submitting..." if args.confirm else "Preview")
+        self.btn_run.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self._worker = Worker(core.run_generate, args)
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._on_done(False, "")
+
+    def _on_done(self, success, msg):
+        self.btn_run.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.prog_bar.setRange(0, 1)
+        self.prog_bar.setValue(1 if success else 0)
+        self.prog_label.setText("Done" if success else ("Error" if msg else "Stopped"))
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def collect_settings(self):
+        return {
+            "gen_model": self.model.text().strip(),
+            "gen_width": self.sp_w.value(), "gen_height": self.sp_h.value(),
+            "gen_steps": self.sp_steps.value(), "gen_cfg": self.cfg.value(),
+            "gen_count": self.sp_count.value(),
+        }
+
+
+# ---------------------------------------------------------------------------
 # Utilities tab
 # ---------------------------------------------------------------------------
 
@@ -1111,6 +1254,10 @@ class UtilitiesTab(QWidget):
         self.btn_sync_videos.setObjectName("btn_run")
         self.btn_sync_videos.setToolTip("Back up your image-to-video generations: find i2v tasks, "
                                         "download each mp4 into videos/, and catalog them")
+        self.btn_import_local = QPushButton("▶  Import Local Media")
+        self.btn_import_local.setObjectName("btn_run")
+        self.btn_import_local.setToolTip("Catalog non-PixAI images/videos you dropped into the "
+                                         "backup folder (source='local') so they show in the gallery")
 
         backfill_row = QHBoxLayout()
         backfill_row.addWidget(self.btn_backfill)
@@ -1129,6 +1276,7 @@ class UtilitiesTab(QWidget):
                                         "video files into a videos/ folder")
         export_row.addWidget(self.chk_with_videos)
         export_row.addWidget(self.btn_sync_videos)
+        export_row.addWidget(self.btn_import_local)
         export_row.addWidget(self.btn_fix_models)
         export_row.addWidget(self.btn_account)
         export_row.addStretch()
@@ -1138,6 +1286,7 @@ class UtilitiesTab(QWidget):
         self.btn_export_csv.clicked.connect(self._run_export_csv)
         self.btn_sync_artworks.clicked.connect(self._run_sync_artworks)
         self.btn_sync_videos.clicked.connect(self._run_sync_videos)
+        self.btn_import_local.clicked.connect(self._run_import_local)
         self.btn_fix_models.clicked.connect(self._run_fix_models)
         self.btn_account.clicked.connect(lambda: self._run(core.run_account_info, self._base_args()))
 
@@ -1313,6 +1462,11 @@ class UtilitiesTab(QWidget):
         args.progress = self._worker.progress.emit
         self._worker.progress.connect(self._update_progress)
 
+    def _run_import_local(self):
+        args = self._base_args()
+        args.import_local = ""        # scan the backup folder for dropped-in media
+        self._run(core.run_import_local, args)
+
     def _run_fix_models(self):
         args = self._base_args()
         args.relabel_removed = True  # clean menus: removed ids -> "Unknown or removed model"
@@ -1361,7 +1515,8 @@ class UtilitiesTab(QWidget):
         for b in (self.btn_probe, self.btn_count, self.btn_stats,
                   self.btn_backfill, self.btn_backfill_full, self.btn_export_csv,
                   self.btn_audit, self.btn_dedup, self.btn_verify,
-                  self.btn_sync_artworks, self.btn_fix_models, self.btn_account):
+                  self.btn_sync_artworks, self.btn_sync_videos, self.btn_import_local,
+                  self.btn_fix_models, self.btn_account):
             b.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         if running:
@@ -1607,11 +1762,13 @@ class MainWindow(QMainWindow):
         self._dl_tab      = DownloadTab(self._sbar, settings)
         self._org_tab     = OrganizeTab(self._sbar, settings)
         self._conv_tab    = ConvertTab(self._sbar, settings)
+        self._gen_tab     = GenerateTab(self._sbar, settings)
         self._util_tab    = UtilitiesTab(self._sbar, settings)
         self._gallery_tab = GalleryTab(self._sbar, settings)
         self._tabs.addTab(self._dl_tab,      "  Download  ")
         self._tabs.addTab(self._org_tab,     "  Organize  ")
         self._tabs.addTab(self._conv_tab,    "  Convert   ")
+        self._tabs.addTab(self._gen_tab,     "  Generate  ")
         self._tabs.addTab(self._util_tab,    "  Utilities ")
         self._tabs.addTab(self._gallery_tab, "  Gallery   ")
         self._tabs.setCurrentIndex(settings.get("last_tab", 0))
@@ -1627,6 +1784,7 @@ class MainWindow(QMainWindow):
         s.update(self._dl_tab.collect_settings())
         s.update(self._org_tab.collect_settings())
         s.update(self._conv_tab.collect_settings())
+        s.update(self._gen_tab.collect_settings())
         s.update(self._util_tab.collect_settings())
         s.update(self._gallery_tab.collect_settings())
         _save_settings(s)

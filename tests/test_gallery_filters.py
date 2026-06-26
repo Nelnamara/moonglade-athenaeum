@@ -175,6 +175,20 @@ def test_media_type_filter(tmp_path):
     assert query_catalog(db, media_type="")[1] == 3  # all
 
 
+def test_source_filter(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="h1", filename="a.png"),                       # online (blank)
+        _row(media_id="h2", filename="b.png", source="online"),      # explicit online
+        _row(media_id="g1", filename="c.png", source="api"),         # generated
+        _row(media_id="l1", filename="d.png", source="local"),       # imported
+    ])
+    assert query_catalog(db, source="online")[1] == 2   # blank + 'online'
+    assert query_catalog(db, source="api")[1] == 1
+    assert query_catalog(db, source="local")[1] == 1
+    assert query_catalog(db, source="")[1] == 4         # all
+
+
 def test_lora_filter(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [

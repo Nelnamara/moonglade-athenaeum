@@ -284,6 +284,35 @@ def test_video_outputs_none_and_empty():
     assert core.video_outputs({"outputs": {}, "parameters": {}}) == ([], {"prompt": "", "duration": "", "i2v_model": ""})
 
 
+# ---------------------------------------------------------------------------
+# _gen_parameters (generation request shape)
+# ---------------------------------------------------------------------------
+
+def test_gen_parameters_builds_request():
+    from types import SimpleNamespace
+    a = SimpleNamespace(prompt="elf", negative="blurry", model="", width=768,
+                        height=512, steps=20, cfg=6.5, count=2, seed=42, params_json="")
+    p = core._gen_parameters(a)
+    assert p["prompts"] == "elf"
+    assert p["negativePrompts"] == "blurry"
+    assert p["modelId"] == core.DEFAULT_GEN_MODEL   # blank model -> default
+    assert p["width"] == 768 and p["height"] == 512
+    assert p["samplingSteps"] == 20 and p["cfgScale"] == 6.5
+    assert p["batchSize"] == 2 and p["seed"] == 42
+
+
+def test_gen_parameters_omits_optionals_and_honors_json():
+    from types import SimpleNamespace
+    a = SimpleNamespace(prompt="cat", negative="", model="M9", width=512, height=512,
+                        steps=25, cfg=7.0, count=1, seed=None, params_json="")
+    p = core._gen_parameters(a)
+    assert "negativePrompts" not in p and "seed" not in p
+    assert p["modelId"] == "M9"
+    # params_json overrides everything
+    a.params_json = '{"prompts":"raw","custom":1}'
+    assert core._gen_parameters(a) == {"prompts": "raw", "custom": 1}
+
+
 def test_extract_full_meta_partial():
     task = {"parameters": {"prompts": "cat"}, "outputs": {}}
     m = core.extract_full_meta(task)

@@ -2042,6 +2042,219 @@ def run_sync_videos(args):
     return {"i2v_tasks": len(i2v_nodes), "videos": ok}
 
 
+_VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
+
+
+def _under(path, parent):
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def run_import_local(args):
+    """Catalog non-PixAI media so it shows + plays in the gallery (source='local').
+
+    Two modes:
+      * No dir (or a dir already inside the backup): scan the backup folder and
+        catalog any image/video NOT already in the catalog -- i.e. files you
+        dropped into videos/ or anywhere under the backup.
+      * External dir: copy each media file into the backup (videos/ or imported/)
+        then catalog it.
+
+    Idempotent: files already cataloged (by relative path) are skipped, so it's
+    safe to re-run. Images get a gallery thumbnail; videos play via the catalog
+    filename (no still to thumbnail, so they show a placeholder + the video badge)."""
+    import hashlib
+    import shutil
+    from pixai_gallery import make_thumbnail
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)                  # import can seed a fresh, download-free backup
+    thumb_dir = out / "gallery" / "thumbs"
+    media_exts = _IMAGE_EXTS | _VIDEO_EXTS
+
+    raw = getattr(args, "import_local", None)
+    src = Path(raw) if raw else out
+    if not src.exists():
+        raise PixAIError("import path not found: {}".format(src))
+    try:
+        external = not _under(src.resolve(), out.resolve()) and src.resolve() != out.resolve()
+    except OSError:
+        external = False
+
+    existing = {(r.get("filename") or "").replace("\\", "/")
+                for r in load_catalog(db_path) if r.get("filename")}
+    gallery_dir = out / "gallery"
+    quarantine = out / "_duplicates"
+
+    candidates = [p for p in src.rglob("*")
+                  if p.is_file() and p.suffix.lower() in media_exts
+                  and not p.name.endswith(".part")]
+    rows, made, skipped = [], 0, 0
+    for p in candidates:
+        if not external and (_under(p, gallery_dir) or _under(p, quarantine)):
+            continue
+        is_vid = p.suffix.lower() in _VIDEO_EXTS
+        if external:
+            dest_dir = out / ("videos" if is_vid else "imported")
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / p.name
+            if not dest.exists():
+                shutil.copy2(p, dest)
+            stored = dest
+        else:
+            stored = p
+        rel = str(stored.relative_to(out)).replace("\\", "/")
+        if rel in existing:
+            skipped += 1
+            continue
+        mid = "local_" + hashlib.sha1(rel.encode("utf-8")).hexdigest()[:12]
+        try:
+            created = time.strftime("%Y-%m-%dT%H:%M:%S",
+                                    time.localtime(stored.stat().st_mtime))
+        except OSError:
+            created = ""
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "media_id": mid, "filename": rel, "source": "local",
+            "status": "imported", "created_at": created,
+            "prompt_preview": stored.stem[:100],
+            "is_video": "1" if is_vid else "",
+        })
+        rows.append(full)
+        if not is_vid:
+            make_thumbnail(stored, thumb_dir / "{}.jpg".format(mid))
+        made += 1
+
+    if rows:
+        save_catalog(db_path, rows)
+    print("Imported {} new local file(s){}; {} already cataloged.".format(
+        made, " (copied into the backup)" if external else "", skipped))
+    return {"imported": made, "skipped": skipped}
+
+
+_GEN_MUTATION = ("mutation createGenerationTask($parameters: JSONObject!) {"
+                 " createGenerationTask(parameters: $parameters) { id } }")
+_GEN_STATUS = "query($id: ID!) { task(id: $id) { id status } }"
+_GEN_RESULT = "query($id: ID!) { task(id: $id) { id status mediaId batchMediaIds } }"
+DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
+
+
+def _gen_parameters(args):
+    if getattr(args, "params_json", ""):
+        return json.loads(args.params_json)
+    params = {
+        "prompts": args.prompt,
+        "modelId": args.model or DEFAULT_GEN_MODEL,
+        "width": args.width,
+        "height": args.height,
+        "samplingSteps": args.steps,
+        "cfgScale": args.cfg,
+        "batchSize": args.count,
+    }
+    if getattr(args, "negative", ""):
+        params["negativePrompts"] = args.negative
+    if getattr(args, "seed", None) is not None:
+        params["seed"] = args.seed
+    return params
+
+
+def run_generate(args):
+    """Create images via PixAI (createGenerationTask), poll to completion, download
+    the results into the backup, and catalog them as source='api'. GUARDED: without
+    --confirm it only prints a preview (spends no credits). Reuses gql_adhoc + the
+    shared session/download/catalog plumbing."""
+    out = Path(args.out)
+    params = _gen_parameters(args)
+
+    if not getattr(args, "confirm", False):
+        print("=== PixAI createGenerationTask (PREVIEW -- no credits spent) ===")
+        print(json.dumps({"parameters": params}, indent=2))
+        print("\nThis would SPEND PixAI credits. Re-run with --confirm to submit.")
+        return {"submitted": False}
+
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)                  # generation can seed a fresh backup
+    session = _make_session(getattr(args, "token", None))
+    thumb_dir = out / "gallery" / "thumbs"
+    from pixai_gallery import make_thumbnail
+
+    print("Submitting generation task...")
+    created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+    task_id = (created.get("createGenerationTask") or {}).get("id")
+    if not task_id:
+        raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+    print("  task id:", task_id)
+
+    deadline = time.time() + getattr(args, "poll_timeout", 300)
+    while time.time() < deadline:
+        task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
+        status = str(task.get("status", "")).lower()
+        vlog("generate poll: {}".format(status or "(unknown)"))
+        if status in ("completed", "succeeded", "success", "done"):
+            break
+        if status in ("failed", "error", "cancelled", "canceled"):
+            raise PixAIError("generation ended with status: " + status)
+        time.sleep(3)
+    else:
+        raise PixAIError("timed out after {}s (task {})".format(
+            getattr(args, "poll_timeout", 300), task_id))
+
+    result = (gql_adhoc(session, _GEN_RESULT, {"id": task_id}) or {}).get("task") or {}
+    mids = []
+    if result.get("mediaId"):
+        mids.append(str(result["mediaId"]))
+    for m in result.get("batchMediaIds") or []:
+        mids.append(str(m))
+    mids = list(dict.fromkeys(mids))
+    if not mids:
+        raise PixAIError("task completed but no media ids found")
+
+    img_dir = out / "images"
+    rows, saved = [], []
+    for mid in mids:
+        url, info = resolve_media(session, mid)
+        if not url:
+            print("  no url for media", mid)
+            continue
+        stem = img_dir / build_stem_name(args.prompt or "", task_id, mid,
+                                         getattr(args, "name_length", 60),
+                                         getattr(args, "name_sep", "_"))
+        status, path = download(session, url, stem)
+        if status not in ("ok", "skip") or not path:
+            continue
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "task_id": str(task_id), "media_id": mid,
+            "filename": str(path.relative_to(out)).replace("\\", "/"),
+            "url": url, "source": "api", "status": "completed",
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "prompt_full": params.get("prompts", ""),
+            "prompt_preview": (params.get("prompts", "") or "")[:100],
+            "negative_prompt": params.get("negativePrompts", ""),
+            "seed": str(params.get("seed", "") or ""),
+            "steps": str(params.get("samplingSteps", "") or ""),
+            "cfg_scale": str(params.get("cfgScale", "") or ""),
+            "model_id": str(params.get("modelId", "") or ""),
+            "width": str((info or {}).get("width") or params.get("width") or ""),
+            "height": str((info or {}).get("height") or params.get("height") or ""),
+        })
+        rows.append(full)
+        make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
+        saved.append(str(path))
+
+    if rows:
+        save_catalog(db_path, rows)
+    print("Generated + cataloged {} image(s):".format(len(saved)))
+    for s in saved:
+        print("  " + s)
+    return {"submitted": True, "task_id": task_id, "images": len(saved)}
+
+
 def _needs_model_fix(row):
     """Return the model version-id to resolve if this row's model_name is missing
     or still a raw numeric id; else ''. Handles the case where model_name was
@@ -2992,6 +3205,28 @@ def main():
     ap.add_argument("--account", action="store_true",
                     help="show a read-only account dashboard (credit balance, membership, "
                          "subscription) and exit. Never moves money")
+    ap.add_argument("--import-local", nargs="?", const="", default=None, metavar="DIR",
+                    help="catalog non-PixAI media (source='local') so it shows in the gallery. "
+                         "No DIR = scan the backup folder for files you dropped in; a DIR "
+                         "outside the backup is copied in. Then exit")
+    # --- Generation (createGenerationTask) -------------------------------------
+    gen = ap.add_argument_group("generation (--generate)")
+    gen.add_argument("--generate", action="store_true",
+                     help="create images via PixAI and catalog them (source='api'). "
+                          "Preview-only unless --confirm (spends credits)")
+    gen.add_argument("--prompt", default="", help="positive prompt for --generate")
+    gen.add_argument("--negative", default="", help="negative prompt for --generate")
+    gen.add_argument("--model", default="", help="modelId for --generate (default: Tsubaki.2)")
+    gen.add_argument("--width", type=int, default=512)
+    gen.add_argument("--height", type=int, default=512)
+    gen.add_argument("--steps", type=int, default=25)
+    gen.add_argument("--cfg", type=float, default=7.0)
+    gen.add_argument("--count", type=int, default=1, help="batch size for --generate")
+    gen.add_argument("--seed", type=int, default=None)
+    gen.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
+    gen.add_argument("--poll-timeout", type=int, default=300)
+    gen.add_argument("--confirm", action="store_true",
+                     help="REQUIRED for --generate to actually submit (spends credits)")
     ap.add_argument("--fix-model-names", action="store_true",
                     help="re-resolve readable model names for catalog rows whose model_name "
                          "is blank or a raw numeric id (one API call per distinct model), then exit")
@@ -3053,6 +3288,12 @@ def main():
             return
         if args.account:
             run_account_info(args)
+            return
+        if args.import_local is not None:
+            run_import_local(args)
+            return
+        if args.generate:
+            run_generate(args)
             return
         if args.fix_model_names:
             run_fix_models(args)
