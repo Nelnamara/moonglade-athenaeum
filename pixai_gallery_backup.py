@@ -1962,21 +1962,25 @@ def run_sync_videos(args):
     thumb_dir = out / "gallery" / "thumbs"
     poster_tmp = out / "gallery" / "_postertmp"
 
-    def _ensure_video_thumb(video_media_id, poster_media_id):
+    def _ensure_video_thumb(video_media_id, poster_media_id, video_path=None):
         thumb_path = thumb_dir / "{}.jpg".format(video_media_id)
-        if thumb_path.exists() or not poster_media_id:
+        if thumb_path.exists():
             return
-        url, _info = resolve_media(session, poster_media_id)
-        if not url:
-            return
-        poster_tmp.mkdir(parents=True, exist_ok=True)
-        status, path = download(session, url, poster_tmp / str(poster_media_id))
-        if status in ("ok", "skip") and path:
-            make_thumbnail(path, thumb_path)
-            try:
-                path.unlink()
-            except OSError:
-                pass
+        # Preferred: thumbnail the PixAI still-frame poster.
+        if poster_media_id:
+            url, _info = resolve_media(session, poster_media_id)
+            if url:
+                poster_tmp.mkdir(parents=True, exist_ok=True)
+                status, path = download(session, url, poster_tmp / str(poster_media_id))
+                if status in ("ok", "skip") and path:
+                    make_thumbnail(path, thumb_path)
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+        # Fallback (no poster, e.g. older i2v): first frame of the mp4 via ffmpeg.
+        if not thumb_path.exists() and video_path:
+            video_poster_thumb(video_path, thumb_path)
 
     # 2. Per task: getTaskById -> video outputs -> fileUrl -> download mp4.
     def _do_task(node):
@@ -2019,7 +2023,7 @@ def run_sync_videos(args):
                     "poster_media_id": o.get("poster_media_id", ""),
                     "video_duration": str(shared.get("duration") or ""),
                 })
-                _ensure_video_thumb(vmid, o.get("poster_media_id"))
+                _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
                 rows.append(full)
             else:
                 rows.append(status)
@@ -2051,6 +2055,40 @@ def _under(path, parent):
         return True
     except ValueError:
         return False
+
+
+def _ffmpeg_path(_cache=[]):
+    """Return the ffmpeg executable path if available, else '' (cached)."""
+    if not _cache:
+        import shutil
+        _cache.append(shutil.which("ffmpeg") or "")
+    return _cache[0]
+
+
+def video_poster_thumb(video_path, thumb_path):
+    """Extract the first frame of a video via ffmpeg and write it as the gallery
+    thumbnail. OPTIONAL: returns False (no-op) if ffmpeg isn't on PATH, so videos
+    just fall back to the placeholder + play badge. Used for imported videos and
+    as a fallback for i2v videos with no still-frame poster."""
+    ff = _ffmpeg_path()
+    if not ff:
+        return False
+    import subprocess
+    import tempfile
+    from pixai_gallery import make_thumbnail
+    tmp = Path(tempfile.gettempdir()) / ("poster_{}.png".format(Path(thumb_path).stem))
+    try:
+        subprocess.run([ff, "-y", "-ss", "0.5", "-i", str(video_path),
+                        "-frames:v", "1", str(tmp)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
+    except Exception:                                # noqa: BLE001
+        return False
+    ok = tmp.exists() and tmp.stat().st_size > 0 and make_thumbnail(tmp, Path(thumb_path))
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+    return bool(ok)
 
 
 def run_import_local(args):
@@ -2125,7 +2163,9 @@ def run_import_local(args):
             "is_video": "1" if is_vid else "",
         })
         rows.append(full)
-        if not is_vid:
+        if is_vid:
+            video_poster_thumb(stored, thumb_dir / "{}.jpg".format(mid))  # ffmpeg, optional
+        else:
             make_thumbnail(stored, thumb_dir / "{}.jpg".format(mid))
         made += 1
 

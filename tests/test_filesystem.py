@@ -149,6 +149,23 @@ def test_import_local_external_copies_in(tmp_path):
     assert (out / "imported" / "outside.png").exists()   # copied into the backup
 
 
+def test_video_poster_thumb_noop_without_ffmpeg(tmp_path, monkeypatch):
+    # ffmpeg absent -> returns False gracefully, no thumbnail written
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    vid = tmp_path / "clip.mp4"; vid.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    thumb = tmp_path / "out.jpg"
+    assert core.video_poster_thumb(vid, thumb) is False
+    assert not thumb.exists()
+
+
+def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    assert res["imported"] == 1   # cataloged fine; just no poster
+
+
 def test_generate_preview_spends_nothing(tmp_path):
     a = SimpleNamespace(prompt="elf", negative="", model="", width=512, height=512,
                         steps=25, cfg=7.0, count=1, seed=None, params_json="",
