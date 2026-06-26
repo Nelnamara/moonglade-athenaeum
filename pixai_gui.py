@@ -1466,6 +1466,8 @@ class UtilitiesTab(QWidget):
         args = self._base_args()
         args.import_local = ""        # scan the backup folder for dropped-in media
         self._run(core.run_import_local, args)
+        args.progress = self._worker.progress.emit
+        self._worker.progress.connect(self._update_progress)
 
     def _run_fix_models(self):
         args = self._base_args()
