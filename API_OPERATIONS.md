@@ -18,19 +18,21 @@ Status legend: ✅ shipped · 🔵 in progress (home machine) · ⬜ to-do (call
 | Full-res / video URLs | REST `/v1/media`, ad-hoc `media` | `resolve_media`, `media_file_gql` |
 | Published-artwork sync | `listArtworks` | `--sync-artworks` |
 | Image-to-video backup | `getTaskById` + `media` | `--sync-videos` |
-| **Delete a cloud task** | **`deleteGenerationTask`** (POST, persisted) | **`--delete-task` (new, this branch)** |
-| Verbose diagnostics | — (not an API op) | `-v/--verbose` (new, this branch) |
+| **Delete a cloud task** | **`deleteGenerationTask`** (POST, persisted) | **`--delete-task`** |
+| Verbose diagnostics | — (not an API op) | `-v/--verbose` |
+| **Ad-hoc GraphQL helper** | — (generic POST, no hash) | **`gql_adhoc()`** |
+| **Account dashboard (read-only)** | `getMyQuota` + `getMyMembership` (ad-hoc) | **`--account` / GUI Account Info** |
 
 ### 🔵 In progress (separate effort)
 | Capability | Operation(s) | Note |
 |---|---|---|
-| **Generation** | `createGenerationTask` + poll `getTaskById` | working test exists on the **home machine** — converge, don't duplicate |
+| **Generation** | `createGenerationTask` + poll `getTaskById` | working `pixai_generate.py` in the repo folder (built in a MedTag side session; ignore MedTag-specific bits) — fold its generator into the tool as `--generate`, don't duplicate |
 
 ### ⬜ To-do — prioritized (all callable ad-hoc, no hash capture needed)
 | # | Capability | Operation(s) | Why this order |
 |---|---|---|---|
-| 1 | **`gql_adhoc()` helper** | — | unlocks every row below; one generic POST wrapper |
-| 2 | **`--account`** (read-only) | `getMyQuota`, `getMyMembership` | cheap + safe; proves the ad-hoc path end-to-end |
+| ~~1~~ | ~~`gql_adhoc()` helper~~ | — | ✅ done — generic ad-hoc POST; mutations + queries |
+| ~~2~~ | ~~`--account` (read-only)~~ | `getMyQuota`, `getMyMembership` | ✅ done — ad-hoc; balance + membership + subscription. **Read-only on purpose: never moves money** |
 | 3 | **`--cancel-task` / `--rerun-task`** | `cancelGenerationTask`, `rerunGenerationTask` | handlers already mapped; mirrors `--delete-task` guards |
 | 4 | Per-image delete | `deleteBatchMedia` (via task `input`) | delete one image from a batch |
 | 5 | **`--generate`** | `createGenerationTask` (+ poll) | the headline; fold in the home-machine payload |
