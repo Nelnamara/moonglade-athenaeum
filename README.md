@@ -206,6 +206,7 @@ The same three actions are available as buttons in the GUI **Utilities** tab.
 | `--probe` | Resolve one full-res URL and exit — connection sanity check |
 | `--count` | Tally total tasks and images via the API (no downloads) |
 | `--catalog-stats` | Summarize `catalog.db` and count files on disk (no token needed) |
+| `--account` | Read-only account dashboard: credit balance, membership, subscription. Never moves money |
 | `--collect-only` | Page through and write the catalog without downloading images |
 | `--backfill-meta` | Fill missing `url`/`width`/`height` in catalog via `resolve_media` |
 | `--backfill-full-meta` | Fill full prompt/seed/model/LoRAs in catalog via `getTaskById`; also fills url/width/height. Add `--with-loras` to re-fill older rows that predate LoRA tracking |
@@ -372,6 +373,12 @@ python pixai_gallery_backup.py --backfill-full-meta
 ---
 
 ## Changelog
+
+### Unreleased — API client foundation
+
+- **`gql_adhoc()` helper** — a generic ad-hoc GraphQL POST (queries *and* mutations) authenticated by your API key. PixAI's endpoint accepts full query documents, so most operations need **no persisted-hash capture** — this is the foundation for the broader client direction.
+- **`--account` (read-only account dashboard)** — shows your credit balance, membership tier, daily free-claim, and subscription status (GUI: Utilities → Account Info). Built on `gql_adhoc` (no hash). **Deliberately read-only — it never initiates payment or changes your subscription. Buy credits in the browser.**
+- **`--delete-task`** (guarded, irreversible) and **`-v/--verbose`** diagnostics, plus **`API_OPERATIONS.md`** — a full reverse-engineered catalog of PixAI's GraphQL operations and the build roadmap.
 
 ### v1.4.4 — media-type filter
 

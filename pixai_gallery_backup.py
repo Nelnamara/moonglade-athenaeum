@@ -762,20 +762,51 @@ def delete_task_gql(session, task_id):
     return result
 
 
+def gql_adhoc(session, query, variables=None, retries=3):
+    """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full query
+    document. PixAI's endpoint accepts these under Bearer auth (the API key has
+    read+write scope), so NO persisted sha256Hash capture is needed -- this is the
+    generic foundation for every read/write op beyond the reverse-engineered
+    listing path. Returns the `data` dict; raises PixAIError on GraphQL/HTTP error.
+
+    Mutations must be POST (Apollo blocks them over GET); this always POSTs, so it
+    works for queries and mutations alike."""
+    body = {"query": query, "variables": variables or {}}
+    delay = 2.0
+    for attempt in range(retries + 1):
+        try:
+            r = session.post(API_URL, json=body, timeout=120)
+        except requests.exceptions.SSLError:
+            raise PixAIError(_ssl_help())
+        except requests.RequestException:
+            if attempt == retries:
+                raise
+            time.sleep(delay); delay *= 2; continue
+        if r.status_code == 401:
+            raise PixAIError("401 Unauthorized -- API key missing/expired.")
+        if r.status_code == 429 or r.status_code >= 500:
+            if attempt == retries:
+                r.raise_for_status()
+            time.sleep(delay); delay *= 2; continue
+        try:
+            data = r.json()
+        except ValueError:
+            raise PixAIError("HTTP {} non-JSON response:\n{}".format(r.status_code, r.text[:400]))
+        if data.get("errors"):
+            raise PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
+        return data.get("data") or {}
+    raise RuntimeError("unreachable")
+
+
 def media_file_gql(session, media_id):
     """Resolve a VIDEO media's actual file URL. The REST /v1/media endpoint
     returns an empty urls[] for videos; the GraphQL `media` object carries the
-    real mp4 in `fileUrl`. Uses an ad-hoc (non-persisted) query, which the API
-    key authenticates as Bearer. Returns {'fileUrl','type','duration'} or {}."""
+    real mp4 in `fileUrl`. Returns {'fileUrl','type','duration'} or {}."""
     query = ("query($id:String!){ media(id:$id){ id type duration fileUrl "
              "hlsUrl size } }")
     try:
-        r = session.post(API_URL, json={"query": query, "variables": {"id": str(media_id)}},
-                         timeout=60)
-        if r.status_code != 200:
-            return {}
-        return (r.json().get("data") or {}).get("media") or {}
-    except (requests.RequestException, ValueError):
+        return (gql_adhoc(session, query, {"id": str(media_id)}) or {}).get("media") or {}
+    except PixAIError:
         return {}
 
 
@@ -2079,42 +2110,64 @@ def run_fix_models(args):
             "unresolved": unresolved}
 
 
-def _simple_gql(session, op, sha256, variables=None):
-    """Replay a no-arg (or simple) persisted GET op; return data dict or {}."""
-    params = {
-        "operation": op, "u3t": U3T, "operationName": op,
-        "variables": json.dumps(variables or {}, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY_ARTWORK,
-             "persistedQuery": {"version": 1, "sha256Hash": sha256}},
-            separators=(",", ":")),
-    }
+# Read-only account dashboard. Ad-hoc query (no persisted hash) -- the selection
+# below mirrors what the site's getMyQuota + getMyMembership return. READ ONLY:
+# this only reports your credit balance / plan. It never moves money. Buying
+# credits or changing your subscription is deliberately NOT implemented -- do that
+# in the browser.
+_ACCOUNT_QUERY = """
+query {
+  me {
+    id
+    quotaAmount
+    membership { membershipId tier privilege }
+    subscription { planId provider interval status startAt endAt cancelAtPeriodEnd }
+  }
+}
+"""
+
+
+def account_info(session):
+    """Fetch credits + membership/subscription via ad-hoc GraphQL. Returns the
+    `me` dict ({} on failure). Read-only."""
     try:
-        r = session.get(API_URL, params=params, timeout=60,
-                        headers={"x-apollo-operation-name": op})
-        if r.status_code != 200:
-            return {}
-        return r.json().get("data") or {}
-    except (requests.RequestException, ValueError):
+        return (gql_adhoc(session, _ACCOUNT_QUERY) or {}).get("me") or {}
+    except PixAIError:
         return {}
 
 
-_QUOTA_HASH = "9356b42a4ff6e987347a1f1ee3de7aba4bd103b1cdbfbbc4c5c5fcf52767ad66"
-_MEMBERSHIP_HASH = "53dbad3c972e775222a4a6344727b3d2809fc3f08f6787f56500abb8245f9e88"
-
-
 def run_account_info(args):
-    """Print account quota (credits) and membership/plan info."""
+    """Print a read-only account dashboard: credit balance, membership, and
+    subscription status. Never initiates payment -- buy credits in the browser."""
     session = _make_session(getattr(args, "token", None))
-    quota = _simple_gql(session, "getMyQuota", _QUOTA_HASH)
-    me = quota.get("me") or {}
-    print("Account: {}".format(me.get("id") or USER_ID))
-    print("Quota / credits: {}".format(me.get("quotaAmount", "unknown")))
-    member = _simple_gql(session, "getMyMembership", _MEMBERSHIP_HASH)
-    m = member.get("me") or member.get("membership") or member
-    if m:
-        print("Membership: {}".format(json.dumps(m)[:300]))
-    return {"quota": me.get("quotaAmount")}
+    me = account_info(session)
+    if not me:
+        print("Could not read account info (check API key / connection).")
+        return {}
+    mem = me.get("membership") or {}
+    sub = me.get("subscription") or {}
+    priv = mem.get("privilege") or {}
+    try:
+        credits = "{:,}".format(int(me.get("quotaAmount") or 0))
+    except (TypeError, ValueError):
+        credits = str(me.get("quotaAmount"))
+    print("Account ID       : {}".format(me.get("id") or USER_ID))
+    print("Credits (balance): {}".format(credits))
+    if mem:
+        print("Membership       : {} (tier {})".format(
+            mem.get("membershipId", "-"), mem.get("tier", "-")))
+        if priv.get("dailyClaimAdded"):
+            print("Daily free claim : {:,}".format(int(priv["dailyClaimAdded"])))
+        if priv.get("professionalMode"):
+            print("Professional mode: on")
+    if sub:
+        renew = "cancels at period end" if sub.get("cancelAtPeriodEnd") else "renews"
+        print("Subscription     : {} {} via {} ({}); {} {}".format(
+            sub.get("planId", "-"), (sub.get("interval") or "").lower(),
+            sub.get("provider", "-"), sub.get("status", "-"),
+            renew, (sub.get("endAt") or "")[:10]))
+    print("\n(Read-only. To buy credits or change your plan, use the browser.)")
+    return {"quota": me.get("quotaAmount"), "membership": mem.get("membershipId")}
 
 
 def run_catalog_stats(args):
@@ -2936,6 +2989,9 @@ def main():
     ap.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
                          "each mp4 into videos/, and catalog them (is_video), then exit")
+    ap.add_argument("--account", action="store_true",
+                    help="show a read-only account dashboard (credit balance, membership, "
+                         "subscription) and exit. Never moves money")
     ap.add_argument("--fix-model-names", action="store_true",
                     help="re-resolve readable model names for catalog rows whose model_name "
                          "is blank or a raw numeric id (one API call per distinct model), then exit")
@@ -2994,6 +3050,9 @@ def main():
             return
         if args.sync_videos:
             run_sync_videos(args)
+            return
+        if args.account:
+            run_account_info(args)
             return
         if args.fix_model_names:
             run_fix_models(args)
