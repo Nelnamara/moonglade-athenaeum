@@ -1078,12 +1078,32 @@ class GenerateTab(QWidget):
         g.addLayout(r_neg)
 
         r_mod = QHBoxLayout()
-        r_mod.addWidget(QLabel("Model ID:"))
-        self.model = QLineEdit()
-        self.model.setPlaceholderText("blank = Tsubaki.2 (default)")
-        self.model.setText(settings.get("gen_model", ""))
-        r_mod.addWidget(self.model)
+        r_mod.addWidget(QLabel("Model:"))
+        self.model_combo = QComboBox()
+        self.model_combo.addItem("Default (Tsubaki.2)", "")
+        try:
+            from pixai_gallery import catalog_model_options
+            for name, mid in catalog_model_options(Path(self._bar.out) / "catalog.db"):
+                self.model_combo.addItem("{}  ({})".format(name, mid), mid)
+        except Exception:
+            pass
+        self.model_combo.setMinimumWidth(240)
+        self.model_combo.currentIndexChanged.connect(self._on_model_pick)
+        r_mod.addWidget(self.model_combo)
+        self.btn_model_search = QPushButton("Search PixAI…")
+        self.btn_model_search.setToolTip("Search PixAI's model catalog and pick one "
+                                         "(resolves the correct version id automatically)")
+        self.btn_model_search.clicked.connect(self._search_models)
+        r_mod.addWidget(self.btn_model_search)
         g.addLayout(r_mod)
+
+        r_mid = QHBoxLayout()
+        r_mid.addWidget(QLabel("Model ID:"))
+        self.model = QLineEdit()
+        self.model.setPlaceholderText("blank = Tsubaki.2 (default) — or pick/search above, or paste an id")
+        self.model.setText(settings.get("gen_model", ""))
+        r_mid.addWidget(self.model)
+        g.addLayout(r_mid)
 
         r_dim = QHBoxLayout()
         # note: attr names are sp_* to avoid shadowing QWidget.width()/height()
@@ -1150,6 +1170,39 @@ class GenerateTab(QWidget):
             seed=seed, params_json="", confirm=self.confirm.isChecked(),
             poll_timeout=300, name_length=60, name_sep="_",
         )
+
+    def _on_model_pick(self):
+        mid = self.model_combo.currentData()
+        if mid is not None:
+            self.model.setText(mid)
+
+    def _search_models(self):
+        from PySide6.QtWidgets import QInputDialog
+        kw, ok = QInputDialog.getText(self, "Search PixAI models", "Keyword (e.g. anime, realistic, a model name):")
+        if not ok or not kw.strip():
+            return
+        self.btn_model_search.setEnabled(False)
+        try:
+            session = core._make_session(self._bar.token)
+            results = core.model_search_gql(session, kw.strip(), limit=25)
+        except Exception as e:                       # noqa: BLE001
+            self.log.append_line("[model search error] {}".format(e))
+            return
+        finally:
+            self.btn_model_search.setEnabled(True)
+        if not results:
+            self.log.append_line("No models found for '{}'.".format(kw))
+            return
+        labels = ["{}  [{}]{}  ->  {}".format(
+            m["title"][:48], m["type"], "  (NSFW)" if m["is_nsfw"] else "", m["version_id"])
+            for m in results]
+        choice, ok = QInputDialog.getItem(self, "Pick a model", "Results:", labels, 0, False)
+        if not ok:
+            return
+        m = results[labels.index(choice)]
+        self.model.setText(m["version_id"])
+        self.model_combo.setCurrentIndex(0)          # show it's a custom pick now
+        self.log.append_line("Model set: {}  ->  {}".format(m["title"][:40], m["version_id"]))
 
     def _run_generate(self):
         if self._worker and self._worker.isRunning():

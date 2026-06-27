@@ -440,6 +440,23 @@ def unique_models(db_path):
         con.close()
 
 
+def catalog_model_options(db_path):
+    """Return [(name, model_id)] for distinct models in the catalog, most-used
+    first. model_id is the version id used in real generations, so it's a valid,
+    guaranteed-working value for --generate's --model -- the basis of the model
+    picker dropdown."""
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT COALESCE(NULLIF(model_name,''), model_id) AS nm, model_id, COUNT(*) c "
+            "FROM catalog WHERE COALESCE(model_id,'') != '' AND model_id GLOB '[0-9]*' "
+            "GROUP BY model_id ORDER BY c DESC"
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+    finally:
+        con.close()
+
+
 def backfill_batches(out_dir, db_path):
     """Scan batches/ on disk and populate the batch column for already-organized images.
 
@@ -999,6 +1016,9 @@ def create_app(out_dir: Path):
   .card a.cover { position: absolute; inset: 0; z-index: 1; }
   .card .cb-wrap { z-index: 2; }
   .card .vbadge { position: absolute; top: 6px; right: 6px; z-index: 2; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 20px; pointer-events: none; }
+  .card .sbadge { position: absolute; top: 6px; left: 30px; z-index: 2; font-size: 10px; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 4px; pointer-events: none; letter-spacing: .03em; }
+  .card .sbadge.gen { background: var(--mauve, #cba6f7); color: #1e1e2e; }
+  .card .sbadge.loc { background: var(--teal, #94e2d5); color: #1e1e2e; }
 
   /* Pagination */
   .pagination { display: flex; justify-content: center; gap: 6px; padding: 20px; flex-wrap: wrap; }
@@ -1313,6 +1333,8 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="no-thumb">no preview</div>
       {% endif %}
       {% if row.is_video == '1' %}<div class="vbadge" title="Video">▶</div>{% endif %}
+      {% if row.source == 'api' %}<div class="sbadge gen" title="Generated via PixAI">AI</div>
+      {% elif row.source == 'local' %}<div class="sbadge loc" title="Imported local file">local</div>{% endif %}
       <div class="meta">
         {% if row.title %}<div class="title" title="{{ row.title }}">{{ row.title }}</div>{% endif %}
         <div class="model">{{ row.model_name or row.model_id or '—' }}</div>

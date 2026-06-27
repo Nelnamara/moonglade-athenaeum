@@ -834,6 +834,49 @@ def video_outputs(task):
     return outs, shared
 
 
+def model_search_gql(session, keyword="", limit=15):
+    """Search PixAI generation models by keyword via the `generationModels`
+    connection. Returns a list of {title, type, model_id, version_id}.
+
+    IMPORTANT: createGenerationTask's `modelId` wants the *version* id, not the
+    model id. The search node's `id` is the MODEL id (which generation rejects);
+    `latestVersion.id` is the generatable version id. So we surface version_id as
+    the value to feed into --generate."""
+    q = ("query($k:String,$n:Int){ generationModels(keyword:$k, first:$n){ "
+         "edges { node { id title type isNsfw latestVersion { id } } } } }")
+    data = gql_adhoc(session, q, {"k": keyword, "n": limit})
+    out = []
+    for e in (data.get("generationModels") or {}).get("edges") or []:
+        n = e.get("node") or {}
+        out.append({
+            "title": n.get("title") or "",
+            "type": n.get("type") or "",
+            "is_nsfw": bool(n.get("isNsfw")),
+            "model_id": str(n.get("id") or ""),
+            "version_id": str((n.get("latestVersion") or {}).get("id") or ""),
+        })
+    return out
+
+
+def run_list_models(args):
+    """CLI: search PixAI models and print name / type / generatable version id."""
+    session = _make_session(getattr(args, "token", None))
+    kw = getattr(args, "list_models", "") or ""
+    results = model_search_gql(session, kw, limit=getattr(args, "max", 0) or 25)
+    if not results:
+        print("No models found for '{}'.".format(kw))
+        return
+    enc = (sys.stdout.encoding or "utf-8")
+
+    def _safe(t):                       # Windows consoles are often cp1252
+        return t.encode(enc, "replace").decode(enc, "replace")
+    print("{:<40} {:<14} version id (use as --model)".format("model", "type"))
+    for m in results:
+        tag = " [NSFW]" if m["is_nsfw"] else ""
+        print("{:<40} {:<14} {}{}".format(
+            _safe(m["title"][:40]), m["type"][:14], m["version_id"], tag))
+
+
 def model_name_gql(session, model_version_id, _cache={}):
     """GET getGenerationModelByVersionId; result cached by ID (few unique models)."""
     if not model_version_id:
@@ -3322,6 +3365,9 @@ def main():
     gen.add_argument("--poll-timeout", type=int, default=300)
     gen.add_argument("--confirm", action="store_true",
                      help="REQUIRED for --generate to actually submit (spends credits)")
+    gen.add_argument("--list-models", nargs="?", const="", default=None, metavar="KEYWORD",
+                     help="search PixAI generation models by keyword and print their "
+                          "generatable version ids (use as --model), then exit")
     ap.add_argument("--fix-model-names", action="store_true",
                     help="re-resolve readable model names for catalog rows whose model_name "
                          "is blank or a raw numeric id (one API call per distinct model), then exit")
@@ -3386,6 +3432,9 @@ def main():
             return
         if args.import_local is not None:
             run_import_local(args)
+            return
+        if args.list_models is not None:
+            run_list_models(args)
             return
         if args.generate:
             run_generate(args)

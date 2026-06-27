@@ -175,6 +175,33 @@ def test_media_type_filter(tmp_path):
     assert query_catalog(db, media_type="")[1] == 3  # all
 
 
+def test_catalog_model_options_most_used_first(tmp_path):
+    from pixai_gallery import catalog_model_options
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="1", filename="a.png", model_name="Tsubaki", model_id="111"),
+        _row(media_id="2", filename="b.png", model_name="Tsubaki", model_id="111"),
+        _row(media_id="3", filename="c.png", model_name="Dreamix", model_id="222"),
+    ])
+    opts = catalog_model_options(db)
+    assert opts[0] == ("Tsubaki", "111")           # most-used first
+    assert ("Dreamix", "222") in opts
+
+
+def test_source_badges_render(tmp_path):
+    from pixai_gallery import create_app
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="g1", filename="a.png", source="api"),
+        _row(media_id="l1", filename="b.png", source="local"),
+    ])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a.png").write_bytes(b"x")
+    (tmp_path / "images" / "b.png").write_bytes(b"x")
+    data = create_app(tmp_path).test_client().get("/").data
+    assert b"sbadge gen" in data and b"sbadge loc" in data
+
+
 def test_source_filter(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [
