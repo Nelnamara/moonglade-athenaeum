@@ -55,6 +55,12 @@ CATALOG_FIELDS = [
     # Image-to-video tasks (--sync-videos): is_video='1', poster_media_id is the
     # still-frame media id (its image is the gallery poster), duration in seconds.
     "is_video", "poster_media_id", "video_duration",
+    # Provenance: '' / 'online' = backed up from PixAI history; 'api' = created via
+    # --generate; 'local' = imported from disk via --import-local.
+    "source",
+    # '1' if --reconcile-deleted found this row's task is gone from your live PixAI
+    # feed (i.e. you deleted it on the website). Advisory; cleared on re-reconcile.
+    "deleted_remote",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -97,7 +103,9 @@ CREATE TABLE IF NOT EXISTS catalog (
     clip_skip       TEXT DEFAULT '',
     is_video        TEXT DEFAULT '',
     poster_media_id TEXT DEFAULT '',
-    video_duration  TEXT DEFAULT ''
+    video_duration  TEXT DEFAULT '',
+    source          TEXT DEFAULT '',
+    deleted_remote  TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -151,6 +159,8 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN is_video TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN poster_media_id TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN video_duration TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN source TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN deleted_remote TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -328,7 +338,7 @@ def _like_pattern(term):
 
 
 def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
-                 published_only=False, art_tag="", lora="", media_type=""):
+                 published_only=False, art_tag="", lora="", media_type="", source=""):
     """Return (where_clause, params) for the common filter set."""
     clauses = ["filename != ''"]
     params  = []
@@ -336,6 +346,13 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         clauses.append("is_video = '1'")
     elif media_type == "image":
         clauses.append("COALESCE(is_video,'') != '1'")
+    if source == "online":
+        clauses.append("COALESCE(source,'') IN ('', 'online')")
+    elif source in ("api", "local"):
+        clauses.append("source = ?")
+        params.append(source)
+    elif source == "deleted":
+        clauses.append("deleted_remote = '1'")   # flagged by --reconcile-deleted
     if rating_min:
         clauses.append("CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) >= ?")
         params.append(int(rating_min))
@@ -381,10 +398,10 @@ def get_row(db_path, media_id):
 
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
                   sort="newest", page=1, page_size=100, batch="", rating_min=0,
-                  published_only=False, art_tag="", lora="", media_type=""):
+                  published_only=False, art_tag="", lora="", media_type="", source=""):
     """Return (rows, total) with filtering, sorting and pagination done in SQL."""
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
-                                 published_only, art_tag, lora, media_type)
+                                 published_only, art_tag, lora, media_type, source)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     offset = (max(1, page) - 1) * page_size
     con = _connect(db_path)
@@ -403,10 +420,10 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
 
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
-                   media_type=""):
+                   media_type="", source=""):
     """Return ordered list of media_ids matching the filter (no row data)."""
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
-                                 published_only, art_tag, lora, media_type)
+                                 published_only, art_tag, lora, media_type, source)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     con = _connect(db_path)
     try:
@@ -426,6 +443,23 @@ def unique_models(db_path):
             "SELECT DISTINCT model_name FROM catalog WHERE model_name != '' ORDER BY model_name"
         ).fetchall()
         return [r[0] for r in rows]
+    finally:
+        con.close()
+
+
+def catalog_model_options(db_path):
+    """Return [(name, model_id)] for distinct models in the catalog, most-used
+    first. model_id is the version id used in real generations, so it's a valid,
+    guaranteed-working value for --generate's --model -- the basis of the model
+    picker dropdown."""
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT COALESCE(NULLIF(model_name,''), model_id) AS nm, model_id, COUNT(*) c "
+            "FROM catalog WHERE COALESCE(model_id,'') != '' AND model_id GLOB '[0-9]*' "
+            "GROUP BY model_id ORDER BY c DESC"
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
     finally:
         con.close()
 
@@ -520,17 +554,24 @@ def collection_health(out_dir, db_path):
     total_files = 0
     total_bytes = 0
     on_disk_ids = set()
+    on_disk_rels = set()      # relative paths of every media file (incl. videos)
     locs = defaultdict(set)   # media_id -> set of bucket names (Class A dup detection)
     dup_redundant = 0
     dup_bytes = 0
     mid_sizes = defaultdict(list)  # media_id -> [sizes] to estimate reclaimable
+    _video_exts = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}
 
     for p in out_dir.rglob("*"):
-        if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
+        ext = p.suffix.lower()
+        is_img = ext in _IMAGE_EXTS
+        if (not is_img and ext not in _video_exts) or not p.is_file():
             continue
         if p.name.endswith(".part") or _under(p, gallery_dir) or _under(p, quarantine_dir):
             continue
         rel = p.relative_to(out_dir)
+        on_disk_rels.add(str(rel).replace("\\", "/"))
+        if not is_img:
+            continue          # videos: track the path only; skip image-centric stats
         top = str(rel).replace("\\", "/").split("/")[0]
         if top == "images":
             bucket = "images"
@@ -589,8 +630,8 @@ def collection_health(out_dir, db_path):
             "SELECT prompt_preview FROM catalog WHERE COALESCE(prompt_preview,'') != ''"
         ).fetchall()
         # catalog rows that claim a file but whose media_id isn't on disk
-        cat_ids = [r[0] for r in con.execute(
-            "SELECT media_id FROM catalog WHERE filename != ''").fetchall()]
+        cat_rows = con.execute(
+            "SELECT media_id, filename FROM catalog WHERE filename != ''").fetchall()
     finally:
         con.close()
 
@@ -623,7 +664,13 @@ def collection_health(out_dir, db_path):
                 word_counter[w] += 1
     top_words = word_counter.most_common(40)
 
-    missing = sum(1 for mid in cat_ids if mid and mid not in on_disk_ids)
+    # A row is "missing" only if NEITHER its media id is on disk (the PixAI
+    # naming path) NOR its filename resolves to a real file (the imported/local
+    # path, whose media_id is a synthetic local_<hash> that never matches a file).
+    missing = sum(
+        1 for mid, fn in cat_rows
+        if (not mid or mid not in on_disk_ids)
+        and (fn or "").replace("\\", "/") not in on_disk_rels)
 
     return {
         "total_files": total_files,
@@ -846,7 +893,7 @@ def create_app(out_dir: Path):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
 <meta name="theme-color" content="#0c0a1c">
-<title>PixAI Gallery</title>
+<title>Moonglade Athenaeum</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
@@ -861,8 +908,9 @@ def create_app(out_dir: Path):
     --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
     --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
     --blue:    #47cbc3; --sapphire:#3a8a93;
-    /* Accent system: purple leads, teal is the "magic" highlight, gold is rare. */
-    --accent:  #b692e6; --accent-soft:#47cbc3; --gold: #d4af37;
+    /* Moonglade Athenaeum palette: lavender leads, emerald is the "magic"
+       highlight (Nelnamara's gems), gold filigree is rare. */
+    --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
     --purple-deep: #33236d; --purple-bright: #643aac;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -880,7 +928,7 @@ def create_app(out_dir: Path):
   .filters { background: var(--mantle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--surface0); }
   .filters input, .filters select { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
   .filters input { width: 280px; }
-  .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(71,203,195,.25); }
+  .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(79,201,154,.25); }
   .filters label { color: var(--subtext); font-size: 12px; }
   .filter-toggle { display: none; }
   /* Mobile: collapse the filter bar behind a toggle so the grid leads. */
@@ -976,6 +1024,9 @@ def create_app(out_dir: Path):
   .card a.cover { position: absolute; inset: 0; z-index: 1; }
   .card .cb-wrap { z-index: 2; }
   .card .vbadge { position: absolute; top: 6px; right: 6px; z-index: 2; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 20px; pointer-events: none; }
+  .card .sbadge { position: absolute; top: 6px; left: 30px; z-index: 2; font-size: 10px; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 4px; pointer-events: none; letter-spacing: .03em; }
+  .card .sbadge.gen { background: var(--mauve, #cba6f7); color: #1e1e2e; }
+  .card .sbadge.loc { background: var(--teal, #94e2d5); color: #1e1e2e; }
 
   /* Pagination */
   .pagination { display: flex; justify-content: center; gap: 6px; padding: 20px; flex-wrap: wrap; }
@@ -1116,7 +1167,7 @@ document.addEventListener('DOMContentLoaded', function() {
   </select>
 {% endmacro %}
 <header>
-  <div class="brand"><span class="mark">P</span><h1>PixAI Gallery</h1></div>
+  <div class="brand"><span class="mark">M</span><h1>Moonglade Athenaeum</h1></div>
   <span class="header-stats">{{ '{:,}'.format(total) }} images</span>
   <a class="back-link" href="{{ url_for('health') }}" style="margin-left:auto;">Collection health →</a>
 </header>
@@ -1182,6 +1233,16 @@ document.addEventListener('DOMContentLoaded', function() {
     </select>
   </div>
   <div>
+    <label>Source</label><br>
+    <select name="source">
+      <option value="" {% if not source_filter %}selected{% endif %}>All</option>
+      <option value="online" {% if source_filter=='online' %}selected{% endif %}>PixAI history</option>
+      <option value="api" {% if source_filter=='api' %}selected{% endif %}>Generated</option>
+      <option value="local" {% if source_filter=='local' %}selected{% endif %}>Imported</option>
+      <option value="deleted" {% if source_filter=='deleted' %}selected{% endif %}>Deleted on PixAI</option>
+    </select>
+  </div>
+  <div>
     <label>&nbsp;</label><br>
     <label style="color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:6px;">
       <input type="checkbox" name="published" value="1" {% if published_only %}checked{% endif %}
@@ -1240,6 +1301,14 @@ document.addEventListener('DOMContentLoaded', function() {
 <div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--green);border-radius:4px;color:var(--text);font-size:13px;">
   Replaced text in {{ request.args.get('replaced') }} prompt(s).</div>
 {% endif %}
+{% if request.args.get('deleted') %}
+<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--red);border-radius:4px;color:var(--text);font-size:13px;">
+  Deleted {{ request.args.get('deleted') }} task(s) from PixAI · {{ request.args.get('removed') }} local file(s) purged{% if request.args.get('failed') and request.args.get('failed') != '0' %} · <span style="color:var(--red);">{{ request.args.get('failed') }} failed</span>{% endif %}.</div>
+{% endif %}
+{% if request.args.get('delerr') %}
+<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--red);border-radius:4px;color:var(--text);font-size:13px;">
+  Delete error: {{ request.args.get('delerr') }}</div>
+{% endif %}
 
 <div class="bulk-bar">
   <button class="btn" onclick="selectAll()">Select All (page)</button>
@@ -1252,7 +1321,10 @@ document.addEventListener('DOMContentLoaded', function() {
           title="Saved views"><option value="">Saved views…</option></select>
   <button class="btn" onclick="savePreset()" title="Save current filters as a named view">Save view</button>
   <button class="btn btn-danger" id="bulk-del-btn" style="display:none"
-    onclick="confirmBulkDelete()">Delete Selected</button>
+    onclick="confirmBulkDelete()" title="Remove from this local catalog only (keeps the cloud task)">Delete (local)</button>
+  <button class="btn btn-danger" id="bulk-del-cloud-btn" style="display:none"
+    onclick="confirmBulkDeleteCloud()"
+    title="Delete the whole TASK from your PixAI account AND locally (irreversible)">Delete from PixAI</button>
   <span style="margin-left:auto;color:var(--overlay0);font-size:12px;">tip: click an image to open the lightbox · arrow keys to browse · F for slideshow</span>
 </div>
 
@@ -1281,6 +1353,8 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="no-thumb">no preview</div>
       {% endif %}
       {% if row.is_video == '1' %}<div class="vbadge" title="Video">▶</div>{% endif %}
+      {% if row.source == 'api' %}<div class="sbadge gen" title="Generated via PixAI">AI</div>
+      {% elif row.source == 'local' %}<div class="sbadge loc" title="Imported local file">local</div>{% endif %}
       <div class="meta">
         {% if row.title %}<div class="title" title="{{ row.title }}">{{ row.title }}</div>{% endif %}
         <div class="model">{{ row.model_name or row.model_id or '—' }}</div>
@@ -1407,6 +1481,8 @@ function refreshSelUI() {
   document.getElementById('bulk-zip-btn').style.display = sel.size ? 'inline-block' : 'none';
   var rb = document.getElementById('bulk-replace-btn');
   if (rb) rb.style.display = sel.size ? 'inline-block' : 'none';
+  var cb = document.getElementById('bulk-del-cloud-btn');
+  if (cb) cb.style.display = sel.size ? 'inline-block' : 'none';
 }
 function onCheck() {
   var sel = selGet();
@@ -1464,6 +1540,22 @@ function confirmBulkDelete() {
     bf.submit(); return false;
   };
   document.getElementById('del-modal-form').action = '#';
+}
+function confirmBulkDeleteCloud() {
+  var ids = [...selGet()];
+  if (!ids.length) return;
+  if (!confirm('Delete ' + ids.length + ' selected image(s) from your PixAI account AND locally?\n\n'
+    + '⚠ This deletes the whole TASK for each selection (all images in a batch), '
+    + 'from the cloud AND your backup. It is IRREVERSIBLE.')) return;
+  var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
+  if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+  var f = document.createElement('form');
+  f.method = 'post'; f.action = '/delete-tasks-bulk';
+  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
+  add('back', location.href);
+  ids.forEach(function(mid){ add('media_ids', mid); });
+  localStorage.removeItem('gallery_sel');
+  document.body.appendChild(f); f.submit();
 }
 
 /* ---- Lightbox + keyboard navigation ---- */
@@ -1754,7 +1846,7 @@ function savePrompt() {
 </div>
 {% endmacro %}
 <header>
-  <div class="brand"><span class="mark">P</span><h1>Collection Health</h1></div>
+  <div class="brand"><span class="mark">M</span><h1>Collection Health</h1></div>
   <a class="back-link" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 
@@ -1856,7 +1948,7 @@ function savePrompt() {
 
     DUPES_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <header>
-  <div class="brand"><span class="mark">P</span><h1>Duplicate Review</h1></div>
+  <div class="brand"><span class="mark">M</span><h1>Duplicate Review</h1></div>
   <a class="back-link" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 <div style="padding:10px 20px 28px;max-width:1100px;">
@@ -1957,6 +2049,9 @@ function savePrompt() {
         media_type = request.args.get("media", "")
         if media_type not in ("image", "video"):
             media_type = ""
+        source = request.args.get("source", "")
+        if source not in ("online", "api", "local", "deleted"):
+            source = ""
 
         models  = unique_models(db_path)
         batches = unique_batches(db_path)
@@ -1965,7 +2060,7 @@ function savePrompt() {
             db_path, q, model_filter, date_from, date_to, sort, page, per_page,
             batch=batch_filter, rating_min=rating_min,
             published_only=published_only, art_tag=art_tag, lora=lora_filter,
-            media_type=media_type,
+            media_type=media_type, source=source,
         )
         total_pages = max(1, (total + per_page - 1) // per_page)
         page = max(1, min(page, total_pages))
@@ -2015,11 +2110,13 @@ function savePrompt() {
             chips.append({"k": "lora", "v": lora_filter, "url": _without("lora")})
         if media_type:
             chips.append({"k": "media", "v": media_type + "s", "url": _without("media")})
+        if source:
+            chips.append({"k": "source", "v": source, "url": _without("source")})
 
         return render_template_string(
             INDEX_HTML,
             chips=chips, published_only=published_only, art_tag=art_tag,
-            lora_filter=lora_filter, media_type=media_type,
+            lora_filter=lora_filter, media_type=media_type, source_filter=source,
             rows=page_rows, total=total, page=page,
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
@@ -2066,7 +2163,7 @@ function savePrompt() {
             date_from=_ym("from", "01"), date_to=_ym("to", "12"),
             sort=_qs1("sort", "newest"), batch=_qs1("batch"), rating_min=_rmin,
             published_only=(_qs1("published") == "1"), art_tag=_qs1("tag"),
-            lora=_qs1("lora"), media_type=_qs1("media"),
+            lora=_qs1("lora"), media_type=_qs1("media"), source=_qs1("source"),
         )
         try:
             idx = nav_ids.index(media_id)
@@ -2121,6 +2218,82 @@ function savePrompt() {
             delete_from_catalog(db_path, mid)
 
         return redirect(back)
+
+    def _purge_local(media_id, filename):
+        """Remove a media's file, thumbnail, and catalog row locally."""
+        img = find_image_file(out_dir, media_id, filename)
+        if img and img.exists():
+            try:
+                img.unlink()
+            except OSError:
+                pass
+        tp = thumb_dir / "{}.jpg".format(media_id)
+        if tp.exists():
+            try:
+                tp.unlink()
+            except OSError:
+                pass
+        delete_from_catalog(db_path, media_id)
+
+    @app.route("/delete-tasks-bulk", methods=["POST"])
+    def delete_tasks_bulk():
+        """Delete the selected images' TASKS from PixAI (irreversible) AND purge
+        them locally, so cloud and catalog never drift. Task-level: deleting any
+        image deletes its whole task (all batch images), cloud + local. Imports
+        with no task id are purged locally only."""
+        import urllib.parse
+        import pixai_gallery_backup as core   # lazy: avoid import cycle
+        back = request.form.get("back") or url_for("index")
+        sel = request.form.getlist("media_ids")
+        if not sel:
+            return redirect(back)
+
+        con = _connect(db_path)
+        try:
+            sel_rows = [con.execute(
+                "SELECT media_id, task_id, filename FROM catalog WHERE media_id=?", (m,)
+            ).fetchone() for m in sel]
+        finally:
+            con.close()
+        sel_rows = [dict(r) for r in sel_rows if r]
+        task_ids = sorted({(r.get("task_id") or "").strip()
+                           for r in sel_rows if (r.get("task_id") or "").strip()})
+        local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
+
+        def _err(msg):
+            sep = "&" if "?" in back else "?"
+            return redirect("{}{}delerr={}".format(back, sep, urllib.parse.quote(msg[:160])))
+
+        deleted = failed = removed = 0
+        if task_ids:
+            try:
+                session = core._make_session(None)
+            except core.PixAIError as e:
+                return _err(str(e))
+            for tid in task_ids:
+                try:
+                    core.delete_task_gql(session, tid)   # cloud delete (irreversible)
+                except Exception:                        # noqa: BLE001
+                    failed += 1
+                    continue
+                deleted += 1
+                con = _connect(db_path)
+                try:
+                    media = con.execute(
+                        "SELECT media_id, filename FROM catalog WHERE task_id=?", (tid,)
+                    ).fetchall()
+                finally:
+                    con.close()
+                for m in media:
+                    _purge_local(m[0], m[1])
+                    removed += 1
+        for r in local_only:
+            _purge_local(r["media_id"], r.get("filename"))
+            removed += 1
+
+        sep = "&" if "?" in back else "?"
+        return redirect("{}{}deleted={}&failed={}&removed={}".format(
+            back, sep, deleted, failed, removed))
 
     @app.route("/rate/<media_id>", methods=["POST"])
     def rate(media_id):
@@ -2187,7 +2360,7 @@ function savePrompt() {
                 "fill='%23d4af37'/%3E%3C/svg%3E")
         return app.response_class(
             json.dumps({
-                "name": "PixAI Gallery", "short_name": "PixAI",
+                "name": "Moonglade Athenaeum", "short_name": "Moonglade",
                 "start_url": "/", "display": "standalone",
                 "background_color": "#0c0a1c", "theme_color": "#0c0a1c",
                 "icons": [{"src": icon, "sizes": "any", "type": "image/svg+xml"}],

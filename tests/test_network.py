@@ -471,3 +471,37 @@ def test_progress_counter_does_not_double_count(tmp_path, mocker):
     total = seen[-1][1]
     assert max_done <= total          # never overshoots the denominator
     assert max_done == 2              # two items walked, counted once each
+
+
+# ---------------------------------------------------------------------------
+# gql_adhoc + account_info (ad-hoc GraphQL path -- no persisted hash)
+# ---------------------------------------------------------------------------
+
+def test_gql_adhoc_returns_data(mocker):
+    sess = mocker.MagicMock()
+    sess.post.return_value = _make_response(mocker, 200, {"data": {"me": {"id": "1"}}})
+    assert core.gql_adhoc(sess, "query{ me { id } }") == {"me": {"id": "1"}}
+
+
+def test_gql_adhoc_raises_on_graphql_error(mocker):
+    sess = mocker.MagicMock()
+    sess.post.return_value = _make_response(mocker, 200, {"errors": [{"message": "nope"}]})
+    with pytest.raises(core.PixAIError):
+        core.gql_adhoc(sess, "query{ bad }")
+
+
+def test_account_info_parses_me(mocker):
+    mocker.patch.object(core, "gql_adhoc", return_value={"me": {
+        "id": "42", "quotaAmount": 21290,
+        "membership": {"membershipId": "membership-plus", "tier": 2,
+                       "privilege": {"dailyClaimAdded": 10000, "professionalMode": True}},
+        "subscription": {"planId": "membership-plus", "status": "active",
+                         "cancelAtPeriodEnd": True, "endAt": "2026-07-08T00:00:00Z"}}})
+    me = core.account_info(mocker.MagicMock())
+    assert me["quotaAmount"] == 21290
+    assert me["membership"]["membershipId"] == "membership-plus"
+
+
+def test_account_info_empty_on_error(mocker):
+    mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("boom"))
+    assert core.account_info(mocker.MagicMock()) == {}

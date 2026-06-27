@@ -762,20 +762,51 @@ def delete_task_gql(session, task_id):
     return result
 
 
+def gql_adhoc(session, query, variables=None, retries=3):
+    """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full query
+    document. PixAI's endpoint accepts these under Bearer auth (the API key has
+    read+write scope), so NO persisted sha256Hash capture is needed -- this is the
+    generic foundation for every read/write op beyond the reverse-engineered
+    listing path. Returns the `data` dict; raises PixAIError on GraphQL/HTTP error.
+
+    Mutations must be POST (Apollo blocks them over GET); this always POSTs, so it
+    works for queries and mutations alike."""
+    body = {"query": query, "variables": variables or {}}
+    delay = 2.0
+    for attempt in range(retries + 1):
+        try:
+            r = session.post(API_URL, json=body, timeout=120)
+        except requests.exceptions.SSLError:
+            raise PixAIError(_ssl_help())
+        except requests.RequestException:
+            if attempt == retries:
+                raise
+            time.sleep(delay); delay *= 2; continue
+        if r.status_code == 401:
+            raise PixAIError("401 Unauthorized -- API key missing/expired.")
+        if r.status_code == 429 or r.status_code >= 500:
+            if attempt == retries:
+                r.raise_for_status()
+            time.sleep(delay); delay *= 2; continue
+        try:
+            data = r.json()
+        except ValueError:
+            raise PixAIError("HTTP {} non-JSON response:\n{}".format(r.status_code, r.text[:400]))
+        if data.get("errors"):
+            raise PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
+        return data.get("data") or {}
+    raise RuntimeError("unreachable")
+
+
 def media_file_gql(session, media_id):
     """Resolve a VIDEO media's actual file URL. The REST /v1/media endpoint
     returns an empty urls[] for videos; the GraphQL `media` object carries the
-    real mp4 in `fileUrl`. Uses an ad-hoc (non-persisted) query, which the API
-    key authenticates as Bearer. Returns {'fileUrl','type','duration'} or {}."""
+    real mp4 in `fileUrl`. Returns {'fileUrl','type','duration'} or {}."""
     query = ("query($id:String!){ media(id:$id){ id type duration fileUrl "
              "hlsUrl size } }")
     try:
-        r = session.post(API_URL, json={"query": query, "variables": {"id": str(media_id)}},
-                         timeout=60)
-        if r.status_code != 200:
-            return {}
-        return (r.json().get("data") or {}).get("media") or {}
-    except (requests.RequestException, ValueError):
+        return (gql_adhoc(session, query, {"id": str(media_id)}) or {}).get("media") or {}
+    except PixAIError:
         return {}
 
 
@@ -801,6 +832,63 @@ def video_outputs(task):
                 "seed": str(v.get("seed") or ""),
             })
     return outs, shared
+
+
+def model_search_gql(session, keyword="", limit=15, base_only=False, lora_only=False):
+    """Search PixAI generation models by keyword via the `generationModels`
+    connection. Returns a list of {title, type, model_id, version_id}.
+
+    IMPORTANT: createGenerationTask's `modelId` wants the *version* id, not the
+    model id. The search node's `id` is the MODEL id (which generation rejects);
+    `latestVersion.id` is the generatable version id. So we surface version_id as
+    the value to feed into --generate.
+
+    base_only=True drops LoRA / video types -- a LoRA can't be the BASE model
+    (generation fails), so the base-model picker filters them out. LoRAs belong in
+    the separate LoRA picker."""
+    q = ("query($k:String,$n:Int){ generationModels(keyword:$k, first:$n){ "
+         "edges { node { id title type isNsfw latestVersion { id } } } } }")
+    data = gql_adhoc(session, q, {"k": keyword, "n": limit})
+    out = []
+    for e in (data.get("generationModels") or {}).get("edges") or []:
+        n = e.get("node") or {}
+        mtype = (n.get("type") or "").upper()
+        if base_only and ("LORA" in mtype or "VIDEO" in mtype):
+            continue
+        if lora_only and "LORA" not in mtype:
+            continue
+        out.append({
+            "title": n.get("title") or "",
+            "type": n.get("type") or "",
+            "is_nsfw": bool(n.get("isNsfw")),
+            "model_id": str(n.get("id") or ""),
+            "version_id": str((n.get("latestVersion") or {}).get("id") or ""),
+        })
+    return out
+
+
+def is_lora_type(model_type):
+    """True if a model type is a LoRA (can't be used as a base model)."""
+    return "LORA" in (model_type or "").upper()
+
+
+def run_list_models(args):
+    """CLI: search PixAI models and print name / type / generatable version id."""
+    session = _make_session(getattr(args, "token", None))
+    kw = getattr(args, "list_models", "") or ""
+    results = model_search_gql(session, kw, limit=getattr(args, "max", 0) or 25)
+    if not results:
+        print("No models found for '{}'.".format(kw))
+        return
+    enc = (sys.stdout.encoding or "utf-8")
+
+    def _safe(t):                       # Windows consoles are often cp1252
+        return t.encode(enc, "replace").decode(enc, "replace")
+    print("{:<40} {:<14} version id (use as --model)".format("model", "type"))
+    for m in results:
+        tag = " [NSFW]" if m["is_nsfw"] else ""
+        print("{:<40} {:<14} {}{}".format(
+            _safe(m["title"][:40]), m["type"][:14], m["version_id"], tag))
 
 
 def model_name_gql(session, model_version_id, _cache={}):
@@ -1350,105 +1438,111 @@ def reconcile_catalog_with_disk(out_dir, db_path):
     return updated
 
 
-def cmd_organize(args, out, img_dir, db_path):
-    """Reorganize already-downloaded files into batch/ and YYYY-MM/ folders using
-    the catalog. Embeds prompt metadata, optionally converts, writes per-folder
-    info files. Idempotent (only touches flat files in images/) and dry-runnable."""
-    db_path = _ensure_db(out)
-    if not img_dir.exists():
-        raise PixAIError("No images folder at {}.".format(img_dir))
+ORGANIZE_MANIFEST = "organize_manifest.csv"
 
-    # catalog: media_id -> row, and task_id -> [media_ids]
-    meta_by_mid, mids_by_task = {}, defaultdict(list)
+
+def cmd_organize(args, out, img_dir, db_path):
+    """Normalize PixAI images into YYYY-MM/ month folders with descriptive,
+    readable filenames (prompt_taskid_mediaid) -- one flat scheme, NO batch
+    subfolders. Scans the WHOLE backup (flat images/, existing month folders, and
+    any legacy batches/), so a single run brings everything to the same layout for
+    easy Explorer browsing.
+
+    Safety: writes a reversible move-manifest (organize_manifest.csv: old->new) so
+    every move can be undone with --undo-organize. Idempotent (files already at
+    their target are skipped), byte-safe (never overwrites a differing file), and
+    dry-runnable. Metadata embedding (--embed-metadata) and conversion (--convert)
+    are opt-in. Imported (source='local') files and videos are left untouched."""
+    db_path = _ensure_db(out)
+    meta_by_mid = {}
     for row in load_catalog(db_path):
         mid = row.get("media_id")
-        if not mid:
-            continue
-        meta_by_mid[mid] = row
-        mids_by_task[row.get("task_id", "")].append(mid)
+        if mid:
+            meta_by_mid[mid] = row
 
-    # Sources = flat files in images/ only, so re-runs are idempotent (already
-    # organized files live in sibling folders and are left alone).
-    src_by_mid = {}
-    for p in sorted(img_dir.glob("*.*")):
+    skip_dirs = (out / "gallery", out / "_duplicates", out / "videos", out / "imported")
+
+    def _target(mid, row, ext):
+        month = (row.get("created_at") or "")[:7] or "unknown-date"
+        stem = build_stem_name(row.get("prompt_preview", ""), row.get("task_id", ""),
+                               mid, args.name_length, args.name_sep)
+        return out / month / (stem + ext)
+
+    # Sources: every PixAI image on disk (catalog media), wherever it currently is.
+    plan, in_place = [], 0
+    for p in out.rglob("*"):
+        if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS:
+            continue
         if p.name.endswith(".part") or p.name.startswith("_"):
             continue
-        src_by_mid.setdefault(p.stem.split("_")[-1], p)
+        if any(_under(p, d) for d in skip_dirs):
+            continue
+        row = meta_by_mid.get(media_id_of(p))
+        if not row or (row.get("source") or "") == "local":
+            continue                       # unknown file or user import: leave it
+        dst = _target(media_id_of(p), row, p.suffix.lower())
+        if p.resolve() == dst.resolve():
+            in_place += 1
+            continue
+        plan.append((p, dst, media_id_of(p), row))
 
-    batches_root = out / "batches"
-    moved = converted = embedded = skipped = missing = 0
-    month_index = defaultdict(list)   # "YYYY-MM" -> list of row dicts for index csv
-    batch_txt = {}                    # folder -> info text
-
-    plan = []  # (src, dst, is_batch, mid)
-    for tid, mids in mids_by_task.items():
-        distinct = list(dict.fromkeys(mids))
-        is_batch = len(distinct) > 1
-        for idx, mid in enumerate(sorted(distinct)):
-            src = src_by_mid.get(mid)
-            if not src:
-                continue  # not on disk as a flat file (already organized or never got)
-            row = meta_by_mid.get(mid, {})
-            ext = src.suffix.lower()
-            if is_batch:
-                folder = batches_root / build_stem_name(
-                    row.get("prompt_preview", ""), tid, "", args.name_length, args.name_sep)
-                dst = folder / "{:02d}_{}{}".format(idx + 1, mid, ext)
-            else:
-                month = (row.get("created_at") or "")[:7] or "unknown-date"
-                folder = out / month
-                dst = folder / (mid + ext)
-            plan.append((src, dst, is_batch, mid, row))
-
-    print("Organize plan: {} flat files to sort ({} not found on disk are skipped)."
-          .format(len(plan), sum(1 for m in meta_by_mid if m not in src_by_mid)))
-    for src, dst, is_b, mid, row in plan[:6]:
-        print("  {}  ->  {}".format(src.name, dst.relative_to(out)))
+    print("Organize plan: {} file(s) -> YYYY-MM/ with descriptive names; "
+          "{} already in place.".format(len(plan), in_place))
+    for src, dst, mid, row in plan[:6]:
+        print("  {}  ->  {}".format(src.relative_to(out), dst.relative_to(out)))
     if len(plan) > 6:
         print("  ... and {} more".format(len(plan) - 6))
     if args.convert:
-        print("Will also convert to {} ({}).".format(
-            args.convert, "keeping .webp" if args.keep_webp else "replacing .webp"))
-    print("Will embed prompt metadata into PNG/JPEG files (WebP skipped).")
+        print("Will also convert to {}.".format(args.convert))
+    if getattr(args, "embed_metadata", False):
+        print("Will embed prompt metadata into PNG/JPEG (WebP skipped).")
 
     if args.dry_run:
         print("\nDry run -- nothing moved. Re-run without --dry-run to apply.")
         return
+    if not plan:
+        print("Nothing to do -- everything already organized.")
+        return
 
-    catalog_updates = {}  # media_id -> (new filename, batch name)
+    manifest_path = out / ORGANIZE_MANIFEST
+    mf_new = not manifest_path.exists()
+    mf = open(manifest_path, "a", newline="", encoding="utf-8")
+    mw = csv.writer(mf)
+    if mf_new:
+        mw.writerow(["old_path", "new_path", "ts"])
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    moved = converted = embedded = skipped = deduped = 0
+    catalog_updates = {}                   # media_id -> new basename
+    month_index = defaultdict(list)
     _prog = getattr(args, "progress", None)
-    deduped = 0  # redundant flat sources removed because dst already holds the same bytes
 
-    for n, (src, dst, is_batch, mid, row) in enumerate(plan):
+    for n, (src, dst, mid, row) in enumerate(plan):
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists() and dst.resolve() != src.resolve():
-            # The organized copy already exists. Historically we left `src` in
-            # images/ here, which is exactly what produced the images/+month
-            # duplication. If src is byte-identical to the existing dst, the flat
-            # copy is pure redundancy -> remove it. If they differ, leave both
-            # untouched and report so nothing is lost.
+            # Target already holds this media. Byte-identical -> drop the redundant
+            # source (this is the INVARIANT-7 protection). Differ -> keep both.
             if _same_bytes(src, dst):
                 try:
-                    src.unlink()
-                    deduped += 1
-                except OSError as e:
-                    print("  could not remove redundant flat copy {} ({})".format(src.name, e))
+                    src.unlink(); deduped += 1
+                except OSError:
+                    pass
             else:
-                print("  KEPT both (differ): {} vs existing {}".format(
-                    src.name, dst.relative_to(out)))
+                print("  KEPT both (differ): {} vs {}".format(src.name, dst.relative_to(out)))
             skipped += 1
             final = dst
         else:
             try:
                 src.replace(dst)
+                mw.writerow([str(src.relative_to(out)).replace("\\", "/"),
+                             str(dst.relative_to(out)).replace("\\", "/"), ts])
+                mf.flush()
                 moved += 1
                 final = dst
-                batch_name = final.parent.parent.name if is_batch else ""
-                catalog_updates[mid] = (final.name, batch_name)
+                catalog_updates[mid] = final.name
             except OSError as e:
                 print("  move failed {} ({})".format(src.name, e))
                 continue
-        # optional convert (replaces extension; updates final path)
         if args.convert:
             final, note = convert_image(final, args.convert, args.jpeg_quality,
                                         args.jpeg_bg, keep_original=args.keep_webp)
@@ -1456,61 +1550,30 @@ def cmd_organize(args, out, img_dir, db_path):
                 raise PixAIError("--convert needs Pillow:  pip install pillow")
             if note == "ok":
                 converted += 1
-        # embed metadata
-        fields = {
-            "prompt": row.get("prompt_preview", ""),
-            "task_id": row.get("task_id", ""),
-            "media_id": mid,
-            "width": row.get("width", ""),
-            "height": row.get("height", ""),
-            "created_at": row.get("created_at", ""),
-            "status": row.get("status", ""),
-            "source": "PixAI",
-        }
-        note = embed_metadata(final, fields)
-        if note == "ok":
-            embedded += 1
-        elif note == "pillow-missing":
-            print("  (install Pillow to embed metadata:  pip install pillow)")
-
-        if is_batch:
-            folder = final.parent
-            if folder not in batch_txt:
-                batch_txt[folder] = [
-                    "Prompt (preview): {}".format(row.get("prompt_preview", "")),
-                    "Task ID         : {}".format(row.get("task_id", "")),
-                    "Created         : {}".format(row.get("created_at", "")),
-                    "Status          : {}".format(row.get("status", "")),
-                    "Source          : PixAI",
-                    "", "Images in this batch:",
-                ]
-            batch_txt[folder].append("  {}  ({}x{})".format(
-                final.name, row.get("width", "?"), row.get("height", "?")))
-        else:
-            month = final.parent.name
-            month_index[month].append({
-                "filename": final.name, "media_id": mid,
-                "task_id": row.get("task_id", ""),
-                "prompt_preview": row.get("prompt_preview", ""),
-                "width": row.get("width", ""), "height": row.get("height", ""),
-                "created_at": row.get("created_at", ""),
-                "status": row.get("status", ""),
-            })
+            catalog_updates[mid] = final.name
+        if getattr(args, "embed_metadata", False):
+            note = embed_metadata(final, {
+                "prompt": row.get("prompt_preview", ""), "task_id": row.get("task_id", ""),
+                "media_id": mid, "width": row.get("width", ""), "height": row.get("height", ""),
+                "created_at": row.get("created_at", ""), "status": row.get("status", ""),
+                "source": "PixAI"})
+            if note == "ok":
+                embedded += 1
+        month_index[final.parent.name].append({
+            "filename": final.name, "media_id": mid, "task_id": row.get("task_id", ""),
+            "prompt_preview": row.get("prompt_preview", ""), "width": row.get("width", ""),
+            "height": row.get("height", ""), "created_at": row.get("created_at", ""),
+            "status": row.get("status", "")})
 
         if _prog:
             _prog(n + 1, len(plan), 0)
         else:
-            sys.stdout.write("\r  {:,}/{:,}  moved {:,}  skip {:,}  ".format(
-                n + 1, len(plan), moved, skipped))
+            sys.stdout.write("\r  {:,}/{:,}  moved {:,}  ".format(n + 1, len(plan), moved))
             sys.stdout.flush()
-
+    mf.close()
     if not _prog:
-        print()  # newline after \r output
+        print()
 
-    # write per-batch _prompt.txt
-    for folder, lines in batch_txt.items():
-        (folder / "_prompt.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    # write/append per-month _index.csv
     for month, entries in month_index.items():
         idx_path = out / month / "_index.csv"
         new = not idx_path.exists()
@@ -1523,24 +1586,80 @@ def cmd_organize(args, out, img_dir, db_path):
             for e in entries:
                 w.writerow(e)
 
-    # Update catalog filenames to reflect new locations
+    # Tidy up now-empty legacy batches/ folders (drop their _prompt.txt first).
+    batches_root = out / "batches"
+    if batches_root.exists():
+        for f in batches_root.rglob("_prompt.txt"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        for d in sorted([p for p in batches_root.rglob("*") if p.is_dir()],
+                        key=lambda p: len(p.parts), reverse=True):
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+        try:
+            batches_root.rmdir()
+        except OSError:
+            pass
+
     if catalog_updates:
         rows = load_catalog(db_path)
         for r in rows:
             if r["media_id"] in catalog_updates:
-                r["filename"], r["batch"] = catalog_updates[r["media_id"]]
+                r["filename"] = catalog_updates[r["media_id"]]
+                r["batch"] = ""            # batches are gone
         save_catalog(db_path, rows)
-        print("Updated {:,} catalog filename/batch entries.".format(len(catalog_updates)))
+        print("Updated {:,} catalog entries.".format(len(catalog_updates)))
 
-    print("\nOrganized: moved {}, already-in-place {}.".format(moved, skipped))
+    print("\nOrganized: moved {:,}, already-in-place {:,}.".format(moved, in_place))
     if deduped:
-        print("Removed {:,} redundant flat copies (byte-identical to the "
-              "organized version).".format(deduped))
+        print("Removed {:,} redundant byte-identical copies.".format(deduped))
     if args.convert:
-        print("Converted to {}: {}.".format(args.convert, converted))
-    print("Embedded metadata into {} images.".format(embedded))
-    print("Batch folders: {}   Month folders written with _index.csv.".format(
-        len(batch_txt)))
+        print("Converted to {}: {:,}.".format(args.convert, converted))
+    if embedded:
+        print("Embedded metadata into {:,} images.".format(embedded))
+    print("Reversible manifest: {}  (run --undo-organize to revert)".format(manifest_path))
+
+
+def cmd_undo_organize(args, out):
+    """Reverse the moves recorded in organize_manifest.csv (newest run first):
+    each new_path is moved back to its old_path. Safe (skips already-reverted),
+    then clears the manifest. Lets a re-normalize be undone if you don't like it."""
+    db_path = _ensure_db(out)
+    manifest_path = out / ORGANIZE_MANIFEST
+    if not manifest_path.exists():
+        print("No organize manifest found ({}); nothing to undo.".format(manifest_path))
+        return
+    with open(manifest_path, newline="", encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if r.get("new_path")]
+    print("Reverting {} recorded move(s)...".format(len(rows)))
+    if getattr(args, "dry_run", False):
+        for r in rows[:8]:
+            print("  {}  ->  {}".format(r["new_path"], r["old_path"]))
+        print("\nDry run -- nothing moved.")
+        return
+    reverted = miss = 0
+    for r in reversed(rows):               # undo newest first
+        new_p, old_p = out / r["new_path"], out / r["old_path"]
+        if old_p.exists() and not new_p.exists():
+            continue                       # already reverted
+        if not new_p.exists():
+            miss += 1
+            continue
+        old_p.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            new_p.replace(old_p)
+            reverted += 1
+        except OSError as e:
+            print("  revert failed {} ({})".format(new_p, e))
+    # The gallery resolves files by media id (find_files_for_media_id matches both
+    # naming layouts), so restored files still resolve without rewriting the
+    # catalog. Clear the manifest now that it's been applied.
+    manifest_path.unlink()
+    print("Reverted {} file(s); {} already gone. Manifest cleared.".format(reverted, miss))
 
 
 # ---------------------------------------------------------------------------
@@ -1931,21 +2050,25 @@ def run_sync_videos(args):
     thumb_dir = out / "gallery" / "thumbs"
     poster_tmp = out / "gallery" / "_postertmp"
 
-    def _ensure_video_thumb(video_media_id, poster_media_id):
+    def _ensure_video_thumb(video_media_id, poster_media_id, video_path=None):
         thumb_path = thumb_dir / "{}.jpg".format(video_media_id)
-        if thumb_path.exists() or not poster_media_id:
+        if thumb_path.exists():
             return
-        url, _info = resolve_media(session, poster_media_id)
-        if not url:
-            return
-        poster_tmp.mkdir(parents=True, exist_ok=True)
-        status, path = download(session, url, poster_tmp / str(poster_media_id))
-        if status in ("ok", "skip") and path:
-            make_thumbnail(path, thumb_path)
-            try:
-                path.unlink()
-            except OSError:
-                pass
+        # Preferred: thumbnail the PixAI still-frame poster.
+        if poster_media_id:
+            url, _info = resolve_media(session, poster_media_id)
+            if url:
+                poster_tmp.mkdir(parents=True, exist_ok=True)
+                status, path = download(session, url, poster_tmp / str(poster_media_id))
+                if status in ("ok", "skip") and path:
+                    make_thumbnail(path, thumb_path)
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+        # Fallback (no poster, e.g. older i2v): first frame of the mp4 via ffmpeg.
+        if not thumb_path.exists() and video_path:
+            video_poster_thumb(video_path, thumb_path)
 
     # 2. Per task: getTaskById -> video outputs -> fileUrl -> download mp4.
     def _do_task(node):
@@ -1988,7 +2111,7 @@ def run_sync_videos(args):
                     "poster_media_id": o.get("poster_media_id", ""),
                     "video_duration": str(shared.get("duration") or ""),
                 })
-                _ensure_video_thumb(vmid, o.get("poster_media_id"))
+                _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
                 rows.append(full)
             else:
                 rows.append(status)
@@ -2009,6 +2132,369 @@ def run_sync_videos(args):
     print("Videos saved/present: {}{}.".format(
         ok, " | {} had no resolvable file url".format(missing) if missing else ""))
     return {"i2v_tasks": len(i2v_nodes), "videos": ok}
+
+
+_VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
+
+
+def _under(path, parent):
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _ffmpeg_path(_cache=[]):
+    """Return the ffmpeg executable path if available, else '' (cached)."""
+    if not _cache:
+        import shutil
+        _cache.append(shutil.which("ffmpeg") or "")
+    return _cache[0]
+
+
+def video_poster_thumb(video_path, thumb_path):
+    """Extract the first frame of a video via ffmpeg and write it as the gallery
+    thumbnail. OPTIONAL: returns False (no-op) if ffmpeg isn't on PATH, so videos
+    just fall back to the placeholder + play badge. Used for imported videos and
+    as a fallback for i2v videos with no still-frame poster."""
+    ff = _ffmpeg_path()
+    if not ff:
+        return False
+    import subprocess
+    import tempfile
+    from pixai_gallery import make_thumbnail
+    tmp = Path(tempfile.gettempdir()) / ("poster_{}.png".format(Path(thumb_path).stem))
+    try:
+        subprocess.run([ff, "-y", "-ss", "0.5", "-i", str(video_path),
+                        "-frames:v", "1", str(tmp)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
+    except Exception:                                # noqa: BLE001
+        return False
+    ok = tmp.exists() and tmp.stat().st_size > 0 and make_thumbnail(tmp, Path(thumb_path))
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+    return bool(ok)
+
+
+def run_import_local(args):
+    """Catalog non-PixAI media so it shows + plays in the gallery (source='local').
+
+    Two modes:
+      * No dir (or a dir already inside the backup): scan the backup folder and
+        catalog any image/video NOT already in the catalog -- i.e. files you
+        dropped into videos/ or anywhere under the backup.
+      * External dir: copy each media file into the backup (videos/ or imported/)
+        then catalog it.
+
+    Idempotent: files already cataloged (by relative path) are skipped, so it's
+    safe to re-run. Images get a gallery thumbnail; videos play via the catalog
+    filename (no still to thumbnail, so they show a placeholder + the video badge)."""
+    import hashlib
+    import shutil
+    from pixai_gallery import make_thumbnail
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)                  # import can seed a fresh, download-free backup
+    thumb_dir = out / "gallery" / "thumbs"
+    media_exts = _IMAGE_EXTS | _VIDEO_EXTS
+
+    raw = getattr(args, "import_local", None)
+    src = Path(raw) if raw else out
+    if not src.exists():
+        raise PixAIError("import path not found: {}".format(src))
+    try:
+        external = not _under(src.resolve(), out.resolve()) and src.resolve() != out.resolve()
+    except OSError:
+        external = False
+
+    _prog = getattr(args, "progress", None)
+    catalog_rows = load_catalog(db_path)
+    existing = {(r.get("filename") or "").replace("\\", "/")
+                for r in catalog_rows if r.get("filename")}
+    # Also key on media_id: an already-backed-up PixAI file is named after its
+    # media id, so media_id_of() of an organized file matches an existing row even
+    # though its on-disk path no longer equals the stored `filename` string. This
+    # is what stops --import-local from re-cataloging the whole backup as 'local'.
+    existing_mids = {r.get("media_id") for r in catalog_rows if r.get("media_id")}
+    gallery_dir = out / "gallery"
+    quarantine = out / "_duplicates"
+
+    print("Scanning {} for media (this can take a moment on a large backup)...".format(src),
+          flush=True)
+    candidates, scanned = [], 0
+    for p in src.rglob("*"):
+        scanned += 1
+        if scanned % 5000 == 0:
+            vlog("scanned {} files, {} media so far...".format(scanned, len(candidates)))
+        if p.is_file() and p.suffix.lower() in media_exts and not p.name.endswith(".part"):
+            candidates.append(p)
+    total = len(candidates)
+    print("Found {} media file(s) among {} scanned; cataloging new ones...".format(
+        total, scanned), flush=True)
+
+    rows, made, skipped = [], 0, 0
+    for idx, p in enumerate(candidates):
+        if _prog:
+            _prog(idx + 1, total, 0)
+        if not external and (_under(p, gallery_dir) or _under(p, quarantine)):
+            continue
+        is_vid = p.suffix.lower() in _VIDEO_EXTS
+        if external:
+            dest_dir = out / ("videos" if is_vid else "imported")
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / p.name
+            if not dest.exists():
+                shutil.copy2(p, dest)
+            stored = dest
+        else:
+            stored = p
+        rel = str(stored.relative_to(out)).replace("\\", "/")
+        if rel in existing or media_id_of(stored) in existing_mids:
+            skipped += 1                  # already cataloged (by path OR PixAI media id)
+            continue
+        mid = "local_" + hashlib.sha1(rel.encode("utf-8")).hexdigest()[:12]
+        try:
+            created = time.strftime("%Y-%m-%dT%H:%M:%S",
+                                    time.localtime(stored.stat().st_mtime))
+        except OSError:
+            created = ""
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "media_id": mid, "filename": rel, "source": "local",
+            "status": "imported", "created_at": created,
+            "prompt_preview": stored.stem[:100],
+            "is_video": "1" if is_vid else "",
+        })
+        rows.append(full)
+        if is_vid:
+            video_poster_thumb(stored, thumb_dir / "{}.jpg".format(mid))  # ffmpeg, optional
+        else:
+            make_thumbnail(stored, thumb_dir / "{}.jpg".format(mid))
+        made += 1
+        vlog("imported {} ({})".format(rel, "video" if is_vid else "image"))
+
+    if rows:
+        save_catalog(db_path, rows)
+    print("Imported {} new local file(s){}; {} already cataloged.".format(
+        made, " (copied into the backup)" if external else "", skipped))
+    return {"imported": made, "skipped": skipped}
+
+
+_GEN_MUTATION = ("mutation createGenerationTask($parameters: JSONObject!) {"
+                 " createGenerationTask(parameters: $parameters) { id } }")
+_GEN_STATUS = "query($id: ID!) { task(id: $id) { id status } }"
+DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
+
+
+def _lora_params(raw):
+    """Turn LoRA specs into createGenerationTask's two fields. `raw` is a list of
+    'versionId:weight' strings or (versionId, weight) tuples. Returns
+    ({versionId: weight}, [{weight, versionId}])."""
+    lora_map, lora_list = {}, []
+    for item in (raw or []):
+        if isinstance(item, (tuple, list)):
+            vid, w = str(item[0]).strip(), item[1]
+        else:
+            vid, _sep, ws = str(item).partition(":")
+            vid = vid.strip()
+            w = ws.strip()
+        if not vid:
+            continue
+        try:
+            w = float(w)
+        except (TypeError, ValueError):
+            w = 0.7
+        lora_map[vid] = w
+        lora_list.append({"weight": w, "versionId": vid})
+    return lora_map, lora_list
+
+
+def _gen_parameters(args):
+    if getattr(args, "params_json", ""):
+        return json.loads(args.params_json)
+    def _dim(v):                          # SD models require multiples of 8
+        return max(64, (int(v) // 8) * 8)
+    params = {
+        "prompts": args.prompt,
+        # naturalPrompts is the natural-language form the prompt-helper reads; send
+        # it alongside prompts (PixAI's generator does the same).
+        "naturalPrompts": args.prompt,
+        "modelId": args.model or DEFAULT_GEN_MODEL,
+        "width": _dim(args.width),
+        "height": _dim(args.height),
+        "samplingSteps": args.steps,
+        "cfgScale": args.cfg,
+        "batchSize": args.count,
+        # 1000 = high priority (faster, more credits); 500 = standard (cheaper).
+        # We default to standard so a run costs less unless high is requested.
+        "priority": getattr(args, "priority", 500) or 500,
+    }
+    # Quality mode (inferenceProfile) is MODEL-TYPE-SPECIFIC: SD_V1_MODEL accepts
+    # lite/standard but rejects pro/ultra (those are for newer model types). So we
+    # only send it when explicitly chosen; "auto"/"" omits it and lets PixAI pick
+    # the model's default (always safe -- this is the original working behavior).
+    mode = (getattr(args, "mode", "") or "").strip().lower()
+    if mode and mode != "auto":
+        params["inferenceProfile"] = mode
+    if getattr(args, "negative", ""):
+        params["negativePrompts"] = args.negative
+    if getattr(args, "seed", None) is not None:
+        params["seed"] = args.seed
+    # LoRAs: createGenerationTask wants BOTH a {versionId: weight} map and a
+    # [{weight, versionId}] array, keyed by the LoRA's version id.
+    lmap, llist = _lora_params(getattr(args, "lora", None))
+    if lmap:
+        params["lora"] = lmap
+        params["loraParameters"] = llist
+    # Prompt helper (auto-interprets/enhances the natural prompt). On by default to
+    # match the site; turn OFF when it mangles a carefully-built prompt.
+    if getattr(args, "prompt_helper", True):
+        params["promptHelper"] = {"withStage": True, "userWantToEnable": True,
+                                  "forcePromptHelperDetectionSide": "server"}
+    else:
+        params["promptHelper"] = {"withStage": False, "userWantToEnable": False,
+                                  "forcePromptHelperDetectionSide": "server"}
+    return params
+
+
+def run_generate(args):
+    """Create images via PixAI (createGenerationTask), poll to completion, download
+    the results into the backup, and catalog them as source='api'. GUARDED: without
+    --confirm it only prints a preview (spends no credits). Reuses gql_adhoc + the
+    shared session/download/catalog plumbing."""
+    out = Path(args.out)
+    params = _gen_parameters(args)
+    existing_task = (getattr(args, "task_id", "") or "").strip()
+
+    if not existing_task and not getattr(args, "confirm", False):
+        print("=== PixAI createGenerationTask (PREVIEW -- no credits spent) ===")
+        print(json.dumps({"parameters": params}, indent=2))
+        print("\nThis would SPEND PixAI credits. Re-run with --confirm to submit.")
+        return {"submitted": False}
+
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)                  # generation can seed a fresh backup
+    session = _make_session(getattr(args, "token", None))
+    thumb_dir = out / "gallery" / "thumbs"
+    from pixai_gallery import make_thumbnail
+
+    if existing_task:
+        # Recover an already-created generation by id (no new credits). Tool/API
+        # generations don't enter listUserTaskSummaries, so --update can't fetch
+        # them -- this is how you reclaim a stranded paid generation.
+        task_id = existing_task
+        print("Fetching existing task (no credits):", task_id)
+    else:
+        print("Submitting generation task...")
+        try:
+            created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        except PixAIError as e:
+            # inferenceProfile is model-type-specific; a rejected submit costs no
+            # credits, so if the chosen mode isn't supported, fall back to the
+            # model's default and retry once instead of failing the run.
+            if "inferenceProfile" in str(e) and "inferenceProfile" in params:
+                dropped = params.pop("inferenceProfile")
+                print("  mode '{}' not supported by this model; retrying on the "
+                      "model's default...".format(dropped))
+                created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+            else:
+                raise
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        print("  task id:", task_id)
+
+        deadline = time.time() + getattr(args, "poll_timeout", 300)
+        while time.time() < deadline:
+            task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
+            status = str(task.get("status", "")).lower()
+            vlog("generate poll: {}".format(status or "(unknown)"))
+            if status in ("completed", "succeeded", "success", "done"):
+                break
+            if status in ("failed", "error", "cancelled", "canceled"):
+                raise PixAIError("generation ended with status: " + status)
+            time.sleep(3)
+        else:
+            raise PixAIError("timed out after {}s (task {})".format(
+                getattr(args, "poll_timeout", 300), task_id))
+
+    # The Task type exposes its media under `outputs` (mediaId / batchMediaIds /
+    # videos), NOT at the top level. getTaskById returns that whole object and is
+    # already proven, so reuse it for the result rather than guessing an ad-hoc
+    # selection set.
+    result = task_detail_gql(session, task_id) or {}
+    outputs = result.get("outputs") or {}
+    mids = []
+    if outputs.get("mediaId"):
+        mids.append(str(outputs["mediaId"]))
+    for m in outputs.get("batchMediaIds") or []:
+        mids.append(str(m))
+    for v in outputs.get("videos") or []:
+        if v.get("mediaId"):
+            mids.append(str(v["mediaId"]))
+    mids = list(dict.fromkeys(mids))
+    if not mids:
+        raise PixAIError("task completed but no media ids found")
+
+    # Prefer the task's actual metadata (authoritative, and the only source when
+    # recovering by --task-id); fall back to the params we submitted.
+    fm = extract_full_meta(result)
+
+    def _pick(fm_key, *param_keys):
+        if fm.get(fm_key):
+            return str(fm[fm_key])
+        for pk in param_keys:
+            if params.get(pk):
+                return str(params[pk])
+        return ""
+
+    img_dir = out / "images"
+    rows, saved = [], []
+    for mid in mids:
+        url, info = resolve_media(session, mid)
+        if not url:
+            print("  no url for media", mid)
+            continue
+        prompt = fm.get("prompt_full") or params.get("prompts", "")
+        stem = img_dir / build_stem_name(prompt, task_id, mid,
+                                         getattr(args, "name_length", 60),
+                                         getattr(args, "name_sep", "_"))
+        status, path = download(session, url, stem)
+        if status not in ("ok", "skip") or not path:
+            continue
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "task_id": str(task_id), "media_id": mid,
+            "filename": str(path.relative_to(out)).replace("\\", "/"),
+            "url": url, "source": "api", "status": "completed",
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "prompt_full": prompt,
+            "prompt_preview": (prompt or "")[:100],
+            "negative_prompt": _pick("negative_prompt", "negativePrompts"),
+            "seed": _pick("seed", "seed"),
+            "steps": _pick("steps", "samplingSteps"),
+            "cfg_scale": _pick("cfg_scale", "cfgScale"),
+            "model_id": _pick("model_id", "modelId"),
+            "model_name": fm.get("model_name", ""),
+            "loras": fm.get("loras", ""),
+            "width": str((info or {}).get("width") or params.get("width") or ""),
+            "height": str((info or {}).get("height") or params.get("height") or ""),
+        })
+        rows.append(full)
+        make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
+        saved.append(str(path))
+
+    if rows:
+        save_catalog(db_path, rows)
+    print("Generated + cataloged {} image(s):".format(len(saved)))
+    for s in saved:
+        print("  " + s)
+    return {"submitted": True, "task_id": task_id, "images": len(saved)}
 
 
 def _needs_model_fix(row):
@@ -2079,42 +2565,121 @@ def run_fix_models(args):
             "unresolved": unresolved}
 
 
-def _simple_gql(session, op, sha256, variables=None):
-    """Replay a no-arg (or simple) persisted GET op; return data dict or {}."""
-    params = {
-        "operation": op, "u3t": U3T, "operationName": op,
-        "variables": json.dumps(variables or {}, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY_ARTWORK,
-             "persistedQuery": {"version": 1, "sha256Hash": sha256}},
-            separators=(",", ":")),
-    }
+# Read-only account dashboard. Ad-hoc query (no persisted hash) -- the selection
+# below mirrors what the site's getMyQuota + getMyMembership return. READ ONLY:
+# this only reports your credit balance / plan. It never moves money. Buying
+# credits or changing your subscription is deliberately NOT implemented -- do that
+# in the browser.
+_ACCOUNT_QUERY = """
+query {
+  me {
+    id
+    quotaAmount
+    membership { membershipId tier privilege }
+    subscription { planId provider interval status startAt endAt cancelAtPeriodEnd }
+  }
+}
+"""
+
+
+def account_info(session):
+    """Fetch credits + membership/subscription via ad-hoc GraphQL. Returns the
+    `me` dict ({} on failure). Read-only."""
     try:
-        r = session.get(API_URL, params=params, timeout=60,
-                        headers={"x-apollo-operation-name": op})
-        if r.status_code != 200:
-            return {}
-        return r.json().get("data") or {}
-    except (requests.RequestException, ValueError):
+        return (gql_adhoc(session, _ACCOUNT_QUERY) or {}).get("me") or {}
+    except PixAIError:
         return {}
 
 
-_QUOTA_HASH = "9356b42a4ff6e987347a1f1ee3de7aba4bd103b1cdbfbbc4c5c5fcf52767ad66"
-_MEMBERSHIP_HASH = "53dbad3c972e775222a4a6344727b3d2809fc3f08f6787f56500abb8245f9e88"
-
-
 def run_account_info(args):
-    """Print account quota (credits) and membership/plan info."""
+    """Print a read-only account dashboard: credit balance, membership, and
+    subscription status. Never initiates payment -- buy credits in the browser."""
     session = _make_session(getattr(args, "token", None))
-    quota = _simple_gql(session, "getMyQuota", _QUOTA_HASH)
-    me = quota.get("me") or {}
-    print("Account: {}".format(me.get("id") or USER_ID))
-    print("Quota / credits: {}".format(me.get("quotaAmount", "unknown")))
-    member = _simple_gql(session, "getMyMembership", _MEMBERSHIP_HASH)
-    m = member.get("me") or member.get("membership") or member
-    if m:
-        print("Membership: {}".format(json.dumps(m)[:300]))
-    return {"quota": me.get("quotaAmount")}
+    me = account_info(session)
+    if not me:
+        print("Could not read account info (check API key / connection).")
+        return {}
+    mem = me.get("membership") or {}
+    sub = me.get("subscription") or {}
+    priv = mem.get("privilege") or {}
+    try:
+        credits = "{:,}".format(int(me.get("quotaAmount") or 0))
+    except (TypeError, ValueError):
+        credits = str(me.get("quotaAmount"))
+    print("Account ID       : {}".format(me.get("id") or USER_ID))
+    print("Credits (balance): {}".format(credits))
+    if mem:
+        print("Membership       : {} (tier {})".format(
+            mem.get("membershipId", "-"), mem.get("tier", "-")))
+        if priv.get("dailyClaimAdded"):
+            print("Daily free claim : {:,}".format(int(priv["dailyClaimAdded"])))
+        if priv.get("professionalMode"):
+            print("Professional mode: on")
+    if sub:
+        renew = "cancels at period end" if sub.get("cancelAtPeriodEnd") else "renews"
+        print("Subscription     : {} {} via {} ({}); {} {}".format(
+            sub.get("planId", "-"), (sub.get("interval") or "").lower(),
+            sub.get("provider", "-"), sub.get("status", "-"),
+            renew, (sub.get("endAt") or "")[:10]))
+    print("\n(Read-only. To buy credits or change your plan, use the browser.)")
+    return {"quota": me.get("quotaAmount"), "membership": mem.get("membershipId")}
+
+
+def run_reconcile_deleted(args):
+    """Find catalog rows whose PixAI task no longer exists in your live feed -- i.e.
+    generations you deleted on the website -- and flag them (deleted_remote='1') so
+    the gallery can surface them for a local prune. Closes the cloud->local delete
+    drift. Advisory: re-running refreshes the flags. Skips imports (no task) and
+    very-recent rows (a fresh generation may not have propagated to the feed yet)."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    session = _make_session(getattr(args, "token", None))
+    _prog = getattr(args, "progress", None)
+
+    print("Scanning your live PixAI feed for existing task ids...")
+    live, before, page = set(), None, 0
+    while True:
+        conn = find_connection(gql(session, page_variables(
+            getattr(args, "page_size", 250) or 250, before)))
+        if not conn:
+            break
+        edges = conn.get("edges") or []
+        if not edges:
+            break
+        for e in edges:
+            tid = (e.get("node") or {}).get("id")
+            if tid:
+                live.add(str(tid))
+        page += 1
+        vlog("reconcile: page {}, {} live tasks so far".format(page, len(live)))
+        pi = conn.get("pageInfo") or {}
+        if not pi.get("hasPreviousPage"):
+            break
+        before = pi.get("startCursor")
+    print("Live tasks in your feed: {:,}".format(len(live)))
+    if not live:
+        raise PixAIError("Live feed returned no tasks -- aborting so we don't flag "
+                         "your whole catalog by mistake.")
+
+    grace = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 2 * 86400))
+    rows = load_catalog(db_path)
+    flagged = cleared = 0
+    for r in rows:
+        tid = (r.get("task_id") or "").strip()
+        gone = (tid and tid not in live and (r.get("source") or "") != "local"
+                and (r.get("created_at") or "") < grace)
+        was = r.get("deleted_remote") == "1"
+        if gone and not was:
+            r["deleted_remote"] = "1"; flagged += 1
+        elif not gone and was:
+            r["deleted_remote"] = ""; cleared += 1
+        else:
+            r["deleted_remote"] = "1" if gone else ""
+    save_catalog(db_path, rows)
+    print("Flagged {:,} row(s) as deleted-on-PixAI; cleared {:,} stale flag(s).".format(
+        flagged, cleared))
+    print("Review in the gallery: Source -> 'Deleted on PixAI', then bulk Delete (local).")
+    return {"live": len(live), "flagged": flagged, "cleared": cleared}
 
 
 def run_catalog_stats(args):
@@ -2904,13 +3469,20 @@ def main():
                     help="apply prompt_taskid_mediaid naming to files as they download "
                          "(same as default naming; flag makes intent explicit)")
     ap.add_argument("--organize-adv", action="store_true",
-                    help="sort already-downloaded files into batches/ and YYYY-MM/ "
-                         "folders with info files + embedded metadata, then exit")
+                    help="normalize the WHOLE backup into YYYY-MM/ month folders with "
+                         "descriptive filenames (no batch subfolders); writes a reversible "
+                         "move-manifest. Idempotent + dry-runnable. Then exit")
     ap.add_argument("--organize-adv-live", action="store_true",
-                    help="sort files into batches/ and YYYY-MM/ folders live as they "
-                         "download, writing _prompt.txt and _index.csv per folder")
+                    help="sort files into YYYY-MM/ month folders live as they download")
+    ap.add_argument("--undo-organize", action="store_true",
+                    help="revert the last --organize-adv run using organize_manifest.csv "
+                         "(move files back to their old paths), then exit")
+    ap.add_argument("--embed-metadata", action="store_true",
+                    help="with --organize-adv, embed prompt/IDs/date into PNG/JPEG files "
+                         "(off by default; useful when pulling images into other apps)")
     ap.add_argument("--dry-run", action="store_true",
-                    help="with --organize or --organize-adv, show plan without making changes")
+                    help="with --organize / --organize-adv / --undo-organize, show the "
+                         "plan without moving anything")
     ap.add_argument("--full-meta", action="store_true",
                     help="fetch full prompt, seed, steps, sampler, CFG, and model name for each "
                          "task via a second API call (requires TASK_DETAIL_HASH + MODEL_DETAIL_HASH "
@@ -2936,6 +3508,61 @@ def main():
     ap.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
                          "each mp4 into videos/, and catalog them (is_video), then exit")
+    ap.add_argument("--account", action="store_true",
+                    help="show a read-only account dashboard (credit balance, membership, "
+                         "subscription) and exit. Never moves money")
+    ap.add_argument("--reconcile-deleted", action="store_true",
+                    help="flag catalog rows whose PixAI task is gone from your live feed "
+                         "(deleted on the website) so the gallery can surface them for a "
+                         "local prune, then exit")
+    ap.add_argument("--import-local", nargs="?", const="", default=None, metavar="DIR",
+                    help="catalog non-PixAI media (source='local') so it shows in the gallery. "
+                         "No DIR = scan the backup folder for files you dropped in; a DIR "
+                         "outside the backup is copied in. Then exit")
+    # --- Generation (createGenerationTask) -------------------------------------
+    gen = ap.add_argument_group("generation (--generate)")
+    gen.add_argument("--generate", action="store_true",
+                     help="create images via PixAI and catalog them (source='api'). "
+                          "Preview-only unless --confirm (spends credits)")
+    gen.add_argument("--prompt", default="", help="positive prompt for --generate")
+    gen.add_argument("--negative", default="", help="negative prompt for --generate")
+    gen.add_argument("--model", default="", help="modelId for --generate (default: Tsubaki.2)")
+    gen.add_argument("--width", type=int, default=512)
+    gen.add_argument("--height", type=int, default=512)
+    gen.add_argument("--steps", type=int, default=25)
+    gen.add_argument("--cfg", type=float, default=7.0)
+    gen.add_argument("--batch-size", dest="count", type=int, default=1,
+                     help="number of images per --generate run (batch size)")
+    gen.add_argument("--seed", type=int, default=None)
+    gen.add_argument("--priority", type=int, default=500,
+                     help="generation priority: 500 = standard (default, cheaper), "
+                          "1000 = high (faster, costs more credits)")
+    gen.add_argument("--high-priority", dest="priority", action="store_const", const=1000,
+                     help="shortcut for --priority 1000 (faster, more credits)")
+    gen.add_argument("--mode", default="auto",
+                     choices=["auto", "lite", "standard", "pro", "ultra"],
+                     help="quality mode (inferenceProfile). auto (default) lets PixAI pick the "
+                          "model's default -- always safe. lite/standard suit SD_V1 models; "
+                          "pro/ultra are for newer model types (an unsupported mode is rejected)")
+    gen.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
+                     help="disable PixAI's prompt-helper (use your prompt more literally; "
+                          "helps when auto-enhancement mangles a carefully-built prompt)")
+    gen.set_defaults(prompt_helper=True)
+    gen.add_argument("--lora", action="append", metavar="VERSIONID:WEIGHT",
+                     help="add a LoRA by its version id and weight, e.g. "
+                          "--lora 1686550608832816741:0.7 (repeatable). Find version ids "
+                          "with --list-models")
+    gen.add_argument("--task-id", default="",
+                     help="with --generate, fetch + catalog an ALREADY-created task by id "
+                          "(no new credits). Recovers a stranded generation that --update "
+                          "can't see, since generated tasks don't enter the listing feed")
+    gen.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
+    gen.add_argument("--poll-timeout", type=int, default=300)
+    gen.add_argument("--confirm", action="store_true",
+                     help="REQUIRED for --generate to actually submit (spends credits)")
+    gen.add_argument("--list-models", nargs="?", const="", default=None, metavar="KEYWORD",
+                     help="search PixAI generation models by keyword and print their "
+                          "generatable version ids (use as --model), then exit")
     ap.add_argument("--fix-model-names", action="store_true",
                     help="re-resolve readable model names for catalog rows whose model_name "
                          "is blank or a raw numeric id (one API call per distinct model), then exit")
@@ -2995,6 +3622,21 @@ def main():
         if args.sync_videos:
             run_sync_videos(args)
             return
+        if args.account:
+            run_account_info(args)
+            return
+        if args.reconcile_deleted:
+            run_reconcile_deleted(args)
+            return
+        if args.import_local is not None:
+            run_import_local(args)
+            return
+        if args.list_models is not None:
+            run_list_models(args)
+            return
+        if args.generate:
+            run_generate(args)
+            return
         if args.fix_model_names:
             run_fix_models(args)
             return
@@ -3015,6 +3657,9 @@ def main():
             return
         if args.convert_existing:
             cmd_convert_existing(args, out)
+            return
+        if args.undo_organize:
+            cmd_undo_organize(args, out)
             return
         if args.organize_adv:
             cmd_organize(args, out, img_dir, db_path)
