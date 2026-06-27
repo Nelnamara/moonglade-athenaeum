@@ -834,7 +834,7 @@ def video_outputs(task):
     return outs, shared
 
 
-def model_search_gql(session, keyword="", limit=15, base_only=False):
+def model_search_gql(session, keyword="", limit=15, base_only=False, lora_only=False):
     """Search PixAI generation models by keyword via the `generationModels`
     connection. Returns a list of {title, type, model_id, version_id}.
 
@@ -854,6 +854,8 @@ def model_search_gql(session, keyword="", limit=15, base_only=False):
         n = e.get("node") or {}
         mtype = (n.get("type") or "").upper()
         if base_only and ("LORA" in mtype or "VIDEO" in mtype):
+            continue
+        if lora_only and "LORA" not in mtype:
             continue
         out.append({
             "title": n.get("title") or "",
@@ -2257,6 +2259,29 @@ _GEN_STATUS = "query($id: ID!) { task(id: $id) { id status } }"
 DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
 
 
+def _lora_params(raw):
+    """Turn LoRA specs into createGenerationTask's two fields. `raw` is a list of
+    'versionId:weight' strings or (versionId, weight) tuples. Returns
+    ({versionId: weight}, [{weight, versionId}])."""
+    lora_map, lora_list = {}, []
+    for item in (raw or []):
+        if isinstance(item, (tuple, list)):
+            vid, w = str(item[0]).strip(), item[1]
+        else:
+            vid, _sep, ws = str(item).partition(":")
+            vid = vid.strip()
+            w = ws.strip()
+        if not vid:
+            continue
+        try:
+            w = float(w)
+        except (TypeError, ValueError):
+            w = 0.7
+        lora_map[vid] = w
+        lora_list.append({"weight": w, "versionId": vid})
+    return lora_map, lora_list
+
+
 def _gen_parameters(args):
     if getattr(args, "params_json", ""):
         return json.loads(args.params_json)
@@ -2288,6 +2313,12 @@ def _gen_parameters(args):
         params["negativePrompts"] = args.negative
     if getattr(args, "seed", None) is not None:
         params["seed"] = args.seed
+    # LoRAs: createGenerationTask wants BOTH a {versionId: weight} map and a
+    # [{weight, versionId}] array, keyed by the LoRA's version id.
+    lmap, llist = _lora_params(getattr(args, "lora", None))
+    if lmap:
+        params["lora"] = lmap
+        params["loraParameters"] = llist
     # Prompt helper (auto-interprets/enhances the natural prompt). On by default to
     # match the site; turn OFF when it mangles a carefully-built prompt.
     if getattr(args, "prompt_helper", True):
@@ -3418,6 +3449,10 @@ def main():
                      help="disable PixAI's prompt-helper (use your prompt more literally; "
                           "helps when auto-enhancement mangles a carefully-built prompt)")
     gen.set_defaults(prompt_helper=True)
+    gen.add_argument("--lora", action="append", metavar="VERSIONID:WEIGHT",
+                     help="add a LoRA by its version id and weight, e.g. "
+                          "--lora 1686550608832816741:0.7 (repeatable). Find version ids "
+                          "with --list-models")
     gen.add_argument("--task-id", default="",
                      help="with --generate, fetch + catalog an ALREADY-created task by id "
                           "(no new credits). Recovers a stranded generation that --update "

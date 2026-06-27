@@ -1105,6 +1105,22 @@ class GenerateTab(QWidget):
         r_mid.addWidget(self.model)
         g.addLayout(r_mid)
 
+        self._loras = []                 # list of (version_id, title, weight)
+        r_lora = QHBoxLayout()
+        r_lora.addWidget(QLabel("LoRAs:"))
+        self.lora_label = QLineEdit()
+        self.lora_label.setReadOnly(True)
+        self.lora_label.setPlaceholderText("none — add with the button →")
+        r_lora.addWidget(self.lora_label)
+        self.btn_lora_add = QPushButton("Add LoRA…")
+        self.btn_lora_add.setToolTip("Search PixAI LoRAs, pick one, set its weight")
+        self.btn_lora_add.clicked.connect(self._add_lora)
+        r_lora.addWidget(self.btn_lora_add)
+        self.btn_lora_clear = QPushButton("Clear")
+        self.btn_lora_clear.clicked.connect(self._clear_loras)
+        r_lora.addWidget(self.btn_lora_clear)
+        g.addLayout(r_lora)
+
         r_dim = QHBoxLayout()
         # note: attr names are sp_* to avoid shadowing QWidget.width()/height()
         for label, attr, skey, lo, hi, dv in (
@@ -1228,6 +1244,7 @@ class GenerateTab(QWidget):
             priority=1000 if self.high_priority.isChecked() else 500,
             mode=self.mode.currentData(),
             prompt_helper=self.prompt_helper.isChecked(),
+            lora=["{}:{}".format(vid, w) for vid, _t, w in self._loras],
             poll_timeout=300, name_length=60, name_sep="_",
         )
 
@@ -1235,6 +1252,44 @@ class GenerateTab(QWidget):
         mid = self.model_combo.currentData()
         if mid is not None:
             self.model.setText(mid)
+
+    def _refresh_loras(self):
+        self.lora_label.setText(", ".join(
+            "{}:{}".format(t[:18], w) for _vid, t, w in self._loras))
+
+    def _clear_loras(self):
+        self._loras = []
+        self._refresh_loras()
+
+    def _add_lora(self):
+        from PySide6.QtWidgets import QInputDialog
+        kw, ok = QInputDialog.getText(self, "Search LoRAs", "Keyword (LoRA name / character / style):")
+        if not ok or not kw.strip():
+            return
+        self.btn_lora_add.setEnabled(False)
+        try:
+            session = core._make_session(self._bar.token)
+            results = core.model_search_gql(session, kw.strip(), limit=30, lora_only=True)
+        except Exception as e:                       # noqa: BLE001
+            self.log.append_line("[LoRA search error] {}".format(e))
+            return
+        finally:
+            self.btn_lora_add.setEnabled(True)
+        if not results:
+            self.log.append_line("No LoRAs found for '{}'.".format(kw))
+            return
+        labels = ["{}  [{}]{}".format(m["title"][:50], m["type"],
+                                      "  (NSFW)" if m["is_nsfw"] else "") for m in results]
+        choice, ok = QInputDialog.getItem(self, "Pick a LoRA", "Results:", labels, 0, False)
+        if not ok:
+            return
+        m = results[labels.index(choice)]
+        weight, ok = QInputDialog.getDouble(self, "LoRA weight", "Weight:", 0.7, -2.0, 2.0, 2)
+        if not ok:
+            return
+        self._loras.append((m["version_id"], m["title"], weight))
+        self._refresh_loras()
+        self.log.append_line("Added LoRA: {}  ({}) @ {}".format(m["title"][:40], m["version_id"], weight))
 
     def _on_aspect(self):
         d = self.aspect.currentData()
