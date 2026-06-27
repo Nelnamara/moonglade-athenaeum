@@ -1153,6 +1153,29 @@ class GenerateTab(QWidget):
         r_aspect.addStretch()
         g.addLayout(r_aspect)
 
+        r_mode = QHBoxLayout()
+        r_mode.addWidget(QLabel("Mode:"))
+        self.mode = QComboBox()
+        for label, val in (("Lite (fastest, cheapest)", "lite"),
+                           ("Standard (balanced)", "standard"),
+                           ("Pro (higher detail)", "pro"),
+                           ("Ultra (max quality)", "ultra")):
+            self.mode.addItem(label, val)
+        _mi = self.mode.findData(settings.get("gen_mode", "standard"))
+        self.mode.setCurrentIndex(max(0, _mi))
+        self.mode.setToolTip("Quality mode (inferenceProfile). Higher = better quality but "
+                             "more credits/slower.")
+        r_mode.addWidget(self.mode)
+        r_mode.addSpacing(16)
+        self.prompt_helper = QCheckBox("Prompt helper")
+        self.prompt_helper.setChecked(settings.get("gen_prompt_helper", True))
+        self.prompt_helper.setToolTip("PixAI auto-interprets/enhances your prompt. On by default; "
+                                      "uncheck to use your prompt more literally when the helper "
+                                      "mangles a carefully-built prompt.")
+        r_mode.addWidget(self.prompt_helper)
+        r_mode.addStretch()
+        g.addLayout(r_mode)
+
         r_conf = QHBoxLayout()
         self.confirm = QCheckBox("Confirm — actually submit (spends credits)")
         self.confirm.setToolTip("Unchecked = preview the request only (no credits). "
@@ -1201,6 +1224,8 @@ class GenerateTab(QWidget):
             steps=self.sp_steps.value(), cfg=self.cfg.value(), count=self.sp_count.value(),
             seed=seed, params_json="", confirm=self.confirm.isChecked(),
             priority=1000 if self.high_priority.isChecked() else 500,
+            mode=self.mode.currentData(),
+            prompt_helper=self.prompt_helper.isChecked(),
             poll_timeout=300, name_length=60, name_sep="_",
         )
 
@@ -1288,6 +1313,8 @@ class GenerateTab(QWidget):
             "gen_steps": self.sp_steps.value(), "gen_cfg": self.cfg.value(),
             "gen_count": self.sp_count.value(),
             "gen_high_priority": self.high_priority.isChecked(),
+            "gen_mode": self.mode.currentData(),
+            "gen_prompt_helper": self.prompt_helper.isChecked(),
         }
 
 

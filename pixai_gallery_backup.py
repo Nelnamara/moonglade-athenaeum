@@ -2250,6 +2250,9 @@ def _gen_parameters(args):
         return json.loads(args.params_json)
     params = {
         "prompts": args.prompt,
+        # naturalPrompts is the natural-language form the prompt-helper reads; send
+        # it alongside prompts (PixAI's generator does the same).
+        "naturalPrompts": args.prompt,
         "modelId": args.model or DEFAULT_GEN_MODEL,
         "width": args.width,
         "height": args.height,
@@ -2259,11 +2262,22 @@ def _gen_parameters(args):
         # 1000 = high priority (faster, more credits); 500 = standard (cheaper).
         # We default to standard so a run costs less unless high is requested.
         "priority": getattr(args, "priority", 500) or 500,
+        # Quality mode: lite (cheapest) / standard / pro / ultra. Bundles the
+        # quality knobs the way PixAI's "mode" switch does.
+        "inferenceProfile": getattr(args, "mode", "standard") or "standard",
     }
     if getattr(args, "negative", ""):
         params["negativePrompts"] = args.negative
     if getattr(args, "seed", None) is not None:
         params["seed"] = args.seed
+    # Prompt helper (auto-interprets/enhances the natural prompt). On by default to
+    # match the site; turn OFF when it mangles a carefully-built prompt.
+    if getattr(args, "prompt_helper", True):
+        params["promptHelper"] = {"withStage": True, "userWantToEnable": True,
+                                  "forcePromptHelperDetectionSide": "server"}
+    else:
+        params["promptHelper"] = {"withStage": False, "userWantToEnable": False,
+                                  "forcePromptHelperDetectionSide": "server"}
     return params
 
 
@@ -3365,6 +3379,14 @@ def main():
                           "1000 = high (faster, costs more credits)")
     gen.add_argument("--high-priority", dest="priority", action="store_const", const=1000,
                      help="shortcut for --priority 1000 (faster, more credits)")
+    gen.add_argument("--mode", default="standard",
+                     choices=["lite", "standard", "pro", "ultra"],
+                     help="quality mode (inferenceProfile): lite=fastest/cheapest, "
+                          "standard=balanced (default), pro=higher detail, ultra=max quality")
+    gen.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
+                     help="disable PixAI's prompt-helper (use your prompt more literally; "
+                          "helps when auto-enhancement mangles a carefully-built prompt)")
+    gen.set_defaults(prompt_helper=True)
     gen.add_argument("--task-id", default="",
                      help="with --generate, fetch + catalog an ALREADY-created task by id "
                           "(no new credits). Recovers a stranded generation that --update "
