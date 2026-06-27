@@ -1,10 +1,14 @@
-# PixAI Gallery Backup
+# 🌙 Moonglade Athenaeum
+
+### *A library against the Void.*
 
 > **Language:** Python 3.8+ · **Platform:** Windows / macOS / Linux · **Author:** Nelnamara
 
-A command-line tool (with optional desktop GUI) that backs up **your own** PixAI.art generated images at full resolution. PixAI's gallery UI only shows 20 images at a time; this talks to the same API the browser uses, pages through your entire generation history, downloads every image, and keeps a fully searchable catalog of prompts, seeds, model names, dimensions, and dates.
+A full local companion for **your own** PixAI.art work — **back up · browse · generate · curate**. It started as a backup tool (PixAI's UI only shows 20 images at a time) and grew into a complete client: it talks to the same API the browser uses to page your **entire** generation history at full resolution, keeps a fully searchable SQLite catalog (prompts, seeds, models, LoRAs, dates), serves a local web gallery, **creates** new images via the API, and lets you manage and prune both your local archive and your cloud account — so nothing is ever lost to the Void.
 
-PixAI's terms grant users copyright of their own generations. This tool is rate-paced to be polite to their servers.
+PixAI's terms grant users copyright of their own generations. This tool is unofficial, uses your own API key, and is rate-paced to be polite to their servers.
+
+📖 **Full docs:** [`docs/`](docs/) — [Setup](docs/setup.md) · [Generating](docs/generating.md) · [Gallery](docs/gallery.md) · [Architecture](docs/architecture.md) · [API Operations](API_OPERATIONS.md)
 
 ---
 
@@ -39,7 +43,8 @@ A PySide6 desktop GUI (`pixai_gui.py`) wraps the full workflow in a tabbed windo
 | **Download** | Output folder, page size, **workers**, **update mode**, organize mode, conversion, collect-only, and full-meta; Start / Stop. (Auth comes from `PIXAI_API_KEY` in `config.json`; an optional Token field remains for the legacy browser-token path) |
 | **Organize** | Post-download rename (`--organize`) or full folder sort (`--organize-adv`); dry-run preview |
 | **Convert** | Batch-convert existing `.webp` files to PNG or JPEG in place (parallel) |
-| **Utilities** | Probe, Count, Catalog Stats, Backfill url/width/height, Backfill Full Meta (+ incl. LoRAs), Export CSV, **Sync Artworks** (+ incl. videos), **Sync Videos**, **Fix Model Names**, **Account Info**, **Audit Duplicates / Dedup / Verify Quarantine**; configurable API delay and **Workers** |
+| **Generate** | Create images via PixAI: prompt/negative/model/size/steps/CFG/count/seed; preview by default, "Confirm — spend credits" to submit; catalogs results as `source='api'` |
+| **Utilities** | Probe, Count, Catalog Stats, Backfill url/width/height, Backfill Full Meta (+ incl. LoRAs), Export CSV, **Sync Artworks** (+ incl. videos), **Sync Videos**, **Import Local Media**, **Fix Model Names**, **Account Info**, **Audit Duplicates / Dedup / Verify Quarantine**; configurable API delay and **Workers** |
 | **Gallery** | Launch / stop the local gallery server; configurable port; LAN mode; **HTTPS** option; auto-builds thumbnails on start (parallel) |
 
 Settings are saved to `pixai_gui_settings.json` next to the script (git-ignored).
@@ -206,12 +211,16 @@ The same three actions are available as buttons in the GUI **Utilities** tab.
 | `--probe` | Resolve one full-res URL and exit — connection sanity check |
 | `--count` | Tally total tasks and images via the API (no downloads) |
 | `--catalog-stats` | Summarize `catalog.db` and count files on disk (no token needed) |
+| `--account` | Read-only account dashboard: credit balance, membership, subscription. Never moves money |
 | `--collect-only` | Page through and write the catalog without downloading images |
 | `--backfill-meta` | Fill missing `url`/`width`/`height` in catalog via `resolve_media` |
 | `--backfill-full-meta` | Fill full prompt/seed/model/LoRAs in catalog via `getTaskById`; also fills url/width/height. Add `--with-loras` to re-fill older rows that predate LoRA tracking |
 | `--export-csv` | Export `catalog.db` to `catalog_export.csv` (interop / spreadsheet backup) |
 | `--sync-artworks` | Fetch published-artwork metadata (title, NSFW, likes, comments, tags) via `listArtworks` and merge onto catalog rows by `media_id`. Add `--with-videos` to also download animated-artwork video files into `videos/` |
 | `--sync-videos` | Back up image-to-video generations: find i2v tasks, resolve each mp4, download into `videos/`, and catalog them (`is_video`) so they play in the gallery |
+| `--generate` | Create images via PixAI (`createGenerationTask`), download + catalog them (`source='api'`). Preview-only unless `--confirm` (spends credits) |
+| `--import-local [DIR]` | Catalog non-PixAI media as `source='local'`. No DIR scans the backup for dropped-in files; an external DIR is copied in |
+| `--account` | Read-only account dashboard (credit balance, membership, subscription). Never moves money |
 | `--fix-model-names` | Re-resolve readable model names for rows whose `model_name` is blank or a raw numeric id (one API call per distinct model) |
 | `--audit` | Read-only duplicate report of the whole backup folder → `audit_report.csv` |
 | `--dedup` | Quarantine redundant duplicate copies to `_duplicates/` (dry-run unless `--apply`); reconciles the catalog |
@@ -327,6 +336,7 @@ pixai_backup/
 | `is_video` | `1` for image-to-video rows whose `filename` is an mp4 (`--sync-videos`) |
 | `poster_media_id` | The still-frame media id used as the video's gallery poster (`--sync-videos`) |
 | `video_duration` | Requested video length in seconds (`--sync-videos`) |
+| `source` | Provenance: blank/`online` = PixAI history, `api` = created via `--generate`, `local` = imported via `--import-local` |
 
 ---
 
@@ -372,6 +382,15 @@ python pixai_gallery_backup.py --backfill-full-meta
 ---
 
 ## Changelog
+
+### Unreleased — API client foundation
+
+- **`gql_adhoc()` helper** — a generic ad-hoc GraphQL POST (queries *and* mutations) authenticated by your API key. PixAI's endpoint accepts full query documents, so most operations need **no persisted-hash capture** — this is the foundation for the broader client direction.
+- **`--account` (read-only account dashboard)** — shows your credit balance, membership tier, daily free-claim, and subscription status (GUI: Utilities → Account Info). Built on `gql_adhoc` (no hash). **Deliberately read-only — it never initiates payment or changes your subscription. Buy credits in the browser.**
+- **`--delete-task`** (guarded, irreversible) and **`-v/--verbose`** diagnostics, plus **`API_OPERATIONS.md`** — a full reverse-engineered catalog of PixAI's GraphQL operations and the build roadmap.
+- **`--generate` — create images via PixAI** (GUI: **Generate** tab). Submits a `createGenerationTask` via `gql_adhoc`, polls to completion, downloads the results into the backup, and catalogs them as `source='api'`. **Guarded: preview-only unless `--confirm`** (the GUI's "Confirm — spend credits" checkbox). Takes prompt/negative/model/size/steps/cfg/count/seed or a raw `--params-json`.
+- **`--import-local` — catalog non-PixAI media** (GUI: Utilities → **Import Local Media**). Drop your own images/videos into the backup folder and this catalogs them (`source='local'`) so they show + play in the gallery; an external dir is copied in. Idempotent; images get thumbnails. **Videos get a real first-frame poster when `ffmpeg` is on your PATH** (optional — falls back to a placeholder + ▶ badge if absent). The same ffmpeg fallback now also covers i2v videos that had no still-frame poster.
+- **`source` column + gallery Source filter** — every row is tagged `online` (PixAI history) / `api` (generated) / `local` (imported), with a filter-bar dropdown to isolate each.
 
 ### v1.4.4 — media-type filter
 

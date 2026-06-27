@@ -760,8 +760,8 @@ class OrganizeTab(QWidget):
         r1 = QHBoxLayout()
         r1.addWidget(QLabel("Mode:"))
         self._mode_grp = QButtonGroup(self)
-        self.rb_simple = QRadioButton("Simple rename  (prompt_taskid_mediaid)")
-        self.rb_adv    = QRadioButton("Advanced  (batch/ + YYYY-MM/ folders + metadata)")
+        self.rb_simple = QRadioButton("Simple rename  (flat, prompt_taskid_mediaid)")
+        self.rb_adv    = QRadioButton("Month folders  (YYYY-MM/ + descriptive names, reversible)")
         for rb in (self.rb_simple, self.rb_adv):
             self._mode_grp.addButton(rb)
             r1.addWidget(rb)
@@ -774,7 +774,13 @@ class OrganizeTab(QWidget):
         self.dry_run = QCheckBox("Dry run (preview only)")
         self.dry_run.setChecked(settings.get("org_dry_run", False))
         r2.addWidget(self.dry_run)
-        r2.addSpacing(20)
+        r2.addSpacing(14)
+        self.embed_meta = QCheckBox("Embed metadata")
+        self.embed_meta.setChecked(settings.get("org_embed", False))
+        self.embed_meta.setToolTip("Month-folders mode only: write prompt/IDs/date into "
+                                   "PNG/JPEG files (off by default; useful for other apps)")
+        r2.addWidget(self.embed_meta)
+        r2.addSpacing(14)
         r2.addWidget(QLabel("Name length:"))
         self.name_len = QSpinBox()
         self.name_len.setRange(10, 200)
@@ -837,6 +843,7 @@ class OrganizeTab(QWidget):
         return SimpleNamespace(
             out=self._bar.out,
             dry_run=self.dry_run.isChecked(),
+            embed_metadata=self.embed_meta.isChecked(),
             name_length=self.name_len.value(),
             name_sep=self.name_sep.currentText(),
             convert=self.convert_combo.currentData(),
@@ -896,6 +903,7 @@ class OrganizeTab(QWidget):
     def collect_settings(self):
         return {
             "org_adv":     self.rb_adv.isChecked(),
+            "org_embed":   self.embed_meta.isChecked(),
             "org_dry_run": self.dry_run.isChecked(),
         }
 
@@ -1051,6 +1059,332 @@ class ConvertTab(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Generate tab
+# ---------------------------------------------------------------------------
+
+class GenerateTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        opts = QGroupBox("Generate images via PixAI (spends credits)")
+        g = QVBoxLayout(opts)
+
+        g.addWidget(QLabel("Prompt:"))
+        self.prompt = QTextEdit()
+        self.prompt.setPlaceholderText("e.g. a night elf druid, lavender skin, moonlit forest, masterpiece")
+        self.prompt.setFixedHeight(70)
+        g.addWidget(self.prompt)
+
+        r_neg = QHBoxLayout()
+        r_neg.addWidget(QLabel("Negative:"))
+        self.negative = QLineEdit()
+        self.negative.setPlaceholderText("lowres, text, watermark, extra limbs …")
+        r_neg.addWidget(self.negative)
+        g.addLayout(r_neg)
+
+        r_mod = QHBoxLayout()
+        r_mod.addWidget(QLabel("Model:"))
+        self.model_combo = QComboBox()
+        self.model_combo.addItem("Default (Tsubaki.2)", "")
+        try:
+            from pixai_gallery import catalog_model_options
+            for name, mid in catalog_model_options(Path(self._bar.out) / "catalog.db"):
+                self.model_combo.addItem("{}  ({})".format(name, mid), mid)
+        except Exception:
+            pass
+        self.model_combo.setMinimumWidth(240)
+        self.model_combo.currentIndexChanged.connect(self._on_model_pick)
+        r_mod.addWidget(self.model_combo)
+        self.btn_model_search = QPushButton("Search PixAI…")
+        self.btn_model_search.setToolTip("Search PixAI's model catalog and pick one "
+                                         "(resolves the correct version id automatically)")
+        self.btn_model_search.clicked.connect(self._search_models)
+        r_mod.addWidget(self.btn_model_search)
+        g.addLayout(r_mod)
+
+        r_mid = QHBoxLayout()
+        r_mid.addWidget(QLabel("Model ID:"))
+        self.model = QLineEdit()
+        self.model.setPlaceholderText("blank = Tsubaki.2 (default) — or pick/search above, or paste an id")
+        self.model.setText(settings.get("gen_model", ""))
+        r_mid.addWidget(self.model)
+        g.addLayout(r_mid)
+
+        self._loras = []                 # list of (version_id, title, weight)
+        r_lora = QHBoxLayout()
+        r_lora.addWidget(QLabel("LoRAs:"))
+        self.lora_label = QLineEdit()
+        self.lora_label.setReadOnly(True)
+        self.lora_label.setPlaceholderText("none — add with the button →")
+        r_lora.addWidget(self.lora_label)
+        self.btn_lora_add = QPushButton("Add LoRA…")
+        self.btn_lora_add.setToolTip("Search PixAI LoRAs, pick one, set its weight")
+        self.btn_lora_add.clicked.connect(self._add_lora)
+        r_lora.addWidget(self.btn_lora_add)
+        self.btn_lora_clear = QPushButton("Clear")
+        self.btn_lora_clear.clicked.connect(self._clear_loras)
+        r_lora.addWidget(self.btn_lora_clear)
+        g.addLayout(r_lora)
+
+        r_dim = QHBoxLayout()
+        # note: attr names are sp_* to avoid shadowing QWidget.width()/height()
+        for label, attr, skey, lo, hi, dv in (
+                ("Width", "sp_w", "gen_width", 64, 2048, 512),
+                ("Height", "sp_h", "gen_height", 64, 2048, 512),
+                ("Steps", "sp_steps", "gen_steps", 1, 60, 25),
+                ("Count", "sp_count", "gen_count", 1, 8, 1)):
+            r_dim.addWidget(QLabel(label + ":"))
+            sb = QSpinBox(); sb.setRange(lo, hi); sb.setValue(settings.get(skey, dv))
+            sb.setFixedWidth(70 if attr in ("sp_w", "sp_h") else 55)
+            setattr(self, attr, sb); r_dim.addWidget(sb); r_dim.addSpacing(8)
+        r_dim.addWidget(QLabel("CFG:"))
+        self.cfg = QDoubleSpinBox(); self.cfg.setRange(1.0, 20.0); self.cfg.setSingleStep(0.5)
+        self.cfg.setValue(settings.get("gen_cfg", 7.0)); self.cfg.setFixedWidth(60)
+        r_dim.addWidget(self.cfg)
+        r_dim.addSpacing(8)
+        r_dim.addWidget(QLabel("Seed:"))
+        self.seed = QLineEdit(); self.seed.setPlaceholderText("random"); self.seed.setFixedWidth(120)
+        r_dim.addWidget(self.seed)
+        r_dim.addStretch()
+        g.addLayout(r_dim)
+
+        r_aspect = QHBoxLayout()
+        r_aspect.addWidget(QLabel("Aspect:"))
+        self.aspect = QComboBox()
+        self.aspect.addItem("Custom", None)
+        for label, w, h in (
+                ("1:1  square  1024x1024", 1024, 1024),
+                ("16:9  landscape  1344x768", 1344, 768),
+                ("9:16  portrait  768x1344", 768, 1344),
+                ("4:3  1152x896", 1152, 896),
+                ("3:4  896x1152", 896, 1152),
+                ("3:2  1216x832", 1216, 832),
+                ("2:3  832x1216", 832, 1216),
+                ("5:3  1280x768", 1280, 768),
+                ("3:5  768x1280", 768, 1280),
+                ("3:1  wide  1536x512", 1536, 512)):
+            self.aspect.addItem(label, (w, h))
+        self.aspect.setMinimumWidth(200)
+        self.aspect.currentIndexChanged.connect(self._on_aspect)
+        r_aspect.addWidget(self.aspect)
+        self.btn_swap = QPushButton("⇄  Swap W/H")
+        self.btn_swap.setToolTip("Swap width and height (portrait ↔ landscape)")
+        self.btn_swap.clicked.connect(self._swap_dims)
+        r_aspect.addWidget(self.btn_swap)
+        r_aspect.addStretch()
+        g.addLayout(r_aspect)
+
+        r_mode = QHBoxLayout()
+        r_mode.addWidget(QLabel("Mode:"))
+        self.mode = QComboBox()
+        for label, val in (("Auto (model default)", "auto"),
+                           ("Lite (fastest, cheapest)", "lite"),
+                           ("Standard (balanced)", "standard"),
+                           ("Pro (newer models)", "pro"),
+                           ("Ultra (newer models)", "ultra")):
+            self.mode.addItem(label, val)
+        _mi = self.mode.findData(settings.get("gen_mode", "auto"))
+        self.mode.setCurrentIndex(max(0, _mi))
+        self.mode.setToolTip("Quality mode (inferenceProfile). Auto = the model's default "
+                             "(always works). lite/standard suit SD models; pro/ultra are for "
+                             "newer model types and are REJECTED on older ones.")
+        r_mode.addWidget(self.mode)
+        r_mode.addSpacing(16)
+        self.prompt_helper = QCheckBox("Prompt helper")
+        self.prompt_helper.setChecked(settings.get("gen_prompt_helper", True))
+        self.prompt_helper.setToolTip("PixAI auto-interprets/enhances your prompt. On by default; "
+                                      "uncheck to use your prompt more literally when the helper "
+                                      "mangles a carefully-built prompt.")
+        r_mode.addWidget(self.prompt_helper)
+        r_mode.addStretch()
+        g.addLayout(r_mode)
+
+        r_conf = QHBoxLayout()
+        self.confirm = QCheckBox("Confirm — actually submit (spends credits)")
+        self.confirm.setToolTip("Unchecked = preview the request only (no credits). "
+                                "Checked = create the images for real.")
+        r_conf.addWidget(self.confirm)
+        r_conf.addSpacing(20)
+        self.high_priority = QCheckBox("High priority")
+        self.high_priority.setChecked(settings.get("gen_high_priority", False))
+        self.high_priority.setToolTip("Off = standard priority (cheaper, the default). "
+                                      "On = high priority (faster in the queue, costs more credits).")
+        r_conf.addWidget(self.high_priority)
+        r_conf.addStretch()
+        g.addLayout(r_conf)
+
+        self.btn_run = QPushButton("▶  Generate")
+        self.btn_run.setObjectName("btn_run")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_run); btn_row.addStretch(); btn_row.addWidget(self.btn_stop)
+        self.btn_run.clicked.connect(self._run_generate)
+        self.btn_stop.clicked.connect(self._stop)
+
+        prog_row, self.prog_bar, self.prog_label = _make_progress_row()
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(opts)
+        lay.addLayout(btn_row)
+        lay.addLayout(prog_row)
+        lay.addWidget(self.log, stretch=1)
+
+    def _build_args(self):
+        seed_txt = self.seed.text().strip()
+        try:
+            seed = int(seed_txt) if seed_txt else None
+        except ValueError:
+            seed = None
+        return SimpleNamespace(
+            out=self._bar.out, token=self._bar.token,
+            prompt=self.prompt.toPlainText().strip(),
+            negative=self.negative.text().strip(),
+            model=self.model.text().strip(),
+            width=self.sp_w.value(), height=self.sp_h.value(),
+            steps=self.sp_steps.value(), cfg=self.cfg.value(), count=self.sp_count.value(),
+            seed=seed, params_json="", confirm=self.confirm.isChecked(),
+            priority=1000 if self.high_priority.isChecked() else 500,
+            mode=self.mode.currentData(),
+            prompt_helper=self.prompt_helper.isChecked(),
+            lora=["{}:{}".format(vid, w) for vid, _t, w in self._loras],
+            poll_timeout=300, name_length=60, name_sep="_",
+        )
+
+    def _on_model_pick(self):
+        mid = self.model_combo.currentData()
+        if mid is not None:
+            self.model.setText(mid)
+
+    def _refresh_loras(self):
+        self.lora_label.setText(", ".join(
+            "{}:{}".format(t[:18], w) for _vid, t, w in self._loras))
+
+    def _clear_loras(self):
+        self._loras = []
+        self._refresh_loras()
+
+    def _add_lora(self):
+        from PySide6.QtWidgets import QInputDialog
+        kw, ok = QInputDialog.getText(self, "Search LoRAs", "Keyword (LoRA name / character / style):")
+        if not ok or not kw.strip():
+            return
+        self.btn_lora_add.setEnabled(False)
+        try:
+            session = core._make_session(self._bar.token)
+            results = core.model_search_gql(session, kw.strip(), limit=30, lora_only=True)
+        except Exception as e:                       # noqa: BLE001
+            self.log.append_line("[LoRA search error] {}".format(e))
+            return
+        finally:
+            self.btn_lora_add.setEnabled(True)
+        if not results:
+            self.log.append_line("No LoRAs found for '{}'.".format(kw))
+            return
+        labels = ["{}  [{}]{}".format(m["title"][:50], m["type"],
+                                      "  (NSFW)" if m["is_nsfw"] else "") for m in results]
+        choice, ok = QInputDialog.getItem(self, "Pick a LoRA", "Results:", labels, 0, False)
+        if not ok:
+            return
+        m = results[labels.index(choice)]
+        weight, ok = QInputDialog.getDouble(self, "LoRA weight", "Weight:", 0.7, -2.0, 2.0, 2)
+        if not ok:
+            return
+        self._loras.append((m["version_id"], m["title"], weight))
+        self._refresh_loras()
+        self.log.append_line("Added LoRA: {}  ({}) @ {}".format(m["title"][:40], m["version_id"], weight))
+
+    def _on_aspect(self):
+        d = self.aspect.currentData()
+        if d:
+            self.sp_w.setValue(d[0])
+            self.sp_h.setValue(d[1])
+
+    def _swap_dims(self):
+        w, h = self.sp_w.value(), self.sp_h.value()
+        self.sp_w.setValue(h)
+        self.sp_h.setValue(w)
+
+    def _search_models(self):
+        from PySide6.QtWidgets import QInputDialog
+        kw, ok = QInputDialog.getText(self, "Search PixAI models", "Keyword (e.g. anime, realistic, a model name):")
+        if not ok or not kw.strip():
+            return
+        self.btn_model_search.setEnabled(False)
+        try:
+            session = core._make_session(self._bar.token)
+            # base-model picker: exclude LoRAs (a LoRA can't be the base model)
+            results = core.model_search_gql(session, kw.strip(), limit=30, base_only=True)
+        except Exception as e:                       # noqa: BLE001
+            self.log.append_line("[model search error] {}".format(e))
+            return
+        finally:
+            self.btn_model_search.setEnabled(True)
+        if not results:
+            self.log.append_line("No models found for '{}'.".format(kw))
+            return
+        labels = ["{}  [{}]{}  ->  {}".format(
+            m["title"][:48], m["type"], "  (NSFW)" if m["is_nsfw"] else "", m["version_id"])
+            for m in results]
+        choice, ok = QInputDialog.getItem(self, "Pick a model", "Results:", labels, 0, False)
+        if not ok:
+            return
+        m = results[labels.index(choice)]
+        self.model.setText(m["version_id"])
+        self.model_combo.setCurrentIndex(0)          # show it's a custom pick now
+        self.log.append_line("Model set: {}  ->  {}".format(m["title"][:40], m["version_id"]))
+
+    def _run_generate(self):
+        if self._worker and self._worker.isRunning():
+            return
+        args = self._build_args()
+        if not args.prompt and not args.params_json:
+            self.log.append_line("[ERROR] Enter a prompt first.")
+            return
+        self.log.clear_log()
+        self.prog_bar.setRange(0, 0)
+        self.prog_label.setText("Submitting..." if args.confirm else "Preview")
+        self.btn_run.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self._worker = Worker(core.run_generate, args)
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._on_done(False, "")
+
+    def _on_done(self, success, msg):
+        self.btn_run.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.prog_bar.setRange(0, 1)
+        self.prog_bar.setValue(1 if success else 0)
+        self.prog_label.setText("Done" if success else ("Error" if msg else "Stopped"))
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def collect_settings(self):
+        return {
+            "gen_model": self.model.text().strip(),
+            "gen_width": self.sp_w.value(), "gen_height": self.sp_h.value(),
+            "gen_steps": self.sp_steps.value(), "gen_cfg": self.cfg.value(),
+            "gen_count": self.sp_count.value(),
+            "gen_high_priority": self.high_priority.isChecked(),
+            "gen_mode": self.mode.currentData(),
+            "gen_prompt_helper": self.prompt_helper.isChecked(),
+        }
+
+
+# ---------------------------------------------------------------------------
 # Utilities tab
 # ---------------------------------------------------------------------------
 
@@ -1107,10 +1441,19 @@ class UtilitiesTab(QWidget):
         self.btn_account = QPushButton("▶  Account Info")
         self.btn_account.setObjectName("btn_run")
         self.btn_account.setToolTip("Show your PixAI quota/credits and membership")
+        self.btn_reconcile = QPushButton("▶  Reconcile Deleted")
+        self.btn_reconcile.setObjectName("btn_run")
+        self.btn_reconcile.setToolTip("Find catalog items you deleted on the PixAI website and "
+                                      "flag them, so you can prune them in the gallery "
+                                      "(Source -> Deleted on PixAI)")
         self.btn_sync_videos = QPushButton("▶  Sync Videos")
         self.btn_sync_videos.setObjectName("btn_run")
         self.btn_sync_videos.setToolTip("Back up your image-to-video generations: find i2v tasks, "
                                         "download each mp4 into videos/, and catalog them")
+        self.btn_import_local = QPushButton("▶  Import Local Media")
+        self.btn_import_local.setObjectName("btn_run")
+        self.btn_import_local.setToolTip("Catalog non-PixAI images/videos you dropped into the "
+                                         "backup folder (source='local') so they show in the gallery")
 
         backfill_row = QHBoxLayout()
         backfill_row.addWidget(self.btn_backfill)
@@ -1129,8 +1472,10 @@ class UtilitiesTab(QWidget):
                                         "video files into a videos/ folder")
         export_row.addWidget(self.chk_with_videos)
         export_row.addWidget(self.btn_sync_videos)
+        export_row.addWidget(self.btn_import_local)
         export_row.addWidget(self.btn_fix_models)
         export_row.addWidget(self.btn_account)
+        export_row.addWidget(self.btn_reconcile)
         export_row.addStretch()
 
         self.btn_backfill.clicked.connect(self._run_backfill)
@@ -1138,8 +1483,10 @@ class UtilitiesTab(QWidget):
         self.btn_export_csv.clicked.connect(self._run_export_csv)
         self.btn_sync_artworks.clicked.connect(self._run_sync_artworks)
         self.btn_sync_videos.clicked.connect(self._run_sync_videos)
+        self.btn_import_local.clicked.connect(self._run_import_local)
         self.btn_fix_models.clicked.connect(self._run_fix_models)
         self.btn_account.clicked.connect(lambda: self._run(core.run_account_info, self._base_args()))
+        self.btn_reconcile.clicked.connect(self._run_reconcile)
 
         # ---- Duplicate audit / dedup ----
         self.btn_audit = QPushButton("▶  Audit Duplicates")
@@ -1313,6 +1660,18 @@ class UtilitiesTab(QWidget):
         args.progress = self._worker.progress.emit
         self._worker.progress.connect(self._update_progress)
 
+    def _run_import_local(self):
+        args = self._base_args()
+        args.import_local = ""        # scan the backup folder for dropped-in media
+        self._run(core.run_import_local, args)
+        args.progress = self._worker.progress.emit
+        self._worker.progress.connect(self._update_progress)
+
+    def _run_reconcile(self):
+        args = self._base_args()
+        args.page_size = 250          # the feed walk wants a big page size
+        self._run(core.run_reconcile_deleted, args)
+
     def _run_fix_models(self):
         args = self._base_args()
         args.relabel_removed = True  # clean menus: removed ids -> "Unknown or removed model"
@@ -1361,7 +1720,8 @@ class UtilitiesTab(QWidget):
         for b in (self.btn_probe, self.btn_count, self.btn_stats,
                   self.btn_backfill, self.btn_backfill_full, self.btn_export_csv,
                   self.btn_audit, self.btn_dedup, self.btn_verify,
-                  self.btn_sync_artworks, self.btn_fix_models, self.btn_account):
+                  self.btn_sync_artworks, self.btn_sync_videos, self.btn_import_local,
+                  self.btn_fix_models, self.btn_account, self.btn_reconcile):
             b.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         if running:
@@ -1584,7 +1944,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PixAI Gallery Backup v{}".format(core.__version__))
+        self.setWindowTitle("Moonglade Athenaeum  v{}".format(core.__version__))
         self.setMinimumSize(860, 640)
         self.resize(960, 720)
 
@@ -1607,11 +1967,13 @@ class MainWindow(QMainWindow):
         self._dl_tab      = DownloadTab(self._sbar, settings)
         self._org_tab     = OrganizeTab(self._sbar, settings)
         self._conv_tab    = ConvertTab(self._sbar, settings)
+        self._gen_tab     = GenerateTab(self._sbar, settings)
         self._util_tab    = UtilitiesTab(self._sbar, settings)
         self._gallery_tab = GalleryTab(self._sbar, settings)
         self._tabs.addTab(self._dl_tab,      "  Download  ")
         self._tabs.addTab(self._org_tab,     "  Organize  ")
         self._tabs.addTab(self._conv_tab,    "  Convert   ")
+        self._tabs.addTab(self._gen_tab,     "  Generate  ")
         self._tabs.addTab(self._util_tab,    "  Utilities ")
         self._tabs.addTab(self._gallery_tab, "  Gallery   ")
         self._tabs.setCurrentIndex(settings.get("last_tab", 0))
@@ -1627,6 +1989,7 @@ class MainWindow(QMainWindow):
         s.update(self._dl_tab.collect_settings())
         s.update(self._org_tab.collect_settings())
         s.update(self._conv_tab.collect_settings())
+        s.update(self._gen_tab.collect_settings())
         s.update(self._util_tab.collect_settings())
         s.update(self._gallery_tab.collect_settings())
         _save_settings(s)

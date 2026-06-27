@@ -52,31 +52,40 @@ def test_already_downloaded_multiple_exts_returns_first(tmp_path):
 # load_token
 # ---------------------------------------------------------------------------
 
-def test_load_token_from_cli():
+@pytest.fixture
+def isolated_creds(tmp_path, monkeypatch):
+    """Neutralize any real config.json / env so load_token's fallback chain is
+    tested in isolation. Without this, a real PIXAI_API_KEY in the developer's
+    config.json (loaded into core._cfg at import) short-circuits every fallback
+    and these tests fail on machines that have a live config."""
+    monkeypatch.setattr(core, "_cfg", {})
+    monkeypatch.setattr(core, "__file__", str(tmp_path / "pixai_gallery_backup.py"))
+    monkeypatch.chdir(tmp_path)            # no config.json / token.txt in CWD
+    monkeypatch.delenv("PIXAI_API_KEY", raising=False)
+    monkeypatch.delenv("PIXAI_TOKEN", raising=False)
+    return tmp_path
+
+
+def test_load_token_from_cli(isolated_creds):
     assert core.load_token("mytoken") == "mytoken"
 
 
-def test_load_token_from_env(monkeypatch):
+def test_load_token_from_env(isolated_creds, monkeypatch):
     monkeypatch.setenv("PIXAI_TOKEN", "envtoken")
     assert core.load_token() == "envtoken"
 
 
-def test_load_token_from_file(tmp_path, monkeypatch):
-    tok_file = tmp_path / "token.txt"
-    tok_file.write_text("filetoken\n", encoding="utf-8")
-    # Patch __file__ so the script-dir lookup hits our tmp file
-    monkeypatch.setattr(core, "__file__", str(tmp_path / "pixai_gallery_backup.py"))
+def test_load_token_from_file(isolated_creds):
+    (isolated_creds / "token.txt").write_text("filetoken\n", encoding="utf-8")
     assert core.load_token() == "filetoken"
 
 
-def test_load_token_strips_whitespace(monkeypatch):
+def test_load_token_strips_whitespace(isolated_creds, monkeypatch):
     monkeypatch.setenv("PIXAI_TOKEN", "  tok  ")
     assert core.load_token() == "tok"
 
 
-def test_load_token_raises_when_none(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "__file__", str(tmp_path / "pixai_gallery_backup.py"))
-    monkeypatch.chdir(tmp_path)  # prevent CWD fallback from finding a real token.txt
+def test_load_token_raises_when_none(isolated_creds):
     with pytest.raises(core.PixAIError, match="No credential"):
         core.load_token()
 
@@ -105,6 +114,163 @@ def test_load_config_missing_returns_empty(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # prevent CWD fallback from finding a real config.json
     result = core._load_config()
     assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# run_import_local + run_generate (preview)
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+from pixai_gallery import load_catalog as _load_cat
+
+
+def test_import_local_scans_and_is_idempotent(tmp_path):
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "myclip.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "art.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    assert res == {"imported": 2, "skipped": 0}
+    rows = {r["filename"]: r for r in _load_cat(tmp_path / "catalog.db")}
+    assert rows["videos/myclip.mp4"]["source"] == "local"
+    assert rows["videos/myclip.mp4"]["is_video"] == "1"
+    assert rows["images/art.png"]["source"] == "local"
+    assert rows["images/art.png"]["is_video"] == ""
+    # re-run imports nothing new
+    assert core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))["imported"] == 0
+
+
+def test_import_local_skips_already_backed_up_pixai_files(tmp_path):
+    """Regression: an organized PixAI file is named <mediaid>.ext and its catalog
+    'filename' string may differ from the on-disk path, but media_id_of() matches
+    the existing row -- so import must NOT re-catalog it as a duplicate 'local'."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
+                      {"media_id": "375806477215601884", "filename": "images/old_name.png"}])
+    (tmp_path / "2023-10").mkdir()
+    (tmp_path / "2023-10" / "375806477215601884.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    assert res["imported"] == 0          # recognized as already backed up
+    assert res["skipped"] == 1
+    # catalog still has exactly one row, no 'local' duplicate
+    rows = _load_cat(db)
+    assert len(rows) == 1 and rows[0]["source"] != "local"
+
+
+def test_import_local_external_copies_in(tmp_path):
+    ext = tmp_path / "external"; ext.mkdir()
+    (ext / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    out = tmp_path / "backup"
+    res = core.run_import_local(SimpleNamespace(out=str(out), import_local=str(ext)))
+    assert res["imported"] == 1
+    assert (out / "imported" / "outside.png").exists()   # copied into the backup
+
+
+def test_video_poster_thumb_noop_without_ffmpeg(tmp_path, monkeypatch):
+    # ffmpeg absent -> returns False gracefully, no thumbnail written
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    vid = tmp_path / "clip.mp4"; vid.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    thumb = tmp_path / "out.jpg"
+    assert core.video_poster_thumb(vid, thumb) is False
+    assert not thumb.exists()
+
+
+def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    assert res["imported"] == 1   # cataloged fine; just no poster
+
+
+def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
+            "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T1_m1.png"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m2", "task_id": "T2",
+            "prompt_preview": "beta", "created_at": "2024-05-01T00:00:00", "filename": "m2.png"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m3", "task_id": "T3",
+            "prompt_preview": "gamma", "created_at": "2024-06-01T00:00:00", "filename": "01_m3.png"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "loc", "source": "local", "filename": "imported/keep.png"},
+    ])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "alpha_T1_m1.png").write_bytes(b"a")           # flat
+    (tmp_path / "2024-05").mkdir(); (tmp_path / "2024-05" / "m2.png").write_bytes(b"b")  # old bare month
+    (tmp_path / "batches" / "g").mkdir(parents=True)
+    (tmp_path / "batches" / "g" / "01_m3.png").write_bytes(b"c")          # legacy batch
+    (tmp_path / "imported").mkdir(); (tmp_path / "imported" / "keep.png").write_bytes(b"L")  # user import
+
+    args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
+                           dry_run=False, embed_metadata=False, jpeg_quality=92,
+                           jpeg_bg="white", keep_webp=False, progress=None)
+    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+
+    assert (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()            # flat -> month
+    assert (tmp_path / "2024-05" / "beta_T2_m2.png").exists()             # bare -> descriptive
+    assert (tmp_path / "2024-06" / "gamma_T3_m3.png").exists()            # batch -> month
+    assert not (tmp_path / "batches").exists()                           # batches flattened away
+    assert (tmp_path / "imported" / "keep.png").exists()                 # import left alone
+    assert (tmp_path / "organize_manifest.csv").exists()                 # reversible
+    by = {r["media_id"]: r for r in load_catalog(db)}
+    assert by["m2"]["filename"] == "beta_T2_m2.png" and by["m2"]["batch"] == ""
+
+    # idempotent: a second run moves nothing
+    args2 = SimpleNamespace(**{**vars(args)})
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        core.cmd_organize(args2, tmp_path, tmp_path / "images", db)
+    assert "already organized" in buf.getvalue()
+
+
+def test_undo_organize_reverts_moves(tmp_path):
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
+        "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T1_m1.png"}])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "alpha_T1_m1.png").write_bytes(b"a")
+    args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
+                           dry_run=False, embed_metadata=False, jpeg_quality=92,
+                           jpeg_bg="white", keep_webp=False, progress=None)
+    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+    assert (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
+    core.cmd_undo_organize(SimpleNamespace(out=str(tmp_path), dry_run=False), tmp_path)
+    assert (tmp_path / "images" / "alpha_T1_m1.png").exists()             # back to original
+    assert not (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
+    assert not (tmp_path / "organize_manifest.csv").exists()              # manifest cleared
+
+
+def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch):
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    old = "2024-01-01T00:00:00"
+    save_catalog(db, [
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "a", "task_id": "LIVE1", "filename": "a.png", "created_at": old},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "b", "task_id": "GONE", "filename": "b.png", "created_at": old},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "c", "task_id": "NEW", "filename": "c.png", "created_at": "2099-01-01T00:00:00"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "L", "task_id": "GONE2", "filename": "L.png", "source": "local", "created_at": old},
+    ])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    conn = {"edges": [{"node": {"id": "LIVE1"}}], "pageInfo": {"hasPreviousPage": False}}
+    monkeypatch.setattr(core, "gql", lambda *a, **k: conn)
+    res = core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
+    assert res["live"] == 1 and res["flagged"] == 1
+    by = {r["media_id"]: r for r in load_catalog(db)}
+    assert by["b"]["deleted_remote"] == "1"      # task gone from feed, old -> flagged
+    assert by["a"]["deleted_remote"] == ""       # still live -> not flagged
+    assert by["c"]["deleted_remote"] == ""       # too recent -> not flagged (propagation grace)
+    assert by["L"]["deleted_remote"] == ""       # local import -> never flagged
+
+
+def test_generate_preview_spends_nothing(tmp_path):
+    a = SimpleNamespace(prompt="elf", negative="", model="", width=512, height=512,
+                        steps=25, cfg=7.0, count=1, seed=None, params_json="",
+                        confirm=False, out=str(tmp_path))
+    assert core.run_generate(a) == {"submitted": False}
 
 
 # ---------------------------------------------------------------------------

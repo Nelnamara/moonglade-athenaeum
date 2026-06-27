@@ -175,6 +175,56 @@ def test_media_type_filter(tmp_path):
     assert query_catalog(db, media_type="")[1] == 3  # all
 
 
+def test_catalog_model_options_most_used_first(tmp_path):
+    from pixai_gallery import catalog_model_options
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="1", filename="a.png", model_name="Tsubaki", model_id="111"),
+        _row(media_id="2", filename="b.png", model_name="Tsubaki", model_id="111"),
+        _row(media_id="3", filename="c.png", model_name="Dreamix", model_id="222"),
+    ])
+    opts = catalog_model_options(db)
+    assert opts[0] == ("Tsubaki", "111")           # most-used first
+    assert ("Dreamix", "222") in opts
+
+
+def test_source_badges_render(tmp_path):
+    from pixai_gallery import create_app
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="g1", filename="a.png", source="api"),
+        _row(media_id="l1", filename="b.png", source="local"),
+    ])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a.png").write_bytes(b"x")
+    (tmp_path / "images" / "b.png").write_bytes(b"x")
+    data = create_app(tmp_path).test_client().get("/").data
+    assert b"sbadge gen" in data and b"sbadge loc" in data
+
+
+def test_source_filter(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="h1", filename="a.png"),                       # online (blank)
+        _row(media_id="h2", filename="b.png", source="online"),      # explicit online
+        _row(media_id="g1", filename="c.png", source="api"),         # generated
+        _row(media_id="l1", filename="d.png", source="local"),       # imported
+    ])
+    assert query_catalog(db, source="online")[1] == 2   # blank + 'online'
+    assert query_catalog(db, source="api")[1] == 1
+    assert query_catalog(db, source="local")[1] == 1
+    assert query_catalog(db, source="")[1] == 4         # all
+
+
+def test_deleted_remote_filter(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="a", filename="a.png", deleted_remote="1"),
+        _row(media_id="b", filename="b.png"),
+    ])
+    assert query_catalog(db, source="deleted")[1] == 1   # only the flagged one
+
+
 def test_lora_filter(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [
@@ -206,6 +256,22 @@ def test_full_image_and_export_zip_routes(tmp_path):
     names = zipfile.ZipFile(io.BytesIO(z.data)).namelist()
     assert names == ["a_111.png"]
     assert client.post("/export-zip", data={"media_ids": "ghost"}).status_code == 404
+
+
+def test_collection_health_resolves_video_and_local_by_filename(tmp_path):
+    """A video / imported row's media_id is synthetic (or a video id the image-only
+    walk never sees), so 'missing' must resolve by filename too -- not over-report."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="vid123", filename="videos/x_vid123.mp4", is_video="1"),
+        _row(media_id="local_abc", filename="videos/MyClip.mp4", is_video="1", source="local"),
+        _row(media_id="gone", filename="images/not_here.png"),   # genuinely missing
+    ])
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "x_vid123.mp4").write_bytes(b"v")
+    (tmp_path / "videos" / "MyClip.mp4").write_bytes(b"v")
+    h = collection_health(tmp_path, db)
+    assert h["missing"] == 1          # only the truly-absent image, not the videos
 
 
 def test_collection_health_detects_duplicate(tmp_path):
@@ -281,6 +347,36 @@ def test_video_row_renders_and_serves(tmp_path):
 
     # a non-video media id is rejected by the video route
     assert client.get("/video-file/POSTER").status_code == 404
+
+
+def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypatch):
+    import pixai_gallery_backup as core
+    from pixai_gallery import create_app, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="m1", filename="images/a_m1.png", task_id="T1"),
+        _row(media_id="m2", filename="images/b_m2.png", task_id="T1"),   # same task (batch)
+        _row(media_id="loc", filename="videos/c.mp4", task_id="", source="local", is_video="1"),
+    ])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a_m1.png").write_bytes(b"x")
+    (tmp_path / "images" / "b_m2.png").write_bytes(b"x")
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "c.mp4").write_bytes(b"v")
+
+    calls = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: calls.append(tid))
+    client = create_app(tmp_path).test_client()
+
+    # select ONE image of task T1, plus the local-only import
+    r = client.post("/delete-tasks-bulk", data={"media_ids": ["m1", "loc"], "back": "/"})
+    assert r.status_code == 302
+    assert calls == ["T1"]                       # cloud delete fired once for the task
+    assert "deleted=1" in r.headers["Location"]
+    remaining = {x["media_id"] for x in load_catalog(db)}
+    assert remaining == set()                    # whole task (m1+m2) + import all purged
+    assert not (tmp_path / "images" / "b_m2.png").exists()   # batch sibling gone too
 
 
 def test_edit_prompt_and_bulk_replace_routes(tmp_path):

@@ -6,9 +6,9 @@ This file is committed so it is available on every machine that clones the repo.
 
 ## What this project is
 
-A Python CLI (`pixai_gallery_backup.py`) with an optional PySide6 GUI (`pixai_gui.py`) and local Flask gallery (`pixai_gallery.py`) that backs up the **owner's own** PixAI.art generated images at full resolution. PixAI's UI only shows 20 images at a time; this talks to the same API the browser uses, pages through the entire generation history, downloads every image, and keeps a fully searchable SQLite catalog.
+**Moonglade Athenaeum** — *"a library against the Void."* A Python CLI (`pixai_gallery_backup.py`) with a PySide6 GUI (`pixai_gui.py`) and local Flask gallery (`pixai_gallery.py`). It began as a backup tool for the **owner's own** PixAI.art generations and grew into a full local PixAI **client**: back up · browse · generate · curate. Talks to the same API the browser uses, pages the entire history at full resolution, keeps a searchable SQLite catalog, **creates** new images via the API, and manages both the local archive and the cloud account.
 
-Built by reverse-engineering site network traffic. There is no official PixAI API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations.
+Built by reverse-engineering site network traffic (catalogued in `API_OPERATIONS.md`). The `gql_adhoc()` ad-hoc POST path means most operations need no persisted-hash capture. There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `docs/`.
 
 ---
 
@@ -60,6 +60,8 @@ Built by reverse-engineering site network traffic. There is no official PixAI AP
 | `delete_task_gql()` | Replay the `deleteGenerationTask` persisted **mutation** (POST, not the GET listing path). VOID mutation: returns `null` on success, raises on error. Single-attempt — no retry, so a flaky network can't double-fire a delete |
 | `run_delete_tasks()` | Guarded `--delete-task` driver: dry-run by default, `--apply` + typed `delete` confirm (or `--yes`), counts deleted/failed. Leaves local files + `catalog.db` untouched |
 | `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout (the GUI log pane captures it). No-op until enabled |
+| `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error |
+| `account_info()` / `run_account_info()` | Read-only account dashboard (credits/membership/subscription) via `gql_adhoc`. **Never moves money** — no payment/subscription mutations are implemented, by design |
 
 ### Key helpers in `pixai_gallery.py`
 
@@ -183,7 +185,7 @@ Fix: DevTools → Network → filter `graphql` → click `listUserTaskSummaries`
 
 ## Test suite
 
-146 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
+181 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
 
 ---
 
