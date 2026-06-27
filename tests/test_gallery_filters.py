@@ -222,6 +222,22 @@ def test_full_image_and_export_zip_routes(tmp_path):
     assert client.post("/export-zip", data={"media_ids": "ghost"}).status_code == 404
 
 
+def test_collection_health_resolves_video_and_local_by_filename(tmp_path):
+    """A video / imported row's media_id is synthetic (or a video id the image-only
+    walk never sees), so 'missing' must resolve by filename too -- not over-report."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="vid123", filename="videos/x_vid123.mp4", is_video="1"),
+        _row(media_id="local_abc", filename="videos/MyClip.mp4", is_video="1", source="local"),
+        _row(media_id="gone", filename="images/not_here.png"),   # genuinely missing
+    ])
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "x_vid123.mp4").write_bytes(b"v")
+    (tmp_path / "videos" / "MyClip.mp4").write_bytes(b"v")
+    h = collection_health(tmp_path, db)
+    assert h["missing"] == 1          # only the truly-absent image, not the videos
+
+
 def test_collection_health_detects_duplicate(tmp_path):
     db = tmp_path / "catalog.db"
     init_db(db)
