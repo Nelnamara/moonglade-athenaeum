@@ -140,6 +140,24 @@ def test_import_local_scans_and_is_idempotent(tmp_path):
     assert core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))["imported"] == 0
 
 
+def test_import_local_skips_already_backed_up_pixai_files(tmp_path):
+    """Regression: an organized PixAI file is named <mediaid>.ext and its catalog
+    'filename' string may differ from the on-disk path, but media_id_of() matches
+    the existing row -- so import must NOT re-catalog it as a duplicate 'local'."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
+                      {"media_id": "375806477215601884", "filename": "images/old_name.png"}])
+    (tmp_path / "2023-10").mkdir()
+    (tmp_path / "2023-10" / "375806477215601884.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    assert res["imported"] == 0          # recognized as already backed up
+    assert res["skipped"] == 1
+    # catalog still has exactly one row, no 'local' duplicate
+    rows = _load_cat(db)
+    assert len(rows) == 1 and rows[0]["source"] != "local"
+
+
 def test_import_local_external_copies_in(tmp_path):
     ext = tmp_path / "external"; ext.mkdir()
     (ext / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
