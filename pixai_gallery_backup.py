@@ -2124,8 +2124,14 @@ def run_import_local(args):
         external = False
 
     _prog = getattr(args, "progress", None)
+    catalog_rows = load_catalog(db_path)
     existing = {(r.get("filename") or "").replace("\\", "/")
-                for r in load_catalog(db_path) if r.get("filename")}
+                for r in catalog_rows if r.get("filename")}
+    # Also key on media_id: an already-backed-up PixAI file is named after its
+    # media id, so media_id_of() of an organized file matches an existing row even
+    # though its on-disk path no longer equals the stored `filename` string. This
+    # is what stops --import-local from re-cataloging the whole backup as 'local'.
+    existing_mids = {r.get("media_id") for r in catalog_rows if r.get("media_id")}
     gallery_dir = out / "gallery"
     quarantine = out / "_duplicates"
 
@@ -2159,8 +2165,8 @@ def run_import_local(args):
         else:
             stored = p
         rel = str(stored.relative_to(out)).replace("\\", "/")
-        if rel in existing:
-            skipped += 1
+        if rel in existing or media_id_of(stored) in existing_mids:
+            skipped += 1                  # already cataloged (by path OR PixAI media id)
             continue
         mid = "local_" + hashlib.sha1(rel.encode("utf-8")).hexdigest()[:12]
         try:
