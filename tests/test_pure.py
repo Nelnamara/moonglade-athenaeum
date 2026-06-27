@@ -301,6 +301,21 @@ def test_gen_parameters_builds_request():
     assert p["batchSize"] == 2 and p["seed"] == 42
 
 
+def test_model_search_extracts_version_id(monkeypatch):
+    fake = {"generationModels": {"edges": [
+        {"node": {"id": "MODEL1", "title": "Midsummer", "type": "SD_V1_MODEL",
+                  "isNsfw": False, "latestVersion": {"id": "VER1"}}},
+        {"node": {"id": "MODEL2", "title": "Lora", "type": "MULTI_LORA",
+                  "isNsfw": True, "latestVersion": {"id": "VER2"}}},
+    ]}}
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: fake)
+    res = core.model_search_gql(None, "mid")
+    # version_id is latestVersion.id (the generatable id), NOT the model node id
+    assert res[0] == {"title": "Midsummer", "type": "SD_V1_MODEL", "is_nsfw": False,
+                      "model_id": "MODEL1", "version_id": "VER1"}
+    assert res[1]["is_nsfw"] is True and res[1]["version_id"] == "VER2"
+
+
 def test_gen_parameters_omits_optionals_and_honors_json():
     from types import SimpleNamespace
     a = SimpleNamespace(prompt="cat", negative="", model="M9", width=512, height=512,
