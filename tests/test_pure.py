@@ -310,6 +310,25 @@ def test_gen_parameters_priority():
     assert core._gen_parameters(SimpleNamespace(priority=1000, **base))["priority"] == 1000
 
 
+def test_lora_params_builds_both_fields():
+    m, l = core._lora_params(["1686550608832816741:0.7", ("X", 0.5)])
+    assert m == {"1686550608832816741": 0.7, "X": 0.5}
+    assert {"weight": 0.7, "versionId": "1686550608832816741"} in l
+    assert {"weight": 0.5, "versionId": "X"} in l
+    assert core._lora_params(None) == ({}, [])
+    assert core._lora_params(["abc:notanum"])[0] == {"abc": 0.7}   # bad weight -> 0.7
+
+
+def test_gen_parameters_with_lora():
+    from types import SimpleNamespace
+    base = dict(prompt="x", negative="", model="", width=512, height=512,
+                steps=25, cfg=7.0, count=1, seed=None, params_json="")
+    p = core._gen_parameters(SimpleNamespace(lora=["VER:0.6"], **base))
+    assert p["lora"] == {"VER": 0.6}
+    assert p["loraParameters"] == [{"weight": 0.6, "versionId": "VER"}]
+    assert "lora" not in core._gen_parameters(SimpleNamespace(**base))   # none -> absent
+
+
 def test_gen_parameters_mode_helper_natural():
     from types import SimpleNamespace
     base = dict(prompt="elf", negative="", model="", width=512, height=512,
