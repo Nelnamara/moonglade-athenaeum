@@ -1127,6 +1127,32 @@ class GenerateTab(QWidget):
         r_dim.addStretch()
         g.addLayout(r_dim)
 
+        r_aspect = QHBoxLayout()
+        r_aspect.addWidget(QLabel("Aspect:"))
+        self.aspect = QComboBox()
+        self.aspect.addItem("Custom", None)
+        for label, w, h in (
+                ("1:1  square  1024x1024", 1024, 1024),
+                ("16:9  landscape  1344x768", 1344, 768),
+                ("9:16  portrait  768x1344", 768, 1344),
+                ("4:3  1152x896", 1152, 896),
+                ("3:4  896x1152", 896, 1152),
+                ("3:2  1216x832", 1216, 832),
+                ("2:3  832x1216", 832, 1216),
+                ("5:3  1280x768", 1280, 768),
+                ("3:5  768x1280", 768, 1280),
+                ("3:1  wide  1536x512", 1536, 512)):
+            self.aspect.addItem(label, (w, h))
+        self.aspect.setMinimumWidth(200)
+        self.aspect.currentIndexChanged.connect(self._on_aspect)
+        r_aspect.addWidget(self.aspect)
+        self.btn_swap = QPushButton("⇄  Swap W/H")
+        self.btn_swap.setToolTip("Swap width and height (portrait ↔ landscape)")
+        self.btn_swap.clicked.connect(self._swap_dims)
+        r_aspect.addWidget(self.btn_swap)
+        r_aspect.addStretch()
+        g.addLayout(r_aspect)
+
         r_conf = QHBoxLayout()
         self.confirm = QCheckBox("Confirm — actually submit (spends credits)")
         self.confirm.setToolTip("Unchecked = preview the request only (no credits). "
@@ -1182,6 +1208,17 @@ class GenerateTab(QWidget):
         mid = self.model_combo.currentData()
         if mid is not None:
             self.model.setText(mid)
+
+    def _on_aspect(self):
+        d = self.aspect.currentData()
+        if d:
+            self.sp_w.setValue(d[0])
+            self.sp_h.setValue(d[1])
+
+    def _swap_dims(self):
+        w, h = self.sp_w.value(), self.sp_h.value()
+        self.sp_w.setValue(h)
+        self.sp_h.setValue(w)
 
     def _search_models(self):
         from PySide6.QtWidgets import QInputDialog
