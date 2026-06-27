@@ -1255,7 +1255,8 @@ class GenerateTab(QWidget):
         self.btn_model_search.setEnabled(False)
         try:
             session = core._make_session(self._bar.token)
-            results = core.model_search_gql(session, kw.strip(), limit=25)
+            # base-model picker: exclude LoRAs (a LoRA can't be the base model)
+            results = core.model_search_gql(session, kw.strip(), limit=30, base_only=True)
         except Exception as e:                       # noqa: BLE001
             self.log.append_line("[model search error] {}".format(e))
             return
