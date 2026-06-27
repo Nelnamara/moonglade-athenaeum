@@ -2315,7 +2315,19 @@ def run_generate(args):
         print("Fetching existing task (no credits):", task_id)
     else:
         print("Submitting generation task...")
-        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        try:
+            created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        except PixAIError as e:
+            # inferenceProfile is model-type-specific; a rejected submit costs no
+            # credits, so if the chosen mode isn't supported, fall back to the
+            # model's default and retry once instead of failing the run.
+            if "inferenceProfile" in str(e) and "inferenceProfile" in params:
+                dropped = params.pop("inferenceProfile")
+                print("  mode '{}' not supported by this model; retrying on the "
+                      "model's default...".format(dropped))
+                created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+            else:
+                raise
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
