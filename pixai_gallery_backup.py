@@ -834,20 +834,27 @@ def video_outputs(task):
     return outs, shared
 
 
-def model_search_gql(session, keyword="", limit=15):
+def model_search_gql(session, keyword="", limit=15, base_only=False):
     """Search PixAI generation models by keyword via the `generationModels`
     connection. Returns a list of {title, type, model_id, version_id}.
 
     IMPORTANT: createGenerationTask's `modelId` wants the *version* id, not the
     model id. The search node's `id` is the MODEL id (which generation rejects);
     `latestVersion.id` is the generatable version id. So we surface version_id as
-    the value to feed into --generate."""
+    the value to feed into --generate.
+
+    base_only=True drops LoRA / video types -- a LoRA can't be the BASE model
+    (generation fails), so the base-model picker filters them out. LoRAs belong in
+    the separate LoRA picker."""
     q = ("query($k:String,$n:Int){ generationModels(keyword:$k, first:$n){ "
          "edges { node { id title type isNsfw latestVersion { id } } } } }")
     data = gql_adhoc(session, q, {"k": keyword, "n": limit})
     out = []
     for e in (data.get("generationModels") or {}).get("edges") or []:
         n = e.get("node") or {}
+        mtype = (n.get("type") or "").upper()
+        if base_only and ("LORA" in mtype or "VIDEO" in mtype):
+            continue
         out.append({
             "title": n.get("title") or "",
             "type": n.get("type") or "",
@@ -856,6 +863,11 @@ def model_search_gql(session, keyword="", limit=15):
             "version_id": str((n.get("latestVersion") or {}).get("id") or ""),
         })
     return out
+
+
+def is_lora_type(model_type):
+    """True if a model type is a LoRA (can't be used as a base model)."""
+    return "LORA" in (model_type or "").upper()
 
 
 def run_list_models(args):
@@ -2248,14 +2260,16 @@ DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model
 def _gen_parameters(args):
     if getattr(args, "params_json", ""):
         return json.loads(args.params_json)
+    def _dim(v):                          # SD models require multiples of 8
+        return max(64, (int(v) // 8) * 8)
     params = {
         "prompts": args.prompt,
         # naturalPrompts is the natural-language form the prompt-helper reads; send
         # it alongside prompts (PixAI's generator does the same).
         "naturalPrompts": args.prompt,
         "modelId": args.model or DEFAULT_GEN_MODEL,
-        "width": args.width,
-        "height": args.height,
+        "width": _dim(args.width),
+        "height": _dim(args.height),
         "samplingSteps": args.steps,
         "cfgScale": args.cfg,
         "batchSize": args.count,
