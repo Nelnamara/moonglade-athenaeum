@@ -1156,15 +1156,17 @@ class GenerateTab(QWidget):
         r_mode = QHBoxLayout()
         r_mode.addWidget(QLabel("Mode:"))
         self.mode = QComboBox()
-        for label, val in (("Lite (fastest, cheapest)", "lite"),
+        for label, val in (("Auto (model default)", "auto"),
+                           ("Lite (fastest, cheapest)", "lite"),
                            ("Standard (balanced)", "standard"),
-                           ("Pro (higher detail)", "pro"),
-                           ("Ultra (max quality)", "ultra")):
+                           ("Pro (newer models)", "pro"),
+                           ("Ultra (newer models)", "ultra")):
             self.mode.addItem(label, val)
-        _mi = self.mode.findData(settings.get("gen_mode", "standard"))
+        _mi = self.mode.findData(settings.get("gen_mode", "auto"))
         self.mode.setCurrentIndex(max(0, _mi))
-        self.mode.setToolTip("Quality mode (inferenceProfile). Higher = better quality but "
-                             "more credits/slower.")
+        self.mode.setToolTip("Quality mode (inferenceProfile). Auto = the model's default "
+                             "(always works). lite/standard suit SD models; pro/ultra are for "
+                             "newer model types and are REJECTED on older ones.")
         r_mode.addWidget(self.mode)
         r_mode.addSpacing(16)
         self.prompt_helper = QCheckBox("Prompt helper")
