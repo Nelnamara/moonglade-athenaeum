@@ -893,7 +893,7 @@ def create_app(out_dir: Path):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
 <meta name="theme-color" content="#0c0a1c">
-<title>PixAI Gallery</title>
+<title>Moonglade Athenaeum</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
@@ -908,8 +908,9 @@ def create_app(out_dir: Path):
     --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
     --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
     --blue:    #47cbc3; --sapphire:#3a8a93;
-    /* Accent system: purple leads, teal is the "magic" highlight, gold is rare. */
-    --accent:  #b692e6; --accent-soft:#47cbc3; --gold: #d4af37;
+    /* Moonglade Athenaeum palette: lavender leads, emerald is the "magic"
+       highlight (Nelnamara's gems), gold filigree is rare. */
+    --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
     --purple-deep: #33236d; --purple-bright: #643aac;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -927,7 +928,7 @@ def create_app(out_dir: Path):
   .filters { background: var(--mantle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--surface0); }
   .filters input, .filters select { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
   .filters input { width: 280px; }
-  .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(71,203,195,.25); }
+  .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(79,201,154,.25); }
   .filters label { color: var(--subtext); font-size: 12px; }
   .filter-toggle { display: none; }
   /* Mobile: collapse the filter bar behind a toggle so the grid leads. */
@@ -1166,7 +1167,7 @@ document.addEventListener('DOMContentLoaded', function() {
   </select>
 {% endmacro %}
 <header>
-  <div class="brand"><span class="mark">P</span><h1>PixAI Gallery</h1></div>
+  <div class="brand"><span class="mark">M</span><h1>Moonglade Athenaeum</h1></div>
   <span class="header-stats">{{ '{:,}'.format(total) }} images</span>
   <a class="back-link" href="{{ url_for('health') }}" style="margin-left:auto;">Collection health →</a>
 </header>
@@ -1845,7 +1846,7 @@ function savePrompt() {
 </div>
 {% endmacro %}
 <header>
-  <div class="brand"><span class="mark">P</span><h1>Collection Health</h1></div>
+  <div class="brand"><span class="mark">M</span><h1>Collection Health</h1></div>
   <a class="back-link" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 
@@ -1947,7 +1948,7 @@ function savePrompt() {
 
     DUPES_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <header>
-  <div class="brand"><span class="mark">P</span><h1>Duplicate Review</h1></div>
+  <div class="brand"><span class="mark">M</span><h1>Duplicate Review</h1></div>
   <a class="back-link" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 <div style="padding:10px 20px 28px;max-width:1100px;">
@@ -2359,7 +2360,7 @@ function savePrompt() {
                 "fill='%23d4af37'/%3E%3C/svg%3E")
         return app.response_class(
             json.dumps({
-                "name": "PixAI Gallery", "short_name": "PixAI",
+                "name": "Moonglade Athenaeum", "short_name": "Moonglade",
                 "start_url": "/", "display": "standalone",
                 "background_color": "#0c0a1c", "theme_color": "#0c0a1c",
                 "icons": [{"src": icon, "sizes": "any", "type": "image/svg+xml"}],

@@ -1,10 +1,12 @@
-# PixAI Gallery Backup
+# 🌙 Moonglade Athenaeum
+
+### *A library against the Void.*
 
 > **Language:** Python 3.8+ · **Platform:** Windows / macOS / Linux · **Author:** Nelnamara
 
-A command-line tool (with optional desktop GUI) that backs up **your own** PixAI.art generated images at full resolution. PixAI's gallery UI only shows 20 images at a time; this talks to the same API the browser uses, pages through your entire generation history, downloads every image, and keeps a fully searchable catalog of prompts, seeds, model names, dimensions, and dates.
+A full local companion for **your own** PixAI.art work — **back up · browse · generate · curate**. It started as a backup tool (PixAI's UI only shows 20 images at a time) and grew into a complete client: it talks to the same API the browser uses to page your **entire** generation history at full resolution, keeps a fully searchable SQLite catalog (prompts, seeds, models, LoRAs, dates), serves a local web gallery, **creates** new images via the API, and lets you manage and prune both your local archive and your cloud account — so nothing is ever lost to the Void.
 
-PixAI's terms grant users copyright of their own generations. This tool is rate-paced to be polite to their servers.
+PixAI's terms grant users copyright of their own generations. This tool is unofficial, uses your own API key, and is rate-paced to be polite to their servers.
 
 ---
 
