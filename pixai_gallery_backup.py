@@ -2228,8 +2228,9 @@ def run_generate(args):
     shared session/download/catalog plumbing."""
     out = Path(args.out)
     params = _gen_parameters(args)
+    existing_task = (getattr(args, "task_id", "") or "").strip()
 
-    if not getattr(args, "confirm", False):
+    if not existing_task and not getattr(args, "confirm", False):
         print("=== PixAI createGenerationTask (PREVIEW -- no credits spent) ===")
         print(json.dumps({"parameters": params}, indent=2))
         print("\nThis would SPEND PixAI credits. Re-run with --confirm to submit.")
@@ -2242,26 +2243,33 @@ def run_generate(args):
     thumb_dir = out / "gallery" / "thumbs"
     from pixai_gallery import make_thumbnail
 
-    print("Submitting generation task...")
-    created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
-    task_id = (created.get("createGenerationTask") or {}).get("id")
-    if not task_id:
-        raise PixAIError("no task id returned: " + json.dumps(created)[:300])
-    print("  task id:", task_id)
-
-    deadline = time.time() + getattr(args, "poll_timeout", 300)
-    while time.time() < deadline:
-        task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
-        status = str(task.get("status", "")).lower()
-        vlog("generate poll: {}".format(status or "(unknown)"))
-        if status in ("completed", "succeeded", "success", "done"):
-            break
-        if status in ("failed", "error", "cancelled", "canceled"):
-            raise PixAIError("generation ended with status: " + status)
-        time.sleep(3)
+    if existing_task:
+        # Recover an already-created generation by id (no new credits). Tool/API
+        # generations don't enter listUserTaskSummaries, so --update can't fetch
+        # them -- this is how you reclaim a stranded paid generation.
+        task_id = existing_task
+        print("Fetching existing task (no credits):", task_id)
     else:
-        raise PixAIError("timed out after {}s (task {})".format(
-            getattr(args, "poll_timeout", 300), task_id))
+        print("Submitting generation task...")
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        print("  task id:", task_id)
+
+        deadline = time.time() + getattr(args, "poll_timeout", 300)
+        while time.time() < deadline:
+            task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
+            status = str(task.get("status", "")).lower()
+            vlog("generate poll: {}".format(status or "(unknown)"))
+            if status in ("completed", "succeeded", "success", "done"):
+                break
+            if status in ("failed", "error", "cancelled", "canceled"):
+                raise PixAIError("generation ended with status: " + status)
+            time.sleep(3)
+        else:
+            raise PixAIError("timed out after {}s (task {})".format(
+                getattr(args, "poll_timeout", 300), task_id))
 
     # The Task type exposes its media under `outputs` (mediaId / batchMediaIds /
     # videos), NOT at the top level. getTaskById returns that whole object and is
@@ -2281,6 +2289,18 @@ def run_generate(args):
     if not mids:
         raise PixAIError("task completed but no media ids found")
 
+    # Prefer the task's actual metadata (authoritative, and the only source when
+    # recovering by --task-id); fall back to the params we submitted.
+    fm = extract_full_meta(result)
+
+    def _pick(fm_key, *param_keys):
+        if fm.get(fm_key):
+            return str(fm[fm_key])
+        for pk in param_keys:
+            if params.get(pk):
+                return str(params[pk])
+        return ""
+
     img_dir = out / "images"
     rows, saved = [], []
     for mid in mids:
@@ -2288,7 +2308,8 @@ def run_generate(args):
         if not url:
             print("  no url for media", mid)
             continue
-        stem = img_dir / build_stem_name(args.prompt or "", task_id, mid,
+        prompt = fm.get("prompt_full") or params.get("prompts", "")
+        stem = img_dir / build_stem_name(prompt, task_id, mid,
                                          getattr(args, "name_length", 60),
                                          getattr(args, "name_sep", "_"))
         status, path = download(session, url, stem)
@@ -2299,14 +2320,16 @@ def run_generate(args):
             "task_id": str(task_id), "media_id": mid,
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "prompt_full": params.get("prompts", ""),
-            "prompt_preview": (params.get("prompts", "") or "")[:100],
-            "negative_prompt": params.get("negativePrompts", ""),
-            "seed": str(params.get("seed", "") or ""),
-            "steps": str(params.get("samplingSteps", "") or ""),
-            "cfg_scale": str(params.get("cfgScale", "") or ""),
-            "model_id": str(params.get("modelId", "") or ""),
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "prompt_full": prompt,
+            "prompt_preview": (prompt or "")[:100],
+            "negative_prompt": _pick("negative_prompt", "negativePrompts"),
+            "seed": _pick("seed", "seed"),
+            "steps": _pick("steps", "samplingSteps"),
+            "cfg_scale": _pick("cfg_scale", "cfgScale"),
+            "model_id": _pick("model_id", "modelId"),
+            "model_name": fm.get("model_name", ""),
+            "loras": fm.get("loras", ""),
             "width": str((info or {}).get("width") or params.get("width") or ""),
             "height": str((info or {}).get("height") or params.get("height") or ""),
         })
@@ -3288,8 +3311,13 @@ def main():
     gen.add_argument("--height", type=int, default=512)
     gen.add_argument("--steps", type=int, default=25)
     gen.add_argument("--cfg", type=float, default=7.0)
-    gen.add_argument("--count", type=int, default=1, help="batch size for --generate")
+    gen.add_argument("--batch-size", dest="count", type=int, default=1,
+                     help="number of images per --generate run (batch size)")
     gen.add_argument("--seed", type=int, default=None)
+    gen.add_argument("--task-id", default="",
+                     help="with --generate, fetch + catalog an ALREADY-created task by id "
+                          "(no new credits). Recovers a stranded generation that --update "
+                          "can't see, since generated tasks don't enter the listing feed")
     gen.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
     gen.add_argument("--poll-timeout", type=int, default=300)
     gen.add_argument("--confirm", action="store_true",
