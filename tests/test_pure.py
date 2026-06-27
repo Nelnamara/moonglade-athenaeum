@@ -310,6 +310,19 @@ def test_gen_parameters_priority():
     assert core._gen_parameters(SimpleNamespace(priority=1000, **base))["priority"] == 1000
 
 
+def test_gen_parameters_mode_helper_natural():
+    from types import SimpleNamespace
+    base = dict(prompt="elf", negative="", model="", width=512, height=512,
+                steps=25, cfg=7.0, count=1, seed=None, params_json="")
+    p = core._gen_parameters(SimpleNamespace(**base))
+    assert p["inferenceProfile"] == "standard"          # default mode
+    assert p["naturalPrompts"] == "elf"                 # not skipped
+    assert p["promptHelper"]["userWantToEnable"] is True
+    p2 = core._gen_parameters(SimpleNamespace(mode="ultra", prompt_helper=False, **base))
+    assert p2["inferenceProfile"] == "ultra"
+    assert p2["promptHelper"]["userWantToEnable"] is False
+
+
 def test_model_search_extracts_version_id(monkeypatch):
     fake = {"generationModels": {"edges": [
         {"node": {"id": "MODEL1", "title": "Midsummer", "type": "SD_V1_MODEL",
