@@ -216,6 +216,15 @@ def test_source_filter(tmp_path):
     assert query_catalog(db, source="")[1] == 4         # all
 
 
+def test_deleted_remote_filter(tmp_path):
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="a", filename="a.png", deleted_remote="1"),
+        _row(media_id="b", filename="b.png"),
+    ])
+    assert query_catalog(db, source="deleted")[1] == 1   # only the flagged one
+
+
 def test_lora_filter(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [

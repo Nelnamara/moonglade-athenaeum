@@ -1441,6 +1441,11 @@ class UtilitiesTab(QWidget):
         self.btn_account = QPushButton("▶  Account Info")
         self.btn_account.setObjectName("btn_run")
         self.btn_account.setToolTip("Show your PixAI quota/credits and membership")
+        self.btn_reconcile = QPushButton("▶  Reconcile Deleted")
+        self.btn_reconcile.setObjectName("btn_run")
+        self.btn_reconcile.setToolTip("Find catalog items you deleted on the PixAI website and "
+                                      "flag them, so you can prune them in the gallery "
+                                      "(Source -> Deleted on PixAI)")
         self.btn_sync_videos = QPushButton("▶  Sync Videos")
         self.btn_sync_videos.setObjectName("btn_run")
         self.btn_sync_videos.setToolTip("Back up your image-to-video generations: find i2v tasks, "
@@ -1470,6 +1475,7 @@ class UtilitiesTab(QWidget):
         export_row.addWidget(self.btn_import_local)
         export_row.addWidget(self.btn_fix_models)
         export_row.addWidget(self.btn_account)
+        export_row.addWidget(self.btn_reconcile)
         export_row.addStretch()
 
         self.btn_backfill.clicked.connect(self._run_backfill)
@@ -1480,6 +1486,7 @@ class UtilitiesTab(QWidget):
         self.btn_import_local.clicked.connect(self._run_import_local)
         self.btn_fix_models.clicked.connect(self._run_fix_models)
         self.btn_account.clicked.connect(lambda: self._run(core.run_account_info, self._base_args()))
+        self.btn_reconcile.clicked.connect(self._run_reconcile)
 
         # ---- Duplicate audit / dedup ----
         self.btn_audit = QPushButton("▶  Audit Duplicates")
@@ -1660,6 +1667,11 @@ class UtilitiesTab(QWidget):
         args.progress = self._worker.progress.emit
         self._worker.progress.connect(self._update_progress)
 
+    def _run_reconcile(self):
+        args = self._base_args()
+        args.page_size = 250          # the feed walk wants a big page size
+        self._run(core.run_reconcile_deleted, args)
+
     def _run_fix_models(self):
         args = self._base_args()
         args.relabel_removed = True  # clean menus: removed ids -> "Unknown or removed model"
@@ -1709,7 +1721,7 @@ class UtilitiesTab(QWidget):
                   self.btn_backfill, self.btn_backfill_full, self.btn_export_csv,
                   self.btn_audit, self.btn_dedup, self.btn_verify,
                   self.btn_sync_artworks, self.btn_sync_videos, self.btn_import_local,
-                  self.btn_fix_models, self.btn_account):
+                  self.btn_fix_models, self.btn_account, self.btn_reconcile):
             b.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         if running:
