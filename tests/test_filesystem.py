@@ -184,6 +184,66 @@ def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
     assert res["imported"] == 1   # cataloged fine; just no poster
 
 
+def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
+            "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T1_m1.png"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m2", "task_id": "T2",
+            "prompt_preview": "beta", "created_at": "2024-05-01T00:00:00", "filename": "m2.png"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m3", "task_id": "T3",
+            "prompt_preview": "gamma", "created_at": "2024-06-01T00:00:00", "filename": "01_m3.png"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "loc", "source": "local", "filename": "imported/keep.png"},
+    ])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "alpha_T1_m1.png").write_bytes(b"a")           # flat
+    (tmp_path / "2024-05").mkdir(); (tmp_path / "2024-05" / "m2.png").write_bytes(b"b")  # old bare month
+    (tmp_path / "batches" / "g").mkdir(parents=True)
+    (tmp_path / "batches" / "g" / "01_m3.png").write_bytes(b"c")          # legacy batch
+    (tmp_path / "imported").mkdir(); (tmp_path / "imported" / "keep.png").write_bytes(b"L")  # user import
+
+    args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
+                           dry_run=False, embed_metadata=False, jpeg_quality=92,
+                           jpeg_bg="white", keep_webp=False, progress=None)
+    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+
+    assert (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()            # flat -> month
+    assert (tmp_path / "2024-05" / "beta_T2_m2.png").exists()             # bare -> descriptive
+    assert (tmp_path / "2024-06" / "gamma_T3_m3.png").exists()            # batch -> month
+    assert not (tmp_path / "batches").exists()                           # batches flattened away
+    assert (tmp_path / "imported" / "keep.png").exists()                 # import left alone
+    assert (tmp_path / "organize_manifest.csv").exists()                 # reversible
+    by = {r["media_id"]: r for r in load_catalog(db)}
+    assert by["m2"]["filename"] == "beta_T2_m2.png" and by["m2"]["batch"] == ""
+
+    # idempotent: a second run moves nothing
+    args2 = SimpleNamespace(**{**vars(args)})
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        core.cmd_organize(args2, tmp_path, tmp_path / "images", db)
+    assert "already organized" in buf.getvalue()
+
+
+def test_undo_organize_reverts_moves(tmp_path):
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
+        "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T1_m1.png"}])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "alpha_T1_m1.png").write_bytes(b"a")
+    args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
+                           dry_run=False, embed_metadata=False, jpeg_quality=92,
+                           jpeg_bg="white", keep_webp=False, progress=None)
+    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+    assert (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
+    core.cmd_undo_organize(SimpleNamespace(out=str(tmp_path), dry_run=False), tmp_path)
+    assert (tmp_path / "images" / "alpha_T1_m1.png").exists()             # back to original
+    assert not (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
+    assert not (tmp_path / "organize_manifest.csv").exists()              # manifest cleared
+
+
 def test_generate_preview_spends_nothing(tmp_path):
     a = SimpleNamespace(prompt="elf", negative="", model="", width=512, height=512,
                         steps=25, cfg=7.0, count=1, seed=None, params_json="",

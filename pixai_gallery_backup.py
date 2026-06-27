@@ -1438,105 +1438,111 @@ def reconcile_catalog_with_disk(out_dir, db_path):
     return updated
 
 
-def cmd_organize(args, out, img_dir, db_path):
-    """Reorganize already-downloaded files into batch/ and YYYY-MM/ folders using
-    the catalog. Embeds prompt metadata, optionally converts, writes per-folder
-    info files. Idempotent (only touches flat files in images/) and dry-runnable."""
-    db_path = _ensure_db(out)
-    if not img_dir.exists():
-        raise PixAIError("No images folder at {}.".format(img_dir))
+ORGANIZE_MANIFEST = "organize_manifest.csv"
 
-    # catalog: media_id -> row, and task_id -> [media_ids]
-    meta_by_mid, mids_by_task = {}, defaultdict(list)
+
+def cmd_organize(args, out, img_dir, db_path):
+    """Normalize PixAI images into YYYY-MM/ month folders with descriptive,
+    readable filenames (prompt_taskid_mediaid) -- one flat scheme, NO batch
+    subfolders. Scans the WHOLE backup (flat images/, existing month folders, and
+    any legacy batches/), so a single run brings everything to the same layout for
+    easy Explorer browsing.
+
+    Safety: writes a reversible move-manifest (organize_manifest.csv: old->new) so
+    every move can be undone with --undo-organize. Idempotent (files already at
+    their target are skipped), byte-safe (never overwrites a differing file), and
+    dry-runnable. Metadata embedding (--embed-metadata) and conversion (--convert)
+    are opt-in. Imported (source='local') files and videos are left untouched."""
+    db_path = _ensure_db(out)
+    meta_by_mid = {}
     for row in load_catalog(db_path):
         mid = row.get("media_id")
-        if not mid:
-            continue
-        meta_by_mid[mid] = row
-        mids_by_task[row.get("task_id", "")].append(mid)
+        if mid:
+            meta_by_mid[mid] = row
 
-    # Sources = flat files in images/ only, so re-runs are idempotent (already
-    # organized files live in sibling folders and are left alone).
-    src_by_mid = {}
-    for p in sorted(img_dir.glob("*.*")):
+    skip_dirs = (out / "gallery", out / "_duplicates", out / "videos", out / "imported")
+
+    def _target(mid, row, ext):
+        month = (row.get("created_at") or "")[:7] or "unknown-date"
+        stem = build_stem_name(row.get("prompt_preview", ""), row.get("task_id", ""),
+                               mid, args.name_length, args.name_sep)
+        return out / month / (stem + ext)
+
+    # Sources: every PixAI image on disk (catalog media), wherever it currently is.
+    plan, in_place = [], 0
+    for p in out.rglob("*"):
+        if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS:
+            continue
         if p.name.endswith(".part") or p.name.startswith("_"):
             continue
-        src_by_mid.setdefault(p.stem.split("_")[-1], p)
+        if any(_under(p, d) for d in skip_dirs):
+            continue
+        row = meta_by_mid.get(media_id_of(p))
+        if not row or (row.get("source") or "") == "local":
+            continue                       # unknown file or user import: leave it
+        dst = _target(media_id_of(p), row, p.suffix.lower())
+        if p.resolve() == dst.resolve():
+            in_place += 1
+            continue
+        plan.append((p, dst, media_id_of(p), row))
 
-    batches_root = out / "batches"
-    moved = converted = embedded = skipped = missing = 0
-    month_index = defaultdict(list)   # "YYYY-MM" -> list of row dicts for index csv
-    batch_txt = {}                    # folder -> info text
-
-    plan = []  # (src, dst, is_batch, mid)
-    for tid, mids in mids_by_task.items():
-        distinct = list(dict.fromkeys(mids))
-        is_batch = len(distinct) > 1
-        for idx, mid in enumerate(sorted(distinct)):
-            src = src_by_mid.get(mid)
-            if not src:
-                continue  # not on disk as a flat file (already organized or never got)
-            row = meta_by_mid.get(mid, {})
-            ext = src.suffix.lower()
-            if is_batch:
-                folder = batches_root / build_stem_name(
-                    row.get("prompt_preview", ""), tid, "", args.name_length, args.name_sep)
-                dst = folder / "{:02d}_{}{}".format(idx + 1, mid, ext)
-            else:
-                month = (row.get("created_at") or "")[:7] or "unknown-date"
-                folder = out / month
-                dst = folder / (mid + ext)
-            plan.append((src, dst, is_batch, mid, row))
-
-    print("Organize plan: {} flat files to sort ({} not found on disk are skipped)."
-          .format(len(plan), sum(1 for m in meta_by_mid if m not in src_by_mid)))
-    for src, dst, is_b, mid, row in plan[:6]:
-        print("  {}  ->  {}".format(src.name, dst.relative_to(out)))
+    print("Organize plan: {} file(s) -> YYYY-MM/ with descriptive names; "
+          "{} already in place.".format(len(plan), in_place))
+    for src, dst, mid, row in plan[:6]:
+        print("  {}  ->  {}".format(src.relative_to(out), dst.relative_to(out)))
     if len(plan) > 6:
         print("  ... and {} more".format(len(plan) - 6))
     if args.convert:
-        print("Will also convert to {} ({}).".format(
-            args.convert, "keeping .webp" if args.keep_webp else "replacing .webp"))
-    print("Will embed prompt metadata into PNG/JPEG files (WebP skipped).")
+        print("Will also convert to {}.".format(args.convert))
+    if getattr(args, "embed_metadata", False):
+        print("Will embed prompt metadata into PNG/JPEG (WebP skipped).")
 
     if args.dry_run:
         print("\nDry run -- nothing moved. Re-run without --dry-run to apply.")
         return
+    if not plan:
+        print("Nothing to do -- everything already organized.")
+        return
 
-    catalog_updates = {}  # media_id -> (new filename, batch name)
+    manifest_path = out / ORGANIZE_MANIFEST
+    mf_new = not manifest_path.exists()
+    mf = open(manifest_path, "a", newline="", encoding="utf-8")
+    mw = csv.writer(mf)
+    if mf_new:
+        mw.writerow(["old_path", "new_path", "ts"])
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    moved = converted = embedded = skipped = deduped = 0
+    catalog_updates = {}                   # media_id -> new basename
+    month_index = defaultdict(list)
     _prog = getattr(args, "progress", None)
-    deduped = 0  # redundant flat sources removed because dst already holds the same bytes
 
-    for n, (src, dst, is_batch, mid, row) in enumerate(plan):
+    for n, (src, dst, mid, row) in enumerate(plan):
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists() and dst.resolve() != src.resolve():
-            # The organized copy already exists. Historically we left `src` in
-            # images/ here, which is exactly what produced the images/+month
-            # duplication. If src is byte-identical to the existing dst, the flat
-            # copy is pure redundancy -> remove it. If they differ, leave both
-            # untouched and report so nothing is lost.
+            # Target already holds this media. Byte-identical -> drop the redundant
+            # source (this is the INVARIANT-7 protection). Differ -> keep both.
             if _same_bytes(src, dst):
                 try:
-                    src.unlink()
-                    deduped += 1
-                except OSError as e:
-                    print("  could not remove redundant flat copy {} ({})".format(src.name, e))
+                    src.unlink(); deduped += 1
+                except OSError:
+                    pass
             else:
-                print("  KEPT both (differ): {} vs existing {}".format(
-                    src.name, dst.relative_to(out)))
+                print("  KEPT both (differ): {} vs {}".format(src.name, dst.relative_to(out)))
             skipped += 1
             final = dst
         else:
             try:
                 src.replace(dst)
+                mw.writerow([str(src.relative_to(out)).replace("\\", "/"),
+                             str(dst.relative_to(out)).replace("\\", "/"), ts])
+                mf.flush()
                 moved += 1
                 final = dst
-                batch_name = final.parent.parent.name if is_batch else ""
-                catalog_updates[mid] = (final.name, batch_name)
+                catalog_updates[mid] = final.name
             except OSError as e:
                 print("  move failed {} ({})".format(src.name, e))
                 continue
-        # optional convert (replaces extension; updates final path)
         if args.convert:
             final, note = convert_image(final, args.convert, args.jpeg_quality,
                                         args.jpeg_bg, keep_original=args.keep_webp)
@@ -1544,61 +1550,30 @@ def cmd_organize(args, out, img_dir, db_path):
                 raise PixAIError("--convert needs Pillow:  pip install pillow")
             if note == "ok":
                 converted += 1
-        # embed metadata
-        fields = {
-            "prompt": row.get("prompt_preview", ""),
-            "task_id": row.get("task_id", ""),
-            "media_id": mid,
-            "width": row.get("width", ""),
-            "height": row.get("height", ""),
-            "created_at": row.get("created_at", ""),
-            "status": row.get("status", ""),
-            "source": "PixAI",
-        }
-        note = embed_metadata(final, fields)
-        if note == "ok":
-            embedded += 1
-        elif note == "pillow-missing":
-            print("  (install Pillow to embed metadata:  pip install pillow)")
-
-        if is_batch:
-            folder = final.parent
-            if folder not in batch_txt:
-                batch_txt[folder] = [
-                    "Prompt (preview): {}".format(row.get("prompt_preview", "")),
-                    "Task ID         : {}".format(row.get("task_id", "")),
-                    "Created         : {}".format(row.get("created_at", "")),
-                    "Status          : {}".format(row.get("status", "")),
-                    "Source          : PixAI",
-                    "", "Images in this batch:",
-                ]
-            batch_txt[folder].append("  {}  ({}x{})".format(
-                final.name, row.get("width", "?"), row.get("height", "?")))
-        else:
-            month = final.parent.name
-            month_index[month].append({
-                "filename": final.name, "media_id": mid,
-                "task_id": row.get("task_id", ""),
-                "prompt_preview": row.get("prompt_preview", ""),
-                "width": row.get("width", ""), "height": row.get("height", ""),
-                "created_at": row.get("created_at", ""),
-                "status": row.get("status", ""),
-            })
+            catalog_updates[mid] = final.name
+        if getattr(args, "embed_metadata", False):
+            note = embed_metadata(final, {
+                "prompt": row.get("prompt_preview", ""), "task_id": row.get("task_id", ""),
+                "media_id": mid, "width": row.get("width", ""), "height": row.get("height", ""),
+                "created_at": row.get("created_at", ""), "status": row.get("status", ""),
+                "source": "PixAI"})
+            if note == "ok":
+                embedded += 1
+        month_index[final.parent.name].append({
+            "filename": final.name, "media_id": mid, "task_id": row.get("task_id", ""),
+            "prompt_preview": row.get("prompt_preview", ""), "width": row.get("width", ""),
+            "height": row.get("height", ""), "created_at": row.get("created_at", ""),
+            "status": row.get("status", "")})
 
         if _prog:
             _prog(n + 1, len(plan), 0)
         else:
-            sys.stdout.write("\r  {:,}/{:,}  moved {:,}  skip {:,}  ".format(
-                n + 1, len(plan), moved, skipped))
+            sys.stdout.write("\r  {:,}/{:,}  moved {:,}  ".format(n + 1, len(plan), moved))
             sys.stdout.flush()
-
+    mf.close()
     if not _prog:
-        print()  # newline after \r output
+        print()
 
-    # write per-batch _prompt.txt
-    for folder, lines in batch_txt.items():
-        (folder / "_prompt.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    # write/append per-month _index.csv
     for month, entries in month_index.items():
         idx_path = out / month / "_index.csv"
         new = not idx_path.exists()
@@ -1611,24 +1586,80 @@ def cmd_organize(args, out, img_dir, db_path):
             for e in entries:
                 w.writerow(e)
 
-    # Update catalog filenames to reflect new locations
+    # Tidy up now-empty legacy batches/ folders (drop their _prompt.txt first).
+    batches_root = out / "batches"
+    if batches_root.exists():
+        for f in batches_root.rglob("_prompt.txt"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        for d in sorted([p for p in batches_root.rglob("*") if p.is_dir()],
+                        key=lambda p: len(p.parts), reverse=True):
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+        try:
+            batches_root.rmdir()
+        except OSError:
+            pass
+
     if catalog_updates:
         rows = load_catalog(db_path)
         for r in rows:
             if r["media_id"] in catalog_updates:
-                r["filename"], r["batch"] = catalog_updates[r["media_id"]]
+                r["filename"] = catalog_updates[r["media_id"]]
+                r["batch"] = ""            # batches are gone
         save_catalog(db_path, rows)
-        print("Updated {:,} catalog filename/batch entries.".format(len(catalog_updates)))
+        print("Updated {:,} catalog entries.".format(len(catalog_updates)))
 
-    print("\nOrganized: moved {}, already-in-place {}.".format(moved, skipped))
+    print("\nOrganized: moved {:,}, already-in-place {:,}.".format(moved, in_place))
     if deduped:
-        print("Removed {:,} redundant flat copies (byte-identical to the "
-              "organized version).".format(deduped))
+        print("Removed {:,} redundant byte-identical copies.".format(deduped))
     if args.convert:
-        print("Converted to {}: {}.".format(args.convert, converted))
-    print("Embedded metadata into {} images.".format(embedded))
-    print("Batch folders: {}   Month folders written with _index.csv.".format(
-        len(batch_txt)))
+        print("Converted to {}: {:,}.".format(args.convert, converted))
+    if embedded:
+        print("Embedded metadata into {:,} images.".format(embedded))
+    print("Reversible manifest: {}  (run --undo-organize to revert)".format(manifest_path))
+
+
+def cmd_undo_organize(args, out):
+    """Reverse the moves recorded in organize_manifest.csv (newest run first):
+    each new_path is moved back to its old_path. Safe (skips already-reverted),
+    then clears the manifest. Lets a re-normalize be undone if you don't like it."""
+    db_path = _ensure_db(out)
+    manifest_path = out / ORGANIZE_MANIFEST
+    if not manifest_path.exists():
+        print("No organize manifest found ({}); nothing to undo.".format(manifest_path))
+        return
+    with open(manifest_path, newline="", encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if r.get("new_path")]
+    print("Reverting {} recorded move(s)...".format(len(rows)))
+    if getattr(args, "dry_run", False):
+        for r in rows[:8]:
+            print("  {}  ->  {}".format(r["new_path"], r["old_path"]))
+        print("\nDry run -- nothing moved.")
+        return
+    reverted = miss = 0
+    for r in reversed(rows):               # undo newest first
+        new_p, old_p = out / r["new_path"], out / r["old_path"]
+        if old_p.exists() and not new_p.exists():
+            continue                       # already reverted
+        if not new_p.exists():
+            miss += 1
+            continue
+        old_p.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            new_p.replace(old_p)
+            reverted += 1
+        except OSError as e:
+            print("  revert failed {} ({})".format(new_p, e))
+    # The gallery resolves files by media id (find_files_for_media_id matches both
+    # naming layouts), so restored files still resolve without rewriting the
+    # catalog. Clear the manifest now that it's been applied.
+    manifest_path.unlink()
+    print("Reverted {} file(s); {} already gone. Manifest cleared.".format(reverted, miss))
 
 
 # ---------------------------------------------------------------------------
@@ -3381,13 +3412,20 @@ def main():
                     help="apply prompt_taskid_mediaid naming to files as they download "
                          "(same as default naming; flag makes intent explicit)")
     ap.add_argument("--organize-adv", action="store_true",
-                    help="sort already-downloaded files into batches/ and YYYY-MM/ "
-                         "folders with info files + embedded metadata, then exit")
+                    help="normalize the WHOLE backup into YYYY-MM/ month folders with "
+                         "descriptive filenames (no batch subfolders); writes a reversible "
+                         "move-manifest. Idempotent + dry-runnable. Then exit")
     ap.add_argument("--organize-adv-live", action="store_true",
-                    help="sort files into batches/ and YYYY-MM/ folders live as they "
-                         "download, writing _prompt.txt and _index.csv per folder")
+                    help="sort files into YYYY-MM/ month folders live as they download")
+    ap.add_argument("--undo-organize", action="store_true",
+                    help="revert the last --organize-adv run using organize_manifest.csv "
+                         "(move files back to their old paths), then exit")
+    ap.add_argument("--embed-metadata", action="store_true",
+                    help="with --organize-adv, embed prompt/IDs/date into PNG/JPEG files "
+                         "(off by default; useful when pulling images into other apps)")
     ap.add_argument("--dry-run", action="store_true",
-                    help="with --organize or --organize-adv, show plan without making changes")
+                    help="with --organize / --organize-adv / --undo-organize, show the "
+                         "plan without moving anything")
     ap.add_argument("--full-meta", action="store_true",
                     help="fetch full prompt, seed, steps, sampler, CFG, and model name for each "
                          "task via a second API call (requires TASK_DETAIL_HASH + MODEL_DETAIL_HASH "
@@ -3555,6 +3593,9 @@ def main():
             return
         if args.convert_existing:
             cmd_convert_existing(args, out)
+            return
+        if args.undo_organize:
+            cmd_undo_organize(args, out)
             return
         if args.organize_adv:
             cmd_organize(args, out, img_dir, db_path)

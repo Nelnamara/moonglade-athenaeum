@@ -760,8 +760,8 @@ class OrganizeTab(QWidget):
         r1 = QHBoxLayout()
         r1.addWidget(QLabel("Mode:"))
         self._mode_grp = QButtonGroup(self)
-        self.rb_simple = QRadioButton("Simple rename  (prompt_taskid_mediaid)")
-        self.rb_adv    = QRadioButton("Advanced  (batch/ + YYYY-MM/ folders + metadata)")
+        self.rb_simple = QRadioButton("Simple rename  (flat, prompt_taskid_mediaid)")
+        self.rb_adv    = QRadioButton("Month folders  (YYYY-MM/ + descriptive names, reversible)")
         for rb in (self.rb_simple, self.rb_adv):
             self._mode_grp.addButton(rb)
             r1.addWidget(rb)
@@ -774,7 +774,13 @@ class OrganizeTab(QWidget):
         self.dry_run = QCheckBox("Dry run (preview only)")
         self.dry_run.setChecked(settings.get("org_dry_run", False))
         r2.addWidget(self.dry_run)
-        r2.addSpacing(20)
+        r2.addSpacing(14)
+        self.embed_meta = QCheckBox("Embed metadata")
+        self.embed_meta.setChecked(settings.get("org_embed", False))
+        self.embed_meta.setToolTip("Month-folders mode only: write prompt/IDs/date into "
+                                   "PNG/JPEG files (off by default; useful for other apps)")
+        r2.addWidget(self.embed_meta)
+        r2.addSpacing(14)
         r2.addWidget(QLabel("Name length:"))
         self.name_len = QSpinBox()
         self.name_len.setRange(10, 200)
@@ -837,6 +843,7 @@ class OrganizeTab(QWidget):
         return SimpleNamespace(
             out=self._bar.out,
             dry_run=self.dry_run.isChecked(),
+            embed_metadata=self.embed_meta.isChecked(),
             name_length=self.name_len.value(),
             name_sep=self.name_sep.currentText(),
             convert=self.convert_combo.currentData(),
@@ -896,6 +903,7 @@ class OrganizeTab(QWidget):
     def collect_settings(self):
         return {
             "org_adv":     self.rb_adv.isChecked(),
+            "org_embed":   self.embed_meta.isChecked(),
             "org_dry_run": self.dry_run.isChecked(),
         }
 
