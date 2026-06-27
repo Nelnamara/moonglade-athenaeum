@@ -530,17 +530,24 @@ def collection_health(out_dir, db_path):
     total_files = 0
     total_bytes = 0
     on_disk_ids = set()
+    on_disk_rels = set()      # relative paths of every media file (incl. videos)
     locs = defaultdict(set)   # media_id -> set of bucket names (Class A dup detection)
     dup_redundant = 0
     dup_bytes = 0
     mid_sizes = defaultdict(list)  # media_id -> [sizes] to estimate reclaimable
+    _video_exts = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}
 
     for p in out_dir.rglob("*"):
-        if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
+        ext = p.suffix.lower()
+        is_img = ext in _IMAGE_EXTS
+        if (not is_img and ext not in _video_exts) or not p.is_file():
             continue
         if p.name.endswith(".part") or _under(p, gallery_dir) or _under(p, quarantine_dir):
             continue
         rel = p.relative_to(out_dir)
+        on_disk_rels.add(str(rel).replace("\\", "/"))
+        if not is_img:
+            continue          # videos: track the path only; skip image-centric stats
         top = str(rel).replace("\\", "/").split("/")[0]
         if top == "images":
             bucket = "images"
@@ -599,8 +606,8 @@ def collection_health(out_dir, db_path):
             "SELECT prompt_preview FROM catalog WHERE COALESCE(prompt_preview,'') != ''"
         ).fetchall()
         # catalog rows that claim a file but whose media_id isn't on disk
-        cat_ids = [r[0] for r in con.execute(
-            "SELECT media_id FROM catalog WHERE filename != ''").fetchall()]
+        cat_rows = con.execute(
+            "SELECT media_id, filename FROM catalog WHERE filename != ''").fetchall()
     finally:
         con.close()
 
@@ -633,7 +640,13 @@ def collection_health(out_dir, db_path):
                 word_counter[w] += 1
     top_words = word_counter.most_common(40)
 
-    missing = sum(1 for mid in cat_ids if mid and mid not in on_disk_ids)
+    # A row is "missing" only if NEITHER its media id is on disk (the PixAI
+    # naming path) NOR its filename resolves to a real file (the imported/local
+    # path, whose media_id is a synthetic local_<hash> that never matches a file).
+    missing = sum(
+        1 for mid, fn in cat_rows
+        if (not mid or mid not in on_disk_ids)
+        and (fn or "").replace("\\", "/") not in on_disk_rels)
 
     return {
         "total_files": total_files,
