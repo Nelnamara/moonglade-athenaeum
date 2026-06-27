@@ -6,9 +6,9 @@ This file is committed so it is available on every machine that clones the repo.
 
 ## What this project is
 
-A Python CLI (`pixai_gallery_backup.py`) with an optional PySide6 GUI (`pixai_gui.py`) and local Flask gallery (`pixai_gallery.py`) that backs up the **owner's own** PixAI.art generated images at full resolution. PixAI's UI only shows 20 images at a time; this talks to the same API the browser uses, pages through the entire generation history, downloads every image, and keeps a fully searchable SQLite catalog.
+**Moonglade Athenaeum** — *"a library against the Void."* A Python CLI (`pixai_gallery_backup.py`) with a PySide6 GUI (`pixai_gui.py`) and local Flask gallery (`pixai_gallery.py`). It began as a backup tool for the **owner's own** PixAI.art generations and grew into a full local PixAI **client**: back up · browse · generate · curate. Talks to the same API the browser uses, pages the entire history at full resolution, keeps a searchable SQLite catalog, **creates** new images via the API, and manages both the local archive and the cloud account.
 
-Built by reverse-engineering site network traffic. There is no official PixAI API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations.
+Built by reverse-engineering site network traffic (catalogued in `API_OPERATIONS.md`). The `gql_adhoc()` ad-hoc POST path means most operations need no persisted-hash capture. There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `docs/`.
 
 ---
 

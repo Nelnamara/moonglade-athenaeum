@@ -8,6 +8,8 @@ A full local companion for **your own** PixAI.art work — **back up · browse �
 
 PixAI's terms grant users copyright of their own generations. This tool is unofficial, uses your own API key, and is rate-paced to be polite to their servers.
 
+📖 **Full docs:** [`docs/`](docs/) — [Setup](docs/setup.md) · [Generating](docs/generating.md) · [Gallery](docs/gallery.md) · [Architecture](docs/architecture.md) · [API Operations](API_OPERATIONS.md)
+
 ---
 
 ## Features
