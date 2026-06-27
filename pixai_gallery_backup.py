@@ -2262,10 +2262,14 @@ def _gen_parameters(args):
         # 1000 = high priority (faster, more credits); 500 = standard (cheaper).
         # We default to standard so a run costs less unless high is requested.
         "priority": getattr(args, "priority", 500) or 500,
-        # Quality mode: lite (cheapest) / standard / pro / ultra. Bundles the
-        # quality knobs the way PixAI's "mode" switch does.
-        "inferenceProfile": getattr(args, "mode", "standard") or "standard",
     }
+    # Quality mode (inferenceProfile) is MODEL-TYPE-SPECIFIC: SD_V1_MODEL accepts
+    # lite/standard but rejects pro/ultra (those are for newer model types). So we
+    # only send it when explicitly chosen; "auto"/"" omits it and lets PixAI pick
+    # the model's default (always safe -- this is the original working behavior).
+    mode = (getattr(args, "mode", "") or "").strip().lower()
+    if mode and mode != "auto":
+        params["inferenceProfile"] = mode
     if getattr(args, "negative", ""):
         params["negativePrompts"] = args.negative
     if getattr(args, "seed", None) is not None:
@@ -3379,10 +3383,11 @@ def main():
                           "1000 = high (faster, costs more credits)")
     gen.add_argument("--high-priority", dest="priority", action="store_const", const=1000,
                      help="shortcut for --priority 1000 (faster, more credits)")
-    gen.add_argument("--mode", default="standard",
-                     choices=["lite", "standard", "pro", "ultra"],
-                     help="quality mode (inferenceProfile): lite=fastest/cheapest, "
-                          "standard=balanced (default), pro=higher detail, ultra=max quality")
+    gen.add_argument("--mode", default="auto",
+                     choices=["auto", "lite", "standard", "pro", "ultra"],
+                     help="quality mode (inferenceProfile). auto (default) lets PixAI pick the "
+                          "model's default -- always safe. lite/standard suit SD_V1 models; "
+                          "pro/ultra are for newer model types (an unsupported mode is rejected)")
     gen.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
                      help="disable PixAI's prompt-helper (use your prompt more literally; "
                           "helps when auto-enhancement mangles a carefully-built prompt)")

@@ -315,11 +315,12 @@ def test_gen_parameters_mode_helper_natural():
     base = dict(prompt="elf", negative="", model="", width=512, height=512,
                 steps=25, cfg=7.0, count=1, seed=None, params_json="")
     p = core._gen_parameters(SimpleNamespace(**base))
-    assert p["inferenceProfile"] == "standard"          # default mode
+    assert "inferenceProfile" not in p                  # auto default omits it (safe)
     assert p["naturalPrompts"] == "elf"                 # not skipped
     assert p["promptHelper"]["userWantToEnable"] is True
+    assert "inferenceProfile" not in core._gen_parameters(SimpleNamespace(mode="auto", **base))
     p2 = core._gen_parameters(SimpleNamespace(mode="ultra", prompt_helper=False, **base))
-    assert p2["inferenceProfile"] == "ultra"
+    assert p2["inferenceProfile"] == "ultra"            # only sent when explicitly chosen
     assert p2["promptHelper"]["userWantToEnable"] is False
 
 
