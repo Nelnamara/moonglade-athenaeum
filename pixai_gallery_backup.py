@@ -2256,6 +2256,9 @@ def _gen_parameters(args):
         "samplingSteps": args.steps,
         "cfgScale": args.cfg,
         "batchSize": args.count,
+        # 1000 = high priority (faster, more credits); 500 = standard (cheaper).
+        # We default to standard so a run costs less unless high is requested.
+        "priority": getattr(args, "priority", 500) or 500,
     }
     if getattr(args, "negative", ""):
         params["negativePrompts"] = args.negative
@@ -3357,6 +3360,11 @@ def main():
     gen.add_argument("--batch-size", dest="count", type=int, default=1,
                      help="number of images per --generate run (batch size)")
     gen.add_argument("--seed", type=int, default=None)
+    gen.add_argument("--priority", type=int, default=500,
+                     help="generation priority: 500 = standard (default, cheaper), "
+                          "1000 = high (faster, costs more credits)")
+    gen.add_argument("--high-priority", dest="priority", action="store_const", const=1000,
+                     help="shortcut for --priority 1000 (faster, more credits)")
     gen.add_argument("--task-id", default="",
                      help="with --generate, fetch + catalog an ALREADY-created task by id "
                           "(no new credits). Recovers a stranded generation that --update "

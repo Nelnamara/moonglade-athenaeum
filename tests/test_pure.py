@@ -299,6 +299,15 @@ def test_gen_parameters_builds_request():
     assert p["width"] == 768 and p["height"] == 512
     assert p["samplingSteps"] == 20 and p["cfgScale"] == 6.5
     assert p["batchSize"] == 2 and p["seed"] == 42
+    assert p["priority"] == 500          # standard (cheaper) by default
+
+
+def test_gen_parameters_priority():
+    from types import SimpleNamespace
+    base = dict(prompt="x", negative="", model="", width=512, height=512,
+                steps=25, cfg=7.0, count=1, seed=None, params_json="")
+    assert core._gen_parameters(SimpleNamespace(**base))["priority"] == 500
+    assert core._gen_parameters(SimpleNamespace(priority=1000, **base))["priority"] == 1000
 
 
 def test_model_search_extracts_version_id(monkeypatch):

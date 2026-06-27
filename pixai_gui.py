@@ -1132,6 +1132,12 @@ class GenerateTab(QWidget):
         self.confirm.setToolTip("Unchecked = preview the request only (no credits). "
                                 "Checked = create the images for real.")
         r_conf.addWidget(self.confirm)
+        r_conf.addSpacing(20)
+        self.high_priority = QCheckBox("High priority")
+        self.high_priority.setChecked(settings.get("gen_high_priority", False))
+        self.high_priority.setToolTip("Off = standard priority (cheaper, the default). "
+                                      "On = high priority (faster in the queue, costs more credits).")
+        r_conf.addWidget(self.high_priority)
         r_conf.addStretch()
         g.addLayout(r_conf)
 
@@ -1168,6 +1174,7 @@ class GenerateTab(QWidget):
             width=self.sp_w.value(), height=self.sp_h.value(),
             steps=self.sp_steps.value(), cfg=self.cfg.value(), count=self.sp_count.value(),
             seed=seed, params_json="", confirm=self.confirm.isChecked(),
+            priority=1000 if self.high_priority.isChecked() else 500,
             poll_timeout=300, name_length=60, name_sep="_",
         )
 
@@ -1243,6 +1250,7 @@ class GenerateTab(QWidget):
             "gen_width": self.sp_w.value(), "gen_height": self.sp_h.value(),
             "gen_steps": self.sp_steps.value(), "gen_cfg": self.cfg.value(),
             "gen_count": self.sp_count.value(),
+            "gen_high_priority": self.high_priority.isChecked(),
         }
 
 
