@@ -2199,7 +2199,6 @@ def run_import_local(args):
 _GEN_MUTATION = ("mutation createGenerationTask($parameters: JSONObject!) {"
                  " createGenerationTask(parameters: $parameters) { id } }")
 _GEN_STATUS = "query($id: ID!) { task(id: $id) { id status } }"
-_GEN_RESULT = "query($id: ID!) { task(id: $id) { id status mediaId batchMediaIds } }"
 DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
 
 
@@ -2264,12 +2263,20 @@ def run_generate(args):
         raise PixAIError("timed out after {}s (task {})".format(
             getattr(args, "poll_timeout", 300), task_id))
 
-    result = (gql_adhoc(session, _GEN_RESULT, {"id": task_id}) or {}).get("task") or {}
+    # The Task type exposes its media under `outputs` (mediaId / batchMediaIds /
+    # videos), NOT at the top level. getTaskById returns that whole object and is
+    # already proven, so reuse it for the result rather than guessing an ad-hoc
+    # selection set.
+    result = task_detail_gql(session, task_id) or {}
+    outputs = result.get("outputs") or {}
     mids = []
-    if result.get("mediaId"):
-        mids.append(str(result["mediaId"]))
-    for m in result.get("batchMediaIds") or []:
+    if outputs.get("mediaId"):
+        mids.append(str(outputs["mediaId"]))
+    for m in outputs.get("batchMediaIds") or []:
         mids.append(str(m))
+    for v in outputs.get("videos") or []:
+        if v.get("mediaId"):
+            mids.append(str(v["mediaId"]))
     mids = list(dict.fromkeys(mids))
     if not mids:
         raise PixAIError("task completed but no media ids found")
