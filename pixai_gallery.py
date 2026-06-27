@@ -58,6 +58,9 @@ CATALOG_FIELDS = [
     # Provenance: '' / 'online' = backed up from PixAI history; 'api' = created via
     # --generate; 'local' = imported from disk via --import-local.
     "source",
+    # '1' if --reconcile-deleted found this row's task is gone from your live PixAI
+    # feed (i.e. you deleted it on the website). Advisory; cleared on re-reconcile.
+    "deleted_remote",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -101,7 +104,8 @@ CREATE TABLE IF NOT EXISTS catalog (
     is_video        TEXT DEFAULT '',
     poster_media_id TEXT DEFAULT '',
     video_duration  TEXT DEFAULT '',
-    source          TEXT DEFAULT ''
+    source          TEXT DEFAULT '',
+    deleted_remote  TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -156,6 +160,7 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN poster_media_id TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN video_duration TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN source TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN deleted_remote TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -346,6 +351,8 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
     elif source in ("api", "local"):
         clauses.append("source = ?")
         params.append(source)
+    elif source == "deleted":
+        clauses.append("deleted_remote = '1'")   # flagged by --reconcile-deleted
     if rating_min:
         clauses.append("CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) >= ?")
         params.append(int(rating_min))
@@ -1231,6 +1238,7 @@ document.addEventListener('DOMContentLoaded', function() {
       <option value="online" {% if source_filter=='online' %}selected{% endif %}>PixAI history</option>
       <option value="api" {% if source_filter=='api' %}selected{% endif %}>Generated</option>
       <option value="local" {% if source_filter=='local' %}selected{% endif %}>Imported</option>
+      <option value="deleted" {% if source_filter=='deleted' %}selected{% endif %}>Deleted on PixAI</option>
     </select>
   </div>
   <div>
@@ -2041,7 +2049,7 @@ function savePrompt() {
         if media_type not in ("image", "video"):
             media_type = ""
         source = request.args.get("source", "")
-        if source not in ("online", "api", "local"):
+        if source not in ("online", "api", "local", "deleted"):
             source = ""
 
         models  = unique_models(db_path)

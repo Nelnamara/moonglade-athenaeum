@@ -2625,6 +2625,63 @@ def run_account_info(args):
     return {"quota": me.get("quotaAmount"), "membership": mem.get("membershipId")}
 
 
+def run_reconcile_deleted(args):
+    """Find catalog rows whose PixAI task no longer exists in your live feed -- i.e.
+    generations you deleted on the website -- and flag them (deleted_remote='1') so
+    the gallery can surface them for a local prune. Closes the cloud->local delete
+    drift. Advisory: re-running refreshes the flags. Skips imports (no task) and
+    very-recent rows (a fresh generation may not have propagated to the feed yet)."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    session = _make_session(getattr(args, "token", None))
+    _prog = getattr(args, "progress", None)
+
+    print("Scanning your live PixAI feed for existing task ids...")
+    live, before, page = set(), None, 0
+    while True:
+        conn = find_connection(gql(session, page_variables(
+            getattr(args, "page_size", 250) or 250, before)))
+        if not conn:
+            break
+        edges = conn.get("edges") or []
+        if not edges:
+            break
+        for e in edges:
+            tid = (e.get("node") or {}).get("id")
+            if tid:
+                live.add(str(tid))
+        page += 1
+        vlog("reconcile: page {}, {} live tasks so far".format(page, len(live)))
+        pi = conn.get("pageInfo") or {}
+        if not pi.get("hasPreviousPage"):
+            break
+        before = pi.get("startCursor")
+    print("Live tasks in your feed: {:,}".format(len(live)))
+    if not live:
+        raise PixAIError("Live feed returned no tasks -- aborting so we don't flag "
+                         "your whole catalog by mistake.")
+
+    grace = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 2 * 86400))
+    rows = load_catalog(db_path)
+    flagged = cleared = 0
+    for r in rows:
+        tid = (r.get("task_id") or "").strip()
+        gone = (tid and tid not in live and (r.get("source") or "") != "local"
+                and (r.get("created_at") or "") < grace)
+        was = r.get("deleted_remote") == "1"
+        if gone and not was:
+            r["deleted_remote"] = "1"; flagged += 1
+        elif not gone and was:
+            r["deleted_remote"] = ""; cleared += 1
+        else:
+            r["deleted_remote"] = "1" if gone else ""
+    save_catalog(db_path, rows)
+    print("Flagged {:,} row(s) as deleted-on-PixAI; cleared {:,} stale flag(s).".format(
+        flagged, cleared))
+    print("Review in the gallery: Source -> 'Deleted on PixAI', then bulk Delete (local).")
+    return {"live": len(live), "flagged": flagged, "cleared": cleared}
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
@@ -3454,6 +3511,10 @@ def main():
     ap.add_argument("--account", action="store_true",
                     help="show a read-only account dashboard (credit balance, membership, "
                          "subscription) and exit. Never moves money")
+    ap.add_argument("--reconcile-deleted", action="store_true",
+                    help="flag catalog rows whose PixAI task is gone from your live feed "
+                         "(deleted on the website) so the gallery can surface them for a "
+                         "local prune, then exit")
     ap.add_argument("--import-local", nargs="?", const="", default=None, metavar="DIR",
                     help="catalog non-PixAI media (source='local') so it shows in the gallery. "
                          "No DIR = scan the backup folder for files you dropped in; a DIR "
@@ -3563,6 +3624,9 @@ def main():
             return
         if args.account:
             run_account_info(args)
+            return
+        if args.reconcile_deleted:
+            run_reconcile_deleted(args)
             return
         if args.import_local is not None:
             run_import_local(args)
