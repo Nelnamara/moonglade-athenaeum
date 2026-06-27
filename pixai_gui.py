@@ -1944,7 +1944,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PixAI Gallery Backup v{}".format(core.__version__))
+        self.setWindowTitle("Moonglade Athenaeum  v{}".format(core.__version__))
         self.setMinimumSize(860, 640)
         self.resize(960, 720)
 
