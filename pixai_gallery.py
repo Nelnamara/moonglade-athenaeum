@@ -1406,7 +1406,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <span><span id="sel-count">0</span> selected</span>
   <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
   <button class="btn" id="bulk-replace-btn" style="display:none" onclick="bulkReplacePrompt()" title="Find/replace text in the prompts of selected images">Find/Replace</button>
-  <button class="btn btn-primary" id="bulk-collection-btn" style="display:none" onclick="bulkAddCollection()" title="Add the selected images/videos to a named collection (files are not moved)">+ Add to Collection</button>
+  <button class="btn btn-primary" id="bulk-collection-btn" onclick="bulkAddCollection()" title="Check some images/videos first, then click to add them to a named collection (files are not moved)">+ Add to Collection</button>
   <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
   <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
           title="Saved views"><option value="">Saved views…</option></select>
@@ -1574,8 +1574,6 @@ function refreshSelUI() {
   if (rb) rb.style.display = sel.size ? 'inline-block' : 'none';
   var cb = document.getElementById('bulk-del-cloud-btn');
   if (cb) cb.style.display = sel.size ? 'inline-block' : 'none';
-  var colb = document.getElementById('bulk-collection-btn');
-  if (colb) colb.style.display = sel.size ? 'inline-block' : 'none';
 }
 function onCheck() {
   var sel = selGet();
@@ -1618,7 +1616,7 @@ function bulkReplacePrompt() {
 }
 function bulkAddCollection() {
   var sel = [...selGet()];
-  if (!sel.length) return;
+  if (!sel.length) { alert('Select one or more images/videos first (check the boxes, or "Select All (page)"), then click + Add to Collection.'); return; }
   var name = prompt('Add ' + sel.length + ' image(s) to which collection? (a name; files are NOT moved)');
   if (name === null || !name.trim()) return;
   var f = document.createElement('form');
