@@ -63,7 +63,7 @@ pixai_backup/
 **Organize** normalizes everything into `YYYY-MM/` month folders with readable
 `<prompt>_<taskid>_<mediaid>` names (no batch subfolders), writing a reversible
 manifest. It's idempotent, byte-safe, and dry-runnable. See the
-[gallery guide](gallery.md) for usage.
+[Backing Up](../../wiki/Backing-Up) wiki page for usage.
 
 ## Invariants (do not break)
 

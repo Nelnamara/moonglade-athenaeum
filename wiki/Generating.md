@@ -4,9 +4,9 @@ Moonglade Athenaeum can **create** images via PixAI, not just back them up. Ever
 generation is downloaded into your backup and catalogued as `source='api'`, so it
 appears in the gallery alongside your history.
 
-> **Generation spends PixAI credits.** The download/cataloging is free; the
-> generation itself is the paid part. The tool is guarded: it previews unless you
-> explicitly confirm.
+> **Generation spends PixAI credits.** Downloading/cataloging is free; the generation
+> is the paid part. The tool **previews unless you explicitly confirm**, and defaults
+> to the cheaper priority.
 
 ## In the GUI (recommended)
 
@@ -14,13 +14,13 @@ The **Generate** tab:
 
 | Control | Maps to | Notes |
 |---|---|---|
-| **Prompt** / **Negative** | `prompts` / `negativePrompts` | natural language is fine; the prompt-helper can interpret it |
-| **Model** dropdown | `modelId` | pre-filled with **models you've used** (guaranteed-valid version ids), most-used first |
-| **Search PixAI…** | — | search the model catalog; resolves the correct *version* id automatically |
+| **Prompt** / **Negative** | `prompts` / `negativePrompts` | natural language is fine |
+| **Model** dropdown | `modelId` | pre-filled with models **you've used** (valid version ids), most-used first |
+| **Search PixAI…** | — | search the catalog; resolves the correct *version* id automatically |
 | **LoRAs** → Add LoRA… | `lora` + `loraParameters` | search → pick → weight; stack several |
-| **Aspect** + ⇄ Swap | `width`/`height` | presets (1:1, 16:9, 9:16, 4:3, 3:2, 3:1…) at SDXL-friendly dims |
-| Width / Height / Steps / CFG / Count / Seed | the obvious params | seed blank = random; dims rounded to multiples of 8 |
-| **Mode** | `inferenceProfile` | Auto (default, always works) · Lite · Standard · Pro · Ultra |
+| **Aspect** + ⇄ Swap | `width`/`height` | presets at SDXL-friendly dims |
+| Width / Height / Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 |
+| **Mode** | `inferenceProfile` | Auto (default) · Lite · Standard · Pro · Ultra |
 | **Prompt helper** | `promptHelper` | on by default; uncheck to use your prompt literally |
 | **High priority** | `priority` | off (500, cheaper) by default; on = 1000 (faster, more credits) |
 | **Confirm** | — | **required** to actually submit and spend credits |
@@ -28,19 +28,19 @@ The **Generate** tab:
 Click **Generate** and watch the log: `Generated + cataloged N image(s)`.
 
 ### The model-vs-version-id gotcha
-`createGenerationTask` needs a model's **version id**, not its model id. A model
-page URL on the website (`pixai.art/model/<id>`) gives the *model* id, which
-generation rejects ("Invalid modelId"). The dropdown and **Search PixAI…** both
-hand you the correct version id, so prefer those over pasting from the website.
+`createGenerationTask` needs a model's **version id**, not its model id. A model page
+URL (`pixai.art/model/<id>`) gives the *model* id, which generation rejects
+("Invalid modelId"). The dropdown and **Search PixAI…** hand you the correct version
+id — prefer those.
 
 ### Modes are model-specific
-Lite/Standard suit older SD models; Pro/Ultra are for newer model types. Picking
-an unsupported mode is harmless — the tool **auto-falls-back** to the model's
-default (a rejected submit costs no credits) and generates anyway.
+Lite/Standard suit older SD models; Pro/Ultra are for newer types. Picking an
+unsupported mode is harmless — the tool **auto-falls-back** to the model's default (a
+rejected submit costs no credits) and generates anyway.
 
 ### LoRAs are add-ons, not base models
-A LoRA can't be the **base** model (generation fails). The base-model picker
-excludes LoRAs; add LoRAs via the dedicated **LoRAs** row.
+A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via the
+**LoRAs** row.
 
 ## On the CLI
 
@@ -57,12 +57,10 @@ python pixai_gallery_backup.py --generate --confirm \
 # find model / LoRA version ids:
 python pixai_gallery_backup.py --list-models "anime"
 
-# recover an already-created task by id (no new credits) — generated tasks
-# don't always flow into --update instantly:
+# recover an already-created task by id (no new credits):
 python pixai_gallery_backup.py --generate --task-id <id>
 ```
 
-### Key flags
 | Flag | Default | Meaning |
 |---|---|---|
 | `--prompt` / `--negative` | — | the prompts |
