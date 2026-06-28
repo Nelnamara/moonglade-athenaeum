@@ -1708,7 +1708,7 @@ function confirmBulkDelete() {
 function confirmBulkDeleteCloud() {
   var ids = [...selGet()];
   if (!ids.length) return;
-  if (!confirm('Delete ' + ids.length + ' selected image(s) from your PixAI account AND locally?\n\n'
+  if (!confirm('Delete ' + ids.length + ' selected image(s) from your PixAI account AND locally?\\n\\n'
     + '⚠ This deletes the whole TASK for each selection (all images in a batch), '
     + 'from the cloud AND your backup. It is IRREVERSIBLE.')) return;
   var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
