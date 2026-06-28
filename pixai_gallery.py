@@ -1046,7 +1046,7 @@ def create_app(out_dir: Path):
   .chips .clear-all:hover { text-decoration: underline; }
 
   /* Bulk toolbar */
-  .bulk-bar { background: var(--surface0); padding: 8px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--surface1); min-height: 40px; }
+  .bulk-bar { background: var(--surface0); padding: 8px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--surface1); min-height: 40px; flex-wrap: wrap; }
   .bulk-bar span { color: var(--subtext); font-size: 13px; }
   #sel-count { color: var(--gold); font-weight: 600; }
 
@@ -1406,7 +1406,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <span><span id="sel-count">0</span> selected</span>
   <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
   <button class="btn" id="bulk-replace-btn" style="display:none" onclick="bulkReplacePrompt()" title="Find/replace text in the prompts of selected images">Find/Replace</button>
-  <button class="btn" id="bulk-collection-btn" style="display:none" onclick="bulkAddCollection()" title="Add selected images to a named collection (files are not moved)">+ Collection</button>
+  <button class="btn btn-primary" id="bulk-collection-btn" style="display:none" onclick="bulkAddCollection()" title="Add the selected images/videos to a named collection (files are not moved)">+ Add to Collection</button>
   <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
   <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
           title="Saved views"><option value="">Saved views…</option></select>
