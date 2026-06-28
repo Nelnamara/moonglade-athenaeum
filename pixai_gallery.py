@@ -61,6 +61,9 @@ CATALOG_FIELDS = [
     # '1' if --reconcile-deleted found this row's task is gone from your live PixAI
     # feed (i.e. you deleted it on the website). Advisory; cleared on re-reconcile.
     "deleted_remote",
+    # User collections: comma-joined names (no moving files, survives organize).
+    # Names may contain spaces but not commas. Set/filtered in the gallery.
+    "collections",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -105,7 +108,8 @@ CREATE TABLE IF NOT EXISTS catalog (
     poster_media_id TEXT DEFAULT '',
     video_duration  TEXT DEFAULT '',
     source          TEXT DEFAULT '',
-    deleted_remote  TEXT DEFAULT ''
+    deleted_remote  TEXT DEFAULT '',
+    collections     TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -161,6 +165,7 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN video_duration TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN source TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN deleted_remote TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN collections TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -338,10 +343,15 @@ def _like_pattern(term):
 
 
 def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
-                 published_only=False, art_tag="", lora="", media_type="", source=""):
+                 published_only=False, art_tag="", lora="", media_type="", source="",
+                 collection=""):
     """Return (where_clause, params) for the common filter set."""
     clauses = ["filename != ''"]
     params  = []
+    if collection:
+        # exact-token match within the comma-joined list (no partial-name bleed)
+        clauses.append("(',' || COALESCE(collections,'') || ',') LIKE ?")
+        params.append("%," + collection + ",%")
     if media_type == "video":
         clauses.append("is_video = '1'")
     elif media_type == "image":
@@ -396,12 +406,78 @@ def get_row(db_path, media_id):
         con.close()
 
 
+def _split_collections(s):
+    return [c.strip() for c in (s or "").split(",") if c.strip()]
+
+
+def unique_collections(db_path):
+    """Distinct collection names across the catalog, case-insensitive sorted."""
+    con = _connect(db_path)
+    try:
+        names = set()
+        for (s,) in con.execute("SELECT collections FROM catalog WHERE COALESCE(collections,'') != ''"):
+            names.update(_split_collections(s))
+        return sorted(names, key=str.lower)
+    finally:
+        con.close()
+
+
+def add_to_collection(db_path, media_ids, name):
+    """Add a collection label to each media_id (no-op if already in it). Names may
+    contain spaces but not commas. Returns the number of rows changed."""
+    name = (name or "").strip().replace(",", " ").strip()
+    if not name or not media_ids:
+        return 0
+    con = _connect(db_path)
+    changed = 0
+    try:
+        for mid in media_ids:
+            row = con.execute("SELECT collections FROM catalog WHERE media_id=?", (mid,)).fetchone()
+            if not row:
+                continue
+            cols = _split_collections(row[0])
+            if name not in cols:
+                cols.append(name)
+                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                            (",".join(cols), mid))
+                changed += 1
+        con.commit()
+    finally:
+        con.close()
+    return changed
+
+
+def remove_from_collection(db_path, media_ids, name):
+    """Remove a collection label from each media_id. Returns rows changed."""
+    name = (name or "").strip()
+    if not name or not media_ids:
+        return 0
+    con = _connect(db_path)
+    changed = 0
+    try:
+        for mid in media_ids:
+            row = con.execute("SELECT collections FROM catalog WHERE media_id=?", (mid,)).fetchone()
+            if not row:
+                continue
+            cols = _split_collections(row[0])
+            if name in cols:
+                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                            (",".join(c for c in cols if c != name), mid))
+                changed += 1
+        con.commit()
+    finally:
+        con.close()
+    return changed
+
+
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
                   sort="newest", page=1, page_size=100, batch="", rating_min=0,
-                  published_only=False, art_tag="", lora="", media_type="", source=""):
+                  published_only=False, art_tag="", lora="", media_type="", source="",
+                  collection=""):
     """Return (rows, total) with filtering, sorting and pagination done in SQL."""
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
-                                 published_only, art_tag, lora, media_type, source)
+                                 published_only, art_tag, lora, media_type, source,
+                                 collection)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     offset = (max(1, page) - 1) * page_size
     con = _connect(db_path)
@@ -420,10 +496,11 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
 
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
-                   media_type="", source=""):
+                   media_type="", source="", collection=""):
     """Return ordered list of media_ids matching the filter (no row data)."""
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
-                                 published_only, art_tag, lora, media_type, source)
+                                 published_only, art_tag, lora, media_type, source,
+                                 collection)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     con = _connect(db_path)
     try:
@@ -1243,6 +1320,15 @@ document.addEventListener('DOMContentLoaded', function() {
     </select>
   </div>
   <div>
+    <label>Collection</label><br>
+    <select name="collection">
+      <option value="">All</option>
+      {% for c in collections %}
+      <option value="{{ c }}" {% if collection==c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
     <label>&nbsp;</label><br>
     <label style="color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:6px;">
       <input type="checkbox" name="published" value="1" {% if published_only %}checked{% endif %}
@@ -1301,6 +1387,10 @@ document.addEventListener('DOMContentLoaded', function() {
 <div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--green);border-radius:4px;color:var(--text);font-size:13px;">
   Replaced text in {{ request.args.get('replaced') }} prompt(s).</div>
 {% endif %}
+{% if request.args.get('collected') %}
+<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--emerald, #4fc99a);border-radius:4px;color:var(--text);font-size:13px;">
+  Added {{ request.args.get('collected') }} image(s) to the collection.</div>
+{% endif %}
 {% if request.args.get('deleted') %}
 <div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--red);border-radius:4px;color:var(--text);font-size:13px;">
   Deleted {{ request.args.get('deleted') }} task(s) from PixAI · {{ request.args.get('removed') }} local file(s) purged{% if request.args.get('failed') and request.args.get('failed') != '0' %} · <span style="color:var(--red);">{{ request.args.get('failed') }} failed</span>{% endif %}.</div>
@@ -1316,6 +1406,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <span><span id="sel-count">0</span> selected</span>
   <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
   <button class="btn" id="bulk-replace-btn" style="display:none" onclick="bulkReplacePrompt()" title="Find/replace text in the prompts of selected images">Find/Replace</button>
+  <button class="btn" id="bulk-collection-btn" style="display:none" onclick="bulkAddCollection()" title="Add selected images to a named collection (files are not moved)">+ Collection</button>
   <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
   <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
           title="Saved views"><option value="">Saved views…</option></select>
@@ -1483,6 +1574,8 @@ function refreshSelUI() {
   if (rb) rb.style.display = sel.size ? 'inline-block' : 'none';
   var cb = document.getElementById('bulk-del-cloud-btn');
   if (cb) cb.style.display = sel.size ? 'inline-block' : 'none';
+  var colb = document.getElementById('bulk-collection-btn');
+  if (colb) colb.style.display = sel.size ? 'inline-block' : 'none';
 }
 function onCheck() {
   var sel = selGet();
@@ -1520,6 +1613,18 @@ function bulkReplacePrompt() {
   f.method = 'post'; f.action = '/bulk-replace-prompt';
   function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
   add('back', location.href); add('find', find); add('replace', repl);
+  sel.forEach(function(mid){ add('media_ids', mid); });
+  document.body.appendChild(f); f.submit();
+}
+function bulkAddCollection() {
+  var sel = [...selGet()];
+  if (!sel.length) return;
+  var name = prompt('Add ' + sel.length + ' image(s) to which collection? (a name; files are NOT moved)');
+  if (name === null || !name.trim()) return;
+  var f = document.createElement('form');
+  f.method = 'post'; f.action = '/collection-add';
+  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
+  add('back', location.href); add('name', name.trim());
   sel.forEach(function(mid){ add('media_ids', mid); });
   document.body.appendChild(f); f.submit();
 }
@@ -1743,6 +1848,10 @@ document.addEventListener('DOMContentLoaded', function() {
     {% if row.art_tags %}
     <span class="lbl">Tags</span>
     <span class="val">{{ row.art_tags }}</span>
+    {% endif %}
+    {% if row.collections %}
+    <span class="lbl">Collections</span>
+    <span class="val">{{ row.collections.replace(',', ', ') }}</span>
     {% endif %}
     <span class="lbl">Seed</span>
     <span class="val">{{ row.seed or '—' }}</span>
@@ -2052,15 +2161,17 @@ function savePrompt() {
         source = request.args.get("source", "")
         if source not in ("online", "api", "local", "deleted"):
             source = ""
+        collection = request.args.get("collection", "")
 
         models  = unique_models(db_path)
         batches = unique_batches(db_path)
         years   = catalog_years(db_path)
+        collections = unique_collections(db_path)
         page_rows, total = query_catalog(
             db_path, q, model_filter, date_from, date_to, sort, page, per_page,
             batch=batch_filter, rating_min=rating_min,
             published_only=published_only, art_tag=art_tag, lora=lora_filter,
-            media_type=media_type, source=source,
+            media_type=media_type, source=source, collection=collection,
         )
         total_pages = max(1, (total + per_page - 1) // per_page)
         page = max(1, min(page, total_pages))
@@ -2112,11 +2223,14 @@ function savePrompt() {
             chips.append({"k": "media", "v": media_type + "s", "url": _without("media")})
         if source:
             chips.append({"k": "source", "v": source, "url": _without("source")})
+        if collection:
+            chips.append({"k": "collection", "v": collection, "url": _without("collection")})
 
         return render_template_string(
             INDEX_HTML,
             chips=chips, published_only=published_only, art_tag=art_tag,
             lora_filter=lora_filter, media_type=media_type, source_filter=source,
+            collection=collection, collections=collections,
             rows=page_rows, total=total, page=page,
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
@@ -2164,6 +2278,7 @@ function savePrompt() {
             sort=_qs1("sort", "newest"), batch=_qs1("batch"), rating_min=_rmin,
             published_only=(_qs1("published") == "1"), art_tag=_qs1("tag"),
             lora=_qs1("lora"), media_type=_qs1("media"), source=_qs1("source"),
+            collection=_qs1("collection"),
         )
         try:
             idx = nav_ids.index(media_id)
@@ -2310,6 +2425,23 @@ function savePrompt() {
         data = request.get_json(silent=True) or {}
         update_prompt_full(db_path, media_id, data.get("prompt", ""))
         return json.dumps({"ok": True}), 200, {"Content-Type": "application/json"}
+
+    @app.route("/collection-add", methods=["POST"])
+    def collection_add():
+        back = request.form.get("back") or url_for("index")
+        ids = request.form.getlist("media_ids")
+        name = request.form.get("name", "")
+        n = add_to_collection(db_path, ids, name)
+        sep = "&" if "?" in back else "?"
+        return redirect("{}{}collected={}".format(back, sep, n))
+
+    @app.route("/collection-remove", methods=["POST"])
+    def collection_remove():
+        back = request.form.get("back") or url_for("index")
+        ids = request.form.getlist("media_ids")
+        name = request.form.get("name", "")
+        remove_from_collection(db_path, ids, name)
+        return redirect(back)
 
     @app.route("/bulk-replace-prompt", methods=["POST"])
     def bulk_replace():
