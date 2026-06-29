@@ -1083,6 +1083,7 @@ def create_app(out_dir: Path):
                 white-space: nowrap; max-width: 60%; }
   .lb-actions { display: flex; gap: 8px; flex-shrink: 0; }
   #lb-img { max-width: 94vw; max-height: 86vh; object-fit: contain; border-radius: 6px; }
+  #lb-video { max-width: 94vw; max-height: 86vh; border-radius: 6px; background: #000; }
   .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(10,8,24,.5);
             color: var(--text); border: 1px solid var(--surface1); border-radius: 8px; font-size: 28px;
             line-height: 1; padding: 10px 16px; cursor: pointer; }
@@ -1431,17 +1432,14 @@ document.addEventListener('DOMContentLoaded', function() {
     {% for row in rows %}
     <div class="card" id="card-{{ row.media_id }}" data-mid="{{ row.media_id }}"
          data-prompt="{{ (row.title or row.prompt_preview or '')|e }}"
+         {% if row.is_video == '1' %}data-video="1"{% endif %}
          {% if row.is_nsfw == '1' %}data-nsfw="1"{% endif %}>
       <div class="cb-wrap">
         <input type="checkbox" name="media_ids" value="{{ row.media_id }}"
                onchange="onCheck()" onclick="event.stopPropagation()">
       </div>
-      {% if row.is_video == '1' %}
-      <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"></a>
-      {% else %}
       <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"
          data-idx="{{ loop.index0 }}" onclick="return openLightbox(event, {{ loop.index0 }})"></a>
-      {% endif %}
       {% if row._has_thumb %}
       <img src="{{ url_for('thumb', media_id=row._thumb_mid) }}" loading="lazy"
            decoding="async" onload="this.classList.add('loaded')"
@@ -1475,6 +1473,7 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
   <button class="lb-nav lb-prev" onclick="lbStep(-1)" aria-label="Previous">&#8249;</button>
   <img id="lb-img" alt="">
+  <video id="lb-video" controls loop playsinline style="display:none"></video>
   <button class="lb-nav lb-next" onclick="lbStep(1)" aria-label="Next">&#8250;</button>
 </div>
 
@@ -1738,8 +1737,19 @@ function lbShow() {
   var card = lbCards[lbIdx]; if (!card) return;
   var mid = card.dataset.mid;
   var im = document.getElementById('lb-img');
+  var vid = document.getElementById('lb-video');
   lbZoom = false; im.style.transform = '';      // reset zoom on navigate
-  im.src = lbUrl(mid);
+  if (card.dataset.video === '1') {
+    im.style.display = 'none'; im.removeAttribute('src');
+    vid.style.display = '';
+    vid.src = '/video-file/' + mid;
+    vid.currentTime = 0;
+    vid.play().catch(function(){});            // autoplay may be blocked; controls still work
+  } else {
+    vid.pause(); vid.removeAttribute('src'); vid.load(); vid.style.display = 'none';
+    im.style.display = '';
+    im.src = lbUrl(mid);
+  }
   document.getElementById('lb-caption').textContent =
     (lbIdx + 1) + ' / ' + lbCards.length + '   ' + (card.dataset.prompt || '');
   document.getElementById('lb-details').href = '/image/' + mid + '?back=' + encodeURIComponent(location.href);
@@ -1751,6 +1761,8 @@ function lbStep(d) {
 }
 function closeLightbox() {
   document.getElementById('lightbox').classList.remove('open');
+  var vid = document.getElementById('lb-video');
+  if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
   stopSlideshow();
 }
 function toggleSlideshow() { lbTimer ? stopSlideshow() : startSlideshow(); }
