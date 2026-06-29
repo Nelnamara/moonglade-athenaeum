@@ -26,8 +26,9 @@ The filter bar:
 - **Sort** — newest/oldest, rating, aesthetic, likes, resolution.
 - Per-page selector, thumbnail-size slider, saved filter presets, privacy blur.
 
-Cards show a ▶ badge on videos and **AI** / **local** badges by source. Videos play
-inline on the detail page (with a poster).
+Cards show a ▶ badge on videos and **AI** / **local** badges by source. **Videos play
+right in the lightbox** (and on the detail page), so you can browse a mixed grid of
+images and videos with the arrow keys without leaving the overlay.
 
 ## The lightbox & detail page
 
