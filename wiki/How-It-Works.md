@@ -14,8 +14,8 @@ catalog logic lives in exactly one place.
 ## How it talks to PixAI — and why setup is just one key
 
 PixAI has no official public API for managing your own work, so some operations
-(listing your history, task detail, delete) reuse PixAI's own frontend GraphQL
-queries, each identified by a `sha256Hash`. The practical upshot:
+(listing your history, task detail, delete) reuse PixAI's own frontend interfaces.
+The practical upshot:
 
 - **Your API key is the only credential.** Your `USER_ID` is auto-resolved from it,
   and the persisted-query hashes ship with working defaults — so setup is just the key.

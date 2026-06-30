@@ -1,20 +1,13 @@
 # Troubleshooting
 
 ## "PersistedQueryNotFound" / "Cannot query field … on type Query"
-A baked-in persisted-query hash went stale — PixAI changed their frontend. Recapture
-just the affected one:
+A built-in identifier went stale after a PixAI frontend update. These ship with the
+app and are shared by everyone, so when one breaks it breaks for all users.
 
-1. Log in to [pixai.art](https://pixai.art), **F12 → Network**, filter `graphql`.
-2. Trigger the operation and click its request:
-   - the feed → `listUserTaskSummaries` → `PERSISTED_QUERY_HASH`
-   - full-meta / generation polling → `getTaskById` → `TASK_DETAIL_HASH`
-   - delete → `deleteGenerationTask` → `DELETE_TASK_HASH`
-   - model names → `getGenerationModelByVersionId` → `MODEL_DETAIL_HASH`
-3. **Payload** tab → copy `extensions.persistedQuery.sha256Hash` into the matching
-   key in `config.json`. It overrides the default.
-
-(If you find a fresh working hash, opening an issue helps everyone — the defaults can
-be updated.)
+- **First, update to the latest release** (`git pull`) — refreshed defaults usually land
+  there quickly.
+- If it's still broken on the latest version, **open an issue** so the default can be
+  updated for everyone.
 
 ## "401 Unauthorized"
 Your `PIXAI_API_KEY` is missing, mistyped, or expired. Regenerate at
