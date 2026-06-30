@@ -1960,8 +1960,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Moonglade Athenaeum  v{}".format(core.__version__))
-        self.setMinimumSize(860, 640)
-        self.resize(960, 720)
+        self.setMinimumSize(900, 680)
+        self.resize(1120, 840)   # roomier default so the Library tab's groups aren't cramped
 
         settings = _load_settings()
 
