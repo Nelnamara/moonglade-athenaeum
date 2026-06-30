@@ -354,7 +354,8 @@ def test_model_search_extracts_version_id(monkeypatch):
     res = core.model_search_gql(None, "mid")
     # version_id is latestVersion.id (the generatable id), NOT the model node id
     assert res[0] == {"title": "Midsummer", "type": "SD_V1_MODEL", "is_nsfw": False,
-                      "model_id": "MODEL1", "version_id": "VER1"}
+                      "liked_count": 0, "model_id": "MODEL1", "version_id": "VER1",
+                      "preview_url": ""}
     assert res[1]["is_nsfw"] is True and res[1]["version_id"] == "VER2"
 
 
