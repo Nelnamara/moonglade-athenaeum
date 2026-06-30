@@ -15,8 +15,8 @@ import webbrowser
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QTextCursor
+from PySide6.QtCore import Qt, QThread, Signal, QUrl
+from PySide6.QtGui import QTextCursor, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel,
@@ -1866,9 +1866,15 @@ class GalleryTab(QWidget):
         self.btn_stop.setEnabled(False)
         self.btn_open = QPushButton("Open in Browser")
         self.btn_open.setEnabled(False)
+        self.btn_deleted = QPushButton("Recover deleted…")
+        self.btn_deleted.setToolTip(
+            "Open the _deleted/ folder, where files removed via the gallery's Delete "
+            "buttons are kept (recoverable). Drag any back into your backup and re-run "
+            "Import Local Media to restore them.")
         btn_row.addWidget(self.btn_launch)
         btn_row.addWidget(self.btn_stop)
         btn_row.addWidget(self.btn_open)
+        btn_row.addWidget(self.btn_deleted)
         btn_row.addStretch()
         cg.addLayout(btn_row)
 
@@ -1879,6 +1885,7 @@ class GalleryTab(QWidget):
         self.btn_launch.clicked.connect(self._launch)
         self.btn_stop.clicked.connect(self._stop)
         self.btn_open.clicked.connect(self._open_browser)
+        self.btn_deleted.clicked.connect(self._open_deleted)
 
         self.log = LogWidget()
 
@@ -1925,6 +1932,18 @@ class GalleryTab(QWidget):
 
     def _open_browser(self):
         webbrowser.open(getattr(self, "_base_url", f"http://127.0.0.1:{self.port.value()}/"))
+
+    def _open_deleted(self):
+        """Open the _deleted/ quarantine folder in the OS file manager — the easy
+        'undelete' for anyone who removed something by accident in the gallery."""
+        from pathlib import Path
+        name = getattr(gallery_mod, "DELETED_DIRNAME", "_deleted")
+        qdir = Path(self._bar.out) / name
+        if not qdir.exists():
+            self._status.setText(
+                f"Nothing deleted yet — removed files land in {name}/ (recoverable).")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(qdir.resolve())))
 
     def collect_settings(self):
         if not _GALLERY_AVAILABLE:
