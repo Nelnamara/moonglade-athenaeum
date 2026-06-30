@@ -4,6 +4,9 @@ token.txt
 config.json
 pixai_gui_settings.json
 
+# ---- Private dev notes: reverse-engineering ledger, internal maps. NEVER publish ----
+private/
+
 # ---- Gallery server generated files ----
 pixai_backup/gallery/
 
