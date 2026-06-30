@@ -1552,37 +1552,76 @@ class UtilitiesTab(QWidget):
 
         self.log = LogWidget()
 
+        def _group(title):
+            box = QGroupBox(title)
+            return box, QVBoxLayout(box)
+
         lay = QVBoxLayout(self)
-        lay.addWidget(_info(
-            "Probe — fetches the newest page and resolves the full-res URL for the "
-            "first task.  Good sanity-check before a full download."))
-        lay.addWidget(_info(
-            "Count — pages through your entire history and tallies tasks and images "
-            "without downloading anything."))
-        lay.addWidget(_info(
-            "Catalog Stats — reads catalog.db and reports download / "
-            "pending / missing counts."))
-        lay.addLayout(btn_row)
-        lay.addWidget(_info(
-            "Backfill url/width/height — resolves the media URL and dimensions for "
-            "catalog rows that are missing them (uses resolve_media; token required)."))
-        lay.addWidget(_info(
-            "Backfill Full Meta — fetches the full prompt, seed, steps, sampler, "
-            "CFG, and model name for rows missing them via getTaskById "
-            "(requires TASK_DETAIL_HASH in config.json; also fills url/width/height)."))
-        lay.addLayout(backfill_row)
-        lay.addWidget(_info(
-            "Export CSV — saves a copy of catalog.db as catalog_export.csv "
-            "in your output folder (useful for spreadsheets or backup)."))
-        lay.addLayout(export_row)
-        lay.addWidget(_info(
-            "Audit Duplicates — read-only scan of the whole backup folder for "
-            "duplicate images (same media_id across folders, plus byte-identical "
-            "copies). Writes audit_report.csv. Dedup — removes the redundant copies, "
-            "keeping the most-organized one; quarantines to _duplicates/ by default. "
-            "Leave Dry run checked to preview first."))
-        lay.addLayout(audit_row)
-        lay.addLayout(delay_row)
+
+        # --- Diagnostics: read-only checks of the connection, your history, and account ---
+        gb, gv = _group("Diagnostics")
+        r = QHBoxLayout()
+        for b in (self.btn_probe, self.btn_count, self.btn_stats, self.btn_account):
+            r.addWidget(b)
+        r.addStretch()
+        gv.addLayout(r)
+        gv.addWidget(_info(
+            "Probe (connection sanity-check) · Count (tally your whole history) · "
+            "Catalog Stats (local download/pending/missing) · Account Info (credits/membership)."))
+        lay.addWidget(gb)
+
+        # --- Metadata & sync: fill in / refresh catalog data and pull extra media ---
+        gb, gv = _group("Metadata & sync")
+        r1 = QHBoxLayout()
+        r1.addWidget(self.btn_backfill)
+        r1.addWidget(self.btn_backfill_full)
+        r1.addWidget(self.chk_with_loras)
+        r1.addWidget(self.btn_fix_models)
+        r1.addStretch()
+        gv.addLayout(r1)
+        r2 = QHBoxLayout()
+        r2.addWidget(self.btn_sync_artworks)
+        r2.addWidget(self.chk_with_videos)
+        r2.addWidget(self.btn_sync_videos)
+        r2.addWidget(self.btn_export_csv)
+        r2.addStretch()
+        gv.addLayout(r2)
+        gv.addWidget(_info(
+            "Backfill url/dimensions and full meta (prompt/seed/model; incl. LoRAs) · Fix model "
+            "names · Sync published artworks (incl. videos) · Sync image-to-video · Export CSV."))
+        lay.addWidget(gb)
+
+        # --- Cleanup & recovery: bring media in, prune drift, dedup ---
+        gb, gv = _group("Cleanup & recovery")
+        r1 = QHBoxLayout()
+        r1.addWidget(self.btn_import_local)
+        r1.addWidget(self.btn_reconcile)
+        r1.addStretch()
+        gv.addLayout(r1)
+        r2 = QHBoxLayout()
+        r2.addWidget(self.btn_audit)
+        r2.addWidget(self.btn_dedup)
+        r2.addWidget(self.btn_verify)
+        r2.addWidget(self.chk_dedup_dry)
+        r2.addWidget(self.chk_dedup_delete)
+        r2.addWidget(self.chk_no_content)
+        r2.addStretch()
+        gv.addLayout(r2)
+        gv.addWidget(_info(
+            "Import local media · Reconcile (flag items you deleted on PixAI, to prune in the "
+            "gallery) · Audit / Dedup / Verify quarantine (leave Dry run checked to preview)."))
+        lay.addWidget(gb)
+
+        # --- shared controls + progress + log ---
+        ctrl = QHBoxLayout()
+        ctrl.addWidget(QLabel("API delay (s):"))
+        ctrl.addWidget(self.delay)
+        ctrl.addSpacing(16)
+        ctrl.addWidget(QLabel("Workers:"))
+        ctrl.addWidget(self.workers)
+        ctrl.addStretch()
+        ctrl.addWidget(self.btn_stop)
+        lay.addLayout(ctrl)
 
         prog_row, self.prog_bar, self.prog_label = _make_progress_row()
         lay.addLayout(prog_row)
@@ -2002,7 +2041,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._org_tab,     "  Organize  ")
         self._tabs.addTab(self._conv_tab,    "  Convert   ")
         self._tabs.addTab(self._gen_tab,     "  Generate  ")
-        self._tabs.addTab(self._util_tab,    "  Utilities ")
+        self._tabs.addTab(self._util_tab,    "  Library   ")
         self._tabs.addTab(self._gallery_tab, "  Gallery   ")
         self._tabs.setCurrentIndex(settings.get("last_tab", 0))
         root.addWidget(self._tabs, stretch=1)
