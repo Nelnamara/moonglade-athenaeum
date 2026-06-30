@@ -896,7 +896,7 @@ def make_thumbnail(img_path, thumb_path):
         return False
 
 
-def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=4):
+def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8):
     """Generate JPEG thumbnails for rows that have a file. CPU-bound (Pillow),
     so a thread pool gives a real multi-core speedup (Pillow releases the GIL
     during decode/encode). workers<=1 runs serially. Each worker writes a distinct
