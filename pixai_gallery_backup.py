@@ -868,7 +868,8 @@ def model_search_gql(session, keyword="", limit=15, base_only=False, lora_only=F
     (generation fails), so the base-model picker filters them out. LoRAs belong in
     the separate LoRA picker."""
     q = ("query($k:String,$n:Int){ generationModels(keyword:$k, first:$n){ "
-         "edges { node { id title type isNsfw latestVersion { id } } } } }")
+         "edges { node { id title type isNsfw likedCount latestVersion { id } "
+         "media { id urls { url } } } } } }")
     data = gql_adhoc(session, q, {"k": keyword, "n": limit})
     out = []
     for e in (data.get("generationModels") or {}).get("edges") or []:
@@ -882,10 +883,20 @@ def model_search_gql(session, keyword="", limit=15, base_only=False, lora_only=F
             "title": n.get("title") or "",
             "type": n.get("type") or "",
             "is_nsfw": bool(n.get("isNsfw")),
+            "liked_count": int(n.get("likedCount") or 0),
             "model_id": str(n.get("id") or ""),
             "version_id": str((n.get("latestVersion") or {}).get("id") or ""),
+            "preview_url": _model_preview_url(n.get("media")),
         })
     return out
+
+
+def _model_preview_url(media):
+    """Pick a directly-displayable cover thumbnail from a generationModels node's
+    `media.urls`. The CDN list is [orig, thumb, stillThumb]; the `thumb` variant is
+    the right size for a picker and needs no auth. Falls back to the first url."""
+    urls = [u.get("url") for u in ((media or {}).get("urls") or []) if u.get("url")]
+    return next((u for u in urls if "/thumb/" in u), urls[0] if urls else "")
 
 
 def is_lora_type(model_type):
