@@ -514,19 +514,8 @@ class DownloadTab(QWidget):
         r2.addStretch()
         g.addLayout(r2)
 
-        # Row 3: live organize mode
-        r3 = QHBoxLayout()
-        r3.addWidget(QLabel("Organize:"))
-        self._org_grp = QButtonGroup(self)
-        self.org_flat = QRadioButton("Flat (images/ folder)")
-        self.org_live = QRadioButton("Prompt naming (live)")
-        for rb in (self.org_flat, self.org_live):
-            self._org_grp.addButton(rb)
-            r3.addWidget(rb)
-        mode = settings.get("org_mode", "flat")
-        (self.org_live if mode == "live" else self.org_flat).setChecked(True)
-        r3.addStretch()
-        g.addLayout(r3)
+        # Download is always flat to images/ with descriptive names; organize into
+        # YYYY-MM/ month folders afterwards via the Organize tab (no in-tandem organize).
 
         # Row 4: convert on download + JPEG options
         r4 = QHBoxLayout()
@@ -638,8 +627,6 @@ class DownloadTab(QWidget):
             delay=self.delay.value(),
             name_length=self.name_len.value(),
             name_sep="_",
-            organize_live=self.org_live.isChecked(),
-            organize_adv_live=False,
             convert=self.convert_combo.currentData(),
             jpeg_quality=self.jpeg_qual.value(),
             jpeg_bg=self.jpeg_bg.currentText(),
@@ -722,7 +709,6 @@ class DownloadTab(QWidget):
             "max_tasks":    self.max_tasks.value(),
             "delay":        self.delay.value(),
             "name_length":  self.name_len.value(),
-            "org_mode":     ("live" if self.org_live.isChecked() else "flat"),
             "convert":      self.convert_combo.currentData(),
             "jpeg_quality": self.jpeg_qual.value(),
             "jpeg_bg":      self.jpeg_bg.currentText(),

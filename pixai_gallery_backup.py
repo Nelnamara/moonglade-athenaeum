@@ -3408,7 +3408,7 @@ def main():
     ap.add_argument("--workers", type=int, default=4,
                     help="parallel download workers (default 4). 1 = serial/polite. "
                          "Higher saturates bandwidth on bulk first-time pulls; ignored for "
-                         "--collect-only and --organize-adv-live.")
+                         "--collect-only.")
     ap.add_argument("--max", type=int, default=0, help="stop after N tasks (0=all)")
     ap.add_argument("--update", action="store_true",
                     help="incremental follow-up run: stop paging once a run of pages is "
@@ -3455,13 +3455,8 @@ def main():
                     help="normalize the WHOLE backup into YYYY-MM/ month folders with "
                          "descriptive filenames (no batch subfolders); writes a reversible "
                          "move-manifest. Idempotent + dry-runnable. Then exit")
-    ap.add_argument("--organize-live", action="store_true",
-                    help="apply prompt_taskid_mediaid naming to files as they download "
-                         "(same as default naming; flag makes intent explicit)")
     ap.add_argument("--organize-adv", action="store_true",
                     help="alias for --organize (kept for back-compat)")
-    ap.add_argument("--organize-adv-live", action="store_true",
-                    help="sort files into YYYY-MM/ month folders live as they download")
     ap.add_argument("--undo-organize", action="store_true",
                     help="revert the last --organize-adv run using organize_manifest.csv "
                          "(move files back to their old paths), then exit")
