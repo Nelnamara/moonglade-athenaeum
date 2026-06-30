@@ -511,13 +511,6 @@ class DownloadTab(QWidget):
         self.name_len.setValue(settings.get("name_length", 60))
         self.name_len.setFixedWidth(65)
         r2.addWidget(self.name_len)
-        r2.addSpacing(16)
-        r2.addWidget(QLabel("Separator:"))
-        self.name_sep = QComboBox()
-        self.name_sep.addItems(["_", "-"])
-        self.name_sep.setCurrentText(settings.get("name_sep", "_"))
-        self.name_sep.setFixedWidth(50)
-        r2.addWidget(self.name_sep)
         r2.addStretch()
         g.addLayout(r2)
 
@@ -525,15 +518,13 @@ class DownloadTab(QWidget):
         r3 = QHBoxLayout()
         r3.addWidget(QLabel("Organize:"))
         self._org_grp = QButtonGroup(self)
-        self.org_flat     = QRadioButton("Flat (images/ folder)")
-        self.org_live     = QRadioButton("Prompt naming (live)")
-        self.org_adv_live = QRadioButton("Batch + Month folders (live)")
-        for rb in (self.org_flat, self.org_live, self.org_adv_live):
+        self.org_flat = QRadioButton("Flat (images/ folder)")
+        self.org_live = QRadioButton("Prompt naming (live)")
+        for rb in (self.org_flat, self.org_live):
             self._org_grp.addButton(rb)
             r3.addWidget(rb)
         mode = settings.get("org_mode", "flat")
-        (self.org_adv_live if mode == "adv_live" else
-         self.org_live if mode == "live" else self.org_flat).setChecked(True)
+        (self.org_live if mode == "live" else self.org_flat).setChecked(True)
         r3.addStretch()
         g.addLayout(r3)
 
@@ -546,7 +537,7 @@ class DownloadTab(QWidget):
         self.convert_combo.addItem("→ JPEG", "jpeg")
         idx = self.convert_combo.findData(settings.get("convert", None))
         self.convert_combo.setCurrentIndex(max(0, idx))
-        self.convert_combo.setFixedWidth(150)
+        self.convert_combo.setMinimumWidth(200)
         r4.addWidget(self.convert_combo)
         r4.addSpacing(12)
         self._lbl_jq = QLabel("JPEG quality:")
@@ -646,9 +637,9 @@ class DownloadTab(QWidget):
             max=self.max_tasks.value(),
             delay=self.delay.value(),
             name_length=self.name_len.value(),
-            name_sep=self.name_sep.currentText(),
+            name_sep="_",
             organize_live=self.org_live.isChecked(),
-            organize_adv_live=self.org_adv_live.isChecked(),
+            organize_adv_live=False,
             convert=self.convert_combo.currentData(),
             jpeg_quality=self.jpeg_qual.value(),
             jpeg_bg=self.jpeg_bg.currentText(),
@@ -731,9 +722,7 @@ class DownloadTab(QWidget):
             "max_tasks":    self.max_tasks.value(),
             "delay":        self.delay.value(),
             "name_length":  self.name_len.value(),
-            "name_sep":     self.name_sep.currentText(),
-            "org_mode":     ("adv_live" if self.org_adv_live.isChecked()
-                             else "live" if self.org_live.isChecked() else "flat"),
+            "org_mode":     ("live" if self.org_live.isChecked() else "flat"),
             "convert":      self.convert_combo.currentData(),
             "jpeg_quality": self.jpeg_qual.value(),
             "jpeg_bg":      self.jpeg_bg.currentText(),
@@ -780,13 +769,6 @@ class OrganizeTab(QWidget):
         self.name_len.setValue(settings.get("name_length", 60))
         self.name_len.setFixedWidth(65)
         r2.addWidget(self.name_len)
-        r2.addSpacing(10)
-        r2.addWidget(QLabel("Sep:"))
-        self.name_sep = QComboBox()
-        self.name_sep.addItems(["_", "-"])
-        self.name_sep.setCurrentText(settings.get("name_sep", "_"))
-        self.name_sep.setFixedWidth(50)
-        r2.addWidget(self.name_sep)
         r2.addStretch()
         g.addLayout(r2)
 
@@ -838,7 +820,7 @@ class OrganizeTab(QWidget):
             dry_run=self.dry_run.isChecked(),
             embed_metadata=self.embed_meta.isChecked(),
             name_length=self.name_len.value(),
-            name_sep=self.name_sep.currentText(),
+            name_sep="_",
             convert=self.convert_combo.currentData(),
             jpeg_quality=self.jpeg_qual.value(),
             jpeg_bg="white",
