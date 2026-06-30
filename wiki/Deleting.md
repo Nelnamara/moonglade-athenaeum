@@ -2,14 +2,19 @@
 
 Two delete buttons appear when images are selected in the gallery:
 
-- **Delete (local)** — removes from your backup only (catalog rows + files). The cloud
-  task is untouched.
-- **Delete from PixAI** — deletes the whole **task** from your account *and* locally,
-  so they never drift.
+- **Delete (local)** — removes from your local catalog only (the cloud task is
+  untouched).
+- **Delete from PixAI** — deletes the whole **task** from your account *and* removes it
+  locally, so they never drift.
 
-> ⚠️ **"Delete from PixAI" is irreversible on the cloud side.** It's **task-level**:
-> selecting one image deletes its whole batch. Gated behind a confirm dialog + typing
-> `DELETE`.
+> 🛟 **Local files are recoverable.** Both buttons *move* your files to a `_deleted/`
+> folder inside your backup rather than destroying them, and clear the catalog row. If
+> you delete something by accident, the file is still in `_deleted/` — drag it back and
+> re-run `--import-local`. (Thumbnails are regenerated, so they're not kept.)
+
+> ⚠️ **The cloud side of "Delete from PixAI" is irreversible.** It's **task-level**:
+> selecting one image deletes its whole batch on PixAI. Gated behind a confirm dialog +
+> typing `DELETE`. Only the *local* part is recoverable via `_deleted/`.
 
 ## Reconcile — clean up what you deleted on the website
 
