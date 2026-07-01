@@ -2418,35 +2418,33 @@ DEFAULT_VIDEO_MODEL = "v4.0.1"
 def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
                            tail_media_id="", duration=5, mode="professional",
                            generate_audio=False, audio_language="english",
-                           camera_movement="unset", negative="",
-                           use_prompt_helper=False, ref_resource_mode="firstLastFrames"):
-    """Build the createGenerationTask `parameters` JSONObject for an image-to-video
-    (i2vPro) job. `media_id` is the source/first frame; `tail_media_id` (optional)
-    is the last frame for first/last-frame interpolation. Returns the dict to pass
-    as variables['parameters'] to createGenerationTask.
+                           negative="", use_prompt_helper=False):
+    """Build createGenerationTask's `parameters` for an image-to-video (i2vPro) job.
+
+    VERIFIED against a real submit (2026-07-01): video uses the SAME
+    createGenerationTask mutation, and `variables.parameters` = {channel, i2vPro:{...}}
+    -- NOT a {type,version,parameters} envelope (that earlier wrapper made the server
+    ignore i2vPro and default to a plain image). `media_id` = source/first frame;
+    `tail_media_id` (optional) = last frame for first/last-frame interpolation.
 
     NOTE: video costs FAR more than images (~27.5k credits for a 5s V4.0 clip), so
     submission stays gated behind explicit --confirm. This builder spends nothing.
     """
     i2v = {
         "model": model,
+        "mediaId": str(media_id),
+        "usePromptsHelper": bool(use_prompt_helper),
+        "prompts": prompt or "",
         "mode": mode,                        # "basic" | "professional"
         "duration": str(duration),           # seconds, as a string ("5"/"10"/"15")
         "generateAudio": bool(generate_audio),
         "audioLanguage": audio_language,
-        "cameraMovement": camera_movement,
-        "mediaId": str(media_id),
-        "refResourceMode": ref_resource_mode,
-        "multiRefResource": {"imageMediaIds": [], "videoMediaIds": [],
-                             "audioMediaIds": [], "items": []},
-        "prompts": prompt or "",
-        "negativePrompts": negative or "",
-        "usePromptsHelper": bool(use_prompt_helper),
     }
     if tail_media_id:
         i2v["tailMediaId"] = str(tail_media_id)
-    return {"type": "generation-task", "version": 2,
-            "parameters": {"channel": "private", "i2vPro": i2v}}
+    if negative:
+        i2v["negativePrompts"] = negative
+    return {"channel": "private", "i2vPro": i2v}
 
 
 def _gen_video_parameters(args):
@@ -2618,7 +2616,7 @@ def run_generate_video(args):
     params = _gen_video_parameters(args)
 
     if not existing_task and not getattr(args, "confirm", False):
-        i2v = (params.get("parameters") or {}).get("i2vPro") or {}
+        i2v = params.get("i2vPro") or {}
         print("=== PixAI createGenerationTask -- VIDEO (PREVIEW, no credits spent) ===")
         print(json.dumps({"parameters": params}, indent=2))
         print("\n*** VIDEO GENERATION IS EXPENSIVE ***")
@@ -2666,7 +2664,7 @@ def run_generate_video(args):
     if not outs:
         raise PixAIError("video task completed but no video outputs found")
     detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
-    i2v_sent = (params.get("parameters") or {}).get("i2vPro") or {}
+    i2v_sent = params.get("i2vPro") or {}
     prompt = shared.get("prompt") or i2v_sent.get("prompts", "")
 
     from pixai_gallery import make_thumbnail
