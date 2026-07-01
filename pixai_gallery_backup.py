@@ -2331,7 +2331,7 @@ def run_import_local(args):
 
 _GEN_MUTATION = ("mutation createGenerationTask($parameters: JSONObject!) {"
                  " createGenerationTask(parameters: $parameters) { id } }")
-_GEN_STATUS = "query($id: ID!) { task(id: $id) { id status } }"
+_GEN_STATUS = "query($id: ID!) { task(id: $id) { id status paidCredit } }"
 DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
 
 
@@ -2645,11 +2645,16 @@ def run_generate_video(args):
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
         deadline = time.time() + getattr(args, "poll_timeout", 600)   # video renders slower
+        paid_credit = None
         while time.time() < deadline:
             task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
             status = str(task.get("status", "")).lower()
+            if task.get("paidCredit") is not None:
+                paid_credit = task.get("paidCredit")   # server-authoritative actual cost
             vlog("video poll: {}".format(status or "(unknown)"))
             if status in ("completed", "succeeded", "success", "done"):
+                if paid_credit is not None:
+                    print("  actual cost: {:,} credits".format(int(paid_credit)))
                 break
             if status in ("failed", "error", "cancelled", "canceled"):
                 raise PixAIError("video generation ended with status: " + status)
