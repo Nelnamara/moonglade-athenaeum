@@ -2406,6 +2406,68 @@ def _gen_parameters(args):
     return params
 
 
+# --- Video (image-to-video) generation ---------------------------------------
+# The i2v generator uses the SAME createGenerationTask mutation as images, but the
+# `parameters` JSONObject is a nested {type, version, parameters:{i2vPro:{...}}}
+# shape (reverse-engineered from a real payload, 2026-07-01). A source image
+# (media_id) becomes the first frame; an optional tail image gives first/last-frame
+# interpolation. This is the engine "Generate shot" will call once wired up.
+DEFAULT_VIDEO_MODEL = "v4.0.1"
+
+
+def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
+                           tail_media_id="", duration=5, mode="professional",
+                           generate_audio=False, audio_language="english",
+                           camera_movement="unset", negative="",
+                           use_prompt_helper=False, ref_resource_mode="firstLastFrames"):
+    """Build the createGenerationTask `parameters` JSONObject for an image-to-video
+    (i2vPro) job. `media_id` is the source/first frame; `tail_media_id` (optional)
+    is the last frame for first/last-frame interpolation. Returns the dict to pass
+    as variables['parameters'] to createGenerationTask.
+
+    NOTE: video costs FAR more than images (~27.5k credits for a 5s V4.0 clip), so
+    submission stays gated behind explicit --confirm. This builder spends nothing.
+    """
+    i2v = {
+        "model": model,
+        "mode": mode,                        # "basic" | "professional"
+        "duration": str(duration),           # seconds, as a string ("5"/"10"/"15")
+        "generateAudio": bool(generate_audio),
+        "audioLanguage": audio_language,
+        "cameraMovement": camera_movement,
+        "mediaId": str(media_id),
+        "refResourceMode": ref_resource_mode,
+        "multiRefResource": {"imageMediaIds": [], "videoMediaIds": [],
+                             "audioMediaIds": [], "items": []},
+        "prompts": prompt or "",
+        "negativePrompts": negative or "",
+        "usePromptsHelper": bool(use_prompt_helper),
+    }
+    if tail_media_id:
+        i2v["tailMediaId"] = str(tail_media_id)
+    return {"type": "generation-task", "version": 2,
+            "parameters": {"channel": "private", "i2vPro": i2v}}
+
+
+def _gen_video_parameters(args):
+    """Build the i2v `parameters` from CLI/GUI args (thin wrapper over
+    build_video_parameters). `--params-json` overrides everything."""
+    if getattr(args, "params_json", ""):
+        return json.loads(args.params_json)
+    return build_video_parameters(
+        getattr(args, "prompt", "") or "",
+        getattr(args, "image", "") or "",
+        model=getattr(args, "model", None) or DEFAULT_VIDEO_MODEL,
+        tail_media_id=getattr(args, "tail", "") or "",
+        duration=getattr(args, "duration", 5) or 5,
+        mode=getattr(args, "vmode", None) or "professional",
+        generate_audio=bool(getattr(args, "audio", False)),
+        audio_language=getattr(args, "audio_language", None) or "english",
+        negative=getattr(args, "negative", "") or "",
+        use_prompt_helper=bool(getattr(args, "prompt_helper", False)),
+    )
+
+
 def run_generate(args):
     """Create images via PixAI (createGenerationTask), poll to completion, download
     the results into the backup, and catalog them as source='api'. GUARDED: without
