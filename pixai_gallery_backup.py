@@ -41,6 +41,7 @@ __version__ = "1.6.0"
 import argparse
 import csv
 import json
+import mimetypes
 import os
 import re
 import sys
@@ -2467,6 +2468,102 @@ def _gen_video_parameters(args):
     )
 
 
+# --- media upload + instruct-editing (the "Edit this image" surface) --------------
+# uploadMedia is a 3-step S3 handshake (verified 2026-07-01): request a presigned
+# target, PUT the bytes, then register -> media_id. It's a plain GraphQL mutation, so
+# gql_adhoc drives it with no persisted hash. Uploading is FREE.
+_UPLOAD_MEDIA_MUT = (
+    "mutation uploadMedia($input: UploadMediaInput!) {"
+    " uploadMedia(input: $input) { uploadUrl externalId mediaId"
+    " media { id type width height } } }")
+
+# PixAI "Edit Pro" (instruct-editing) model. Override with --edit-model.
+EDIT_PRO_MODEL_ID = "2006468692917575683"
+
+
+def upload_media(session, path, media_type="IMAGE"):
+    """Upload a LOCAL image file to PixAI and return its media_id.
+
+    Three steps (verified from the live app): (1) uploadMedia({type,provider:"S3"})
+    returns a presigned S3 `uploadUrl` + an `externalId`; (2) PUT the file bytes to
+    that URL (raw S3, NOT our API session -- so the Bearer never leaks to S3);
+    (3) uploadMedia({type,provider,externalId}) registers the object and returns the
+    `mediaId`. Lets local images feed edit / i2v / reference flows. Uploading is free.
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise PixAIError("upload: file not found: {}".format(p))
+    data = p.read_bytes()
+
+    r1 = gql_adhoc(session, _UPLOAD_MEDIA_MUT,
+                   {"input": {"type": media_type, "provider": "S3"}})
+    u = (r1 or {}).get("uploadMedia") or {}
+    upload_url, external_id = u.get("uploadUrl"), u.get("externalId")
+    if not upload_url or not external_id:
+        raise PixAIError("upload: no presigned url/externalId returned: "
+                         + json.dumps(r1)[:300])
+
+    ct = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+    try:
+        put = requests.put(upload_url, data=data, headers={"Content-Type": ct}, timeout=180)
+    except requests.exceptions.SSLError:
+        raise PixAIError(_ssl_help())
+    if put.status_code not in (200, 201, 204):
+        raise PixAIError("upload: S3 PUT failed (HTTP {}): {}".format(
+            put.status_code, (put.text or "")[:200]))
+
+    r3 = gql_adhoc(session, _UPLOAD_MEDIA_MUT,
+                   {"input": {"type": media_type, "provider": "S3",
+                              "externalId": external_id}})
+    reg = (r3 or {}).get("uploadMedia") or {}
+    mid = reg.get("mediaId") or (reg.get("media") or {}).get("id")
+    if not mid:
+        raise PixAIError("upload: registration returned no mediaId: " + json.dumps(r3)[:300])
+    return str(mid)
+
+
+def _is_local_source(src):
+    """A source is a local file to upload (vs an existing catalog media_id) when it
+    points at a real file on disk. media_ids are big numeric strings; paths aren't."""
+    try:
+        return bool(src) and os.path.isfile(src)
+    except (OSError, ValueError):
+        return False
+
+
+def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
+                               resolution="1K", aspect_ratio="3:4", quality="medium"):
+    """Build createGenerationTask's `parameters` for an instruct edit (the `chat`
+    block), verified against a real Edit-Pro submit (2026-07-01). `media_ids` is one
+    or more source media_ids (an array => multi-image reference editing); the first
+    is also sent as `mediaId`. NOTE: we deliberately DO NOT attach a `kaisuukenId`
+    (free-card) here -- free-card spending is a separate, explicit feature; without it
+    the server charges credits, so this stays behind --confirm like all spend paths.
+    """
+    ids = [str(m) for m in (media_ids or []) if str(m).strip()]
+    if not ids:
+        raise PixAIError("edit needs at least one source media_id")
+    return {"chat": {
+        "prompts": prompt or "",
+        "mediaId": ids[0],
+        "mediaIds": ids,
+        "modelId": str(model_id or EDIT_PRO_MODEL_ID),
+        "modelConfig": {"resolution": resolution,
+                        "aspectRatio": aspect_ratio,
+                        "quality": quality},
+    }}
+
+
+def _edit_config_from_args(args):
+    """Pull the modelConfig knobs (with defaults) out of CLI/GUI args."""
+    return dict(
+        model_id=getattr(args, "edit_model", "") or EDIT_PRO_MODEL_ID,
+        resolution=getattr(args, "edit_resolution", "") or "1K",
+        aspect_ratio=getattr(args, "edit_aspect", "") or "3:4",
+        quality=getattr(args, "edit_quality", "") or "medium",
+    )
+
+
 def run_generate(args):
     """Create images via PixAI (createGenerationTask), poll to completion, download
     the results into the backup, and catalog them as source='api'. GUARDED: without
@@ -2721,6 +2818,152 @@ def run_generate_video(args):
     for s in saved:
         print("  " + s)
     return {"submitted": True, "task_id": task_id, "videos": len(saved)}
+
+
+def run_upload(args):
+    """Upload a local image to PixAI and print its media_id (the reusable primitive
+    behind --edit-src file support). Free; spends nothing."""
+    session = _make_session(getattr(args, "token", None))
+    mid = upload_media(session, args.upload_file)
+    print("Uploaded media_id:", mid)
+    return {"media_id": mid}
+
+
+def run_edit_image(args):
+    """Instruct-edit an image via PixAI (createGenerationTask with a `chat` block):
+    describe the change in --prompt and pass source(s) via --edit-src (a catalog
+    media_id OR a local file, uploaded automatically; repeatable for multi-image
+    reference). Poll -> download the result image(s) -> catalog as source='api'.
+    GUARDED: without --confirm it only PREVIEWS (uploads nothing, spends nothing).
+    --task-id recovers an already-created edit for free. Mirrors run_generate."""
+    out = Path(args.out)
+    existing_task = (getattr(args, "task_id", "") or "").strip()
+    srcs = [s for s in (getattr(args, "edit_src", None) or []) if s and str(s).strip()]
+    override = getattr(args, "params_json", "") or ""
+    prompt = getattr(args, "prompt", "") or ""
+    cfg = _edit_config_from_args(args)
+
+    if not existing_task and not srcs and not override:
+        raise PixAIError("--edit-image needs --edit-src <media_id|file> (repeatable), "
+                         "or --task-id to recover an existing edit.")
+
+    # PREVIEW: no upload, no submit, no credits. Local files shown as placeholders.
+    if not existing_task and not getattr(args, "confirm", False):
+        print("=== PixAI createGenerationTask -- EDIT (PREVIEW, no credits spent) ===")
+        if override:
+            params = json.loads(override)
+        else:
+            preview_ids = [("<upload:{}>".format(s) if _is_local_source(s) else s)
+                           for s in srcs] or ["<source>"]
+            params = build_chat_edit_parameters(
+                prompt, preview_ids, model_id=cfg["model_id"],
+                resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
+                quality=cfg["quality"])
+        print(json.dumps({"parameters": params}, indent=2))
+        print("\nThis would SPEND PixAI credits (unless a free Edit card applies). "
+              "Re-run with --confirm to submit.")
+        return {"submitted": False}
+
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)
+    session = _make_session(getattr(args, "token", None))
+    thumb_dir = out / "gallery" / "thumbs"
+    from pixai_gallery import make_thumbnail
+
+    params = {}
+    if existing_task:
+        task_id = existing_task
+        print("Fetching existing edit task (no credits):", task_id)
+    else:
+        if override:
+            params = json.loads(override)
+        else:
+            media_ids = []
+            for s in srcs:
+                if _is_local_source(s):
+                    print("Uploading local image:", s)
+                    media_ids.append(upload_media(session, s))
+                else:
+                    media_ids.append(str(s))
+            params = build_chat_edit_parameters(
+                prompt, media_ids, model_id=cfg["model_id"],
+                resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
+                quality=cfg["quality"])
+        print("Submitting EDIT task (spends credits unless a free card applies)...")
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        print("  task id:", task_id)
+        deadline = time.time() + getattr(args, "poll_timeout", 300)
+        paid_credit = None
+        while time.time() < deadline:
+            task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
+            status = str(task.get("status", "")).lower()
+            if task.get("paidCredit") is not None:
+                paid_credit = task.get("paidCredit")
+            vlog("edit poll: {}".format(status or "(unknown)"))
+            if status in ("completed", "succeeded", "success", "done"):
+                if paid_credit is not None:
+                    print("  actual cost: {:,} credits".format(int(paid_credit)))
+                break
+            if status in ("failed", "error", "cancelled", "canceled"):
+                raise PixAIError("edit ended with status: " + status)
+            time.sleep(3)
+        else:
+            raise PixAIError("timed out after {}s (task {})".format(
+                getattr(args, "poll_timeout", 300), task_id))
+
+    result = task_detail_gql(session, task_id) or {}
+    outputs = result.get("outputs") or {}
+    mids = []
+    if outputs.get("mediaId"):
+        mids.append(str(outputs["mediaId"]))
+    for m in outputs.get("batchMediaIds") or []:
+        mids.append(str(m))
+    mids = list(dict.fromkeys(mids))
+    if not mids:
+        raise PixAIError("edit task completed but no media ids found")
+
+    fm = extract_full_meta(result)
+    chat = (params.get("chat") or {}) if isinstance(params, dict) else {}
+    prompt_used = fm.get("prompt_full") or prompt or chat.get("prompts", "")
+    img_dir = out / "images"
+    rows, saved = [], []
+    for mid in mids:
+        url, info = resolve_media(session, mid)
+        if not url:
+            print("  no url for media", mid)
+            continue
+        stem = img_dir / build_stem_name(prompt_used, task_id, mid,
+                                         getattr(args, "name_length", 60),
+                                         getattr(args, "name_sep", "_"))
+        status, path = download(session, url, stem)
+        if status not in ("ok", "skip") or not path:
+            continue
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "task_id": str(task_id), "media_id": mid,
+            "filename": str(path.relative_to(out)).replace("\\", "/"),
+            "url": url, "source": "api", "status": "completed",
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "prompt_full": prompt_used, "prompt_preview": (prompt_used or "")[:100],
+            "model_id": str(chat.get("modelId") or fm.get("model_id") or ""),
+            "model_name": fm.get("model_name", "") or "Edit",
+            "width": str((info or {}).get("width") or ""),
+            "height": str((info or {}).get("height") or ""),
+        })
+        rows.append(full)
+        make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
+        saved.append(str(path))
+
+    if rows:
+        save_catalog(db_path, rows)
+    print("Edited + cataloged {} image(s):".format(len(saved)))
+    for s in saved:
+        print("  " + s)
+    return {"submitted": True, "task_id": task_id, "images": len(saved)}
 
 
 def _needs_model_fix(row):
@@ -3741,6 +3984,25 @@ def main():
     gen.add_argument("--audio-language", dest="audio_language", default="english")
     gen.add_argument("--video-prompt-helper", dest="video_prompt_helper", action="store_true",
                      help="enable PixAI's prompt-helper for video (off by default)")
+    # --- instruct editing + media upload (the "Edit this image" surface) ---
+    gen.add_argument("--edit-image", dest="edit_image", action="store_true",
+                     help="instruct-edit an image via PixAI: describe the change in --prompt "
+                          "and pass source(s) with --edit-src (a catalog media_id OR a local "
+                          "file, uploaded automatically). Preview-only unless --confirm")
+    gen.add_argument("--edit-src", dest="edit_src", action="append", metavar="MEDIA_ID|FILE",
+                     help="source image for --edit-image: a media_id or a local image file "
+                          "(local files upload automatically). Repeatable for multi-image reference")
+    gen.add_argument("--edit-model", dest="edit_model", default="",
+                     help="edit model id (default PixAI Edit Pro {})".format(EDIT_PRO_MODEL_ID))
+    gen.add_argument("--edit-resolution", dest="edit_resolution", default="1K",
+                     help="edit output resolution (default 1K; e.g. 1K/2K)")
+    gen.add_argument("--edit-aspect", dest="edit_aspect", default="3:4",
+                     help="edit output aspect ratio (default 3:4)")
+    gen.add_argument("--edit-quality", dest="edit_quality", default="medium",
+                     help="edit quality tier (default medium)")
+    gen.add_argument("--upload", dest="upload_file", default="", metavar="FILE",
+                     help="upload a local image to PixAI, print its media_id, then exit "
+                          "(the reusable primitive behind --edit-src file support). Free")
     gen.add_argument("--list-models", nargs="?", const="", default=None, metavar="KEYWORD",
                      help="search PixAI generation models by keyword and print their "
                           "generatable version ids (use as --model), then exit")
@@ -3820,6 +4082,12 @@ def main():
             return
         if getattr(args, "generate_video", False):
             run_generate_video(args)
+            return
+        if getattr(args, "upload_file", ""):
+            run_upload(args)
+            return
+        if getattr(args, "edit_image", False):
+            run_edit_image(args)
             return
         if args.fix_model_names:
             run_fix_models(args)
