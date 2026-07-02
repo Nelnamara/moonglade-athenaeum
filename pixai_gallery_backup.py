@@ -2374,7 +2374,9 @@ def _gen_parameters(args):
         "height": _dim(args.height),
         "samplingSteps": args.steps,
         "cfgScale": args.cfg,
-        "batchSize": args.count,
+        # batchSize must be >= 1. `--batch-size` shares dest="count" with the top-level
+        # `--count` (store_true) flag, so its default can arrive as False -> coerce.
+        "batchSize": max(1, int(getattr(args, "count", 1) or 1)),
         # 1000 = high priority (faster, more credits); 500 = standard (cheaper).
         # We default to standard so a run costs less unless high is requested.
         "priority": getattr(args, "priority", 500) or 500,
@@ -2404,6 +2406,8 @@ def _gen_parameters(args):
     else:
         params["promptHelper"] = {"withStage": False, "userWantToEnable": False,
                                   "forcePromptHelperDetectionSide": "server"}
+    if getattr(args, "kaisuuken_id", ""):
+        params["kaisuukenId"] = str(args.kaisuuken_id)   # spend a free card instead of credits
     return params
 
 
