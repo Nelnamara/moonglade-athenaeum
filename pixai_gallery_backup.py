@@ -2573,6 +2573,30 @@ def _edit_config_from_args(args):
     )
 
 
+def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
+                      fail_noun="task"):
+    """Poll `_GEN_STATUS` until the task completes, fails, or times out. Returns the
+    server-authoritative `paidCredit` (or None) and prints it as the actual cost on
+    completion. Raises PixAIError on failure/timeout. Shared by the generate / video /
+    edit submit paths so their poll behaviour can't drift."""
+    deadline = time.time() + timeout
+    paid_credit = None
+    while time.time() < deadline:
+        task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
+        status = str(task.get("status", "")).lower()
+        if task.get("paidCredit") is not None:
+            paid_credit = task.get("paidCredit")     # server-authoritative actual cost
+        vlog("{} poll: {}".format(label, status or "(unknown)"))
+        if status in ("completed", "succeeded", "success", "done"):
+            if paid_credit is not None:
+                print("  actual cost: {:,} credits".format(int(paid_credit)))
+            return paid_credit
+        if status in ("failed", "error", "cancelled", "canceled"):
+            raise PixAIError("{} ended with status: {}".format(fail_noun, status))
+        time.sleep(interval)
+    raise PixAIError("timed out after {}s (task {})".format(timeout, task_id))
+
+
 def run_generate(args):
     """Create images via PixAI (createGenerationTask), poll to completion, download
     the results into the backup, and catalog them as source='api'. GUARDED: without
@@ -2621,19 +2645,8 @@ def run_generate(args):
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
 
-        deadline = time.time() + getattr(args, "poll_timeout", 300)
-        while time.time() < deadline:
-            task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
-            status = str(task.get("status", "")).lower()
-            vlog("generate poll: {}".format(status or "(unknown)"))
-            if status in ("completed", "succeeded", "success", "done"):
-                break
-            if status in ("failed", "error", "cancelled", "canceled"):
-                raise PixAIError("generation ended with status: " + status)
-            time.sleep(3)
-        else:
-            raise PixAIError("timed out after {}s (task {})".format(
-                getattr(args, "poll_timeout", 300), task_id))
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
+                          interval=3, label="generate", fail_noun="generation")
 
     # The Task type exposes its media under `outputs` (mediaId / batchMediaIds /
     # videos), NOT at the top level. getTaskById returns that whole object and is
@@ -2750,24 +2763,8 @@ def run_generate_video(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
-        deadline = time.time() + getattr(args, "poll_timeout", 600)   # video renders slower
-        paid_credit = None
-        while time.time() < deadline:
-            task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
-            status = str(task.get("status", "")).lower()
-            if task.get("paidCredit") is not None:
-                paid_credit = task.get("paidCredit")   # server-authoritative actual cost
-            vlog("video poll: {}".format(status or "(unknown)"))
-            if status in ("completed", "succeeded", "success", "done"):
-                if paid_credit is not None:
-                    print("  actual cost: {:,} credits".format(int(paid_credit)))
-                break
-            if status in ("failed", "error", "cancelled", "canceled"):
-                raise PixAIError("video generation ended with status: " + status)
-            time.sleep(5)
-        else:
-            raise PixAIError("timed out after {}s (task {})".format(
-                getattr(args, "poll_timeout", 600), task_id))
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600),
+                          interval=5, label="video", fail_noun="video generation")
 
     # Result: getTaskById -> outputs.videos -> fileUrl -> download mp4 (same as --sync-videos).
     result = task_detail_gql(session, task_id) or {}
@@ -2905,24 +2902,8 @@ def run_edit_image(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
-        deadline = time.time() + getattr(args, "poll_timeout", 300)
-        paid_credit = None
-        while time.time() < deadline:
-            task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
-            status = str(task.get("status", "")).lower()
-            if task.get("paidCredit") is not None:
-                paid_credit = task.get("paidCredit")
-            vlog("edit poll: {}".format(status or "(unknown)"))
-            if status in ("completed", "succeeded", "success", "done"):
-                if paid_credit is not None:
-                    print("  actual cost: {:,} credits".format(int(paid_credit)))
-                break
-            if status in ("failed", "error", "cancelled", "canceled"):
-                raise PixAIError("edit ended with status: " + status)
-            time.sleep(3)
-        else:
-            raise PixAIError("timed out after {}s (task {})".format(
-                getattr(args, "poll_timeout", 300), task_id))
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
+                          interval=3, label="edit", fail_noun="edit")
 
     result = task_detail_gql(session, task_id) or {}
     outputs = result.get("outputs") or {}
