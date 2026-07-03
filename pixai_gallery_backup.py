@@ -2420,10 +2420,18 @@ def _gen_parameters(args):
 DEFAULT_VIDEO_MODEL = "v4.0.1"
 
 
+# Video enums banked from the generator i18n (2026-07-02):
+VIDEO_CAMERA_MOVES = ("unset", "horizontal", "pan", "roll", "tilt", "vertical-pan", "zoom")
+VIDEO_AUDIO_LANGS = ("english", "japanese", "chinese", "korean", "none")  # "none" = SE only
+VIDEO_DURATIONS = (5, 6, 10, 15)                                          # 15 is v4.0-only
+VIDEO_CHANNELS = ("private", "normal")                                     # private = "Enhanced" (Plus/Premium)
+
+
 def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
                            tail_media_id="", duration=5, mode="professional",
                            generate_audio=False, audio_language="english",
-                           negative="", use_prompt_helper=False, kaisuuken_id=""):
+                           negative="", use_prompt_helper=False, kaisuuken_id="",
+                           camera_movement="", channel="private"):
     """Build createGenerationTask's `parameters` for an image-to-video (i2vPro) job.
 
     VERIFIED against a real submit (2026-07-01): video uses the SAME
@@ -2449,7 +2457,11 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
         i2v["tailMediaId"] = str(tail_media_id)
     if negative:
         i2v["negativePrompts"] = negative
-    params = {"channel": "private", "i2vPro": i2v}
+    # cameraMovement is v2.7-style camera-dropdown; only send when a real move is picked
+    # (the verified v4.0 submit omits it entirely -> keep it out by default).
+    if camera_movement and camera_movement != "unset":
+        i2v["cameraMovement"] = camera_movement
+    params = {"channel": channel or "private", "i2vPro": i2v}
     if kaisuuken_id:
         params["kaisuukenId"] = str(kaisuuken_id)   # spend a free card instead of credits
     return params
@@ -2473,6 +2485,8 @@ def _gen_video_parameters(args):
         negative=getattr(args, "negative", "") or "",
         use_prompt_helper=bool(getattr(args, "video_prompt_helper", False)),
         kaisuuken_id=getattr(args, "kaisuuken_id", "") or "",
+        camera_movement=getattr(args, "camera_movement", "") or "",
+        channel=getattr(args, "vchannel", "") or "private",
     )
 
 
@@ -4058,6 +4072,13 @@ def main():
     gen.add_argument("--audio-language", dest="audio_language", default="english")
     gen.add_argument("--video-prompt-helper", dest="video_prompt_helper", action="store_true",
                      help="enable PixAI's prompt-helper for video (off by default)")
+    gen.add_argument("--camera-movement", dest="camera_movement", default="",
+                     choices=list(VIDEO_CAMERA_MOVES),
+                     help="camera move (v2.7-style): horizontal/pan/roll/tilt/vertical-pan/zoom "
+                          "(default unset = omit; camera direction can also go in the prompt)")
+    gen.add_argument("--video-channel", dest="vchannel", default="private",
+                     choices=list(VIDEO_CHANNELS),
+                     help="video channel: private = 'Enhanced' (Plus/Premium) | normal")
     # --- instruct editing + media upload (the "Edit this image" surface) ---
     gen.add_argument("--edit-image", dest="edit_image", action="store_true",
                      help="instruct-edit an image via PixAI: describe the change in --prompt "
