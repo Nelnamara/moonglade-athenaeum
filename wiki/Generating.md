@@ -115,6 +115,29 @@ python pixai_gallery_backup.py --edit-image --edit-src <media_id> --prompt "make
 python pixai_gallery_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt "..." --confirm
 ```
 
+## Multi-reference video (`--reference-video`)
+
+A different video mode (V4.0): drive a clip from **multiple reference images / videos / audio**
+instead of a single start frame. You cite each reference in the prompt with `@image1`, `@video1`,
+`@audio1` (they map by position). Refs can be catalog `media_id`s or local files (auto-uploaded).
+
+```bash
+# preview (free): shows the exact referenceVideo request
+python pixai_gallery_backup.py --reference-video \
+    --ref-image <id1> --ref-image "C:\pics\pose.png" \
+    --prompt "@image1 in the outfit from @image2, slow orbit"
+# really generate (V4.0 card auto-applies, else credits):
+python pixai_gallery_backup.py --reference-video --ref-image <id1> --ref-image <id2> \
+    --prompt "@image1 ... @image2 ..." --confirm
+```
+
+| Flag | Meaning |
+|---|---|
+| `--ref-image` / `--ref-video` / `--ref-audio` | a reference (media_id or local file), **repeatable** — `@image1`, `@image2`, … |
+| `--prompt` | cite refs by `@imageN` / `@videoN` / `@audioN` |
+| `--duration` / `--video-mode` / `--audio` | as with `--generate-video` (15s uses 3 V4.0 cards) |
+| `--confirm` | **required** to submit |
+
 ## Upload a local image (`--upload`)
 
 Get a reusable `media_id` for any local file — **free**. Useful to pre-upload once and
@@ -126,14 +149,22 @@ python pixai_gallery_backup.py --upload "C:\pics\her.png"     # prints: Uploaded
 
 ## Free cards (`--cards` / `--kaisuuken-id`)
 
-PixAI grants free-generation tickets — **kaisuuken** (回数券, "ticket book") — through
-membership and events. When one matches your run, it's free instead of charging credits.
+PixAI grants free-generation cards — **kaisuuken** (回数券, "ticket book") — through membership
+and events. Each is **locked to one model** and **applies automatically** when you generate with
+that model (nearest-expiry first): your credits stay untouched, no id needed.
 
 ```bash
-python pixai_gallery_backup.py --cards        # read-only: your cards + their ids and balances
-# spend a specific card on a run (instead of credits):
-python pixai_gallery_backup.py --edit-image --edit-src <media_id> --prompt "..." --kaisuuken-id <id> --confirm
+python pixai_gallery_backup.py --cards        # read-only: your cards, counts, model, expiry
 ```
 
-The tool **never auto-spends a card** — you pass a specific id from `--cards`, still behind
-`--confirm`.
+`--cards` shows which model each card needs. Just generate with the matching model and it's free:
+
+| Card | Just run… |
+|---|---|
+| **Tsubaki.2** | `--generate` (default model) |
+| **Edit Pro** | `--edit-image` (default model) |
+| **Reference Pro** | `--generate --model 1948514378441961474` |
+| **V4.0 video** | `--generate-video` / `--reference-video` (default v4.0.1, 5s = 1 card, 15s = 3) |
+
+`--kaisuuken-id <id>` remains as an optional explicit override, but you rarely need it — the
+matching model does it for you.
