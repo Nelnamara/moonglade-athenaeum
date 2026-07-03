@@ -2467,6 +2467,46 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     return params
 
 
+# Reference video (multi-image/video/audio reference) -- a SEPARATE top-level
+# `referenceVideo` block, VERIFIED from a real submit (2026-07-02). Distinct from i2vPro.
+REFVIDEO_MODEL_ID = "2003969750675682808"   # numeric model id for v4.0.1 reference-video
+
+
+def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_ids=(),
+                                     audio_media_ids=(), model="v4.0.1",
+                                     model_id=REFVIDEO_MODEL_ID, duration=15,
+                                     mode="professional", generate_audio=False,
+                                     audio_language="english", is_private=False,
+                                     priority=1000, kaisuuken_id=""):
+    """Build createGenerationTask `parameters` for a REFERENCE video (multi-image / video /
+    audio reference). VERIFIED shape (2026-07-02) -- a top-level `referenceVideo` block,
+    NOT i2vPro. The prompt references inputs by position with @image1/@video1/@audio1
+    mentions. `duration` is an int here; channel maps to `isPrivate`. Builder spends nothing."""
+    rv = {
+        "mode": mode,
+        "model": model,
+        "prompt": prompt or "",
+        "duration": int(duration),
+        "audioLanguage": audio_language,
+        "generateAudio": bool(generate_audio),
+        "inputVideoDurations": [],
+        "referenceAudioMediaIds": [str(m) for m in (audio_media_ids or [])],
+        "referenceImageMediaIds": [str(m) for m in (image_media_ids or [])],
+        "referenceVideoMediaIds": [str(m) for m in (video_media_ids or [])],
+    }
+    params = {
+        "priority": int(priority),
+        "referenceVideo": rv,
+        "isPrivate": bool(is_private),
+        "enablePreview": True,
+        "hidePrompts": False,
+        "modelId": str(model_id),
+    }
+    if kaisuuken_id:
+        params["kaisuukenId"] = str(kaisuuken_id)
+    return params
+
+
 def _gen_video_parameters(args):
     """Build the i2v `parameters` from CLI/GUI args (thin wrapper over
     build_video_parameters). `--params-json` overrides everything."""

@@ -109,3 +109,28 @@ def test_dump_params_prints_full_shape_when_flagged(capsys):
 def test_dump_params_silent_by_default(capsys):
     core._maybe_dump_params(SimpleNamespace(dump_params=False), {"parameters": {"x": 1}})
     assert capsys.readouterr().out == ""
+
+
+# ---- referenceVideo (multi-image/video/audio) -- pinned to the real submit (2026-07-02) ----
+
+def test_build_reference_video_matches_real_submit():
+    p = core.build_reference_video_parameters(
+        "make @image1 dance", image_media_ids=["10", "20"],
+        model="v4.0.1", duration=15, mode="professional",
+        generate_audio=True, audio_language="english")
+    rv = p["referenceVideo"]
+    assert rv["referenceImageMediaIds"] == ["10", "20"]
+    assert rv["duration"] == 15                       # INT, not "15"
+    assert rv["referenceVideoMediaIds"] == [] and rv["referenceAudioMediaIds"] == []
+    assert p["isPrivate"] is False and p["enablePreview"] is True
+    assert p["modelId"] == core.REFVIDEO_MODEL_ID
+    assert "referenceVideo" in p and "i2vPro" not in p   # distinct from i2v
+
+
+def test_reference_video_refs_private_and_card():
+    p = core.build_reference_video_parameters(
+        "x", image_media_ids=["1"], video_media_ids=["v1"], audio_media_ids=["a1"],
+        is_private=True, kaisuuken_id="card9")
+    rv = p["referenceVideo"]
+    assert rv["referenceVideoMediaIds"] == ["v1"] and rv["referenceAudioMediaIds"] == ["a1"]
+    assert p["isPrivate"] is True and p["kaisuukenId"] == "card9"
