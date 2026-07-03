@@ -76,3 +76,21 @@ def test_generate_video_requires_a_source_image(tmp_path):
     import pytest
     with pytest.raises(core.PixAIError):
         core.run_generate_video(_video_args(tmp_path, image=""))
+
+
+# ---- banked enums: camera movement + channel (2026-07-02) ----
+
+def test_camera_movement_included_when_set():
+    p = core.build_video_parameters("p", media_id="1", camera_movement="zoom")
+    assert p["i2vPro"]["cameraMovement"] == "zoom"
+
+
+def test_camera_movement_omitted_by_default_and_on_unset():
+    assert "cameraMovement" not in core.build_video_parameters("p", media_id="1")["i2vPro"]
+    assert "cameraMovement" not in core.build_video_parameters(
+        "p", media_id="1", camera_movement="unset")["i2vPro"]
+
+
+def test_channel_default_private_and_override_normal():
+    assert core.build_video_parameters("p", media_id="1")["channel"] == "private"
+    assert core.build_video_parameters("p", media_id="1", channel="normal")["channel"] == "normal"

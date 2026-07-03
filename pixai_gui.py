@@ -1415,6 +1415,16 @@ class VideoTab(QWidget):
         _mi = self.mode_combo.findData(settings.get("vid_mode", "professional"))
         self.mode_combo.setCurrentIndex(max(0, _mi))
         r_m.addWidget(self.mode_combo)
+        r_m.addSpacing(12)
+        r_m.addWidget(QLabel("Camera:"))
+        self.camera_combo = QComboBox()
+        for label, val in (("(none)", ""), ("Zoom", "zoom"), ("Pan", "pan"),
+                           ("Tilt", "tilt"), ("Roll", "roll"),
+                           ("Side-to-side", "horizontal"), ("Vertical pan", "vertical-pan")):
+            self.camera_combo.addItem(label, val)
+        self.camera_combo.setToolTip("Camera move (v2.7-style). Leave (none) to omit, or write "
+                                     "the move in the prompt for other models.")
+        r_m.addWidget(self.camera_combo)
         r_m.addStretch()
         g.addLayout(r_m)
 
@@ -1478,6 +1488,7 @@ class VideoTab(QWidget):
             video_model=self.model_combo.currentData(), model="",
             duration=self.duration_combo.currentData(),
             vmode=self.mode_combo.currentData(),
+            camera_movement=self.camera_combo.currentData(), vchannel="private",
             audio=self.audio.isChecked(), audio_language="english",
             video_prompt_helper=self.prompt_helper.isChecked(),
             params_json="", confirm=self.confirm.isChecked(),
