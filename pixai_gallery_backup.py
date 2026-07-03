@@ -2507,6 +2507,49 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
     return params
 
 
+def build_panelplugin_parameters(media_id, workflow_id, *, strength=None,
+                                 extra_inputs=None, priority=1000, is_private=False,
+                                 kaisuuken_id=""):
+    """Enhance via a PixAI panelplugin WORKFLOW (face-fix / upscale / bg-remove / handfix …).
+    VERIFIED shape (2026-07-02): model 'pixai-panelplugin', numeric `workflowId`, and
+    `inputs.image = {type:'media', media_id}` (+ optional strength / per-plugin args).
+    Produces an image output. Builder spends nothing."""
+    inputs = {"image": {"type": "media", "media_id": str(media_id)}}
+    if strength is not None:
+        inputs["strength"] = float(strength)
+    if extra_inputs:
+        inputs.update(extra_inputs)
+    params = {
+        "priority": int(priority),
+        "model": "pixai-panelplugin",
+        "inputs": inputs,
+        "isPrivate": bool(is_private),
+        "enablePreview": True,
+        "hidePrompts": False,
+        "workflowId": str(workflow_id),
+    }
+    if kaisuuken_id:
+        params["kaisuukenId"] = str(kaisuuken_id)
+    return params
+
+
+def build_filter_parameters(media_id, filter_id, *, strength=0.77, is_private=False,
+                            kaisuuken_id=""):
+    """Apply a PixAI Art Filter. VERIFIED shape (2026-07-02): model 'pixai-image-filter',
+    top-level `mediaId`, `inputs = {filterId, strength}`. Produces an image. Free builder."""
+    params = {
+        "mediaId": str(media_id),
+        "model": "pixai-image-filter",
+        "inputs": {"filterId": str(filter_id), "strength": float(strength)},
+        "isPrivate": bool(is_private),
+        "enablePreview": False,
+        "hidePrompts": False,
+    }
+    if kaisuuken_id:
+        params["kaisuukenId"] = str(kaisuuken_id)
+    return params
+
+
 def _gen_video_parameters(args):
     """Build the i2v `parameters` from CLI/GUI args (thin wrapper over
     build_video_parameters). `--params-json` overrides everything."""
@@ -2851,6 +2894,53 @@ def _download_video_task(session, result, task_id, out, args, params):
     return saved
 
 
+def _download_image_task(session, result, task_id, out, args, prompt="", model_name=""):
+    """Download + catalog the image output(s) of a completed task (used by --enhance).
+    Reads outputs.mediaId/batchMediaIds -> resolve_media -> download -> catalog as
+    source='api'. Returns the list of saved file paths."""
+    outputs = result.get("outputs") or {}
+    mids = []
+    if outputs.get("mediaId"):
+        mids.append(str(outputs["mediaId"]))
+    for m in outputs.get("batchMediaIds") or []:
+        mids.append(str(m))
+    mids = list(dict.fromkeys(mids))
+    if not mids:
+        raise PixAIError("task completed but no media ids found")
+    from pixai_gallery import make_thumbnail
+    thumb_dir = out / "gallery" / "thumbs"
+    img_dir = out / "images"
+    db_path = out / "catalog.db"
+    rows, saved = [], []
+    for mid in mids:
+        url, info = resolve_media(session, mid)
+        if not url:
+            print("  no url for media", mid)
+            continue
+        stem = img_dir / build_stem_name(prompt, task_id, mid, getattr(args, "name_length", 60),
+                                         getattr(args, "name_sep", "_"))
+        status, path = download(session, url, stem)
+        if status not in ("ok", "skip") or not path:
+            continue
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "task_id": str(task_id), "media_id": mid,
+            "filename": str(path.relative_to(out)).replace("\\", "/"),
+            "url": url, "source": "api", "status": "completed",
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
+            "model_name": model_name,
+            "width": str((info or {}).get("width") or ""),
+            "height": str((info or {}).get("height") or ""),
+        })
+        rows.append(full)
+        make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
+        saved.append(str(path))
+    if rows:
+        save_catalog(db_path, rows)
+    return saved
+
+
 def run_generate_video(args):
     """Create an image-to-video clip via PixAI (createGenerationTask + i2vPro params),
     poll to completion, download the mp4 into videos/, and catalog it (source='api',
@@ -2991,6 +3081,81 @@ def run_reference_video(args):
     for s in saved:
         print("  " + s)
     return {"submitted": True, "task_id": task_id, "videos": len(saved)}
+
+
+def run_enhance(args):
+    """Apply a PixAI enhance plugin (panelplugin workflow -- face fix / upscale / bg-remove)
+    or an art filter to an image. --src is a catalog media_id OR a local file (auto-uploaded
+    on --confirm). Provide --workflow-id (panelplugin) or --filter-id (art filter); get ids
+    via --dump-params off a real enhance task. Preview-only unless --confirm. Image output."""
+    out = Path(args.out)
+    existing = (getattr(args, "task_id", "") or "").strip()
+    src = (getattr(args, "src", "") or "").strip()
+    workflow_id = (getattr(args, "workflow_id", "") or "").strip()
+    filter_id = (getattr(args, "filter_id", "") or "").strip()
+    override = getattr(args, "params_json", "") or ""
+    strength = getattr(args, "strength", None)
+    kaisuuken = getattr(args, "kaisuuken_id", "") or ""
+
+    if not existing and not override and not src:
+        raise PixAIError("--enhance needs --src <media_id|file>, plus --workflow-id or --filter-id.")
+    if not existing and not override and not (workflow_id or filter_id):
+        raise PixAIError("--enhance needs --workflow-id <id> (a panelplugin, e.g. face fix / "
+                         "upscale) or --filter-id <id> (art filter). Get ids via --dump-params.")
+
+    def _build(media_id):
+        if filter_id:
+            return build_filter_parameters(
+                media_id, filter_id,
+                strength=(strength if strength is not None else 0.77), kaisuuken_id=kaisuuken)
+        return build_panelplugin_parameters(media_id, workflow_id, strength=strength,
+                                            kaisuuken_id=kaisuuken)
+
+    if not existing and not getattr(args, "confirm", False):
+        print("=== PixAI createGenerationTask -- ENHANCE (PREVIEW, no credits spent) ===")
+        if override:
+            print(json.dumps({"parameters": json.loads(override)}, indent=2))
+        else:
+            ph = "<upload:{}>".format(src) if _is_local_source(src) else src
+            print(json.dumps({"parameters": _build(ph)}, indent=2))
+        print("\nThis would SPEND credits (unless an enhancement card applies). "
+              "Re-run with --confirm to submit.")
+        return {"submitted": False}
+
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)
+    session = _make_session(getattr(args, "token", None))
+
+    if existing:
+        task_id = existing
+        print("Fetching existing enhance task (no credits):", task_id)
+    else:
+        if override:
+            params = json.loads(override)
+        else:
+            if _is_local_source(src):
+                print("Uploading source image:", src)
+                media_id = upload_media(session, src)
+            else:
+                media_id = src
+            params = _build(media_id)
+        print("Submitting ENHANCE task (spends credits unless a card applies)...")
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        print("  task id:", task_id)
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300), interval=3,
+                          label="enhance", fail_noun="enhance")
+
+    result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
+    saved = _download_image_task(session, result, task_id, out, args, model_name="Enhance")
+    print("Enhanced + cataloged {} image(s):".format(len(saved)))
+    for s in saved:
+        print("  " + s)
+    return {"submitted": True, "task_id": task_id, "images": len(saved)}
 
 
 def run_upload(args):
@@ -4245,6 +4410,18 @@ def main():
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
     gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
                      help="reference audio (repeatable; cite as @audio1, ...)")
+    # --- enhance (panelplugin workflow OR art filter) ---
+    gen.add_argument("--enhance", dest="enhance", action="store_true",
+                     help="enhance an image: --workflow-id (panelplugin -- face fix / upscale / "
+                          "bg-remove) or --filter-id (art filter) on --src. Preview until --confirm")
+    gen.add_argument("--src", dest="src", default="", metavar="MEDIA_ID|FILE",
+                     help="source image for --enhance (catalog media_id or local file, auto-uploaded)")
+    gen.add_argument("--workflow-id", dest="workflow_id", default="", metavar="ID",
+                     help="panelplugin workflow id for --enhance (get via --dump-params off an enhance task)")
+    gen.add_argument("--filter-id", dest="filter_id", default="", metavar="ID",
+                     help="art-filter id for --enhance (pixai-image-filter, e.g. filter-v1-m2)")
+    gen.add_argument("--strength", dest="strength", type=float, default=None,
+                     help="enhance/filter strength (e.g. 0.5 for plugins, 0.77 for filters)")
     # --- instruct editing + media upload (the "Edit this image" surface) ---
     gen.add_argument("--edit-image", dest="edit_image", action="store_true",
                      help="instruct-edit an image via PixAI: describe the change in --prompt "
@@ -4352,6 +4529,9 @@ def main():
             return
         if getattr(args, "reference_video", False):
             run_reference_video(args)
+            return
+        if getattr(args, "enhance", False):
+            run_enhance(args)
             return
         if getattr(args, "upload_file", ""):
             run_upload(args)
