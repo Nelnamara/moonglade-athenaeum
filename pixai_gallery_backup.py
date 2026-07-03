@@ -36,7 +36,7 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "1.8.1"
+__version__ = "1.8.2"
 
 import argparse
 import csv
@@ -3563,6 +3563,37 @@ def price_task(session, params):
     return int(ap) if ap is not None else None
 
 
+def suggest_prompt(session, media_id):
+    """Reverse a prompt out of an image (PixAI's "Image to prompt"): GET
+    /v2/tag/suggest-prompt/{mediaId} -> a list of suggested prompt strings (a Danbooru-
+    style tag list + a natural-language description variant). FREE, read-only. Raises."""
+    data = _rest_get(session, "/tag/suggest-prompt/" + str(media_id)) or {}
+    return data.get("output") or []
+
+
+def run_suggest_prompt(args):
+    """--suggest-prompt <media_id|file>: print PixAI's suggested prompt(s) for an image
+    (the site's "Image to prompt"). A local file is uploaded first (free); a catalog
+    media_id is used directly. FREE and read-only -- spends no credits, no --confirm."""
+    src = (getattr(args, "suggest_prompt", "") or "").strip()
+    if not src:
+        raise PixAIError("--suggest-prompt needs a catalog media_id or a local image file.")
+    session = _make_session(getattr(args, "token", None))
+    if _is_local_source(src):
+        print("Uploading image (free):", src)
+        media_id = upload_media(session, src)
+    else:
+        media_id = src
+    outs = suggest_prompt(session, media_id)
+    if not outs:
+        print("No prompt suggestion returned for media", media_id)
+        return {"suggestions": 0, "media_id": media_id}
+    print("=== suggested prompt(s) for media {} ===".format(media_id))
+    for i, o in enumerate(outs, 1):
+        print("\n[{}] {}".format(i, o))
+    return {"suggestions": len(outs), "media_id": media_id}
+
+
 def _apply_kaisuuken(session, params, args):
     """Attach a free-card ticket id (`kaisuukenId`) to `params` in place, mirroring the
     web client. Precedence: explicit --kaisuuken-id > --no-card (skip) > auto-match via
@@ -4592,6 +4623,9 @@ def main():
     gen.add_argument("--upload", dest="upload_file", default="", metavar="FILE",
                      help="upload a local image to PixAI, print its media_id, then exit "
                           "(the reusable primitive behind --edit-src file support). Free")
+    gen.add_argument("--suggest-prompt", dest="suggest_prompt", default="", metavar="MEDIA|FILE",
+                     help="reverse a prompt out of an image ('Image to prompt'): print PixAI's "
+                          "suggested tags + description for a catalog media_id or local file. Free")
     gen.add_argument("--kaisuuken-id", dest="kaisuuken_id", default="", metavar="ID",
                      help="force a specific free card (kaisuuken) id on this generate/edit/"
                           "video run. Normally not needed -- a matching card is auto-applied "
@@ -4689,6 +4723,9 @@ def main():
             return
         if getattr(args, "upload_file", ""):
             run_upload(args)
+            return
+        if getattr(args, "suggest_prompt", ""):
+            run_suggest_prompt(args)
             return
         if getattr(args, "edit_image", False):
             run_edit_image(args)
