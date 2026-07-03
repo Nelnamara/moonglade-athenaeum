@@ -134,3 +134,27 @@ def test_reference_video_refs_private_and_card():
     rv = p["referenceVideo"]
     assert rv["referenceVideoMediaIds"] == ["v1"] and rv["referenceAudioMediaIds"] == ["a1"]
     assert p["isPrivate"] is True and p["kaisuukenId"] == "card9"
+
+
+def _refvid_args(tmp_path, **kw):
+    base = dict(out=str(tmp_path), token=None, reference_video=True, ref_image=["10"],
+                ref_video=None, ref_audio=None, params_json="", prompt="@image1 dances",
+                video_model="", duration=15, vmode="professional", audio=False,
+                audio_language="english", vchannel="private", kaisuuken_id="",
+                confirm=False, task_id="", poll_timeout=600, name_length=60, dump_params=False)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_reference_video_previews_without_confirm(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "gql_adhoc",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no network in preview")))
+    monkeypatch.setattr(core, "upload_media",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no upload in preview")))
+    assert core.run_reference_video(_refvid_args(tmp_path)) == {"submitted": False}
+
+
+def test_reference_video_requires_a_ref(tmp_path):
+    import pytest
+    with pytest.raises(core.PixAIError):
+        core.run_reference_video(_refvid_args(tmp_path, ref_image=None))
