@@ -2552,13 +2552,15 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
     return params
 
 
-def build_panelplugin_parameters(media_id, workflow_id, *, strength=None,
-                                 extra_inputs=None, priority=1000, is_private=False,
-                                 kaisuuken_id=""):
-    """Enhance via a PixAI panelplugin WORKFLOW (face-fix / upscale / bg-remove / handfix …).
-    VERIFIED shape (2026-07-02): model 'pixai-panelplugin', numeric `workflowId`, and
-    `inputs.image = {type:'media', media_id}` (+ optional strength / per-plugin args).
-    Produces an image output. Builder spends nothing."""
+def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
+                                 strength=None, extra_inputs=None, priority=1000,
+                                 is_private=False, kaisuuken_id=""):
+    """Enhance via a PixAI panelplugin WORKFLOW (face-fix / bg-remove / handfix / lineart …).
+    VERIFIED shape (2026-07-02): model 'pixai-panelplugin', `inputs.image = {type:'media',
+    media_id}` (+ optional strength / per-plugin args). A workflow is addressed by either a
+    numeric `workflowId` (VERIFIED path) OR a `workflowName` like 'mymusise/hand-fix' (mined
+    from the app; unverified until fired -- a rejected submit costs no credits). Produces an
+    image output. Builder spends nothing."""
     inputs = {"image": {"type": "media", "media_id": str(media_id)}}
     if strength is not None:
         inputs["strength"] = float(strength)
@@ -2571,8 +2573,13 @@ def build_panelplugin_parameters(media_id, workflow_id, *, strength=None,
         "isPrivate": bool(is_private),
         "enablePreview": True,
         "hidePrompts": False,
-        "workflowId": str(workflow_id),
     }
+    if workflow_name:
+        params["workflowName"] = str(workflow_name)
+    elif workflow_id:
+        params["workflowId"] = str(workflow_id)
+    else:
+        raise PixAIError("panelplugin needs a workflow_id or workflow_name")
     if kaisuuken_id:
         params["kaisuukenId"] = str(kaisuuken_id)
     return params
