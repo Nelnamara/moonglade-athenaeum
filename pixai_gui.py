@@ -1342,6 +1342,540 @@ class GenerateTab(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Video tab — image-to-video (i2vPro)
+# ---------------------------------------------------------------------------
+
+class VideoTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        opts = QGroupBox("Image-to-Video (i2vPro) — animate a catalog image")
+        g = QVBoxLayout(opts)
+
+        r_src = QHBoxLayout()
+        r_src.addWidget(QLabel("Source image id:"))
+        self.image = QLineEdit()
+        self.image.setPlaceholderText("media_id of the image to animate (first frame) — copy it from the gallery")
+        r_src.addWidget(self.image)
+        g.addLayout(r_src)
+
+        r_tail = QHBoxLayout()
+        r_tail.addWidget(QLabel("End frame id:"))
+        self.tail = QLineEdit()
+        self.tail.setPlaceholderText("optional — media_id of the last frame (first/last-frame interpolation)")
+        r_tail.addWidget(self.tail)
+        g.addLayout(r_tail)
+
+        r_p = QHBoxLayout()
+        r_p.addWidget(QLabel("Prompt:"))
+        self.prompt = QLineEdit()
+        self.prompt.setPlaceholderText("motion: subject + what they do + environment (e.g. 'she turns slowly toward the camera')")
+        r_p.addWidget(self.prompt)
+        g.addLayout(r_p)
+
+        r_n = QHBoxLayout()
+        r_n.addWidget(QLabel("Negative:"))
+        self.negative = QLineEdit()
+        r_n.addWidget(self.negative)
+        g.addLayout(r_n)
+
+        r_m = QHBoxLayout()
+        r_m.addWidget(QLabel("Model:"))
+        self.model_combo = QComboBox()
+        for label, val in (
+                ("V4.0 Preview (v4.0.1) — 15s, refs, audio", "v4.0.1"),
+                ("V4.0 Preview (v4.0)", "v4.0"),
+                ("V3.2 — audio, best adherence", "v3.2"),
+                ("V3.0 — high consistency, dances", "v3.0"),
+                ("V3.0.2 — Lite", "v3.0.2"),
+                ("V2.7 — high dynamics, camera", "v2.7"),
+                ("V2.5.1 — LoRA", "v2.5.1")):
+            self.model_combo.addItem(label, val)
+        _i = self.model_combo.findData(settings.get("vid_model", "v4.0.1"))
+        self.model_combo.setCurrentIndex(max(0, _i))
+        self.model_combo.setMinimumWidth(240)
+        r_m.addWidget(self.model_combo)
+        r_m.addSpacing(12)
+        r_m.addWidget(QLabel("Duration:"))
+        self.duration_combo = QComboBox()
+        for d in (5, 10, 15):
+            self.duration_combo.addItem("{}s".format(d), d)
+        self.duration_combo.setToolTip("15s is exclusive to the V4.0 series.")
+        _di = self.duration_combo.findData(settings.get("vid_duration", 5))
+        self.duration_combo.setCurrentIndex(max(0, _di))
+        r_m.addWidget(self.duration_combo)
+        r_m.addSpacing(12)
+        r_m.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Professional", "professional")
+        self.mode_combo.addItem("Basic (cheaper)", "basic")
+        _mi = self.mode_combo.findData(settings.get("vid_mode", "professional"))
+        self.mode_combo.setCurrentIndex(max(0, _mi))
+        r_m.addWidget(self.mode_combo)
+        r_m.addSpacing(12)
+        r_m.addWidget(QLabel("Camera:"))
+        self.camera_combo = QComboBox()
+        for label, val in (("(none)", ""), ("Zoom", "zoom"), ("Pan", "pan"),
+                           ("Tilt", "tilt"), ("Roll", "roll"),
+                           ("Side-to-side", "horizontal"), ("Vertical pan", "vertical-pan")):
+            self.camera_combo.addItem(label, val)
+        self.camera_combo.setToolTip("Camera move (v2.7-style). Leave (none) to omit, or write "
+                                     "the move in the prompt for other models.")
+        r_m.addWidget(self.camera_combo)
+        r_m.addStretch()
+        g.addLayout(r_m)
+
+        r_a = QHBoxLayout()
+        self.audio = QCheckBox("Generate audio (V4.0 / V3.2 only)")
+        self.audio.setChecked(settings.get("vid_audio", False))
+        r_a.addWidget(self.audio)
+        r_a.addSpacing(16)
+        self.prompt_helper = QCheckBox("Prompt helper")
+        self.prompt_helper.setChecked(settings.get("vid_prompt_helper", False))
+        r_a.addWidget(self.prompt_helper)
+        r_a.addStretch()
+        g.addLayout(r_a)
+
+        r_r = QHBoxLayout()
+        r_r.addWidget(QLabel("Recover task id:"))
+        self.task_id = QLineEdit()
+        self.task_id.setPlaceholderText("optional — fetch + download an already-created video task (no new credits)")
+        r_r.addWidget(self.task_id)
+        g.addLayout(r_r)
+
+        warn = QLabel("⚠  Video generation is EXPENSIVE — a V4.0 5-second clip costs ~27,500 credits. "
+                      "Leave Confirm OFF to preview the exact request for FREE (nothing is submitted).")
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color: #f9b572; font-size: 9pt; padding: 4px 0;")
+        g.addWidget(warn)
+
+        r_conf = QHBoxLayout()
+        self.confirm = QCheckBox("Confirm — actually submit (spends ~27,500 credits)")
+        self.confirm.setToolTip("Unchecked = preview only (no credits). Checked = create the video for real.")
+        r_conf.addWidget(self.confirm)
+        r_conf.addStretch()
+        g.addLayout(r_conf)
+
+        self.btn_run = QPushButton("▶  Generate video")
+        self.btn_run.setObjectName("btn_run")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_run); btn_row.addStretch(); btn_row.addWidget(self.btn_stop)
+        self.btn_run.clicked.connect(self._run_video)
+        self.btn_stop.clicked.connect(self._stop)
+
+        prog_row, self.prog_bar, self.prog_label = _make_progress_row()
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(opts)
+        lay.addLayout(btn_row)
+        lay.addLayout(prog_row)
+        lay.addWidget(self.log, stretch=1)
+
+    def _build_args(self):
+        return SimpleNamespace(
+            out=self._bar.out, token=self._bar.token,
+            image=self.image.text().strip(),
+            tail=self.tail.text().strip(),
+            prompt=self.prompt.text().strip(),
+            negative=self.negative.text().strip(),
+            video_model=self.model_combo.currentData(), model="",
+            duration=self.duration_combo.currentData(),
+            vmode=self.mode_combo.currentData(),
+            camera_movement=self.camera_combo.currentData(), vchannel="private",
+            audio=self.audio.isChecked(), audio_language="english",
+            video_prompt_helper=self.prompt_helper.isChecked(),
+            params_json="", confirm=self.confirm.isChecked(),
+            task_id=self.task_id.text().strip(),
+            poll_timeout=600, name_length=60,
+        )
+
+    def _run_video(self):
+        if self._worker and self._worker.isRunning():
+            return
+        args = self._build_args()
+        if not args.task_id and not args.image:
+            self.log.append_line("[ERROR] Enter a source image media_id (or a task id to recover).")
+            return
+        self.log.clear_log()
+        self.prog_bar.setRange(0, 0)
+        self.prog_label.setText("Submitting..." if (args.confirm or args.task_id) else "Preview")
+        self.btn_run.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self._worker = Worker(core.run_generate_video, args)
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._on_done(False, "")
+
+    def _on_done(self, success, msg):
+        self.btn_run.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.prog_bar.setRange(0, 1)
+        self.prog_bar.setValue(1 if success else 0)
+        self.prog_label.setText("Done" if success else ("Error" if msg else "Stopped"))
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def collect_settings(self):
+        return {
+            "vid_model": self.model_combo.currentData(),
+            "vid_duration": self.duration_combo.currentData(),
+            "vid_mode": self.mode_combo.currentData(),
+            "vid_audio": self.audio.isChecked(),
+            "vid_prompt_helper": self.prompt_helper.isChecked(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Edit tab (instruct editing + local-image upload)
+# ---------------------------------------------------------------------------
+
+class EditTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        opts = QGroupBox("Instruct edit (Edit Pro) — describe a change to an image")
+        g = QVBoxLayout(opts)
+
+        r_src = QHBoxLayout()
+        r_src.addWidget(QLabel("Source image(s):"))
+        self.src = QLineEdit()
+        self.src.setPlaceholderText("media_id(s) from the gallery OR local file path(s), comma-separated "
+                                    "(local files upload automatically)")
+        r_src.addWidget(self.src)
+        self.btn_browse = QPushButton("Browse…")
+        self.btn_browse.clicked.connect(self._browse)
+        r_src.addWidget(self.btn_browse)
+        g.addLayout(r_src)
+
+        r_p = QHBoxLayout()
+        r_p.addWidget(QLabel("Change:"))
+        self.prompt = QLineEdit()
+        self.prompt.setPlaceholderText("what to change, e.g. 'make it nighttime, add falling snow'")
+        r_p.addWidget(self.prompt)
+        g.addLayout(r_p)
+
+        r_m = QHBoxLayout()
+        r_m.addWidget(QLabel("Edit model id:"))
+        self.model = QLineEdit(settings.get("edit_model", "") or core.EDIT_PRO_MODEL_ID)
+        self.model.setToolTip("Default: PixAI Edit Pro. Reference-Pro / other Edit models use their own id.")
+        self.model.setMaximumWidth(220)
+        r_m.addWidget(self.model)
+        r_m.addSpacing(10)
+        r_m.addWidget(QLabel("Resolution:"))
+        self.res_combo = QComboBox()
+        for v in ("1K", "2K"):
+            self.res_combo.addItem(v, v)
+        self.res_combo.setCurrentIndex(max(0, self.res_combo.findData(settings.get("edit_res", "1K"))))
+        r_m.addWidget(self.res_combo)
+        r_m.addSpacing(10)
+        r_m.addWidget(QLabel("Aspect:"))
+        self.aspect_combo = QComboBox()
+        for v in ("3:4", "1:1", "16:9", "9:16", "4:3"):
+            self.aspect_combo.addItem(v, v)
+        self.aspect_combo.setCurrentIndex(max(0, self.aspect_combo.findData(settings.get("edit_aspect", "3:4"))))
+        r_m.addWidget(self.aspect_combo)
+        r_m.addSpacing(10)
+        r_m.addWidget(QLabel("Quality:"))
+        self.quality_combo = QComboBox()
+        for v in ("low", "medium", "high"):
+            self.quality_combo.addItem(v, v)
+        self.quality_combo.setCurrentIndex(max(0, self.quality_combo.findData(settings.get("edit_quality", "medium"))))
+        r_m.addWidget(self.quality_combo)
+        r_m.addStretch()
+        g.addLayout(r_m)
+
+        r_k = QHBoxLayout()
+        r_k.addWidget(QLabel("Free card id:"))
+        self.kaisuuken = QLineEdit()
+        self.kaisuuken.setPlaceholderText("optional — spend a free card (kaisuuken id, from the CLI --cards) instead of credits")
+        r_k.addWidget(self.kaisuuken)
+        g.addLayout(r_k)
+
+        r_r = QHBoxLayout()
+        r_r.addWidget(QLabel("Recover task id:"))
+        self.task_id = QLineEdit()
+        self.task_id.setPlaceholderText("optional — fetch + download an already-created edit task (no new credits)")
+        r_r.addWidget(self.task_id)
+        g.addLayout(r_r)
+
+        warn = QLabel("⚠  Editing spends credits (unless a free card applies). Leave Confirm OFF to preview "
+                      "the exact request for FREE (nothing is uploaded or submitted).")
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color: #f9b572; font-size: 9pt; padding: 4px 0;")
+        g.addWidget(warn)
+
+        r_conf = QHBoxLayout()
+        self.confirm = QCheckBox("Confirm — actually submit (uploads local files + spends credits/card)")
+        self.confirm.setToolTip("Unchecked = preview only (no upload, no credits). Checked = run the edit for real.")
+        r_conf.addWidget(self.confirm)
+        r_conf.addStretch()
+        g.addLayout(r_conf)
+
+        self.btn_run = QPushButton("▶  Edit image")
+        self.btn_run.setObjectName("btn_run")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_run); btn_row.addStretch(); btn_row.addWidget(self.btn_stop)
+        self.btn_run.clicked.connect(self._run_edit)
+        self.btn_stop.clicked.connect(self._stop)
+
+        prog_row, self.prog_bar, self.prog_label = _make_progress_row()
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(opts)
+        lay.addLayout(btn_row)
+        lay.addLayout(prog_row)
+        lay.addWidget(self.log, stretch=1)
+
+    def _browse(self):
+        p, _ = QFileDialog.getOpenFileName(
+            self, "Choose a local image to edit", "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp);;All files (*.*)")
+        if p:
+            cur = self.src.text().strip()
+            self.src.setText((cur + ", " + p) if cur else p)
+
+    def _build_args(self):
+        srcs = [s.strip() for s in self.src.text().split(",") if s.strip()]
+        return SimpleNamespace(
+            out=self._bar.out, token=self._bar.token,
+            edit_image=True, edit_src=srcs,
+            prompt=self.prompt.text().strip(),
+            edit_model=self.model.text().strip(),
+            edit_resolution=self.res_combo.currentData(),
+            edit_aspect=self.aspect_combo.currentData(),
+            edit_quality=self.quality_combo.currentData(),
+            kaisuuken_id=self.kaisuuken.text().strip(),
+            params_json="", confirm=self.confirm.isChecked(),
+            task_id=self.task_id.text().strip(),
+            poll_timeout=300, name_length=60, name_sep="_",
+        )
+
+    def _run_edit(self):
+        if self._worker and self._worker.isRunning():
+            return
+        args = self._build_args()
+        if not args.task_id and not args.edit_src:
+            self.log.append_line("[ERROR] Enter a source image (media_id or local file), or a task id to recover.")
+            return
+        self.log.clear_log()
+        self.prog_bar.setRange(0, 0)
+        self.prog_label.setText("Submitting..." if (args.confirm or args.task_id) else "Preview")
+        self.btn_run.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self._worker = Worker(core.run_edit_image, args)
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._on_done(False, "")
+
+    def _on_done(self, success, msg):
+        self.btn_run.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.prog_bar.setRange(0, 1)
+        self.prog_bar.setValue(1 if success else 0)
+        self.prog_label.setText("Done" if success else ("Error" if msg else "Stopped"))
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def collect_settings(self):
+        return {
+            "edit_model": self.model.text().strip(),
+            "edit_res": self.res_combo.currentData(),
+            "edit_aspect": self.aspect_combo.currentData(),
+            "edit_quality": self.quality_combo.currentData(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Reference Video tab (multi-image reference -> video)
+# ---------------------------------------------------------------------------
+
+class ReferenceVideoTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        opts = QGroupBox("Reference Video (V4.0) — animate from multiple reference images")
+        g = QVBoxLayout(opts)
+
+        r_src = QHBoxLayout()
+        r_src.addWidget(QLabel("Reference images:"))
+        self.refs = QLineEdit()
+        self.refs.setPlaceholderText("media_id(s) or local file path(s), comma-separated — cite in the prompt as @image1, @image2, …")
+        r_src.addWidget(self.refs)
+        self.btn_browse = QPushButton("Browse…")
+        self.btn_browse.clicked.connect(self._browse)
+        r_src.addWidget(self.btn_browse)
+        g.addLayout(r_src)
+
+        r_p = QHBoxLayout()
+        r_p.addWidget(QLabel("Prompt:"))
+        self.prompt = QLineEdit()
+        self.prompt.setPlaceholderText("describe the scene, citing refs (e.g. '@image1 in the outfit from @image2, slow cinematic orbit')")
+        r_p.addWidget(self.prompt)
+        g.addLayout(r_p)
+
+        r_m = QHBoxLayout()
+        r_m.addWidget(QLabel("Model:"))
+        self.model_combo = QComboBox()
+        self.model_combo.addItem("V4.0 Lite Preview (v4.0.1)", "v4.0.1")
+        self.model_combo.addItem("V4.0 Preview (v4.0)", "v4.0")
+        self.model_combo.setCurrentIndex(max(0, self.model_combo.findData(settings.get("refvid_model", "v4.0.1"))))
+        r_m.addWidget(self.model_combo)
+        r_m.addSpacing(12)
+        r_m.addWidget(QLabel("Duration:"))
+        self.duration_combo = QComboBox()
+        for d in (5, 6, 10, 15):
+            self.duration_combo.addItem("{}s".format(d), d)
+        self.duration_combo.setToolTip("15s uses 3 V4.0 cards.")
+        self.duration_combo.setCurrentIndex(max(0, self.duration_combo.findData(settings.get("refvid_duration", 5))))
+        r_m.addWidget(self.duration_combo)
+        r_m.addSpacing(12)
+        r_m.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Professional", "professional")
+        self.mode_combo.addItem("Basic (cheaper)", "basic")
+        r_m.addWidget(self.mode_combo)
+        r_m.addSpacing(12)
+        self.audio = QCheckBox("Audio")
+        self.audio.setChecked(settings.get("refvid_audio", False))
+        r_m.addWidget(self.audio)
+        r_m.addStretch()
+        g.addLayout(r_m)
+
+        r_r = QHBoxLayout()
+        r_r.addWidget(QLabel("Recover task id:"))
+        self.task_id = QLineEdit()
+        self.task_id.setPlaceholderText("optional — fetch + download an already-created reference-video task (no new credits)")
+        r_r.addWidget(self.task_id)
+        g.addLayout(r_r)
+
+        warn = QLabel("⚠  Reference video is EXPENSIVE (a 15s clip uses 3 V4.0 cards). "
+                      "Leave Confirm OFF to preview the exact request for FREE (nothing uploaded or submitted).")
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color: #f9b572; font-size: 9pt; padding: 4px 0;")
+        g.addWidget(warn)
+
+        r_conf = QHBoxLayout()
+        self.confirm = QCheckBox("Confirm — actually submit (uploads local refs + spends credits/card)")
+        self.confirm.setToolTip("Unchecked = preview only (no upload, no credits). Checked = generate for real.")
+        r_conf.addWidget(self.confirm)
+        r_conf.addStretch()
+        g.addLayout(r_conf)
+
+        self.btn_run = QPushButton("▶  Generate reference video")
+        self.btn_run.setObjectName("btn_run")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_run); btn_row.addStretch(); btn_row.addWidget(self.btn_stop)
+        self.btn_run.clicked.connect(self._run)
+        self.btn_stop.clicked.connect(self._stop)
+
+        prog_row, self.prog_bar, self.prog_label = _make_progress_row()
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(opts)
+        lay.addLayout(btn_row)
+        lay.addLayout(prog_row)
+        lay.addWidget(self.log, stretch=1)
+
+    def _browse(self):
+        p, _ = QFileDialog.getOpenFileName(
+            self, "Choose a reference image", "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp);;All files (*.*)")
+        if p:
+            cur = self.refs.text().strip()
+            self.refs.setText((cur + ", " + p) if cur else p)
+
+    def _build_args(self):
+        refs = [s.strip() for s in self.refs.text().split(",") if s.strip()]
+        return SimpleNamespace(
+            out=self._bar.out, token=self._bar.token, reference_video=True,
+            ref_image=refs, ref_video=None, ref_audio=None, params_json="",
+            prompt=self.prompt.text().strip(),
+            video_model=self.model_combo.currentData(),
+            duration=self.duration_combo.currentData(),
+            vmode=self.mode_combo.currentData(),
+            audio=self.audio.isChecked(), audio_language="english",
+            vchannel="private", kaisuuken_id="",
+            confirm=self.confirm.isChecked(), task_id=self.task_id.text().strip(),
+            poll_timeout=600, name_length=60, name_sep="_", dump_params=False,
+        )
+
+    def _run(self):
+        if self._worker and self._worker.isRunning():
+            return
+        args = self._build_args()
+        if not args.task_id and not args.ref_image:
+            self.log.append_line("[ERROR] Add at least one reference image (media_id or local file), or a task id.")
+            return
+        self.log.clear_log()
+        self.prog_bar.setRange(0, 0)
+        self.prog_label.setText("Submitting..." if (args.confirm or args.task_id) else "Preview")
+        self.btn_run.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self._worker = Worker(core.run_reference_video, args)
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._on_done(False, "")
+
+    def _on_done(self, success, msg):
+        self.btn_run.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.prog_bar.setRange(0, 1)
+        self.prog_bar.setValue(1 if success else 0)
+        self.prog_label.setText("Done" if success else ("Error" if msg else "Stopped"))
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def collect_settings(self):
+        return {
+            "refvid_model": self.model_combo.currentData(),
+            "refvid_duration": self.duration_combo.currentData(),
+            "refvid_audio": self.audio.isChecked(),
+        }
+
+
+# ---------------------------------------------------------------------------
 # Utilities tab
 # ---------------------------------------------------------------------------
 
@@ -1983,12 +2517,18 @@ class MainWindow(QMainWindow):
         self._org_tab     = OrganizeTab(self._sbar, settings)
         self._conv_tab    = ConvertTab(self._sbar, settings)
         self._gen_tab     = GenerateTab(self._sbar, settings)
+        self._video_tab   = VideoTab(self._sbar, settings)
+        self._refvid_tab  = ReferenceVideoTab(self._sbar, settings)
+        self._edit_tab    = EditTab(self._sbar, settings)
         self._util_tab    = UtilitiesTab(self._sbar, settings)
         self._gallery_tab = GalleryTab(self._sbar, settings)
         self._tabs.addTab(self._dl_tab,      "  Download  ")
         self._tabs.addTab(self._org_tab,     "  Organize  ")
         self._tabs.addTab(self._conv_tab,    "  Convert   ")
         self._tabs.addTab(self._gen_tab,     "  Generate  ")
+        self._tabs.addTab(self._video_tab,   "  Video     ")
+        self._tabs.addTab(self._refvid_tab,  "  Ref Video ")
+        self._tabs.addTab(self._edit_tab,    "  Edit      ")
         self._tabs.addTab(self._util_tab,    "  Library   ")
         self._tabs.addTab(self._gallery_tab, "  Gallery   ")
         self._tabs.setCurrentIndex(settings.get("last_tab", 0))
@@ -2005,6 +2545,9 @@ class MainWindow(QMainWindow):
         s.update(self._org_tab.collect_settings())
         s.update(self._conv_tab.collect_settings())
         s.update(self._gen_tab.collect_settings())
+        s.update(self._video_tab.collect_settings())
+        s.update(self._refvid_tab.collect_settings())
+        s.update(self._edit_tab.collect_settings())
         s.update(self._util_tab.collect_settings())
         s.update(self._gallery_tab.collect_settings())
         _save_settings(s)

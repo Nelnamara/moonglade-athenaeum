@@ -2058,6 +2058,18 @@ document.addEventListener('DOMContentLoaded', function() {
     <button class="btn" id="copy-prompt-btn"
       data-prompt="{{ _prompt|e }}" onclick="copyPrompt(this)">Copy Prompt</button>
     {% endif %}
+    <button class="btn" data-cmd="{{ row.media_id }}" onclick="copyCmd(this)"
+      title="Copy this image's media_id (paste into the GUI Video/Edit tab)">Copy media id</button>
+    <button class="btn"
+      data-cmd='python pixai_gallery_backup.py --edit-image --edit-src {{ row.media_id }} --prompt "describe the change"'
+      onclick="copyCmd(this)"
+      title="Copy a ready-to-run Edit command (paste in your terminal; add --confirm to run)">Edit this → cmd</button>
+    {% if row.is_video != '1' %}
+    <button class="btn"
+      data-cmd='python pixai_gallery_backup.py --generate-video --image {{ row.media_id }} --prompt "describe the motion"'
+      onclick="copyCmd(this)"
+      title="Copy a ready-to-run Animate (image→video) command; add --confirm to run">Animate this → cmd</button>
+    {% endif %}
     {% if row.model_name %}
     <a class="btn" href="{{ url_for('index', model=row.model_name) }}"
        title="Show all images from this model">Find Similar (model)</a>
@@ -2085,6 +2097,14 @@ document.addEventListener('DOMContentLoaded', function() {
 <script>
 function copyPrompt(btn) {
   var text = btn.getAttribute('data-prompt');
+  navigator.clipboard.writeText(text).then(function(){
+    var old = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function(){ btn.textContent = old; }, 1200);
+  });
+}
+function copyCmd(btn) {
+  var text = btn.getAttribute('data-cmd');
   navigator.clipboard.writeText(text).then(function(){
     var old = btn.textContent;
     btn.textContent = 'Copied!';
