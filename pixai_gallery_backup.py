@@ -36,11 +36,12 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "1.6.0"
+__version__ = "1.8.0"
 
 import argparse
 import csv
 import json
+import mimetypes
 import os
 import re
 import sys
@@ -118,6 +119,11 @@ def vlog(msg):
 
 
 API_URL = "https://api.pixai.art/graphql"
+# PixAI's newer typed-RPC (oRPC) REST surface, served at /v2 on the same host and
+# authenticated with the same Bearer token. The free-card ("kaisuuken") list + match
+# live here, NOT on GraphQL -- verified 2026-07-03. Derived from API_URL so a custom
+# host in config carries over.
+REST_API_BASE = API_URL.rsplit("/graphql", 1)[0] + "/v2"
 
 # ===========================================================================
 # CAPTURED FROM YOUR BROWSER -- loaded from config.json (see config.example.json)
@@ -649,6 +655,7 @@ def download(session, url, stem, retries=3, convert=None,
                 ext = ext_from_ct(r.headers.get("Content-Type"))
                 dest = stem.with_name(stem.name + ext)
                 tmp = dest.with_suffix(dest.suffix + ".part")
+                dest.parent.mkdir(parents=True, exist_ok=True)   # fresh backup dir may lack images/
                 nbytes = 0
                 with open(tmp, "wb") as fh:
                     for chunk in r.iter_content(chunk_size=65536):
@@ -2331,7 +2338,7 @@ def run_import_local(args):
 
 _GEN_MUTATION = ("mutation createGenerationTask($parameters: JSONObject!) {"
                  " createGenerationTask(parameters: $parameters) { id } }")
-_GEN_STATUS = "query($id: ID!) { task(id: $id) { id status } }"
+_GEN_STATUS = "query($id: ID!) { task(id: $id) { id status paidCredit } }"
 DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
 
 
@@ -2373,7 +2380,9 @@ def _gen_parameters(args):
         "height": _dim(args.height),
         "samplingSteps": args.steps,
         "cfgScale": args.cfg,
-        "batchSize": args.count,
+        # batchSize must be >= 1. `--batch-size` shares dest="count" with the top-level
+        # `--count` (store_true) flag, so its default can arrive as False -> coerce.
+        "batchSize": max(1, int(getattr(args, "count", 1) or 1)),
         # 1000 = high priority (faster, more credits); 500 = standard (cheaper).
         # We default to standard so a run costs less unless high is requested.
         "priority": getattr(args, "priority", 500) or 500,
@@ -2403,7 +2412,308 @@ def _gen_parameters(args):
     else:
         params["promptHelper"] = {"withStage": False, "userWantToEnable": False,
                                   "forcePromptHelperDetectionSide": "server"}
+    if getattr(args, "kaisuuken_id", ""):
+        params["kaisuukenId"] = str(args.kaisuuken_id)   # spend a free card instead of credits
     return params
+
+
+# --- Video (image-to-video) generation ---------------------------------------
+# The i2v generator uses the SAME createGenerationTask mutation as images, but the
+# `parameters` JSONObject is a nested {type, version, parameters:{i2vPro:{...}}}
+# shape (reverse-engineered from a real payload, 2026-07-01). A source image
+# (media_id) becomes the first frame; an optional tail image gives first/last-frame
+# interpolation. This is the engine "Generate shot" will call once wired up.
+DEFAULT_VIDEO_MODEL = "v4.0.1"
+
+
+# Video enums banked from the generator i18n (2026-07-02):
+VIDEO_CAMERA_MOVES = ("unset", "horizontal", "pan", "roll", "tilt", "vertical-pan", "zoom")
+VIDEO_AUDIO_LANGS = ("english", "japanese", "chinese", "korean", "none")  # "none" = SE only
+VIDEO_DURATIONS = (5, 6, 10, 15)                                          # 15 is v4.0-only
+VIDEO_CHANNELS = ("private", "normal")                                     # private = "Enhanced" (Plus/Premium)
+
+
+def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
+                           tail_media_id="", duration=5, mode="professional",
+                           generate_audio=False, audio_language="english",
+                           negative="", use_prompt_helper=False, kaisuuken_id="",
+                           camera_movement="", channel="private"):
+    """Build createGenerationTask's `parameters` for an image-to-video (i2vPro) job.
+
+    VERIFIED against a real submit (2026-07-01): video uses the SAME
+    createGenerationTask mutation, and `variables.parameters` = {channel, i2vPro:{...}}
+    -- NOT a {type,version,parameters} envelope (that earlier wrapper made the server
+    ignore i2vPro and default to a plain image). `media_id` = source/first frame;
+    `tail_media_id` (optional) = last frame for first/last-frame interpolation.
+
+    NOTE: video costs FAR more than images (~27.5k credits for a 5s V4.0 clip), so
+    submission stays gated behind explicit --confirm. This builder spends nothing.
+    """
+    i2v = {
+        "model": model,
+        "mediaId": str(media_id),
+        "usePromptsHelper": bool(use_prompt_helper),
+        "prompts": prompt or "",
+        "mode": mode,                        # "basic" | "professional"
+        "duration": str(duration),           # seconds, as a string ("5"/"10"/"15")
+        "generateAudio": bool(generate_audio),
+        "audioLanguage": audio_language,
+    }
+    if tail_media_id:
+        i2v["tailMediaId"] = str(tail_media_id)
+    if negative:
+        i2v["negativePrompts"] = negative
+    # cameraMovement is v2.7-style camera-dropdown; only send when a real move is picked
+    # (the verified v4.0 submit omits it entirely -> keep it out by default).
+    if camera_movement and camera_movement != "unset":
+        i2v["cameraMovement"] = camera_movement
+    params = {"channel": channel or "private", "i2vPro": i2v}
+    if kaisuuken_id:
+        params["kaisuukenId"] = str(kaisuuken_id)   # spend a free card instead of credits
+    return params
+
+
+# Reference video (multi-image/video/audio reference) -- a SEPARATE top-level
+# `referenceVideo` block, VERIFIED from a real submit (2026-07-02). Distinct from i2vPro.
+REFVIDEO_MODEL_ID = "2003969750675682808"   # numeric model id for v4.0.1 reference-video
+
+
+def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_ids=(),
+                                     audio_media_ids=(), model="v4.0.1",
+                                     model_id=REFVIDEO_MODEL_ID, duration=15,
+                                     mode="professional", generate_audio=False,
+                                     audio_language="english", is_private=False,
+                                     priority=1000, kaisuuken_id=""):
+    """Build createGenerationTask `parameters` for a REFERENCE video (multi-image / video /
+    audio reference). VERIFIED shape (2026-07-02) -- a top-level `referenceVideo` block,
+    NOT i2vPro. The prompt references inputs by position with @image1/@video1/@audio1
+    mentions. `duration` is an int here; channel maps to `isPrivate`. Builder spends nothing."""
+    rv = {
+        "mode": mode,
+        "model": model,
+        "prompt": prompt or "",
+        "duration": int(duration),
+        "audioLanguage": audio_language,
+        "generateAudio": bool(generate_audio),
+        "inputVideoDurations": [],
+        "referenceAudioMediaIds": [str(m) for m in (audio_media_ids or [])],
+        "referenceImageMediaIds": [str(m) for m in (image_media_ids or [])],
+        "referenceVideoMediaIds": [str(m) for m in (video_media_ids or [])],
+    }
+    params = {
+        "priority": int(priority),
+        "referenceVideo": rv,
+        "isPrivate": bool(is_private),
+        "enablePreview": True,
+        "hidePrompts": False,
+        "modelId": str(model_id),
+    }
+    if kaisuuken_id:
+        params["kaisuukenId"] = str(kaisuuken_id)
+    return params
+
+
+def build_panelplugin_parameters(media_id, workflow_id, *, strength=None,
+                                 extra_inputs=None, priority=1000, is_private=False,
+                                 kaisuuken_id=""):
+    """Enhance via a PixAI panelplugin WORKFLOW (face-fix / upscale / bg-remove / handfix …).
+    VERIFIED shape (2026-07-02): model 'pixai-panelplugin', numeric `workflowId`, and
+    `inputs.image = {type:'media', media_id}` (+ optional strength / per-plugin args).
+    Produces an image output. Builder spends nothing."""
+    inputs = {"image": {"type": "media", "media_id": str(media_id)}}
+    if strength is not None:
+        inputs["strength"] = float(strength)
+    if extra_inputs:
+        inputs.update(extra_inputs)
+    params = {
+        "priority": int(priority),
+        "model": "pixai-panelplugin",
+        "inputs": inputs,
+        "isPrivate": bool(is_private),
+        "enablePreview": True,
+        "hidePrompts": False,
+        "workflowId": str(workflow_id),
+    }
+    if kaisuuken_id:
+        params["kaisuukenId"] = str(kaisuuken_id)
+    return params
+
+
+def build_filter_parameters(media_id, filter_id, *, strength=0.77, is_private=False,
+                            kaisuuken_id=""):
+    """Apply a PixAI Art Filter. VERIFIED shape (2026-07-02): model 'pixai-image-filter',
+    top-level `mediaId`, `inputs = {filterId, strength}`. Produces an image. Free builder."""
+    params = {
+        "mediaId": str(media_id),
+        "model": "pixai-image-filter",
+        "inputs": {"filterId": str(filter_id), "strength": float(strength)},
+        "isPrivate": bool(is_private),
+        "enablePreview": False,
+        "hidePrompts": False,
+    }
+    if kaisuuken_id:
+        params["kaisuukenId"] = str(kaisuuken_id)
+    return params
+
+
+def _gen_video_parameters(args):
+    """Build the i2v `parameters` from CLI/GUI args (thin wrapper over
+    build_video_parameters). `--params-json` overrides everything."""
+    if getattr(args, "params_json", ""):
+        return json.loads(args.params_json)
+    return build_video_parameters(
+        getattr(args, "prompt", "") or "",
+        getattr(args, "image", "") or "",
+        model=(getattr(args, "video_model", "") or getattr(args, "model", "")
+               or DEFAULT_VIDEO_MODEL),
+        tail_media_id=getattr(args, "tail", "") or "",
+        duration=getattr(args, "duration", 5) or 5,
+        mode=getattr(args, "vmode", None) or "professional",
+        generate_audio=bool(getattr(args, "audio", False)),
+        audio_language=getattr(args, "audio_language", None) or "english",
+        negative=getattr(args, "negative", "") or "",
+        use_prompt_helper=bool(getattr(args, "video_prompt_helper", False)),
+        kaisuuken_id=getattr(args, "kaisuuken_id", "") or "",
+        camera_movement=getattr(args, "camera_movement", "") or "",
+        channel=getattr(args, "vchannel", "") or "private",
+    )
+
+
+# --- media upload + instruct-editing (the "Edit this image" surface) --------------
+# uploadMedia is a 3-step S3 handshake (verified 2026-07-01): request a presigned
+# target, PUT the bytes, then register -> media_id. It's a plain GraphQL mutation, so
+# gql_adhoc drives it with no persisted hash. Uploading is FREE.
+_UPLOAD_MEDIA_MUT = (
+    "mutation uploadMedia($input: UploadMediaInput!) {"
+    " uploadMedia(input: $input) { uploadUrl externalId mediaId"
+    " media { id type width height } } }")
+
+# PixAI "Edit Pro" (instruct-editing) model. Override with --edit-model.
+EDIT_PRO_MODEL_ID = "2006468692917575683"
+
+
+def upload_media(session, path, media_type="IMAGE"):
+    """Upload a LOCAL image file to PixAI and return its media_id.
+
+    Three steps (verified from the live app): (1) uploadMedia({type,provider:"S3"})
+    returns a presigned S3 `uploadUrl` + an `externalId`; (2) PUT the file bytes to
+    that URL (raw S3, NOT our API session -- so the Bearer never leaks to S3);
+    (3) uploadMedia({type,provider,externalId}) registers the object and returns the
+    `mediaId`. Lets local images feed edit / i2v / reference flows. Uploading is free.
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise PixAIError("upload: file not found: {}".format(p))
+    data = p.read_bytes()
+
+    r1 = gql_adhoc(session, _UPLOAD_MEDIA_MUT,
+                   {"input": {"type": media_type, "provider": "S3"}})
+    u = (r1 or {}).get("uploadMedia") or {}
+    upload_url, external_id = u.get("uploadUrl"), u.get("externalId")
+    if not upload_url or not external_id:
+        raise PixAIError("upload: no presigned url/externalId returned: "
+                         + json.dumps(r1)[:300])
+
+    ct = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+    try:
+        put = requests.put(upload_url, data=data, headers={"Content-Type": ct}, timeout=180)
+    except requests.exceptions.SSLError:
+        raise PixAIError(_ssl_help())
+    if put.status_code not in (200, 201, 204):
+        raise PixAIError("upload: S3 PUT failed (HTTP {}): {}".format(
+            put.status_code, (put.text or "")[:200]))
+
+    r3 = gql_adhoc(session, _UPLOAD_MEDIA_MUT,
+                   {"input": {"type": media_type, "provider": "S3",
+                              "externalId": external_id}})
+    reg = (r3 or {}).get("uploadMedia") or {}
+    mid = reg.get("mediaId") or (reg.get("media") or {}).get("id")
+    if not mid:
+        raise PixAIError("upload: registration returned no mediaId: " + json.dumps(r3)[:300])
+    return str(mid)
+
+
+def _is_local_source(src):
+    """A source is a local file to upload (vs an existing catalog media_id) when it
+    points at a real file on disk. media_ids are big numeric strings; paths aren't."""
+    try:
+        return bool(src) and os.path.isfile(src)
+    except (OSError, ValueError):
+        return False
+
+
+def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
+                               resolution="1K", aspect_ratio="3:4", quality="medium",
+                               kaisuuken_id=""):
+    """Build createGenerationTask's `parameters` for an instruct edit (the `chat`
+    block), verified against a real Edit-Pro submit (2026-07-01). `media_ids` is one
+    or more source media_ids (an array => multi-image reference editing); the first
+    is also sent as `mediaId`. NOTE: we deliberately DO NOT attach a `kaisuukenId`
+    (free-card) here -- free-card spending is a separate, explicit feature; without it
+    the server charges credits, so this stays behind --confirm like all spend paths.
+    """
+    ids = [str(m) for m in (media_ids or []) if str(m).strip()]
+    if not ids:
+        raise PixAIError("edit needs at least one source media_id")
+    params = {"chat": {
+        "prompts": prompt or "",
+        "mediaId": ids[0],
+        "mediaIds": ids,
+        "modelId": str(model_id or EDIT_PRO_MODEL_ID),
+        "modelConfig": {"resolution": resolution,
+                        "aspectRatio": aspect_ratio,
+                        "quality": quality},
+    }}
+    if kaisuuken_id:
+        params["kaisuukenId"] = str(kaisuuken_id)   # spend a free card instead of credits
+    return params
+
+
+def _edit_config_from_args(args):
+    """Pull the modelConfig knobs (with defaults) out of CLI/GUI args."""
+    return dict(
+        model_id=getattr(args, "edit_model", "") or EDIT_PRO_MODEL_ID,
+        resolution=getattr(args, "edit_resolution", "") or "1K",
+        aspect_ratio=getattr(args, "edit_aspect", "") or "3:4",
+        quality=getattr(args, "edit_quality", "") or "medium",
+        kaisuuken_id=getattr(args, "kaisuuken_id", "") or "",
+    )
+
+
+def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
+                      fail_noun="task"):
+    """Poll `_GEN_STATUS` until the task completes, fails, or times out. Returns the
+    server-authoritative `paidCredit` (or None) and prints it as the actual cost on
+    completion. Raises PixAIError on failure/timeout. Shared by the generate / video /
+    edit submit paths so their poll behaviour can't drift."""
+    deadline = time.time() + timeout
+    paid_credit = None
+    while time.time() < deadline:
+        task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
+        status = str(task.get("status", "")).lower()
+        if task.get("paidCredit") is not None:
+            paid_credit = task.get("paidCredit")     # server-authoritative actual cost
+        vlog("{} poll: {}".format(label, status or "(unknown)"))
+        if status in ("completed", "succeeded", "success", "done"):
+            if paid_credit is not None:
+                print("  actual cost: {:,} credits".format(int(paid_credit)))
+            return paid_credit
+        if status in ("failed", "error", "cancelled", "canceled"):
+            raise PixAIError("{} ended with status: {}".format(fail_noun, status))
+        time.sleep(interval)
+    raise PixAIError("timed out after {}s (task {})".format(timeout, task_id))
+
+
+def _maybe_dump_params(args, result):
+    """If --dump-params is set, print the task's full submit `parameters` (the exact
+    shape PixAI received). Handy for banking a param shape off a recovered --task-id
+    without a live browser capture. Read-only; prints nothing otherwise."""
+    if not getattr(args, "dump_params", False):
+        return
+    params = (result or {}).get("parameters")
+    print("=== task parameters (full submit shape) ===")
+    print(json.dumps(params if params is not None else result, indent=2, ensure_ascii=False))
+    print("=== end parameters ===")
 
 
 def run_generate(args):
@@ -2418,7 +2728,8 @@ def run_generate(args):
     if not existing_task and not getattr(args, "confirm", False):
         print("=== PixAI createGenerationTask (PREVIEW -- no credits spent) ===")
         print(json.dumps({"parameters": params}, indent=2))
-        print("\nThis would SPEND PixAI credits. Re-run with --confirm to submit.")
+        _preview_card_note(args, params)
+        print("\nThis would SPEND PixAI credits (unless free above). Re-run with --confirm to submit.")
         return {"submitted": False}
 
     out.mkdir(parents=True, exist_ok=True)
@@ -2436,6 +2747,7 @@ def run_generate(args):
         print("Fetching existing task (no credits):", task_id)
     else:
         print("Submitting generation task...")
+        _apply_kaisuuken(session, params, args)
         try:
             created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
         except PixAIError as e:
@@ -2454,25 +2766,15 @@ def run_generate(args):
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
 
-        deadline = time.time() + getattr(args, "poll_timeout", 300)
-        while time.time() < deadline:
-            task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
-            status = str(task.get("status", "")).lower()
-            vlog("generate poll: {}".format(status or "(unknown)"))
-            if status in ("completed", "succeeded", "success", "done"):
-                break
-            if status in ("failed", "error", "cancelled", "canceled"):
-                raise PixAIError("generation ended with status: " + status)
-            time.sleep(3)
-        else:
-            raise PixAIError("timed out after {}s (task {})".format(
-                getattr(args, "poll_timeout", 300), task_id))
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
+                          interval=3, label="generate", fail_noun="generation")
 
     # The Task type exposes its media under `outputs` (mediaId / batchMediaIds /
     # videos), NOT at the top level. getTaskById returns that whole object and is
     # already proven, so reuse it for the result rather than guessing an ad-hoc
     # selection set.
     result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
     outputs = result.get("outputs") or {}
     mids = []
     if outputs.get("mediaId"):
@@ -2537,6 +2839,468 @@ def run_generate(args):
     if rows:
         save_catalog(db_path, rows)
     print("Generated + cataloged {} image(s):".format(len(saved)))
+    for s in saved:
+        print("  " + s)
+    return {"submitted": True, "task_id": task_id, "images": len(saved)}
+
+
+def _download_video_task(session, result, task_id, out, args, params):
+    """Download + catalog the video output(s) of a completed task. Shared by i2v (i2vPro)
+    and reference-video (referenceVideo) -- reads outputs.videos + the submitted block
+    generically. Returns the list of saved file paths."""
+    outs, shared = video_outputs(result)
+    if not outs:
+        raise PixAIError("video task completed but no video outputs found")
+    detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
+    sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
+    prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
+
+    from pixai_gallery import make_thumbnail
+    thumb_dir = out / "gallery" / "thumbs"
+    vdir = out / "videos"
+    vdir.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    rows, saved = [], []
+    for o in outs:
+        vmid = o["video_media_id"]
+        url = media_file_gql(session, vmid).get("fileUrl")
+        if not url:
+            print("  no file url for video", vmid)
+            continue
+        stem = vdir / build_stem_name(prompt, task_id, vmid, getattr(args, "name_length", 60), "_")
+        status, path = download(session, url, stem)
+        if status not in ("ok", "skip") or not path:
+            continue
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "task_id": str(task_id), "media_id": vmid,
+            "filename": str(path.relative_to(out)).replace("\\", "/"),
+            "url": url, "source": "api", "status": "completed", "is_video": "1",
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
+            "negative_prompt": sent.get("negativePrompts", ""),
+            "seed": str(o.get("seed") or ""),
+            "poster_media_id": o.get("poster_media_id", ""),
+            "video_duration": str(shared.get("duration") or sent.get("duration") or ""),
+            "model_id": str(sent.get("model") or ""),
+            "width": str(detail.get("width") or ""),
+            "height": str(detail.get("height") or ""),
+        })
+        pm = o.get("poster_media_id")
+        if pm:
+            purl, _pi = resolve_media(session, pm)
+            if purl:
+                ptmp = out / "gallery" / "_postertmp"
+                ptmp.mkdir(parents=True, exist_ok=True)
+                st, pp = download(session, purl, ptmp / str(pm))
+                if st in ("ok", "skip") and pp:
+                    make_thumbnail(pp, thumb_dir / "{}.jpg".format(vmid))
+        rows.append(full)
+        saved.append(str(path))
+    if rows:
+        save_catalog(db_path, rows)
+    return saved
+
+
+def _download_image_task(session, result, task_id, out, args, prompt="", model_name=""):
+    """Download + catalog the image output(s) of a completed task (used by --enhance).
+    Reads outputs.mediaId/batchMediaIds -> resolve_media -> download -> catalog as
+    source='api'. Returns the list of saved file paths."""
+    outputs = result.get("outputs") or {}
+    mids = []
+    if outputs.get("mediaId"):
+        mids.append(str(outputs["mediaId"]))
+    for m in outputs.get("batchMediaIds") or []:
+        mids.append(str(m))
+    mids = list(dict.fromkeys(mids))
+    if not mids:
+        raise PixAIError("task completed but no media ids found")
+    from pixai_gallery import make_thumbnail
+    thumb_dir = out / "gallery" / "thumbs"
+    img_dir = out / "images"
+    db_path = out / "catalog.db"
+    rows, saved = [], []
+    for mid in mids:
+        url, info = resolve_media(session, mid)
+        if not url:
+            print("  no url for media", mid)
+            continue
+        stem = img_dir / build_stem_name(prompt, task_id, mid, getattr(args, "name_length", 60),
+                                         getattr(args, "name_sep", "_"))
+        status, path = download(session, url, stem)
+        if status not in ("ok", "skip") or not path:
+            continue
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "task_id": str(task_id), "media_id": mid,
+            "filename": str(path.relative_to(out)).replace("\\", "/"),
+            "url": url, "source": "api", "status": "completed",
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
+            "model_name": model_name,
+            "width": str((info or {}).get("width") or ""),
+            "height": str((info or {}).get("height") or ""),
+        })
+        rows.append(full)
+        make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
+        saved.append(str(path))
+    if rows:
+        save_catalog(db_path, rows)
+    return saved
+
+
+def run_generate_video(args):
+    """Create an image-to-video clip via PixAI (createGenerationTask + i2vPro params),
+    poll to completion, download the mp4 into videos/, and catalog it (source='api',
+    is_video='1'). GUARDED: without --confirm it only PREVIEWS (spends nothing). Video
+    is expensive (~27.5k credits for a 5s V4.0 clip), so the preview shouts the cost.
+    Reuses the same submit/poll as images and the same video download as --sync-videos."""
+    out = Path(args.out)
+    existing_task = (getattr(args, "task_id", "") or "").strip()
+    if not existing_task and not (getattr(args, "image", "") or "").strip():
+        raise PixAIError("--generate-video needs --image <media_id> (a catalog image to animate).")
+    params = _gen_video_parameters(args)
+
+    if not existing_task and not getattr(args, "confirm", False):
+        i2v = params.get("i2vPro") or {}
+        print("=== PixAI createGenerationTask -- VIDEO (PREVIEW, no credits spent) ===")
+        print(json.dumps({"parameters": params}, indent=2))
+        print("\n*** VIDEO GENERATION IS EXPENSIVE ***")
+        print("  model={}  mode={}  duration={}s{}{}".format(
+            i2v.get("model"), i2v.get("mode"), i2v.get("duration"),
+            "  +audio" if i2v.get("generateAudio") else "",
+            "  (first/last-frame)" if i2v.get("tailMediaId") else ""))
+        print("  A V4.0 5s clip costs ~27,500 credits. Re-run with --confirm to submit.")
+        _preview_card_note(args, params)
+        return {"submitted": False}
+
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)
+    session = _make_session(getattr(args, "token", None))
+    vdir = out / "videos"
+    vdir.mkdir(parents=True, exist_ok=True)
+
+    if existing_task:
+        task_id = existing_task
+        print("Fetching existing video task (no credits):", task_id)
+    else:
+        print("Submitting VIDEO generation task (this spends credits)...")
+        _apply_kaisuuken(session, params, args)
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        print("  task id:", task_id)
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600),
+                          interval=5, label="video", fail_noun="video generation")
+
+    # Result: getTaskById -> outputs.videos -> fileUrl -> download mp4 (same as --sync-videos).
+    result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
+    saved = _download_video_task(session, result, task_id, out, args, params)
+    print("Generated + cataloged {} video(s):".format(len(saved)))
+    for s in saved:
+        print("  " + s)
+    return {"submitted": True, "task_id": task_id, "videos": len(saved)}
+
+
+def _resolve_refs(session, items):
+    """Resolve reference sources (media_id or local file) to media_ids, uploading any
+    local files. Used by reference-video on --confirm."""
+    ids = []
+    for s in items:
+        if _is_local_source(s):
+            print("Uploading local reference:", s)
+            ids.append(upload_media(session, s))
+        else:
+            ids.append(str(s))
+    return ids
+
+
+def run_reference_video(args):
+    """Create a REFERENCE video (multi-image/video/audio reference) via createGenerationTask
+    + a `referenceVideo` block. Refs (--ref-image/--ref-video/--ref-audio) are catalog
+    media_ids OR local files (auto-uploaded on --confirm); reference them in --prompt as
+    @image1/@video1/@audio1. Preview-only unless --confirm. Downloads + catalogs the mp4.
+    --task-id recovers an existing reference-video task for free."""
+    out = Path(args.out)
+    existing_task = (getattr(args, "task_id", "") or "").strip()
+    imgs = [s for s in (getattr(args, "ref_image", None) or []) if s and str(s).strip()]
+    vids = [s for s in (getattr(args, "ref_video", None) or []) if s and str(s).strip()]
+    auds = [s for s in (getattr(args, "ref_audio", None) or []) if s and str(s).strip()]
+    override = getattr(args, "params_json", "") or ""
+    prompt = getattr(args, "prompt", "") or ""
+
+    if not existing_task and not (imgs or vids or auds) and not override:
+        raise PixAIError("--reference-video needs at least one --ref-image/--ref-video/"
+                         "--ref-audio (a media_id or local file), or --task-id to recover.")
+
+    is_private = (getattr(args, "vchannel", "private") == "private")
+
+    def _build(img_ids, vid_ids, aud_ids):
+        return build_reference_video_parameters(
+            prompt, image_media_ids=img_ids, video_media_ids=vid_ids, audio_media_ids=aud_ids,
+            model=(getattr(args, "video_model", "") or "v4.0.1"),
+            duration=getattr(args, "duration", 15) or 15,
+            mode=getattr(args, "vmode", None) or "professional",
+            generate_audio=bool(getattr(args, "audio", False)),
+            audio_language=getattr(args, "audio_language", None) or "english",
+            is_private=is_private, kaisuuken_id=getattr(args, "kaisuuken_id", "") or "")
+
+    # PREVIEW: no upload, no submit. Local files shown as placeholders.
+    if not existing_task and not getattr(args, "confirm", False):
+        print("=== PixAI createGenerationTask -- REFERENCE VIDEO (PREVIEW, no credits spent) ===")
+        if override:
+            print(json.dumps({"parameters": json.loads(override)}, indent=2))
+        else:
+            ph = lambda lst: [("<upload:{}>".format(s) if _is_local_source(s) else s) for s in lst]
+            prev = _build(ph(imgs), ph(vids), ph(auds))
+            print(json.dumps({"parameters": prev}, indent=2))
+            _preview_card_note(args, prev)
+        print("\n*** REFERENCE VIDEO IS EXPENSIVE *** (a 15s clip uses 3 V4.0 cards). "
+              "Re-run with --confirm to submit.")
+        return {"submitted": False}
+
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)
+    session = _make_session(getattr(args, "token", None))
+
+    params = {}
+    if existing_task:
+        task_id = existing_task
+        print("Fetching existing reference-video task (no credits):", task_id)
+    else:
+        if override:
+            params = json.loads(override)
+        else:
+            params = _build(_resolve_refs(session, imgs), _resolve_refs(session, vids),
+                            _resolve_refs(session, auds))
+        print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
+        _apply_kaisuuken(session, params, args)
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        print("  task id:", task_id)
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600), interval=5,
+                          label="reference video", fail_noun="reference video generation")
+
+    result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
+    saved = _download_video_task(session, result, task_id, out, args, params)
+    print("Generated + cataloged {} video(s):".format(len(saved)))
+    for s in saved:
+        print("  " + s)
+    return {"submitted": True, "task_id": task_id, "videos": len(saved)}
+
+
+def run_enhance(args):
+    """Apply a PixAI enhance plugin (panelplugin workflow -- face fix / upscale / bg-remove)
+    or an art filter to an image. --src is a catalog media_id OR a local file (auto-uploaded
+    on --confirm). Provide --workflow-id (panelplugin) or --filter-id (art filter); get ids
+    via --dump-params off a real enhance task. Preview-only unless --confirm. Image output."""
+    out = Path(args.out)
+    existing = (getattr(args, "task_id", "") or "").strip()
+    src = (getattr(args, "src", "") or "").strip()
+    workflow_id = (getattr(args, "workflow_id", "") or "").strip()
+    filter_id = (getattr(args, "filter_id", "") or "").strip()
+    override = getattr(args, "params_json", "") or ""
+    strength = getattr(args, "strength", None)
+    kaisuuken = getattr(args, "kaisuuken_id", "") or ""
+
+    if not existing and not override and not src:
+        raise PixAIError("--enhance needs --src <media_id|file>, plus --workflow-id or --filter-id.")
+    if not existing and not override and not (workflow_id or filter_id):
+        raise PixAIError("--enhance needs --workflow-id <id> (a panelplugin, e.g. face fix / "
+                         "upscale) or --filter-id <id> (art filter). Get ids via --dump-params.")
+
+    def _build(media_id):
+        if filter_id:
+            return build_filter_parameters(
+                media_id, filter_id,
+                strength=(strength if strength is not None else 0.77), kaisuuken_id=kaisuuken)
+        return build_panelplugin_parameters(media_id, workflow_id, strength=strength,
+                                            kaisuuken_id=kaisuuken)
+
+    if not existing and not getattr(args, "confirm", False):
+        print("=== PixAI createGenerationTask -- ENHANCE (PREVIEW, no credits spent) ===")
+        if override:
+            print(json.dumps({"parameters": json.loads(override)}, indent=2))
+        else:
+            ph = "<upload:{}>".format(src) if _is_local_source(src) else src
+            print(json.dumps({"parameters": _build(ph)}, indent=2))
+            _preview_card_note(args, _build(ph))
+        print("\nThis would SPEND credits (unless free above). "
+              "Re-run with --confirm to submit.")
+        return {"submitted": False}
+
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)
+    session = _make_session(getattr(args, "token", None))
+
+    if existing:
+        task_id = existing
+        print("Fetching existing enhance task (no credits):", task_id)
+    else:
+        if override:
+            params = json.loads(override)
+        else:
+            if _is_local_source(src):
+                print("Uploading source image:", src)
+                media_id = upload_media(session, src)
+            else:
+                media_id = src
+            params = _build(media_id)
+        print("Submitting ENHANCE task (spends credits unless a card applies)...")
+        _apply_kaisuuken(session, params, args)
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        print("  task id:", task_id)
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300), interval=3,
+                          label="enhance", fail_noun="enhance")
+
+    result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
+    saved = _download_image_task(session, result, task_id, out, args, model_name="Enhance")
+    print("Enhanced + cataloged {} image(s):".format(len(saved)))
+    for s in saved:
+        print("  " + s)
+    return {"submitted": True, "task_id": task_id, "images": len(saved)}
+
+
+def run_upload(args):
+    """Upload a local image to PixAI and print its media_id (the reusable primitive
+    behind --edit-src file support). Free; spends nothing."""
+    session = _make_session(getattr(args, "token", None))
+    mid = upload_media(session, args.upload_file)
+    print("Uploaded media_id:", mid)
+    return {"media_id": mid}
+
+
+def run_edit_image(args):
+    """Instruct-edit an image via PixAI (createGenerationTask with a `chat` block):
+    describe the change in --prompt and pass source(s) via --edit-src (a catalog
+    media_id OR a local file, uploaded automatically; repeatable for multi-image
+    reference). Poll -> download the result image(s) -> catalog as source='api'.
+    GUARDED: without --confirm it only PREVIEWS (uploads nothing, spends nothing).
+    --task-id recovers an already-created edit for free. Mirrors run_generate."""
+    out = Path(args.out)
+    existing_task = (getattr(args, "task_id", "") or "").strip()
+    srcs = [s for s in (getattr(args, "edit_src", None) or []) if s and str(s).strip()]
+    override = getattr(args, "params_json", "") or ""
+    prompt = getattr(args, "prompt", "") or ""
+    cfg = _edit_config_from_args(args)
+
+    if not existing_task and not srcs and not override:
+        raise PixAIError("--edit-image needs --edit-src <media_id|file> (repeatable), "
+                         "or --task-id to recover an existing edit.")
+
+    # PREVIEW: no upload, no submit, no credits. Local files shown as placeholders.
+    if not existing_task and not getattr(args, "confirm", False):
+        print("=== PixAI createGenerationTask -- EDIT (PREVIEW, no credits spent) ===")
+        if override:
+            params = json.loads(override)
+        else:
+            preview_ids = [("<upload:{}>".format(s) if _is_local_source(s) else s)
+                           for s in srcs] or ["<source>"]
+            params = build_chat_edit_parameters(
+                prompt, preview_ids, model_id=cfg["model_id"],
+                resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
+                quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
+        print(json.dumps({"parameters": params}, indent=2))
+        _preview_card_note(args, params)
+        print("\nThis would SPEND PixAI credits (unless free above). "
+              "Re-run with --confirm to submit.")
+        return {"submitted": False}
+
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)
+    session = _make_session(getattr(args, "token", None))
+    thumb_dir = out / "gallery" / "thumbs"
+    from pixai_gallery import make_thumbnail
+
+    params = {}
+    if existing_task:
+        task_id = existing_task
+        print("Fetching existing edit task (no credits):", task_id)
+    else:
+        if override:
+            params = json.loads(override)
+        else:
+            media_ids = []
+            for s in srcs:
+                if _is_local_source(s):
+                    print("Uploading local image:", s)
+                    media_ids.append(upload_media(session, s))
+                else:
+                    media_ids.append(str(s))
+            params = build_chat_edit_parameters(
+                prompt, media_ids, model_id=cfg["model_id"],
+                resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
+                quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
+        print("Submitting EDIT task (spends credits unless a free card applies)...")
+        _apply_kaisuuken(session, params, args)
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        print("  task id:", task_id)
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
+                          interval=3, label="edit", fail_noun="edit")
+
+    result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
+    outputs = result.get("outputs") or {}
+    mids = []
+    if outputs.get("mediaId"):
+        mids.append(str(outputs["mediaId"]))
+    for m in outputs.get("batchMediaIds") or []:
+        mids.append(str(m))
+    mids = list(dict.fromkeys(mids))
+    if not mids:
+        raise PixAIError("edit task completed but no media ids found")
+
+    fm = extract_full_meta(result)
+    chat = (params.get("chat") or {}) if isinstance(params, dict) else {}
+    prompt_used = fm.get("prompt_full") or prompt or chat.get("prompts", "")
+    img_dir = out / "images"
+    rows, saved = [], []
+    for mid in mids:
+        url, info = resolve_media(session, mid)
+        if not url:
+            print("  no url for media", mid)
+            continue
+        stem = img_dir / build_stem_name(prompt_used, task_id, mid,
+                                         getattr(args, "name_length", 60),
+                                         getattr(args, "name_sep", "_"))
+        status, path = download(session, url, stem)
+        if status not in ("ok", "skip") or not path:
+            continue
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "task_id": str(task_id), "media_id": mid,
+            "filename": str(path.relative_to(out)).replace("\\", "/"),
+            "url": url, "source": "api", "status": "completed",
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "prompt_full": prompt_used, "prompt_preview": (prompt_used or "")[:100],
+            "model_id": str(chat.get("modelId") or fm.get("model_id") or ""),
+            "model_name": fm.get("model_name", "") or "Edit",
+            "width": str((info or {}).get("width") or ""),
+            "height": str((info or {}).get("height") or ""),
+        })
+        rows.append(full)
+        make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
+        saved.append(str(path))
+
+    if rows:
+        save_catalog(db_path, rows)
+    print("Edited + cataloged {} image(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
     return {"submitted": True, "task_id": task_id, "images": len(saved)}
@@ -2668,6 +3432,170 @@ def run_account_info(args):
             renew, (sub.get("endAt") or "")[:10]))
     print("\n(Read-only. To buy credits or change your plan, use the browser.)")
     return {"quota": me.get("quotaAmount"), "membership": mem.get("membershipId")}
+
+
+# --- Free "cards" (kaisuuken / 回数券) -------------------------------------------
+# PixAI grants free-generation tickets ("kaisuuken", model-locked) via membership/events.
+# These live on the oRPC /v2 REST API, NOT GraphQL (verified 2026-07-03 from the app's
+# own contract). Two ops matter:
+#   GET  /v2/kaisuuken/summary  -> {kaisuukens:[{count, expiryCounts, templateId, taskTypes,
+#                                    routeToNative, templateName, ...}]}  (one row per template)
+#   POST /v2/kaisuuken/check    -> given a generation's params, returns the matching cards +
+#                                  individual TICKET ids: {matches:[{templateId,
+#                                  kaisuukens:[{id, expiresAt}] (<=3, nearest first), total}]}
+# On pixai.art the web client calls `check` and attaches the ticket id for you; we do the
+# same via _apply_kaisuuken (attach `kaisuukenId` -> server consumes the card -> 0 credits).
+# The `check` call is READ-ONLY: it never consumes a card; consumption happens only when a
+# task is actually submitted with the attached id. Both helpers fail soft.
+
+
+def _rest_get(session, path, params=None, timeout=30):
+    """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx."""
+    r = session.get(REST_API_BASE + path, params=params, timeout=timeout)
+    if not r.ok:
+        raise PixAIError("REST GET {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+    return r.json()
+
+
+def _rest_post(session, path, body, timeout=60):
+    """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx."""
+    r = session.post(REST_API_BASE + path, json=body, timeout=timeout)
+    if not r.ok:
+        raise PixAIError("REST POST {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+    return r.json()
+
+
+def _normalize_kaisuuken(raw):
+    """Normalize one kaisuuken TEMPLATE row from /v2/kaisuuken/summary. Each row is a
+    template with a held `count` (not per-id ids -- those come from `check`). The model
+    it's locked to lives in routeToNative (pixai://...?modelVersionId=NNN)."""
+    raw = raw or {}
+    m = re.search(r"modelVersionId=(\d+)", raw.get("routeToNative") or "")
+    return {
+        "name": raw.get("templateName") or raw.get("templateCode") or "card",
+        "count": raw.get("count"),
+        "category": raw.get("categoryName") or raw.get("categoryCode") or "",
+        "task_types": raw.get("taskTypes") or [],
+        "model_version_id": m.group(1) if m else "",
+        "template_code": raw.get("templateCode") or "",
+        "template_id": raw.get("templateId") or "",
+        "expires": raw.get("soonestExpireAt") or "",
+    }
+
+
+def list_kaisuukens(session):
+    """Read the account's free-generation cards via GET /v2/kaisuuken/summary. Read-only;
+    fails soft (returns []) on error. One row per template, with the held `count`, the
+    model it's locked to, and soonest expiry."""
+    try:
+        data = _rest_get(session, "/kaisuuken/summary") or {}
+    except PixAIError:
+        return []
+    rows = data.get("kaisuukens")
+    if rows is None:
+        return []
+    return [_normalize_kaisuuken(k) for k in rows]
+
+
+def match_kaisuuken(session, parameters):
+    """POST /v2/kaisuuken/check with a generation's `parameters` and return the single
+    nearest-expiry matching TICKET as {id, expiresAt, templateId, total} -- or None when
+    no card matches. READ-ONLY: this only *checks*; the card is consumed later, when the
+    task is submitted with the returned id attached. Fails soft (returns None)."""
+    if not parameters:
+        return None
+    try:
+        data = _rest_post(session, "/kaisuuken/check",
+                          {"type": "generation-task", "parameters": parameters}) or {}
+    except (PixAIError, ValueError):
+        return None
+    best = None
+    for mt in (data.get("matches") or []):
+        for k in (mt.get("kaisuukens") or []):
+            kid = k.get("id")
+            if not kid:
+                continue
+            # ISO8601 sorts chronologically; treat never-expire (null) as far future.
+            exp = k.get("expiresAt") or "9999-12-31"
+            if best is None or exp < best["_exp"]:
+                best = {"id": kid, "expiresAt": k.get("expiresAt"),
+                        "templateId": mt.get("templateId"), "total": mt.get("total"),
+                        "_exp": exp}
+    if best:
+        best.pop("_exp", None)
+    return best
+
+
+def _apply_kaisuuken(session, params, args):
+    """Attach a free-card ticket id (`kaisuukenId`) to `params` in place, mirroring the
+    web client. Precedence: explicit --kaisuuken-id > --no-card (skip) > auto-match via
+    /v2/kaisuuken/check. Returns the attached id ('' if none). The card is only consumed
+    when the task is actually submitted; this just picks the id. Logs what it did."""
+    explicit = (getattr(args, "kaisuuken_id", "") or "").strip()
+    if explicit:
+        params["kaisuukenId"] = explicit
+        print("  attaching your --kaisuuken-id (free card): {}".format(explicit))
+        return explicit
+    if getattr(args, "no_card", False):
+        print("  --no-card: not using a free card (this WILL spend credits).")
+        return ""
+    best = match_kaisuuken(session, params)
+    if best and best.get("id"):
+        params["kaisuukenId"] = best["id"]
+        print("  free card matches -> attaching it; this costs 0 credits "
+              "(card expires {}).".format((best.get("expiresAt") or "never")[:10]))
+        return best["id"]
+    print("  no matching free card -> this will spend credits.")
+    return ""
+
+
+def _preview_card_note(args, params):
+    """In a PREVIEW, tell the user whether a free card will apply -- a read-only
+    /v2/kaisuuken/check (no spend, no upload). Fails soft (says nothing) if offline or
+    unauthenticated, so previews still work with no network."""
+    if (getattr(args, "kaisuuken_id", "") or "").strip():
+        print("A free card (--kaisuuken-id) will be attached on --confirm.")
+        return
+    if getattr(args, "no_card", False):
+        print("--no-card set: this will SPEND CREDITS even if a card matches.")
+        return
+    try:
+        session = _make_session(getattr(args, "token", None))
+        best = match_kaisuuken(session, params)
+    except Exception:
+        return  # offline / no key -- stay silent, preview is still valid
+    if best and best.get("id"):
+        print("FREE: a matching card is available -- with --confirm this costs 0 credits "
+              "(card expires {}).".format((best.get("expiresAt") or "never")[:10]))
+    else:
+        print("NO FREE CARD matches these settings -- with --confirm this WILL spend credits.")
+
+
+def run_cards(args):
+    """Print the account's free-generation cards (kaisuuken) via GET /v2/kaisuuken/summary.
+    Read-only. Cards ARE auto-applied by this tool now: on --confirm we call
+    /v2/kaisuuken/check for the matching ticket id and attach it (0 credits), exactly like
+    the website. Pass --no-card to force paying credits, or --kaisuuken-id to force one."""
+    session = _make_session(getattr(args, "token", None))
+    cards = list_kaisuukens(session)
+    if not cards:
+        print("No free cards found (read-only; nothing was spent).")
+        return {"cards": 0}
+    print("Free-generation cards (kaisuuken) -- model-locked. Auto-applied on --confirm; a\n"
+          "matching card makes that generation cost 0 credits (use --no-card to opt out):\n")
+    total = 0
+    for c in cards:
+        total += int(c.get("count") or 0)
+        model = c["model_version_id"] or ("/".join(c["task_types"]) or "-")
+        print("  {:>3}x  {:<22} {:<13} model={:<20} exp {}".format(
+            c.get("count") or 0, c.get("name"), "[" + c["category"] + "]",
+            model, str(c["expires"])[:10]))
+    print("\n{} free generations total. The matching card is attached automatically when you\n"
+          "generate on its model (nearest-expiry first):".format(total))
+    print("  Tsubaki.2 card  -> --generate         (default model already matches)")
+    print("  Edit Pro card   -> --edit-image       (default model already matches)")
+    print("  Reference Pro   -> --generate --model 1948514378441961474")
+    return {"cards": len(cards), "total": total}
 
 
 def run_reconcile_deleted(args):
@@ -3494,6 +4422,9 @@ def main():
     ap.add_argument("--account", action="store_true",
                     help="show a read-only account dashboard (credit balance, membership, "
                          "subscription) and exit. Never moves money")
+    ap.add_argument("--cards", action="store_true",
+                    help="show your free-generation cards (kaisuuken) + their ids, then exit. "
+                         "Read-only; pass an id to a run with --kaisuuken-id")
     ap.add_argument("--reconcile-deleted", action="store_true",
                     help="flag catalog rows whose PixAI task is gone from your live feed "
                          "(deleted on the website) so the gallery can surface them for a "
@@ -3542,7 +4473,84 @@ def main():
     gen.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
     gen.add_argument("--poll-timeout", type=int, default=300)
     gen.add_argument("--confirm", action="store_true",
-                     help="REQUIRED for --generate to actually submit (spends credits)")
+                     help="REQUIRED for --generate/--generate-video to actually submit (spends credits)")
+    # --- image-to-video generation (shares --prompt/--negative/--model/--confirm/--task-id) ---
+    gen.add_argument("--generate-video", dest="generate_video", action="store_true",
+                     help="create an image-to-video clip via PixAI from a source image "
+                          "(--image). Preview-only unless --confirm. Video is EXPENSIVE "
+                          "(~27,500 credits for a 5s V4.0 clip)")
+    gen.add_argument("--image", default="", help="source image media_id to animate (first frame)")
+    gen.add_argument("--tail", default="", help="optional last-frame image media_id "
+                     "(first/last-frame interpolation)")
+    gen.add_argument("--duration", type=int, default=5, help="video length in seconds (e.g. 5/10/15)")
+    gen.add_argument("--video-model", dest="video_model", default="",
+                     help="video model (default v4.0.1); overrides --model for --generate-video")
+    gen.add_argument("--video-mode", dest="vmode", default="professional",
+                     choices=["basic", "professional"], help="video quality tier")
+    gen.add_argument("--audio", action="store_true", help="generate audio with the video")
+    gen.add_argument("--audio-language", dest="audio_language", default="english")
+    gen.add_argument("--video-prompt-helper", dest="video_prompt_helper", action="store_true",
+                     help="enable PixAI's prompt-helper for video (off by default)")
+    gen.add_argument("--camera-movement", dest="camera_movement", default="",
+                     choices=list(VIDEO_CAMERA_MOVES),
+                     help="camera move (v2.7-style): horizontal/pan/roll/tilt/vertical-pan/zoom "
+                          "(default unset = omit; camera direction can also go in the prompt)")
+    gen.add_argument("--video-channel", dest="vchannel", default="private",
+                     choices=list(VIDEO_CHANNELS),
+                     help="video channel: private = 'Enhanced' (Plus/Premium) | normal")
+    gen.add_argument("--dump-params", action="store_true",
+                     help="with --generate/--generate-video/--edit-image (esp. --task-id "
+                          "recovery), print the task's full submit parameters -- bank any "
+                          "param shape (multiRef, referenceVideo, ...) with no browser capture")
+    # --- reference video (multi-image/video/audio reference) ---
+    gen.add_argument("--reference-video", dest="reference_video", action="store_true",
+                     help="create a multi-reference video (referenceVideo): pass refs with "
+                          "--ref-image/--ref-video/--ref-audio and cite them in --prompt as "
+                          "@image1/@video1/@audio1. Preview-only unless --confirm")
+    gen.add_argument("--ref-image", dest="ref_image", action="append", metavar="MEDIA_ID|FILE",
+                     help="reference image (media_id or local file, auto-uploaded). Repeatable: "
+                          "@image1=first, @image2=second, ...")
+    gen.add_argument("--ref-video", dest="ref_video", action="append", metavar="MEDIA_ID|FILE",
+                     help="reference video (repeatable; cite as @video1, @video2, ...)")
+    gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
+                     help="reference audio (repeatable; cite as @audio1, ...)")
+    # --- enhance (panelplugin workflow OR art filter) ---
+    gen.add_argument("--enhance", dest="enhance", action="store_true",
+                     help="enhance an image: --workflow-id (panelplugin -- face fix / upscale / "
+                          "bg-remove) or --filter-id (art filter) on --src. Preview until --confirm")
+    gen.add_argument("--src", dest="src", default="", metavar="MEDIA_ID|FILE",
+                     help="source image for --enhance (catalog media_id or local file, auto-uploaded)")
+    gen.add_argument("--workflow-id", dest="workflow_id", default="", metavar="ID",
+                     help="panelplugin workflow id for --enhance (get via --dump-params off an enhance task)")
+    gen.add_argument("--filter-id", dest="filter_id", default="", metavar="ID",
+                     help="art-filter id for --enhance (pixai-image-filter, e.g. filter-v1-m2)")
+    gen.add_argument("--strength", dest="strength", type=float, default=None,
+                     help="enhance/filter strength (e.g. 0.5 for plugins, 0.77 for filters)")
+    # --- instruct editing + media upload (the "Edit this image" surface) ---
+    gen.add_argument("--edit-image", dest="edit_image", action="store_true",
+                     help="instruct-edit an image via PixAI: describe the change in --prompt "
+                          "and pass source(s) with --edit-src (a catalog media_id OR a local "
+                          "file, uploaded automatically). Preview-only unless --confirm")
+    gen.add_argument("--edit-src", dest="edit_src", action="append", metavar="MEDIA_ID|FILE",
+                     help="source image for --edit-image: a media_id or a local image file "
+                          "(local files upload automatically). Repeatable for multi-image reference")
+    gen.add_argument("--edit-model", dest="edit_model", default="",
+                     help="edit model id (default PixAI Edit Pro {})".format(EDIT_PRO_MODEL_ID))
+    gen.add_argument("--edit-resolution", dest="edit_resolution", default="1K",
+                     help="edit output resolution (default 1K; e.g. 1K/2K)")
+    gen.add_argument("--edit-aspect", dest="edit_aspect", default="3:4",
+                     help="edit output aspect ratio (default 3:4)")
+    gen.add_argument("--edit-quality", dest="edit_quality", default="medium",
+                     help="edit quality tier (default medium)")
+    gen.add_argument("--upload", dest="upload_file", default="", metavar="FILE",
+                     help="upload a local image to PixAI, print its media_id, then exit "
+                          "(the reusable primitive behind --edit-src file support). Free")
+    gen.add_argument("--kaisuuken-id", dest="kaisuuken_id", default="", metavar="ID",
+                     help="force a specific free card (kaisuuken) id on this generate/edit/"
+                          "video run. Normally not needed -- a matching card is auto-applied "
+                          "on --confirm (like the website)")
+    gen.add_argument("--no-card", dest="no_card", action="store_true",
+                     help="do NOT auto-apply a free card; pay credits even if a card matches")
     gen.add_argument("--list-models", nargs="?", const="", default=None, metavar="KEYWORD",
                      help="search PixAI generation models by keyword and print their "
                           "generatable version ids (use as --model), then exit")
@@ -3608,6 +4616,9 @@ def main():
         if args.account:
             run_account_info(args)
             return
+        if getattr(args, "cards", False):
+            run_cards(args)
+            return
         if args.reconcile_deleted:
             run_reconcile_deleted(args)
             return
@@ -3619,6 +4630,21 @@ def main():
             return
         if args.generate:
             run_generate(args)
+            return
+        if getattr(args, "generate_video", False):
+            run_generate_video(args)
+            return
+        if getattr(args, "reference_video", False):
+            run_reference_video(args)
+            return
+        if getattr(args, "enhance", False):
+            run_enhance(args)
+            return
+        if getattr(args, "upload_file", ""):
+            run_upload(args)
+            return
+        if getattr(args, "edit_image", False):
+            run_edit_image(args)
             return
         if args.fix_model_names:
             run_fix_models(args)

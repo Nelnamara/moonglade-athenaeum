@@ -12,6 +12,28 @@ Built by reverse-engineering site network traffic (catalogued privately in `priv
 
 ---
 
+## Working across machines (home ⇄ work) — READ THIS FIRST
+
+This repo is edited from more than one machine. Cross-machine breakage here is almost
+always **config drift, not real changes** — do not blame the user, do not "fix" it with a
+mass commit. Follow this protocol:
+
+1. **Line endings are pinned by `.gitattributes`** (LF in the repo). Do NOT change
+   `core.autocrlf`, do NOT run line-ending "fixes", do NOT commit a mass line-ending diff.
+   If `git status` shows *every* file modified, STOP — that's line-ending drift. Re-check
+   `.gitattributes` is present and run `git add --renormalize .`; never `git checkout -- .`
+   away someone's real work to make it "clean."
+2. **Default working branch is `video-gen`** (until merged to master). `git checkout video-gen`
+   before doing anything. Do not start committing on `master`.
+3. **Pull before you start, push when you stop:** `git pull --rebase --no-edit` at session
+   start, `git push` at session end. This is what prevents "updates were rejected" /
+   divergence. If push is rejected, it's the remote moving — pull --rebase, then push.
+4. **Never `git add -A` / `git add .`** — stray untracked files live here (`config.json`,
+   `.coverage`, `design_refs/`, old `pixai_*.py` side scripts). Stage **explicit paths** only.
+5. **`config.json` + `private/` are git-ignored and machine-local** — they will NOT be on the
+   other machine, and that's correct. Don't recreate, commit, or complain about their absence.
+6. **Commits: no `Co-Authored-By: Claude` trailer** (standing preference).
+
 ## Architecture / request flow
 
 1. **Listing query is an Apollo persisted query (GET).** The site sends `operationName` + a `sha256Hash`; the query body lives on PixAI's server. Constants (`OPERATION_NAME`, `PERSISTED_QUERY_HASH`, `U3T`, `USER_ID`) are captured from the browser and stored in git-ignored `config.json`.
@@ -62,6 +84,14 @@ Built by reverse-engineering site network traffic (catalogued privately in `priv
 | `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout (the GUI log pane captures it). No-op until enabled |
 | `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error |
 | `account_info()` / `run_account_info()` | Read-only account dashboard (credits/membership/subscription) via `gql_adhoc`. **Never moves money** — no payment/subscription mutations are implemented, by design |
+| `run_generate()` | `--generate`: create images via `createGenerationTask` (ad-hoc POST), poll, download, catalog as `source='api'`. Preview unless `--confirm`. `--task-id` recovers an already-created task for free |
+| `build_video_parameters()` / `run_generate_video()` | `--generate-video`: image-to-video (`i2vPro`) — VERIFIED submit `{channel, i2vPro:{model,mediaId,[tailMediaId],mode,duration,generateAudio,audioLanguage,[cameraMovement]…}}`. Enums banked (`--camera-movement`, `--video-channel`, duration 5/6/10/15). Preview unless `--confirm`; captures `paidCredit`; downloads mp4 into `videos/` |
+| `build_reference_video_parameters()` / `run_reference_video()` | `--reference-video`: multi-image/video/audio reference — VERIFIED **top-level `referenceVideo`** block (NOT i2vPro): `{priority, referenceVideo:{model,prompt,duration(int),referenceImageMediaIds/…VideoMediaIds/…AudioMediaIds}, isPrivate, modelId}`. `--ref-image/--ref-video/--ref-audio` (media_id OR local file, auto-uploaded), cited in `--prompt` as `@image1/@video1/@audio1`. Preview unless `--confirm` |
+| `_download_video_task()` | Shared video download+catalog (used by both i2v and reference-video): `video_outputs` → `media_file_gql.fileUrl` → `download` → catalog `is_video='1'` + poster thumbnail |
+| `_maybe_dump_params()` | `--dump-params`: print a task's full submit `parameters` (esp. on `--task-id` recovery) — bank any shape (multiRef/referenceVideo/…) with NO browser capture |
+| `upload_media()` | `--upload`: local file → `media_id` via the 3-step S3 handshake (`uploadMedia` presign → PUT bytes → `uploadMedia` register). Plain mutation over `gql_adhoc`; **free**. Unblocks inpaint / Edit / LoRA "bring your own image" |
+| `build_chat_edit_parameters()` / `run_edit_image()` | `--edit-image`: instruct editing via `createGenerationTask` with a `chat` block (`prompts`+`mediaId`/`mediaIds`+`modelId`+`modelConfig`). `--edit-src` takes a catalog `media_id` OR a local file (auto-uploaded on `--confirm`); repeat for multi-image reference. Preview unless `--confirm` |
+| `list_kaisuukens()` / `match_kaisuuken()` / `_apply_kaisuuken()` / `run_cards()` | Free-generation cards ("kaisuuken" / 回数券) live on the oRPC **`/v2` REST API**, not GraphQL (verified 2026-07-03 from the app's own contract). `list_kaisuukens` = `GET /v2/kaisuuken/summary` (one row per template w/ count + locked model); `match_kaisuuken` = `POST /v2/kaisuuken/check {type:"generation-task", parameters}` → matching ticket ids. **Cards auto-apply now**: `_apply_kaisuuken` runs on `--confirm` for every create path, calls `check`, and attaches the nearest-expiry `kaisuukenId` → 0 credits (like the website). Preview shows FREE/paid up-front. `--no-card` opts out; `--kaisuuken-id` forces one. `--cards` = read-only display. All fail soft. REST base `REST_API_BASE` + helpers `_rest_get`/`_rest_post` |
 
 ### Key helpers in `pixai_gallery.py`
 
@@ -156,9 +186,31 @@ recapture is in `private/RE_NOTES.md`.
 
 ---
 
+## Creating: generate · video · reference-video · edit · upload · cards
+
+All creation rides the SAME `createGenerationTask` mutation over `gql_adhoc` (no persisted hash),
+differing only in the `parameters` object. **Every credit-spending path is preview-only until
+`--confirm`**, `--task-id` recovers an already-created task for free, and `--dump-params` prints a
+recovered task's full submit shape (bank any param shape with no browser capture).
+
+- `--generate` → image (`parameters` = the image params).
+- `--generate-video --image <media_id>` → i2vPro video (`{channel, i2vPro:{…, [tailMediaId], [cameraMovement]}}`);
+  first/last-frame via `--tail`, enums via `--camera-movement`/`--video-channel`, duration 5/6/10/15.
+- `--reference-video --ref-image/--ref-video/--ref-audio` → multi-reference video (top-level `referenceVideo`
+  block, distinct from i2vPro); cite refs in `--prompt` as `@image1/@video1/@audio1`; local files auto-upload.
+- `--edit-image --edit-src <media_id|file> --prompt "…"` → instruct edit (`{chat:{…}}`); local files
+  auto-upload via `uploadMedia`; repeat `--edit-src` for multi-image reference.
+- `--upload <file>` → prints a `media_id` (free; the 3-step S3 handshake).
+- `--cards` → read-only free-card (kaisuuken) list (via `GET /v2/kaisuuken/summary`). Cards **auto-apply**:
+  on `--confirm` the tool calls `/v2/kaisuuken/check`, attaches the matching card, and the gen is 0 credits.
+  `--no-card` to pay credits anyway; `--kaisuuken-id <id>` to force a specific card.
+
+Deeper RE detail (submit shapes, the full app op catalog, kaisuuken/upload/edit captures, pricing) is
+in git-ignored `private/GENERATOR_SURFACE.md` + `private/APP_OPERATIONS_FULL.md`.
+
 ## Test suite
 
-181 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
+246 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
 
 ---
 
@@ -197,4 +249,21 @@ python pixai_gallery.py --out pixai_backup                # launch gallery at :5
 python pixai_gallery_backup.py --delete-task <id> [<id> ...]        # DRY-RUN: list what would be deleted (nothing happens)
 python pixai_gallery_backup.py --delete-task <id> --apply --yes     # actually delete from your account (irreversible; null=success)
 python pixai_gallery_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
+# --- creating (all preview-only until --confirm; --task-id recovers a task for free) ---
+python pixai_gallery_backup.py --account                  # read-only credits/membership dashboard
+python pixai_gallery_backup.py --cards                    # read-only free-card (kaisuuken) balances + ids
+python pixai_gallery_backup.py --upload path/to/image.png # local file -> media_id (free; S3 upload)
+python pixai_gallery_backup.py --generate --prompt "..."               # preview an image gen (add --confirm to spend)
+python pixai_gallery_backup.py --generate-video --image <media_id> --prompt "..."   # preview i2v (EXPENSIVE; --confirm)
+python pixai_gallery_backup.py --reference-video --ref-image <id1> --ref-image <id2> --prompt "@image1 ... @image2 ..."  # preview multi-ref video
+python pixai_gallery_backup.py --edit-image --edit-src <media_id|file> --prompt "make it night"  # preview an edit
+python pixai_gallery_backup.py --generate-video --task-id <id> --dump-params  # recover a task (free) + print its full submit shape
 ```
+
+**Free cards auto-apply** (shipped 2026-07-03): on `--confirm`, `_apply_kaisuuken` calls PixAI's
+`/v2/kaisuuken/check` with the submit params, finds the nearest-expiry matching card, and attaches its
+`kaisuukenId` → the generation costs **0 credits**, exactly like the website. Works for every create path
+(generate / edit / video / reference-video). Preview prints FREE-vs-paid up front. `--no-card` forces
+credits; `--kaisuuken-id <id>` forces a specific card. `--dump-params` banks any submit shape off a
+recovered `--task-id` (no browser). Deep RE detail (incl. the full `/v2` REST surface) in git-ignored
+`private/GENERATOR_SURFACE.md`.

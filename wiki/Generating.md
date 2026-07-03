@@ -75,3 +75,106 @@ python pixai_gallery_backup.py --generate --task-id <id>
 
 Generated images are tagged `source='api'` — filter to them in the gallery via
 **Source → Generated**.
+
+---
+
+## Animate an image → video (`--generate-video`)
+
+Turn any catalog image into a short clip (image-to-video). Same preview/confirm safety —
+but **video is expensive** (a V4.0 5-second clip is ~27,500 credits, ~50–100× an image),
+so the preview shouts the cost, and the actual charge is read back from the server
+(`paidCredit`) after it runs. Clips download into `videos/` and catalog as `is_video`.
+
+**GUI:** the **Video** tab — paste a source image `media_id`, pick model / duration
+(5/10/15s; 15 is V4.0-only) / mode (Basic cheaper, Professional = Plus), optional audio,
+optional **End frame id** for first/last-frame interpolation, then Confirm.
+
+```bash
+# preview (free): prints the exact request + the ~credit cost
+python pixai_gallery_backup.py --generate-video --image <media_id> --prompt "she turns slowly toward camera"
+# really animate (EXPENSIVE — spends credits):
+python pixai_gallery_backup.py --generate-video --image <media_id> --prompt "..." \
+    --video-model v4.0.1 --duration 5 --video-mode professional --confirm
+# recover a finished clip for free:
+python pixai_gallery_backup.py --generate-video --task-id <id>
+```
+
+## Edit an image with words (`--edit-image`)
+
+Describe a change and let PixAI's Edit model apply it — "make it nighttime", "add a hat".
+Source can be a **catalog `media_id`** or a **local file** (uploaded automatically); pass
+`--edit-src` more than once for multi-image reference. Results catalog as `source='api'`.
+
+**GUI:** the **Edit** tab — put media_id(s) or a file path in *Source*, or click **Browse…**
+to pick a local image; type the change; set resolution/aspect/quality; Confirm.
+
+```bash
+# preview (free; local files show as placeholders, nothing uploads):
+python pixai_gallery_backup.py --edit-image --edit-src <media_id> --prompt "make it nighttime, add snow"
+# edit a LOCAL image (uploads it, then edits) — spends credits:
+python pixai_gallery_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt "..." --confirm
+```
+
+## Multi-reference video (`--reference-video`)
+
+A different video mode (V4.0): drive a clip from **multiple reference images / videos / audio**
+instead of a single start frame. You cite each reference in the prompt with `@image1`, `@video1`,
+`@audio1` (they map by position). Refs can be catalog `media_id`s or local files (auto-uploaded).
+
+```bash
+# preview (free): shows the exact referenceVideo request
+python pixai_gallery_backup.py --reference-video \
+    --ref-image <id1> --ref-image "C:\pics\pose.png" \
+    --prompt "@image1 in the outfit from @image2, slow orbit"
+# really generate — a matching V4.0 card is auto-applied (0 credits); --no-card to pay instead:
+python pixai_gallery_backup.py --reference-video --ref-image <id1> --ref-image <id2> \
+    --prompt "@image1 ... @image2 ..." --confirm
+```
+
+| Flag | Meaning |
+|---|---|
+| `--ref-image` / `--ref-video` / `--ref-audio` | a reference (media_id or local file), **repeatable** — `@image1`, `@image2`, … |
+| `--prompt` | cite refs by `@imageN` / `@videoN` / `@audioN` |
+| `--duration` / `--video-mode` / `--audio` | as with `--generate-video` (15s uses 3 V4.0 cards) |
+| `--confirm` | **required** to submit |
+
+## Upload a local image (`--upload`)
+
+Get a reusable `media_id` for any local file — **free**. Useful to pre-upload once and
+reuse the id across edit/video runs.
+
+```bash
+python pixai_gallery_backup.py --upload "C:\pics\her.png"     # prints: Uploaded media_id: <id>
+```
+
+## Free cards (`--cards`) — auto-applied
+
+PixAI grants free-generation cards — **kaisuuken** (回数券, "ticket book") — through membership
+and events. Each is **locked to one model**.
+
+> **✅ Cards auto-apply — just generate.** On `--confirm`, the tool asks PixAI which of your
+> cards matches this generation (the same `check` call the website makes), attaches the
+> nearest-expiry one, and that generation costs **0 credits**. The **preview** tells you
+> up-front whether it'll be free:
+>
+> ```
+> FREE: a matching card is available -- with --confirm this costs 0 credits (card expires …).
+> NO FREE CARD matches these settings -- with --confirm this WILL spend credits.
+> ```
+
+```bash
+python pixai_gallery_backup.py --cards        # read-only: your cards, counts, model, expiry
+```
+
+Just generate on a model you have a card for — the match is automatic:
+
+| Card | Just run | 
+|---|---|
+| **Tsubaki.2** | `--generate` (default model) |
+| **Edit Pro** | `--edit-image` (default model) |
+| **Reference Pro** | `--generate --model 1948514378441961474` |
+| **V4.0 video** | `--generate-video` / `--reference-video` (5s = 1 card, 15s = 3) |
+
+Overrides: **`--no-card`** forces paying credits even when a card matches; **`--kaisuuken-id <id>`**
+forces a specific card. Cards closest to expiry are used first. Card list + match come from PixAI's
+`/v2/kaisuuken/*` REST API.
