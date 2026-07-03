@@ -912,6 +912,44 @@ def is_lora_type(model_type):
     return "LORA" in (model_type or "").upper()
 
 
+def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
+    """Search models/LoRAs via the oRPC GET /v2/generation-model/search endpoint. Unlike
+    the GraphQL `generationModels` connection (which conflates base models + LoRAs), this
+    cleanly separates them by `usageType` (MODEL vs LORA) and returns cover thumbnails.
+    Returns {results:[{title, type, model_id, liked_count, should_blur, preview_url,
+    has_version}], has_more}. Read-only (no spend). NOTE: `model_id` is the MODEL id --
+    resolve the generatable version id with resolve_latest_version() on selection."""
+    params = {"usageType": (usage or "MODEL").upper(),
+              "size": max(1, min(int(size), 50)), "offset": max(0, int(offset))}
+    kw = (keyword or "").strip()
+    if kw:
+        params["keyword"] = kw
+    data = _rest_get(session, "/generation-model/search", params=params) or {}
+    out = []
+    for m in data.get("data") or []:
+        med = m.get("media") or {}
+        flag = m.get("flag") or {}
+        out.append({
+            "title": m.get("title") or "",
+            "type": m.get("type") or "",
+            "model_id": str(m.get("id") or ""),
+            "liked_count": int(m.get("likedCount") or 0),
+            "should_blur": bool(flag.get("shouldBlur")),
+            "preview_url": med.get("thumbnailUrl") or med.get("publicUrl") or "",
+            "has_version": bool(m.get("hasLatestAvailableVersion")),
+        })
+    return {"results": out, "has_more": bool(data.get("hasMore"))}
+
+
+def resolve_latest_version(session, model_id):
+    """Resolve a model's latest generatable VERSION id (what createGenerationTask's
+    `modelId` actually wants) from its MODEL id, via GET /v2/generation-model/{id}/versions.
+    Returns '' when the model has no version. Read-only."""
+    data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
+    rows = data if isinstance(data, list) else (data or {}).get("data") or []
+    return str(rows[0].get("id") or "") if rows else ""
+
+
 def run_list_models(args):
     """CLI: search PixAI models and print name / type / generatable version id."""
     session = _make_session(getattr(args, "token", None))
