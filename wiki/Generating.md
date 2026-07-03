@@ -126,7 +126,7 @@ instead of a single start frame. You cite each reference in the prompt with `@im
 python pixai_gallery_backup.py --reference-video \
     --ref-image <id1> --ref-image "C:\pics\pose.png" \
     --prompt "@image1 in the outfit from @image2, slow orbit"
-# really generate (V4.0 card auto-applies, else credits):
+# really generate — a matching V4.0 card is auto-applied (0 credits); --no-card to pay instead:
 python pixai_gallery_backup.py --reference-video --ref-image <id1> --ref-image <id2> \
     --prompt "@image1 ... @image2 ..." --confirm
 ```
@@ -147,24 +147,34 @@ reuse the id across edit/video runs.
 python pixai_gallery_backup.py --upload "C:\pics\her.png"     # prints: Uploaded media_id: <id>
 ```
 
-## Free cards (`--cards` / `--kaisuuken-id`)
+## Free cards (`--cards`) — auto-applied
 
 PixAI grants free-generation cards — **kaisuuken** (回数券, "ticket book") — through membership
-and events. Each is **locked to one model** and **applies automatically** when you generate with
-that model (nearest-expiry first): your credits stay untouched, no id needed.
+and events. Each is **locked to one model**.
+
+> **✅ Cards auto-apply — just generate.** On `--confirm`, the tool asks PixAI which of your
+> cards matches this generation (the same `check` call the website makes), attaches the
+> nearest-expiry one, and that generation costs **0 credits**. The **preview** tells you
+> up-front whether it'll be free:
+>
+> ```
+> FREE: a matching card is available -- with --confirm this costs 0 credits (card expires …).
+> NO FREE CARD matches these settings -- with --confirm this WILL spend credits.
+> ```
 
 ```bash
 python pixai_gallery_backup.py --cards        # read-only: your cards, counts, model, expiry
 ```
 
-`--cards` shows which model each card needs. Just generate with the matching model and it's free:
+Just generate on a model you have a card for — the match is automatic:
 
-| Card | Just run… |
+| Card | Just run | 
 |---|---|
 | **Tsubaki.2** | `--generate` (default model) |
 | **Edit Pro** | `--edit-image` (default model) |
 | **Reference Pro** | `--generate --model 1948514378441961474` |
-| **V4.0 video** | `--generate-video` / `--reference-video` (default v4.0.1, 5s = 1 card, 15s = 3) |
+| **V4.0 video** | `--generate-video` / `--reference-video` (5s = 1 card, 15s = 3) |
 
-`--kaisuuken-id <id>` remains as an optional explicit override, but you rarely need it — the
-matching model does it for you.
+Overrides: **`--no-card`** forces paying credits even when a card matches; **`--kaisuuken-id <id>`**
+forces a specific card. Cards closest to expiry are used first. Card list + match come from PixAI's
+`/v2/kaisuuken/*` REST API.

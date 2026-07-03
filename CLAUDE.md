@@ -91,7 +91,7 @@ mass commit. Follow this protocol:
 | `_maybe_dump_params()` | `--dump-params`: print a task's full submit `parameters` (esp. on `--task-id` recovery) — bank any shape (multiRef/referenceVideo/…) with NO browser capture |
 | `upload_media()` | `--upload`: local file → `media_id` via the 3-step S3 handshake (`uploadMedia` presign → PUT bytes → `uploadMedia` register). Plain mutation over `gql_adhoc`; **free**. Unblocks inpaint / Edit / LoRA "bring your own image" |
 | `build_chat_edit_parameters()` / `run_edit_image()` | `--edit-image`: instruct editing via `createGenerationTask` with a `chat` block (`prompts`+`mediaId`/`mediaIds`+`modelId`+`modelConfig`). `--edit-src` takes a catalog `media_id` OR a local file (auto-uploaded on `--confirm`); repeat for multi-image reference. Preview unless `--confirm` |
-| `list_kaisuukens()` / `run_cards()` | `--cards`: read-only display of free-generation cards ("kaisuuken" / 回数券) — one row per template with `count` + the model it's locked to. VERIFIED query (`kaisuukens`, fails soft). Cards **auto-apply** when you generate with the matching model (Tsubaki.2=`--generate` default, Edit Pro=`--edit-image`, V4.0=`--generate-video`); `--kaisuuken-id <id>` is an optional explicit override |
+| `list_kaisuukens()` / `match_kaisuuken()` / `_apply_kaisuuken()` / `run_cards()` | Free-generation cards ("kaisuuken" / 回数券) live on the oRPC **`/v2` REST API**, not GraphQL (verified 2026-07-03 from the app's own contract). `list_kaisuukens` = `GET /v2/kaisuuken/summary` (one row per template w/ count + locked model); `match_kaisuuken` = `POST /v2/kaisuuken/check {type:"generation-task", parameters}` → matching ticket ids. **Cards auto-apply now**: `_apply_kaisuuken` runs on `--confirm` for every create path, calls `check`, and attaches the nearest-expiry `kaisuukenId` → 0 credits (like the website). Preview shows FREE/paid up-front. `--no-card` opts out; `--kaisuuken-id` forces one. `--cards` = read-only display. All fail soft. REST base `REST_API_BASE` + helpers `_rest_get`/`_rest_post` |
 
 ### Key helpers in `pixai_gallery.py`
 
@@ -201,8 +201,9 @@ recovered task's full submit shape (bank any param shape with no browser capture
 - `--edit-image --edit-src <media_id|file> --prompt "…"` → instruct edit (`{chat:{…}}`); local files
   auto-upload via `uploadMedia`; repeat `--edit-src` for multi-image reference.
 - `--upload <file>` → prints a `media_id` (free; the 3-step S3 handshake).
-- `--cards` → read-only free-card (kaisuuken) list; cards **auto-apply on the matching model** (no id needed),
-  or force one with `--kaisuuken-id <id>`.
+- `--cards` → read-only free-card (kaisuuken) list (via `GET /v2/kaisuuken/summary`). Cards **auto-apply**:
+  on `--confirm` the tool calls `/v2/kaisuuken/check`, attaches the matching card, and the gen is 0 credits.
+  `--no-card` to pay credits anyway; `--kaisuuken-id <id>` to force a specific card.
 
 Deeper RE detail (submit shapes, the full app op catalog, kaisuuken/upload/edit captures, pricing) is
 in git-ignored `private/GENERATOR_SURFACE.md` + `private/APP_OPERATIONS_FULL.md`.
@@ -259,7 +260,10 @@ python pixai_gallery_backup.py --edit-image --edit-src <media_id|file> --prompt 
 python pixai_gallery_backup.py --generate-video --task-id <id> --dump-params  # recover a task (free) + print its full submit shape
 ```
 
-**Free cards auto-apply**: generating with a card's matching model (Tsubaki.2 = `--generate` default,
-Edit Pro = `--edit-image`, V4.0 = `--generate-video`/`--reference-video`) consumes a card and costs 0
-credits — no `--kaisuuken-id` needed. `--dump-params` banks any submit shape off a recovered `--task-id`
-(no browser). Deep RE detail in git-ignored `private/GENERATOR_SURFACE.md`.
+**Free cards auto-apply** (shipped 2026-07-03): on `--confirm`, `_apply_kaisuuken` calls PixAI's
+`/v2/kaisuuken/check` with the submit params, finds the nearest-expiry matching card, and attaches its
+`kaisuukenId` → the generation costs **0 credits**, exactly like the website. Works for every create path
+(generate / edit / video / reference-video). Preview prints FREE-vs-paid up front. `--no-card` forces
+credits; `--kaisuuken-id <id>` forces a specific card. `--dump-params` banks any submit shape off a
+recovered `--task-id` (no browser). Deep RE detail (incl. the full `/v2` REST surface) in git-ignored
+`private/GENERATOR_SURFACE.md`.
