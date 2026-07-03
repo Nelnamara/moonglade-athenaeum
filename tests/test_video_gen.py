@@ -94,3 +94,18 @@ def test_camera_movement_omitted_by_default_and_on_unset():
 def test_channel_default_private_and_override_normal():
     assert core.build_video_parameters("p", media_id="1")["channel"] == "private"
     assert core.build_video_parameters("p", media_id="1", channel="normal")["channel"] == "normal"
+
+
+# ---- --dump-params: bank any submit shape off a recovered task ----
+
+def test_dump_params_prints_full_shape_when_flagged(capsys):
+    core._maybe_dump_params(SimpleNamespace(dump_params=True),
+                            {"parameters": {"i2vPro": {"model": "v4.0.1"},
+                                            "multiRefResource": {"imageMediaIds": ["1"]}}})
+    out = capsys.readouterr().out
+    assert "full submit shape" in out and "v4.0.1" in out and "multiRefResource" in out
+
+
+def test_dump_params_silent_by_default(capsys):
+    core._maybe_dump_params(SimpleNamespace(dump_params=False), {"parameters": {"x": 1}})
+    assert capsys.readouterr().out == ""
