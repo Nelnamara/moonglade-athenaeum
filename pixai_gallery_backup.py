@@ -119,6 +119,11 @@ def vlog(msg):
 
 
 API_URL = "https://api.pixai.art/graphql"
+# PixAI's newer typed-RPC (oRPC) REST surface, served at /v2 on the same host and
+# authenticated with the same Bearer token. The free-card ("kaisuuken") list + match
+# live here, NOT on GraphQL -- verified 2026-07-03. Derived from API_URL so a custom
+# host in config carries over.
+REST_API_BASE = API_URL.rsplit("/graphql", 1)[0] + "/v2"
 
 # ===========================================================================
 # CAPTURED FROM YOUR BROWSER -- loaded from config.json (see config.example.json)
@@ -650,6 +655,7 @@ def download(session, url, stem, retries=3, convert=None,
                 ext = ext_from_ct(r.headers.get("Content-Type"))
                 dest = stem.with_name(stem.name + ext)
                 tmp = dest.with_suffix(dest.suffix + ".part")
+                dest.parent.mkdir(parents=True, exist_ok=True)   # fresh backup dir may lack images/
                 nbytes = 0
                 with open(tmp, "wb") as fh:
                     for chunk in r.iter_content(chunk_size=65536):
@@ -2722,7 +2728,8 @@ def run_generate(args):
     if not existing_task and not getattr(args, "confirm", False):
         print("=== PixAI createGenerationTask (PREVIEW -- no credits spent) ===")
         print(json.dumps({"parameters": params}, indent=2))
-        print("\nThis would SPEND PixAI credits. Re-run with --confirm to submit.")
+        _preview_card_note(args, params)
+        print("\nThis would SPEND PixAI credits (unless free above). Re-run with --confirm to submit.")
         return {"submitted": False}
 
     out.mkdir(parents=True, exist_ok=True)
@@ -2740,6 +2747,7 @@ def run_generate(args):
         print("Fetching existing task (no credits):", task_id)
     else:
         print("Submitting generation task...")
+        _apply_kaisuuken(session, params, args)
         try:
             created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
         except PixAIError as e:
@@ -2963,6 +2971,7 @@ def run_generate_video(args):
             "  +audio" if i2v.get("generateAudio") else "",
             "  (first/last-frame)" if i2v.get("tailMediaId") else ""))
         print("  A V4.0 5s clip costs ~27,500 credits. Re-run with --confirm to submit.")
+        _preview_card_note(args, params)
         return {"submitted": False}
 
     out.mkdir(parents=True, exist_ok=True)
@@ -2977,6 +2986,7 @@ def run_generate_video(args):
         print("Fetching existing video task (no credits):", task_id)
     else:
         print("Submitting VIDEO generation task (this spends credits)...")
+        _apply_kaisuuken(session, params, args)
         created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
@@ -3045,7 +3055,9 @@ def run_reference_video(args):
             print(json.dumps({"parameters": json.loads(override)}, indent=2))
         else:
             ph = lambda lst: [("<upload:{}>".format(s) if _is_local_source(s) else s) for s in lst]
-            print(json.dumps({"parameters": _build(ph(imgs), ph(vids), ph(auds))}, indent=2))
+            prev = _build(ph(imgs), ph(vids), ph(auds))
+            print(json.dumps({"parameters": prev}, indent=2))
+            _preview_card_note(args, prev)
         print("\n*** REFERENCE VIDEO IS EXPENSIVE *** (a 15s clip uses 3 V4.0 cards). "
               "Re-run with --confirm to submit.")
         return {"submitted": False}
@@ -3066,6 +3078,7 @@ def run_reference_video(args):
             params = _build(_resolve_refs(session, imgs), _resolve_refs(session, vids),
                             _resolve_refs(session, auds))
         print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
+        _apply_kaisuuken(session, params, args)
         created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
@@ -3118,7 +3131,8 @@ def run_enhance(args):
         else:
             ph = "<upload:{}>".format(src) if _is_local_source(src) else src
             print(json.dumps({"parameters": _build(ph)}, indent=2))
-        print("\nThis would SPEND credits (unless an enhancement card applies). "
+            _preview_card_note(args, _build(ph))
+        print("\nThis would SPEND credits (unless free above). "
               "Re-run with --confirm to submit.")
         return {"submitted": False}
 
@@ -3141,6 +3155,7 @@ def run_enhance(args):
                 media_id = src
             params = _build(media_id)
         print("Submitting ENHANCE task (spends credits unless a card applies)...")
+        _apply_kaisuuken(session, params, args)
         created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
@@ -3198,7 +3213,8 @@ def run_edit_image(args):
                 resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
                 quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
         print(json.dumps({"parameters": params}, indent=2))
-        print("\nThis would SPEND PixAI credits (unless a free Edit card applies). "
+        _preview_card_note(args, params)
+        print("\nThis would SPEND PixAI credits (unless free above). "
               "Re-run with --confirm to submit.")
         return {"submitted": False}
 
@@ -3229,6 +3245,7 @@ def run_edit_image(args):
                 resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
                 quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
         print("Submitting EDIT task (spends credits unless a free card applies)...")
+        _apply_kaisuuken(session, params, args)
         created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
@@ -3419,27 +3436,39 @@ def run_account_info(args):
 
 # --- Free "cards" (kaisuuken / 回数券) -------------------------------------------
 # PixAI grants free-generation tickets ("kaisuuken", model-locked) via membership/events.
-# VERIFIED (2026-07-02): a card is applied AUTOMATICALLY, server-side, whenever you
-# generate with its matching model (nearest-expiry first) -- your credits stay untouched.
-# So `--cards` is a read-only DISPLAY; you don't need an id, just use the right model.
-# `--kaisuuken-id` remains as an optional explicit override. list_kaisuukens fails soft.
-_KAISUUKEN_FIELDS = (
-    " { count soonestExpireAt categoryCode templateId templateCode taskTypes"
-    " categoryName templateName templateDescription routeTo routeToNative"
-    " expiryCounts { expiresAt count } }")
-# VERIFIED response shape (2026-07-02): the list root is `kaisuukens`, one row per
-# TEMPLATE with a held `count` (not per-id). Try the top-level form first, then me{}.
-# gql_adhoc POSTs the full document, so no persisted hash is needed.
-_KAISUUKEN_QUERIES = (
-    "query { kaisuukens" + _KAISUUKEN_FIELDS + " }",
-    "query { me { kaisuukens" + _KAISUUKEN_FIELDS + " } }",
-)
+# These live on the oRPC /v2 REST API, NOT GraphQL (verified 2026-07-03 from the app's
+# own contract). Two ops matter:
+#   GET  /v2/kaisuuken/summary  -> {kaisuukens:[{count, expiryCounts, templateId, taskTypes,
+#                                    routeToNative, templateName, ...}]}  (one row per template)
+#   POST /v2/kaisuuken/check    -> given a generation's params, returns the matching cards +
+#                                  individual TICKET ids: {matches:[{templateId,
+#                                  kaisuukens:[{id, expiresAt}] (<=3, nearest first), total}]}
+# On pixai.art the web client calls `check` and attaches the ticket id for you; we do the
+# same via _apply_kaisuuken (attach `kaisuukenId` -> server consumes the card -> 0 credits).
+# The `check` call is READ-ONLY: it never consumes a card; consumption happens only when a
+# task is actually submitted with the attached id. Both helpers fail soft.
+
+
+def _rest_get(session, path, params=None, timeout=30):
+    """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx."""
+    r = session.get(REST_API_BASE + path, params=params, timeout=timeout)
+    if not r.ok:
+        raise PixAIError("REST GET {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+    return r.json()
+
+
+def _rest_post(session, path, body, timeout=60):
+    """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx."""
+    r = session.post(REST_API_BASE + path, json=body, timeout=timeout)
+    if not r.ok:
+        raise PixAIError("REST POST {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+    return r.json()
 
 
 def _normalize_kaisuuken(raw):
-    """Normalize one kaisuuken TEMPLATE row (verified shape 2026-07-02). Each row is a
-    template with a held `count`, not individual ids. The model it's locked to lives in
-    routeToNative (pixai://...?modelVersionId=NNN)."""
+    """Normalize one kaisuuken TEMPLATE row from /v2/kaisuuken/summary. Each row is a
+    template with a held `count` (not per-id ids -- those come from `check`). The model
+    it's locked to lives in routeToNative (pixai://...?modelVersionId=NNN)."""
     raw = raw or {}
     m = re.search(r"modelVersionId=(\d+)", raw.get("routeToNative") or "")
     return {
@@ -3449,36 +3478,111 @@ def _normalize_kaisuuken(raw):
         "task_types": raw.get("taskTypes") or [],
         "model_version_id": m.group(1) if m else "",
         "template_code": raw.get("templateCode") or "",
+        "template_id": raw.get("templateId") or "",
         "expires": raw.get("soonestExpireAt") or "",
     }
 
 
 def list_kaisuukens(session):
-    """Read the account's free-generation cards (kaisuuken). Read-only; fails soft
-    (returns []) on schema drift. Never spends anything. One row per template, with the
-    held `count`, the model it's locked to, and soonest expiry."""
-    for q in _KAISUUKEN_QUERIES:
-        try:
-            data = gql_adhoc(session, q) or {}
-        except PixAIError:
-            continue
-        rows = data.get("kaisuukens")
-        if rows is None:
-            rows = (data.get("me") or {}).get("kaisuukens")
-        if rows is not None:
-            return [_normalize_kaisuuken(k) for k in rows]
-    return []
+    """Read the account's free-generation cards via GET /v2/kaisuuken/summary. Read-only;
+    fails soft (returns []) on error. One row per template, with the held `count`, the
+    model it's locked to, and soonest expiry."""
+    try:
+        data = _rest_get(session, "/kaisuuken/summary") or {}
+    except PixAIError:
+        return []
+    rows = data.get("kaisuukens")
+    if rows is None:
+        return []
+    return [_normalize_kaisuuken(k) for k in rows]
+
+
+def match_kaisuuken(session, parameters):
+    """POST /v2/kaisuuken/check with a generation's `parameters` and return the single
+    nearest-expiry matching TICKET as {id, expiresAt, templateId, total} -- or None when
+    no card matches. READ-ONLY: this only *checks*; the card is consumed later, when the
+    task is submitted with the returned id attached. Fails soft (returns None)."""
+    if not parameters:
+        return None
+    try:
+        data = _rest_post(session, "/kaisuuken/check",
+                          {"type": "generation-task", "parameters": parameters}) or {}
+    except (PixAIError, ValueError):
+        return None
+    best = None
+    for mt in (data.get("matches") or []):
+        for k in (mt.get("kaisuukens") or []):
+            kid = k.get("id")
+            if not kid:
+                continue
+            # ISO8601 sorts chronologically; treat never-expire (null) as far future.
+            exp = k.get("expiresAt") or "9999-12-31"
+            if best is None or exp < best["_exp"]:
+                best = {"id": kid, "expiresAt": k.get("expiresAt"),
+                        "templateId": mt.get("templateId"), "total": mt.get("total"),
+                        "_exp": exp}
+    if best:
+        best.pop("_exp", None)
+    return best
+
+
+def _apply_kaisuuken(session, params, args):
+    """Attach a free-card ticket id (`kaisuukenId`) to `params` in place, mirroring the
+    web client. Precedence: explicit --kaisuuken-id > --no-card (skip) > auto-match via
+    /v2/kaisuuken/check. Returns the attached id ('' if none). The card is only consumed
+    when the task is actually submitted; this just picks the id. Logs what it did."""
+    explicit = (getattr(args, "kaisuuken_id", "") or "").strip()
+    if explicit:
+        params["kaisuukenId"] = explicit
+        print("  attaching your --kaisuuken-id (free card): {}".format(explicit))
+        return explicit
+    if getattr(args, "no_card", False):
+        print("  --no-card: not using a free card (this WILL spend credits).")
+        return ""
+    best = match_kaisuuken(session, params)
+    if best and best.get("id"):
+        params["kaisuukenId"] = best["id"]
+        print("  free card matches -> attaching it; this costs 0 credits "
+              "(card expires {}).".format((best.get("expiresAt") or "never")[:10]))
+        return best["id"]
+    print("  no matching free card -> this will spend credits.")
+    return ""
+
+
+def _preview_card_note(args, params):
+    """In a PREVIEW, tell the user whether a free card will apply -- a read-only
+    /v2/kaisuuken/check (no spend, no upload). Fails soft (says nothing) if offline or
+    unauthenticated, so previews still work with no network."""
+    if (getattr(args, "kaisuuken_id", "") or "").strip():
+        print("A free card (--kaisuuken-id) will be attached on --confirm.")
+        return
+    if getattr(args, "no_card", False):
+        print("--no-card set: this will SPEND CREDITS even if a card matches.")
+        return
+    try:
+        session = _make_session(getattr(args, "token", None))
+        best = match_kaisuuken(session, params)
+    except Exception:
+        return  # offline / no key -- stay silent, preview is still valid
+    if best and best.get("id"):
+        print("FREE: a matching card is available -- with --confirm this costs 0 credits "
+              "(card expires {}).".format((best.get("expiresAt") or "never")[:10]))
+    else:
+        print("NO FREE CARD matches these settings -- with --confirm this WILL spend credits.")
 
 
 def run_cards(args):
-    """Print the account's free-generation cards (kaisuuken). Cards AUTO-APPLY when you
-    generate with the matching model (nearest-expiry first) -- no id needed. Read-only."""
+    """Print the account's free-generation cards (kaisuuken) via GET /v2/kaisuuken/summary.
+    Read-only. Cards ARE auto-applied by this tool now: on --confirm we call
+    /v2/kaisuuken/check for the matching ticket id and attach it (0 credits), exactly like
+    the website. Pass --no-card to force paying credits, or --kaisuuken-id to force one."""
     session = _make_session(getattr(args, "token", None))
     cards = list_kaisuukens(session)
     if not cards:
         print("No free cards found (read-only; nothing was spent).")
         return {"cards": 0}
-    print("Free-generation cards (kaisuuken) -- applied AUTOMATICALLY on the matching model:\n")
+    print("Free-generation cards (kaisuuken) -- model-locked. Auto-applied on --confirm; a\n"
+          "matching card makes that generation cost 0 credits (use --no-card to opt out):\n")
     total = 0
     for c in cards:
         total += int(c.get("count") or 0)
@@ -3486,11 +3590,11 @@ def run_cards(args):
         print("  {:>3}x  {:<22} {:<13} model={:<20} exp {}".format(
             c.get("count") or 0, c.get("name"), "[" + c["category"] + "]",
             model, str(c["expires"])[:10]))
-    print("\n{} free generations total. Cards apply automatically -- just use the matching "
-          "model:".format(total))
+    print("\n{} free generations total. The matching card is attached automatically when you\n"
+          "generate on its model (nearest-expiry first):".format(total))
     print("  Tsubaki.2 card  -> --generate         (default model already matches)")
     print("  Edit Pro card   -> --edit-image       (default model already matches)")
-    print("  V4.0 video card -> --generate-video   (default v4.0.1, --duration 5)")
+    print("  Reference Pro   -> --generate --model 1948514378441961474")
     return {"cards": len(cards), "total": total}
 
 
@@ -4442,8 +4546,11 @@ def main():
                      help="upload a local image to PixAI, print its media_id, then exit "
                           "(the reusable primitive behind --edit-src file support). Free")
     gen.add_argument("--kaisuuken-id", dest="kaisuuken_id", default="", metavar="ID",
-                     help="spend a specific free card (kaisuuken) id on this generate/edit/"
-                          "video run instead of credits. Get ids from --cards")
+                     help="force a specific free card (kaisuuken) id on this generate/edit/"
+                          "video run. Normally not needed -- a matching card is auto-applied "
+                          "on --confirm (like the website)")
+    gen.add_argument("--no-card", dest="no_card", action="store_true",
+                     help="do NOT auto-apply a free card; pay credits even if a card matches")
     gen.add_argument("--list-models", nargs="?", const="", default=None, metavar="KEYWORD",
                      help="search PixAI generation models by keyword and print their "
                           "generatable version ids (use as --model), then exit")
