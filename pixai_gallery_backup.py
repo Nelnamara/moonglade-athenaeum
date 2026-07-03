@@ -2793,6 +2793,64 @@ def run_generate(args):
     return {"submitted": True, "task_id": task_id, "images": len(saved)}
 
 
+def _download_video_task(session, result, task_id, out, args, params):
+    """Download + catalog the video output(s) of a completed task. Shared by i2v (i2vPro)
+    and reference-video (referenceVideo) -- reads outputs.videos + the submitted block
+    generically. Returns the list of saved file paths."""
+    outs, shared = video_outputs(result)
+    if not outs:
+        raise PixAIError("video task completed but no video outputs found")
+    detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
+    sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
+    prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
+
+    from pixai_gallery import make_thumbnail
+    thumb_dir = out / "gallery" / "thumbs"
+    vdir = out / "videos"
+    vdir.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    rows, saved = [], []
+    for o in outs:
+        vmid = o["video_media_id"]
+        url = media_file_gql(session, vmid).get("fileUrl")
+        if not url:
+            print("  no file url for video", vmid)
+            continue
+        stem = vdir / build_stem_name(prompt, task_id, vmid, getattr(args, "name_length", 60), "_")
+        status, path = download(session, url, stem)
+        if status not in ("ok", "skip") or not path:
+            continue
+        full = {f: "" for f in CATALOG_FIELDS}
+        full.update({
+            "task_id": str(task_id), "media_id": vmid,
+            "filename": str(path.relative_to(out)).replace("\\", "/"),
+            "url": url, "source": "api", "status": "completed", "is_video": "1",
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
+            "negative_prompt": sent.get("negativePrompts", ""),
+            "seed": str(o.get("seed") or ""),
+            "poster_media_id": o.get("poster_media_id", ""),
+            "video_duration": str(shared.get("duration") or sent.get("duration") or ""),
+            "model_id": str(sent.get("model") or ""),
+            "width": str(detail.get("width") or ""),
+            "height": str(detail.get("height") or ""),
+        })
+        pm = o.get("poster_media_id")
+        if pm:
+            purl, _pi = resolve_media(session, pm)
+            if purl:
+                ptmp = out / "gallery" / "_postertmp"
+                ptmp.mkdir(parents=True, exist_ok=True)
+                st, pp = download(session, purl, ptmp / str(pm))
+                if st in ("ok", "skip") and pp:
+                    make_thumbnail(pp, thumb_dir / "{}.jpg".format(vmid))
+        rows.append(full)
+        saved.append(str(path))
+    if rows:
+        save_catalog(db_path, rows)
+    return saved
+
+
 def run_generate_video(args):
     """Create an image-to-video clip via PixAI (createGenerationTask + i2vPro params),
     poll to completion, download the mp4 into videos/, and catalog it (source='api',
@@ -2840,58 +2898,95 @@ def run_generate_video(args):
     # Result: getTaskById -> outputs.videos -> fileUrl -> download mp4 (same as --sync-videos).
     result = task_detail_gql(session, task_id) or {}
     _maybe_dump_params(args, result)
-    outs, shared = video_outputs(result)
-    if not outs:
-        raise PixAIError("video task completed but no video outputs found")
-    detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
-    i2v_sent = params.get("i2vPro") or {}
-    prompt = shared.get("prompt") or i2v_sent.get("prompts", "")
+    saved = _download_video_task(session, result, task_id, out, args, params)
+    print("Generated + cataloged {} video(s):".format(len(saved)))
+    for s in saved:
+        print("  " + s)
+    return {"submitted": True, "task_id": task_id, "videos": len(saved)}
 
-    from pixai_gallery import make_thumbnail
-    thumb_dir = out / "gallery" / "thumbs"
-    rows, saved = [], []
-    for o in outs:
-        vmid = o["video_media_id"]
-        fm = media_file_gql(session, vmid)
-        url = fm.get("fileUrl")
-        if not url:
-            print("  no file url for video", vmid)
-            continue
-        stem = vdir / build_stem_name(prompt, task_id, vmid,
-                                      getattr(args, "name_length", 60), "_")
-        status, path = download(session, url, stem)
-        if status not in ("ok", "skip") or not path:
-            continue
-        full = {f: "" for f in CATALOG_FIELDS}
-        full.update({
-            "task_id": str(task_id), "media_id": vmid,
-            "filename": str(path.relative_to(out)).replace("\\", "/"),
-            "url": url, "source": "api", "status": "completed", "is_video": "1",
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
-            "negative_prompt": i2v_sent.get("negativePrompts", ""),
-            "seed": str(o.get("seed") or ""),
-            "poster_media_id": o.get("poster_media_id", ""),
-            "video_duration": str(shared.get("duration") or i2v_sent.get("duration") or ""),
-            "model_id": str(i2v_sent.get("model") or ""),
-            "width": str(detail.get("width") or ""),
-            "height": str(detail.get("height") or ""),
-        })
-        # Best-effort poster thumbnail: the PixAI still frame, keyed by the video id.
-        pm = o.get("poster_media_id")
-        if pm:
-            purl, _pi = resolve_media(session, pm)
-            if purl:
-                ptmp = out / "gallery" / "_postertmp"
-                ptmp.mkdir(parents=True, exist_ok=True)
-                st, pp = download(session, purl, ptmp / str(pm))
-                if st in ("ok", "skip") and pp:
-                    make_thumbnail(pp, thumb_dir / "{}.jpg".format(vmid))
-        rows.append(full)
-        saved.append(str(path))
 
-    if rows:
-        save_catalog(db_path, rows)
+def _resolve_refs(session, items):
+    """Resolve reference sources (media_id or local file) to media_ids, uploading any
+    local files. Used by reference-video on --confirm."""
+    ids = []
+    for s in items:
+        if _is_local_source(s):
+            print("Uploading local reference:", s)
+            ids.append(upload_media(session, s))
+        else:
+            ids.append(str(s))
+    return ids
+
+
+def run_reference_video(args):
+    """Create a REFERENCE video (multi-image/video/audio reference) via createGenerationTask
+    + a `referenceVideo` block. Refs (--ref-image/--ref-video/--ref-audio) are catalog
+    media_ids OR local files (auto-uploaded on --confirm); reference them in --prompt as
+    @image1/@video1/@audio1. Preview-only unless --confirm. Downloads + catalogs the mp4.
+    --task-id recovers an existing reference-video task for free."""
+    out = Path(args.out)
+    existing_task = (getattr(args, "task_id", "") or "").strip()
+    imgs = [s for s in (getattr(args, "ref_image", None) or []) if s and str(s).strip()]
+    vids = [s for s in (getattr(args, "ref_video", None) or []) if s and str(s).strip()]
+    auds = [s for s in (getattr(args, "ref_audio", None) or []) if s and str(s).strip()]
+    override = getattr(args, "params_json", "") or ""
+    prompt = getattr(args, "prompt", "") or ""
+
+    if not existing_task and not (imgs or vids or auds) and not override:
+        raise PixAIError("--reference-video needs at least one --ref-image/--ref-video/"
+                         "--ref-audio (a media_id or local file), or --task-id to recover.")
+
+    is_private = (getattr(args, "vchannel", "private") == "private")
+
+    def _build(img_ids, vid_ids, aud_ids):
+        return build_reference_video_parameters(
+            prompt, image_media_ids=img_ids, video_media_ids=vid_ids, audio_media_ids=aud_ids,
+            model=(getattr(args, "video_model", "") or "v4.0.1"),
+            duration=getattr(args, "duration", 15) or 15,
+            mode=getattr(args, "vmode", None) or "professional",
+            generate_audio=bool(getattr(args, "audio", False)),
+            audio_language=getattr(args, "audio_language", None) or "english",
+            is_private=is_private, kaisuuken_id=getattr(args, "kaisuuken_id", "") or "")
+
+    # PREVIEW: no upload, no submit. Local files shown as placeholders.
+    if not existing_task and not getattr(args, "confirm", False):
+        print("=== PixAI createGenerationTask -- REFERENCE VIDEO (PREVIEW, no credits spent) ===")
+        if override:
+            print(json.dumps({"parameters": json.loads(override)}, indent=2))
+        else:
+            ph = lambda lst: [("<upload:{}>".format(s) if _is_local_source(s) else s) for s in lst]
+            print(json.dumps({"parameters": _build(ph(imgs), ph(vids), ph(auds))}, indent=2))
+        print("\n*** REFERENCE VIDEO IS EXPENSIVE *** (a 15s clip uses 3 V4.0 cards). "
+              "Re-run with --confirm to submit.")
+        return {"submitted": False}
+
+    out.mkdir(parents=True, exist_ok=True)
+    db_path = out / "catalog.db"
+    init_db(db_path)
+    session = _make_session(getattr(args, "token", None))
+
+    params = {}
+    if existing_task:
+        task_id = existing_task
+        print("Fetching existing reference-video task (no credits):", task_id)
+    else:
+        if override:
+            params = json.loads(override)
+        else:
+            params = _build(_resolve_refs(session, imgs), _resolve_refs(session, vids),
+                            _resolve_refs(session, auds))
+        print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        task_id = (created.get("createGenerationTask") or {}).get("id")
+        if not task_id:
+            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        print("  task id:", task_id)
+        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600), interval=5,
+                          label="reference video", fail_noun="reference video generation")
+
+    result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
+    saved = _download_video_task(session, result, task_id, out, args, params)
     print("Generated + cataloged {} video(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
@@ -4138,6 +4233,18 @@ def main():
                      help="with --generate/--generate-video/--edit-image (esp. --task-id "
                           "recovery), print the task's full submit parameters -- bank any "
                           "param shape (multiRef, referenceVideo, ...) with no browser capture")
+    # --- reference video (multi-image/video/audio reference) ---
+    gen.add_argument("--reference-video", dest="reference_video", action="store_true",
+                     help="create a multi-reference video (referenceVideo): pass refs with "
+                          "--ref-image/--ref-video/--ref-audio and cite them in --prompt as "
+                          "@image1/@video1/@audio1. Preview-only unless --confirm")
+    gen.add_argument("--ref-image", dest="ref_image", action="append", metavar="MEDIA_ID|FILE",
+                     help="reference image (media_id or local file, auto-uploaded). Repeatable: "
+                          "@image1=first, @image2=second, ...")
+    gen.add_argument("--ref-video", dest="ref_video", action="append", metavar="MEDIA_ID|FILE",
+                     help="reference video (repeatable; cite as @video1, @video2, ...)")
+    gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
+                     help="reference audio (repeatable; cite as @audio1, ...)")
     # --- instruct editing + media upload (the "Edit this image" surface) ---
     gen.add_argument("--edit-image", dest="edit_image", action="store_true",
                      help="instruct-edit an image via PixAI: describe the change in --prompt "
@@ -4242,6 +4349,9 @@ def main():
             return
         if getattr(args, "generate_video", False):
             run_generate_video(args)
+            return
+        if getattr(args, "reference_video", False):
+            run_reference_video(args)
             return
         if getattr(args, "upload_file", ""):
             run_upload(args)
