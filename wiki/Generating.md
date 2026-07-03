@@ -155,11 +155,12 @@ and events. Each is **locked to one model**.
 > **✅ Cards auto-apply — just generate.** On `--confirm`, the tool asks PixAI which of your
 > cards matches this generation (the same `check` call the website makes), attaches the
 > nearest-expiry one, and that generation costs **0 credits**. The **preview** tells you
-> up-front whether it'll be free:
+> up-front whether it'll be free — and the **real credit cost** (via PixAI's `task-price`
+> estimate, which spends nothing):
 >
 > ```
-> FREE: a matching card is available -- with --confirm this costs 0 credits (card expires …).
-> NO FREE CARD matches these settings -- with --confirm this WILL spend credits.
+> FREE: a matching card covers this -- with --confirm it costs 0 credits (saves ~1,600 credits) …
+> NO FREE CARD matches -- with --confirm this will cost ~27,500 credits.
 > ```
 
 ```bash

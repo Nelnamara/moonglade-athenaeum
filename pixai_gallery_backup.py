@@ -36,7 +36,7 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "1.8.0"
+__version__ = "1.8.1"
 
 import argparse
 import csv
@@ -3526,6 +3526,43 @@ def match_kaisuuken(session, parameters):
     return best
 
 
+# GET /v2/task-price computes a generation's credit cost WITHOUT creating it (mirrors the
+# GraphQL pricingTask). Scalar params go as query params; the nested blocks below go as
+# URL-encoded JSON. Field set = the endpoint's input schema (`Ou` in the app contract) --
+# anything else (prompts, seed, cfgScale, channel, kaisuukenId, …) is not priced, so skip it.
+_PRICE_SCALARS = frozenset((
+    "width", "height", "samplingSteps", "inferenceProfile", "upscaleDenoisingSteps",
+    "upscaleDenoisingStrength", "upscale", "samplingMethod", "priority", "strength",
+    "batchSize", "enableTile", "enlarge", "mediaId", "modelId", "enableADetailer",
+    "lightning", "vaeModelId", "workflowName", "sceneId", "watermark"))
+_PRICE_NESTED = frozenset((
+    "controlNets", "ipAdapter", "animateDiff", "workflow", "i2vPro", "referenceVideo",
+    "t2i2v", "inputs", "chat", "inpaint", "loraParameters"))
+
+
+def price_task(session, params):
+    """Compute a generation's credit cost via GET /v2/task-price WITHOUT creating it.
+    Returns actualPrice (int credits) or None. READ-ONLY -- spends nothing, fails soft."""
+    if not params:
+        return None
+    q = {}
+    for k, v in params.items():
+        if v is None:
+            continue
+        if k in _PRICE_NESTED:
+            q[k] = json.dumps(v)          # requests URL-encodes the JSON string
+        elif k in _PRICE_SCALARS:
+            q[k] = v
+    if not q:
+        return None
+    try:
+        data = _rest_get(session, "/task-price", params=q) or {}
+    except (PixAIError, ValueError):
+        return None
+    ap = data.get("actualPrice")
+    return int(ap) if ap is not None else None
+
+
 def _apply_kaisuuken(session, params, args):
     """Attach a free-card ticket id (`kaisuukenId`) to `params` in place, mirroring the
     web client. Precedence: explicit --kaisuuken-id > --no-card (skip) > auto-match via
@@ -3550,25 +3587,35 @@ def _apply_kaisuuken(session, params, args):
 
 
 def _preview_card_note(args, params):
-    """In a PREVIEW, tell the user whether a free card will apply -- a read-only
-    /v2/kaisuuken/check (no spend, no upload). Fails soft (says nothing) if offline or
-    unauthenticated, so previews still work with no network."""
-    if (getattr(args, "kaisuuken_id", "") or "").strip():
-        print("A free card (--kaisuuken-id) will be attached on --confirm.")
-        return
+    """In a PREVIEW, tell the user the real credit cost and whether a free card covers it --
+    read-only /v2/kaisuuken/check + /v2/task-price (no spend, no upload). Fails soft (stays
+    silent) if offline or unauthenticated, so previews still work with no network."""
+    def _fmt(n):
+        return "~{:,} credits".format(n) if n is not None else "credits"
     if getattr(args, "no_card", False):
-        print("--no-card set: this will SPEND CREDITS even if a card matches.")
+        try:
+            session = _make_session(getattr(args, "token", None))
+            price = price_task(session, params)
+        except Exception:
+            price = None
+        print("--no-card set: this WILL spend {} on --confirm even if a card matches.".format(_fmt(price)))
+        return
+    explicit = (getattr(args, "kaisuuken_id", "") or "").strip()
+    if explicit:
+        print("A free card (--kaisuuken-id) will be attached on --confirm -> 0 credits.")
         return
     try:
         session = _make_session(getattr(args, "token", None))
         best = match_kaisuuken(session, params)
+        price = price_task(session, params)
     except Exception:
         return  # offline / no key -- stay silent, preview is still valid
     if best and best.get("id"):
-        print("FREE: a matching card is available -- with --confirm this costs 0 credits "
-              "(card expires {}).".format((best.get("expiresAt") or "never")[:10]))
+        saved = " (saves {})".format(_fmt(price)) if price else ""
+        print("FREE: a matching card covers this -- with --confirm it costs 0 credits{} "
+              "(card expires {}).".format(saved, (best.get("expiresAt") or "never")[:10]))
     else:
-        print("NO FREE CARD matches these settings -- with --confirm this WILL spend credits.")
+        print("NO FREE CARD matches -- with --confirm this will cost {}.".format(_fmt(price)))
 
 
 def run_cards(args):
