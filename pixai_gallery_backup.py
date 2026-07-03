@@ -36,10 +36,11 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "1.8.2"
+__version__ = "1.8.3"
 
 import argparse
 import csv
+import datetime
 import json
 import mimetypes
 import os
@@ -3594,6 +3595,88 @@ def run_suggest_prompt(args):
     return {"suggestions": len(outs), "media_id": media_id}
 
 
+# --- Claimable rewards (daily credits, agent stamina) -- oRPC /v2/claim ----------
+def list_claims(session):
+    """Read the account's claimable rewards via GET /v2/claim (daily credits, agent
+    stamina). Read-only; fails soft (returns []). Each row: {id, amount, canClaim,
+    claimedAt, nextClaimableTime}."""
+    try:
+        data = _rest_get(session, "/claim")
+    except PixAIError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def claim_reward(session, claim_id):
+    """Claim a reward by id via POST /v2/claim/{id}. State-changing: grants the reward to
+    YOUR OWN account (a routine daily entitlement, no money moves). Returns the updated
+    claim record. Raises PixAIError on error."""
+    return _rest_post(session, "/claim/" + str(claim_id), {})
+
+
+def _fmt_epoch_ms(ms):
+    if not ms:
+        return "-"
+    try:
+        return datetime.datetime.fromtimestamp(int(ms) / 1000).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, OverflowError, OSError):
+        return str(ms)
+
+
+def run_claims(args):
+    """--claims: list your claimable rewards (read-only). --claim <id|all>: claim one or
+    all ready rewards -- GATED behind --confirm (grants free credits/stamina to your own
+    account). Never claims anything without --confirm."""
+    session = _make_session(getattr(args, "token", None))
+    claim_id = (getattr(args, "claim", "") or "").strip()
+    rewards = list_claims(session)
+    if not rewards:
+        print("No claimable rewards found (read-only; nothing changed).")
+        return {"rewards": 0}
+
+    if not claim_id:                                   # LIST (read-only)
+        print("Claimable rewards (read-only):\n")
+        for r in rewards:
+            state = "READY now" if r.get("canClaim") else \
+                    "next: " + _fmt_epoch_ms(r.get("nextClaimableTime"))
+            print("  {:<24} {:>8}   {}".format(r.get("id"), r.get("amount"), state))
+        ready = [r["id"] for r in rewards if r.get("canClaim")]
+        if ready:
+            print("\nReady: {}\nClaim with:  --claim <id>  (or --claim all)  --confirm".format(
+                ", ".join(ready)))
+        else:
+            print("\nNothing ready to claim right now.")
+        return {"rewards": len(rewards), "ready": len(ready)}
+
+    # CLAIM (--claim <id|all>) -- guarded by --confirm
+    targets = ([r for r in rewards if r.get("canClaim")] if claim_id == "all"
+               else [r for r in rewards if r.get("id") == claim_id])
+    if not targets:
+        print("Nothing to claim for '{}' (unknown id, or not currently claimable).".format(claim_id))
+        return {"claimed": 0}
+    if not any(t.get("canClaim") for t in targets):
+        print("'{}' is not claimable yet (next: {}).".format(
+            claim_id, _fmt_epoch_ms(targets[0].get("nextClaimableTime"))))
+        return {"claimed": 0}
+    if not getattr(args, "confirm", False):
+        print("Would claim (re-run with --confirm):")
+        for r in targets:
+            if r.get("canClaim"):
+                print("  {} (+{})".format(r.get("id"), r.get("amount")))
+        return {"claimed": 0, "preview": True}
+    claimed = 0
+    for r in targets:
+        if not r.get("canClaim"):
+            continue
+        try:
+            claim_reward(session, r["id"])
+            print("Claimed {} (+{}).".format(r["id"], r.get("amount")))
+            claimed += 1
+        except PixAIError as e:
+            print("Failed to claim {}: {}".format(r["id"], str(e)[:150]))
+    return {"claimed": claimed}
+
+
 def _apply_kaisuuken(session, params, args):
     """Attach a free-card ticket id (`kaisuukenId`) to `params` in place, mirroring the
     web client. Precedence: explicit --kaisuuken-id > --no-card (skip) > auto-match via
@@ -4503,6 +4586,12 @@ def main():
     ap.add_argument("--cards", action="store_true",
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
+    ap.add_argument("--claims", action="store_true",
+                    help="list your claimable rewards (daily credits, agent stamina), then "
+                         "exit. Read-only")
+    ap.add_argument("--claim", default="", metavar="ID|all",
+                    help="claim a ready reward by id (or 'all') -- requires --confirm. "
+                         "Grants free credits/stamina to your own account")
     ap.add_argument("--reconcile-deleted", action="store_true",
                     help="flag catalog rows whose PixAI task is gone from your live feed "
                          "(deleted on the website) so the gallery can surface them for a "
@@ -4699,6 +4788,9 @@ def main():
             return
         if getattr(args, "cards", False):
             run_cards(args)
+            return
+        if getattr(args, "claims", False) or getattr(args, "claim", ""):
+            run_claims(args)
             return
         if args.reconcile_deleted:
             run_reconcile_deleted(args)

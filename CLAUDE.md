@@ -94,6 +94,7 @@ mass commit. Follow this protocol:
 | `list_kaisuukens()` / `match_kaisuuken()` / `_apply_kaisuuken()` / `run_cards()` | Free-generation cards ("kaisuuken" / 回数券) live on the oRPC **`/v2` REST API**, not GraphQL (verified 2026-07-03 from the app's own contract). `list_kaisuukens` = `GET /v2/kaisuuken/summary` (one row per template w/ count + locked model); `match_kaisuuken` = `POST /v2/kaisuuken/check {type:"generation-task", parameters}` → matching ticket ids. **Cards auto-apply now**: `_apply_kaisuuken` runs on `--confirm` for every create path, calls `check`, and attaches the nearest-expiry `kaisuukenId` → 0 credits (like the website). Preview shows FREE/paid up-front. `--no-card` opts out; `--kaisuuken-id` forces one. `--cards` = read-only display. All fail soft. REST base `REST_API_BASE` + helpers `_rest_get`/`_rest_post` |
 | `price_task()` | `GET /v2/task-price`: compute a generation's credit cost WITHOUT creating it (mirrors GraphQL `pricingTask`). Scalars → query params, nested blocks (`i2vPro`/`referenceVideo`/`chat`/`loraParameters`/…) → URL-encoded JSON. Returns `actualPrice` (int) or None. **READ-ONLY, spends nothing** — used in previews to show the real cost + card savings. Verified exact: i2v/ref-video 27,500, edit 8,000 |
 | `suggest_prompt()` / `run_suggest_prompt()` | `--suggest-prompt <media_id\|file>`: image-to-prompt via `GET /v2/tag/suggest-prompt/{mediaId}` → `{output:[…]}` (a Danbooru-style tag list + natural-language description variants). Local files upload first (free). **FREE / read-only**, no `--confirm` |
+| `list_claims()` / `claim_reward()` / `run_claims()` | `--claims`: list claimable rewards (daily credits, agent stamina) via `GET /v2/claim` — **read-only**. `--claim <id\|all>`: claim ready rewards via `POST /v2/claim/{id}` — **gated behind `--confirm`**, previews otherwise, and never fires on a not-yet-claimable reward. Grants free credits/stamina to the owner's own account (no money moves) |
 
 ### Key helpers in `pixai_gallery.py`
 
@@ -254,6 +255,9 @@ python pixai_gallery_backup.py -v --update                # verbose: per-page / 
 # --- creating (all preview-only until --confirm; --task-id recovers a task for free) ---
 python pixai_gallery_backup.py --account                  # read-only credits/membership dashboard
 python pixai_gallery_backup.py --cards                    # read-only free-card (kaisuuken) balances + ids
+python pixai_gallery_backup.py --claims                   # read-only claimable rewards (daily credits, stamina)
+python pixai_gallery_backup.py --claim all --confirm      # claim ready rewards (gated; grants to your account)
+python pixai_gallery_backup.py --suggest-prompt <id|file> # image-to-prompt: tags + description (free)
 python pixai_gallery_backup.py --upload path/to/image.png # local file -> media_id (free; S3 upload)
 python pixai_gallery_backup.py --generate --prompt "..."               # preview an image gen (add --confirm to spend)
 python pixai_gallery_backup.py --generate-video --image <media_id> --prompt "..."   # preview i2v (EXPENSIVE; --confirm)
