@@ -994,6 +994,17 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
 # Flask app factory
 # ---------------------------------------------------------------------------
 
+# One-click enhance plugins for the Edit tab. `detail-fix` is the VERIFIED workflowId
+# (fired for real 2026-07-02). `hand-fix` / `face-fix` use workflowNames mined from the
+# app bundle -- unverified until fired, but a rejected panelplugin submit costs no credits,
+# so they're safe to offer and confirm live. More arrive once we have the full catalog.
+ENHANCE_PLUGINS = {
+    "detail-fix": {"label": "Detail fix", "workflow_id": "1797414829336369706"},
+    "hand-fix":   {"label": "Fix hands",  "workflow_name": "mymusise/hand-fix"},
+    "face-fix":   {"label": "Fix face",   "workflow_name": "kyo/face-detailer"},
+}
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
     db_path = out_dir / "catalog.db"
@@ -2031,6 +2042,13 @@ document.addEventListener('DOMContentLoaded', function(){
       <div id="edit-cost" class="gen-cost">Pick an image to see the cost.</div>
       <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
       <div id="edit-result" class="gen-result" style="display:none;"></div>
+      <div class="gen-lbl" style="margin-top:14px;">One-click enhance <span style="text-transform:none;color:var(--subtext);">&middot; on the source</span></div>
+      <div class="gen-aspects" id="enh-actions">
+        <button type="button" onclick="Gen.enhance('detail-fix')">Detail fix</button>
+        <button type="button" onclick="Gen.enhance('hand-fix')">Fix hands</button>
+        <button type="button" onclick="Gen.enhance('face-fix')">Fix face</button>
+      </div>
+      <div id="enh-result" class="gen-result" style="display:none;"></div>
     </div>
   </div>
 </aside>
@@ -2189,9 +2207,26 @@ var Gen = (function(){
         res.innerHTML='<span style="color:var(--red);font-size:12px;">network error</span>'; });
   }
   function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
+  function enhance(key){
+    var src=editSrc();
+    if(!src){ el('edit-src').focus(); return; }
+    var res=el('enh-result'); res.style.display='block';
+    res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Enhancing\\u2026 (rejected plugins cost nothing)</span>';
+    fetch('/api/enhance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:src,plugin:key})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
+        var ids=d.media_ids||[];
+        var cost=d.paid_credit===0?'free':((d.paid_credit||0).toLocaleString()+' credits');
+        var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 Enhanced \\u2014 '+cost+'.</div>';
+        ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
+        if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');return false;">Use as source \\u2192</a>'; }
+        res.innerHTML=html;
+      }).catch(function(){ res.innerHTML='<span style="color:var(--red);font-size:12px;">network error</span>'; });
+  }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
-          editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
+          editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
           get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
@@ -3170,6 +3205,32 @@ function savePrompt() {
                 return jsonify({"error": "pick an image to edit"}), 400
             if not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
+            core._apply_kaisuuken(session, params,
+                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
+            res = core.web_generate(session, params, str(out_dir))
+            return jsonify(res)
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+    @app.route("/api/enhance", methods=["POST"])
+    def api_enhance():
+        """One-click enhance (panelplugin) on the Edit tab's source image. Localhost-gated;
+        auto-applies a card if one matches. A rejected/unknown workflow just errors (no
+        credits spent). Returns {task_id, media_ids, paid_credit}."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            from types import SimpleNamespace
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            src = str(p.get("source") or "").strip()
+            plug = ENHANCE_PLUGINS.get(str(p.get("plugin") or "").strip())
+            if not src:
+                return jsonify({"error": "pick an image first"}), 400
+            if not plug:
+                return jsonify({"error": "unknown enhance action"}), 400
+            params = core.build_panelplugin_parameters(
+                src, plug.get("workflow_id", ""), workflow_name=plug.get("workflow_name", ""))
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             res = core.web_generate(session, params, str(out_dir))
