@@ -2615,6 +2615,18 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
     raise PixAIError("timed out after {}s (task {})".format(timeout, task_id))
 
 
+def _maybe_dump_params(args, result):
+    """If --dump-params is set, print the task's full submit `parameters` (the exact
+    shape PixAI received). Handy for banking a param shape off a recovered --task-id
+    without a live browser capture. Read-only; prints nothing otherwise."""
+    if not getattr(args, "dump_params", False):
+        return
+    params = (result or {}).get("parameters")
+    print("=== task parameters (full submit shape) ===")
+    print(json.dumps(params if params is not None else result, indent=2, ensure_ascii=False))
+    print("=== end parameters ===")
+
+
 def run_generate(args):
     """Create images via PixAI (createGenerationTask), poll to completion, download
     the results into the backup, and catalog them as source='api'. GUARDED: without
@@ -2671,6 +2683,7 @@ def run_generate(args):
     # already proven, so reuse it for the result rather than guessing an ad-hoc
     # selection set.
     result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
     outputs = result.get("outputs") or {}
     mids = []
     if outputs.get("mediaId"):
@@ -2786,6 +2799,7 @@ def run_generate_video(args):
 
     # Result: getTaskById -> outputs.videos -> fileUrl -> download mp4 (same as --sync-videos).
     result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
     outs, shared = video_outputs(result)
     if not outs:
         raise PixAIError("video task completed but no video outputs found")
@@ -2924,6 +2938,7 @@ def run_edit_image(args):
                           interval=3, label="edit", fail_noun="edit")
 
     result = task_detail_gql(session, task_id) or {}
+    _maybe_dump_params(args, result)
     outputs = result.get("outputs") or {}
     mids = []
     if outputs.get("mediaId"):
@@ -4079,6 +4094,10 @@ def main():
     gen.add_argument("--video-channel", dest="vchannel", default="private",
                      choices=list(VIDEO_CHANNELS),
                      help="video channel: private = 'Enhanced' (Plus/Premium) | normal")
+    gen.add_argument("--dump-params", action="store_true",
+                     help="with --generate/--generate-video/--edit-image (esp. --task-id "
+                          "recovery), print the task's full submit parameters -- bank any "
+                          "param shape (multiRef, referenceVideo, ...) with no browser capture")
     # --- instruct editing + media upload (the "Edit this image" surface) ---
     gen.add_argument("--edit-image", dest="edit_image", action="store_true",
                      help="instruct-edit an image via PixAI: describe the change in --prompt "
