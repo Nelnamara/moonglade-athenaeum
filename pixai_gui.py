@@ -1714,6 +1714,168 @@ class EditTab(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Reference Video tab (multi-image reference -> video)
+# ---------------------------------------------------------------------------
+
+class ReferenceVideoTab(QWidget):
+
+    def __init__(self, settings_bar, settings, parent=None):
+        super().__init__(parent)
+        self._bar = settings_bar
+        self._worker = None
+
+        opts = QGroupBox("Reference Video (V4.0) — animate from multiple reference images")
+        g = QVBoxLayout(opts)
+
+        r_src = QHBoxLayout()
+        r_src.addWidget(QLabel("Reference images:"))
+        self.refs = QLineEdit()
+        self.refs.setPlaceholderText("media_id(s) or local file path(s), comma-separated — cite in the prompt as @image1, @image2, …")
+        r_src.addWidget(self.refs)
+        self.btn_browse = QPushButton("Browse…")
+        self.btn_browse.clicked.connect(self._browse)
+        r_src.addWidget(self.btn_browse)
+        g.addLayout(r_src)
+
+        r_p = QHBoxLayout()
+        r_p.addWidget(QLabel("Prompt:"))
+        self.prompt = QLineEdit()
+        self.prompt.setPlaceholderText("describe the scene, citing refs (e.g. '@image1 in the outfit from @image2, slow cinematic orbit')")
+        r_p.addWidget(self.prompt)
+        g.addLayout(r_p)
+
+        r_m = QHBoxLayout()
+        r_m.addWidget(QLabel("Model:"))
+        self.model_combo = QComboBox()
+        self.model_combo.addItem("V4.0 Lite Preview (v4.0.1)", "v4.0.1")
+        self.model_combo.addItem("V4.0 Preview (v4.0)", "v4.0")
+        self.model_combo.setCurrentIndex(max(0, self.model_combo.findData(settings.get("refvid_model", "v4.0.1"))))
+        r_m.addWidget(self.model_combo)
+        r_m.addSpacing(12)
+        r_m.addWidget(QLabel("Duration:"))
+        self.duration_combo = QComboBox()
+        for d in (5, 6, 10, 15):
+            self.duration_combo.addItem("{}s".format(d), d)
+        self.duration_combo.setToolTip("15s uses 3 V4.0 cards.")
+        self.duration_combo.setCurrentIndex(max(0, self.duration_combo.findData(settings.get("refvid_duration", 5))))
+        r_m.addWidget(self.duration_combo)
+        r_m.addSpacing(12)
+        r_m.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Professional", "professional")
+        self.mode_combo.addItem("Basic (cheaper)", "basic")
+        r_m.addWidget(self.mode_combo)
+        r_m.addSpacing(12)
+        self.audio = QCheckBox("Audio")
+        self.audio.setChecked(settings.get("refvid_audio", False))
+        r_m.addWidget(self.audio)
+        r_m.addStretch()
+        g.addLayout(r_m)
+
+        r_r = QHBoxLayout()
+        r_r.addWidget(QLabel("Recover task id:"))
+        self.task_id = QLineEdit()
+        self.task_id.setPlaceholderText("optional — fetch + download an already-created reference-video task (no new credits)")
+        r_r.addWidget(self.task_id)
+        g.addLayout(r_r)
+
+        warn = QLabel("⚠  Reference video is EXPENSIVE (a 15s clip uses 3 V4.0 cards). "
+                      "Leave Confirm OFF to preview the exact request for FREE (nothing uploaded or submitted).")
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color: #f9b572; font-size: 9pt; padding: 4px 0;")
+        g.addWidget(warn)
+
+        r_conf = QHBoxLayout()
+        self.confirm = QCheckBox("Confirm — actually submit (uploads local refs + spends credits/card)")
+        self.confirm.setToolTip("Unchecked = preview only (no upload, no credits). Checked = generate for real.")
+        r_conf.addWidget(self.confirm)
+        r_conf.addStretch()
+        g.addLayout(r_conf)
+
+        self.btn_run = QPushButton("▶  Generate reference video")
+        self.btn_run.setObjectName("btn_run")
+        self.btn_stop = QPushButton("■  Stop")
+        self.btn_stop.setObjectName("btn_stop")
+        self.btn_stop.setEnabled(False)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_run); btn_row.addStretch(); btn_row.addWidget(self.btn_stop)
+        self.btn_run.clicked.connect(self._run)
+        self.btn_stop.clicked.connect(self._stop)
+
+        prog_row, self.prog_bar, self.prog_label = _make_progress_row()
+        self.log = LogWidget()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(opts)
+        lay.addLayout(btn_row)
+        lay.addLayout(prog_row)
+        lay.addWidget(self.log, stretch=1)
+
+    def _browse(self):
+        p, _ = QFileDialog.getOpenFileName(
+            self, "Choose a reference image", "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp);;All files (*.*)")
+        if p:
+            cur = self.refs.text().strip()
+            self.refs.setText((cur + ", " + p) if cur else p)
+
+    def _build_args(self):
+        refs = [s.strip() for s in self.refs.text().split(",") if s.strip()]
+        return SimpleNamespace(
+            out=self._bar.out, token=self._bar.token, reference_video=True,
+            ref_image=refs, ref_video=None, ref_audio=None, params_json="",
+            prompt=self.prompt.text().strip(),
+            video_model=self.model_combo.currentData(),
+            duration=self.duration_combo.currentData(),
+            vmode=self.mode_combo.currentData(),
+            audio=self.audio.isChecked(), audio_language="english",
+            vchannel="private", kaisuuken_id="",
+            confirm=self.confirm.isChecked(), task_id=self.task_id.text().strip(),
+            poll_timeout=600, name_length=60, name_sep="_", dump_params=False,
+        )
+
+    def _run(self):
+        if self._worker and self._worker.isRunning():
+            return
+        args = self._build_args()
+        if not args.task_id and not args.ref_image:
+            self.log.append_line("[ERROR] Add at least one reference image (media_id or local file), or a task id.")
+            return
+        self.log.clear_log()
+        self.prog_bar.setRange(0, 0)
+        self.prog_label.setText("Submitting..." if (args.confirm or args.task_id) else "Preview")
+        self.btn_run.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self._worker = Worker(core.run_reference_video, args)
+        self._worker.log.connect(self.log.append_line)
+        self._worker.done.connect(self._on_done)
+        self._worker.start()
+
+    def _stop(self):
+        if self._worker:
+            self._worker.terminate()
+            self._worker.wait(2000)
+            self.log.append_line("\n[Stopped by user]")
+            self._on_done(False, "")
+
+    def _on_done(self, success, msg):
+        self.btn_run.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.prog_bar.setRange(0, 1)
+        self.prog_bar.setValue(1 if success else 0)
+        self.prog_label.setText("Done" if success else ("Error" if msg else "Stopped"))
+        if not success and msg:
+            self.log.append_line("\n[ERROR] " + msg)
+
+    def collect_settings(self):
+        return {
+            "refvid_model": self.model_combo.currentData(),
+            "refvid_duration": self.duration_combo.currentData(),
+            "refvid_audio": self.audio.isChecked(),
+        }
+
+
+# ---------------------------------------------------------------------------
 # Utilities tab
 # ---------------------------------------------------------------------------
 
@@ -2356,6 +2518,7 @@ class MainWindow(QMainWindow):
         self._conv_tab    = ConvertTab(self._sbar, settings)
         self._gen_tab     = GenerateTab(self._sbar, settings)
         self._video_tab   = VideoTab(self._sbar, settings)
+        self._refvid_tab  = ReferenceVideoTab(self._sbar, settings)
         self._edit_tab    = EditTab(self._sbar, settings)
         self._util_tab    = UtilitiesTab(self._sbar, settings)
         self._gallery_tab = GalleryTab(self._sbar, settings)
@@ -2364,6 +2527,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._conv_tab,    "  Convert   ")
         self._tabs.addTab(self._gen_tab,     "  Generate  ")
         self._tabs.addTab(self._video_tab,   "  Video     ")
+        self._tabs.addTab(self._refvid_tab,  "  Ref Video ")
         self._tabs.addTab(self._edit_tab,    "  Edit      ")
         self._tabs.addTab(self._util_tab,    "  Library   ")
         self._tabs.addTab(self._gallery_tab, "  Gallery   ")
@@ -2382,6 +2546,7 @@ class MainWindow(QMainWindow):
         s.update(self._conv_tab.collect_settings())
         s.update(self._gen_tab.collect_settings())
         s.update(self._video_tab.collect_settings())
+        s.update(self._refvid_tab.collect_settings())
         s.update(self._edit_tab.collect_settings())
         s.update(self._util_tab.collect_settings())
         s.update(self._gallery_tab.collect_settings())
