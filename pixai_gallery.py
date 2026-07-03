@@ -1974,6 +1974,11 @@ document.addEventListener('DOMContentLoaded', function(){
     <button class="x" onclick="Gen.close()" aria-label="Close">&times;</button>
   </div>
   <div class="gen-body">
+    <div class="gen-seg" id="gen-mode-seg" style="margin-bottom:12px;">
+      <button id="gm-generate" class="on" onclick="Gen.setMode('generate')">Generate</button>
+      <button id="gm-edit" onclick="Gen.setMode('edit')">Edit</button>
+    </div>
+    <div id="gen-mode-generate">
     <div class="gen-seg">
       <button id="gen-k-base" class="on" onclick="Gen.setKind('base')">Models</button>
       <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
@@ -2008,6 +2013,24 @@ document.addEventListener('DOMContentLoaded', function(){
       <div id="gen-cost" class="gen-cost">Pick a model to see the cost.</div>
       <button id="gen-go" class="gen-go" onclick="Gen.generate()" disabled>Generate</button>
       <div id="gen-result" class="gen-result" style="display:none;"></div>
+    </div>
+    </div>
+    <div id="gen-mode-edit" style="display:none;">
+      <div class="gen-lbl">Editing image</div>
+      <img id="edit-src-img" alt="source" style="width:100%;border-radius:10px;display:none;margin-bottom:8px;">
+      <input id="edit-src" class="gen-search" placeholder="Source media_id (or open an image &amp; click Edit)" autocomplete="off">
+      <textarea id="edit-ins" class="gen-ta" rows="3" placeholder="Describe the change &mdash; &lsquo;make it night, add snow&rsquo;&hellip;"></textarea>
+      <div class="gen-row" style="margin-top:8px;">
+        <div style="flex:1;"><div class="gen-lbl">Resolution</div>
+          <select id="edit-res" class="gen-sel"><option>1K</option><option>2K</option><option>4K</option></select></div>
+        <div style="flex:1;"><div class="gen-lbl">Quality</div>
+          <select id="edit-qual" class="gen-sel"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+      </div>
+      <div class="gen-lbl">Aspect</div>
+      <select id="edit-aspect" class="gen-sel"><option value="3:4">3:4</option><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select>
+      <div id="edit-cost" class="gen-cost">Pick an image to see the cost.</div>
+      <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
+      <div id="edit-result" class="gen-result" style="display:none;"></div>
     </div>
   </div>
 </aside>
@@ -2111,8 +2134,65 @@ var Gen = (function(){
       }).catch(function(){ go.disabled=false; go.textContent='Generate'; res.style.display='block';
         res.innerHTML='<span style="color:var(--red);font-size:12px;">network error</span>'; });
   }
+  function setMode(m){
+    var isEdit=(m==='edit');
+    el('gen-mode-generate').style.display=isEdit?'none':'';
+    el('gen-mode-edit').style.display=isEdit?'':'none';
+    el('gm-generate').classList.toggle('on',!isEdit);
+    el('gm-edit').classList.toggle('on',isEdit);
+    if(isEdit && el('edit-src').value.trim()) editCost();
+  }
+  function editSrc(){ return el('edit-src').value.trim(); }
+  function setEditSource(mid){
+    el('edit-src').value=mid||'';
+    var img=el('edit-src-img');
+    if(mid){ img.onerror=function(){img.style.display='none';}; img.src='/thumbs/'+mid+'.jpg'; img.style.display='block'; }
+    else { img.style.display='none'; }
+    debEditCost();
+  }
+  function editPayload(){
+    return { mode:'edit', source:editSrc(), instruction:el('edit-ins').value.trim(),
+      resolution:el('edit-res').value, quality:el('edit-qual').value, aspect:el('edit-aspect').value };
+  }
+  function editCost(){
+    var cost=el('edit-cost');
+    if(!editSrc()){ cost.className='gen-cost'; cost.textContent='Pick an image to see the cost.'; return; }
+    cost.className='gen-cost'; cost.textContent='Checking cost\\u2026'; var mine=++costSeq;
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(editPayload())})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine!==costSeq)return;
+        if(d.note){ cost.textContent=d.note; return; }
+        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
+        var n=d.cost!=null?d.cost.toLocaleString():'?';
+        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 an Edit card covers this (saves ~'+n+' credits)'; }
+        else { cost.textContent='\\u2248 '+n+' credits'; }
+      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
+  }
+  function debEditCost(){ clearTimeout(costTimer); costTimer=setTimeout(editCost,250); }
+  function edit(){
+    var p=editPayload();
+    if(!p.source){ el('edit-src').focus(); return; }
+    if(!p.instruction){ el('edit-ins').focus(); return; }
+    var go=el('edit-go'), res=el('edit-result');
+    go.disabled=true; go.textContent='Editing\\u2026'; res.style.display='none';
+    fetch('/api/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
+      .then(function(r){return r.json();})
+      .then(function(d){ go.disabled=false; go.textContent='Apply edit'; res.style.display='block';
+        if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
+        var ids=d.media_ids||[];
+        var cost=d.paid_credit===0?'free (card used)':((d.paid_credit||0).toLocaleString()+' credits');
+        var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 Edited \\u2014 '+cost+'. Added to your gallery.</div>';
+        ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
+        if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');return false;">Edit this result \\u2192</a>'; }
+        res.innerHTML=html;
+      }).catch(function(){ go.disabled=false; go.textContent='Apply edit'; res.style.display='block';
+        res.innerHTML='<span style="color:var(--red);font-size:12px;">network error</span>'; });
+  }
+  function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
-          refreshCost:debouncedCost, generate:generate, get selected(){return selected;}};
+          refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
+          editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
+          get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
   var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
@@ -2123,6 +2203,12 @@ document.addEventListener('DOMContentLoaded', function(){
     b.classList.add('on'); Gen.refreshCost(); });
   ['gen-mode','gen-count','gen-hp','gen-ph'].forEach(function(id){
     var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.refreshCost); });
+  ['edit-res','edit-qual','edit-aspect'].forEach(function(id){
+    var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.editCost); });
+  var es=document.getElementById('edit-src');
+  if(es) es.addEventListener('input', function(){ Gen.setEditSource(es.value.trim()); });
+  var em=new URLSearchParams(location.search).get('edit');
+  if(em) Gen.openEdit(em);
 });
 </script>
 """)
@@ -2268,10 +2354,10 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endif %}
     <button class="btn" data-cmd="{{ row.media_id }}" onclick="copyCmd(this)"
       title="Copy this image's media_id (paste into the GUI Video/Edit tab)">Copy media id</button>
-    <button class="btn"
-      data-cmd='python pixai_gallery_backup.py --edit-image --edit-src {{ row.media_id }} --prompt "describe the change"'
-      onclick="copyCmd(this)"
-      title="Copy a ready-to-run Edit command (paste in your terminal; add --confirm to run)">Edit this → cmd</button>
+    {% if row.is_video != '1' %}
+    <a class="btn btn-primary" href="/?edit={{ row.media_id }}"
+      title="Open this image in the gallery's Edit Bay">&#10022; Edit this</a>
+    {% endif %}
     {% if row.is_video != '1' %}
     <button class="btn"
       data-cmd='python pixai_gallery_backup.py --generate-video --image {{ row.media_id }} --prompt "describe the motion"'
@@ -3004,20 +3090,44 @@ function savePrompt() {
             prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
             kaisuuken_id="", no_card=bool(p.get("no_card")))
 
+    def _edit_params_from_payload(core, p):
+        """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
+        catalog media_id (the image being edited). Returns None if no source."""
+        p = p or {}
+        src = str(p.get("source") or "").strip()
+        if not src:
+            return None
+        return core.build_chat_edit_parameters(
+            (p.get("instruction") or "").strip(), [src],
+            resolution=(p.get("resolution") or "1K"),
+            aspect_ratio=(p.get("aspect") or "3:4"),
+            quality=(p.get("quality") or "medium"))
+
+    def _params_and_nocard(core, p):
+        """Route a drawer payload to either generate or edit params. Returns (params,
+        no_card, note). note is set (params None) when something's missing."""
+        if (p or {}).get("mode") == "edit":
+            params = _edit_params_from_payload(core, p)
+            return (params, bool((p or {}).get("no_card")),
+                    None if params else "pick an image to edit")
+        args = _gen_args_from_payload(p)
+        if not args.model:
+            return None, args.no_card, "pick a model"
+        return core._gen_parameters(args), args.no_card, None
+
     @app.route("/api/price", methods=["POST"])
     def api_price():
-        """Live cost + free-card check for the drawer's current settings. Read-only
-        (no spend). Localhost-only."""
+        """Live cost + free-card check for the drawer's current settings (generate OR
+        edit). Read-only (no spend). Localhost-only."""
         if not _is_local_request():
             return jsonify({"error": "localhost-only", "cost": None}), 403
         try:
             core, session = _gen_session()
-            args = _gen_args_from_payload(request.get_json(silent=True) or {})
-            if not args.model:
-                return jsonify({"cost": None, "free": False, "note": "pick a model"})
-            params = core._gen_parameters(args)
+            params, no_card, note = _params_and_nocard(core, request.get_json(silent=True) or {})
+            if params is None:
+                return jsonify({"cost": None, "free": False, "note": note})
             cost = core.price_task(session, params)
-            best = None if args.no_card else core.match_kaisuuken(session, params)
+            best = None if no_card else core.match_kaisuuken(session, params)
             return jsonify({"cost": cost, "free": bool(best),
                             "card_expires": (best or {}).get("expiresAt")})
         except Exception as e:
@@ -3039,6 +3149,29 @@ function savePrompt() {
                 return jsonify({"error": "enter a prompt"}), 400
             params = core._gen_parameters(args)
             core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
+            res = core.web_generate(session, params, str(out_dir))
+            return jsonify(res)
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+    @app.route("/api/edit", methods=["POST"])
+    def api_edit():
+        """Instruct-edit an existing gallery image ('make it night'). Localhost-gated;
+        auto-applies an Edit-Pro card unless no_card. Catalogs the result into this
+        backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            from types import SimpleNamespace
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            params = _edit_params_from_payload(core, p)
+            if params is None:
+                return jsonify({"error": "pick an image to edit"}), 400
+            if not (p.get("instruction") or "").strip():
+                return jsonify({"error": "describe the edit"}), 400
+            core._apply_kaisuuken(session, params,
+                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             res = core.web_generate(session, params, str(out_dir))
             return jsonify(res)
         except Exception as e:
