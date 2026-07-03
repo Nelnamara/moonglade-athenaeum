@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 try:
-    from flask import (Flask, redirect, render_template_string, request,
+    from flask import (Flask, jsonify, redirect, render_template_string, request,
                        send_file, send_from_directory, url_for)
 except ImportError:
     sys.exit("Flask is required for the gallery server.\n"
@@ -1293,7 +1293,8 @@ document.addEventListener('DOMContentLoaded', function() {
 <header>
   <div class="brand"><span class="mark">M</span><h1>Moonglade Athenaeum</h1></div>
   <span class="header-stats">{{ '{:,}'.format(total) }} images</span>
-  <a class="back-link" href="{{ url_for('health') }}" style="margin-left:auto;">Collection health →</a>
+  <button type="button" class="btn btn-primary" onclick="Gen.open()" style="margin-left:auto;">&#10022; Generate</button>
+  <a class="back-link" href="{{ url_for('health') }}">Collection health &rarr;</a>
 </header>
 
 <button type="button" class="filter-toggle btn" onclick="toggleFilters()"
@@ -1915,6 +1916,126 @@ document.addEventListener('DOMContentLoaded', function(){
       x0 = null;
     }, {passive: true});
   }
+});
+</script>
+
+<style>
+  #gen-scrim{position:fixed;inset:0;background:rgba(6,4,16,.55);z-index:200;opacity:0;visibility:hidden;transition:opacity .18s;}
+  #gen-scrim.open{opacity:1;visibility:visible;}
+  #gen-drawer{position:fixed;top:0;right:0;height:100%;width:372px;max-width:94vw;background:var(--mantle);border-left:1px solid var(--surface1);z-index:201;transform:translateX(100%);transition:transform .2s ease;display:flex;flex-direction:column;}
+  #gen-drawer.open{transform:translateX(0);}
+  .gen-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--surface0);}
+  .gen-head .spark{color:var(--lavender);font-size:18px;}
+  .gen-head .t{font-size:15px;font-weight:600;color:var(--text);}
+  .gen-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
+  .gen-head .x:hover{color:var(--red);}
+  .gen-body{padding:12px 14px;overflow-y:auto;flex:1;}
+  .gen-seg{display:flex;gap:6px;margin-bottom:10px;}
+  .gen-seg button{flex:1;padding:6px 0;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
+  .gen-seg button.on{background:var(--lavender);color:var(--base);border-color:var(--lavender);font-weight:600;}
+  .gen-search{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;margin-bottom:10px;}
+  .gen-search:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+  .gen-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .12s;}
+  .gen-card{border-radius:12px;overflow:hidden;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;position:relative;}
+  .gen-card:hover{border-color:var(--overlay0);}
+  .gen-card.sel{border:2px solid var(--lavender);box-shadow:0 0 0 2px rgba(182,146,230,.25);}
+  .gen-card .cov{aspect-ratio:1;width:100%;object-fit:cover;display:block;background:var(--surface1);}
+  .gen-card .cov.blur{filter:blur(15px);}
+  .gen-card .meta{padding:5px 7px;}
+  .gen-card .nm{font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .gen-card .sub{display:flex;justify-content:space-between;align-items:center;margin-top:2px;font-size:10px;}
+  .gen-card .ty{color:var(--emerald);}
+  .gen-card .lk{color:var(--subtext);}
+  .gen-card .chk{position:absolute;top:4px;right:4px;color:var(--lavender);background:var(--mantle);border-radius:50%;font-size:12px;width:18px;height:18px;display:none;align-items:center;justify-content:center;border:1px solid var(--lavender);}
+  .gen-card.sel .chk{display:flex;}
+  .gen-empty{color:var(--subtext);font-size:12px;padding:22px 4px;text-align:center;}
+  .gen-foot{border-top:1px dashed var(--surface1);margin-top:12px;padding-top:10px;color:var(--overlay0);font-size:11px;}
+  .gen-foot b{color:var(--lavender);font-weight:600;}
+</style>
+<div id="gen-scrim" onclick="Gen.close()"></div>
+<aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
+  <div class="gen-head">
+    <span class="spark">&#10022;</span><span class="t">Generate</span>
+    <button class="x" onclick="Gen.close()" aria-label="Close">&times;</button>
+  </div>
+  <div class="gen-body">
+    <div class="gen-seg">
+      <button id="gen-k-base" class="on" onclick="Gen.setKind('base')">Models</button>
+      <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
+    </div>
+    <input class="gen-search" id="gen-q" placeholder="Search models&hellip;" autocomplete="off">
+    <div class="gen-grid" id="gen-grid"></div>
+    <div class="gen-empty" id="gen-empty" style="display:none;"></div>
+    <div class="gen-foot">Selected: <b id="gen-selname">none</b><br><span style="color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;">prompt &middot; size &middot; live cost &mdash; next</span></div>
+  </div>
+</aside>
+<script>
+var Gen = (function(){
+  var kind='base', q='', selected=null, timer=null, seq=0;
+  function el(id){return document.getElementById(id);}
+  function open(){
+    el('gen-drawer').classList.add('open'); el('gen-scrim').classList.add('open');
+    el('gen-drawer').setAttribute('aria-hidden','false');
+    if(!el('gen-grid').children.length) search();
+    setTimeout(function(){el('gen-q').focus();},200);
+  }
+  function close(){
+    el('gen-drawer').classList.remove('open'); el('gen-scrim').classList.remove('open');
+    el('gen-drawer').setAttribute('aria-hidden','true');
+  }
+  function setKind(k){
+    if(k===kind) return; kind=k;
+    el('gen-k-base').classList.toggle('on',k==='base');
+    el('gen-k-lora').classList.toggle('on',k==='lora');
+    el('gen-q').placeholder = (k==='lora'?'Search LoRAs':'Search models')+'\\u2026';
+    search();
+  }
+  function onInput(){ q=el('gen-q').value.trim(); clearTimeout(timer); timer=setTimeout(search,280); }
+  function search(){
+    var mine=++seq, grid=el('gen-grid'); grid.style.opacity='.45';
+    fetch('/api/model-search?kind='+kind+'&size=24&q='+encodeURIComponent(q))
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine!==seq)return; render(d.results||[], d.error); grid.style.opacity='1'; })
+      .catch(function(){ if(mine!==seq)return; render([], 'network error'); grid.style.opacity='1'; });
+  }
+  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmt(n){ return (n||0).toLocaleString(); }
+  function tyShort(t){ t=(t||'').toUpperCase();
+    if(t.indexOf('LORA')>=0)return 'LoRA'; if(t.indexOf('MMDIT')>=0)return 'MMDiT';
+    if(t.indexOf('DIT')>=0)return 'DiT'; if(t.indexOf('SDXL')>=0)return 'SDXL';
+    if(t.indexOf('SD_V1')>=0)return 'SD1.5'; if(t.indexOf('SD3')>=0)return 'SD3';
+    if(t.indexOf('Z_IMAGE')>=0)return 'Z-Image'; if(t.indexOf('CHAT')>=0)return 'Chat';
+    return (t.split('_')[0]||'model').toLowerCase(); }
+  function render(rows, err){
+    var grid=el('gen-grid'), empty=el('gen-empty'); grid.innerHTML='';
+    if(err){ empty.textContent='\\u26a0 '+err; empty.style.display='block'; return; }
+    if(!rows.length){ empty.textContent='No results \\u2014 try another search.'; empty.style.display='block'; return; }
+    empty.style.display='none';
+    rows.forEach(function(m){
+      var c=document.createElement('div'); c.className='gen-card';
+      if(selected && selected.model_id===m.model_id) c.classList.add('sel');
+      var cov = m.preview_url ? '<img class="cov'+(m.should_blur?' blur':'')+'" loading="lazy" src="'+esc(m.preview_url)+'" alt="">' : '<div class="cov"></div>';
+      c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span></div></div>';
+      c.onclick=function(){ selectCard(m, c); };
+      grid.appendChild(c);
+    });
+  }
+  function selectCard(m, c){
+    document.querySelectorAll('.gen-card.sel').forEach(function(x){x.classList.remove('sel');});
+    c.classList.add('sel'); selected=Object.assign({}, m);
+    el('gen-selname').textContent=m.title+' \\u2026';
+    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
+      .then(function(r){return r.json();})
+      .then(function(d){ selected.version_id=d.version_id||'';
+        el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)'); })
+      .catch(function(){ el('gen-selname').textContent=m.title; });
+  }
+  return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
+          get selected(){return selected;}};
+})();
+document.addEventListener('DOMContentLoaded', function(){
+  var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
 });
 </script>
 """)
@@ -2715,6 +2836,55 @@ function savePrompt() {
         mem.seek(0)
         return send_file(mem, mimetype="application/zip", as_attachment=True,
                          download_name="pixai_selection_{}.zip".format(n))
+
+    # --- Generation surface (localhost-gated) --------------------------------
+    # The Generate drawer talks to PixAI with the OWNER's API key and can spend
+    # credits. So every generation endpoint is gated to local requests: exposing the
+    # gallery on the LAN (--host 0.0.0.0) must never let another device use the key or
+    # spend credits. Read-only browsing stays open; generation is owner-only.
+    def _is_local_request():
+        ra = (request.remote_addr or "").strip()
+        return ra in ("127.0.0.1", "::1", "localhost", "")
+
+    def _gen_session():
+        import pixai_gallery_backup as core
+        return core, core._make_session(None)
+
+    @app.route("/api/model-search")
+    def api_model_search():
+        """Search PixAI models/LoRAs for the picker grid via the /v2 search (clean
+        MODEL/LORA split + thumbnails). Read-only, but uses the owner's key -> localhost
+        only. ?q=&kind=base|lora&size=N&offset=N."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only", "results": []}), 403
+        q = (request.args.get("q") or "").strip()
+        usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
+        try:
+            size = max(1, min(int(request.args.get("size") or 24), 50))
+            offset = max(0, int(request.args.get("offset") or 0))
+        except ValueError:
+            size, offset = 24, 0
+        try:
+            core, session = _gen_session()
+            return jsonify(core.model_search_rest(session, keyword=q, usage=usage,
+                                                  size=size, offset=offset))
+        except Exception as e:
+            return jsonify({"error": str(e)[:200], "results": []}), 200
+
+    @app.route("/api/model-version")
+    def api_model_version():
+        """Resolve a model_id (from the grid) to its generatable version id, on selection.
+        Localhost-only; read-only."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only", "version_id": ""}), 403
+        mid = (request.args.get("model_id") or "").strip()
+        if not mid:
+            return jsonify({"error": "model_id required", "version_id": ""}), 400
+        try:
+            core, session = _gen_session()
+            return jsonify({"version_id": core.resolve_latest_version(session, mid)})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200], "version_id": ""}), 200
 
     @app.after_request
     def _gzip_html(resp):
