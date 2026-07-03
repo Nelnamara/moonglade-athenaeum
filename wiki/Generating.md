@@ -147,6 +147,20 @@ reuse the id across edit/video runs.
 python pixai_gallery_backup.py --upload "C:\pics\her.png"     # prints: Uploaded media_id: <id>
 ```
 
+## Image → prompt (`--suggest-prompt`)
+
+Reverse a prompt out of any image (PixAI's *"Image to prompt"*). Point it at a catalog
+`media_id` or a local file (uploaded first, free) and it prints suggested prompts — a
+Danbooru-style **tag list** plus one or two **natural-language descriptions**. **Free**,
+read-only — no `--confirm`.
+
+```bash
+python pixai_gallery_backup.py --suggest-prompt 739411069833281443    # a catalog media_id
+python pixai_gallery_backup.py --suggest-prompt "C:\pics\ref.png"     # a local file (uploads first)
+```
+
+Copy a suggestion straight into `--generate --prompt "…"` to riff on an image's style.
+
 ## Free cards (`--cards`) — auto-applied
 
 PixAI grants free-generation cards — **kaisuuken** (回数券, "ticket book") — through membership
