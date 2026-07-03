@@ -3089,92 +3089,80 @@ def run_account_info(args):
 
 
 # --- Free "cards" (kaisuuken / 回数券) -------------------------------------------
-# PixAI grants free-generation tickets ("kaisuuken") via membership/events. When a
-# generation's params match an available ticket, the client attaches a `kaisuukenId`
-# to the submit and it's free instead of charging credits. We keep this READ + explicit-
-# id only: --cards shows balances + ids; pass a specific --kaisuuken-id to spend one.
-# We NEVER auto-consume a card. FIELD NAMES BELOW ARE RE-INFERRED (see
-# private/GENERATOR_SURFACE.md) and want one live confirmation; list_kaisuukens fails soft.
-_KAISUUKEN_QUERY = """
-query {
-  me {
-    id
-    kaisuukens {
-      id
-      categoryCode
-      taskType
-      total
-      remaining
-      consumeAmount
-      expiresAt
-      status
-    }
-  }
-}
-"""
+# PixAI grants free-generation tickets ("kaisuuken", model-locked) via membership/events.
+# VERIFIED (2026-07-02): a card is applied AUTOMATICALLY, server-side, whenever you
+# generate with its matching model (nearest-expiry first) -- your credits stay untouched.
+# So `--cards` is a read-only DISPLAY; you don't need an id, just use the right model.
+# `--kaisuuken-id` remains as an optional explicit override. list_kaisuukens fails soft.
+_KAISUUKEN_FIELDS = (
+    " { count soonestExpireAt categoryCode templateId templateCode taskTypes"
+    " categoryName templateName templateDescription routeTo routeToNative"
+    " expiryCounts { expiresAt count } }")
+# VERIFIED response shape (2026-07-02): the list root is `kaisuukens`, one row per
+# TEMPLATE with a held `count` (not per-id). Try the top-level form first, then me{}.
+# gql_adhoc POSTs the full document, so no persisted hash is needed.
+_KAISUUKEN_QUERIES = (
+    "query { kaisuukens" + _KAISUUKEN_FIELDS + " }",
+    "query { me { kaisuukens" + _KAISUUKEN_FIELDS + " } }",
+)
 
 
 def _normalize_kaisuuken(raw):
-    """Tolerantly normalize one kaisuuken dict (RE-inferred field names vary). Returns
-    {id, category, task_type, total, remaining, expires, status}."""
+    """Normalize one kaisuuken TEMPLATE row (verified shape 2026-07-02). Each row is a
+    template with a held `count`, not individual ids. The model it's locked to lives in
+    routeToNative (pixai://...?modelVersionId=NNN)."""
     raw = raw or {}
-
-    def first(*keys):
-        for k in keys:
-            v = raw.get(k)
-            if v not in (None, ""):
-                return v
-        return None
-
-    total = first("total", "amount", "count", "freeAmount", "quota")
-    remaining = first("remaining", "left", "balance", "remainingAmount")
-    used = first("used", "usedAmount", "consumed", "consumeAmount")
-    if remaining is None and total is not None and used is not None:
-        try:
-            remaining = int(total) - int(used)
-        except (TypeError, ValueError):
-            remaining = None
+    m = re.search(r"modelVersionId=(\d+)", raw.get("routeToNative") or "")
     return {
-        "id": first("id", "kaisuukenId"),
-        "category": first("categoryCode", "category", "code"),
-        "task_type": first("taskType", "type", "kind"),
-        "total": total,
-        "remaining": remaining,
-        "expires": first("expiresAt", "expiresInDays", "endAt"),
-        "status": first("status", "state"),
+        "name": raw.get("templateName") or raw.get("templateCode") or "card",
+        "count": raw.get("count"),
+        "category": raw.get("categoryName") or raw.get("categoryCode") or "",
+        "task_types": raw.get("taskTypes") or [],
+        "model_version_id": m.group(1) if m else "",
+        "template_code": raw.get("templateCode") or "",
+        "expires": raw.get("soonestExpireAt") or "",
     }
 
 
 def list_kaisuukens(session):
-    """Read the account's free-generation tickets (kaisuuken). Read-only; fails soft
-    (returns []) if the schema differs -- fields are RE-inferred and may need a live
-    re-capture. Never spends anything."""
-    try:
-        me = (gql_adhoc(session, _KAISUUKEN_QUERY) or {}).get("me") or {}
-    except PixAIError:
-        return []
-    return [_normalize_kaisuuken(k) for k in (me.get("kaisuukens") or [])]
+    """Read the account's free-generation cards (kaisuuken). Read-only; fails soft
+    (returns []) on schema drift. Never spends anything. One row per template, with the
+    held `count`, the model it's locked to, and soonest expiry."""
+    for q in _KAISUUKEN_QUERIES:
+        try:
+            data = gql_adhoc(session, q) or {}
+        except PixAIError:
+            continue
+        rows = data.get("kaisuukens")
+        if rows is None:
+            rows = (data.get("me") or {}).get("kaisuukens")
+        if rows is not None:
+            return [_normalize_kaisuuken(k) for k in rows]
+    return []
 
 
 def run_cards(args):
-    """Print the account's free-generation cards (kaisuuken) + their ids, so you can
-    pass one to --kaisuuken-id on a generate/edit/video run. Read-only; spends nothing."""
+    """Print the account's free-generation cards (kaisuuken). Cards AUTO-APPLY when you
+    generate with the matching model (nearest-expiry first) -- no id needed. Read-only."""
     session = _make_session(getattr(args, "token", None))
     cards = list_kaisuukens(session)
     if not cards:
-        print("No free cards found (or the kaisuuken schema needs a live re-capture -- "
-              "see private notes). Read-only; nothing was spent.")
+        print("No free cards found (read-only; nothing was spent).")
         return {"cards": 0}
-    print("Free generation cards (kaisuuken):")
+    print("Free-generation cards (kaisuuken) -- applied AUTOMATICALLY on the matching model:\n")
+    total = 0
     for c in cards:
-        rem, tot = c.get("remaining"), c.get("total")
-        count = "{}/{}".format("?" if rem is None else rem, "?" if tot is None else tot)
-        exp = "  exp {}".format(str(c["expires"])[:10]) if c.get("expires") else ""
-        print("  {:>7}  {:<14} id={} {}{}".format(
-            count, (c.get("category") or c.get("task_type") or "card"),
-            c.get("id") or "-", (c.get("status") or ""), exp))
-    print("\nSpend one on a run:  --kaisuuken-id <id> --confirm")
-    return {"cards": len(cards)}
+        total += int(c.get("count") or 0)
+        model = c["model_version_id"] or ("/".join(c["task_types"]) or "-")
+        print("  {:>3}x  {:<22} {:<13} model={:<20} exp {}".format(
+            c.get("count") or 0, c.get("name"), "[" + c["category"] + "]",
+            model, str(c["expires"])[:10]))
+    print("\n{} free generations total. Cards apply automatically -- just use the matching "
+          "model:".format(total))
+    print("  Tsubaki.2 card  -> --generate         (default model already matches)")
+    print("  Edit Pro card   -> --edit-image       (default model already matches)")
+    print("  V4.0 video card -> --generate-video   (default v4.0.1, --duration 5)")
+    return {"cards": len(cards), "total": total}
 
 
 def run_reconcile_deleted(args):
