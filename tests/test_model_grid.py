@@ -47,3 +47,23 @@ def test_resolve_latest_version_picks_first(monkeypatch):
 def test_resolve_latest_version_empty(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])
     assert core.resolve_latest_version(object(), "x") == ""
+
+
+def test_web_generate_pipeline(monkeypatch, tmp_path):
+    # web_generate = submit -> poll -> task detail -> download/catalog; all reused parts
+    # mocked so no network / no spend. Verifies it threads the pieces + returns media_ids.
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {"id": "T1"}})
+    monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: 0)
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda s, t: {"outputs": {"mediaId": "M1", "batchMediaIds": ["M2"]}})
+    monkeypatch.setattr(core, "_download_image_task", lambda *a, **k: ["/p/M1.webp", "/p/M2.webp"])
+    res = core.web_generate(object(), {"prompts": "x", "modelId": "v"}, str(tmp_path))
+    assert res["task_id"] == "T1" and res["media_ids"] == ["M1", "M2"]
+    assert res["saved"] == 2 and res["paid_credit"] == 0
+
+
+def test_web_generate_raises_without_task_id(monkeypatch, tmp_path):
+    import pytest
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {}})
+    with pytest.raises(core.PixAIError):
+        core.web_generate(object(), {"prompts": "x", "modelId": "v"}, str(tmp_path))

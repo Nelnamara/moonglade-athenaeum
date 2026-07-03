@@ -2988,6 +2988,33 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     return saved
 
 
+def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll_timeout=240):
+    """Submit an image generation, wait for it, download + catalog into out_dir, and return
+    {task_id, media_ids, saved, paid_credit}. The free card (if any) must already be
+    attached to `params` (via _apply_kaisuuken). Synchronous -- the caller (the gallery
+    Generate drawer) shows a spinner. Raises PixAIError on failure. Reuses the same submit /
+    poll / download-catalog plumbing as the CLI so web + CLI stay identical."""
+    from types import SimpleNamespace
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    init_db(out / "catalog.db")
+    created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+    task_id = (created.get("createGenerationTask") or {}).get("id")
+    if not task_id:
+        raise PixAIError("no task id returned: " + json.dumps(created)[:200])
+    paid = _poll_task_status(session, task_id, poll_timeout, interval=3,
+                             label="generate", fail_noun="generation")
+    result = task_detail_gql(session, task_id) or {}
+    a = SimpleNamespace(name_length=name_length, name_sep=name_sep)
+    saved = _download_image_task(session, result, task_id, out, a,
+                                 prompt=params.get("prompts", ""))
+    outputs = result.get("outputs") or {}
+    mids = ([str(outputs["mediaId"])] if outputs.get("mediaId") else []) + \
+           [str(m) for m in (outputs.get("batchMediaIds") or [])]
+    return {"task_id": str(task_id), "media_ids": list(dict.fromkeys(mids)),
+            "saved": len(saved), "paid_credit": paid}
+
+
 def run_generate_video(args):
     """Create an image-to-video clip via PixAI (createGenerationTask + i2vPro params),
     poll to completion, download the mp4 into videos/, and catalog it (source='api',

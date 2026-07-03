@@ -1949,8 +1949,23 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-card .chk{position:absolute;top:4px;right:4px;color:var(--lavender);background:var(--mantle);border-radius:50%;font-size:12px;width:18px;height:18px;display:none;align-items:center;justify-content:center;border:1px solid var(--lavender);}
   .gen-card.sel .chk{display:flex;}
   .gen-empty{color:var(--subtext);font-size:12px;padding:22px 4px;text-align:center;}
-  .gen-foot{border-top:1px dashed var(--surface1);margin-top:12px;padding-top:10px;color:var(--overlay0);font-size:11px;}
-  .gen-foot b{color:var(--lavender);font-weight:600;}
+  .gen-form{border-top:1px dashed var(--surface1);margin-top:12px;padding-top:10px;}
+  .gen-lbl{color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;}
+  .gen-ta{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 9px;font-size:13px;font-family:inherit;resize:vertical;}
+  .gen-ta:focus,.gen-sel:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+  #gen-selname{color:var(--lavender);font-size:12.5px;margin-bottom:8px;}
+  .gen-aspects{display:flex;gap:5px;flex-wrap:wrap;}
+  .gen-aspects button{padding:4px 9px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
+  .gen-aspects button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
+  .gen-row{display:flex;gap:8px;}
+  .gen-sel{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12.5px;}
+  .gen-check{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:12px;margin-top:8px;cursor:pointer;}
+  .gen-cost{margin:12px 0 8px;padding:8px 10px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12.5px;color:var(--text);}
+  .gen-cost.free{border-color:var(--emerald);color:var(--emerald);}
+  .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
+  .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
+  .gen-result{margin-top:12px;} .gen-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
+  .gen-result a{color:var(--accent-soft);font-size:12px;text-decoration:none;}
 </style>
 <div id="gen-scrim" onclick="Gen.close()"></div>
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
@@ -1966,12 +1981,39 @@ document.addEventListener('DOMContentLoaded', function(){
     <input class="gen-search" id="gen-q" placeholder="Search models&hellip;" autocomplete="off">
     <div class="gen-grid" id="gen-grid"></div>
     <div class="gen-empty" id="gen-empty" style="display:none;"></div>
-    <div class="gen-foot">Selected: <b id="gen-selname">none</b><br><span style="color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;">prompt &middot; size &middot; live cost &mdash; next</span></div>
+    <div class="gen-form">
+      <div class="gen-lbl">Selected model</div>
+      <div id="gen-selname">none &mdash; pick one above</div>
+      <textarea id="gen-prompt" class="gen-ta" rows="3" placeholder="Describe your image&hellip;"></textarea>
+      <details style="margin-top:6px;">
+        <summary style="cursor:pointer;color:var(--subtext);font-size:11px;">Negative prompt</summary>
+        <textarea id="gen-neg" class="gen-ta" rows="2" placeholder="lowres, text, watermark&hellip;" style="margin-top:5px;"></textarea>
+      </details>
+      <div class="gen-lbl">Aspect</div>
+      <div class="gen-aspects" id="gen-aspects">
+        <button type="button" data-w="512" data-h="512" class="on">1:1</button>
+        <button type="button" data-w="512" data-h="768">2:3</button>
+        <button type="button" data-w="768" data-h="512">3:2</button>
+        <button type="button" data-w="512" data-h="896">9:16</button>
+        <button type="button" data-w="896" data-h="512">16:9</button>
+      </div>
+      <div class="gen-row" style="margin-top:8px;">
+        <div style="flex:1;"><div class="gen-lbl">Mode</div>
+          <select id="gen-mode" class="gen-sel"><option value="auto">Auto</option><option value="lite">Lite</option><option value="standard">Standard</option><option value="pro">Pro</option><option value="ultra">Ultra</option></select></div>
+        <div style="flex:1;"><div class="gen-lbl">Count</div>
+          <select id="gen-count" class="gen-sel"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+      </div>
+      <label class="gen-check"><input type="checkbox" id="gen-hp"> High priority (faster, costs more)</label>
+      <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
+      <div id="gen-cost" class="gen-cost">Pick a model to see the cost.</div>
+      <button id="gen-go" class="gen-go" onclick="Gen.generate()" disabled>Generate</button>
+      <div id="gen-result" class="gen-result" style="display:none;"></div>
+    </div>
   </div>
 </aside>
 <script>
 var Gen = (function(){
-  var kind='base', q='', selected=null, timer=null, seq=0;
+  var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null;
   function el(id){return document.getElementById(id);}
   function open(){
     el('gen-drawer').classList.add('open'); el('gen-scrim').classList.add('open');
@@ -2027,15 +2069,60 @@ var Gen = (function(){
     fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
       .then(function(r){return r.json();})
       .then(function(d){ selected.version_id=d.version_id||'';
-        el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)'); })
+        el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)');
+        el('gen-go').disabled = !d.version_id; refreshCost(); })
       .catch(function(){ el('gen-selname').textContent=m.title; });
   }
+  function curAspect(){ var b=document.querySelector('#gen-aspects button.on');
+    return b?{w:+b.getAttribute('data-w'),h:+b.getAttribute('data-h')}:{w:512,h:512}; }
+  function payload(){ var a=curAspect();
+    return { version_id:(selected&&selected.version_id)||'', prompt:el('gen-prompt').value.trim(),
+      negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
+      count:+el('gen-count').value, high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked }; }
+  function refreshCost(){
+    if(!(selected&&selected.version_id)) return;
+    var cost=el('gen-cost'); cost.className='gen-cost'; cost.textContent='Checking cost\\u2026';
+    var mine=++costSeq;
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine!==costSeq)return;
+        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
+        var n = d.cost!=null ? d.cost.toLocaleString() : '?';
+        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 a card covers this (saves ~'+n+' credits)'; }
+        else { cost.textContent='\\u2248 '+n+' credits'; }
+      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
+  }
+  function debouncedCost(){ clearTimeout(costTimer); costTimer=setTimeout(refreshCost,250); }
+  function generate(){
+    var p=payload();
+    if(!p.version_id){ return; }
+    if(!p.prompt){ el('gen-prompt').focus(); return; }
+    var go=el('gen-go'), res=el('gen-result');
+    go.disabled=true; go.textContent='Generating\\u2026'; res.style.display='none';
+    fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
+      .then(function(r){return r.json();})
+      .then(function(d){ go.disabled=false; go.textContent='Generate'; res.style.display='block';
+        if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
+        var ids=d.media_ids||[];
+        var cost = d.paid_credit===0 ? 'free (card used)' : ((d.paid_credit||0).toLocaleString()+' credits');
+        var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 Done \\u2014 '+cost+'. Added to your gallery.</div>';
+        ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
+        html+='<a href="/">Refresh gallery to see it in the grid \\u2192</a>'; res.innerHTML=html;
+      }).catch(function(){ go.disabled=false; go.textContent='Generate'; res.style.display='block';
+        res.innerHTML='<span style="color:var(--red);font-size:12px;">network error</span>'; });
+  }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
-          get selected(){return selected;}};
+          refreshCost:debouncedCost, generate:generate, get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
   var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
+  var asp=document.getElementById('gen-aspects');
+  if(asp) asp.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b)return;
+    asp.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on'); Gen.refreshCost(); });
+  ['gen-mode','gen-count','gen-hp','gen-ph'].forEach(function(id){
+    var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.refreshCost); });
 });
 </script>
 """)
@@ -2885,6 +2972,77 @@ function savePrompt() {
             return jsonify({"version_id": core.resolve_latest_version(session, mid)})
         except Exception as e:
             return jsonify({"error": str(e)[:200], "version_id": ""}), 200
+
+    def _gen_args_from_payload(p):
+        """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
+        feeds to core._gen_parameters -- so web + CLI build identical params (one source
+        of truth). Clamped to safe ranges."""
+        from types import SimpleNamespace
+        p = p or {}
+        def num(k, d, cast=int):
+            try:
+                return cast(p.get(k, d))
+            except (TypeError, ValueError):
+                return d
+        loras = []
+        for lo in (p.get("loras") or []):
+            vid = str((lo or {}).get("version_id") or "").strip()
+            if vid:
+                loras.append((vid, (lo or {}).get("weight", 0.7)))
+        seed_raw = str(p.get("seed") or "").strip()
+        hp = p.get("high_priority") in (True, "1", "true", "on")
+        return SimpleNamespace(
+            params_json="", prompt=(p.get("prompt") or "").strip(),
+            negative=(p.get("negative") or "").strip(),
+            model=(p.get("version_id") or "").strip(),
+            width=num("width", 512), height=num("height", 512),
+            steps=num("steps", 25), cfg=num("cfg", 7, float),
+            count=max(1, min(num("count", 1), 4)),
+            priority=(1000 if hp else 500), mode=(p.get("mode") or "auto"),
+            seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
+            lora=loras,
+            prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
+            kaisuuken_id="", no_card=bool(p.get("no_card")))
+
+    @app.route("/api/price", methods=["POST"])
+    def api_price():
+        """Live cost + free-card check for the drawer's current settings. Read-only
+        (no spend). Localhost-only."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only", "cost": None}), 403
+        try:
+            core, session = _gen_session()
+            args = _gen_args_from_payload(request.get_json(silent=True) or {})
+            if not args.model:
+                return jsonify({"cost": None, "free": False, "note": "pick a model"})
+            params = core._gen_parameters(args)
+            cost = core.price_task(session, params)
+            best = None if args.no_card else core.match_kaisuuken(session, params)
+            return jsonify({"cost": cost, "free": bool(best),
+                            "card_expires": (best or {}).get("expiresAt")})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200], "cost": None}), 200
+
+    @app.route("/api/generate", methods=["POST"])
+    def api_generate():
+        """Submit a generation from the drawer, wait, and catalog it into THIS gallery's
+        backup. Localhost-only (spends the owner's credits/cards). A matching free card is
+        auto-applied unless no_card is set. Returns {task_id, media_ids, paid_credit}."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            core, session = _gen_session()
+            args = _gen_args_from_payload(request.get_json(silent=True) or {})
+            if not args.model:
+                return jsonify({"error": "pick a model first"}), 400
+            if not args.prompt:
+                return jsonify({"error": "enter a prompt"}), 400
+            params = core._gen_parameters(args)
+            core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
+            res = core.web_generate(session, params, str(out_dir))
+            return jsonify(res)
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
 
     @app.after_request
     def _gzip_html(resp):
