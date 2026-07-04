@@ -2055,6 +2055,15 @@ document.addEventListener('DOMContentLoaded', function(){
   #fix-wrap{position:relative;display:inline-block;max-width:100%;line-height:0;}
   #fix-img{max-width:100%;display:block;border-radius:8px;}
   #fix-canvas{position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;}
+  #gen-loras{display:flex;flex-direction:column;gap:5px;}
+  .lora-chip{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12px;color:var(--text);}
+  .lora-chip img{width:24px;height:24px;border-radius:4px;object-fit:cover;flex:0 0 auto;}
+  .lora-chip .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lora-chip input{width:58px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:11.5px;padding:2px 4px;}
+  .lora-chip .rm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
+  .lora-chip .rm:hover{color:var(--red);}
+  #lora-add{width:100%;margin-top:5px;padding:5px 0;font-size:11.5px;border-radius:6px;background:transparent;color:var(--subtext);border:1px dashed var(--surface1);cursor:pointer;}
+  #lora-add:hover{color:var(--text);border-color:var(--overlay0);}
   #gen-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);color:var(--text);cursor:pointer;font-size:12.5px;text-align:left;}
   #gen-selrow:hover{border-color:var(--overlay0);}
   #gen-selthumb{width:30px;height:30px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
@@ -2117,6 +2126,9 @@ document.addEventListener('DOMContentLoaded', function(){
       <span id="gen-selname">none &mdash; browse models</span>
       <span class="hint">&#9666; browse</span>
     </button>
+    <div class="gen-lbl">LoRAs</div>
+    <div id="gen-loras"></div>
+    <button type="button" id="lora-add" onclick="Gen.openLoraBrowser()">+ Add LoRA</button>
     <div class="gen-form" style="border-top:none;margin-top:0;padding-top:0;">
       <textarea id="gen-prompt" class="gen-ta" rows="3" style="margin-top:8px;" placeholder="Describe your image&hellip;"></textarea>
       <details style="margin-top:6px;">
@@ -2328,7 +2340,8 @@ var Gen = (function(){
     empty.style.display='none';
     rows.forEach(function(m){
       var c=document.createElement('div'); c.className='gen-card';
-      if(selected && selected.model_id===m.model_id) c.classList.add('sel');
+      if(kind==='lora' ? loras.some(function(l){return l.model_id===m.model_id;})
+                       : (selected && selected.model_id===m.model_id)) c.classList.add('sel');
       var cov = m.preview_url ? '<img class="cov'+(m.should_blur?' blur':'')+'" loading="lazy" src="'+esc(m.preview_url)+'" alt="">' : '<div class="cov"></div>';
       c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span></div></div>';
       c.onclick=function(){ selectCard(m, c); };
@@ -2356,7 +2369,40 @@ var Gen = (function(){
   }
   function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
   function previewSelected(ev){ if(selected) showPreview(selected, ev.currentTarget); }
+  var loras=[];
+  function toggleLora(m, c){
+    var i=-1; loras.forEach(function(l,j){ if(l.model_id===m.model_id) i=j; });
+    if(i>=0){ loras.splice(i,1); c.classList.remove('sel'); renderLoras(); debouncedCost(); return; }
+    if(loras.length>=6) return;
+    var entry={model_id:m.model_id, title:m.title, preview_url:m.preview_url, version_id:'', weight:0.7};
+    loras.push(entry); c.classList.add('sel'); renderLoras();
+    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
+      .then(function(r){return r.json();})
+      .then(function(d){ entry.version_id=d.version_id||''; renderLoras(); debouncedCost(); })
+      .catch(function(){ renderLoras(); });
+  }
+  function renderLoras(){
+    var box=el('gen-loras'); if(!box) return; box.innerHTML='';
+    loras.forEach(function(l,i){
+      var d=document.createElement('div'); d.className='lora-chip';
+      d.innerHTML=(l.preview_url?'<img src="'+esc(l.preview_url)+'" alt="">':'')
+        +'<span class="nm" title="'+esc(l.title)+'">'+esc(l.title)+(l.version_id?'':' \\u23f3')+'</span>'
+        +'<input type="number" step="0.05" min="0" max="2" value="'+l.weight+'" title="Weight" onchange="Gen.loraWeight('+i+', this.value)">'
+        +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>';
+      box.appendChild(d);
+    });
+  }
+  function loraWeight(i, v){ if(!loras[i]) return;
+    v=parseFloat(v); loras[i].weight=(isNaN(v)?0.7:Math.max(0,Math.min(2,v))); debouncedCost(); }
+  function loraRemove(i){ loras.splice(i,1); renderLoras();
+    if(kind==='lora') search(); debouncedCost(); }
+  function openLoraBrowser(){
+    var f=el('model-flyout');
+    if(!f.classList.contains('open')) toggleFlyout();
+    setKind('lora');
+  }
   function selectCard(m, c){
+    if(kind==='lora'){ toggleLora(m, c); return; }
     document.querySelectorAll('.gen-card.sel').forEach(function(x){x.classList.remove('sel');});
     c.classList.add('sel'); selected=Object.assign({}, m);
     var th=el('gen-selthumb');
@@ -2374,7 +2420,8 @@ var Gen = (function(){
   function payload(){ var a=curAspect();
     return { version_id:(selected&&selected.version_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
-      count:+el('gen-count').value, high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked }; }
+      count:+el('gen-count').value, high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
+      loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
   function refreshCost(){
     if(!(selected&&selected.version_id)) return;
     var cost=el('gen-cost'); cost.className='gen-cost'; cost.textContent='Checking cost\\u2026';
@@ -2575,6 +2622,7 @@ var Gen = (function(){
           setVideoMode:setVideoMode, videoGenerate:videoGenerate, renderVideoSlots:renderVideoSlots,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
+          loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
