@@ -18,6 +18,19 @@ def _client(tmp_path, rows):
     return create_app(tmp_path).test_client()
 
 
+def test_gallery_images_works_from_lan_address(tmp_path):
+    """The picker source must NOT be localhost-gated: a 0.0.0.0 server browsed via a
+    LAN address (non-loopback remote_addr) still returns the catalog. This is the bug
+    that made the picker show 'No images found' while the gallery was full."""
+    cli = _client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", prompt_preview="p",
+             created_at="2025-01-01T00:00:00"),
+    ])
+    d = cli.get("/api/gallery-images",
+                environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_json()
+    assert len(d["images"]) == 1 and d["total"] == 1
+
+
 def test_gallery_images_prefers_full_prompt(tmp_path):
     cli = _client(tmp_path, [
         _row(media_id="1", filename="a_1.png", prompt_preview="short...",

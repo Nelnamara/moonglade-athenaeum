@@ -4064,9 +4064,11 @@ function savePrompt() {
     def api_gallery_images():
         """Pick-from-your-gallery source for the create surfaces + Edit Bay: recent (or
         keyword-filtered) IMAGE media_ids with thumbnails -> use the media_id full-res, no
-        re-upload. Read-only, localhost-only. ?q=&limit=&page="""
-        if not _is_local_request():
-            return jsonify({"images": []}), 403
+        re-upload. Read-only. NOT localhost-gated: it reads ONLY the local catalog and
+        returns the same thumbnails/prompts the gallery already serves openly, so the gate
+        added no protection while breaking the picker for the owner on a --host 0.0.0.0
+        server accessed via a LAN address. Spending still gated on the generate/upload
+        routes. ?q=&limit=&page="""
         q = (request.args.get("q") or "").strip()
         try:
             limit = max(1, min(int(request.args.get("limit") or 40), 100))
