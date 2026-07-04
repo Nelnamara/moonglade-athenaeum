@@ -1005,6 +1005,35 @@ ENHANCE_PLUGINS = {
 }
 
 
+# The Edit Bay (Seedance video storyboard tool) is served at /edit-bay. Its React source
+# lives in editbay/seedance-storyboard.jsx; this page loads React+Babel from a CDN and, per
+# the tool's own integration notes, swaps window.storage onto the gallery backend so a board
+# persists server-side (shared across devices) instead of per-browser localStorage.
+EDITBAY_PAGE = r"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Edit Bay - Moonglade Athenaeum</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head><body style="margin:0;background:#15131C">
+<div id="root"></div>
+<script>
+window.storage = {
+  get:function(k){ return fetch('/api/editbay/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },
+  set:function(k,v){ return fetch('/api/editbay/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})}); },
+  list:function(p){ return fetch('/api/editbay/list?prefix='+encodeURIComponent(p||'')).then(function(r){return r.json();}).then(function(d){ return {keys:(d&&d.keys)||[]}; }); },
+  delete:function(k){ return fetch('/api/editbay/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
+};
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+__JSX__
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body></html>"""
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
     db_path = out_dir / "catalog.db"
@@ -1305,6 +1334,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <div class="brand"><span class="mark">M</span><h1>Moonglade Athenaeum</h1></div>
   <span class="header-stats">{{ '{:,}'.format(total) }} images</span>
   <button type="button" class="btn btn-primary" onclick="Gen.open()" style="margin-left:auto;">&#10022; Generate</button>
+  <a class="back-link" href="/edit-bay" title="Seedance video storyboard">&#9648; Edit Bay</a>
   <a class="back-link" href="{{ url_for('health') }}">Collection health &rarr;</a>
 </header>
 
@@ -3334,6 +3364,87 @@ function savePrompt() {
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
+
+    # --- The Edit Bay (Seedance storyboard) ---------------------------------
+    import threading
+    _editbay_lock = threading.Lock()
+
+    def _editbay_store():
+        d = out_dir / "editbay"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "store.json"
+
+    def _editbay_load():
+        p = _editbay_store()
+        if p.exists():
+            try:
+                import json as _j
+                return _j.loads(p.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                return {}
+        return {}
+
+    def _editbay_save(data):
+        import json as _j
+        _editbay_store().write_text(_j.dumps(data), encoding="utf-8")
+
+    @app.route("/edit-bay")
+    def edit_bay():
+        """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
+        backend (window.storage swapped for /api/editbay/*). Localhost-only."""
+        if not _is_local_request():
+            return "The Edit Bay is localhost-only.", 403
+        import re as _re
+        src = Path(__file__).resolve().parent / "editbay" / "seedance-storyboard.jsx"
+        try:
+            jsx = src.read_text(encoding="utf-8")
+        except OSError:
+            return "Edit Bay source not found (editbay/seedance-storyboard.jsx).", 404
+        jsx = _re.sub(r"(?m)^\s*import\s+React.*$", "", jsx)          # React is a CDN global
+        jsx = jsx.replace("export default function App()", "function App()")
+        return EDITBAY_PAGE.replace("__JSX__", jsx)
+
+    @app.route("/api/editbay/get")
+    def editbay_get():
+        if not _is_local_request():
+            return jsonify({"value": None}), 403
+        with _editbay_lock:
+            return jsonify({"value": _editbay_load().get(request.args.get("key") or "")})
+
+    @app.route("/api/editbay/set", methods=["POST"])
+    def editbay_set():
+        if not _is_local_request():
+            return jsonify({"ok": False}), 403
+        p = request.get_json(silent=True) or {}
+        k = p.get("key")
+        if not k:
+            return jsonify({"ok": False}), 400
+        with _editbay_lock:
+            data = _editbay_load()
+            data[k] = p.get("value")
+            _editbay_save(data)
+        return jsonify({"ok": True})
+
+    @app.route("/api/editbay/list")
+    def editbay_list():
+        if not _is_local_request():
+            return jsonify({"keys": []}), 403
+        pre = request.args.get("prefix") or ""
+        with _editbay_lock:
+            keys = [k for k in _editbay_load().keys() if k.startswith(pre)]
+        return jsonify({"keys": keys})
+
+    @app.route("/api/editbay/delete", methods=["POST"])
+    def editbay_delete():
+        if not _is_local_request():
+            return jsonify({"ok": False}), 403
+        k = (request.get_json(silent=True) or {}).get("key")
+        with _editbay_lock:
+            data = _editbay_load()
+            if k in data:
+                del data[k]
+                _editbay_save(data)
+        return jsonify({"ok": True})
 
     @app.route("/api/task-status")
     def api_task_status():
