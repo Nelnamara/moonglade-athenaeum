@@ -2076,7 +2076,9 @@ document.addEventListener('DOMContentLoaded', function(){
   #gen-drawer.dock-bottom #model-flyout{top:auto;bottom:100%;right:auto;left:50%;transform:translateX(-50%);height:auto;max-height:58vh;border-bottom:none;box-shadow:0 -14px 34px rgba(0,0,0,.4);}
   #pick-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
   #pick-scrim.open{display:block;}
-  #pick-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:640px;max-width:94vw;max-height:82vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
+  #pick-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
+  .pick-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+  .pick-filters select{background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:5px 8px;font-size:12px;}
   #pick-modal.open{display:flex;}
   .pick-head{display:flex;align-items:center;margin-bottom:10px;}
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
@@ -2239,6 +2241,27 @@ document.addEventListener('DOMContentLoaded', function(){
     <button type="button" id="pick-up" onclick="Picker.upload()" title="Upload a local file (free)">&#8679; Upload</button>
     <input type="file" id="pick-file" accept="image/*" style="display:none;" onchange="Picker.onFile()">
   </div>
+  <div class="pick-filters">
+    <select id="pick-collection" onchange="Picker.onFilter()">
+      <option value="">All collections</option>
+      {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+    <select id="pick-source" onchange="Picker.onFilter()">
+      <option value="">Any source</option>
+      <option value="api">Generated (AI)</option>
+      <option value="local">Imported local</option>
+    </select>
+    <select id="pick-rating" onchange="Picker.onFilter()">
+      <option value="0">Any rating</option>
+      <option value="1">&#9733;+</option><option value="2">&#9733;&#9733;+</option>
+      <option value="3">&#9733;&#9733;&#9733;+</option><option value="4">&#9733;&#9733;&#9733;&#9733;+</option>
+      <option value="5">&#9733;&#9733;&#9733;&#9733;&#9733;</option>
+    </select>
+    <select id="pick-sort" onchange="Picker.onFilter()">
+      <option value="newest">Newest first</option>
+      <option value="oldest">Oldest first</option>
+    </select>
+  </div>
   <label class="gen-check" style="margin:0 0 8px;"><input type="checkbox" id="pick-copy" onchange="Picker.toggleCopy()"> Copy the image&rsquo;s prompt to the clipboard when picking</label>
   <div id="pick-grid" onscroll="Picker.onScroll()"></div>
   <div class="pick-empty" id="pick-empty" style="display:none;"></div>
@@ -2253,6 +2276,12 @@ var Picker = (function(){
     try{ el('pick-copy').checked = localStorage.getItem('pick-copyprompt')==='1'; }catch(e){} }
   function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; }
   function onInput(){ clearTimeout(timer); timer=setTimeout(function(){ curQ=el('pick-q').value.trim(); page=1; load(false); }, 280); }
+  function onFilter(){ page=1; load(false); }
+  function filterQS(){
+    var v=function(id){ var e=el(id); return e?encodeURIComponent(e.value):''; };
+    return '&collection='+v('pick-collection')+'&source='+v('pick-source')
+         +'&rating_min='+v('pick-rating')+'&sort='+v('pick-sort');
+  }
   function pick(m, thumb){
     try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
     var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'');
@@ -2260,7 +2289,7 @@ var Picker = (function(){
   function load(append){
     if(loading) return; loading=true;
     var grid=el('pick-grid'), empty=el('pick-empty'); if(!append) grid.style.opacity='.5';
-    fetch('/api/gallery-images?limit=60&page='+page+'&q='+encodeURIComponent(curQ)).then(function(r){return r.json();}).then(function(d){
+    fetch('/api/gallery-images?limit=60&page='+page+'&q='+encodeURIComponent(curQ)+filterQS()).then(function(r){return r.json();}).then(function(d){
       loading=false; grid.style.opacity='1'; var imgs=d.images||[];
       if(!append) grid.innerHTML='';
       more = ((d.page||1)*(d.limit||60)) < (d.total||0);
@@ -2286,7 +2315,7 @@ var Picker = (function(){
       pick({media_id:d.media_id, prompt:''}, URL.createObjectURL(f));
     }).catch(function(){ el('pick-file').value=''; empty.textContent='\\u26a0 Upload failed (network).'; });
   }
-  return {open:open, close:close, onInput:onInput, onScroll:onScroll, toggleCopy:toggleCopy, upload:upload, onFile:onFile};
+  return {open:open, close:close, onInput:onInput, onFilter:onFilter, onScroll:onScroll, toggleCopy:toggleCopy, upload:upload, onFile:onFile};
 })();
 document.addEventListener('DOMContentLoaded', function(){
   var pq=document.getElementById('pick-q'); if(pq) pq.addEventListener('input', Picker.onInput);
@@ -3522,9 +3551,15 @@ function savePrompt() {
         try:
             limit = max(1, min(int(request.args.get("limit") or 40), 100))
             page = max(1, int(request.args.get("page") or 1))
+            rating_min = max(0, min(int(request.args.get("rating_min") or 0), 5))
         except ValueError:
-            limit, page = 40, 1
-        rows, total = query_catalog(db_path, q=q, sort="newest", page=page, page_size=limit)
+            limit, page, rating_min = 40, 1, 0
+        sort = "oldest" if (request.args.get("sort") or "") == "oldest" else "newest"
+        rows, total = query_catalog(
+            db_path, q=q, sort=sort, page=page, page_size=limit,
+            collection=(request.args.get("collection") or "").strip(),
+            source=(request.args.get("source") or "").strip(),
+            rating_min=rating_min)
         out = []
         for r in rows:
             if str(r.get("is_video") or "") == "1":
