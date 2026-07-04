@@ -2479,7 +2479,8 @@ var Picker = (function(){
       empty.style.display='none';
       imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
         c.innerHTML='<img loading="lazy" decoding="async" onload="this.classList.add(\\'loaded\\')" src="'+m.thumb+'" alt="">';
-        c.onclick=function(){ pick(m); }; grid.appendChild(c); });
+        c.onclick=function(){ pick(m); }; grid.appendChild(c);
+        var im=c.querySelector('img'); if(im&&im.complete) im.classList.add('loaded'); });
     }).catch(function(){ loading=false; grid.style.opacity='1'; });
   }
   function onScroll(){ var g=el('pick-grid');
