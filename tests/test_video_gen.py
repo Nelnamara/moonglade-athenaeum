@@ -188,6 +188,20 @@ def test_build_shot_video_params_needs_refs():
         core.build_shot_video_params("R2V", "x")
 
 
+def test_build_shot_video_params_model_and_audio_passthrough():
+    p = core.build_shot_video_params("I2V", "sing", image_ids=["1"], duration=5,
+                                     model="v3.2", generate_audio=True,
+                                     audio_language="japanese")
+    i2v = p["i2vPro"]
+    assert i2v["model"] == "v3.2" and i2v["generateAudio"] is True
+    assert i2v["audioLanguage"] == "japanese"
+    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0")
+    assert r["referenceVideo"]["model"] == "v4.0"
+    # empty model falls back to the default on every path
+    d = core.build_shot_video_params("I2V", "x", image_ids=["1"], model="")
+    assert d["i2vPro"]["model"] == core.DEFAULT_VIDEO_MODEL
+
+
 def test_collect_generation_detects_video(monkeypatch, tmp_path):
     monkeypatch.setattr(core, "task_detail_gql", lambda s, t: {"outputs": {"videos": [{"mediaId": "V9"}]}})
     monkeypatch.setattr(core, "video_outputs", lambda r: ([{"video_media_id": "V9"}], {"prompt": "p"}))

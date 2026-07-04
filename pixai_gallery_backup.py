@@ -2588,7 +2588,8 @@ def _snap_video_duration(d):
 
 
 def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=(),
-                            *, duration=5, generate_audio=False):
+                            *, duration=5, generate_audio=False, model="",
+                            audio_language="english"):
     """PixAI video PROVIDER ADAPTER: map an Edit Bay shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
@@ -2599,15 +2600,21 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     vids = [str(v) for v in (video_ids or []) if str(v).strip()]
     auds = [str(a) for a in (audio_ids or []) if str(a).strip()]
     dur = _snap_video_duration(duration)
+    mdl = (model or "").strip() or DEFAULT_VIDEO_MODEL
     if m == "I2V" and imgs:
-        return build_video_parameters(prompt, imgs[0], duration=dur, generate_audio=generate_audio)
+        return build_video_parameters(prompt, imgs[0], model=mdl, duration=dur,
+                                      generate_audio=generate_audio,
+                                      audio_language=audio_language)
     if m == "FLF" and len(imgs) >= 2:
-        return build_video_parameters(prompt, imgs[0], tail_media_id=imgs[1],
-                                      duration=dur, generate_audio=generate_audio)
+        return build_video_parameters(prompt, imgs[0], model=mdl, tail_media_id=imgs[1],
+                                      duration=dur, generate_audio=generate_audio,
+                                      audio_language=audio_language)
     if imgs or vids or auds:                       # R2V / V2V / any mode carrying references
         return build_reference_video_parameters(prompt, image_media_ids=imgs,
                                                  video_media_ids=vids, audio_media_ids=auds,
-                                                 duration=dur, generate_audio=generate_audio)
+                                                 model=mdl, duration=dur,
+                                                 generate_audio=generate_audio,
+                                                 audio_language=audio_language)
     raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
                      "(mode {}) -- attach a cast image or an open frame.".format(m))
 

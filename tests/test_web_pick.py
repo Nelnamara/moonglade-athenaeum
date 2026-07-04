@@ -99,3 +99,33 @@ def test_tag_suggest_route_returns_tags(tmp_path, monkeypatch):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/tag-suggest?q=no hu").get_json() == {"tags": ["no humans"]}
+
+
+def test_price_route_video_mode(tmp_path, monkeypatch):
+    """Video payloads price through build_shot_video_params + report the card count."""
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task",
+                        lambda s, params: seen.update(params=params) or 27500)
+    monkeypatch.setattr(core, "match_kaisuuken",
+                        lambda s, params: {"id": "c1", "total": 9, "expiresAt": 1})
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/price", json={"mode": "I2V", "images": ["55"], "prompt": "pan",
+                                     "duration": 5, "video_model": "v3.2",
+                                     "audio": True}).get_json()
+    assert d["cost"] == 27500 and d["free"] is True and d["cards"] == 9
+    i2v = seen["params"]["i2vPro"]
+    assert i2v["mediaId"] == "55" and i2v["model"] == "v3.2"
+    assert i2v["generateAudio"] is True
+
+
+def test_price_route_video_needs_an_image(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("no pricing without a source image")
+    monkeypatch.setattr(core, "price_task", boom)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/price", json={"mode": "R2V", "images": []}).get_json()
+    assert d["cost"] is None and "source image" in d["note"]
