@@ -1,0 +1,131 @@
+"""The gallery Picker's web API: /api/gallery-images (browse the whole catalog with
+paging + full prompts for the copy-to-clipboard feature) and /api/upload (local file
+-> PixAI media_id via the free S3 handshake). All localhost-gated; upload_media is
+monkeypatched so nothing touches the network."""
+import io
+import os
+
+import pixai_gallery_backup as core
+from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+
+
+def _row(**kw):
+    return {f: "" for f in CATALOG_FIELDS} | kw
+
+
+def _client(tmp_path, rows):
+    save_catalog(tmp_path / "catalog.db", rows)
+    return create_app(tmp_path).test_client()
+
+
+def test_gallery_images_prefers_full_prompt(tmp_path):
+    cli = _client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", prompt_preview="short...",
+             prompt_full="the full glorious prompt", created_at="2025-01-01T00:00:00"),
+    ])
+    d = cli.get("/api/gallery-images").get_json()
+    assert d["images"][0]["prompt"] == "the full glorious prompt"
+    assert d["total"] == 1 and d["page"] == 1 and d["limit"] >= 1
+
+
+def test_gallery_images_pages_and_skips_videos(tmp_path):
+    rows = [_row(media_id=str(i), filename="f_{}.png".format(i), prompt_preview="p",
+                 created_at="2025-01-{:02d}T00:00:00".format(i)) for i in range(1, 6)]
+    rows.append(_row(media_id="9", filename="v_9.mp4", is_video="1",
+                     created_at="2025-02-01T00:00:00"))
+    cli = _client(tmp_path, rows)
+    d1 = cli.get("/api/gallery-images?limit=2&page=1").get_json()
+    d2 = cli.get("/api/gallery-images?limit=2&page=2").get_json()
+    assert d1["total"] == 6                    # total counts all catalog rows
+    ids1 = [m["media_id"] for m in d1["images"]]
+    ids2 = [m["media_id"] for m in d2["images"]]
+    assert ids1 and ids2 and not set(ids1) & set(ids2)   # paging advances
+    assert "9" not in ids1 + ids2                        # video row filtered out
+
+
+def test_upload_returns_media_id_and_cleans_temp(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_upload(session, path, *a, **k):
+        seen["path"] = path
+        assert os.path.exists(path)            # file was materialized for upload
+        return "M123"
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "upload_media", fake_upload)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    resp = cli.post("/api/upload", data={
+        "file": (io.BytesIO(b"\x89PNG fake"), "pic.png"),
+    }, content_type="multipart/form-data")
+    assert resp.get_json() == {"media_id": "M123"}
+    assert not os.path.exists(seen["path"])    # temp file removed after upload
+
+
+def test_upload_requires_a_file(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.post("/api/upload", data={}).status_code == 400
+
+
+def test_tag_search_gql_shapes_names(monkeypatch):
+    seen = {}
+
+    def fake_gql(session, q, variables=None, **k):
+        seen["q"], seen["vars"] = q, variables
+        return {"tags": {"edges": [{"node": {"name": "no humans"}},
+                                   {"node": {"name": "no shoes"}},
+                                   {"node": {}}]}}
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    out = core.tag_search_gql(object(), "no hu", first=8)
+    assert out == ["no humans", "no shoes"]          # nameless node dropped
+    assert "tags(q:" in seen["q"] and seen["vars"] == {"k": "no hu", "n": 8}
+
+
+def test_tag_suggest_route_short_prefix_is_free(tmp_path, monkeypatch):
+    """Under 2 chars: no session, no network -- just an empty list."""
+    def boom(*a, **k):
+        raise AssertionError("must not touch the network for short prefixes")
+    monkeypatch.setattr(core, "_make_session", boom)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.get("/api/tag-suggest?q=n").get_json() == {"tags": []}
+
+
+def test_tag_suggest_route_returns_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "tag_search_gql", lambda s, q, first=8: ["no humans"])
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.get("/api/tag-suggest?q=no hu").get_json() == {"tags": ["no humans"]}
+
+
+def test_price_route_video_mode(tmp_path, monkeypatch):
+    """Video payloads price through build_shot_video_params + report the card count."""
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task",
+                        lambda s, params: seen.update(params=params) or 27500)
+    monkeypatch.setattr(core, "match_kaisuuken",
+                        lambda s, params: {"id": "c1", "total": 9, "expiresAt": 1})
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/price", json={"mode": "I2V", "images": ["55"], "prompt": "pan",
+                                     "duration": 5, "video_model": "v3.2",
+                                     "audio": True}).get_json()
+    assert d["cost"] == 27500 and d["free"] is True and d["cards"] == 9
+    i2v = seen["params"]["i2vPro"]
+    assert i2v["mediaId"] == "55" and i2v["model"] == "v3.2"
+    assert i2v["generateAudio"] is True
+
+
+def test_price_route_video_needs_an_image(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("no pricing without a source image")
+    monkeypatch.setattr(core, "price_task", boom)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/price", json={"mode": "R2V", "images": []}).get_json()
+    assert d["cost"] is None and "source image" in d["note"]

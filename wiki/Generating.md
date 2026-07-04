@@ -193,3 +193,31 @@ Just generate on a model you have a card for — the match is automatic:
 Overrides: **`--no-card`** forces paying credits even when a card matches; **`--kaisuuken-id <id>`**
 forces a specific card. Cards closest to expiry are used first. Card list + match come from PixAI's
 `/v2/kaisuuken/*` REST API.
+
+
+---
+
+## The Generate drawer (web gallery, v1.9.0)
+
+Everything above also lives in the **web gallery** as a dockable drawer — click **✦ Generate**
+in the header. It is **localhost-only**: anyone browsing the gallery over the LAN can look,
+but only the owner's machine can spend credits or cards.
+
+- **Generate** — pick a base model in the pop-out browser (hover any card for a full preview),
+  attach up to 6 **LoRAs with weights**, aspect/mode/count, live credit cost with the free-card
+  check up front.
+- **Edit** — instruct edits ("make it night"), the one-click **Enhance** workflow catalog, and
+  the drag-a-box hand/face **Fixer**, in sub-tabs over one source image.
+- **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
+  from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
+  the prompt turns into a chip; model + duration + audio; live cost shows **FREE + how many
+  video cards you have left** when a card covers it.
+- **Tag Suggestions** — Danbooru-style autocomplete in every prompt box; **TAB** accepts.
+- **Bridges from the gallery**: right-click any thumbnail (Edit / Send to Video / Copy media id),
+  the same buttons in the lightbox, and multi-select → **Send to Video** in the bulk bar.
+- Results are downloaded and cataloged automatically (`source='api'`; videos into `videos/`),
+  so everything you make lands in your own library the moment it finishes.
+
+The **Edit Bay** (`/edit-bay`) is the storyboard for multi-clip video — acts, shots, cast,
+frame handoff, and per-shot **Generate** on the same engine. Full manual: `docs/EDIT_BAY.md`
+(or the ? button on the page).
