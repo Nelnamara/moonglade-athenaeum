@@ -1525,6 +1525,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
   <button class="btn" id="bulk-replace-btn" style="display:none" onclick="bulkReplacePrompt()" title="Find/replace text in the prompts of selected images">Find/Replace</button>
   <button class="btn btn-primary" id="bulk-collection-btn" onclick="bulkAddCollection()" title="Check some images/videos first, then click to add them to a named collection (files are not moved)">+ Add to Collection</button>
+  <button class="btn" id="bulk-video-btn" style="display:none" onclick="bulkSendVideo()" title="Send up to 9 selected images to the Video tab as references">&#9654; Send to Video</button>
   <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
   <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
           title="Saved views"><option value="">Saved views…</option></select>
@@ -1577,6 +1578,8 @@ document.addEventListener('DOMContentLoaded', function() {
   <div class="lb-bar">
     <span id="lb-caption"></span>
     <span class="lb-actions">
+      <button class="btn" onclick="lbEdit()" title="Open in the Edit tab">✎ Edit</button>
+      <button class="btn" onclick="lbVideo()" title="Send to the Video tab as a reference">▶ To Video</button>
       <a id="lb-details" class="btn" href="#">Details</a>
       <button class="btn" id="lb-play" onclick="toggleSlideshow()">▶ Slideshow</button>
       <button class="btn" onclick="closeLightbox()">✕ Close</button>
@@ -1690,6 +1693,8 @@ function refreshSelUI() {
   if (rb) rb.style.display = sel.size ? 'inline-block' : 'none';
   var cb = document.getElementById('bulk-del-cloud-btn');
   if (cb) cb.style.display = sel.size ? 'inline-block' : 'none';
+  var vb = document.getElementById('bulk-video-btn');
+  if (vb) vb.style.display = sel.size ? 'inline-block' : 'none';
 }
 function onCheck() {
   var sel = selGet();
@@ -2267,6 +2272,12 @@ document.addEventListener('DOMContentLoaded', function(){
   <div class="pick-empty" id="pick-empty" style="display:none;"></div>
 </div>
 <div id="model-preview" aria-hidden="true"></div>
+<div id="ctx-menu"></div>
+<style>
+  #ctx-menu{position:fixed;z-index:230;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:180px;padding:4px;}
+  #ctx-menu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:7px 10px;border-radius:5px;cursor:pointer;}
+  #ctx-menu button:hover{background:var(--surface0);}
+</style>
 <script>
 var Picker = (function(){
   var cb=null, timer=null, page=1, more=false, loading=false, curQ='';
@@ -2655,6 +2666,16 @@ var Gen = (function(){
       add.onclick=function(){ vslots.push(null); renderVideoSlots(); }; wrap.appendChild(add);
     }
   }
+  function addVideoRefs(refs){
+    refs=(refs||[]).slice(0,9); if(!refs.length) return;
+    open(); setMode('video');
+    if(refs.length>1) setVideoMode('r2v');
+    var slots=refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; });
+    if(refs.length>1){ vslots=slots; }
+    else if(vmode==='r2v'){ vslots=[slots[0]]; }
+    else { vslots[0]=slots[0]; }
+    renderVideoSlots();
+  }
   function videoGenerate(){
     var imgs=vslots.filter(function(s){return s&&s.media_id;}).map(function(s){return s.media_id;});
     var res=el('video-result');
@@ -2670,9 +2691,51 @@ var Gen = (function(){
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
-          setEditSub:setEditSub,
+          setEditSub:setEditSub, addVideoRefs:addVideoRefs,
           get selected(){return selected;}};
 })();
+function lbMid(){ var m=(document.getElementById('lb-details').href||'').match(/\\/image\\/([^/?]+)/); return m?decodeURIComponent(m[1]):''; }
+function lbEdit(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.openEdit(mid); }
+function lbVideo(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); }
+var Ctx = (function(){
+  var mid='', isVideo=false;
+  function m(){ return document.getElementById('ctx-menu'); }
+  function hide(){ var e=m(); if(e) e.style.display='none'; }
+  function show(e, card){
+    mid=card.getAttribute('data-mid'); isVideo=card.getAttribute('data-video')==='1';
+    var menu=m();
+    menu.innerHTML=(isVideo?'':'<button onclick="Ctx.edit()">\\u270e Edit image</button>'
+        +'<button onclick="Ctx.video()">\\u25b6 Send to Video</button>')
+      +'<button onclick="Ctx.copy()">\\u2398 Copy media id</button>'
+      +'<button onclick="Ctx.detail()">Open details</button>';
+    menu.style.display='block';
+    menu.style.left=Math.min(e.clientX, window.innerWidth-menu.offsetWidth-8)+'px';
+    menu.style.top=Math.min(e.clientY, window.innerHeight-menu.offsetHeight-8)+'px';
+  }
+  document.addEventListener('click', hide);
+  document.addEventListener('scroll', hide, true);
+  document.addEventListener('contextmenu', function(e){
+    var card=e.target && e.target.closest ? e.target.closest('.card') : null;
+    if(!card || !card.getAttribute('data-mid')){ hide(); return; }
+    e.preventDefault(); show(e, card);
+  });
+  return {
+    edit:function(){ hide(); Gen.openEdit(mid); },
+    video:function(){ hide(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); },
+    copy:function(){ hide(); try{ navigator.clipboard.writeText(mid); }catch(e){} },
+    detail:function(){ hide(); location.href='/image/'+mid; }
+  };
+})();
+function bulkSendVideo(){
+  var refs=[];
+  selGet().forEach(function(mid){
+    var card=document.getElementById('card-'+mid);
+    if(card && card.getAttribute('data-video')==='1') return;   // videos can't be image refs
+    refs.push({mid:mid, thumb:'/thumbs/'+mid+'.jpg'});
+  });
+  if(!refs.length) return;
+  Gen.addVideoRefs(refs.slice(0,9));
+}
 document.addEventListener('DOMContentLoaded', function(){
   var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
