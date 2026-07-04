@@ -129,3 +129,76 @@ def test_price_route_video_needs_an_image(tmp_path, monkeypatch):
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "R2V", "images": []}).get_json()
     assert d["cost"] is None and "source image" in d["note"]
+
+
+def test_account_route_sums_cards(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 330990})
+    monkeypatch.setattr(core, "list_kaisuukens",
+                        lambda s: [{"count": 16}, {"count": 34}, {"count": None}])
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.get("/api/account").get_json() == {"credits": 330990, "cards": 50}
+
+
+def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.get("/api/snippets").get_json() == {"snippets": []}
+    saved = cli.post("/api/snippets",
+                     json={"snippets": ["masterpiece, 4k", "", "  ", "night"]}).get_json()
+    assert saved == {"snippets": ["masterpiece, 4k", "night"]}   # blanks dropped
+    assert (tmp_path / "prompt_snippets.json").exists()
+    assert cli.get("/api/snippets").get_json() == {"snippets": ["masterpiece, 4k", "night"]}
+
+
+def test_snippets_rejects_non_list(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.post("/api/snippets", json={"snippets": "nope"}).status_code == 400
+
+
+def test_suggest_prompt_route(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "suggest_prompt", lambda s, mid: ["1girl, night", "a girl at night"])
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.get("/api/suggest-prompt?media_id=55").get_json() == {
+        "suggestions": ["1girl, night", "a girl at night"]}
+    assert cli.get("/api/suggest-prompt").status_code == 400   # no media_id
+
+
+def test_rows_for_media_ids_preserves_order_drops_missing():
+    import pixai_gallery as g
+
+    class FakeCon:
+        def execute(self, sql, params):
+            rows = [{"media_id": p, "rating": "0"} for p in params if p != "99"]
+            return type("C", (), {"fetchall": lambda self: rows})()
+
+        def close(self):
+            pass
+
+    import unittest.mock as mock
+    with mock.patch.object(g, "_connect", return_value=FakeCon()):
+        rows = g.rows_for_media_ids("db", ["3", "1", "99", "2"])
+    assert [r["media_id"] for r in rows] == ["3", "1", "2"]   # order kept, 99 dropped
+
+
+def test_contact_sheet_renders_selection(tmp_path):
+    cli = _client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-02T00:00:00", rating="3"),
+        _row(media_id="2", filename="b_2.png", created_at="2025-01-01T00:00:00"),
+    ])
+    html = cli.get("/contact-sheet?ids=2,1").get_data(as_text=True)
+    # both cells present, selection order (2 then 1), stars for the rated one, auto-print
+    assert html.index("/thumbs/2.jpg") < html.index("/thumbs/1.jpg")
+    assert "★★★" in html and "window.print()" in html
+
+
+def test_contact_sheet_captions_off(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-02T00:00:00", rating="3")])
+    html = cli.get("/contact-sheet?ids=1&captions=0").get_data(as_text=True)
+    assert "class='cap'" not in html
