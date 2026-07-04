@@ -2119,10 +2119,24 @@ def artwork_list_gql(session, before=None, last=50):
 
 def extract_artwork_meta(node):
     """Pull the published-artwork fields we store from a listArtworks node.
-    Keyed by media_id so it merges onto the existing catalog row."""
+    Keyed by media_id so it merges onto the existing catalog row.
+
+    The listArtworks node already carries an `extra` block (no extra request), from which we
+    also lift a compact BlurHash (instant gallery placeholders) + PixAI's per-category NSFW
+    classifier scores (a finer signal than the binary is_nsfw). Published rows only."""
     tacks = node.get("tacks") or []
     tags = [t.get("displayName") or t.get("codeName") for t in tacks
             if (t.get("displayName") or t.get("codeName"))]
+    extra = node.get("extra") if isinstance(node.get("extra"), dict) else {}
+    scores = extra.get("nsfwPredict")
+    nsfw_scores = ""
+    if isinstance(scores, dict):
+        # keep it small + deterministic: round each category to 3 decimals
+        try:
+            nsfw_scores = json.dumps({k: round(float(v), 3) for k, v in scores.items()
+                                      if isinstance(v, (int, float))}, separators=(",", ":"))
+        except (TypeError, ValueError):
+            nsfw_scores = ""
     return {
         "media_id":      str(node.get("mediaId") or ""),
         "artwork_id":    str(node.get("id") or ""),
@@ -2133,6 +2147,8 @@ def extract_artwork_meta(node):
         "comment_count": str(node.get("commentCount") or 0),
         "aes_score":     str(node.get("aesScore") or ""),
         "art_tags":      ", ".join(tags),
+        "blurhash":      str(extra.get("imageBlurHash") or ""),
+        "nsfw_scores":   nsfw_scores,
     }
 
 
