@@ -518,4 +518,19 @@ def test_account_info_parses_me(mocker):
 
 def test_account_info_empty_on_error(mocker):
     mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("boom"))
-    assert core.account_info(mocker.MagicMock()) == {}
+    assert core.account_info(mocker.MagicMock()) == {}          # soft-fail (web relies on this)
+    with __import__("pytest").raises(core.PixAIError):          # ...but can surface the reason
+        core.account_info(mocker.MagicMock(), raise_on_error=True)
+
+
+def test_run_account_info_reports_real_reason(mocker, capsys):
+    """The dashboard distinguishes an auth failure from a transient blip, instead of the old
+    catch-all that blamed the API key for any hiccup."""
+    from types import SimpleNamespace
+    mocker.patch.object(core, "_make_session", lambda *a, **k: object())
+    mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("401 Unauthorized -- API key"))
+    core.run_account_info(SimpleNamespace(token=None))
+    assert "API key" in capsys.readouterr().out
+    mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("connection reset"))
+    core.run_account_info(SimpleNamespace(token=None))
+    assert "temporary" in capsys.readouterr().out.lower()
