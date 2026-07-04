@@ -2027,6 +2027,16 @@ document.addEventListener('DOMContentLoaded', function(){
   #fix-wrap{position:relative;display:inline-block;max-width:100%;line-height:0;}
   #fix-img{max-width:100%;display:block;border-radius:8px;}
   #fix-canvas{position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;}
+  #gen-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);color:var(--text);cursor:pointer;font-size:12.5px;text-align:left;}
+  #gen-selrow:hover{border-color:var(--overlay0);}
+  #gen-selthumb{width:30px;height:30px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
+  #gen-selrow .hint{margin-left:auto;color:var(--overlay0);font-size:11px;flex:0 0 auto;}
+  #model-flyout{position:absolute;top:0;right:100%;height:100%;width:372px;max-width:92vw;background:var(--mantle);border:1px solid var(--surface1);border-right:none;display:none;flex-direction:column;box-shadow:-14px 0 34px rgba(0,0,0,.4);}
+  #model-flyout.open{display:flex;}
+  #model-flyout .x{margin-left:auto;}
+  #gen-drawer.dock-left #model-flyout{right:auto;left:100%;border-right:1px solid var(--surface1);border-left:none;box-shadow:14px 0 34px rgba(0,0,0,.4);}
+  #gen-drawer.dock-top #model-flyout{top:100%;bottom:auto;right:auto;left:50%;transform:translateX(-50%);height:auto;max-height:58vh;border-top:none;box-shadow:0 14px 34px rgba(0,0,0,.4);}
+  #gen-drawer.dock-bottom #model-flyout{top:auto;bottom:100%;right:auto;left:50%;transform:translateX(-50%);height:auto;max-height:58vh;border-bottom:none;box-shadow:0 -14px 34px rgba(0,0,0,.4);}
   #pick-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
   #pick-scrim.open{display:block;}
   #pick-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:640px;max-width:94vw;max-height:82vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
@@ -2059,17 +2069,14 @@ document.addEventListener('DOMContentLoaded', function(){
       <button id="gm-video" onclick="Gen.setMode('video')">Video</button>
     </div>
     <div id="gen-mode-generate">
-    <div class="gen-seg">
-      <button id="gen-k-base" class="on" onclick="Gen.setKind('base')">Models</button>
-      <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
-    </div>
-    <input class="gen-search" id="gen-q" placeholder="Search models&hellip;" autocomplete="off">
-    <div class="gen-grid" id="gen-grid"></div>
-    <div class="gen-empty" id="gen-empty" style="display:none;"></div>
-    <div class="gen-form">
-      <div class="gen-lbl">Selected model</div>
-      <div id="gen-selname">none &mdash; pick one above</div>
-      <textarea id="gen-prompt" class="gen-ta" rows="3" placeholder="Describe your image&hellip;"></textarea>
+    <div class="gen-lbl" style="margin-top:0;">Model</div>
+    <button type="button" id="gen-selrow" onclick="Gen.toggleFlyout()">
+      <img id="gen-selthumb" alt="" style="display:none;">
+      <span id="gen-selname">none &mdash; browse models</span>
+      <span class="hint">&#9666; browse</span>
+    </button>
+    <div class="gen-form" style="border-top:none;margin-top:0;padding-top:0;">
+      <textarea id="gen-prompt" class="gen-ta" rows="3" style="margin-top:8px;" placeholder="Describe your image&hellip;"></textarea>
       <details style="margin-top:6px;">
         <summary style="cursor:pointer;color:var(--subtext);font-size:11px;">Negative prompt</summary>
         <textarea id="gen-neg" class="gen-ta" rows="2" placeholder="lowres, text, watermark&hellip;" style="margin-top:5px;"></textarea>
@@ -2144,6 +2151,19 @@ document.addEventListener('DOMContentLoaded', function(){
       <div id="video-result" class="gen-result" style="display:none;"></div>
     </div>
   </div>
+  <div id="model-flyout" aria-hidden="true" aria-label="Models and LoRAs">
+    <div class="gen-head"><span class="t">Models &amp; LoRAs</span>
+      <button class="x" onclick="Gen.toggleFlyout()" aria-label="Close">&times;</button></div>
+    <div class="gen-body">
+      <div class="gen-seg">
+        <button id="gen-k-base" class="on" onclick="Gen.setKind('base')">Models</button>
+        <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
+      </div>
+      <input class="gen-search" id="gen-q" placeholder="Search models&hellip;" autocomplete="off">
+      <div class="gen-grid" id="gen-grid"></div>
+      <div class="gen-empty" id="gen-empty" style="display:none;"></div>
+    </div>
+  </div>
 </aside>
 <div id="pick-scrim" onclick="Picker.close()"></div>
 <div id="pick-modal" aria-hidden="true" aria-label="Pick from your gallery">
@@ -2186,12 +2206,17 @@ var Gen = (function(){
   function open(){
     el('gen-drawer').classList.add('open'); el('gen-scrim').classList.add('open');
     el('gen-drawer').setAttribute('aria-hidden','false');
-    if(!el('gen-grid').children.length) search();
-    setTimeout(function(){el('gen-q').focus();},200);
+    setTimeout(function(){el('gen-prompt').focus();},200);
   }
   function close(){
     el('gen-drawer').classList.remove('open'); el('gen-scrim').classList.remove('open');
     el('gen-drawer').setAttribute('aria-hidden','true');
+    var f=el('model-flyout'); if(f){ f.classList.remove('open'); f.setAttribute('aria-hidden','true'); }
+  }
+  function toggleFlyout(){
+    var f=el('model-flyout'), on=!f.classList.contains('open');
+    f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
+    if(on){ if(!el('gen-grid').children.length) search(); setTimeout(function(){el('gen-q').focus();},120); }
   }
   function setDock(d){
     d=(d==='left'||d==='top'||d==='bottom')?d:'right';
@@ -2240,6 +2265,8 @@ var Gen = (function(){
   function selectCard(m, c){
     document.querySelectorAll('.gen-card.sel').forEach(function(x){x.classList.remove('sel');});
     c.classList.add('sel'); selected=Object.assign({}, m);
+    var th=el('gen-selthumb');
+    if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
     el('gen-selname').textContent=m.title+' \\u2026';
     fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
       .then(function(r){return r.json();})
@@ -2452,7 +2479,7 @@ var Gen = (function(){
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
           renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
           setVideoMode:setVideoMode, videoGenerate:videoGenerate, renderVideoSlots:renderVideoSlots,
-          setDock:setDock,
+          setDock:setDock, toggleFlyout:toggleFlyout,
           get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
