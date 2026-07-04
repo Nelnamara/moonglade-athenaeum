@@ -3446,6 +3446,55 @@ function savePrompt() {
                 _editbay_save(data)
         return jsonify({"ok": True})
 
+    @app.route("/api/editbay/generate", methods=["POST"])
+    def editbay_generate():
+        """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
+        Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
+        video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Localhost."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            import base64
+            import hashlib
+            from types import SimpleNamespace
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            updir = out_dir / "editbay" / "_uploads"
+            updir.mkdir(parents=True, exist_ok=True)
+
+            def resolve_img(val):
+                s = str(val or "").strip()
+                if not s:
+                    return ""
+                if s.isdigit():                       # already a PixAI media_id
+                    return s
+                if s.startswith("data:"):             # an Edit Bay thumbnail -> upload it
+                    try:
+                        head, b64 = s.split(",", 1)
+                        raw = base64.b64decode(b64)
+                    except Exception:
+                        return ""
+                    ext = ".png" if "png" in head[:24] else ".jpg"
+                    fp = updir / (hashlib.sha1(raw).hexdigest()[:16] + ext)
+                    if not fp.exists():
+                        fp.write_bytes(raw)
+                    return core.upload_media(session, str(fp))
+                return ""                             # a bare filename/URL we can't fetch
+
+            image_ids = [m for m in (resolve_img(x) for x in (p.get("images") or [])) if m]
+            video_ids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip().isdigit()]
+            audio_ids = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip().isdigit()]
+            params = core.build_shot_video_params(
+                p.get("mode") or "R2V", (p.get("prompt") or "").strip(),
+                image_ids=image_ids, video_ids=video_ids, audio_ids=audio_ids,
+                duration=p.get("duration") or 5, generate_audio=bool(p.get("generate_audio")))
+            core._apply_kaisuuken(session, params,
+                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
+            task_id = core.submit_generation(session, params)
+            return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
     @app.route("/api/task-status")
     def api_task_status():
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
