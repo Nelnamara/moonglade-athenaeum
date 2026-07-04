@@ -22,6 +22,7 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 try:
@@ -490,6 +491,27 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
             params + [page_size, offset],
         ).fetchall()
         return [dict(r) for r in rows], total
+    finally:
+        con.close()
+
+
+def rows_for_media_ids(db_path, ids):
+    """Fetch catalog rows for a specific list of media_ids, preserving the given order.
+    Used by the contact-sheet print view. Chunked to stay under SQLite's variable cap."""
+    ids = [str(i) for i in (ids or []) if str(i).strip()]
+    if not ids:
+        return []
+    con = _connect(db_path)
+    try:
+        found = {}
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            ph = ",".join("?" * len(chunk))
+            for r in con.execute(
+                "SELECT * FROM catalog WHERE media_id IN ({})".format(ph), chunk
+            ).fetchall():
+                found[str(r["media_id"])] = dict(r)
+        return [found[i] for i in ids if i in found]
     finally:
         con.close()
 
@@ -1236,6 +1258,15 @@ def create_app(out_dir: Path):
   .focus-mode .detail-nav { width: 100%; max-width: 900px; }
   .focus-mode .detail-img { width: 100%; display: flex; justify-content: center; }
   .focus-mode .detail-img img { max-height: 90vh; max-width: 95vw; width: auto; height: auto; }
+  @media print {
+    @page { size: letter; margin: 12mm; }
+    header, .detail-nav, .detail-actions, .detail-stars, #suggest-box, #lightbox { display: none !important; }
+    body, .detail-wrap { background: #fff !important; color: #000 !important; }
+    .detail-wrap { max-width: 100% !important; padding: 0 !important; }
+    .detail-img img { max-width: 100%; max-height: 78vh; width: auto; height: auto; display: block; margin: 0 auto; }
+    .detail-meta { background: #fff !important; border: none !important; margin-top: 8mm; grid-template-columns: 130px 1fr; }
+    .detail-meta .lbl { color: #555 !important; } .detail-meta .val { color: #000 !important; }
+  }
   .back-link { display: inline-block; color: var(--blue); text-decoration: none; font-size: 13px; }
   .back-link:hover { text-decoration: underline; }
   .detail-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
@@ -1379,7 +1410,8 @@ document.addEventListener('DOMContentLoaded', function() {
 <header>
   <div class="brand"><span class="mark">M</span><h1>Moonglade Athenaeum</h1></div>
   <span class="header-stats">{{ '{:,}'.format(total) }} images</span>
-  <button type="button" class="btn btn-primary" onclick="Gen.open()" style="margin-left:auto;">&#10022; Generate</button>
+  <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
+  <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
   <a class="back-link" href="/edit-bay" title="Seedance video storyboard">&#9648; Edit Bay</a>
   <a class="back-link" href="{{ url_for('health') }}">Collection health &rarr;</a>
 </header>
@@ -1544,6 +1576,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <button class="btn" id="bulk-replace-btn" style="display:none" onclick="bulkReplacePrompt()" title="Find/replace text in the prompts of selected images">Find/Replace</button>
   <button class="btn btn-primary" id="bulk-collection-btn" onclick="bulkAddCollection()" title="Check some images/videos first, then click to add them to a named collection (files are not moved)">+ Add to Collection</button>
   <button class="btn" id="bulk-video-btn" style="display:none" onclick="bulkSendVideo()" title="Send up to 9 selected images to the Video tab as references">&#9654; Send to Video</button>
+  <button class="btn" id="bulk-print-btn" style="display:none" onclick="bulkContactSheet()" title="Open a print-ready contact sheet of the selected images">&#128424; Print sheet</button>
   <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
   <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
           title="Saved views"><option value="">Saved views…</option></select>
@@ -1713,6 +1746,13 @@ function refreshSelUI() {
   if (cb) cb.style.display = sel.size ? 'inline-block' : 'none';
   var vb = document.getElementById('bulk-video-btn');
   if (vb) vb.style.display = sel.size ? 'inline-block' : 'none';
+  var pb = document.getElementById('bulk-print-btn');
+  if (pb) pb.style.display = sel.size ? 'inline-block' : 'none';
+}
+function bulkContactSheet() {
+  var ids = Array.from(selGet());
+  if (!ids.length) return;
+  window.open('/contact-sheet?ids=' + encodeURIComponent(ids.join(',')), '_blank');
 }
 function onCheck() {
   var sel = selGet();
@@ -2163,7 +2203,10 @@ document.addEventListener('DOMContentLoaded', function(){
     <div id="gen-loras"></div>
     <button type="button" id="lora-add" onclick="Gen.openLoraBrowser()">+ Add LoRA</button>
     <div class="gen-form" style="border-top:none;margin-top:0;padding-top:0;">
-      <textarea id="gen-prompt" class="gen-ta" rows="3" style="margin-top:8px;" placeholder="Describe your image&hellip;"></textarea>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+        <button type="button" class="snip-btn" onclick="Snips.open(this, {get:function(){return document.getElementById('gen-prompt').value;}, set:function(v){document.getElementById('gen-prompt').value=v;document.getElementById('gen-prompt').focus();Gen.refreshCost();}})">&#9733; Snippets</button>
+      </div>
+      <textarea id="gen-prompt" class="gen-ta" rows="3" placeholder="Describe your image&hellip;"></textarea>
       <details style="margin-top:6px;">
         <summary style="cursor:pointer;color:var(--subtext);font-size:11px;">Negative prompt</summary>
         <textarea id="gen-neg" class="gen-ta" rows="2" placeholder="lowres, text, watermark&hellip;" style="margin-top:5px;"></textarea>
@@ -2241,7 +2284,10 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <div class="gen-lbl" id="video-slots-lbl">Source image (first frame)</div>
       <div id="video-slots"></div>
-      <div id="video-prompt" class="gen-ta gen-ce" contenteditable="true" style="margin-top:8px;"
+      <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+        <button type="button" class="snip-btn" onclick="Snips.open(this, {get:Gen.videoPromptText, set:Gen.videoPromptSet})">&#9733; Snippets</button>
+      </div>
+      <div id="video-prompt" class="gen-ta gen-ce" contenteditable="true"
            data-placeholder="Describe the motion &mdash; &lsquo;slow cinematic pan right, gentle waves&hellip;&rsquo;"></div>
       <div class="gen-row" style="margin-top:8px;">
         <div style="flex:1.4;"><div class="gen-lbl">Model</div>
@@ -2312,7 +2358,27 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="model-preview" aria-hidden="true"></div>
 <div id="ctx-menu"></div>
 <div id="tag-suggest"></div>
+<div id="jobs-tray"></div>
+<div id="snip-menu"></div>
 <style>
+  #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:240px;max-width:340px;max-height:300px;overflow-y:auto;padding:5px;}
+  #snip-menu .snip-head{display:flex;justify-content:space-between;align-items:center;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);padding:3px 6px 5px;}
+  #snip-menu .snip-empty{color:var(--subtext);font-size:11.5px;padding:6px;}
+  .snip-row{display:flex;gap:4px;align-items:center;}
+  .snip-ins{flex:1;text-align:left;background:none;border:none;color:var(--text);font-size:12px;padding:6px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .snip-ins:hover{background:var(--surface0);color:var(--lavender);}
+  .snip-btn{background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);border-radius:6px;font-size:11px;padding:3px 8px;cursor:pointer;}
+  .snip-btn:hover{color:var(--lavender);border-color:var(--overlay0);}
+  .acct-chip{font-size:12.5px;color:var(--subtext);background:var(--surface0);border:1px solid var(--surface1);border-radius:20px;padding:4px 12px;white-space:nowrap;}
+  .acct-chip b{color:var(--text);} .acct-chip .cd{color:var(--lavender);}
+  #jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:214px;background:var(--mantle);border:1px solid var(--surface1);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;padding:8px;}
+  #jobs-tray .jt-head{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);margin-bottom:6px;display:flex;justify-content:space-between;}
+  .jt-item{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--text);padding:4px 2px;}
+  .jt-item .jt-lab{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .jt-item img{width:26px;height:26px;border-radius:4px;object-fit:cover;}
+  .jt-item .jt-x{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;}
+  .jt-item .jt-x:hover{color:var(--red);}
+  .jt-ok{color:var(--emerald);} .jt-err{color:var(--red);}
   #ctx-menu{position:fixed;z-index:230;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:180px;padding:4px;}
   #ctx-menu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:7px 10px;border-radius:5px;cursor:pointer;}
   #ctx-menu button:hover{background:var(--surface0);}
@@ -2375,6 +2441,91 @@ document.addEventListener('DOMContentLoaded', function(){
   var pq=document.getElementById('pick-q'); if(pq) pq.addEventListener('input', Picker.onInput);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Picker.close(); });
 });
+/* ---- Account balance chip (credits + free cards) in the header ---- */
+var Acct = (function(){
+  function chip(){ return document.getElementById('acct-chip'); }
+  function refresh(){
+    var c=chip(); if(!c) return;
+    fetch('/api/account').then(function(r){return r.json();}).then(function(d){
+      if(d.error || (d.credits==null && !d.cards)){ return; }
+      var parts=[]; if(d.credits!=null) parts.push('\\u25c8 <b>'+d.credits.toLocaleString()+'</b>');
+      if(d.cards) parts.push('<span class="cd">\\ud83c\\udfab '+d.cards+'</span>');
+      c.innerHTML=parts.join(' \\u00b7 '); c.style.display=parts.length?'':'none';
+    }).catch(function(){});
+  }
+  return {refresh:refresh};
+})();
+/* ---- Jobs tray: tasks survive closing the drawer ---- */
+var Jobs = (function(){
+  var jobs={}, order=[];
+  function tray(){ return document.getElementById('jobs-tray'); }
+  function track(id, label, cb){
+    if(jobs[id]) return; jobs[id]={id:id, label:label||'Task', status:'running', mid:'', cb:cb};
+    order.unshift(id); render(); poll(id);
+  }
+  function poll(id){
+    if(!jobs[id]) return;
+    fetch('/api/task-status?task_id='+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){
+      var j=jobs[id]; if(!j) return;
+      if(d.phase==='done'){ j.status='done'; j.mid=(d.media_ids||[])[0]||''; render(); if(j.cb) j.cb('done', d); }
+      else if(d.phase==='failed'){ j.status='failed'; render(); if(j.cb) j.cb('failed', d); }
+      else { if(j.cb) j.cb('running', d); setTimeout(function(){ poll(id); }, 3000); }
+    }).catch(function(){ setTimeout(function(){ poll(id); }, 4000); });
+  }
+  function dismiss(id){ delete jobs[id]; order=order.filter(function(x){return x!==id;}); render(); }
+  function clearDone(){ order.slice().forEach(function(id){ if(jobs[id]&&jobs[id].status!=='running') dismiss(id); }); }
+  function render(){
+    var t=tray(); if(!t) return;
+    if(!order.length){ t.style.display='none'; t.innerHTML=''; return; }
+    t.style.display='block';
+    var html='<div class="jt-head"><span>Jobs</span><button class="jt-x" onclick="Jobs.clearDone()" title="Clear finished">clear</button></div>';
+    order.forEach(function(id){ var j=jobs[id];
+      var icon = j.status==='done'?'<span class="jt-ok">\\u2713</span>'
+               : j.status==='failed'?'<span class="jt-err">\\u26a0</span>'
+               : '<span class="gen-moon"></span>';
+      var thumb = (j.status==='done'&&j.mid)?'<a href="/image/'+j.mid+'"><img src="/thumbs/'+j.mid+'.jpg" alt=""></a>':'';
+      html+='<div class="jt-item">'+icon+'<span class="jt-lab">'+j.label+' \\u00b7 '+j.status+'</span>'+thumb
+          +'<button class="jt-x" onclick="Jobs.dismiss(\\''+id+'\\')">\\u00d7</button></div>';
+    });
+    t.innerHTML=html;
+  }
+  return {track:track, dismiss:dismiss, clearDone:clearDone};
+})();
+/* ---- Prompt snippets / favorites (server-stored) ---- */
+var Snips = (function(){
+  var list=null, target=null;
+  function menu(){ return document.getElementById('snip-menu'); }
+  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function load(){ return (list!==null?Promise.resolve():fetch('/api/snippets').then(function(r){return r.json();})
+      .then(function(d){ list=d.snippets||[]; }).catch(function(){ list=[]; })); }
+  function persist(){ fetch('/api/snippets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snippets:list})}); }
+  function open(anchor, tgt){ target=tgt; load().then(function(){ render(); place(anchor); }); }
+  function hide(){ var m=menu(); if(m) m.style.display='none'; }
+  function place(a){ var m=menu(), r=a.getBoundingClientRect();
+    m.style.display='block';
+    m.style.left=Math.min(r.left, window.innerWidth-m.offsetWidth-8)+'px';
+    var top=r.bottom+4; if(top+m.offsetHeight>window.innerHeight-8) top=r.top-m.offsetHeight-4;
+    m.style.top=Math.max(8,top)+'px';
+  }
+  function render(){
+    var m=menu(); var html='<div class="snip-head"><span>Snippets</span>'
+      +'<button class="jt-x" onmousedown="event.preventDefault();Snips.saveCurrent()">+ save current</button></div>';
+    if(!list.length) html+='<div class="snip-empty">No saved snippets yet.</div>';
+    (list||[]).forEach(function(s,i){
+      html+='<div class="snip-row"><button class="snip-ins" onmousedown="event.preventDefault();Snips.insert('+i+')" title="Insert">'+esc(s)+'</button>'
+        +'<button class="jt-x" onmousedown="event.preventDefault();Snips.del('+i+')">\\u00d7</button></div>';
+    });
+    m.innerHTML=html;
+  }
+  function saveCurrent(){ if(!target) return; var v=(target.get()||'').trim(); if(!v) return;
+    if(list.indexOf(v)<0){ list.unshift(v); list=list.slice(0,200); persist(); render(); } }
+  function insert(i){ if(!target||!list[i]) return; var cur=(target.get()||'').trim();
+    target.set(cur ? (cur.replace(/,\\s*$/,'')+', '+list[i]) : list[i]); hide(); }
+  function del(i){ list.splice(i,1); persist(); render(); }
+  document.addEventListener('click', function(e){ var m=menu();
+    if(m && m.style.display==='block' && !m.contains(e.target) && !(e.target.classList&&e.target.classList.contains('snip-btn'))) hide(); });
+  return {open:open, saveCurrent:saveCurrent, insert:insert, del:del};
+})();
 var Gen = (function(){
   var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null;
   var workflows=null, enhTimer=null;
@@ -2549,15 +2700,6 @@ var Gen = (function(){
     if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');Gen.setMode(\\'edit\\');return false;">Edit this result \\u2192</a>'; }
     res.innerHTML=html;
   }
-  function pollTask(tid, res, past, done){
-    fetch('/api/task-status?task_id='+encodeURIComponent(tid))
-      .then(function(r){return r.json();})
-      .then(function(d){
-        if(d.phase==='done'){ done(); renderResult(res, d, past); }
-        else if(d.phase==='failed'){ done(); renderResult(res, {error:d.error||('task '+(d.status||'failed'))}); }
-        else { res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Rendering under the eclipse\\u2026 (task '+String(tid).slice(-6)+')</span>'; setTimeout(function(){ pollTask(tid,res,past,done); }, 3000); }
-      }).catch(function(){ setTimeout(function(){ pollTask(tid,res,past,done); }, 4000); });
-  }
   function runTask(url, p, res, opts){
     opts=opts||{};
     res.style.display='block'; res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
@@ -2568,7 +2710,12 @@ var Gen = (function(){
       .then(function(d){
         if(d.error || !d.task_id){ done(); renderResult(res, {error:d.error||'submit failed'}); return; }
         res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
-        pollTask(d.task_id, res, opts.past, done);
+        // Jobs owns the polling, so the task (and its result) survive closing the drawer.
+        Jobs.track(d.task_id, opts.past||'Task', function(phase, data){
+          if(phase==='done'){ done(); renderResult(res, data, opts.past); Acct.refresh(); }
+          else if(phase==='failed'){ done(); renderResult(res, {error:data.error||('task '+(data.status||'failed'))}); }
+          else { res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Rendering under the eclipse\\u2026 (task '+String(d.task_id).slice(-6)+')</span>'; }
+        });
       }).catch(function(){ done(); renderResult(res, {error:'network error'}); });
   }
   function generate(){
@@ -2782,6 +2929,7 @@ var Gen = (function(){
     });})(vp);
     return out.replace(/\\u00a0/g,' ').trim();
   }
+  function videoPromptSet(v){ var vp=el('video-prompt'); if(!vp) return; vp.textContent=v||''; vpChipify(true); videoCost(); }
   function vpOnInput(){ clearTimeout(vpTimer); vpTimer=setTimeout(function(){ vpChipify(false); videoCost(); }, 300); }
   function videoPayload(){
     return { mode:vmode.toUpperCase(), prompt:vpText(),
@@ -2832,6 +2980,7 @@ var Gen = (function(){
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           setEditSub:setEditSub, addVideoRefs:addVideoRefs, videoCost:videoCost,
           vpOnInput:vpOnInput, vpChipify:vpChipify,
+          videoPromptText:vpText, videoPromptSet:videoPromptSet,
           get selected(){return selected;}};
 })();
 var Tags = (function(){
@@ -2930,6 +3079,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
   try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
+  Acct.refresh();
   ['gen-prompt','gen-neg','edit-ins'].forEach(Tags.attach);
   var vp=document.getElementById('video-prompt');
   if(vp){ vp.addEventListener('input', Gen.vpOnInput);
@@ -3092,7 +3242,11 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endif %}
     <button class="btn" data-cmd="{{ row.media_id }}" onclick="copyCmd(this)"
       title="Copy this image's media_id (paste into the GUI Video/Edit tab)">Copy media id</button>
+    <button class="btn" onclick="window.print()" title="Print this image with its details">&#128424; Print</button>
     {% if row.is_video != '1' %}
+    <button class="btn" id="suggest-prompt-btn" data-mid="{{ row.media_id }}"
+      onclick="suggestPrompt(this)"
+      title="Ask PixAI to read this image back into a prompt (free)">&#9998; Suggest prompt</button>
     <a class="btn btn-primary" href="/?edit={{ row.media_id }}"
       title="Open this image in the gallery's Edit Bay">&#10022; Edit this</a>
     {% endif %}
@@ -3142,6 +3296,27 @@ function copyCmd(btn) {
     btn.textContent = 'Copied!';
     setTimeout(function(){ btn.textContent = old; }, 1200);
   });
+}
+function suggestPrompt(btn) {
+  var mid = btn.getAttribute('data-mid'), old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Reading…';
+  var box = document.getElementById('suggest-box');
+  if (!box) { box = document.createElement('div'); box.id = 'suggest-box';
+    box.style.cssText = 'margin-top:12px;padding:12px 14px;background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;font-size:13px;line-height:1.5;';
+    btn.closest('.detail-actions').after(box); }
+  fetch('/api/suggest-prompt?media_id=' + encodeURIComponent(mid)).then(function(r){return r.json();}).then(function(d){
+    btn.disabled = false; btn.textContent = old;
+    var s = d.suggestions || [];
+    if (d.error || !s.length) { box.innerHTML = '<span style="color:var(--overlay0);">' + (d.error || 'No suggestion returned.') + '</span>'; return; }
+    box.innerHTML = '<div style="color:var(--overlay0);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Suggested prompt(s) &middot; click to copy</div>';
+    s.forEach(function(t){
+      var line = document.createElement('div');
+      line.className = 'suggest-line'; line.textContent = t || '';
+      line.style.cssText = 'padding:6px 8px;border-radius:6px;cursor:pointer;';
+      line.onclick = function(){ navigator.clipboard.writeText(t || ''); line.style.color = 'var(--emerald)'; };
+      box.appendChild(line);
+    });
+  }).catch(function(){ btn.disabled = false; btn.textContent = old; box.innerHTML = '<span style="color:var(--red);">Network error.</span>'; });
 }
 function toggleEdit() {
   var e = document.getElementById('prompt-editor');
@@ -3829,6 +4004,132 @@ function savePrompt() {
         return jsonify({"images": out, "total": total, "page": page,
                         "limit": limit})
 
+    @app.route("/contact-sheet")
+    def contact_sheet():
+        """Print-ready grid of images for physical curation. Sources: ?ids=a,b,c
+        (from a gallery selection) or ?collection=<name>. ?cols=N (default 4),
+        ?captions=0 to hide the date/rating line. Opens the print dialog on load."""
+        ids_arg = (request.args.get("ids") or "").strip()
+        collection = (request.args.get("collection") or "").strip()
+        try:
+            cols = max(2, min(int(request.args.get("cols") or 4), 8))
+        except ValueError:
+            cols = 4
+        captions = (request.args.get("captions") or "1") not in ("0", "false", "no")
+        if ids_arg:
+            ids = [x for x in ids_arg.split(",") if x.strip()]
+            rows = rows_for_media_ids(db_path, ids)
+            title = "{} selected".format(len(rows))
+        elif collection:
+            rows, _ = query_catalog(db_path, collection=collection, sort="newest",
+                                    page=1, page_size=400)
+            title = "Collection: {}".format(collection)
+        else:
+            rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
+            title = "Recent"
+        cells = []
+        for r in rows:
+            mid = str(r.get("media_id") or "")
+            if not mid:
+                continue
+            cap = ""
+            if captions:
+                date = (r.get("created_at") or "")[:10]
+                try:
+                    stars = "★" * int(r.get("rating") or 0)
+                except (TypeError, ValueError):
+                    stars = ""
+                cap = "<div class='cap'>{}{}</div>".format(
+                    date, (" " + stars) if stars else "")
+            cells.append(
+                "<figure><img src='/thumbs/{}.jpg' alt=''>{}</figure>".format(mid, cap))
+        html = """<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Contact sheet &middot; {title}</title>
+<style>
+  @page {{ size: letter; margin: 12mm; }}
+  body {{ font-family: system-ui, sans-serif; margin: 18px; color: #111; }}
+  .bar {{ display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }}
+  .bar h1 {{ font-size: 16px; margin: 0; font-weight: 600; }}
+  .bar button {{ font-size: 13px; padding: 6px 14px; cursor: pointer; }}
+  .grid {{ display: grid; grid-template-columns: repeat({cols}, 1fr); gap: 8px; }}
+  figure {{ margin: 0; break-inside: avoid; }}
+  figure img {{ width: 100%; aspect-ratio: 1; object-fit: cover; border: 1px solid #ddd; border-radius: 4px; display: block; }}
+  .cap {{ font-size: 9px; color: #555; margin-top: 2px; text-align: center; }}
+  @media print {{ .bar {{ display: none; }} body {{ margin: 0; }} }}
+</style></head><body>
+<div class="bar"><h1>{title} &middot; {n} images</h1>
+  <button onclick="window.print()">&#128424; Print</button>
+  <a href="/" style="margin-left:auto;">&larr; back to gallery</a></div>
+<div class="grid">{cells}</div>
+<script>window.addEventListener('load', function(){{ setTimeout(function(){{ window.print(); }}, 350); }});</script>
+</body></html>""".format(title=title, cols=cols, n=len(cells), cells="".join(cells))
+        return html
+
+    @app.route("/api/account")
+    def api_account():
+        """Credits + free-card balance for the header chip. Read-only, localhost-only.
+        Fails soft to nulls so the header never breaks."""
+        if not _is_local_request():
+            return jsonify({}), 403
+        try:
+            core, session = _gen_session()
+            me = core.account_info(session)
+            try:
+                credits = int(me.get("quotaAmount") or 0)
+            except (TypeError, ValueError):
+                credits = None
+            cards = 0
+            for k in core.list_kaisuukens(session):
+                try:
+                    cards += int(k.get("count") or 0)
+                except (TypeError, ValueError):
+                    pass
+            return jsonify({"credits": credits, "cards": cards})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 200
+
+    _snips_lock = threading.Lock()
+
+    @app.route("/api/snippets", methods=["GET", "POST"])
+    def api_snippets():
+        """Prompt snippets/favorites, stored server-side (out_dir/prompt_snippets.json) so
+        they persist with the backup and sync across the owner's machines. Localhost-only."""
+        if not _is_local_request():
+            return jsonify({"snippets": []}), 403
+        path = out_dir / "prompt_snippets.json"
+        with _snips_lock:
+            if request.method == "POST":
+                body = request.get_json(silent=True) or {}
+                snips = body.get("snippets")
+                if not isinstance(snips, list):
+                    return jsonify({"error": "snippets must be a list"}), 400
+                clean = [str(s)[:800] for s in snips if str(s).strip()][:200]
+                try:
+                    path.write_text(json.dumps(clean), encoding="utf-8")
+                except OSError as e:
+                    return jsonify({"error": str(e)[:160]}), 200
+                return jsonify({"snippets": clean})
+            try:
+                snips = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+            except (OSError, ValueError):
+                snips = []
+            return jsonify({"snippets": snips})
+
+    @app.route("/api/suggest-prompt")
+    def api_suggest_prompt():
+        """Image-to-prompt for the gallery's 'Suggest prompt' button: PixAI's tag list +
+        NL description for a media_id. Read-only, free, localhost-only. ?media_id="""
+        if not _is_local_request():
+            return jsonify({"suggestions": []}), 403
+        mid = (request.args.get("media_id") or "").strip()
+        if not mid:
+            return jsonify({"suggestions": [], "error": "media_id required"}), 400
+        try:
+            core, session = _gen_session()
+            return jsonify({"suggestions": core.suggest_prompt(session, mid)})
+        except Exception as e:
+            return jsonify({"suggestions": [], "error": str(e)[:200]}), 200
+
     @app.route("/api/tag-suggest")
     def api_tag_suggest():
         """Tag autocomplete for the drawer's prompt boxes (the site's Tag Suggestions
@@ -4056,7 +4357,6 @@ function savePrompt() {
             return jsonify({"error": str(e)[:300]}), 200
 
     # --- The Edit Bay (Seedance storyboard) ---------------------------------
-    import threading
     _editbay_lock = threading.Lock()
 
     def _editbay_store():
