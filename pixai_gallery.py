@@ -1542,7 +1542,7 @@ document.addEventListener('DOMContentLoaded', function() {
 <button type="button" class="filter-toggle btn" onclick="toggleFilters()"
         aria-expanded="false">Filters &#9662;</button>
 <form method="get" action="/" id="filter-form">
-{% set adv_active = model_filter or batch_filter or art_tag or lora_filter or source_filter or published_only %}
+{% set adv_active = model_filter or lora_filter or date_from or date_to or batch_filter or rating_min or art_tag or source_filter or published_only %}
 <div class="filters">
   <div class="f-grow">
     <label>Search prompt</label><br>
@@ -1558,15 +1558,6 @@ document.addEventListener('DOMContentLoaded', function() {
     </select>
   </div>
   <div>
-    <label>Min rating</label><br>
-    <select name="rating_min">
-      <option value="0" {% if rating_min==0 %}selected{% endif %}>Any</option>
-      {% for r in [1,2,3,4,5] %}
-      <option value="{{ r }}" {% if rating_min==r %}selected{% endif %}>{{ '★' * r }}+</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div>
     <label>Collection</label><br>
     <select name="collection">
       <option value="">All</option>
@@ -1574,14 +1565,6 @@ document.addEventListener('DOMContentLoaded', function() {
       <option value="{{ c }}" {% if collection==c %}selected{% endif %}>{{ c }}</option>
       {% endfor %}
     </select>
-  </div>
-  <div>
-    <label>From</label><br>
-    {{ date_select('from', date_from, years) }}
-  </div>
-  <div>
-    <label>To</label><br>
-    {{ date_select('to', date_to, years) }}
   </div>
   <div>
     <label>Sort</label><br>
@@ -1600,6 +1583,19 @@ document.addEventListener('DOMContentLoaded', function() {
       <option value="height"      {% if sort=='height' %}selected{% endif %}>Height ↓</option>
     </select>
   </div>
+  <div>
+    <label>Thumb size</label><br>
+    <input type="range" id="thumb-size" min="120" max="320" step="20" value="200"
+           title="Thumbnail size" style="width:110px;vertical-align:middle">
+  </div>
+  <div>
+    <label>Per page</label><br>
+    <select name="per_page">
+      {% for n in per_page_opts %}
+      <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>
+      {% endfor %}
+    </select>
+  </div>
   <div style="align-self:flex-end">
     <button type="submit" class="btn btn-primary">Filter</button>
     <a href="/" class="btn">Reset</a>
@@ -1616,6 +1612,18 @@ document.addEventListener('DOMContentLoaded', function() {
       {% for m in models %}<option value="{{ m }}">{% endfor %}
     </datalist>
   </div>
+  <div>
+    <label>LoRA</label><br>
+    <input type="text" name="lora" value="{{ lora_filter }}" placeholder="lora name…" style="width:140px">
+  </div>
+  <div>
+    <label>From</label><br>
+    {{ date_select('from', date_from, years) }}
+  </div>
+  <div>
+    <label>To</label><br>
+    {{ date_select('to', date_to, years) }}
+  </div>
   {% if batches %}
   <div>
     <label>Batch</label><br>
@@ -1627,12 +1635,17 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
   {% endif %}
   <div>
-    <label>Tag / contest</label><br>
-    <input type="text" name="tag" value="{{ art_tag }}" placeholder="published tag…" style="width:140px">
+    <label>Min rating</label><br>
+    <select name="rating_min">
+      <option value="0" {% if rating_min==0 %}selected{% endif %}>Any</option>
+      {% for r in [1,2,3,4,5] %}
+      <option value="{{ r }}" {% if rating_min==r %}selected{% endif %}>{{ '★' * r }}+</option>
+      {% endfor %}
+    </select>
   </div>
   <div>
-    <label>LoRA</label><br>
-    <input type="text" name="lora" value="{{ lora_filter }}" placeholder="lora name…" style="width:140px">
+    <label>Tag / contest</label><br>
+    <input type="text" name="tag" value="{{ art_tag }}" placeholder="published tag…" style="width:140px">
   </div>
   <div>
     <label>Source</label><br>
@@ -1643,19 +1656,6 @@ document.addEventListener('DOMContentLoaded', function() {
       <option value="local" {% if source_filter=='local' %}selected{% endif %}>Imported</option>
       <option value="deleted" {% if source_filter=='deleted' %}selected{% endif %}>Deleted on PixAI</option>
     </select>
-  </div>
-  <div>
-    <label>Per page</label><br>
-    <select name="per_page">
-      {% for n in per_page_opts %}
-      <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div>
-    <label>Thumb size</label><br>
-    <input type="range" id="thumb-size" min="120" max="320" step="20" value="200"
-           title="Thumbnail size" style="width:110px;vertical-align:middle">
   </div>
   <div>
     <label>&nbsp;</label><br>
