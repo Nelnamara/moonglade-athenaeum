@@ -1337,6 +1337,11 @@ def create_app(out_dir: Path):
         "export-csv":    {"args": ["--export-csv"], "label": "Export catalog → CSV", "destructive": False},
         "organize-dry":  {"args": ["--organize", "--dry-run"], "label": "Organize — preview (dry run)", "destructive": False},
         "dedup-dry":     {"args": ["--dedup"], "label": "Dedup — preview (dry run)", "destructive": False},
+        # Routine maintenance that used to be GUI-only (no args, non-destructive -> schedulable).
+        # import-local stays CLI/GUI: it needs a folder path the fixed-button panel can't supply.
+        "sync-videos":     {"args": ["--sync-videos"], "label": "Sync i2v videos (back up mp4s)", "destructive": False},
+        "reconcile-deleted": {"args": ["--reconcile-deleted"], "label": "Reconcile deleted (flag cloud-removed rows)", "destructive": False},
+        "fix-models":      {"args": ["--fix-model-names"], "label": "Fix model names (re-resolve ids)", "destructive": False},
         # --- destructive: require confirm=true ---
         "organize":      {"args": ["--organize"], "label": "Organize into month folders", "destructive": True},
         "dedup-apply":   {"args": ["--dedup", "--apply"], "label": "Dedup — quarantine dupes to _duplicates/", "destructive": True},
@@ -1543,6 +1548,7 @@ def create_app(out_dir: Path):
     header h1 { font-size: 16px; }
     header .back-link { font-size: 12px; }
   .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .lan-note { font-size: 11.5px; color: var(--overlay0); font-style: italic; padding: 5px 10px; border: 1px dashed var(--surface1); border-radius: 7px; }
     .filter-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 12px 0; }
     .filters { display: none; flex-direction: column; align-items: stretch; padding: 10px 12px; }
     .filters.open { display: flex; }
@@ -1856,13 +1862,22 @@ document.addEventListener('DOMContentLoaded', function() {
     <span id="gen-live" class="gen-live" style="display:none;"></span>
   </span>
   <div class="head-nav">
+    {# Owner-only surfaces (generation, The Loom, Panel, balance) are localhost-gated -- on a
+       LAN-served instance they'd 403 for other devices, so hide them there and show a small
+       read-only note instead of dead buttons. Browse/curate + community stay available. #}
+    {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
     <a class="btn" href="/edit-bay" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
+    {% endif %}
     <button type="button" class="btn" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
     <button type="button" class="btn" onclick="Contests.open()" title="Live PixAI contests &mdash; the Oasis was never a 1-player game">&#127941; Contests</button>
     <button type="button" class="btn" onclick="YourArt.open()" title="How your published art is doing &mdash; views, likes, comments">&#128200; My Art</button>
+    {% if is_local %}
     <a class="btn" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
+    {% else %}
+    <span class="lan-note" title="Creation &amp; maintenance tools live on the owner's machine (localhost).">&#128065; read-only LAN view</span>
+    {% endif %}
     <a class="btn" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
   </div>
 </header>
@@ -4928,7 +4943,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             lora_filter=lora_filter, media_type=media_type, source_filter=source,
             collection=collection, collections=collections,
             rows=page_rows, total=total, page=page, stats=catalog_counts(db_path),
-            build_stamp=build_stamp,
+            build_stamp=build_stamp, is_local=_is_local_request(),
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
             date_from=date_from,
@@ -6178,6 +6193,9 @@ def main():
     ap.add_argument("--skip-thumbs", action="store_true",
                     help="don't build catalog thumbnails on startup (fast boot; missing "
                          "ones show 'no preview'). Per-generation thumbs are still made.")
+    ap.add_argument("--open-browser", action="store_true",
+                    help="open the gallery in your default browser once the server is up "
+                         "(used by the double-click 'Serve Gallery' launcher)")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
@@ -6216,11 +6234,16 @@ def main():
                   "Falling back to HTTP.")
 
     app = create_app(out_dir)
-    print("\nGallery ready ->  {}://{}:{}/".format(
-        scheme, "localhost" if args.host == "127.0.0.1" else args.host, args.port))
+    url = "{}://{}:{}/".format(
+        scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)
+    print("\nGallery ready ->  {}".format(url))
     if ssl_context:
         print("(self-signed HTTPS: your browser/phone will show a one-time 'proceed anyway' warning)")
     print("Press Ctrl+C to stop.\n")
+    if getattr(args, "open_browser", False):
+        # fire just after app.run() starts blocking (the GUI proves this pattern)
+        import threading, webbrowser
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)
 
 
