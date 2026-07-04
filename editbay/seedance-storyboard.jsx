@@ -660,6 +660,7 @@ function GalleryPick({ onPick, onClose }) {
                  onClick={() => onPick(m.media_id, m.thumb)}>
               <img src={m.thumb} loading="lazy" decoding="async" alt=""
                 style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0, transition: "opacity .18s" }}
+                ref={(el) => { if (el && el.complete) el.style.opacity = 1; }}
                 onLoad={(e) => { e.target.style.opacity = 1; }} />
             </div>))}
         </div>
