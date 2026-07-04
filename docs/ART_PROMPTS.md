@@ -104,3 +104,53 @@ Ask for the **#00FF00 flat background** so the transparency cut is clean (AI "tr
 backgrounds are painted fakes — we key the green out instead). Drop the finished cut at
 `pixai_backup/branding/logo.png` (512px, transparent PNG) and it's live on refresh — glow,
 glint, twinkle and all. Banner goes to `pixai_backup/branding/banner.png`.
+
+---
+
+## Banner + icon v3 — "protection against the Void" (2026-07-04)
+
+Aesthetic correction from v2: DROP the gold filigree / baroque ornament. North star is a WARD,
+not a jewel — a shield of moonlight holding back the dark. Clean, iconic, resolute. Two-tone
+(moonlight-lavender/silver vs void-black), ONE emerald spark (Nel's gems). Strong bold silhouette
+(the header glint masks to the logo's alpha, so clean shapes read best). Emblem on flat #00FF00
+for a clean key-out. Banner: all art in the LEFT third, no text anywhere.
+
+### Launch/header ICON — pick one, all on flat pure-green #00FF00, no text, no shadow
+**A - The Moonward (clean sigil)**
+> A single bold emblem on a flat pure-green #00FF00 background, no text, no shadow. A luminous
+> crescent moon enclosed within a simple circular warding rune — clean geometric lines, a
+> protective sigil of moonlight. Soft lavender-white glow along the crescent, one small emerald
+> gem at the center. Minimalist, iconic, strong bold silhouette, flat vector crest style. NO gold,
+> no filigree, no ornamentation — restrained and powerful. Deep violet and silver-white palette.
+
+**B - Shield of Elune (the barrier)**
+> A single emblem on flat pure-green #00FF00, no text, no shadow. A crescent moon forming a
+> protective shield, faint tendrils of dark void-shadow recoiling from its glowing edge, held back
+> by the light. Clean and bold, two-tone: pale moonlight-lavender against deep void-black, one
+> emerald spark. Minimal iconic silhouette, flat modern fantasy crest. Absolutely NO gold or
+> baroque detail — this is a ward, not a jewel.
+
+**C - The Sealed Moon (keeper of the archive)**
+> A single emblem on flat pure-green #00FF00, no text, no shadow. A crescent moon set as a seal
+> over an open book, a simple ring of soft arcane light around it — the moon guarding the archive.
+> Clean minimal geometry, lavender and silver glow, one emerald accent, bold readable silhouette,
+> flat vector crest. NO gold filigree, restrained and elegant.
+
+### BANNER — ultra-wide, NO text anywhere, all art in the LEFT third (header masks the right ~62%)
+**A - The Warded Sanctum**
+> Ultra-wide fantasy banner, NO text anywhere. A moonlit sanctuary at night: a serene archive
+> bathed in a dome of protective pale-blue moonlight on the LEFT, with the encroaching Void — deep
+> violet-black shadow and faint creeping tendrils — held back at the edge, unable to cross the
+> light. Cool silver-blue and deep violet palette, one emerald glow. Atmospheric, protective, calm
+> strength. Minimal, NOT ornate — no gold, no clutter. The right half dissolving into plain darkness.
+
+**B - Bulwark of Moonlight**
+> Ultra-wide fantasy banner, NO text. Tall archive shelves on the LEFT lit by a clean shaft of
+> silver moonlight from a high window, a subtle luminous barrier of light between the shelves and
+> the void-black pressing in from the right. Restrained, atmospheric, protective. Deep violet and
+> moonlight-silver, one emerald accent. Painterly but CLEAN — no gold filigree, no baroque
+> decoration. Right side fading to darkness.
+
+Cut the finished icon on flat green (AI "transparent" backgrounds are painted fakes — key the
+green out), drop to pixai_backup/branding/logo.png (512, transparent PNG) and banner.png; both go
+live on refresh, glow/glint/twinkle included.
