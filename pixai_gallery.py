@@ -1159,6 +1159,8 @@ def create_app(out_dir: Path):
   .filters { background: var(--mantle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--surface0); }
   .filters input, .filters select { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
   .filters input { width: 280px; }
+  .filters .f-grow { flex: 1 1 320px; min-width: 220px; } .filters .f-grow input { width: 100%; }
+  .filters-adv { border-top: 1px dashed var(--surface1); }
   .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(79,201,154,.25); }
   .filters label { color: var(--subtext); font-size: 12px; }
   .filter-toggle { display: none; }
@@ -1462,12 +1464,72 @@ document.addEventListener('DOMContentLoaded', function() {
 <button type="button" class="filter-toggle btn" onclick="toggleFilters()"
         aria-expanded="false">Filters &#9662;</button>
 <form method="get" action="/" id="filter-form">
+{% set adv_active = model_filter or batch_filter or art_tag or lora_filter or source_filter or published_only %}
 <div class="filters">
-  <div>
-    <label>Prompt</label><br>
+  <div class="f-grow">
+    <label>Search prompt</label><br>
     <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard…"
            title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf">
   </div>
+  <div>
+    <label>Media</label><br>
+    <select name="media">
+      <option value="" {% if not media_type %}selected{% endif %}>All</option>
+      <option value="image" {% if media_type=='image' %}selected{% endif %}>Images</option>
+      <option value="video" {% if media_type=='video' %}selected{% endif %}>Videos</option>
+    </select>
+  </div>
+  <div>
+    <label>Min rating</label><br>
+    <select name="rating_min">
+      <option value="0" {% if rating_min==0 %}selected{% endif %}>Any</option>
+      {% for r in [1,2,3,4,5] %}
+      <option value="{{ r }}" {% if rating_min==r %}selected{% endif %}>{{ '★' * r }}+</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label>Collection</label><br>
+    <select name="collection">
+      <option value="">All</option>
+      {% for c in collections %}
+      <option value="{{ c }}" {% if collection==c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label>From</label><br>
+    {{ date_select('from', date_from, years) }}
+  </div>
+  <div>
+    <label>To</label><br>
+    {{ date_select('to', date_to, years) }}
+  </div>
+  <div>
+    <label>Sort</label><br>
+    <select name="sort">
+      <option value="newest"      {% if sort=='newest' %}selected{% endif %}>Newest first</option>
+      <option value="oldest"      {% if sort=='oldest' %}selected{% endif %}>Oldest first</option>
+      <option value="rating_desc" {% if sort=='rating_desc' %}selected{% endif %}>Rating ↓</option>
+      <option value="rating_asc"  {% if sort=='rating_asc' %}selected{% endif %}>Rating ↑</option>
+      <option value="model"       {% if sort=='model' %}selected{% endif %}>Model name</option>
+      <option value="pixels"      {% if sort=='pixels' %}selected{% endif %}>Resolution ↓</option>
+      <option value="aspect"      {% if sort=='aspect' %}selected{% endif %}>Aspect (wide→tall)</option>
+      <option value="aes_desc"    {% if sort=='aes_desc' %}selected{% endif %}>Aesthetic score ↓</option>
+      <option value="aes_asc"     {% if sort=='aes_asc' %}selected{% endif %}>Aesthetic score ↑</option>
+      <option value="likes"       {% if sort=='likes' %}selected{% endif %}>Most liked</option>
+      <option value="width"       {% if sort=='width' %}selected{% endif %}>Width ↓</option>
+      <option value="height"      {% if sort=='height' %}selected{% endif %}>Height ↓</option>
+    </select>
+  </div>
+  <div style="align-self:flex-end">
+    <button type="submit" class="btn btn-primary">Filter</button>
+    <a href="/" class="btn">Reset</a>
+    <button type="button" class="btn" id="adv-toggle" onclick="toggleAdvanced()"
+      aria-expanded="{{ 'true' if adv_active else 'false' }}">{{ 'Less &#9652;' if adv_active else 'More &#9662;' }}</button>
+  </div>
+</div>
+<div class="filters filters-adv" id="filters-adv" {% if not adv_active %}style="display:none;"{% endif %}>
   <div>
     <label>Model</label><br>
     <input type="text" name="model" value="{{ model_filter }}" list="models-list"
@@ -1487,37 +1549,12 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
   {% endif %}
   <div>
-    <label>From</label><br>
-    {{ date_select('from', date_from, years) }}
-  </div>
-  <div>
-    <label>To</label><br>
-    {{ date_select('to', date_to, years) }}
-  </div>
-  <div>
-    <label>Min rating</label><br>
-    <select name="rating_min">
-      <option value="0" {% if rating_min==0 %}selected{% endif %}>Any</option>
-      {% for r in [1,2,3,4,5] %}
-      <option value="{{ r }}" {% if rating_min==r %}selected{% endif %}>{{ '★' * r }}+</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div>
     <label>Tag / contest</label><br>
     <input type="text" name="tag" value="{{ art_tag }}" placeholder="published tag…" style="width:140px">
   </div>
   <div>
     <label>LoRA</label><br>
     <input type="text" name="lora" value="{{ lora_filter }}" placeholder="lora name…" style="width:140px">
-  </div>
-  <div>
-    <label>Media</label><br>
-    <select name="media">
-      <option value="" {% if not media_type %}selected{% endif %}>All</option>
-      <option value="image" {% if media_type=='image' %}selected{% endif %}>Images</option>
-      <option value="video" {% if media_type=='video' %}selected{% endif %}>Videos</option>
-    </select>
   </div>
   <div>
     <label>Source</label><br>
@@ -1530,22 +1567,6 @@ document.addEventListener('DOMContentLoaded', function() {
     </select>
   </div>
   <div>
-    <label>Collection</label><br>
-    <select name="collection">
-      <option value="">All</option>
-      {% for c in collections %}
-      <option value="{{ c }}" {% if collection==c %}selected{% endif %}>{{ c }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div>
-    <label>&nbsp;</label><br>
-    <label style="color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:6px;">
-      <input type="checkbox" name="published" value="1" {% if published_only %}checked{% endif %}
-             style="width:auto;"> Published only
-    </label>
-  </div>
-  <div>
     <label>Per page</label><br>
     <select name="per_page">
       {% for n in per_page_opts %}
@@ -1554,30 +1575,16 @@ document.addEventListener('DOMContentLoaded', function() {
     </select>
   </div>
   <div>
-    <label>Sort</label><br>
-    <select name="sort">
-      <option value="newest"      {% if sort=='newest' %}selected{% endif %}>Newest first</option>
-      <option value="oldest"      {% if sort=='oldest' %}selected{% endif %}>Oldest first</option>
-      <option value="rating_desc" {% if sort=='rating_desc' %}selected{% endif %}>Rating ↓</option>
-      <option value="rating_asc"  {% if sort=='rating_asc' %}selected{% endif %}>Rating ↑</option>
-      <option value="model"       {% if sort=='model' %}selected{% endif %}>Model name</option>
-      <option value="pixels"      {% if sort=='pixels' %}selected{% endif %}>Resolution ↓</option>
-      <option value="aspect"      {% if sort=='aspect' %}selected{% endif %}>Aspect (wide→tall)</option>
-      <option value="aes_desc"    {% if sort=='aes_desc' %}selected{% endif %}>Aesthetic score ↓</option>
-      <option value="aes_asc"     {% if sort=='aes_asc' %}selected{% endif %}>Aesthetic score ↑</option>
-      <option value="likes"       {% if sort=='likes' %}selected{% endif %}>Most liked</option>
-      <option value="width"       {% if sort=='width' %}selected{% endif %}>Width ↓</option>
-      <option value="height"      {% if sort=='height' %}selected{% endif %}>Height ↓</option>
-    </select>
-  </div>
-  <div>
     <label>Thumb size</label><br>
     <input type="range" id="thumb-size" min="120" max="320" step="20" value="200"
            title="Thumbnail size" style="width:110px;vertical-align:middle">
   </div>
-  <div style="align-self:flex-end">
-    <button type="submit" class="btn btn-primary">Filter</button>
-    <a href="/" class="btn">Reset</a>
+  <div>
+    <label>&nbsp;</label><br>
+    <label style="color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:6px;">
+      <input type="checkbox" name="published" value="1" {% if published_only %}checked{% endif %}
+             style="width:auto;"> Published only
+    </label>
   </div>
 </div>
 </form>
@@ -1718,6 +1725,14 @@ function toggleFilters() {
   var f = document.querySelector('.filters');
   var btn = document.querySelector('.filter-toggle');
   var open = f.classList.toggle('open');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function toggleAdvanced() {
+  var a = document.getElementById('filters-adv');
+  var btn = document.getElementById('adv-toggle');
+  var open = a.style.display === 'none';
+  a.style.display = open ? '' : 'none';
+  btn.innerHTML = open ? 'Less \\u25b2' : 'More \\u25be';
   btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 function applyBlur() {
