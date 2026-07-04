@@ -346,6 +346,56 @@ def test_distinct_task_count(tmp_path):
     assert g.distinct_task_count(tmp_path / "catalog.db") == 2
 
 
+_CONTEST_PAGES = {
+    1: {"data": [
+        {"id": "1", "title": {"en": "Summer Embers", "zh": "x"}, "slug": "pixai-summer-embers",
+         "type": "official", "runtimeStatus": "running", "voteType": "creator_pick",
+         "prizeAmount": 29000000, "mediaId": "M1", "startAt": "2026-06-26T00:00:00Z",
+         "endAt": "2026-07-06T00:00:00Z", "prizeDistribution": [{"rank": 1, "count": 1, "amount": 100}]},
+        {"id": "2", "title": {"en": "Rookie Contest"}, "slug": "user-rookie", "type": "community",
+         "runtimeStatus": "running", "prizeAmount": 100000, "mediaId": "M2",
+         "startAt": "2026-06-29T00:00:00Z", "endAt": "2026-07-10T00:00:00Z"},
+        {"id": "3", "title": {"en": "Old One"}, "slug": "user-old", "type": "community",
+         "runtimeStatus": "ended", "prizeAmount": 5000, "mediaId": "", "endAt": "2026-05-01T00:00:00Z"},
+    ], "page": 1, "pageSize": 50, "totalPage": 2, "totalCount": 4},
+    2: {"data": [
+        {"id": "4", "title": {"en": "Page-2 Live"}, "slug": "user-p2", "type": "community",
+         "runtimeStatus": "running", "prizeAmount": 0, "mediaId": "M4", "endAt": "2026-08-01T00:00:00Z"},
+    ], "page": 2, "pageSize": 50, "totalPage": 2, "totalCount": 4},
+}
+
+
+def test_list_contests_normalizes_and_pages(monkeypatch):
+    seen = []
+    def fake_get(s, path, params=None, **k):
+        seen.append((path, params.get("page")))
+        return _CONTEST_PAGES[params["page"]]
+    monkeypatch.setattr(core, "_rest_get", fake_get)
+    # active_only walks BOTH pages (a running contest hides on page 2) and keeps only 'running'
+    active = core.list_contests(object(), active_only=True)
+    assert [c["id"] for c in active] == ["1", "2", "4"]      # the 'ended' one dropped, page-2 kept
+    assert ("/contest/list", 2) in seen                      # paged through
+    c0 = active[0]
+    assert c0["title"] == "Summer Embers" and c0["type"] == "official" and c0["active"] is True
+    assert c0["url"] == "https://pixai.art/en/contest/pixai-summer-embers"
+    assert c0["cover_url"] == "https://api.pixai.art/v1/media/M1/thumbnail"
+    assert c0["prize_amount"] == 29000000
+    # all -> the ended one is included
+    allc = core.list_contests(object(), active_only=False)
+    assert any(c["id"] == "3" and c["active"] is False for c in allc)
+
+
+def test_api_contests_route(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "_rest_get",
+                        lambda s, path, params=None, **k: _CONTEST_PAGES[params["page"]])
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/contests").get_json()             # default = active only
+    assert d["official"] == 1 and d["community"] == 2   # 1 official + 2 running community
+    assert all(c["active"] for c in d["contests"])
+
+
 def test_branding_absent_is_404(tmp_path):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
