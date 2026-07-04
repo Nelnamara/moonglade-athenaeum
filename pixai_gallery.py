@@ -1309,6 +1309,34 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
   </div>
 </div>
+<style>
+  .ee-star{position:fixed;top:-40px;z-index:400;pointer-events:none;color:var(--lavender);text-shadow:0 0 14px rgba(182,146,230,.9),0 0 30px rgba(182,146,230,.5);animation:ee-fall linear forwards;}
+  @keyframes ee-fall{to{transform:translateY(112vh) rotate(540deg);opacity:.05;}}
+  .ee-toast{position:fixed;left:50%;top:36%;transform:translate(-50%,-50%);z-index:401;background:var(--mantle);border:1px solid var(--lavender);border-radius:14px;padding:18px 32px;font-size:19px;color:var(--text);text-align:center;box-shadow:0 0 70px rgba(182,146,230,.55);pointer-events:none;animation:ee-toast 6s ease forwards;}
+  @keyframes ee-toast{0%{opacity:0;transform:translate(-50%,-50%) scale(.85);}10%{opacity:1;transform:translate(-50%,-50%) scale(1);}82%{opacity:1;}100%{opacity:0;}}
+</style>
+<script>
+(function(){
+  var seq=[38,38,40,40,37,39,37,39,66,65], pos=0, busy=false;
+  document.addEventListener('keydown', function(e){
+    pos = (e.keyCode===seq[pos]) ? pos+1 : (e.keyCode===seq[0] ? 1 : 0);
+    if(pos!==seq.length) return;
+    pos=0; if(busy) return; busy=true;
+    var g=['✦','✧','★','✪','✺'];
+    for(var i=0;i<46;i++){ var s=document.createElement('div'); s.className='ee-star';
+      s.textContent=g[i%g.length];
+      s.style.left=(Math.random()*100)+'vw';
+      s.style.fontSize=(13+Math.random()*24)+'px';
+      s.style.animationDuration=(2.2+Math.random()*2.6)+'s';
+      s.style.animationDelay=(Math.random()*1.8)+'s';
+      document.body.appendChild(s); }
+    var t=document.createElement('div'); t.className='ee-toast';
+    t.innerHTML='✺ Elune-adore, Nelnamara ✺<div style="font-size:12.5px;color:var(--subtext);margin-top:7px;">The Athenaeum casts Starfall. Moonfire spam remains a lifestyle.</div>';
+    document.body.appendChild(t);
+    setTimeout(function(){ document.querySelectorAll('.ee-star,.ee-toast').forEach(function(n){n.remove();}); busy=false; }, 7000);
+  });
+})();
+</script>
 </body>
 </html>
 """
