@@ -288,8 +288,10 @@ export default function App() {
   const [showCast, setShowCast] = useState(true);
   const [genState, setGenState] = useState({});   // cardId -> {phase, msg, mid}
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb) or null
+  const [batching, setBatching] = useState(false);
   const openPick = useCallback((cb) => setPickCb(() => cb), []);
   const saveTimer = useRef(null);
+  const castImported = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -303,6 +305,23 @@ export default function App() {
       }
     })();
   }, []);
+
+  // Gallery -> cast: /edit-bay?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
+  // action) adds those images as reusable @image cast members, once, then clears the URL.
+  useEffect(() => {
+    if (!project || castImported.current) return;
+    castImported.current = true;
+    const ids = (new URLSearchParams(location.search).get("cast") || "")
+      .split(",").map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
+    if (!ids.length) return;
+    setProject((p) => {
+      const base = (p.assets || []).filter((a) => a.kind === "image").length;
+      const added = ids.map((mid, i) => ({ id: uid(), name: "", kind: "image",
+        tag: `@image${base + i + 1}`, thumbId: "", source: "", mediaId: mid, lock: true }));
+      return { ...p, assets: [...(p.assets || []), ...added] };
+    });
+    history.replaceState(null, "", location.pathname);
+  }, [project]);
 
   useEffect(() => {
     if (!project || !hasStore) return;
@@ -435,6 +454,20 @@ export default function App() {
   const scale = Math.max(total, project.target) || 1;
   const over = total - project.target;
 
+  // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
+  // the submits don't collide. Each shot manages its own status/poll via generateShot.
+  const batchGenerate = async () => {
+    const todo = entries.filter((e) => e.c.status !== "done");
+    if (!todo.length) return;
+    if (!window.confirm(`Generate ${todo.length} shot(s) on PixAI? Each is free with a V4.0 card; otherwise credits apply.`)) return;
+    setBatching(true);
+    for (const e of todo) {
+      try { await generateShot(e); } catch (_e) { /* keep going */ }
+      await new Promise((r) => setTimeout(r, 2200));
+    }
+    setBatching(false);
+  };
+
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
@@ -446,6 +479,9 @@ export default function App() {
           <div className="sb-brand">
             <h1 className="sb-disp"><span className="sb-clap">▰</span> The Edit Bay</h1>
             <input className="sb-projname" value={project.name} onChange={(e) => setProject((p) => ({ ...p, name: e.target.value }))} aria-label="Project name" />
+            <button className="sb-btn" onClick={batchGenerate} disabled={batching || !entries.length}
+              title="Generate every shot that isn't done yet, one after another">
+              {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
           </div>
           <div className="sb-stat"><b>{done}/{entries.length}</b><span>shots done</span></div>
           <div className="sb-stat"><b style={{ color: over > 0 ? "var(--coral)" : "var(--ink)" }}>{fmt(total)}</b>
@@ -695,7 +731,26 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
   const setF = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: val }));
   const append = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: c[field] ? `${c[field]}, ${val}` : val }));
   const patchFrame = (key, patch) => setCard(act.id, card.id, (c) => ({ ...c, [key]: { ...c[key], ...patch } }));
-  const inheritPrev = () => { if (!prev) return; patchFrame("openFrame", { ...prev.c.closeFrame }); };
+  const [handoff, setHandoff] = useState("");   // '', 'wip', 'err'
+  const inheritPrev = () => {
+    if (!prev) return;
+    // Frame handoff: if the previous shot was actually GENERATED, pull its clip's real
+    // last frame; otherwise fall back to copying its planned closing frame.
+    const rmid = prev.c.resultMid;
+    if (rmid) {
+      setHandoff("wip");
+      fetch("/api/editbay/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_media_id: rmid }) })
+        .then((r) => r.json()).then((d) => {
+          if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
+          setHandoff("");
+          patchFrame("openFrame", { mediaId: d.frame_media_id, thumbId: "", source: "",
+            desc: "handed off from " + (prev.code || "prev shot") });
+        }).catch(() => setHandoff("err"));
+    } else {
+      patchFrame("openFrame", { ...prev.c.closeFrame });
+    }
+  };
   const toggleCast = (id) => setCard(act.id, card.id, (c) => ({ ...c, cast: c.cast.includes(id) ? c.cast.filter((x) => x !== id) : [...c.cast, id] }));
 
   return (
@@ -729,7 +784,10 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
         <div className="sb-twoframes">
           <FrameSlot which="open" frame={card.openFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("openFrame", p)}
-            extraBtn={prev ? <button className="sb-btn ghost sm" onClick={inheritPrev} title={`Copy ${prev.code}'s closing frame here`}>↳ inherit {prev.code} close</button>
+            extraBtn={prev ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
+                title={prev.c.resultMid ? `Pull ${prev.code}'s generated clip's last frame` : `Copy ${prev.code}'s closing frame here`}>
+                {handoff === "wip" ? "↳ handing off…" : handoff === "err" ? "↳ handoff failed — retry"
+                  : prev.c.resultMid ? `↳ pull ${prev.code}'s last frame` : `↳ inherit ${prev.code} close`}</button>
               : <span className="sb-hint">first shot — no previous frame</span>} />
           <div className="sb-conn-mid">→</div>
           <FrameSlot which="close" frame={card.closeFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb} openPick={openPick}

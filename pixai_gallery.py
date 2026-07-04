@@ -1793,6 +1793,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <div class="actions-menu" id="actions-menu">
       <button onclick="bulkAddCollection();closeActionsMenu()">&#43; Add to collection</button>
       <button onclick="bulkSendVideo();closeActionsMenu()">&#9654; Send to Video</button>
+      <button onclick="bulkSendCast();closeActionsMenu()">&#9648; Send to Edit Bay cast</button>
       <button onclick="bulkContactSheet();closeActionsMenu()">&#128424; Print sheet</button>
       <button onclick="downloadZip();closeActionsMenu()">&#8681; Download ZIP</button>
       <button onclick="bulkReplacePrompt();closeActionsMenu()">Find / replace in prompts</button>
@@ -1992,6 +1993,16 @@ function bulkContactSheet() {
   var ids = Array.from(selGet());
   if (!ids.length) return;
   window.open('/contact-sheet?ids=' + encodeURIComponent(ids.join(',')), '_blank');
+}
+function bulkSendCast() {
+  var ids = [];
+  selGet().forEach(function(mid){
+    var card = document.getElementById('card-'+mid);
+    if (card && card.getAttribute('data-video') === '1') return;   // cast is images
+    ids.push(mid);
+  });
+  if (!ids.length) return;
+  window.location.href = '/edit-bay?cast=' + encodeURIComponent(ids.join(','));
 }
 function onCheck() {
   var sel = selGet();
@@ -5145,6 +5156,49 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 del data[k]
                 _editbay_save(data)
         return jsonify({"ok": True})
+
+    @app.route("/api/editbay/handoff", methods=["POST"])
+    def editbay_handoff():
+        """Frame handoff: given a generated shot's video media_id, extract its LAST frame,
+        upload it, and return the new frame media_id -- which the storyboard sets as the
+        next shot's opening frame, chaining clips into one continuous scene. The clip must
+        already be downloaded locally (it is, right after Generate-shot cataloged it).
+        Localhost-only; the upload is free."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        mid = str(body.get("video_media_id") or "").strip()
+        if not mid:
+            return jsonify({"error": "video_media_id required"}), 400
+        try:
+            core, session = _gen_session()
+            vid_exts = (".mp4", ".webm", ".mov", ".mkv")
+            vid = None
+            # videos aren't in find_files_for_media_id (image-only) -- resolve via the
+            # catalog's stored filename, then fall back to a video-aware disk scan.
+            row = get_row(db_path, mid) or {}
+            fn = row.get("filename") or ""
+            if fn:
+                cand = out_dir / fn
+                if cand.is_file() and cand.suffix.lower() in vid_exts:
+                    vid = cand
+            if vid is None:
+                for p in out_dir.rglob("*{}.*".format(mid)):
+                    if p.suffix.lower() in vid_exts and p.is_file() and p.stat().st_size:
+                        vid = p
+                        break
+            if vid is None:
+                return jsonify({"error": "clip not downloaded yet -- generate/collect it first"}), 200
+            fdir = out_dir / "editbay" / "_frames"
+            fdir.mkdir(parents=True, exist_ok=True)
+            png = fdir / (mid + "_last.png")
+            if not core.extract_last_frame(str(vid), str(png)):
+                return jsonify({"error": "could not extract the last frame (ffmpeg)"}), 200
+            frame_mid = core.upload_media(session, str(png))
+            dur = core.probe_video_duration(str(vid))
+            return jsonify({"frame_media_id": str(frame_mid), "duration": dur})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 200
 
     @app.route("/api/editbay/generate", methods=["POST"])
     def editbay_generate():

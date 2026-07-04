@@ -230,6 +230,40 @@ def test_contact_sheet_photo_and_strip(tmp_path):
     assert strip.count("/full/1") == 4 and strip.count("/full/2") == 4
 
 
+def test_editbay_handoff_extracts_and_uploads(tmp_path, monkeypatch):
+    """Frame handoff: find the shot's clip -> extract last frame -> upload -> media_id."""
+    import pixai_gallery as g
+    (tmp_path / "videos").mkdir()
+    clip = tmp_path / "videos" / "shot_V9.mp4"
+    clip.write_bytes(b"fake")
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    seen = {}
+
+    def fake_extract(vp, out):
+        seen["video"] = vp
+        with open(out, "wb") as fh:      # simulate a produced frame
+            fh.write(b"png")
+        return out
+    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
+    monkeypatch.setattr(core, "probe_video_duration", lambda p: 5.0)
+
+    cli = _client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+                                  is_video="1", created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/editbay/handoff", json={"video_media_id": "V9"}).get_json()
+    assert d == {"frame_media_id": "FRAME123", "duration": 5.0}
+    assert seen["video"].endswith("shot_V9.mp4")
+
+
+def test_editbay_handoff_needs_local_clip(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = _client(tmp_path, [_row(media_id="X", filename="a_x.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/editbay/handoff", json={"video_media_id": "nope"}).get_json()
+    assert "not downloaded" in d["error"]
+
+
 def test_gen_reference_image_passthrough():
     """Capture #14 (task 2030052367400863154): 'use as reference' = plain img2img,
     a top-level mediaId + strength on a standard submit."""
