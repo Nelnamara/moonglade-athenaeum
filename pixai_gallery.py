@@ -3197,6 +3197,31 @@ function savePrompt() {
         except Exception as e:
             return jsonify({"error": str(e)[:200], "version_id": ""}), 200
 
+    @app.route("/api/gallery-images")
+    def api_gallery_images():
+        """Pick-from-your-gallery source for the create surfaces + Edit Bay: recent (or
+        keyword-filtered) IMAGE media_ids with thumbnails -> use the media_id full-res, no
+        re-upload. Read-only, localhost-only. ?q=&limit=&page="""
+        if not _is_local_request():
+            return jsonify({"images": []}), 403
+        q = (request.args.get("q") or "").strip()
+        try:
+            limit = max(1, min(int(request.args.get("limit") or 40), 100))
+            page = max(1, int(request.args.get("page") or 1))
+        except ValueError:
+            limit, page = 40, 1
+        rows, total = query_catalog(db_path, q=q, sort="newest", page=page, page_size=limit)
+        out = []
+        for r in rows:
+            if str(r.get("is_video") or "") == "1":
+                continue
+            mid = r.get("media_id")
+            if not mid:
+                continue
+            out.append({"media_id": str(mid), "thumb": "/thumbs/{}.jpg".format(mid),
+                        "prompt": (r.get("prompt_preview") or r.get("prompt_full") or "")[:80]})
+        return jsonify({"images": out, "total": total, "page": page})
+
     def _gen_args_from_payload(p):
         """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
         feeds to core._gen_parameters -- so web + CLI build identical params (one source
