@@ -2477,6 +2477,17 @@ def _gen_parameters(args):
     else:
         params["promptHelper"] = {"withStage": False, "userWantToEnable": False,
                                   "forcePromptHelperDetectionSide": "server"}
+    # Reference image (the site's "use as reference" = plain img2img): a top-level
+    # mediaId + strength on an otherwise standard submit. Banked from a real capture
+    # 2026-07-04 (task 2030052367400863154): {..., mediaId, strength: 0.55}.
+    ref = str(getattr(args, "ref_media_id", "") or "").strip()
+    if ref:
+        params["mediaId"] = ref
+        try:
+            stg = float(getattr(args, "ref_strength", 0.55) or 0.55)
+        except (TypeError, ValueError):
+            stg = 0.55
+        params["strength"] = max(0.05, min(1.0, stg))
     if getattr(args, "kaisuuken_id", ""):
         params["kaisuukenId"] = str(args.kaisuuken_id)   # spend a free card instead of credits
     return params
@@ -2761,13 +2772,16 @@ def _is_local_source(src):
 
 def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
                                resolution="1K", aspect_ratio="3:4", quality="medium",
-                               kaisuuken_id=""):
+                               kaisuuken_id="", scene_id=""):
     """Build createGenerationTask's `parameters` for an instruct edit (the `chat`
     block), verified against a real Edit-Pro submit (2026-07-01). `media_ids` is one
     or more source media_ids (an array => multi-image reference editing); the first
-    is also sent as `mediaId`. NOTE: we deliberately DO NOT attach a `kaisuukenId`
-    (free-card) here -- free-card spending is a separate, explicit feature; without it
-    the server charges credits, so this stays behind --confirm like all spend paths.
+    is also sent as `mediaId`. `scene_id` marks a Toolbox PRESET (banked 2026-07-04
+    from task 2030050946353349700: a preset = this same chat block + a canned prompt
+    + top-level sceneId, e.g. "character-card"; Edit cards match it either way).
+    NOTE: we deliberately DO NOT attach a `kaisuukenId` (free-card) here -- free-card
+    spending is a separate, explicit feature; without it the server charges credits,
+    so this stays behind --confirm like all spend paths.
     """
     ids = [str(m) for m in (media_ids or []) if str(m).strip()]
     if not ids:
@@ -2781,6 +2795,8 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
                         "aspectRatio": aspect_ratio,
                         "quality": quality},
     }}
+    if scene_id:
+        params["sceneId"] = str(scene_id)
     if kaisuuken_id:
         params["kaisuukenId"] = str(kaisuuken_id)   # spend a free card instead of credits
     return params

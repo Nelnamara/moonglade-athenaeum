@@ -2295,6 +2295,17 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="gen-lbl">LoRAs</div>
     <div id="gen-loras"></div>
     <button type="button" id="lora-add" onclick="Gen.openLoraBrowser()">+ Add LoRA</button>
+    <div class="gen-lbl">Reference image <span style="text-transform:none;color:var(--subtext);">&middot; optional &middot; guides the result (img2img)</span></div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <div id="gen-ref-slot" onclick="Gen.refPick()" title="Pick a reference image from your gallery"
+           style="position:relative;width:58px;height:58px;flex:0 0 auto;border-radius:8px;border:1px dashed var(--surface1);background:var(--surface0);cursor:pointer;display:grid;place-items:center;color:var(--subtext);font-size:10.5px;overflow:hidden;">+ ref</div>
+      <div id="gen-ref-ctl" style="flex:1;display:none;">
+        <div class="gen-lbl" style="margin-top:0;">Strength <span id="gen-ref-sval" style="color:var(--lavender);">0.55</span>
+          <span style="text-transform:none;color:var(--overlay0);">&middot; higher = closer to the reference</span></div>
+        <input type="range" id="gen-ref-strength" min="0.1" max="1" step="0.05" value="0.55" style="width:100%;"
+               oninput="Gen.refStrength(this.value)">
+      </div>
+    </div>
     <div class="gen-form" style="border-top:none;margin-top:0;padding-top:0;">
       <div style="display:flex;justify-content:flex-end;margin-top:8px;">
         <button type="button" class="snip-btn" onclick="Snips.open(this, {get:function(){return document.getElementById('gen-prompt').value;}, set:function(v){document.getElementById('gen-prompt').value=v;document.getElementById('gen-prompt').focus();Gen.refreshCost();}})">&#9733; Snippets</button>
@@ -2338,6 +2349,14 @@ document.addEventListener('DOMContentLoaded', function(){
         <button id="es-fix" onclick="Gen.setEditSub('fix')">Fix</button>
       </div>
       <div id="edit-sub-edit">
+        <div class="gen-lbl" style="margin-top:0;">Toolbox preset <span style="text-transform:none;color:var(--subtext);">&middot; canned effects &middot; overrides the instruction</span></div>
+        <div style="display:flex;gap:6px;margin-bottom:6px;">
+          <select id="edit-preset" class="gen-sel" style="flex:1;" onchange="Gen.editCost()">
+            <option value="">None &mdash; custom instruction below</option>
+          </select>
+          <input id="preset-task" class="gen-search" style="margin:0;flex:0 0 150px;" placeholder="import: task id" autocomplete="off">
+          <button type="button" class="snip-btn" style="flex:0 0 auto;" onclick="Gen.presetImport()" title="Run any Toolbox item once on pixai.art, paste its task id here — banks that preset locally forever">＋ bank</button>
+        </div>
         <textarea id="edit-ins" class="gen-ta" rows="3" placeholder="Describe the change &mdash; &lsquo;make it night, add snow&rsquo;&hellip;"></textarea>
         <div class="gen-row" style="margin-top:8px;">
           <div style="flex:1;"><div class="gen-lbl">Resolution</div>
@@ -2794,12 +2813,32 @@ var Gen = (function(){
         el('gen-go').disabled = !d.version_id; refreshCost(); })
       .catch(function(){ el('gen-selname').textContent=m.title; });
   }
+  var genRef=null;   // {media_id, thumb} -- the img2img reference, or null
+  function refPick(){
+    if(genRef){ genRef=null; renderGenRef(); debouncedCost(); return; }   // click filled slot = clear
+    Picker.open(function(mid, thumb){ genRef={media_id:mid, thumb:thumb}; renderGenRef(); debouncedCost(); });
+  }
+  function renderGenRef(){
+    var s=el('gen-ref-slot'), c=el('gen-ref-ctl'); if(!s) return;
+    if(genRef){
+      s.innerHTML='<img src="'+genRef.thumb+'" style="width:100%;height:100%;object-fit:cover;">'
+        +'<span style="position:absolute;top:1px;right:1px;background:rgba(21,19,28,.85);color:var(--subtext);border-radius:50%;width:15px;height:15px;font-size:10px;line-height:15px;text-align:center;">&times;</span>';
+      s.style.borderStyle='solid'; s.title='Click to remove the reference';
+      c.style.display='';
+      s.onmouseenter=function(){ showRefPreview(genRef.media_id, s); }; s.onmouseleave=hidePreview;
+    } else {
+      s.innerHTML='+ ref'; s.style.borderStyle='dashed'; s.title='Pick a reference image from your gallery';
+      s.onmouseenter=null; s.onmouseleave=null; c.style.display='none';
+    }
+  }
+  function refStrength(v){ el('gen-ref-sval').textContent=(+v).toFixed(2); debouncedCost(); }
   function curAspect(){ var b=document.querySelector('#gen-aspects button.on');
     return b?{w:+b.getAttribute('data-w'),h:+b.getAttribute('data-h')}:{w:512,h:512}; }
   function payload(){ var a=curAspect();
     return { version_id:(selected&&selected.version_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
       count:+el('gen-count').value, high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
+      ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
       loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
   function refreshCost(){
     if(!(selected&&selected.version_id)) return;
@@ -2855,7 +2894,7 @@ var Gen = (function(){
       var pane=el('gen-mode-'+x); if(pane) pane.style.display=(x===m)?'':'none';
       var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
     el('gen-drawer').classList.toggle('wide', m==='video'||m==='edit');
-    if(m==='edit'){ if(el('edit-src').value.trim()) editCost(); loadWorkflows().then(renderWorkflows); }
+    if(m==='edit'){ if(el('edit-src').value.trim()) editCost(); loadWorkflows().then(renderWorkflows); if(!presetsLoaded) loadPresets(); }
     if(m==='video') renderVideoSlots();
   }
   function setEditSub(s){
@@ -2875,7 +2914,31 @@ var Gen = (function(){
   }
   function editPayload(){
     return { mode:'edit', source:editSrc(), instruction:el('edit-ins').value.trim(),
+      preset:(el('edit-preset')?el('edit-preset').value:''),
       resolution:el('edit-res').value, quality:el('edit-qual').value, aspect:el('edit-aspect').value };
+  }
+  var presetsLoaded=false;
+  function loadPresets(){
+    fetch('/api/presets').then(function(r){return r.json();}).then(function(d){
+      var sel=el('edit-preset'); if(!sel) return;
+      var cur=sel.value; presetsLoaded=true;
+      sel.innerHTML='<option value="">None \\u2014 custom instruction below</option>';
+      Object.keys(d.presets||{}).sort().forEach(function(k){
+        var o=document.createElement('option'); o.value=k; o.textContent=d.presets[k].label||k;
+        sel.appendChild(o); });
+      sel.value=cur;
+    }).catch(function(){});
+  }
+  function presetImport(){
+    var tid=(el('preset-task').value||'').trim(); if(!tid) { el('preset-task').focus(); return; }
+    var btn=el('preset-task');
+    fetch('/api/presets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.error){ btn.value=''; btn.placeholder='\\u26a0 '+d.error.slice(0,40); return; }
+        btn.value=''; btn.placeholder='banked: '+(d.label||d.imported);
+        loadPresets(); var sel=el('edit-preset'); if(sel) setTimeout(function(){ sel.value=d.imported; editCost(); }, 300);
+      }).catch(function(){ btn.placeholder='\\u26a0 network error'; });
   }
   function editCost(){
     var cost=el('edit-cost');
@@ -2895,7 +2958,7 @@ var Gen = (function(){
   function edit(){
     var p=editPayload();
     if(!p.source){ el('edit-src').focus(); return; }
-    if(!p.instruction){ el('edit-ins').focus(); return; }
+    if(!p.instruction && !p.preset){ el('edit-ins').focus(); return; }
     runTask('/api/edit', p, el('edit-result'),
             {past:'Edited', btn:el('edit-go'), busy:'Editing\\u2026', idle:'Apply edit'});
   }
@@ -3107,6 +3170,7 @@ var Gen = (function(){
           setVideoMode:setVideoMode, videoGenerate:videoGenerate, renderVideoSlots:renderVideoSlots,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
+          refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           setEditSub:setEditSub, addVideoRefs:addVideoRefs, videoCost:videoCost,
           videoAudioToggle:videoAudioToggle,
@@ -4407,20 +4471,94 @@ function savePrompt() {
             seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
             lora=loras,
             prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
+            ref_media_id=str(p.get("ref_media_id") or "").strip(),
+            ref_strength=num("ref_strength", 0.55, float),
             kaisuuken_id="", no_card=bool(p.get("no_card")))
+
+    _presets_lock = threading.Lock()
+
+    def _presets_path():
+        return out_dir / "toolbox_presets.json"
+
+    def _load_presets():
+        try:
+            if _presets_path().exists():
+                return json.loads(_presets_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        return {}
 
     def _edit_params_from_payload(core, p):
         """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
-        catalog media_id (the image being edited). Returns None if no source."""
+        catalog media_id (the image being edited). A `preset` name swaps in a locally
+        banked Toolbox preset (canned prompt + sceneId + its modelId). Returns None if
+        no source."""
         p = p or {}
         src = str(p.get("source") or "").strip()
         if not src:
             return None
-        return core.build_chat_edit_parameters(
-            (p.get("instruction") or "").strip(), [src],
-            resolution=(p.get("resolution") or "1K"),
-            aspect_ratio=(p.get("aspect") or "3:4"),
-            quality=(p.get("quality") or "medium"))
+        instruction = (p.get("instruction") or "").strip()
+        scene_id, model_id = "", ""
+        preset_name = str(p.get("preset") or "").strip()
+        if preset_name:
+            pre = _load_presets().get(preset_name)
+            if not pre:
+                return None
+            instruction = pre.get("prompt") or instruction
+            scene_id = pre.get("scene_id") or ""
+            model_id = pre.get("model_id") or ""
+        kwargs = dict(resolution=(p.get("resolution") or "1K"),
+                      aspect_ratio=(p.get("aspect") or "3:4"),
+                      quality=(p.get("quality") or "medium"),
+                      scene_id=scene_id)
+        if model_id:
+            kwargs["model_id"] = model_id
+        return core.build_chat_edit_parameters(instruction, [src], **kwargs)
+
+    @app.route("/api/presets", methods=["GET", "POST"])
+    def api_presets():
+        """Toolbox presets, stored LOCALLY (out_dir/toolbox_presets.json -- preset
+        prompts are PixAI-authored content, so they live as the owner's own captured
+        task data, never in the repo). GET lists {name: {label, scene_id}} (no prompt
+        bodies). POST {task_id, label?} imports one from a task the owner ran on the
+        site: fetches the task, extracts chat.prompts + sceneId + modelId, saves it.
+        Localhost-only (uses the owner's key on import)."""
+        if not _is_local_request():
+            return jsonify({"presets": {}}), 403
+        with _presets_lock:
+            presets = _load_presets()
+            if request.method == "GET":
+                return jsonify({"presets": {
+                    k: {"label": v.get("label") or k, "scene_id": v.get("scene_id", "")}
+                    for k, v in presets.items()}})
+            body = request.get_json(silent=True) or {}
+            tid = str(body.get("task_id") or "").strip()
+            if not tid:
+                return jsonify({"error": "task_id required"}), 400
+            try:
+                core, session = _gen_session()
+                task = core.task_detail_gql(session, tid) or {}
+                params = task.get("parameters") or {}
+                chat = params.get("chat") or {}
+                prompt = chat.get("prompts") or params.get("prompts") or ""
+                scene = str(params.get("sceneId") or "").strip()
+                if not prompt:
+                    return jsonify({"error": "task has no prompt to bank"}), 200
+                name = scene or ("preset-" + tid[-6:])
+                presets[name] = {
+                    "label": (body.get("label") or "").strip()
+                             or scene.replace("-", " ").title() or name,
+                    "scene_id": scene,
+                    "prompt": prompt,
+                    "model_id": str(chat.get("modelId") or ""),
+                    "from_task": tid,
+                }
+                _presets_path().write_text(json.dumps(presets, indent=1),
+                                           encoding="utf-8")
+                return jsonify({"imported": name,
+                                "label": presets[name]["label"]})
+            except Exception as e:
+                return jsonify({"error": str(e)[:200]}), 200
 
     def _params_and_nocard(core, p):
         """Route a drawer payload to generate, edit, or video params. Returns (params,
@@ -4504,8 +4642,8 @@ function savePrompt() {
             p = request.get_json(silent=True) or {}
             params = _edit_params_from_payload(core, p)
             if params is None:
-                return jsonify({"error": "pick an image to edit"}), 400
-            if not (p.get("instruction") or "").strip():
+                return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
+            if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))

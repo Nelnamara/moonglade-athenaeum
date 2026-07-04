@@ -230,6 +230,55 @@ def test_contact_sheet_photo_and_strip(tmp_path):
     assert strip.count("/full/1") == 4 and strip.count("/full/2") == 4
 
 
+def test_gen_reference_image_passthrough():
+    """Capture #14 (task 2030052367400863154): 'use as reference' = plain img2img,
+    a top-level mediaId + strength on a standard submit."""
+    from types import SimpleNamespace
+    a = SimpleNamespace(params_json="", prompt="p", negative="", model="m",
+                        width=512, height=512, steps=25, cfg=7, count=1,
+                        priority=500, mode="auto", seed=None, lora=[],
+                        prompt_helper=True, kaisuuken_id="",
+                        ref_media_id="739707411648019153", ref_strength=0.55)
+    p = core._gen_parameters(a)
+    assert p["mediaId"] == "739707411648019153" and p["strength"] == 0.55
+    a.ref_media_id = ""
+    p2 = core._gen_parameters(a)
+    assert "mediaId" not in p2 and "strength" not in p2   # absent when no ref
+
+
+def test_edit_scene_id_passthrough():
+    """Capture #13 (task 2030050946353349700): a Toolbox preset = the normal chat
+    block + a canned prompt + top-level sceneId."""
+    p = core.build_chat_edit_parameters("canned prompt", ["55"],
+                                        scene_id="character-card")
+    assert p["sceneId"] == "character-card" and p["chat"]["prompts"] == "canned prompt"
+    assert "sceneId" not in core.build_chat_edit_parameters("x", ["55"])
+
+
+def test_presets_import_and_use(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "character-card",
+                       "chat": {"prompts": "BIG CANNED PROMPT",
+                                "modelId": "1948514378441961474"}}})
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/presets", json={"task_id": "2030050946353349700"}).get_json()
+    assert d["imported"] == "character-card"
+    lst = cli.get("/api/presets").get_json()["presets"]
+    assert lst["character-card"]["label"] == "Character Card"
+    assert "prompt" not in lst["character-card"]          # GET never leaks the prompt body
+    # price path uses the banked preset: canned prompt + sceneId + its model
+    seen = {}
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params: None)
+    cli.post("/api/price", json={"mode": "edit", "source": "55",
+                                 "preset": "character-card"})
+    assert seen["p"]["sceneId"] == "character-card"
+    assert seen["p"]["chat"]["prompts"] == "BIG CANNED PROMPT"
+    assert seen["p"]["chat"]["modelId"] == "1948514378441961474"
+
+
 def test_catalog_counts(tmp_path):
     import pixai_gallery as g
     g.save_catalog(tmp_path / "catalog.db", [
