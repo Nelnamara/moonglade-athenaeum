@@ -2066,6 +2066,9 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-cost.free{border-color:var(--emerald);color:var(--emerald);}
   .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
   .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
+  .gen-moon{display:inline-block;width:15px;height:15px;border-radius:50%;background:var(--lavender);position:relative;overflow:hidden;vertical-align:-3px;margin-right:7px;box-shadow:0 0 9px rgba(182,146,230,.75);}
+  .gen-moon::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--mantle);animation:gen-eclipse 2.6s ease-in-out infinite;}
+  @keyframes gen-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}
   .gen-result{margin-top:12px;} .gen-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
   .gen-result a{color:var(--accent-soft);font-size:12px;text-decoration:none;}
   #enh-list{max-height:230px;overflow-y:auto;margin-top:2px;}
@@ -2521,19 +2524,19 @@ var Gen = (function(){
       .then(function(d){
         if(d.phase==='done'){ done(); renderResult(res, d, past); }
         else if(d.phase==='failed'){ done(); renderResult(res, {error:d.error||('task '+(d.status||'failed'))}); }
-        else { res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Running\\u2026 (task '+String(tid).slice(-6)+')</span>'; setTimeout(function(){ pollTask(tid,res,past,done); }, 3000); }
+        else { res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Rendering under the eclipse\\u2026 (task '+String(tid).slice(-6)+')</span>'; setTimeout(function(){ pollTask(tid,res,past,done); }, 3000); }
       }).catch(function(){ setTimeout(function(){ pollTask(tid,res,past,done); }, 4000); });
   }
   function runTask(url, p, res, opts){
     opts=opts||{};
-    res.style.display='block'; res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
+    res.style.display='block'; res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
     if(opts.btn){ opts.btn.disabled=true; opts.btn.textContent=opts.busy; }
     function done(){ if(opts.btn){ opts.btn.disabled=false; opts.btn.textContent=opts.idle; } }
     fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.error || !d.task_id){ done(); renderResult(res, {error:d.error||'submit failed'}); return; }
-        res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
+        res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
         pollTask(d.task_id, res, opts.past, done);
       }).catch(function(){ done(); renderResult(res, {error:'network error'}); });
   }
