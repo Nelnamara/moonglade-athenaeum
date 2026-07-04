@@ -1126,6 +1126,60 @@ def create_app(out_dir: Path):
     thumb_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
+    # Control Panel: run maintenance CLI ops as background jobs with live
+    # logs. Each action is a WHITELISTED argv against pixai_gallery_backup.py
+    # (never an arbitrary command); destructive ones require confirm=True.
+    # One job at a time. Localhost-gated at the routes. Runs the CLI as a
+    # subprocess (isolation + natural stdout capture -- same shape the GUI
+    # uses) with cwd = the checkout dir (where config.json lives).
+    # ------------------------------------------------------------------
+    _cli_path = str(Path(__file__).resolve().parent / "pixai_gallery_backup.py")
+    _cli_dir = str(Path(__file__).resolve().parent)
+    _panel_lock = threading.Lock()
+    _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
+                  "rc": None, "started_at": None}
+
+    # action -> {args (extra flags), label, destructive}
+    PANEL_ACTIONS = {
+        "update":        {"args": ["--update"], "label": "Incremental backup (--update)", "destructive": False},
+        "stats":         {"args": ["--catalog-stats"], "label": "Catalog stats", "destructive": False},
+        "audit":         {"args": ["--audit", "--no-content"], "label": "Duplicate audit (fast, read-only)", "destructive": False},
+        "sync-artworks": {"args": ["--sync-artworks"], "label": "Sync published-artwork metadata", "destructive": False},
+        "backfill-meta": {"args": ["--backfill-full-meta"], "label": "Backfill full metadata", "destructive": False},
+        "export-csv":    {"args": ["--export-csv"], "label": "Export catalog → CSV", "destructive": False},
+        "organize-dry":  {"args": ["--organize", "--dry-run"], "label": "Organize — preview (dry run)", "destructive": False},
+        "dedup-dry":     {"args": ["--dedup"], "label": "Dedup — preview (dry run)", "destructive": False},
+        # --- destructive: require confirm=true ---
+        "organize":      {"args": ["--organize"], "label": "Organize into month folders", "destructive": True},
+        "dedup-apply":   {"args": ["--dedup", "--apply"], "label": "Dedup — quarantine dupes to _duplicates/", "destructive": True},
+    }
+
+    def _panel_reader(proc):
+        for line in iter(proc.stdout.readline, ""):
+            with _panel_lock:
+                _panel_job["lines"].append(line.rstrip("\n"))
+                if len(_panel_job["lines"]) > 800:       # ring buffer
+                    del _panel_job["lines"][:-800]
+        proc.stdout.close()
+        rc = proc.wait()
+        with _panel_lock:
+            _panel_job["rc"] = rc
+            _panel_job["status"] = "done" if rc == 0 else "failed"
+
+    def _panel_run(action):
+        import subprocess
+        spec = PANEL_ACTIONS[action]
+        argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v"] + spec["args"]
+        with _panel_lock:
+            _panel_job.update(status="running", action=action, label=spec["label"],
+                              lines=["$ " + " ".join(spec["args"])], rc=None,
+                              started_at=None)
+        proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                encoding="utf-8", errors="replace")
+        threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
+
+    # ------------------------------------------------------------------
     # Template
     # ------------------------------------------------------------------
     BASE_HTML = r"""<!DOCTYPE html>
@@ -1481,6 +1535,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
   <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
   <a class="back-link" href="/edit-bay" title="Seedance video storyboard">&#9648; Edit Bay</a>
+  <a class="back-link" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Control Panel</a>
   <a class="back-link" href="{{ url_for('health') }}">Collection health &rarr;</a>
 </header>
 
@@ -3685,6 +3740,108 @@ function savePrompt() {
 </div>
 """)
 
+    PANEL_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
+<style>
+  .panel{padding:10px 20px 40px;max-width:1000px;}
+  .p-sec{background:var(--mantle);border:1px solid var(--surface0);border-radius:12px;padding:16px 18px;margin-bottom:16px;}
+  .p-sec h2{font-size:15px;margin:0 0 12px;font-weight:600;}
+  .p-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;}
+  .p-stat{background:var(--surface0);border-radius:8px;padding:12px 14px;}
+  .p-stat .l{font-size:11.5px;color:var(--subtext);margin-bottom:5px;}
+  .p-stat .v{font-size:21px;font-weight:500;color:var(--text);font-variant-numeric:tabular-nums;}
+  .p-stat .v.lav{color:var(--lavender);}
+  .jobrow{display:flex;flex-wrap:wrap;gap:8px;}
+  .jobbtn{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:9px 12px;cursor:pointer;color:var(--text);font-family:inherit;min-width:180px;}
+  .jobbtn:hover{border-color:var(--lavender);}
+  .jobbtn:disabled{opacity:.45;cursor:not-allowed;}
+  .jobbtn .t{font-size:13px;font-weight:500;}
+  .jobbtn .d{font-size:11px;color:var(--subtext);}
+  .jobbtn.danger{border-color:#5a3a4a;} .jobbtn.danger .t{color:var(--red);}
+  .p-note{font-size:12px;color:var(--subtext);margin-top:10px;}
+  #joblog{background:var(--base);border:1px solid var(--surface1);border-radius:8px;padding:12px 14px;font-family:ui-monospace,monospace;font-size:12px;color:var(--subtext);white-space:pre-wrap;line-height:1.5;max-height:340px;overflow-y:auto;margin-top:12px;display:none;}
+  #jobstatus{font-size:12.5px;margin-top:6px;}
+  .st-running{color:var(--lavender);} .st-done{color:var(--emerald);} .st-failed{color:var(--red);}
+</style>
+<header>
+  <div class="brand"><span class="mark">M</span><h1>Control Panel</h1></div>
+  <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
+  <a class="back-link" href="{{ url_for('index') }}">↑ Back to gallery</a>
+</header>
+<div class="panel">
+  <div class="p-sec">
+    <h2>Library at a glance</h2>
+    <div class="p-grid">
+      <div class="p-stat"><div class="l">Images</div><div class="v">{{ '{:,}'.format(stats.images) }}</div></div>
+      <div class="p-stat"><div class="l">Videos</div><div class="v">{{ '{:,}'.format(stats.videos) }}</div></div>
+      <div class="p-stat"><div class="l">Collections</div><div class="v">{{ stats.collections }}</div></div>
+      <div class="p-stat"><div class="l">Credits</div><div class="v lav" id="ps-credits">—</div></div>
+      <div class="p-stat"><div class="l">Free cards</div><div class="v lav" id="ps-cards">—</div></div>
+    </div>
+  </div>
+
+  <div class="p-sec">
+    <h2>Maintenance</h2>
+    <div style="font-size:12px;color:var(--overlay0);margin-bottom:8px;">Safe &middot; read-only or reversible</div>
+    <div class="jobrow" id="jobs-safe"></div>
+    <div style="font-size:12px;color:var(--overlay0);margin:16px 0 8px;">Changes files &middot; asks first</div>
+    <div class="jobrow" id="jobs-danger"></div>
+    <div id="jobstatus"></div>
+    <pre id="joblog"></pre>
+    <div class="p-note">One job runs at a time. Backup / audit / dry-runs never delete anything. Organize and Dedup move files (both reversible &mdash; Organize writes an undo manifest, Dedup quarantines to <code>_duplicates/</code>).</div>
+  </div>
+
+  <div class="p-sec">
+    <h2>This build</h2>
+    <div style="font-size:13px;color:var(--subtext);">Running <b style="color:var(--text);">{{ build_stamp }}</b> &middot; library at <code>{{ out_dir }}</code></div>
+    <div class="p-note">More settings (default workers, page size, verbose) land here next. Deleting from your PixAI account stays CLI-only, behind its typed confirm &mdash; on purpose.</div>
+  </div>
+</div>
+<script>
+var ACTIONS = {{ actions_json|safe }};
+function el(i){return document.getElementById(i);}
+function renderJobs(){
+  var safe=el('jobs-safe'), danger=el('jobs-danger');
+  ACTIONS.forEach(function(a){
+    var b=document.createElement('button'); b.className='jobbtn'+(a.destructive?' danger':'');
+    b.innerHTML='<span class="t">'+a.label+'</span>';
+    b.onclick=function(){ runJob(a); };
+    (a.destructive?danger:safe).appendChild(b);
+  });
+}
+var polling=false;
+function runJob(a){
+  if(a.destructive && !confirm('Run: '+a.label+'?\\n\\nThis changes files on disk (reversible). Continue?')) return;
+  fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a.action, confirm:true})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>'; return; }
+      el('joblog').style.display='block'; if(!polling){ polling=true; poll(); }
+    });
+}
+function setButtons(disabled){ document.querySelectorAll('.jobbtn').forEach(function(b){ b.disabled=disabled; }); }
+function poll(){
+  fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
+    var log=el('joblog'); if(d.lines){ log.textContent=d.lines.join('\\n'); log.scrollTop=log.scrollHeight; }
+    var st=el('jobstatus');
+    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+d.label+'\\u2026</span>'; setButtons(true); setTimeout(poll,1500); }
+    else { setButtons(false); polling=false;
+      if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
+      else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
+    }
+  }).catch(function(){ polling=false; setButtons(false); });
+}
+function loadAcct(){
+  fetch('/api/account').then(function(r){return r.json();}).then(function(d){
+    if(d.credits!=null) el('ps-credits').textContent=d.credits.toLocaleString();
+    if(d.cards!=null) el('ps-cards').textContent=d.cards;
+    var chip=el('acct-chip'); if(chip && d.credits!=null){ chip.innerHTML='\\u25c8 <b>'+d.credits.toLocaleString()+'</b> \\u00b7 <span style="color:var(--lavender)">\\ud83c\\udfab '+(d.cards||0)+'</span>'; chip.style.display=''; }
+  }).catch(function(){});
+}
+renderJobs(); loadAcct();
+// if a job was already running when the page loaded, resume polling
+fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });
+</script>
+""")
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -3709,6 +3866,45 @@ function savePrompt() {
     def health():
         return render_template_string(
             HEALTH_HTML, h=collection_health(out_dir, db_path))
+
+    @app.route("/panel")
+    def panel():
+        actions = [{"action": k, "label": v["label"], "destructive": v["destructive"]}
+                   for k, v in PANEL_ACTIONS.items()]
+        return render_template_string(
+            PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
+            out_dir=str(out_dir), actions_json=json.dumps(actions))
+
+    @app.route("/api/panel/run", methods=["POST"])
+    def api_panel_run():
+        """Start a whitelisted maintenance job as a background subprocess. Destructive
+        actions require confirm=true. One job at a time. Localhost-only."""
+        if not _is_local_request():
+            return jsonify({"error": "control panel is localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        action = str(body.get("action") or "").strip()
+        spec = PANEL_ACTIONS.get(action)
+        if not spec:
+            return jsonify({"error": "unknown action"}), 400
+        if spec["destructive"] and not body.get("confirm"):
+            return jsonify({"error": "this action changes files; confirm required"}), 400
+        with _panel_lock:
+            if _panel_job["status"] == "running":
+                return jsonify({"error": "a job is already running"}), 409
+        try:
+            _panel_run(action)
+            return jsonify({"ok": True, "action": action, "label": spec["label"]})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 200
+
+    @app.route("/api/panel/status")
+    def api_panel_status():
+        if not _is_local_request():
+            return jsonify({"status": "idle"}), 403
+        with _panel_lock:
+            return jsonify({"status": _panel_job["status"], "action": _panel_job["action"],
+                            "label": _panel_job["label"], "rc": _panel_job["rc"],
+                            "lines": list(_panel_job["lines"])})
 
     @app.route("/duplicates")
     def duplicates():
