@@ -2060,6 +2060,9 @@ document.addEventListener('DOMContentLoaded', function(){
   #gen-drawer.dock-left{right:auto;left:0;border-left:none;border-right:1px solid var(--surface1);transform:translateX(-100%);}
   #gen-drawer.dock-top{right:auto;left:0;top:0;bottom:auto;width:100%;max-width:100vw;height:auto;max-height:64vh;border:none;border-bottom:1px solid var(--surface1);transform:translateY(-100%);}
   #gen-drawer.dock-bottom{right:auto;left:0;top:auto;bottom:0;width:100%;max-width:100vw;height:auto;max-height:64vh;border:none;border-top:1px solid var(--surface1);transform:translateY(100%);}
+  /* Open-while-docked: two classes beat the single-class dock rule so the on-screen
+     transform wins (else a docked+open drawer keeps its off-screen transform -> vanishes). */
+  #gen-drawer.open.dock-left,#gen-drawer.open.dock-top,#gen-drawer.open.dock-bottom{transform:none;}
   #gen-drawer.dock-top.wide,#gen-drawer.dock-bottom.wide{width:100%;}
   #gen-drawer.dock-top .gen-body,#gen-drawer.dock-bottom .gen-body{width:100%;max-width:940px;margin:0 auto;}
   .dock-ctl{margin-left:auto;display:flex;gap:3px;}
