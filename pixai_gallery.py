@@ -1031,6 +1031,24 @@ const { useState, useEffect, useRef, useCallback } = React;
 __JSX__
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
+<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex'"
+  style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:#8b7bd8;color:#15131C;border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
+  title="How the Edit Bay works">?</button>
+<div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
+  style="position:fixed;inset:0;z-index:301;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
+  <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:#1d1a26;border:1px solid #3a3550;border-radius:14px;padding:22px 26px;color:#d8d4e8;font:13.5px/1.55 system-ui,sans-serif;">
+    <h2 style="margin:0 0 4px;color:#fff;">The Edit Bay &mdash; quick guide</h2>
+    <p style="color:#9a93b5;margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
+    <p><b>Acts &amp; Shots.</b> Your video is a list of <i>acts</i>, each holding <i>shot cards</i>. The reel bar tracks total runtime against your target. Add a shot, give it a duration, and write what happens.</p>
+    <p><b>Modes.</b> Each shot has a generation mode: <b>T2V</b> text-only &middot; <b>I2V</b> animate from one image &middot; <b>FLF</b> morph from a start frame to an end frame &middot; <b>R2V</b> multi-reference (cast + scenes) &middot; <b>V2V</b> extend/transform an existing clip.</p>
+    <p><b>Cast &amp; Assets.</b> Reusable references. Cite them in shot text as <b>@image1 @video1 @audio1</b> (lowercase). "Lock appearance" keeps a character consistent across shots.</p>
+    <p><b>Frame handoff.</b> Every card has an open and close frame. "&#8627; inherit prev close" chains one shot's last frame into the next shot's first &mdash; the &#10003;/&#9888; dots show whether the chain is intact.</p>
+    <p><b>&#9654; Generate shot.</b> Renders the card on PixAI's video engine (V4.0): your cast + frames upload in @-order, the shot text becomes the prompt, and the finished clip lands in the gallery catalog &mdash; free when a V4.0 card covers it. Status shows on the card; "open clip &#8599;" plays it.</p>
+    <p><b>Copy shot.</b> The same assembled prompt, to your clipboard &mdash; paste it into any Seedance-style generator. The board is engine-agnostic by design: plan here, render anywhere.</p>
+    <p><b>Saving.</b> The board autosaves to the gallery server (survives restarts). Backup .json / export .txt live in the header.</p>
+    <p style="color:#9a93b5;">Full manual: <code>docs/EDIT_BAY.md</code> in the repo.</p>
+  </div>
+</div>
 </body></html>"""
 
 
