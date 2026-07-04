@@ -5,13 +5,13 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
 | # | Item | Status | Notes |
 |---|------|--------|-------|
 | 1 | Model/LoRA selector in its own pop-out card; preview with info (not just image); L/R/Top/Bottom docking | ✅ | Flyout + hover preview card + dock control shipped. Preview shows author/description/tags only when the search API returns them — probe the per-model detail endpoint if thin. |
-| 1a | Model and LoRA are SEPARATE selections — currently both override one field | 🔧 | **Top priority — correctness bug.** Base-model slot + attachable LoRA chip list with weights (`loraParameters` already supported by the engine). |
-| 2 | Image picker larger + robust filters (Collection, etc.) — "a MESS to look at" | 📋 | Whole-catalog scroll + Upload + copy-prompt shipped. Filters are UI-only: `query_catalog` already supports collection/batch/rating/date/source/model. Bigger modal + visual cleanup. |
-| 3 | Edit card needs more real estate | 📋 | Give Edit the 600px wide mode like Video; split into sub-tabs: Edit \| Enhance \| Fix. |
-| 4 | Generate/Edit/Enhance all a bit cramped | 📋 | Same pass as #3; dock-bottom already relieves it — the width game changes per dock. |
-| 5 | Edit Bay full README + instructions ("even for me :P") | 📋 | Wiki page + in-app ❓ help overlay. Part of the docs pass. |
-| 6 | Detail-page action buttons (Edit / create video) in the lightbox; right-click menu on thumbnail cards | 📋 | Lightbox chrome buttons + small context menu (Edit / Video ref / Copy media id). |
-| 7 | Multi-select images in gallery → send directly to the video workspace | 📋 | Reuse existing multi-select; "Send to Video" opens the drawer in Multi-ref with slots pre-filled (≤9). Later: send to Edit Bay cast. |
+| 1a | Model and LoRA are SEPARATE selections — currently both override one field | ✅ | Base model keeps its slot; LoRAs toggle onto a chip list (≤6) with editable weights (0–2, default 0.7). Rides `loras:[{version_id,weight}]` → `loraParameters`. |
+| 2 | Image picker larger + robust filters (Collection, etc.) — "a MESS to look at" | ✅ | 900px × 84vh modal; Collection / Source / Rating / Sort filters; whole-catalog infinite scroll + Upload + copy-prompt. Further visual polish → owner's notes pass. |
+| 3 | Edit card needs more real estate | ✅ | Edit mode widens to 600px; tools split into Edit \| Enhance \| Fix sub-tabs over a shared source picker. |
+| 4 | Generate/Edit/Enhance all a bit cramped | ✅ | Same pass as #3 + base width 420 + docking. Remaining taste-level tweaks → notes pass. |
+| 5 | Edit Bay full README + instructions ("even for me :P") | ✅ | In-app ❓ quick-guide overlay on /edit-bay + full manual at docs/EDIT_BAY.md. |
+| 6 | Detail-page action buttons (Edit / create video) in the lightbox; right-click menu on thumbnail cards | ✅ | Lightbox: ✎ Edit + ▶ To Video. Right-click a card: Edit / Send to Video / Copy media id / Details. |
+| 7 | Multi-select images in gallery → send directly to the video workspace | ✅ | Bulk bar "▶ Send to Video": selection (tap/drag-paint) → Video tab refs (≤9, auto Multi-ref). Later: send to Edit Bay cast. |
 | 8 | Gallery search bar bolder/deeper — redesign for the suite ("This is more than a gallery. It is a SUITE.") | 💬 | The banked two-drawer design: LEFT Filters drawer mirroring the right Generate drawer. Sketch AFTER the owner's layout-notes pass. |
 | 9 | Printer integration? | 💬 | v1: print stylesheet + Print button on detail (image centered, chrome hidden) + contact sheets from a selection/collection. OS dialog does paper handling. |
 | 10 | Image → 3D model → 3D printer? | 💬 | Viable: Hunyuan3D-2 (open weights, figurine-grade from one image), TRELLIS, TripoSR, Meshy (API). Pipeline: image → GLB → Blender cleanup → watertight STL → slicer. Roadmap spike: a "Foundry" module in the provider-deck pattern. |
