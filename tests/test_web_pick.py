@@ -144,14 +144,22 @@ def test_price_route_video_needs_an_image(tmp_path, monkeypatch):
     assert d["cost"] is None and "source image" in d["note"]
 
 
-def test_account_route_sums_cards(tmp_path, monkeypatch):
+def test_account_route_sums_cards_and_coverage(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 330990})
+    monkeypatch.setattr(core, "account_info", lambda s: {
+        "quotaAmount": 330990, "tasks": {"totalCount": 4}, "followerCount": 30, "followingCount": 4})
     monkeypatch.setattr(core, "list_kaisuukens",
                         lambda s: [{"count": 16}, {"count": 34}, {"count": None}])
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    assert cli.get("/api/account").get_json() == {"credits": 330990, "cards": 50}
+    # 2 distinct local tasks (tA on two media, tB) out of 4 on the server -> 50% coverage
+    cli = _client(tmp_path, [
+        _row(media_id="1", task_id="tA", filename="a_1.png", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", task_id="tA", filename="b_2.png", created_at="2025-01-02T00:00:00"),
+        _row(media_id="3", task_id="tB", filename="c_3.png", created_at="2025-01-03T00:00:00"),
+    ])
+    d = cli.get("/api/account").get_json()
+    assert d["credits"] == 330990 and d["cards"] == 50
+    assert d["server_tasks"] == 4 and d["local_tasks"] == 2 and d["coverage_pct"] == 50.0
+    assert d["followers"] == 30 and d["following"] == 4
 
 
 def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch):
@@ -324,6 +332,18 @@ def test_catalog_counts(tmp_path):
     ])
     c = g.catalog_counts(tmp_path / "catalog.db")
     assert c == {"images": 2, "videos": 1, "collections": 2}   # faves + wips distinct
+
+
+def test_distinct_task_count(tmp_path):
+    import pixai_gallery as g
+    g.save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", task_id="tA", filename="a_1.png", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", task_id="tA", filename="b_2.png", created_at="2025-01-02T00:00:00"),  # same task (batch)
+        _row(media_id="3", task_id="tB", filename="c_3.png", created_at="2025-01-03T00:00:00"),
+        _row(media_id="4", task_id="",   filename="d_4.png", created_at="2025-01-04T00:00:00"),  # no task id
+    ])
+    # 2 distinct tasks (tA, tB); the batch-sibling and the empty task_id don't inflate it
+    assert g.distinct_task_count(tmp_path / "catalog.db") == 2
 
 
 def test_branding_absent_is_404(tmp_path):
