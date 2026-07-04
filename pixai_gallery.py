@@ -516,6 +516,137 @@ def catalog_counts(db_path):
         con.close()
 
 
+# ---------------------------------------------------------------------------
+# Achievements & Skins -- WoW-flavored milestones computed from local catalog
+# stats (read-only, no spend). Earning an epic tier unlocks a cosmetic skin
+# (a CSS-variable palette swap in the browser). State (which unlocks the user
+# has already been *toasted* for, plus the active skin) persists to
+# out_dir/achievements.json. See ACHIEVEMENTS/SKINS below for the catalog.
+# ---------------------------------------------------------------------------
+ACHIEVEMENTS = [
+    {"id": "first-light",  "name": "First Light",     "icon": "\U0001F311",
+     "desc": "Back up your first piece.",                 "metric": "images",
+     "threshold": 1,     "tier": "common"},
+    {"id": "archivist",    "name": "Archivist",       "icon": "\U0001F4DA",
+     "desc": "1,000 images preserved against the Void.",  "metric": "images",
+     "threshold": 1000,  "tier": "rare"},
+    {"id": "hoardsmith",   "name": "Hoardsmith",      "icon": "\U0001F409",
+     "desc": "10,000 images in the vault.",               "metric": "images",
+     "threshold": 10000, "tier": "epic",      "skin": "moonlit"},
+    {"id": "loremaster",   "name": "Loremaster",      "icon": "\U0001F451",
+     "desc": "25,000 images. The Athenaeum is vast.",     "metric": "images",
+     "threshold": 25000, "tier": "legendary"},
+    {"id": "first-frame",  "name": "First Frame",     "icon": "\U0001F39E",
+     "desc": "Weave your first video on the Loom.",       "metric": "videos",
+     "threshold": 1,     "tier": "common"},
+    {"id": "moonweaver",   "name": "Moonweaver",      "icon": "\U0001F319",
+     "desc": "10 videos woven.",                          "metric": "videos",
+     "threshold": 10,    "tier": "rare"},
+    {"id": "reel-director","name": "Reel Director",   "icon": "\U0001F3AC",
+     "desc": "50 videos. Roll camera.",                   "metric": "videos",
+     "threshold": 50,    "tier": "epic",      "skin": "ember"},
+    {"id": "curator",      "name": "Curator",         "icon": "\U0001F5C2",
+     "desc": "Organize 10 collections.",                  "metric": "collections",
+     "threshold": 10,    "tier": "rare"},
+    {"id": "menagerie",    "name": "Menagerie",       "icon": "\U0001F3AD",
+     "desc": "Draw from 25 distinct models.",             "metric": "models",
+     "threshold": 25,    "tier": "epic",      "skin": "verdant"},
+    {"id": "gallery-opening","name": "Gallery Opening","icon": "\U0001F5BC",
+     "desc": "Publish 10 works to the world.",            "metric": "published",
+     "threshold": 10,    "tier": "rare"},
+    {"id": "tagsmith",     "name": "Tagsmith",        "icon": "\U0001F3F7",
+     "desc": "Curate 500 pieces with tags.",              "metric": "tagged",
+     "threshold": 500,   "tier": "epic"},
+]
+
+SKINS = [
+    {"id": "moonglade",   "name": "Moonglade",     "free": True,
+     "desc": "The default — lavender leads, emerald magic."},
+    {"id": "nightfallen", "name": "Nightfallen",   "free": True,
+     "desc": "Void-touched violet and star-ash."},
+    {"id": "moonlit",     "name": "Moonlit Silver", "free": False,
+     "desc": "Cold silver and glacier blue."},
+    {"id": "ember",       "name": "Embercourt",    "free": False,
+     "desc": "Warm ember and venthyr gold."},
+    {"id": "verdant",     "name": "Verdant Grove", "free": False,
+     "desc": "Deep emerald and living moss."},
+]
+_SKIN_IDS = {s["id"] for s in SKINS}
+
+
+def achievement_metrics(db_path):
+    """The metric bundle every achievement threshold is measured against. Cheap
+    COUNTs over the local catalog -- read-only, no network, no spend. Fails soft."""
+    m = catalog_counts(db_path)   # images, videos, collections
+    con = _connect(db_path)
+    try:
+        def _scalar(sql):
+            return int(con.execute(sql).fetchone()[0] or 0)
+        m["models"] = _scalar(
+            "SELECT COUNT(DISTINCT COALESCE(NULLIF(model_name,''), NULLIF(model_id,''))) "
+            "FROM catalog WHERE COALESCE(model_name,'') != '' OR COALESCE(model_id,'') != ''")
+        m["published"] = _scalar("SELECT COUNT(*) FROM catalog WHERE is_published = '1'")
+        m["tagged"] = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(art_tags,'') != ''")
+    except sqlite3.Error:
+        m.setdefault("models", 0); m.setdefault("published", 0); m.setdefault("tagged", 0)
+    finally:
+        con.close()
+    return m
+
+
+def compute_achievements(metrics, seen=()):
+    """Pure: given the metric bundle + the set of already-seen achievement ids,
+    return {achievements, skins, newly}. An achievement is *earned* when its metric
+    reaches the threshold; a skin is *earned* if it's free or any earned achievement
+    unlocks it. `newly` = earned-but-not-yet-seen (drives the one-shot unlock toast)."""
+    seen = set(seen or [])
+    earned_skins = set()
+    achs = []
+    for a in ACHIEVEMENTS:
+        cur = int(metrics.get(a["metric"], 0) or 0)
+        earned = cur >= a["threshold"]
+        if earned and a.get("skin"):
+            earned_skins.add(a["skin"])
+        achs.append({
+            "id": a["id"], "name": a["name"], "icon": a["icon"], "desc": a["desc"],
+            "tier": a["tier"], "metric": a["metric"], "threshold": a["threshold"],
+            "current": cur, "earned": earned, "skin": a.get("skin", ""),
+        })
+    skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
+              "earned": bool(s.get("free")) or s["id"] in earned_skins}
+             for s in SKINS]
+    newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
+    return {"achievements": achs, "skins": skins, "newly": newly}
+
+
+def _ach_state_path(out_dir):
+    return Path(out_dir) / "achievements.json"
+
+
+def load_ach_state(out_dir):
+    """Persisted cosmetic state: {seen:[ids already toasted], skin:'active id'}.
+    Fails soft to an empty default so a missing/corrupt file never breaks a page."""
+    try:
+        d = json.loads(_ach_state_path(out_dir).read_text(encoding="utf-8"))
+        seen = [s for s in (d.get("seen") or []) if isinstance(s, str)]
+        skin = d.get("skin") if d.get("skin") in _SKIN_IDS else "moonglade"
+        return {"seen": seen, "skin": skin}
+    except (OSError, ValueError):
+        return {"seen": [], "skin": "moonglade"}
+
+
+def save_ach_state(out_dir, state):
+    """Persist {seen, skin} atomically-ish. Best-effort; swallows write errors."""
+    try:
+        _ach_state_path(out_dir).write_text(
+            json.dumps({"seen": sorted(set(state.get("seen") or [])),
+                        "skin": state.get("skin", "moonglade")}, indent=2),
+            encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
 def rows_for_media_ids(db_path, ids):
     """Fetch catalog rows for a specific list of media_ids, preserving the given order.
     Used by the contact-sheet print view. Chunked to stay under SQLite's variable cap."""
@@ -1242,6 +1373,7 @@ def create_app(out_dir: Path):
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
+<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>
 <style>
   :root {
     /* Palette sampled from two reference images:
@@ -1257,6 +1389,33 @@ def create_app(out_dir: Path):
        highlight (Nelnamara's gems), gold filigree is rare. */
     --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
     --purple-deep: #33236d; --purple-bright: #643aac;
+  }
+  /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
+     the meaningful subset of the palette; everything else inherits :root. Applied
+     via <html data-skin="..."> (set pre-paint from localStorage in <head>). ---- */
+  html[data-skin="nightfallen"] {
+    --base:#0a0713; --mantle:#080610; --surface0:#241a3f; --surface1:#3c2b63;
+    --text:#e7ddff; --subtext:#a493c9; --overlay0:#7a6aa6;
+    --accent:#a678f0; --lavender:#c9a6ff; --mauve:#d3b6ff;
+    --emerald:#7f6fe0; --accent-soft:#8b7ae6; --gold:#d9b3ff;
+  }
+  html[data-skin="moonlit"] {
+    --base:#0b1018; --mantle:#080d15; --surface0:#1c2735; --surface1:#334358;
+    --text:#e6eefb; --subtext:#93a6bd; --overlay0:#6f8298;
+    --accent:#8fb8e8; --lavender:#bcd6f5; --mauve:#c6dbf7;
+    --emerald:#68d5e0; --accent-soft:#6fc9d6; --gold:#cfe1f5;
+  }
+  html[data-skin="ember"] {
+    --base:#160c0c; --mantle:#120909; --surface0:#33201c; --surface1:#5a352c;
+    --text:#fbe6df; --subtext:#c79b8d; --overlay0:#a5786a;
+    --accent:#e8935f; --lavender:#f0b48f; --mauve:#f3c3a5;
+    --emerald:#e0a94b; --accent-soft:#d67f4b; --gold:#ffcf7a;
+  }
+  html[data-skin="verdant"] {
+    --base:#0a1410; --mantle:#08110d; --surface0:#173026; --surface1:#2a5140;
+    --text:#e2f5ea; --subtext:#93bda6; --overlay0:#6f9d84;
+    --accent:#5fd39a; --lavender:#8fe8bf; --mauve:#a5f3cf;
+    --emerald:#4fc99a; --accent-soft:#4bd68f; --gold:#c8e6a8;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--base); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
@@ -1618,6 +1777,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
     <a class="btn" href="/edit-bay" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
+    <button type="button" class="btn" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
     <a class="btn" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
     <a class="btn" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
   </div>
@@ -2659,6 +2819,61 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="tag-suggest"></div>
 <div id="jobs-tray"></div>
 <div id="snip-menu"></div>
+<div id="ach-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
+  <div class="ach-panel" role="dialog" aria-label="Achievements and skins">
+    <button type="button" class="ach-x" onclick="Ach.close()" aria-label="Close">&times;</button>
+    <div class="ach-htitle">&#127942; Achievements</div>
+    <div class="ach-hsub" id="ach-progress">&hellip;</div>
+    <div id="ach-grid" class="ach-grid"></div>
+    <div class="ach-skinhd">&#127912; Skins <span class="ach-skinnote">unlock more by earning epic feats</span></div>
+    <div id="ach-skins" class="ach-skins"></div>
+  </div>
+</div>
+<style>
+  .ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}
+  .ach-modal.open{display:flex;}
+  .ach-panel{position:relative;width:760px;max-width:96vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:16px;box-shadow:0 30px 90px rgba(0,0,0,.6);padding:24px 26px 28px;}
+  .ach-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--subtext);font-size:26px;line-height:1;cursor:pointer;}
+  .ach-x:hover{color:var(--text);}
+  .ach-htitle{font-size:21px;font-weight:700;color:var(--text);letter-spacing:.01em;}
+  .ach-hsub{font-size:12px;color:var(--subtext);margin-top:3px;}
+  .ach-hsub b{color:var(--lavender);}
+  .ach-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:11px;margin-top:18px;}
+  .ach-card{display:flex;gap:11px;align-items:flex-start;background:var(--surface0);border:1px solid var(--surface1);border-left-width:3px;border-radius:11px;padding:11px 12px;transition:transform .12s,box-shadow .12s;}
+  .ach-card.locked{opacity:.62;}
+  .ach-card.earned:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.35);}
+  .ach-card .ico{font-size:27px;line-height:1;filter:grayscale(1) brightness(.8);flex-shrink:0;}
+  .ach-card.earned .ico{filter:none;}
+  .ach-card .nm{font-size:13.5px;font-weight:650;color:var(--text);}
+  .ach-card .ds{font-size:11px;color:var(--subtext);margin-top:2px;line-height:1.35;}
+  .ach-card .tier{font-size:9px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-top:5px;display:inline-block;}
+  .ach-card .unlk{font-size:10px;color:var(--gold);margin-top:4px;}
+  .ach-bar{height:5px;border-radius:3px;background:var(--surface1);margin-top:6px;overflow:hidden;}
+  .ach-bar i{display:block;height:100%;background:var(--accent);border-radius:3px;}
+  .ach-bar+.ach-num{font-size:9.5px;color:var(--overlay0);margin-top:2px;font-variant-numeric:tabular-nums;}
+  .ach-card.t-common{border-left-color:#8a8298;} .ach-card.t-common .tier{color:#a9a1b8;}
+  .ach-card.t-rare{border-left-color:var(--blue);} .ach-card.t-rare .tier{color:var(--blue);}
+  .ach-card.t-epic{border-left-color:var(--purple-bright);} .ach-card.t-epic .tier{color:var(--mauve);}
+  .ach-card.t-legendary{border-left-color:var(--gold);} .ach-card.t-legendary .tier{color:var(--gold);}
+  .ach-card.earned.t-legendary{box-shadow:0 0 0 1px rgba(212,175,55,.35),0 0 22px rgba(212,175,55,.12);}
+  .ach-skinhd{font-size:15px;font-weight:700;color:var(--text);margin-top:24px;}
+  .ach-skinnote{font-size:10.5px;font-weight:400;color:var(--overlay0);margin-left:6px;}
+  .ach-skins{display:flex;flex-wrap:wrap;gap:10px;margin-top:11px;}
+  .ach-skin{width:150px;border:1px solid var(--surface1);border-radius:11px;padding:9px;cursor:pointer;background:var(--surface0);transition:border-color .12s,transform .12s;}
+  .ach-skin:hover{transform:translateY(-2px);}
+  .ach-skin.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+  .ach-skin.locked{opacity:.5;cursor:not-allowed;}
+  .ach-skin .sw{height:34px;border-radius:7px;display:flex;overflow:hidden;margin-bottom:7px;}
+  .ach-skin .sw i{flex:1;}
+  .ach-skin .snm{font-size:12px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:5px;}
+  .ach-skin .sds{font-size:10px;color:var(--subtext);margin-top:2px;line-height:1.3;}
+  .ach-skin .slock{font-size:10px;color:var(--overlay0);}
+  .ach-toast{position:fixed;left:50%;top:22%;transform:translate(-50%,-50%);z-index:402;min-width:300px;max-width:90vw;background:var(--mantle);border:1px solid var(--gold);border-radius:14px;padding:16px 22px;box-shadow:0 0 70px rgba(212,175,55,.4);text-align:center;animation:ee-toast 6.5s ease forwards;}
+  .ach-toast .at-k{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--gold);}
+  .ach-toast .at-n{font-size:19px;font-weight:700;color:var(--text);margin-top:3px;}
+  .ach-toast .at-n .ai{margin-right:7px;}
+  .ach-toast .at-d{font-size:11.5px;color:var(--subtext);margin-top:4px;}
+</style>
 <style>
   #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:240px;max-width:340px;max-height:300px;overflow-y:auto;padding:5px;}
   #snip-menu .snip-head{display:flex;justify-content:space-between;align-items:center;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);padding:3px 6px 5px;}
@@ -2690,6 +2905,104 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script>
+var Ach = (function(){
+  function el(id){return document.getElementById(id);}
+  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmt(n){ return (Number(n)||0).toLocaleString(); }
+  var SKIN_SW={ moonglade:['#0c0a1c','#b692e6','#4fc99a','#d4af37'],
+                nightfallen:['#0a0713','#a678f0','#7f6fe0','#d9b3ff'],
+                moonlit:['#0b1018','#8fb8e8','#68d5e0','#cfe1f5'],
+                ember:['#160c0c','#e8935f','#e0a94b','#ffcf7a'],
+                verdant:['#0a1410','#5fd39a','#4fc99a','#c8e6a8'] };
+  var data=null;
+  function open(){ el('ach-modal').classList.add('open'); el('ach-modal').setAttribute('aria-hidden','false');
+    load(false); }
+  function close(){ el('ach-modal').classList.remove('open'); el('ach-modal').setAttribute('aria-hidden','true'); }
+  function load(mark){
+    fetch('/api/achievements'+(mark?'?mark=1':''))
+      .then(function(r){return r.json();})
+      .then(function(d){ data=d; render(d); if(mark) toastNew(d); syncSkin(d); })
+      .catch(function(){});
+  }
+  function render(d){
+    var earned=(d.achievements||[]).filter(function(a){return a.earned;}).length;
+    var tot=(d.achievements||[]).length;
+    var p=el('ach-progress'); if(p) p.innerHTML='<b>'+earned+'</b> of <b>'+tot+'</b> feats earned';
+    var g=el('ach-grid'); if(g){ g.innerHTML='';
+      (d.achievements||[]).forEach(function(a){
+        var c=document.createElement('div');
+        c.className='ach-card t-'+a.tier+(a.earned?' earned':' locked');
+        var body='<div class="ico">'+esc(a.icon)+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
+          +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>';
+        if(a.skin) body+='<div class="unlk">&#9733; unlocks '+esc(skinName(d,a.skin))+' skin</div>';
+        if(!a.earned){ var pct=Math.min(100,Math.round(a.current/a.threshold*100));
+          body+='<div class="ach-bar"><i style="width:'+pct+'%"></i></div>'
+              +'<div class="ach-num">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div>'; }
+        body+='</div>'; c.innerHTML=body; g.appendChild(c);
+      });
+    }
+    var sk=el('ach-skins'); if(sk){ sk.innerHTML='';
+      (d.skins||[]).forEach(function(s){
+        var active=(s.id===d.skin);
+        var c=document.createElement('div');
+        c.className='ach-skin'+(active?' active':'')+(s.earned?'':' locked');
+        var sw=(SKIN_SW[s.id]||SKIN_SW.moonglade).map(function(h){return '<i style="background:'+h+'"></i>';}).join('');
+        c.innerHTML='<div class="sw">'+sw+'</div><div class="snm">'+esc(s.name)
+          +(active?' <span style="color:var(--accent)">&#10003;</span>':'')+'</div>'
+          +'<div class="sds">'+esc(s.desc)+'</div>'
+          +(s.earned?'':'<div class="slock">&#128274; locked</div>');
+        if(s.earned) c.onclick=function(){ pick(s.id); };
+        sk.appendChild(c);
+      });
+    }
+  }
+  function skinName(d,id){ var s=(d.skins||[]).filter(function(x){return x.id===id;})[0]; return s?s.name:id; }
+  function pick(id){
+    fetch('/api/skin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skin:id})})
+      .then(function(r){return r.json();})
+      .then(function(res){ if(res.skin){ applySkin(res.skin); if(data){ data.skin=res.skin; render(data);} } })
+      .catch(function(){});
+  }
+  function applySkin(id){
+    if(id&&id!=='moonglade') document.documentElement.setAttribute('data-skin',id);
+    else document.documentElement.removeAttribute('data-skin');
+    try{ localStorage.setItem('skin', id||'moonglade'); }catch(e){}
+  }
+  function syncSkin(d){ // server is source of truth; reconcile the pre-paint guess
+    var srv=d.skin||'moonglade', cur=null;
+    try{ cur=localStorage.getItem('skin'); }catch(e){}
+    if(srv!==cur) applySkin(srv);
+  }
+  function toastNew(d){
+    var newly=(d.newly||[]).map(function(id){
+      return (d.achievements||[]).filter(function(a){return a.id===id;})[0]; }).filter(Boolean);
+    if(newly.length>3){   // returning user with a full catalog -> one summary, not a barrage
+      showToast({icon:'\\ud83c\\udfc6', name:newly.length+' feats unlocked',
+                 desc:'Your catalog just earned a stack of achievements. Open '
+                      +'\\ud83c\\udfc6 to review them.', skin:false});
+      return;
+    }
+    newly.forEach(function(a,i){ setTimeout(function(){ showToast(a); }, i*1400); });
+  }
+  function showToast(a){
+    var t=document.createElement('div'); t.className='ach-toast';
+    t.innerHTML='<div class="at-k">Achievement unlocked</div>'
+      +'<div class="at-n"><span class="ai">'+esc(a.icon)+'</span>'+esc(a.name)+'</div>'
+      +'<div class="at-d">'+esc(a.desc)+(a.skin?' &mdash; a new skin awaits.':'')+'</div>';
+    document.body.appendChild(t);
+    for(var i=0;i<26;i++){ var s=document.createElement('div'); s.className='ee-star';
+      s.textContent=['\\u2726','\\u2727','\\u2b50'][i%3];
+      s.style.left=(Math.random()*100)+'vw'; s.style.color='var(--gold)';
+      s.style.fontSize=(12+Math.random()*20)+'px';
+      s.style.animationDuration=(2.4+Math.random()*2.4)+'s';
+      s.style.animationDelay=(Math.random()*1.4)+'s'; document.body.appendChild(s); }
+    setTimeout(function(){ t.remove(); document.querySelectorAll('.ee-star').forEach(function(n){n.remove();}); }, 7000);
+  }
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
+  // On load: mark-and-toast any freshly earned feats, and reconcile the active skin.
+  document.addEventListener('DOMContentLoaded', function(){ load(true); });
+  return { open:open, close:close };
+})();
 var Picker = (function(){
   var cb=null, timer=null, page=1, more=false, loading=false, curQ='';
   function el(id){return document.getElementById(id);}
@@ -4774,6 +5087,45 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             except (OSError, ValueError):
                 snips = []
             return jsonify({"snippets": snips})
+
+    _ach_lock = threading.Lock()
+
+    @app.route("/api/achievements")
+    def api_achievements():
+        """Milestone progress + skin unlocks, computed from local catalog stats. Read-only
+        catalog data (no spend, no network) so — like the picker — it's NOT localhost-gated;
+        the owner browsing over LAN still sees their trophies. ?mark=1 records the currently
+        newly-earned achievements as 'seen' so the unlock toast fires exactly once."""
+        metrics = achievement_metrics(db_path)
+        with _ach_lock:
+            state = load_ach_state(out_dir)
+            result = compute_achievements(metrics, state.get("seen"))
+            newly = result["newly"]
+            if newly and request.args.get("mark") == "1":
+                state["seen"] = sorted(set(state.get("seen") or []) | set(newly))
+                save_ach_state(out_dir, state)
+        result["skin"] = state.get("skin", "moonglade")
+        result["metrics"] = metrics
+        return jsonify(result)
+
+    @app.route("/api/skin", methods=["POST"])
+    def api_skin():
+        """Set the active cosmetic skin. Only an *earned* skin may be applied (server checks
+        against current unlocks), so a client can't force a locked palette. Persists to
+        out_dir/achievements.json. Cosmetic + local-only, no spend."""
+        body = request.get_json(silent=True) or {}
+        skin = str(body.get("skin") or "").strip()
+        if skin not in _SKIN_IDS:
+            return jsonify({"error": "unknown skin"}), 400
+        result = compute_achievements(achievement_metrics(db_path))
+        earned = {s["id"] for s in result["skins"] if s["earned"]}
+        if skin not in earned:
+            return jsonify({"error": "skin locked", "skin": load_ach_state(out_dir)["skin"]}), 403
+        with _ach_lock:
+            state = load_ach_state(out_dir)
+            state["skin"] = skin
+            save_ach_state(out_dir, state)
+        return jsonify({"skin": skin})
 
     @app.route("/api/suggest-prompt")
     def api_suggest_prompt():
