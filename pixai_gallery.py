@@ -2136,23 +2136,44 @@ var Gen = (function(){
       }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
   }
   function debouncedCost(){ clearTimeout(costTimer); costTimer=setTimeout(refreshCost,250); }
+  function renderResult(res, d, past){
+    res.style.display='block';
+    if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
+    var ids=d.media_ids||[];
+    var cost = d.paid_credit===0 ? 'free (card used)' : ((d.paid_credit||0).toLocaleString()+' credits');
+    var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 '+past+' \\u2014 '+cost+'. Added to your gallery.</div>';
+    ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
+    if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');Gen.setMode(\\'edit\\');return false;">Edit this result \\u2192</a>'; }
+    res.innerHTML=html;
+  }
+  function pollTask(tid, res, past, done){
+    fetch('/api/task-status?task_id='+encodeURIComponent(tid))
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.phase==='done'){ done(); renderResult(res, d, past); }
+        else if(d.phase==='failed'){ done(); renderResult(res, {error:d.error||('task '+(d.status||'failed'))}); }
+        else { res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Running\\u2026 (task '+String(tid).slice(-6)+')</span>'; setTimeout(function(){ pollTask(tid,res,past,done); }, 3000); }
+      }).catch(function(){ setTimeout(function(){ pollTask(tid,res,past,done); }, 4000); });
+  }
+  function runTask(url, p, res, opts){
+    opts=opts||{};
+    res.style.display='block'; res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
+    if(opts.btn){ opts.btn.disabled=true; opts.btn.textContent=opts.busy; }
+    function done(){ if(opts.btn){ opts.btn.disabled=false; opts.btn.textContent=opts.idle; } }
+    fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.error || !d.task_id){ done(); renderResult(res, {error:d.error||'submit failed'}); return; }
+        res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
+        pollTask(d.task_id, res, opts.past, done);
+      }).catch(function(){ done(); renderResult(res, {error:'network error'}); });
+  }
   function generate(){
     var p=payload();
-    if(!p.version_id){ return; }
+    if(!p.version_id) return;
     if(!p.prompt){ el('gen-prompt').focus(); return; }
-    var go=el('gen-go'), res=el('gen-result');
-    go.disabled=true; go.textContent='Generating\\u2026'; res.style.display='none';
-    fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
-      .then(function(r){return r.json();})
-      .then(function(d){ go.disabled=false; go.textContent='Generate'; res.style.display='block';
-        if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
-        var ids=d.media_ids||[];
-        var cost = d.paid_credit===0 ? 'free (card used)' : ((d.paid_credit||0).toLocaleString()+' credits');
-        var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 Done \\u2014 '+cost+'. Added to your gallery.</div>';
-        ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
-        html+='<a href="/">Refresh gallery to see it in the grid \\u2192</a>'; res.innerHTML=html;
-      }).catch(function(){ go.disabled=false; go.textContent='Generate'; res.style.display='block';
-        res.innerHTML='<span style="color:var(--red);font-size:12px;">network error</span>'; });
+    runTask('/api/generate', p, el('gen-result'),
+            {past:'Generated', btn:el('gen-go'), busy:'Generating\\u2026', idle:'Generate'});
   }
   function setMode(m){
     var isEdit=(m==='edit');
@@ -2193,20 +2214,8 @@ var Gen = (function(){
     var p=editPayload();
     if(!p.source){ el('edit-src').focus(); return; }
     if(!p.instruction){ el('edit-ins').focus(); return; }
-    var go=el('edit-go'), res=el('edit-result');
-    go.disabled=true; go.textContent='Editing\\u2026'; res.style.display='none';
-    fetch('/api/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
-      .then(function(r){return r.json();})
-      .then(function(d){ go.disabled=false; go.textContent='Apply edit'; res.style.display='block';
-        if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
-        var ids=d.media_ids||[];
-        var cost=d.paid_credit===0?'free (card used)':((d.paid_credit||0).toLocaleString()+' credits');
-        var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 Edited \\u2014 '+cost+'. Added to your gallery.</div>';
-        ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
-        if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');return false;">Edit this result \\u2192</a>'; }
-        res.innerHTML=html;
-      }).catch(function(){ go.disabled=false; go.textContent='Apply edit'; res.style.display='block';
-        res.innerHTML='<span style="color:var(--red);font-size:12px;">network error</span>'; });
+    runTask('/api/edit', p, el('edit-result'),
+            {past:'Edited', btn:el('edit-go'), busy:'Editing\\u2026', idle:'Apply edit'});
   }
   function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
   function loadWorkflows(){
@@ -2230,19 +2239,7 @@ var Gen = (function(){
   function enhance(wid){
     var src=editSrc();
     if(!src){ el('edit-src').focus(); return; }
-    var res=el('enh-result'); res.style.display='block';
-    res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Enhancing\\u2026 (rejected workflows cost nothing)</span>';
-    fetch('/api/enhance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:src,workflow_id:wid})})
-      .then(function(r){return r.json();})
-      .then(function(d){
-        if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
-        var ids=d.media_ids||[];
-        var cost=d.paid_credit===0?'free':((d.paid_credit||0).toLocaleString()+' credits');
-        var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 Enhanced \\u2014 '+cost+'.</div>';
-        ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
-        if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');return false;">Use as source \\u2192</a>'; }
-        res.innerHTML=html;
-      }).catch(function(){ res.innerHTML='<span style="color:var(--red);font-size:12px;">network error</span>'; });
+    runTask('/api/enhance', {source:src, workflow_id:wid}, el('enh-result'), {past:'Enhanced'});
   }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
@@ -3206,8 +3203,8 @@ function savePrompt() {
                 return jsonify({"error": "enter a prompt"}), 400
             params = core._gen_parameters(args)
             core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
-            res = core.web_generate(session, params, str(out_dir))
-            return jsonify(res)
+            task_id = core.submit_generation(session, params)
+            return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
 
@@ -3229,8 +3226,8 @@ function savePrompt() {
                 return jsonify({"error": "describe the edit"}), 400
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            res = core.web_generate(session, params, str(out_dir))
-            return jsonify(res)
+            task_id = core.submit_generation(session, params)
+            return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
 
@@ -3259,10 +3256,33 @@ function savePrompt() {
                 return jsonify({"error": "pick an enhance workflow"}), 400
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            res = core.web_generate(session, params, str(out_dir))
-            return jsonify(res)
+            task_id = core.submit_generation(session, params)
+            return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
+
+    @app.route("/api/task-status")
+    def api_task_status():
+        """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
+        catalogs the result into this backup and returns media_ids + paid_credit. Read-only
+        until done; localhost-only."""
+        if not _is_local_request():
+            return jsonify({"phase": "failed", "error": "localhost-only"}), 403
+        tid = (request.args.get("task_id") or "").strip()
+        if not tid:
+            return jsonify({"phase": "failed", "error": "task_id required"}), 400
+        try:
+            core, session = _gen_session()
+            st = core.generation_status(session, tid)
+            if st["phase"] == "done":
+                got = core.collect_generation(session, tid, str(out_dir))
+                return jsonify({"phase": "done", "media_ids": got["media_ids"],
+                                "paid_credit": st["paid_credit"]})
+            if st["phase"] == "failed":
+                return jsonify({"phase": "failed", "status": st["status"]})
+            return jsonify({"phase": "running", "status": st["status"]})
+        except Exception as e:
+            return jsonify({"phase": "failed", "error": str(e)[:200]}), 200
 
     @app.route("/api/workflows")
     def api_workflows():

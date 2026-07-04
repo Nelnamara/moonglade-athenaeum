@@ -78,3 +78,32 @@ def test_workflow_catalog(monkeypatch):
     out = core.workflow_catalog(object())
     assert len(out) == 1 and out[0]["id"] == "1794855217667308480"
     assert out[0]["name"] == "Image Upscale" and out[0]["cover_media_id"] == "9"
+
+
+def test_submit_generation(monkeypatch):
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {"id": "T9"}})
+    assert core.submit_generation(object(), {"x": 1}) == "T9"
+
+
+def test_submit_generation_raises(monkeypatch):
+    import pytest
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {}})
+    with pytest.raises(core.PixAIError):
+        core.submit_generation(object(), {})
+
+
+def test_generation_status_phases(monkeypatch):
+    for raw, phase in [("completed", "done"), ("succeeded", "done"), ("failed", "failed"),
+                       ("cancelled", "failed"), ("running", "running"), ("pending", "running")]:
+        monkeypatch.setattr(core, "gql_adhoc",
+                            lambda s, q, v=None, _r=raw: {"task": {"status": _r, "paidCredit": 7}})
+        st = core.generation_status(object(), "T")
+        assert st["phase"] == phase and st["paid_credit"] == 7
+
+
+def test_collect_generation(monkeypatch, tmp_path):
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, t: {"outputs": {"mediaId": "M1"}})
+    monkeypatch.setattr(core, "extract_full_meta", lambda r: {"prompt_full": "p"})
+    monkeypatch.setattr(core, "_download_image_task", lambda *a, **k: ["/M1.webp"])
+    got = core.collect_generation(object(), "T", str(tmp_path))
+    assert got["media_ids"] == ["M1"] and got["saved"] == 1

@@ -3012,31 +3012,60 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     return saved
 
 
-def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll_timeout=240):
-    """Submit an image generation, wait for it, download + catalog into out_dir, and return
-    {task_id, media_ids, saved, paid_credit}. The free card (if any) must already be
-    attached to `params` (via _apply_kaisuuken). Synchronous -- the caller (the gallery
-    Generate drawer) shows a spinner. Raises PixAIError on failure. Reuses the same submit /
-    poll / download-catalog plumbing as the CLI so web + CLI stay identical."""
-    from types import SimpleNamespace
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    init_db(out / "catalog.db")
+def submit_generation(session, params):
+    """Submit a createGenerationTask and return the task id immediately -- no wait, no
+    download. The card (if any) must already be attached to `params`. Raises on no id."""
     created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
     task_id = (created.get("createGenerationTask") or {}).get("id")
     if not task_id:
         raise PixAIError("no task id returned: " + json.dumps(created)[:200])
-    paid = _poll_task_status(session, task_id, poll_timeout, interval=3,
-                             label="generate", fail_noun="generation")
+    return str(task_id)
+
+
+_GEN_DONE = ("completed", "success", "succeeded", "done", "finished")
+_GEN_FAIL = ("failed", "error", "cancelled", "canceled", "rejected")
+
+
+def generation_status(session, task_id):
+    """One status check for a task -> {status, phase, paid_credit}. `phase` normalizes the
+    raw status into 'running' | 'done' | 'failed' for the async poller. Read-only."""
+    d = gql_adhoc(session, _GEN_STATUS, {"id": str(task_id)}) or {}
+    t = d.get("task") or {}
+    raw = (t.get("status") or "").lower()
+    phase = ("done" if raw in _GEN_DONE else
+             "failed" if raw in _GEN_FAIL else "running")
+    return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit")}
+
+
+def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_"):
+    """Download + catalog a COMPLETED generation's image output(s) into out_dir -> {media_ids,
+    saved}. Reuses the shared image download/catalog. Call only once status is 'done'."""
+    from types import SimpleNamespace
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    init_db(out / "catalog.db")
     result = task_detail_gql(session, task_id) or {}
+    fm = extract_full_meta(result)
     a = SimpleNamespace(name_length=name_length, name_sep=name_sep)
     saved = _download_image_task(session, result, task_id, out, a,
-                                 prompt=params.get("prompts", ""))
+                                 prompt=fm.get("prompt_full", ""))
     outputs = result.get("outputs") or {}
     mids = ([str(outputs["mediaId"])] if outputs.get("mediaId") else []) + \
            [str(m) for m in (outputs.get("batchMediaIds") or [])]
-    return {"task_id": str(task_id), "media_ids": list(dict.fromkeys(mids)),
-            "saved": len(saved), "paid_credit": paid}
+    return {"media_ids": list(dict.fromkeys(mids)), "saved": len(saved)}
+
+
+def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll_timeout=240):
+    """Synchronous submit -> wait -> download+catalog (used by tests / any blocking caller).
+    The async gallery routes use submit_generation + generation_status + collect_generation
+    instead. Returns {task_id, media_ids, saved, paid_credit}."""
+    task_id = submit_generation(session, params)
+    paid = _poll_task_status(session, task_id, poll_timeout, interval=3,
+                             label="generate", fail_noun="generation")
+    got = collect_generation(session, task_id, out_dir,
+                             name_length=name_length, name_sep=name_sep)
+    return {"task_id": task_id, "media_ids": got["media_ids"],
+            "saved": got["saved"], "paid_credit": paid}
 
 
 def run_generate_video(args):
