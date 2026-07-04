@@ -2834,7 +2834,10 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
         if status in ("failed", "error", "cancelled", "canceled"):
             raise PixAIError("{} ended with status: {}".format(fail_noun, status))
         time.sleep(interval)
-    raise PixAIError("timed out after {}s (task {})".format(timeout, task_id))
+    raise PixAIError(
+        "stopped waiting after {}s, but the task is STILL RUNNING on PixAI (task {}). "
+        "Nothing is lost: recover it free once it finishes with --task-id {} "
+        "(or it arrives in your next --update).".format(timeout, task_id, task_id))
 
 
 def _maybe_dump_params(args, result):

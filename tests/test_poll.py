@@ -29,7 +29,10 @@ def test_poll_raises_on_failure_with_noun(monkeypatch):
 
 
 def test_poll_raises_on_timeout(monkeypatch):
+    """Timeout must NOT read as task failure: the task keeps running on PixAI, so the
+    message says so and gives the free --task-id recovery path."""
     monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "running"}})
     with pytest.raises(core.PixAIError) as e:
         core._poll_task_status(object(), "t4", 0, label="generate", fail_noun="generation")
-    assert "timed out" in str(e.value) and "t4" in str(e.value)
+    msg = str(e.value)
+    assert "STILL RUNNING" in msg and "--task-id t4" in msg
