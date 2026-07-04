@@ -1977,6 +1977,10 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
   .gen-result{margin-top:12px;} .gen-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
   .gen-result a{color:var(--accent-soft);font-size:12px;text-decoration:none;}
+  #enh-list{max-height:230px;overflow-y:auto;margin-top:2px;}
+  .enh-item{display:block;width:100%;text-align:left;padding:6px 9px;margin-bottom:4px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.3;}
+  .enh-item:hover{border-color:var(--overlay0);}
+  .enh-item .ty{color:var(--overlay0);font-size:10px;}
 </style>
 <div id="gen-scrim" onclick="Gen.close()"></div>
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
@@ -2043,11 +2047,8 @@ document.addEventListener('DOMContentLoaded', function(){
       <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
       <div id="edit-result" class="gen-result" style="display:none;"></div>
       <div class="gen-lbl" style="margin-top:14px;">One-click enhance <span style="text-transform:none;color:var(--subtext);">&middot; on the source</span></div>
-      <div class="gen-aspects" id="enh-actions">
-        <button type="button" onclick="Gen.enhance('detail-fix')">Detail fix</button>
-        <button type="button" onclick="Gen.enhance('hand-fix')">Fix hands</button>
-        <button type="button" onclick="Gen.enhance('face-fix')">Fix face</button>
-      </div>
+      <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
+      <div id="enh-list"></div>
       <div id="enh-result" class="gen-result" style="display:none;"></div>
     </div>
   </div>
@@ -2055,6 +2056,7 @@ document.addEventListener('DOMContentLoaded', function(){
 <script>
 var Gen = (function(){
   var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null;
+  var workflows=null, enhTimer=null;
   function el(id){return document.getElementById(id);}
   function open(){
     el('gen-drawer').classList.add('open'); el('gen-scrim').classList.add('open');
@@ -2158,7 +2160,7 @@ var Gen = (function(){
     el('gen-mode-edit').style.display=isEdit?'':'none';
     el('gm-generate').classList.toggle('on',!isEdit);
     el('gm-edit').classList.toggle('on',isEdit);
-    if(isEdit && el('edit-src').value.trim()) editCost();
+    if(isEdit){ if(el('edit-src').value.trim()) editCost(); loadWorkflows().then(renderWorkflows); }
   }
   function editSrc(){ return el('edit-src').value.trim(); }
   function setEditSource(mid){
@@ -2207,12 +2209,30 @@ var Gen = (function(){
         res.innerHTML='<span style="color:var(--red);font-size:12px;">network error</span>'; });
   }
   function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
-  function enhance(key){
+  function loadWorkflows(){
+    if(workflows) return Promise.resolve(workflows);
+    return fetch('/api/workflows').then(function(r){return r.json();})
+      .then(function(d){ workflows=d.workflows||[]; return workflows; })
+      .catch(function(){ workflows=[]; return workflows; });
+  }
+  function renderWorkflows(){
+    var list=el('enh-list'); if(!list) return;
+    var qq=(el('enh-q').value||'').toLowerCase().trim();
+    list.innerHTML='';
+    (workflows||[]).filter(function(w){ return !qq || w.name.toLowerCase().indexOf(qq)>=0; })
+      .slice(0,50).forEach(function(w){
+        var b=document.createElement('button'); b.type='button'; b.className='enh-item';
+        var nm=w.name.split('|')[0].split('/')[0].trim();
+        b.innerHTML=esc(nm)+' <span class="ty">'+esc((w.type||'').toLowerCase())+'</span>';
+        b.onclick=function(){ enhance(w.id); }; list.appendChild(b);
+      });
+  }
+  function enhance(wid){
     var src=editSrc();
     if(!src){ el('edit-src').focus(); return; }
     var res=el('enh-result'); res.style.display='block';
-    res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Enhancing\\u2026 (rejected plugins cost nothing)</span>';
-    fetch('/api/enhance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:src,plugin:key})})
+    res.innerHTML='<span style="color:var(--subtext);font-size:12px;">Enhancing\\u2026 (rejected workflows cost nothing)</span>';
+    fetch('/api/enhance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:src,workflow_id:wid})})
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
@@ -2227,6 +2247,7 @@ var Gen = (function(){
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
+          renderWorkflows:renderWorkflows,
           get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
@@ -2242,6 +2263,7 @@ document.addEventListener('DOMContentLoaded', function(){
     var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.editCost); });
   var es=document.getElementById('edit-src');
   if(es) es.addEventListener('input', function(){ Gen.setEditSource(es.value.trim()); });
+  var eq=document.getElementById('enh-q'); if(eq) eq.addEventListener('input', Gen.renderWorkflows);
   var em=new URLSearchParams(location.search).get('edit');
   if(em) Gen.openEdit(em);
 });
@@ -3224,19 +3246,35 @@ function savePrompt() {
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
             src = str(p.get("source") or "").strip()
+            wid = str(p.get("workflow_id") or "").strip()
             plug = ENHANCE_PLUGINS.get(str(p.get("plugin") or "").strip())
             if not src:
                 return jsonify({"error": "pick an image first"}), 400
-            if not plug:
-                return jsonify({"error": "unknown enhance action"}), 400
-            params = core.build_panelplugin_parameters(
-                src, plug.get("workflow_id", ""), workflow_name=plug.get("workflow_name", ""))
+            if wid:
+                params = core.build_panelplugin_parameters(src, wid)
+            elif plug:
+                params = core.build_panelplugin_parameters(
+                    src, plug.get("workflow_id", ""), workflow_name=plug.get("workflow_name", ""))
+            else:
+                return jsonify({"error": "pick an enhance workflow"}), 400
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             res = core.web_generate(session, params, str(out_dir))
             return jsonify(res)
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
+
+    @app.route("/api/workflows")
+    def api_workflows():
+        """Live enhance-workflow catalog (id + name + type) for the Edit tab picker.
+        Read-only; localhost-only (owner key)."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only", "workflows": []}), 403
+        try:
+            core, session = _gen_session()
+            return jsonify({"workflows": core.workflow_catalog(session)})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200], "workflows": []}), 200
 
     @app.after_request
     def _gzip_html(resp):
