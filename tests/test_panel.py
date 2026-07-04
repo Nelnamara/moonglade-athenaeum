@@ -65,6 +65,24 @@ def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
     assert "line two" in d["lines"]
 
 
+def test_schedule_roundtrip_and_safe_only(tmp_path):
+    cli = _client(tmp_path).test_client()
+    # default: disabled
+    assert cli.get("/api/panel/schedule").get_json()["enabled"] is False
+    # save a valid safe schedule
+    s = cli.post("/api/panel/schedule",
+                 json={"enabled": True, "action": "update", "interval_hours": 12}).get_json()
+    assert s["enabled"] is True and s["action"] == "update" and s["interval_hours"] == 12
+    assert (tmp_path / "schedule.json").exists()
+    assert cli.get("/api/panel/schedule").get_json()["interval_hours"] == 12
+    # destructive actions cannot be scheduled
+    r = cli.post("/api/panel/schedule", json={"enabled": True, "action": "dedup-apply"})
+    assert r.status_code == 400
+    # interval is clamped to [1, 168]
+    assert cli.post("/api/panel/schedule",
+                    json={"action": "stats", "interval_hours": 9999}).get_json()["interval_hours"] == 168
+
+
 def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
     """The spawned argv must be python + the CLI + --out + our fixed flags -- never a
     shell string, never user input."""
