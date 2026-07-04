@@ -2391,9 +2391,13 @@ var Gen = (function(){
   function setVideoMode(m){
     vmode=m;
     ['i2v','flf','r2v'].forEach(function(x){ var b=el('vm-'+x); if(b) b.classList.toggle('on',x===m); });
-    if(m==='i2v'){ vslots=[vslots[0]||null]; el('video-slots-lbl').textContent='Source image (first frame)'; }
-    else if(m==='flf'){ vslots=[vslots[0]||null,vslots[1]||null]; el('video-slots-lbl').textContent='Start & end frame'; }
-    else { if(!vslots.length) vslots=[null]; el('video-slots-lbl').textContent='Reference images (@image1, @image2\\u2026)'; }
+    var vp=el('video-prompt');
+    if(m==='i2v'){ vslots=[vslots[0]||null]; el('video-slots-lbl').textContent='Source image (first frame)';
+      vp.placeholder='Describe the motion \\u2014 \\u2018slow cinematic pan right, gentle waves\\u2026\\u2019'; }
+    else if(m==='flf'){ vslots=[vslots[0]||null,vslots[1]||null]; el('video-slots-lbl').textContent='Start & end frame';
+      vp.placeholder='Describe the transition from start frame to end frame\\u2026'; }
+    else { if(!vslots.length) vslots=[null]; el('video-slots-lbl').textContent='Reference images';
+      vp.placeholder='Cite refs in lowercase \\u2014 \\u2018the girl from @image1 walks the pier from @image2\\u2026\\u2019'; }
     renderVideoSlots();
   }
   function renderVideoSlots(){
