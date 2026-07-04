@@ -202,3 +202,23 @@ def test_contact_sheet_captions_off(tmp_path):
                                   created_at="2025-01-02T00:00:00", rating="3")])
     html = cli.get("/contact-sheet?ids=1&captions=0").get_data(as_text=True)
     assert "class='cap'" not in html
+
+
+def test_catalog_counts(tmp_path):
+    import pixai_gallery as g
+    g.save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00",
+             collections="faves,wips"),
+        _row(media_id="2", filename="b_2.png", created_at="2025-01-02T00:00:00",
+             collections="faves"),
+        _row(media_id="3", filename="c_3.mp4", is_video="1", created_at="2025-01-03T00:00:00"),
+    ])
+    c = g.catalog_counts(tmp_path / "catalog.db")
+    assert c == {"images": 2, "videos": 1, "collections": 2}   # faves + wips distinct
+
+
+def test_branding_absent_is_404(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.get("/branding/banner.png").status_code == 404      # onerror removes the img
+    assert cli.get("/branding/../catalog.db").status_code == 404    # traversal rejected

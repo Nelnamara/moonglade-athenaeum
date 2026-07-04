@@ -495,6 +495,27 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
         con.close()
 
 
+def catalog_counts(db_path):
+    """At-a-glance header stats: image count, video count, distinct collections.
+    Cheap COUNTs over the catalog. Fails soft to zeros."""
+    con = _connect(db_path)
+    try:
+        images = con.execute(
+            "SELECT COUNT(*) FROM catalog WHERE filename != '' "
+            "AND COALESCE(is_video,'') != '1'").fetchone()[0]
+        videos = con.execute(
+            "SELECT COUNT(*) FROM catalog WHERE is_video = '1'").fetchone()[0]
+        names = set()
+        for (s,) in con.execute(
+                "SELECT collections FROM catalog WHERE COALESCE(collections,'') != ''"):
+            names.update(_split_collections(s))
+        return {"images": images, "videos": videos, "collections": len(names)}
+    except sqlite3.Error:
+        return {"images": 0, "videos": 0, "collections": 0}
+    finally:
+        con.close()
+
+
 def rows_for_media_ids(db_path, ids):
     """Fetch catalog rows for a specific list of media_ids, preserving the given order.
     Used by the contact-sheet print view. Chunked to stay under SQLite's variable cap."""
@@ -1115,12 +1136,24 @@ def create_app(out_dir: Path):
   body { background: var(--base); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
 
   /* Header */
-  header { background: var(--mantle); padding: 12px 20px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--surface0); position: sticky; top: 0; z-index: 100; }
+  header { background: var(--mantle); padding: 12px 20px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--surface0); position: sticky; top: 0; z-index: 100; overflow: hidden; }
+  #brand-banner { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .16; z-index: 0; pointer-events: none; -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 62%); mask-image: linear-gradient(90deg, #000 0%, transparent 62%); }
+  header > * { position: relative; z-index: 1; }
   .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-  .brand .mark { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: var(--base); font-weight: 700; font-size: 15px; position: relative; }
-  .brand .mark::after { content: ''; position: absolute; top: 5px; right: 5px; width: 4px; height: 4px; border-radius: 50%; background: var(--gold); }
+  .brand-txt { display: flex; flex-direction: column; line-height: 1; }
+  .brand .mark { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: var(--base); font-weight: 700; font-size: 15px; position: relative; overflow: hidden; box-shadow: 0 0 0 rgba(182,146,230,0); animation: mark-glow 5.5s ease-in-out infinite; }
+  .brand .mark::after { content: ''; position: absolute; top: 5px; right: 5px; width: 4px; height: 4px; border-radius: 50%; background: var(--gold); z-index: 2; }
+  .brand .mark::before { content: ''; position: absolute; inset: 0; border-radius: 7px; background: var(--mantle); transform: translateX(-108%); animation: mark-eclipse 5.5s ease-in-out infinite; }
+  @keyframes mark-eclipse { 0%,100% { transform: translateX(-108%); } 46%,54% { transform: translateX(0); } }
+  @keyframes mark-glow { 0%,100% { box-shadow: 0 0 10px rgba(182,146,230,.55); } 50% { box-shadow: 0 0 3px rgba(182,146,230,.2); } }
   header h1 { font-size: 18px; color: var(--text); flex-shrink: 0; font-weight: 600; border-bottom: 2px solid var(--gold); padding-bottom: 1px; line-height: 1.1; }
-  .header-stats { color: var(--subtext); font-size: 12px; }
+  .tagline { font-size: 10.5px; color: var(--overlay0); font-style: italic; margin-top: 3px; transition: opacity .5s; letter-spacing: .02em; }
+  .header-stats { color: var(--subtext); font-size: 12px; } .header-stats b { color: var(--text); }
+  .gen-live { color: var(--lavender); margin-left: 8px; }
+  @media (prefers-reduced-motion: reduce) {
+    .brand .mark { animation: none; } .brand .mark::before { animation: none; transform: translateX(-108%); }
+    .tagline { transition: none; }
+  }
 
   /* Filters */
   .filters { background: var(--mantle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--surface0); }
@@ -1408,8 +1441,18 @@ document.addEventListener('DOMContentLoaded', function() {
   </select>
 {% endmacro %}
 <header>
-  <div class="brand"><span class="mark">M</span><h1>Moonglade Athenaeum</h1></div>
-  <span class="header-stats">{{ '{:,}'.format(total) }} images</span>
+  <img id="brand-banner" src="/branding/banner.png" alt="" onerror="this.remove()">
+  <div class="brand">
+    <span class="mark">M</span>
+    <div class="brand-txt">
+      <h1>Moonglade Athenaeum</h1>
+      <span id="tagline" class="tagline">a library against the Void</span>
+    </div>
+  </div>
+  <span class="header-stats">
+    <b>{{ '{:,}'.format(stats.images) }}</b> images{% if stats.videos %} &middot; <b>{{ '{:,}'.format(stats.videos) }}</b> videos{% endif %}{% if stats.collections %} &middot; <b>{{ stats.collections }}</b> collections{% endif %}
+    <span id="gen-live" class="gen-live" style="display:none;"></span>
+  </span>
   <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
   <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
   <a class="back-link" href="/edit-bay" title="Seedance video storyboard">&#9648; Edit Bay</a>
@@ -2493,7 +2536,13 @@ var Jobs = (function(){
   }
   function dismiss(id){ delete jobs[id]; order=order.filter(function(x){return x!==id;}); render(); }
   function clearDone(){ order.slice().forEach(function(id){ if(jobs[id]&&jobs[id].status!=='running') dismiss(id); }); }
+  function liveBadge(){
+    var running=order.filter(function(id){ return jobs[id]&&jobs[id].status==='running'; }).length;
+    var live=document.getElementById('gen-live');
+    if(live){ if(running){ live.textContent='\\u25c9 '+running+' generating'; live.style.display=''; } else live.style.display='none'; }
+  }
   function render(){
+    liveBadge();
     var t=tray(); if(!t) return;
     if(!order.length){ t.style.display='none'; t.innerHTML=''; return; }
     t.style.display='block';
@@ -3108,6 +3157,11 @@ document.addEventListener('DOMContentLoaded', function(){
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
   try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
   Acct.refresh();
+  (function(){ var tl=document.getElementById('tagline'); if(!tl) return;
+    if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var lines=['a library against the Void','the archive remembers','what the moon keeps','every dream, kept','a light in the Nightmare'];
+    var i=0; setInterval(function(){ i=(i+1)%lines.length; tl.style.opacity=0;
+      setTimeout(function(){ tl.textContent=lines[i]; tl.style.opacity=1; }, 500); }, 9000); })();
   ['gen-prompt','gen-neg','edit-ins'].forEach(Tags.attach);
   var vp=document.getElementById('video-prompt');
   if(vp){ vp.addEventListener('input', Gen.vpOnInput);
@@ -3649,7 +3703,7 @@ function savePrompt() {
             chips=chips, published_only=published_only, art_tag=art_tag,
             lora_filter=lora_filter, media_type=media_type, source_filter=source,
             collection=collection, collections=collections,
-            rows=page_rows, total=total, page=page,
+            rows=page_rows, total=total, page=page, stats=catalog_counts(db_path),
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
             date_from=date_from,
@@ -4031,6 +4085,21 @@ function savePrompt() {
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
         return jsonify({"images": out, "total": total, "page": page,
                         "limit": limit})
+
+    @app.route("/branding/<path:fname>")
+    def branding(fname):
+        """Serve drop-in branding art from out_dir/branding/ (banner.png, logo, icons).
+        Absent files 404 so the header's onerror simply removes the <img>. Path-safe."""
+        from flask import send_from_directory, abort
+        bdir = (out_dir / "branding").resolve()
+        try:
+            target = (bdir / fname).resolve()
+            target.relative_to(bdir)          # reject path traversal
+        except (ValueError, OSError):
+            abort(404)
+        if not target.is_file():
+            abort(404)
+        return send_from_directory(str(bdir), fname)
 
     @app.route("/contact-sheet")
     def contact_sheet():
