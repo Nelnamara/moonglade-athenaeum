@@ -1245,6 +1245,9 @@ def create_app(out_dir: Path):
   @media (max-width: 680px) {
     header h1 { font-size: 16px; }
     header .back-link { font-size: 12px; }
+  .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .head-nav a.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; color: var(--text); }
+  .head-nav a.btn:hover { border-color: var(--overlay0); text-decoration: none; }
     .filter-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 12px 0; }
     .filters { display: none; flex-direction: column; align-items: stretch; padding: 10px 12px; }
     .filters.open { display: flex; }
@@ -1279,7 +1282,20 @@ def create_app(out_dir: Path):
   .chips .clear-all:hover { text-decoration: underline; }
 
   /* Bulk toolbar */
-  .bulk-bar { background: var(--surface0); padding: 8px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--surface1); min-height: 40px; flex-wrap: wrap; position: sticky; top: var(--bulk-top, 52px); z-index: 99; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  .bulk-bar { background: var(--surface0); padding: 8px 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--surface1); min-height: 40px; flex-wrap: wrap; position: sticky; top: var(--bulk-top, 52px); z-index: 99; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  .bulk-grp { display: flex; align-items: center; gap: 6px; }
+  .bulk-grp + .bulk-grp:not(.bulk-view), .bulk-actions { border-left: 1px solid var(--surface1); padding-left: 10px; }
+  .bulk-view { margin-left: auto; }
+  .sel-count { color: var(--subtext); font-size: 13px; padding: 0 2px; } .sel-count b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .bulk-actions { position: relative; }
+  .actions-menu { position: absolute; top: calc(100% + 6px); left: 10px; z-index: 130; background: var(--mantle); border: 1px solid var(--surface1); border-radius: 9px; box-shadow: 0 14px 34px rgba(0,0,0,.5); min-width: 210px; padding: 5px; display: none; }
+  .actions-menu.open { display: block; }
+  .actions-menu button { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text); font-size: 13px; padding: 8px 11px; border-radius: 6px; cursor: pointer; font-family: inherit; }
+  .actions-menu button:hover { background: var(--surface0); }
+  .actions-menu .am-div { height: 1px; background: var(--surface1); margin: 5px 6px; }
+  .actions-menu .am-danger { color: var(--red); }
+  .actions-menu .am-danger:hover { background: rgba(243,139,168,.13); }
+  .bulk-tip { padding: 5px 20px; font-size: 12px; color: var(--overlay0); background: var(--surface0); border-bottom: 1px solid var(--surface1); }
   /* Select mode: cards capture the drag (no scroll-hijack mid-card) and never open the lightbox. */
   .select-mode .grid .card { touch-action: none; cursor: copy; }
   .select-mode .grid .card .cover { cursor: copy; }
@@ -1532,11 +1548,13 @@ document.addEventListener('DOMContentLoaded', function() {
     <b>{{ '{:,}'.format(stats.images) }}</b> images{% if stats.videos %} &middot; <b>{{ '{:,}'.format(stats.videos) }}</b> videos{% endif %}{% if stats.collections %} &middot; <b>{{ stats.collections }}</b> collections{% endif %}
     <span id="gen-live" class="gen-live" style="display:none;"></span>
   </span>
-  <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
-  <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
-  <a class="back-link" href="/edit-bay" title="Seedance video storyboard">&#9648; Edit Bay</a>
-  <a class="back-link" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Control Panel</a>
-  <a class="back-link" href="{{ url_for('health') }}">Collection health &rarr;</a>
+  <div class="head-nav">
+    <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="display:none;"></span>
+    <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
+    <a class="btn" href="/edit-bay" title="Seedance video storyboard">&#9648; Edit Bay</a>
+    <a class="btn" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
+    <a class="btn" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
+  </div>
 </header>
 
 <button type="button" class="filter-toggle btn" onclick="toggleFilters()"
@@ -1696,26 +1714,36 @@ document.addEventListener('DOMContentLoaded', function() {
 {% endif %}
 
 <div class="bulk-bar">
-  <button class="btn" onclick="selectAll()">Select All (page)</button>
-  <button class="btn" onclick="clearAll()">Clear</button>
-  <button class="btn" id="select-mode-btn" onclick="toggleSelectMode()" title="Select mode: tap an image to toggle it, or drag across images to paint a selection. No lightbox opens, so no accidental opens. Great for touch/tablet.">Select</button>
-  <span><span id="sel-count">0</span> selected</span>
-  <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
-  <button class="btn" id="bulk-replace-btn" style="display:none" onclick="bulkReplacePrompt()" title="Find/replace text in the prompts of selected images">Find/Replace</button>
-  <button class="btn btn-primary" id="bulk-collection-btn" onclick="bulkAddCollection()" title="Check some images/videos first, then click to add them to a named collection (files are not moved)">+ Add to Collection</button>
-  <button class="btn" id="bulk-video-btn" style="display:none" onclick="bulkSendVideo()" title="Send up to 9 selected images to the Video tab as references">&#9654; Send to Video</button>
-  <button class="btn" id="bulk-print-btn" style="display:none" onclick="bulkContactSheet()" title="Open a print-ready contact sheet of the selected images">&#128424; Print sheet</button>
-  <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
-  <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
-          title="Saved views"><option value="">Saved views…</option></select>
-  <button class="btn" onclick="savePreset()" title="Save current filters as a named view">Save view</button>
-  <button class="btn btn-danger" id="bulk-del-btn" style="display:none"
-    onclick="confirmBulkDelete()" title="Remove from this local catalog only (keeps the cloud task)">Delete (local)</button>
-  <button class="btn btn-danger" id="bulk-del-cloud-btn" style="display:none"
-    onclick="confirmBulkDeleteCloud()"
-    title="Delete the whole TASK from your PixAI account AND locally (irreversible)">Delete from PixAI</button>
-  <span style="margin-left:auto;color:var(--overlay0);font-size:12px;">tip: click an image to open the lightbox · arrow keys to browse · F for slideshow</span>
+  <!-- Selection -->
+  <div class="bulk-grp">
+    <button class="btn" onclick="selectAll()">Select all</button>
+    <button class="btn" onclick="clearAll()">Clear</button>
+    <button class="btn" id="select-mode-btn" onclick="toggleSelectMode()" title="Select mode: tap an image to toggle it, or drag across images to paint a selection. No lightbox opens. Great for touch/tablet.">Select</button>
+    <span class="sel-count"><b id="sel-count">0</b> selected</span>
+  </div>
+  <!-- Actions on the selection (only shown when something is selected) -->
+  <div class="bulk-actions" id="bulk-actions" style="display:none;">
+    <button class="btn btn-primary" id="actions-btn" onclick="toggleActionsMenu(event)">Actions <span id="act-n"></span> &#9662;</button>
+    <div class="actions-menu" id="actions-menu">
+      <button onclick="bulkAddCollection();closeActionsMenu()">&#43; Add to collection</button>
+      <button onclick="bulkSendVideo();closeActionsMenu()">&#9654; Send to Video</button>
+      <button onclick="bulkContactSheet();closeActionsMenu()">&#128424; Print sheet</button>
+      <button onclick="downloadZip();closeActionsMenu()">&#8681; Download ZIP</button>
+      <button onclick="bulkReplacePrompt();closeActionsMenu()">Find / replace in prompts</button>
+      <div class="am-div"></div>
+      <button class="am-danger" onclick="confirmBulkDelete();closeActionsMenu()" title="Remove from this local catalog only (keeps the cloud task)">Delete locally</button>
+      <button class="am-danger" onclick="confirmBulkDeleteCloud();closeActionsMenu()" title="Delete the whole TASK from your PixAI account AND locally (irreversible)">Delete from PixAI</button>
+    </div>
+  </div>
+  <!-- View controls (right) -->
+  <div class="bulk-grp bulk-view">
+    <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
+    <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
+            title="Saved views"><option value="">Saved views…</option></select>
+    <button class="btn" onclick="savePreset()" title="Save current filters as a named view">Save view</button>
+  </div>
 </div>
+<div class="bulk-tip">tip: click an image to open the lightbox &middot; arrow keys to browse &middot; F for slideshow</div>
 
 <form id="bulk-form" method="post" action="/delete-bulk">
   <input type="hidden" name="back" value="{{ request.url }}">
@@ -1874,17 +1902,26 @@ function refreshSelUI() {
     cb.closest('.card').classList.toggle('selected', on);
   });
   document.getElementById('sel-count').textContent = sel.size;
-  document.getElementById('bulk-del-btn').style.display = sel.size ? 'inline-block' : 'none';
-  document.getElementById('bulk-zip-btn').style.display = sel.size ? 'inline-block' : 'none';
-  var rb = document.getElementById('bulk-replace-btn');
-  if (rb) rb.style.display = sel.size ? 'inline-block' : 'none';
-  var cb = document.getElementById('bulk-del-cloud-btn');
-  if (cb) cb.style.display = sel.size ? 'inline-block' : 'none';
-  var vb = document.getElementById('bulk-video-btn');
-  if (vb) vb.style.display = sel.size ? 'inline-block' : 'none';
-  var pb = document.getElementById('bulk-print-btn');
-  if (pb) pb.style.display = sel.size ? 'inline-block' : 'none';
+  // One "Actions" button holds every selection action; it appears only when
+  // something's selected (replaces the old row of individually-toggled buttons).
+  var ba = document.getElementById('bulk-actions');
+  if (ba) ba.style.display = sel.size ? '' : 'none';
+  var an = document.getElementById('act-n');
+  if (an) an.textContent = sel.size ? '(' + sel.size + ')' : '';
+  if (!sel.size) closeActionsMenu();
 }
+function toggleActionsMenu(e) {
+  if (e) e.stopPropagation();
+  document.getElementById('actions-menu').classList.toggle('open');
+}
+function closeActionsMenu() {
+  var m = document.getElementById('actions-menu');
+  if (m) m.classList.remove('open');
+}
+document.addEventListener('click', function(e) {
+  var w = document.getElementById('bulk-actions');
+  if (w && !w.contains(e.target)) closeActionsMenu();
+});
 function bulkContactSheet() {
   var ids = Array.from(selGet());
   if (!ids.length) return;
