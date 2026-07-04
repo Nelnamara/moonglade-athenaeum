@@ -3315,6 +3315,9 @@ def main():
                          "browsers show a one-time certificate warning)")
     ap.add_argument("--rebuild-thumbs", action="store_true",
                     help="regenerate all thumbnails even if they already exist")
+    ap.add_argument("--skip-thumbs", action="store_true",
+                    help="don't build catalog thumbnails on startup (fast boot; missing "
+                         "ones show 'no preview'). Per-generation thumbs are still made.")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
@@ -3335,8 +3338,11 @@ def main():
     thumb_dir = out_dir / "gallery" / "thumbs"
     print("Loading catalog...")
     rows = load_catalog(db_path)
-    print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
-    build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
+    if args.skip_thumbs:
+        print("Skipping thumbnail build (--skip-thumbs).")
+    else:
+        print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
+        build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
 
     ssl_context = None
     scheme = "http"
