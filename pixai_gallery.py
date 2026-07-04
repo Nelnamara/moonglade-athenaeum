@@ -2066,6 +2066,11 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-cost.free{border-color:var(--emerald);color:var(--emerald);}
   .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
   .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
+  .gen-ce{min-height:66px;white-space:pre-wrap;overflow-y:auto;max-height:180px;}
+  .gen-ce:empty::before{content:attr(data-placeholder);color:var(--overlay0);pointer-events:none;}
+  .gen-ce:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+  .vp-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:5px;padding:1px 6px 1px 2px;font-size:11.5px;color:var(--lavender);margin:0 2px;vertical-align:-3px;cursor:default;user-select:none;}
+  .vp-chip img{width:16px;height:16px;border-radius:3px;object-fit:cover;}
   .gen-moon{display:inline-block;width:15px;height:15px;border-radius:50%;background:var(--lavender);position:relative;overflow:hidden;vertical-align:-3px;margin-right:7px;box-shadow:0 0 9px rgba(182,146,230,.75);}
   .gen-moon::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--mantle);animation:gen-eclipse 2.6s ease-in-out infinite;}
   @keyframes gen-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}
@@ -2236,7 +2241,8 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <div class="gen-lbl" id="video-slots-lbl">Source image (first frame)</div>
       <div id="video-slots"></div>
-      <textarea id="video-prompt" class="gen-ta" rows="3" style="margin-top:8px;" placeholder="Describe the motion &mdash; &lsquo;slow cinematic pan right, gentle waves&hellip;&rsquo;"></textarea>
+      <div id="video-prompt" class="gen-ta gen-ce" contenteditable="true" style="margin-top:8px;"
+           data-placeholder="Describe the motion &mdash; &lsquo;slow cinematic pan right, gentle waves&hellip;&rsquo;"></div>
       <div class="gen-row" style="margin-top:8px;">
         <div style="flex:1.4;"><div class="gen-lbl">Model</div>
           <select id="video-model" class="gen-sel" onchange="Gen.videoCost()">
@@ -2449,13 +2455,22 @@ var Gen = (function(){
       +((m.tags&&m.tags.length)?'<div class="mp-tags">'+m.tags.map(function(t){return '<span>'+esc(t)+'</span>';}).join('')+'</div>':'')
       +'</div>';
     p.innerHTML=html; p.classList.add('open'); p.setAttribute('aria-hidden','false');
+    placePreview(p, anchor);
+  }
+  function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
+  function placePreview(p, anchor){
     var r=anchor.getBoundingClientRect(), w=300, gap=14;
     var x = r.left - w - gap;
     if(x < 8) x = Math.min(r.right + gap, window.innerWidth - w - 8);
     var y = Math.max(8, Math.min(r.top - 20, window.innerHeight - 470));
     p.style.left=x+'px'; p.style.top=y+'px';
   }
-  function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
+  function showRefPreview(mid, anchor){
+    var p=el('model-preview'); if(!p||!mid) return;
+    p.innerHTML='<img src="/thumbs/'+mid+'.jpg" alt="">';
+    p.classList.add('open'); p.setAttribute('aria-hidden','false');
+    placePreview(p, anchor);
+  }
   function previewSelected(ev){ if(selected) showPreview(selected, ev.currentTarget); }
   var loras=[];
   function toggleLora(m, c){
@@ -2680,19 +2695,31 @@ var Gen = (function(){
     ['i2v','flf','r2v'].forEach(function(x){ var b=el('vm-'+x); if(b) b.classList.toggle('on',x===m); });
     var vp=el('video-prompt');
     if(m==='i2v'){ vslots=[vslots[0]||null]; el('video-slots-lbl').textContent='Source image (first frame)';
-      vp.placeholder='Describe the motion \\u2014 \\u2018slow cinematic pan right, gentle waves\\u2026\\u2019'; }
+      vp.setAttribute('data-placeholder','Describe the motion \\u2014 \\u2018slow cinematic pan right, gentle waves\\u2026\\u2019'); }
     else if(m==='flf'){ vslots=[vslots[0]||null,vslots[1]||null]; el('video-slots-lbl').textContent='Start & end frame';
-      vp.placeholder='Describe the transition from start frame to end frame\\u2026'; }
+      vp.setAttribute('data-placeholder','Describe the transition from start frame to end frame\\u2026'); }
     else { if(!vslots.length) vslots=[null]; el('video-slots-lbl').textContent='Reference images';
-      vp.placeholder='Cite refs in lowercase \\u2014 \\u2018the girl from @image1 walks the pier from @image2\\u2026\\u2019'; }
+      vp.setAttribute('data-placeholder','Type @image1 to cite a ref \\u2014 it becomes a chip \\u2014 \\u2018the girl from @image1 walks the pier\\u2026\\u2019'); }
     renderVideoSlots();
   }
   function renderVideoSlots(){
     var wrap=el('video-slots'); if(!wrap) return; wrap.innerHTML=''; wrap.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+    var refN=0;
     vslots.forEach(function(s,i){
       var box=document.createElement('div');
-      box.style.cssText='width:78px;height:78px;border-radius:8px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;overflow:hidden;display:grid;place-items:center;color:var(--subtext);font-size:11px;text-align:center;';
-      if(s){ box.innerHTML='<img src="'+s.thumb+'" style="width:100%;height:100%;object-fit:cover;">'; }
+      box.style.cssText='position:relative;width:78px;height:78px;border-radius:8px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;overflow:hidden;display:grid;place-items:center;color:var(--subtext);font-size:11px;text-align:center;';
+      if(s){
+        refN++;
+        var tag=(vmode==='flf'?(i===0?'start':'end'):'@image'+refN);
+        box.innerHTML='<img src="'+s.thumb+'" style="width:100%;height:100%;object-fit:cover;">'
+          +'<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.85);color:var(--lavender);font-size:9.5px;padding:1px 5px;border-radius:4px;">'+tag+'</span>'
+          +'<button type="button" class="vs-x" style="position:absolute;top:2px;right:2px;width:17px;height:17px;border-radius:50%;border:none;background:rgba(21,19,28,.85);color:var(--subtext);font-size:11px;line-height:1;cursor:pointer;padding:0;">&times;</button>';
+        box.querySelector('.vs-x').onclick=function(ev){ ev.stopPropagation(); hidePreview();
+          if(vmode==='r2v'){ vslots.splice(i,1); if(!vslots.length) vslots=[null]; } else vslots[i]=null;
+          renderVideoSlots(); };
+        box.onmouseenter=function(){ showRefPreview(s.media_id, box); };
+        box.onmouseleave=hidePreview;
+      }
       else { box.textContent=(vmode==='flf'?(i===0?'+ start':'+ end'):'+ pick'); }
       box.onclick=function(){ Picker.open(function(mid,thumb){ vslots[i]={media_id:mid,thumb:thumb}; renderVideoSlots(); }); };
       wrap.appendChild(box);
@@ -2704,9 +2731,60 @@ var Gen = (function(){
     }
     videoCost();
   }
-  var vcostTimer=null;
+  var vcostTimer=null, vpTimer=null;
+  function vpRefs(){
+    var map={}, n=0;
+    vslots.forEach(function(s){ if(s&&s.media_id){ n++; map['@image'+n]={thumb:s.thumb, mid:s.media_id}; } });
+    return map;
+  }
+  function vpMakeChip(tag, info){
+    var c=document.createElement('span'); c.className='vp-chip'; c.contentEditable='false';
+    c.setAttribute('data-ref', tag);
+    c.innerHTML=(info&&info.thumb?'<img src="'+info.thumb+'" alt="">':'')+tag;
+    if(info&&info.mid){ c.onmouseenter=function(){ showRefPreview(info.mid, c); }; c.onmouseleave=hidePreview; }
+    return c;
+  }
+  function vpChipify(final){
+    var vp=el('video-prompt'); if(!vp) return;
+    var map=vpRefs(), sel=window.getSelection();
+    var walker=document.createTreeWalker(vp, NodeFilter.SHOW_TEXT), nodes=[], tn;
+    while((tn=walker.nextNode())) nodes.push(tn);
+    var re=/@image\\d+/g;
+    nodes.forEach(function(node){
+      var t=node.nodeValue, m, found=[];
+      re.lastIndex=0;
+      while((m=re.exec(t))!==null){
+        if(!map[m[0]]) continue;
+        if(!final && m.index+m[0].length===t.length) continue;  // still typing at the end
+        found.push({i:m.index, tag:m[0]});
+      }
+      if(!found.length) return;
+      var caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer===node;
+      var frag=document.createDocumentFragment(), pos=0;
+      found.forEach(function(f){
+        if(f.i>pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
+        frag.appendChild(vpMakeChip(f.tag, map[f.tag]));
+        pos=f.i+f.tag.length;
+      });
+      var tail=document.createTextNode(t.slice(pos)); frag.appendChild(tail);
+      node.parentNode.replaceChild(frag, node);
+      if(caretHere){ var r=document.createRange(); r.setStart(tail, tail.length); r.collapse(true);
+        sel.removeAllRanges(); sel.addRange(r); }
+    });
+  }
+  function vpText(){
+    var vp=el('video-prompt'), out='';
+    (function walk(n){ n.childNodes.forEach(function(c){
+      if(c.nodeType===3) out+=c.nodeValue;
+      else if(c.classList&&c.classList.contains('vp-chip')) out+=c.getAttribute('data-ref');
+      else if(c.nodeName==='BR') out+='\\n';
+      else walk(c);
+    });})(vp);
+    return out.replace(/\\u00a0/g,' ').trim();
+  }
+  function vpOnInput(){ clearTimeout(vpTimer); vpTimer=setTimeout(function(){ vpChipify(false); videoCost(); }, 300); }
   function videoPayload(){
-    return { mode:vmode.toUpperCase(), prompt:el('video-prompt').value.trim(),
+    return { mode:vmode.toUpperCase(), prompt:vpText(),
       images:vslots.filter(function(s){return s&&s.media_id;}).map(function(s){return s.media_id;}),
       duration:+el('video-dur').value, audio:el('video-audio').checked,
       video_model:el('video-model').value };
@@ -2753,6 +2831,7 @@ var Gen = (function(){
           previewSelected:previewSelected, hidePreview:hidePreview,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           setEditSub:setEditSub, addVideoRefs:addVideoRefs, videoCost:videoCost,
+          vpOnInput:vpOnInput, vpChipify:vpChipify,
           get selected(){return selected;}};
 })();
 var Tags = (function(){
@@ -2851,7 +2930,10 @@ document.addEventListener('DOMContentLoaded', function(){
   var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
   try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
-  ['gen-prompt','gen-neg','edit-ins','video-prompt'].forEach(Tags.attach);
+  ['gen-prompt','gen-neg','edit-ins'].forEach(Tags.attach);
+  var vp=document.getElementById('video-prompt');
+  if(vp){ vp.addEventListener('input', Gen.vpOnInput);
+          vp.addEventListener('blur', function(){ Gen.vpChipify(true); }); }
   var asp=document.getElementById('gen-aspects');
   if(asp) asp.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b)return;
     asp.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
