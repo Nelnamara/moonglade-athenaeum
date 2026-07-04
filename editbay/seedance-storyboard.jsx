@@ -287,6 +287,8 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showCast, setShowCast] = useState(true);
   const [genState, setGenState] = useState({});   // cardId -> {phase, msg, mid}
+  const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb) or null
+  const openPick = useCallback((cb) => setPickCb(() => cb), []);
   const saveTimer = useRef(null);
 
   useEffect(() => {
@@ -382,11 +384,11 @@ export default function App() {
     const tagNum = (t) => { const m = /(\d+)/.exec(t || ""); return m ? +m[1] : 99; };
     const imgs = [];
     (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
-      .forEach((as) => { const d = imgSrc(as.thumbId, as.source); if (d) imgs.push({ tag: as.tag, d }); });
+      .forEach((as) => { const d = as.mediaId || imgSrc(as.thumbId, as.source); if (d) imgs.push({ tag: as.tag, d }); });
     [c.openFrame, c.mode === "FLF" ? c.closeFrame : null].filter(Boolean).forEach((f) => {
-      const d = imgSrc(f.thumbId, f.source); if (d) imgs.push({ tag: f.tag || "@image9", d }); });
+      const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) imgs.push({ tag: f.tag || "@image9", d }); });
     (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
-      const d = imgSrc(r.thumbId, r.source); if (d) imgs.push({ tag: r.tag, d }); });
+      const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) imgs.push({ tag: r.tag, d }); });
     const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
     imgs.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
     if (!imgs.length && !vids.length) {
@@ -436,6 +438,8 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
+      {pickCb && <GalleryPick onClose={() => setPickCb(null)}
+        onPick={(mid, thumb) => { const cb = pickCb; setPickCb(null); cb(mid, thumb); }} />}
 
       <header className="sb-top">
         <div className="sb-topgrid">
@@ -499,7 +503,9 @@ export default function App() {
           {showCast && (
             <div className="sb-panelbody">
               {(project.assets || []).map((as) => {
-                const prev = as.thumbId ? thumbs[as.thumbId] : (as.kind === "image" && as.source.startsWith("http") ? as.source : null);
+                const prev = as.thumbId ? thumbs[as.thumbId]
+                  : (as.mediaId ? "/thumbs/" + as.mediaId + ".jpg"
+                    : (as.kind === "image" && as.source.startsWith("http") ? as.source : null));
                 return (
                   <div className="sb-assetrow" key={as.id}>
                     {as.kind === "image" ? (
@@ -507,8 +513,10 @@ export default function App() {
                         {prev ? <img src={prev} alt={as.name} /> : "＋"}
                         <input type="file" accept="image/*" style={{ display: "none" }}
                           onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f);
-                            setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name })); }} /></label>
+                            setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" })); }} /></label>
                     ) : <div className="sb-assetprev">{as.kind === "video" ? "🎞" : "♪"}</div>}
+                    {as.kind === "image" && <button className="sb-ico" title="Pick from the gallery"
+                      onClick={() => openPick((mid) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, mediaId: mid, thumbId: "", source: "" })))}>▤</button>}
                     <input className="sb-in" style={{ flex: "1 1 120px" }} value={as.name} placeholder="name (Her, Me, the room…)"
                       onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, name: e.target.value }))} />
                     <input className="sb-tagin sb-mono" value={as.tag} onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, tag: e.target.value }))} />
@@ -550,7 +558,7 @@ export default function App() {
                     const prev = gIdx > 0 ? entries[gIdx - 1] : null;
                     return (
                       <CardView key={card.id} {...{ act, card, ci, ai, code, prev, project, thumbs, open, setOpen,
-                        setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries }} />
+                        setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries, openPick }} />
                     );
                   })}
                   <button className="sb-add" onClick={() => addCard(act.id)}>+ Add shot to {act.name}</button>
@@ -566,9 +574,11 @@ export default function App() {
 }
 
 /* ===================== CARD ===================== */
-function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpen, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries }) {
+function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpen, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries, openPick }) {
   const isOpen = open[card.id];
-  const framePrev = (f) => f.thumbId ? thumbs[f.thumbId] : (f.source && f.source.startsWith("http") ? f.source : null);
+  const framePrev = (f) => f.thumbId ? thumbs[f.thumbId]
+    : (f.mediaId ? "/thumbs/" + f.mediaId + ".jpg"
+      : (f.source && f.source.startsWith("http") ? f.source : null));
   const openImg = framePrev(card.openFrame), closeImg = framePrev(card.closeFrame);
   const prevClose = prev ? prev.c.closeFrame : null;
   const linked = prev && prevClose && card.openFrame.thumbId && prevClose.thumbId && card.openFrame.thumbId === prevClose.thumbId;
@@ -615,32 +625,71 @@ function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpe
           </div>
         </div>
       ) : (
-        <CardEditor {...{ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev }} />
+        <CardEditor {...{ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev, openPick }} />
       )}
     </article>
   );
 }
 
 /* ===================== EDITOR ===================== */
-function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, extraBtn }) {
+function GalleryPick({ onPick, onClose }) {
+  const [q, setQ] = useState("");
+  const [imgs, setImgs] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const load = (p, query, append) =>
+    fetch(`/api/gallery-images?limit=60&page=${p}&q=${encodeURIComponent(query)}`)
+      .then((r) => r.json())
+      .then((d) => { setImgs((old) => append ? [...old, ...(d.images || [])] : (d.images || [])); setTotal(d.total || 0); })
+      .catch(() => {});
+  useEffect(() => { load(1, "", false); }, []);
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(6,4,16,.72)", display: "flex", alignItems: "center", justifyContent: "center" }}
+         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ width: 860, maxWidth: "92vw", height: "80vh", background: "var(--panel, #1d1a26)", border: "1px solid var(--line, #3a3550)", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <b>Pick from your gallery</b>
+          <input className="sb-in" style={{ flex: 1 }} placeholder="Search prompts…" value={q} autoFocus
+            onChange={(e) => { setQ(e.target.value); setPage(1); load(1, e.target.value, false); }} />
+          <button className="sb-btn ghost sm" onClick={onClose}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(110px,1fr))", gap: 8, alignContent: "start" }}>
+          {imgs.map((m) => (
+            <div key={m.media_id} title={m.prompt}
+                 style={{ aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid var(--line, #3a3550)", cursor: "pointer" }}
+                 onClick={() => onPick(m.media_id, m.thumb)}>
+              <img src={m.thumb} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+            </div>))}
+        </div>
+        {imgs.length < total &&
+          <button className="sb-btn ghost sm" style={{ alignSelf: "center" }}
+            onClick={() => { const p = page + 1; setPage(p); load(p, q, true); }}>Load more ({imgs.length}/{total})</button>}
+      </div>
+    </div>
+  );
+}
+
+function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, openPick, extraBtn }) {
   const img = framePrev(frame);
   return (
     <div className="sb-frame">
       <div className="sb-framehead">
         <span className="sb-lab">{which === "open" ? "Opening frame" : "Closing frame"}</span>
+        {openPick && <button className="sb-ico" title="Pick from the gallery"
+          onClick={() => openPick((mid) => onPatch({ mediaId: mid, thumbId: "", source: "" }))}>▤</button>}
         <input className="sb-tagin sb-mono" placeholder="@image1" value={frame.tag} onChange={(e) => onPatch({ tag: e.target.value })} />
       </div>
       <label className={"sb-frameprev" + (discreet ? " discreet" : "")} title="Attach image">
         {img ? <img src={img} alt={which} /> : "＋ attach frame"}
         <input type="file" accept="image/*" style={{ display: "none" }}
-          onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); onPatch({ thumbId: id, source: frame.source || f.name }); }} /></label>
+          onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); onPatch({ thumbId: id, source: frame.source || f.name, mediaId: "" }); }} /></label>
       <input className="sb-in" placeholder="describe this frame (composition, subject position, light)" value={frame.desc} onChange={(e) => onPatch({ desc: e.target.value })} />
       {extraBtn}
     </div>
   );
 }
 
-function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev }) {
+function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev, openPick }) {
   const [palFor, setPalFor] = useState(null);
   const setF = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: val }));
   const append = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: c[field] ? `${c[field]}, ${val}` : val }));
@@ -677,12 +726,12 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
       <div className="sb-section">
         <h5>Frame handoff — close of one shot opens the next</h5>
         <div className="sb-twoframes">
-          <FrameSlot which="open" frame={card.openFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb}
+          <FrameSlot which="open" frame={card.openFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("openFrame", p)}
             extraBtn={prev ? <button className="sb-btn ghost sm" onClick={inheritPrev} title={`Copy ${prev.code}'s closing frame here`}>↳ inherit {prev.code} close</button>
               : <span className="sb-hint">first shot — no previous frame</span>} />
           <div className="sb-conn-mid">→</div>
-          <FrameSlot which="close" frame={card.closeFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb}
+          <FrameSlot which="close" frame={card.closeFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("closeFrame", p)} />
         </div>
         <span className="sb-hint" style={{ marginTop: 6 }}>For First→Last shots, prompt the motion between these two — not the stills. Keep them close in composition so the subject doesn't warp.</span>
