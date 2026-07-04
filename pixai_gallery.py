@@ -2163,31 +2163,42 @@ document.addEventListener('DOMContentLoaded', function(){
         <input id="edit-src" class="gen-search" style="margin-bottom:0;flex:1;" placeholder="Source media_id" autocomplete="off">
         <button type="button" class="gen-seg" style="flex:0 0 auto;padding:7px 11px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;" onclick="Picker.open(function(mid){ Gen.setEditSource(mid); })">&#9648; Pick</button>
       </div>
-      <textarea id="edit-ins" class="gen-ta" rows="3" placeholder="Describe the change &mdash; &lsquo;make it night, add snow&rsquo;&hellip;"></textarea>
-      <div class="gen-row" style="margin-top:8px;">
-        <div style="flex:1;"><div class="gen-lbl">Resolution</div>
-          <select id="edit-res" class="gen-sel"><option>1K</option><option>2K</option><option>4K</option></select></div>
-        <div style="flex:1;"><div class="gen-lbl">Quality</div>
-          <select id="edit-qual" class="gen-sel"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+      <div class="gen-seg" style="margin:10px 0;">
+        <button id="es-edit" class="on" onclick="Gen.setEditSub('edit')">Edit</button>
+        <button id="es-enhance" onclick="Gen.setEditSub('enhance')">Enhance</button>
+        <button id="es-fix" onclick="Gen.setEditSub('fix')">Fix</button>
       </div>
-      <div class="gen-lbl">Aspect</div>
-      <select id="edit-aspect" class="gen-sel"><option value="3:4">3:4</option><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select>
-      <div id="edit-cost" class="gen-cost">Pick an image to see the cost.</div>
-      <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
-      <div id="edit-result" class="gen-result" style="display:none;"></div>
-      <div class="gen-lbl" style="margin-top:14px;">One-click enhance <span style="text-transform:none;color:var(--subtext);">&middot; on the source</span></div>
-      <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
-      <div id="enh-list"></div>
-      <div id="enh-result" class="gen-result" style="display:none;"></div>
-      <div class="gen-lbl" style="margin-top:14px;">Fix hands / faces <span style="text-transform:none;color:var(--subtext);">&middot; drag a box</span></div>
-      <div class="fix-tags">
-        <button type="button" id="fix-tag-face" class="on" onclick="Gen.fixTag('face')">Face</button>
-        <button type="button" id="fix-tag-hand" onclick="Gen.fixTag('hand')">Hand</button>
-        <button type="button" onclick="Gen.fixClear()">Clear</button>
+      <div id="edit-sub-edit">
+        <textarea id="edit-ins" class="gen-ta" rows="3" placeholder="Describe the change &mdash; &lsquo;make it night, add snow&rsquo;&hellip;"></textarea>
+        <div class="gen-row" style="margin-top:8px;">
+          <div style="flex:1;"><div class="gen-lbl">Resolution</div>
+            <select id="edit-res" class="gen-sel"><option>1K</option><option>2K</option><option>4K</option></select></div>
+          <div style="flex:1;"><div class="gen-lbl">Quality</div>
+            <select id="edit-qual" class="gen-sel"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+        </div>
+        <div class="gen-lbl">Aspect</div>
+        <select id="edit-aspect" class="gen-sel"><option value="3:4">3:4</option><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select>
+        <div id="edit-cost" class="gen-cost">Pick an image to see the cost.</div>
+        <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
+        <div id="edit-result" class="gen-result" style="display:none;"></div>
       </div>
-      <div id="fix-wrap"><img id="fix-img" alt="fix source"><canvas id="fix-canvas"></canvas></div>
-      <button id="fix-go" class="gen-go" onclick="Gen.fix()" style="margin-top:8px;">Fix marked regions</button>
-      <div id="fix-result" class="gen-result" style="display:none;"></div>
+      <div id="edit-sub-enhance" style="display:none;">
+        <div class="gen-lbl">One-click enhance <span style="text-transform:none;color:var(--subtext);">&middot; on the source</span></div>
+        <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
+        <div id="enh-list"></div>
+        <div id="enh-result" class="gen-result" style="display:none;"></div>
+      </div>
+      <div id="edit-sub-fix" style="display:none;">
+        <div class="gen-lbl">Fix hands / faces <span style="text-transform:none;color:var(--subtext);">&middot; drag a box</span></div>
+        <div class="fix-tags">
+          <button type="button" id="fix-tag-face" class="on" onclick="Gen.fixTag('face')">Face</button>
+          <button type="button" id="fix-tag-hand" onclick="Gen.fixTag('hand')">Hand</button>
+          <button type="button" onclick="Gen.fixClear()">Clear</button>
+        </div>
+        <div id="fix-wrap"><img id="fix-img" alt="fix source"><canvas id="fix-canvas"></canvas></div>
+        <button id="fix-go" class="gen-go" onclick="Gen.fix()" style="margin-top:8px;">Fix marked regions</button>
+        <div id="fix-result" class="gen-result" style="display:none;"></div>
+      </div>
     </div>
     <div id="gen-mode-video" style="display:none;">
       <div class="gen-seg" style="margin-bottom:10px;">
@@ -2479,9 +2490,16 @@ var Gen = (function(){
     ['generate','edit','video'].forEach(function(x){
       var pane=el('gen-mode-'+x); if(pane) pane.style.display=(x===m)?'':'none';
       var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
-    el('gen-drawer').classList.toggle('wide', m==='video');
+    el('gen-drawer').classList.toggle('wide', m==='video'||m==='edit');
     if(m==='edit'){ if(el('edit-src').value.trim()) editCost(); loadWorkflows().then(renderWorkflows); }
     if(m==='video') renderVideoSlots();
+  }
+  function setEditSub(s){
+    ['edit','enhance','fix'].forEach(function(x){
+      var pane=el('edit-sub-'+x); if(pane) pane.style.display=(x===s)?'':'none';
+      var b=el('es-'+x); if(b) b.classList.toggle('on', x===s); });
+    if(s==='enhance') loadWorkflows().then(renderWorkflows);
+    if(s==='fix') fixResize();
   }
   function editSrc(){ return el('edit-src').value.trim(); }
   function setEditSource(mid){
@@ -2623,6 +2641,7 @@ var Gen = (function(){
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
+          setEditSub:setEditSub,
           get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
