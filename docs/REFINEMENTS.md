@@ -4,7 +4,7 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 1 | Model/LoRA selector in its own pop-out card; preview with info (not just image); L/R/Top/Bottom docking | ✅ | Flyout + hover preview card + dock control shipped. Preview shows author/description/tags only when the search API returns them — probe the per-model detail endpoint if thin. |
+| 1 | Model/LoRA selector in its own pop-out card; preview with info (not just image); L/R/Top/Bottom docking | ✅ | Flyout + hover preview card + dock control shipped. **Preview enriched (2026-07-04):** probed for a per-model detail endpoint — none exists, but the `/v2` search rows are far richer than we read (real key is `modelDescription`, plus `category` base-family, `curations` in-house badge, `commentCount`). Card now shows a base-model chip, an **Official** badge, comment count, and the real description. |
 | 1a | Model and LoRA are SEPARATE selections — currently both override one field | ✅ | Base model keeps its slot; LoRAs toggle onto a chip list (≤6) with editable weights (0–2, default 0.7). Rides `loras:[{version_id,weight}]` → `loraParameters`. |
 | 2 | Image picker larger + robust filters (Collection, etc.) — "a MESS to look at" | ✅ | 900px × 84vh modal; Collection / Source / Rating / Sort filters; whole-catalog infinite scroll + Upload + copy-prompt. Further visual polish → owner's notes pass. |
 | 3 | Edit card needs more real estate | ✅ | Edit mode widens to 600px; tools split into Edit \| Enhance \| Fix sub-tabs over a shared source picker. |
@@ -32,11 +32,12 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
   literal collapsed-stack fan animation deferred to the notes pass — cosmetic only).
 - ✅ Picker in the Edit Bay (GalleryPick on cast rows + frame slots; mediaId rides Generate-shot).
 - ✅ Housekeeping: merged → master v1.9.0; CLAUDE.md + wiki/Generating.md updated.
-- Horizon: multi-provider deck (Seedance 2.0 direct), Turbo-mode capture, PySide6 ref-video tab.
+- ✅ **Achievements & skins** shipped (2026-07-04) — see below.
+- Horizon: multi-provider deck (Seedance 2.0 direct), **Turbo-mode capture** (blocked on owner: run one turbo gen on the site → task-id → dump-params; can't be done solo per hands-off), PySide6 ref-video tab.
 
 ## Roadmap — banked ideas
 
-**Achievements system** (owner idea, 2026-07-04) — WoW-style achievements that trigger in-app off catalog/usage milestones, mostly flair + unlocking **skins**. E.g. 9,000 images → "IT'S OVER 9000!!!" toast + a skin unlock. Lives near the health page. Ties into the skins system (theme-variable swap on the same banner/branding slot).
+**Achievements & skins** ✅ **SHIPPED (2026-07-04)** — eleven WoW-flavored feats computed from local catalog stats (images/videos/collections/distinct-models/published/tagged), read-only, no spend. A trophy button in the header opens a modal (tier-colored badges, progress bars); a gold **Achievement unlocked** toast fires once per feat (collapses to one summary toast for a returning full catalog, so a 19k-image catalog doesn't fire a barrage). Earning an **epic** feat unlocks a cosmetic **skin** — a CSS-variable palette applied via `<html data-skin>` (pre-paint from localStorage, no FOUC), server-validated so a locked skin can't be forced. Ships Nightfallen (free) + Moonlit/Ember/Verdant (unlockable) beside the default Moonglade. State persists to `out_dir/achievements.json`. *Milestone thresholds/badge-art (owner has the Blood Elf / Night Elf / Nightfallen candidates) are easy to retune later.* Verified live in-browser: modal, gallery-wide skin swap, reload persistence, one-shot toast.
 
 **The Foundry — image → 3D print (item 10) work breakdown:**
 1. **Spike (prove it):** standalone script — one gallery image → Hunyuan3D-2 (mini/turbo, `pip` + ~several-GB weights, CUDA on the 4070S 12GB, CPU-offload if VRAM-tight) → export GLB. Confirm quality on a real Nelnamara render. *~a session; the go/no-go gate.*
