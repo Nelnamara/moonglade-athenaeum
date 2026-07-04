@@ -73,6 +73,45 @@ def test_resolve_latest_version_empty(monkeypatch):
     assert core.resolve_latest_version(object(), "x") == ""
 
 
+def test_resolve_version_meta_full_shape(monkeypatch):
+    """The enriched resolver keeps the version metadata resolve_latest_version threw away:
+    model_type + lora_base_model_type (for compat) and extra.triggerWords + tuned preset."""
+    lora_row = [{"id": "V1", "modelType": "MULTI_LORA", "loraBaseModelType": "SDXL_MODEL",
+                 "extra": {"triggerWords": "Eris_Adult, <lora:ErisV14:1>",
+                           "previewArtworkIds": ["9"]}}]
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: lora_row)
+    m = core.resolve_version_meta(object(), "L1")
+    assert m["version_id"] == "V1" and m["model_type"] == "MULTI_LORA"
+    assert m["lora_base_model_type"] == "SDXL_MODEL"          # the base family the LoRA needs
+    assert m["trigger_words"] == "Eris_Adult, <lora:ErisV14:1>"
+
+    base_row = [{"id": "V2", "modelType": "SDXL_MODEL", "loraBaseModelType": None,
+                 "extra": {"negativePrompts": "nsfw, worst quality", "samplingMethod": "Euler a",
+                           "samplingSteps": 28, "cfgScale": 5,
+                           "capabilities": ["better-hands", 7]}}]  # non-str filtered
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: base_row)
+    b = core.resolve_version_meta(object(), "B1")
+    assert b["model_type"] == "SDXL_MODEL" and b["lora_base_model_type"] == ""  # null -> ""
+    assert b["trigger_words"] == "" and b["negative_prompt"] == "nsfw, worst quality"
+    assert b["sampling_method"] == "Euler a" and b["sampling_steps"] == 28 and b["cfg_scale"] == 5
+    assert b["capabilities"] == ["better-hands"]
+
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])   # no versions -> empty shape
+    e = core.resolve_version_meta(object(), "x")
+    assert e["version_id"] == "" and e["model_type"] == "" and e["capabilities"] == []
+
+
+def test_is_lora_compatible_exact_equality_fails_open():
+    # exact enum equality
+    assert core.is_lora_compatible("SDXL_MODEL", "SDXL_MODEL") is True
+    assert core.is_lora_compatible("DIT7B_MODEL", "SDXL_MODEL") is False   # architecture mismatch
+    assert core.is_lora_compatible("sdxl_model", "SDXL_MODEL") is True     # case-insensitive
+    # fails OPEN on unknown/empty -> never block a submit on missing data
+    assert core.is_lora_compatible("", "SDXL_MODEL") is True
+    assert core.is_lora_compatible("SDXL_MODEL", "") is True
+    assert core.is_lora_compatible(None, None) is True
+
+
 def test_web_generate_pipeline(monkeypatch, tmp_path):
     # web_generate = submit -> poll -> task detail -> download/catalog; all reused parts
     # mocked so no network / no spend. Verifies it threads the pieces + returns media_ids.
@@ -91,6 +130,44 @@ def test_web_generate_raises_without_task_id(monkeypatch, tmp_path):
     monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {}})
     with pytest.raises(core.PixAIError):
         core.web_generate(object(), {"prompts": "x", "modelId": "v"}, str(tmp_path))
+
+
+def test_model_search_market_gql(monkeypatch):
+    """Market browse via GraphQL: honors category + Newest sort (which REST silently ignores),
+    returns the SAME row shape as model_search_rest (REST-only fields empty) + tags/created_at,
+    and splits base vs LoRA by node type."""
+    captured = {}
+    def fake_gql(session, query, vars=None):
+        captured["query"] = query
+        captured["vars"] = vars
+        return {"generationModels": {"pageInfo": {"hasNextPage": True}, "edges": [
+            {"node": {"id": "1", "title": "Style A", "type": "SDXL_MODEL", "isNsfw": False,
+                      "likedCount": 9, "latestVersion": {"id": "v1"},
+                      "media": {"urls": [{"url": "https://cdn/orig"}, {"url": "https://cdn/thumb/x"}]},
+                      "tags": [{"name": "anime"}, {"name": "night"}], "author": {"displayName": "Nel"},
+                      "createdAt": "2026-07-04T00:00:00Z"}},
+            {"node": {"id": "2", "title": "A LoRA", "type": "MULTI_LORA", "isNsfw": True,
+                      "likedCount": 3, "latestVersion": {"id": "v2"}, "media": {"urls": []},
+                      "tags": [], "author": {}, "createdAt": ""}},
+        ]}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+
+    # base + category + newest -> category/orderBy interpolated, keyword bound as a variable
+    r = core.model_search_market_gql(object(), keyword="anime", category="style",
+                                     sort="newest", usage="MODEL", limit=24)
+    assert 'category:"style"' in captured["query"] and 'orderBy:"-createdAt"' in captured["query"]
+    assert captured["vars"]["k"] == "anime"           # keyword stays a bound var (no injection)
+    assert [m["model_id"] for m in r["results"]] == ["1"]   # LoRA dropped for MODEL usage
+    m0 = r["results"][0]
+    assert m0["preview_url"] == "https://cdn/thumb/x" and m0["has_version"] is True
+    assert m0["tags"] == ["anime", "night"] and m0["author"] == "Nel"
+    assert m0["description"] == "" and m0["ref_count"] == 0 and m0["official"] is False  # REST-only empty
+    assert r["has_more"] is True
+
+    # LoRA usage keeps only LoRA rows; a bad category is ignored (no category arg emitted)
+    r2 = core.model_search_market_gql(object(), category="concept", usage="LORA")
+    assert 'category:' not in captured["query"]          # 'concept' not whitelisted
+    assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
 
 
 def test_workflow_catalog(monkeypatch):
