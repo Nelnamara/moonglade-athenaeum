@@ -13,10 +13,10 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
 | 6 | Detail-page action buttons (Edit / create video) in the lightbox; right-click menu on thumbnail cards | ✅ | Lightbox: ✎ Edit + ▶ To Video. Right-click a card: Edit / Send to Video / Copy media id / Details. |
 | 7 | Multi-select images in gallery → send directly to the video workspace | ✅ | Bulk bar "▶ Send to Video": selection (tap/drag-paint) → Video tab refs (≤9, auto Multi-ref). Later: send to Edit Bay cast. |
 | 8 | Gallery search bar bolder/deeper — redesign for the suite ("This is more than a gallery. It is a SUITE.") | 💬 | The banked two-drawer design: LEFT Filters drawer mirroring the right Generate drawer. Sketch AFTER the owner's layout-notes pass. |
-| 9 | Printer integration? | ✅ | Print button + @media print on the detail page; `/contact-sheet?ids=|collection=` print-ready grid (cols/captions configurable) + bulk-bar "Print sheet". OS dialog handles paper. |
-| 10 | Image → 3D model → 3D printer? | 💬 | Viable: Hunyuan3D-2 (open weights, figurine-grade from one image), TRELLIS, TripoSR, Meshy (API). Pipeline: image → GLB → Blender cleanup → watertight STL → slicer. Roadmap spike: a "Foundry" module in the provider-deck pattern. |
-| 11 | What are we missing? | ✅ | All four shipped: **Jobs tray** (tasks survive drawer close), **credits + card balance chip** in the header, **Suggest-prompt button** on image detail, **prompt snippets/favorites** (server-stored, syncs across machines). |
-| 11a | Robust, eye-popping top banner + header — "this is a suite, not an AOL home page with dancing hamsters" | 💬 | Part of the #8 identity redesign; owner's notes pass drives it. |
+| 9 | Printer integration? | ✅ | Letter contact sheets (grid) + **4x6 photo** + **photo-booth strip** (`?format=photo|strip`, for the owner's Sinfonia 4x6/strip printer); detail-page Print / 4x6 / Strip buttons; bulk "Print sheet". Refine layouts later. |
+| 10 | Image → 3D model → 3D printer? | 📋 (roadmap) | **CONFIRMED for roadmap.** HW: RTX 4070 Super **12GB** + resin **Anycubic**. Plan: local **Hunyuan3D-2 mini/turbo** (fits ~12GB) → GLB → Blender (already wired) cleanup → **STL** → Photon Workshop; resin target (hide hallucinated back). "Foundry" module, separate install. Work breakdown below. |
+| 11 | What are we missing? | ✅ | All four shipped: **Jobs tray** (tasks survive drawer close), **credits + card balance chip**, **Suggest-prompt button**, **prompt snippets/favorites** (server-stored). |
+| 11a | Robust, eye-popping top banner + header | ✅ (core) | **Header pass shipped:** images/videos/collections stats + live "N generating" badge; rotating tagline (anchor "a library against the Void"); animated eclipse `M` mark (prefers-reduced-motion honored); `/branding/<file>` drop-in banner slot (owner has art + launch icons ready). Remaining → owner's art + skins + achievements (roadmap). |
 | 12 | Contest / community linkage — "the Oasis was never a 1-player game" | 💬 | pixai.art/contest is community surface. v1: link out + maybe surface ongoing official contests. Needs an op capture to list contests via API. |
 | 13 | Toolbox preset generators (Lego / Trading Card / Standee / Desktop Pet / Stadium Screen…) | 📋 | NOT the same as our Enhance workflows — they're preset templates at /generator/preset/&lt;name&gt;. Plan: owner runs ONE toolbox gen on the site → `--task-id <id> --dump-params` banks the shape free → if it's canned `chat`/params, ship a "Presets" row in the Edit tab. |
 | 14 | Reference Image slot on the IMAGE generator ("use as reference", 0/1 + upload) | 📋 | The site's image gen takes a reference image (likely `ipAdapter` — already in _PRICE_NESTED). Needs one dump-params capture of a reference-image gen to pin the shape, then add a ref slot (Picker-fed) to the Generate tab. |
@@ -33,6 +33,17 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
 - ✅ Picker in the Edit Bay (GalleryPick on cast rows + frame slots; mediaId rides Generate-shot).
 - ✅ Housekeeping: merged → master v1.9.0; CLAUDE.md + wiki/Generating.md updated.
 - Horizon: multi-provider deck (Seedance 2.0 direct), Turbo-mode capture, PySide6 ref-video tab.
+
+## Roadmap — banked ideas
+
+**Achievements system** (owner idea, 2026-07-04) — WoW-style achievements that trigger in-app off catalog/usage milestones, mostly flair + unlocking **skins**. E.g. 9,000 images → "IT'S OVER 9000!!!" toast + a skin unlock. Lives near the health page. Ties into the skins system (theme-variable swap on the same banner/branding slot).
+
+**The Foundry — image → 3D print (item 10) work breakdown:**
+1. **Spike (prove it):** standalone script — one gallery image → Hunyuan3D-2 (mini/turbo, `pip` + ~several-GB weights, CUDA on the 4070S 12GB, CPU-offload if VRAM-tight) → export GLB. Confirm quality on a real Nelnamara render. *~a session; the go/no-go gate.*
+2. **Blender cleanup pass:** headless Blender (already wired) — import GLB → decimate, make-manifold, recompute normals, auto-orient for resin (weak/hallucinated back facing the plate) → export **watertight STL**. *~a session.*
+3. **Gallery integration:** "Send to Foundry" button (detail + right-click) → async job (reuse submit/poll/collect + Jobs tray) → **mesh preview** (three.js GLB viewer) → **STL download**. Store meshes beside the image in the catalog. *~a session.*
+4. **Provider seam (later):** Meshy/Tripo API as a fallback provider behind the same interface (same pattern as the Seedance deck).
+Constraints: separate optional install (NOT bundled — heavy deps + weights); resin-first (skip texture baking; color irrelevant); single-image backs are hallucinated (orient to hide). Detail in [[edit-bay-project]] deck pattern.
 
 ## Working agreement
 
