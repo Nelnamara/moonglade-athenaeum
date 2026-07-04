@@ -1963,13 +1963,22 @@ document.addEventListener('DOMContentLoaded', function(){
 <style>
   #gen-scrim{position:fixed;inset:0;background:rgba(6,4,16,.55);z-index:200;opacity:0;visibility:hidden;transition:opacity .18s;}
   #gen-scrim.open{opacity:1;visibility:visible;}
-  #gen-drawer{position:fixed;top:0;right:0;height:100%;width:372px;max-width:94vw;background:var(--mantle);border-left:1px solid var(--surface1);z-index:201;transform:translateX(100%);transition:transform .2s ease,width .2s ease;display:flex;flex-direction:column;}
-  #gen-drawer.open{transform:translateX(0);}
+  #gen-drawer{position:fixed;top:0;right:0;height:100%;width:420px;max-width:94vw;background:var(--mantle);border-left:1px solid var(--surface1);z-index:201;transform:translateX(100%);transition:transform .2s ease,width .2s ease;display:flex;flex-direction:column;}
+  #gen-drawer.open{transform:none;}
   #gen-drawer.wide{width:600px;}
+  #gen-drawer.dock-left{right:auto;left:0;border-left:none;border-right:1px solid var(--surface1);transform:translateX(-100%);}
+  #gen-drawer.dock-top{right:auto;left:0;top:0;bottom:auto;width:100%;max-width:100vw;height:auto;max-height:64vh;border:none;border-bottom:1px solid var(--surface1);transform:translateY(-100%);}
+  #gen-drawer.dock-bottom{right:auto;left:0;top:auto;bottom:0;width:100%;max-width:100vw;height:auto;max-height:64vh;border:none;border-top:1px solid var(--surface1);transform:translateY(100%);}
+  #gen-drawer.dock-top.wide,#gen-drawer.dock-bottom.wide{width:100%;}
+  #gen-drawer.dock-top .gen-body,#gen-drawer.dock-bottom .gen-body{width:100%;max-width:940px;margin:0 auto;}
+  .dock-ctl{margin-left:auto;display:flex;gap:3px;}
+  .dock-ctl button{background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);border-radius:5px;width:22px;height:22px;font-size:10px;line-height:1;cursor:pointer;padding:0;}
+  .dock-ctl button:hover{color:var(--text);}
+  .dock-ctl button.on{color:var(--lavender);border-color:var(--lavender);}
   .gen-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--surface0);}
   .gen-head .spark{color:var(--lavender);font-size:18px;}
   .gen-head .t{font-size:15px;font-weight:600;color:var(--text);}
-  .gen-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
+  .gen-head .x{margin-left:4px;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
   .gen-head .x:hover{color:var(--red);}
   .gen-body{padding:12px 14px;overflow-y:auto;flex:1;}
   .gen-seg{display:flex;gap:6px;margin-bottom:10px;}
@@ -2035,6 +2044,12 @@ document.addEventListener('DOMContentLoaded', function(){
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
   <div class="gen-head">
     <span class="spark">&#10022;</span><span class="t">Generate</span>
+    <span class="dock-ctl">
+      <button type="button" data-dock="left" onclick="Gen.setDock('left')" title="Dock left">&#9612;</button>
+      <button type="button" data-dock="top" onclick="Gen.setDock('top')" title="Dock top">&#9600;</button>
+      <button type="button" data-dock="bottom" onclick="Gen.setDock('bottom')" title="Dock bottom">&#9604;</button>
+      <button type="button" data-dock="right" class="on" onclick="Gen.setDock('right')" title="Dock right">&#9616;</button>
+    </span>
     <button class="x" onclick="Gen.close()" aria-label="Close">&times;</button>
   </div>
   <div class="gen-body">
@@ -2177,6 +2192,13 @@ var Gen = (function(){
   function close(){
     el('gen-drawer').classList.remove('open'); el('gen-scrim').classList.remove('open');
     el('gen-drawer').setAttribute('aria-hidden','true');
+  }
+  function setDock(d){
+    d=(d==='left'||d==='top'||d==='bottom')?d:'right';
+    var dr=el('gen-drawer');
+    ['left','top','bottom'].forEach(function(x){ dr.classList.toggle('dock-'+x, d===x); });
+    document.querySelectorAll('.dock-ctl button').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-dock')===d); });
+    try{ localStorage.setItem('gen-dock', d); }catch(e){}
   }
   function setKind(k){
     if(k===kind) return; kind=k;
@@ -2430,11 +2452,13 @@ var Gen = (function(){
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
           renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
           setVideoMode:setVideoMode, videoGenerate:videoGenerate, renderVideoSlots:renderVideoSlots,
+          setDock:setDock,
           get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
   var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
+  try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
   var asp=document.getElementById('gen-aspects');
   if(asp) asp.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b)return;
     asp.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
