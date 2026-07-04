@@ -3188,25 +3188,61 @@ def _download_video_task(session, result, task_id, out, args, params):
     return saved
 
 
+def _task_image_media(outputs):
+    """The REAL output images of a completed image task as [(media_id, seed)], newest logic:
+    a batchSize>1 task stores a 2x2 COMPOSITE GRID under outputs.mediaId and the INDIVIDUAL
+    images under outputs.batch[] -- so we take the individuals (the actual generations), never
+    the grid. batchSize==1 / legacy tasks fall back to outputs.mediaId (+ legacy batchMediaIds).
+    Per-image seed comes from batch[].seed, else the shared outputs.seed. Deduped, order-kept.
+
+    This is why batch generations were previously under-captured: the old path read
+    outputs.batchMediaIds (which is null on modern tasks) and saved only the grid."""
+    outputs = outputs or {}
+    batch = outputs.get("batch") or []
+    shared_seed = str(outputs.get("seed") or "")
+    pairs = []
+    if batch:                                        # modern batch: save the individuals
+        for b in batch:
+            mid = str((b or {}).get("mediaId") or "")
+            if mid:
+                pairs.append((mid, str((b or {}).get("seed") or shared_seed)))
+    else:                                            # single image (or legacy shape)
+        if outputs.get("mediaId"):
+            pairs.append((str(outputs["mediaId"]), shared_seed))
+        for m in outputs.get("batchMediaIds") or []:
+            pairs.append((str(m), shared_seed))
+    seen, uniq = set(), []
+    for mid, sd in pairs:
+        if mid and mid not in seen:
+            seen.add(mid)
+            uniq.append((mid, sd))
+    return uniq
+
+
+def _task_detail_query(session, task_id):
+    """getTaskById via the persisted hash when available, else the ad-hoc `task(id:)` query
+    (same parameters+outputs shape -- verified). The ad-hoc fallback means --full-meta /
+    --backfill-full-meta no longer HARD-FAIL when TASK_DETAIL_HASH is missing from config."""
+    if TASK_DETAIL_HASH:
+        return task_detail_gql(session, task_id)
+    q = "query($id: ID!) { task(id: $id) { id status createdAt parameters outputs } }"
+    return (gql_adhoc(session, q, {"id": str(task_id)}) or {}).get("task")
+
+
 def _download_image_task(session, result, task_id, out, args, prompt="", model_name=""):
-    """Download + catalog the image output(s) of a completed task (used by --enhance).
-    Reads outputs.mediaId/batchMediaIds -> resolve_media -> download -> catalog as
-    source='api'. Returns the list of saved file paths."""
+    """Download + catalog the image output(s) of a completed task. Saves the individual batch
+    images (not the composite grid) via _task_image_media, storing each image's own seed.
+    resolve_media -> download -> catalog as source='api'. Returns the saved file paths."""
     outputs = result.get("outputs") or {}
-    mids = []
-    if outputs.get("mediaId"):
-        mids.append(str(outputs["mediaId"]))
-    for m in outputs.get("batchMediaIds") or []:
-        mids.append(str(m))
-    mids = list(dict.fromkeys(mids))
-    if not mids:
+    media = _task_image_media(outputs)
+    if not media:
         raise PixAIError("task completed but no media ids found")
     from pixai_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     img_dir = out / "images"
     db_path = out / "catalog.db"
     rows, saved = [], []
-    for mid in mids:
+    for mid, seed in media:
         url, info = resolve_media(session, mid)
         if not url:
             print("  no url for media", mid)
@@ -3218,7 +3254,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             continue
         full = {f: "" for f in CATALOG_FIELDS}
         full.update({
-            "task_id": str(task_id), "media_id": mid,
+            "task_id": str(task_id), "media_id": mid, "seed": seed,
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
             "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -3294,7 +3330,7 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     init_db(out / "catalog.db")
-    result = task_detail_gql(session, task_id) or {}
+    result = _task_detail_query(session, task_id) or {}
     a = SimpleNamespace(name_length=name_length, name_sep=name_sep)
     vouts, _shared = video_outputs(result)
     if vouts:
@@ -3304,10 +3340,9 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
         return {"media_ids": mids, "saved": len(saved), "is_video": True, "duration": dur}
     fm = extract_full_meta(result)
     saved = _download_image_task(session, result, task_id, out, a, prompt=fm.get("prompt_full", ""))
-    outputs = result.get("outputs") or {}
-    mids = ([str(outputs["mediaId"])] if outputs.get("mediaId") else []) + \
-           [str(m) for m in (outputs.get("batchMediaIds") or [])]
-    return {"media_ids": list(dict.fromkeys(mids)), "saved": len(saved), "is_video": False}
+    # the real images (batch individuals, not the composite grid)
+    mids = [mid for mid, _seed in _task_image_media(result.get("outputs") or {})]
+    return {"media_ids": mids, "saved": len(saved), "is_video": False}
 
 
 def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll_timeout=240):
