@@ -30,6 +30,28 @@ def test_model_search_rest_shapes_rows(monkeypatch):
     assert b["should_blur"] is True and b["preview_url"] == "https://cdn/pub/y"   # falls back to publicUrl
 
 
+def test_model_search_rest_preview_card_fields(monkeypatch):
+    """Enrichment for the model-preview pop-out: description/author/tags/cover_url
+    pass through when present, default empty when the API omits them."""
+    rich = {"data": [
+        {"id": "1", "title": "Rich", "type": "MMDIT26A_MODEL", "likedCount": 3,
+         "flag": {}, "media": {"thumbnailUrl": "t", "publicUrl": "p"},
+         "description": "d" * 500, "user": {"displayName": "Nel"},
+         "tags": ["anime", {"bad": "obj"}, "night"] + ["t{}".format(i) for i in range(9)]},
+    ], "hasMore": False}
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: rich)
+    m = core.model_search_rest(object())["results"][0]
+    assert len(m["description"]) == 400                 # truncated
+    assert m["author"] == "Nel"
+    assert m["tags"][:2] == ["anime", "night"] and len(m["tags"]) <= 8  # strings only, capped
+    assert m["cover_url"] == "p"                        # full-res preferred for the card
+
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: _SEARCH)
+    m = core.model_search_rest(object())["results"][0]  # fields absent in response
+    assert m["description"] == "" and m["author"] == "" and m["tags"] == []
+    assert m["cover_url"] == "https://cdn/pub/x"
+
+
 def test_model_search_rest_omits_empty_keyword(monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "_rest_get",
