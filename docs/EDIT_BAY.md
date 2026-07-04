@@ -1,8 +1,8 @@
-# The Edit Bay — full manual
+# The Loom — full manual
 
-The Edit Bay is Moonglade Athenaeum's **video storyboard**: a shot-blocking board for
+The Loom is Moonglade Athenaeum's **video storyboard**: a shot-blocking board for
 planning a multi-clip AI video, wired directly into PixAI's video engine so every card
-can render itself. Open it from the gallery header (**▦ Edit Bay**) or at
+can render itself. Open it from the gallery header (**▦ The Loom**) or at
 `http://localhost:<port>/edit-bay`.
 
 It is deliberately **engine-agnostic**: the same board that generates on PixAI can hand
@@ -95,5 +95,5 @@ you cast shots.
 ## Relationship to the Generate drawer's Video tab
 
 The drawer's **Video tab** is the *simple mode*: one shot, picked images, prompt,
-duration, go. The Edit Bay is the *production mode*: many shots with continuity,
+duration, go. The Loom is the *production mode*: many shots with continuity,
 cast, and a runtime target. They share the same engine underneath.

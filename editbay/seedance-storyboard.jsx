@@ -481,7 +481,7 @@ export default function App() {
       <header className="sb-top">
         <div className="sb-topgrid">
           <div className="sb-brand">
-            <h1 className="sb-disp"><span className="sb-clap">▰</span> The Edit Bay</h1>
+            <h1 className="sb-disp"><span className="sb-clap">▰</span> The Loom</h1>
             <input className="sb-projname" value={project.name} onChange={(e) => setProject((p) => ({ ...p, name: e.target.value }))} aria-label="Project name" />
             <button className="sb-btn" onClick={batchGenerate} disabled={batching || !entries.length}
               title="Generate every shot that isn't done yet, one after another">
@@ -789,9 +789,9 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
           <FrameSlot which="open" frame={card.openFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("openFrame", p)}
             extraBtn={prev ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
-                title={prev.c.resultMid ? `Pull ${prev.code}'s generated clip's last frame` : `Copy ${prev.code}'s closing frame here`}>
-                {handoff === "wip" ? "↳ handing off…" : handoff === "err" ? "↳ handoff failed — retry"
-                  : prev.c.resultMid ? `↳ pull ${prev.code}'s last frame` : `↳ inherit ${prev.code} close`}</button>
+                title={prev.c.resultMid ? `Splice in ${prev.code}'s generated clip's last frame` : `Copy ${prev.code}'s closing frame here`}>
+                {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
+                  : prev.c.resultMid ? `✂ splice ${prev.code}'s last frame` : `↳ inherit ${prev.code} close`}</button>
               : <span className="sb-hint">first shot — no previous frame</span>} />
           <div className="sb-conn-mid">→</div>
           <FrameSlot which="close" frame={card.closeFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb} openPick={openPick}
