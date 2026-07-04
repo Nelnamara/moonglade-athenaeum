@@ -2490,6 +2490,12 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-seg button.on{background:var(--lavender);color:var(--base);border-color:var(--lavender);font-weight:600;}
   .gen-search{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;margin-bottom:10px;}
   .gen-search:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+  .mkt-sort{display:flex;gap:6px;margin-bottom:8px;}
+  .mkt-sort button{flex:1;padding:5px 0;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
+  .mkt-sort button.on{background:var(--surface1);color:var(--text);border-color:var(--accent-soft);font-weight:600;}
+  .mkt-cats{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}
+  .mkt-cats button{padding:3px 10px;font-size:10.5px;border-radius:11px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
+  .mkt-cats button.on{background:var(--accent);color:var(--base);border-color:var(--accent);font-weight:600;}
   .gen-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .12s;}
   .gen-card{border-radius:12px;overflow:hidden;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;position:relative;}
   .gen-card:hover{border-color:var(--overlay0);}
@@ -2498,9 +2504,10 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-card .cov.blur{filter:blur(15px);}
   .gen-card .meta{padding:5px 7px;}
   .gen-card .nm{font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .gen-card .sub{display:flex;justify-content:space-between;align-items:center;margin-top:2px;font-size:10px;}
+  .gen-card .sub{display:flex;align-items:center;gap:7px;margin-top:2px;font-size:10px;}
   .gen-card .ty{color:var(--emerald);}
   .gen-card .lk{color:var(--subtext);}
+  .gen-card .uses{color:var(--lavender);margin-left:auto;}
   .gen-card .chk{position:absolute;top:4px;right:4px;color:var(--lavender);background:var(--mantle);border-radius:50%;font-size:12px;width:18px;height:18px;display:none;align-items:center;justify-content:center;border:1px solid var(--lavender);}
   .gen-card.sel .chk{display:flex;}
   .gen-empty{color:var(--subtext);font-size:12px;padding:22px 4px;text-align:center;}
@@ -2540,6 +2547,16 @@ document.addEventListener('DOMContentLoaded', function(){
   #fix-img{max-width:100%;display:block;border-radius:8px;}
   #fix-canvas{position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;}
   #gen-loras{display:flex;flex-direction:column;gap:5px;}
+  #gen-lora-note{display:flex;flex-direction:column;gap:5px;}
+  #gen-lora-note:empty{display:none;}
+  .lora-warn{font-size:11px;line-height:1.4;padding:6px 9px;border-radius:6px;background:rgba(243,139,168,.09);border:1px solid var(--red);color:var(--red);}
+  .lora-warn b{color:var(--peach);}
+  .lora-trig{font-size:11px;line-height:1.4;padding:6px 9px;border-radius:6px;background:rgba(79,201,154,.09);border:1px solid var(--emerald);color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .lora-trig code{background:var(--surface1);border-radius:4px;padding:1px 5px;font-size:10.5px;color:var(--accent-soft);}
+  .lora-trig button{margin-left:auto;background:var(--emerald);color:var(--base);border:none;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .lora-trig button.done{background:var(--surface1);color:var(--subtext);cursor:default;}
+  .lora-chip.incompat{border-color:var(--red);}
+  .lora-chip.incompat .nm{color:var(--red);}
   .lora-chip{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12px;color:var(--text);}
   .lora-chip img{width:24px;height:24px;border-radius:4px;object-fit:cover;flex:0 0 auto;}
   .lora-chip .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -2627,6 +2644,7 @@ document.addEventListener('DOMContentLoaded', function(){
     </button>
     <div class="gen-lbl">LoRAs</div>
     <div id="gen-loras"></div>
+    <div id="gen-lora-note"></div>
     <button type="button" id="lora-add" onclick="Gen.openLoraBrowser()">+ Add LoRA</button>
     <div class="gen-lbl">Reference image <span style="text-transform:none;color:var(--subtext);">&middot; optional &middot; guides the result (img2img)</span></div>
     <div style="display:flex;gap:10px;align-items:center;">
@@ -2774,6 +2792,19 @@ document.addEventListener('DOMContentLoaded', function(){
         <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
       </div>
       <input class="gen-search" id="gen-q" placeholder="Search models&hellip;" autocomplete="off">
+      <div class="mkt-sort" id="mkt-sort" style="display:none;">
+        <button id="mkt-popular" class="on" onclick="Gen.setSort('popular')" title="PixAI&#39;s most-used order">Popular</button>
+        <button id="mkt-newest" onclick="Gen.setSort('newest')" title="Newest uploads first">Newest</button>
+      </div>
+      <div class="mkt-cats" id="mkt-cats" style="display:none;">
+        <button class="on" data-cat="" onclick="Gen.setCat('')">All</button>
+        <button data-cat="character" onclick="Gen.setCat('character')">Character</button>
+        <button data-cat="style" onclick="Gen.setCat('style')">Style</button>
+        <button data-cat="pose" onclick="Gen.setCat('pose')">Pose</button>
+        <button data-cat="clothing" onclick="Gen.setCat('clothing')">Clothing</button>
+        <button data-cat="background" onclick="Gen.setCat('background')">Background</button>
+        <button data-cat="detail" onclick="Gen.setCat('detail')">Detail</button>
+      </div>
       <div class="gen-grid" id="gen-grid"></div>
       <div class="gen-empty" id="gen-empty" style="display:none;"></div>
     </div>
@@ -3157,6 +3188,7 @@ var Snips = (function(){
 })();
 var Gen = (function(){
   var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null;
+  var sortMode='popular', catFilter='';   // Model-Market: 'popular'(REST) | 'newest'(GraphQL); category chip
   var workflows=null, enhTimer=null;
   var fixTag_='face', fixBoxes=[], fixStart=null;
   function el(id){return document.getElementById(id);}
@@ -3189,18 +3221,40 @@ var Gen = (function(){
     el('gen-k-base').classList.toggle('on',k==='base');
     el('gen-k-lora').classList.toggle('on',k==='lora');
     el('gen-q').placeholder = (k==='lora'?'Search LoRAs':'Search models')+'\\u2026';
+    // Category chips + Newest sort are a LoRA taxonomy (PixAI categories are 100% LoRAs, and
+    // new base-model uploads are rare) -> only meaningful on the LoRAs tab. Base models stay on
+    // the rich Popular/REST path; reset market state when leaving LoRAs.
+    var market=(k==='lora');
+    el('mkt-cats').style.display = market ? '' : 'none';
+    el('mkt-sort').style.display = market ? '' : 'none';
+    if(!market){ catFilter=''; sortMode='popular';
+      document.querySelectorAll('#mkt-cats button').forEach(function(b){ b.classList.toggle('on',(b.getAttribute('data-cat')||'')===''); });
+      el('mkt-popular').classList.add('on'); el('mkt-newest').classList.remove('on'); }
     search();
   }
   function onInput(){ q=el('gen-q').value.trim(); clearTimeout(timer); timer=setTimeout(search,280); }
+  function setSort(s){ s=(s==='newest')?'newest':'popular'; if(s===sortMode) return; sortMode=s;
+    el('mkt-popular').classList.toggle('on',s==='popular'); el('mkt-newest').classList.toggle('on',s==='newest');
+    search(); }
+  function setCat(c){ if(c===catFilter) return; catFilter=c||'';
+    document.querySelectorAll('#mkt-cats button').forEach(function(b){ b.classList.toggle('on', (b.getAttribute('data-cat')||'')===catFilter); });
+    search(); }
   function search(){
     var mine=++seq, grid=el('gen-grid'); grid.style.opacity='.45';
-    fetch('/api/model-search?kind='+kind+'&size=24&q='+encodeURIComponent(q))
+    var u='/api/model-search?kind='+kind+'&size=24&q='+encodeURIComponent(q)
+      +'&sort='+sortMode+'&category='+encodeURIComponent(catFilter);
+    fetch(u)
       .then(function(r){return r.json();})
       .then(function(d){ if(mine!==seq)return; render(d.results||[], d.error); grid.style.opacity='1'; })
       .catch(function(){ if(mine!==seq)return; render([], 'network error'); grid.style.opacity='1'; });
   }
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function fmt(n){ return (n||0).toLocaleString(); }
+  function fmtCompact(n){ n=Number(n)||0;   // 207743449 -> "207.7M"; refCount = lifetime uses
+    if(n>=1e9) return (n/1e9).toFixed(1).replace(/\\.0$/,'')+'B';
+    if(n>=1e6) return (n/1e6).toFixed(1).replace(/\\.0$/,'')+'M';
+    if(n>=1e3) return (n/1e3).toFixed(1).replace(/\\.0$/,'')+'K';
+    return String(n); }
   function tyShort(t){ t=(t||'').toUpperCase();
     if(t.indexOf('LORA')>=0)return 'LoRA'; if(t.indexOf('MMDIT')>=0)return 'MMDiT';
     if(t.indexOf('DIT')>=0)return 'DiT'; if(t.indexOf('SDXL')>=0)return 'SDXL';
@@ -3210,14 +3264,21 @@ var Gen = (function(){
   function render(rows, err){
     var grid=el('gen-grid'), empty=el('gen-empty'); grid.innerHTML='';
     if(err){ empty.textContent='\\u26a0 '+err; empty.style.display='block'; return; }
-    if(!rows.length){ empty.textContent='No results \\u2014 try another search.'; empty.style.display='block'; return; }
+    if(!rows.length){
+      // Newest+Models is legitimately sparse (new uploads are almost all LoRAs), so say so
+      // instead of the generic 'no results' which reads as broken.
+      empty.textContent=(sortMode==='newest' && kind==='base')
+        ? 'Few base models are uploaded recently \\u2014 new content is mostly LoRAs. Try the LoRAs tab, or switch to Popular.'
+        : 'No results \\u2014 try another search.';
+      empty.style.display='block'; return; }
     empty.style.display='none';
     rows.forEach(function(m){
       var c=document.createElement('div'); c.className='gen-card';
       if(kind==='lora' ? loras.some(function(l){return l.model_id===m.model_id;})
                        : (selected && selected.model_id===m.model_id)) c.classList.add('sel');
       var cov = m.preview_url ? '<img class="cov'+(m.should_blur?' blur':'')+'" loading="lazy" src="'+esc(m.preview_url)+'" alt="">' : '<div class="cov"></div>';
-      c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span></div></div>';
+      var uses = m.ref_count ? '<span class="uses" title="'+fmt(m.ref_count)+' generations \\u2014 PixAI\\u2019s own most-used ranking">\\u25c8 '+fmtCompact(m.ref_count)+'</span>' : '';
+      c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span>'+uses+'</div></div>';
       c.onclick=function(){ selectCard(m, c); };
       c.onmouseenter=function(){ showPreview(m, c); };
       c.onmouseleave=hidePreview;
@@ -3238,7 +3299,9 @@ var Gen = (function(){
     var badges='';
     if(base) badges+='<span class="bdg base">'+esc(base)+'</span>';
     if(m.official) badges+='<span class="bdg official" title="In-house / official model">\\u2713 Official</span>';
-    var stats='<span class="ty">'+tyShort(m.type)+'</span><span>\\u2665 '+fmt(m.liked_count)+'</span>';
+    var stats='<span class="ty">'+tyShort(m.type)+'</span>';
+    if(m.ref_count) stats+='<span title="'+fmt(m.ref_count)+' generations \\u2014 lifetime uses">\\u25c8 '+fmtCompact(m.ref_count)+' uses</span>';
+    stats+='<span>\\u2665 '+fmt(m.liked_count)+'</span>';
     if(m.comment_count) stats+='<span>\\ud83d\\udcac '+fmt(m.comment_count)+'</span>';
     var html = (src?'<img src="'+esc(src)+'"'+(m.should_blur?' class="blur"':'')+' alt="">':'')
       +'<div class="mp-meta"><div class="mp-nm">'+esc(m.title)+'</div>'
@@ -3270,19 +3333,67 @@ var Gen = (function(){
   var loras=[];
   function toggleLora(m, c){
     var i=-1; loras.forEach(function(l,j){ if(l.model_id===m.model_id) i=j; });
-    if(i>=0){ loras.splice(i,1); c.classList.remove('sel'); renderLoras(); debouncedCost(); return; }
+    if(i>=0){ loras.splice(i,1); c.classList.remove('sel'); renderLoras(); refreshLoraNotes(); debouncedCost(); return; }
     if(loras.length>=6) return;
-    var entry={model_id:m.model_id, title:m.title, preview_url:m.preview_url, version_id:'', weight:0.7};
+    var entry={model_id:m.model_id, title:m.title, preview_url:m.preview_url, version_id:'',
+               weight:0.7, lora_base_type:'', trigger_words:''};
     loras.push(entry); c.classList.add('sel'); renderLoras();
     fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
       .then(function(r){return r.json();})
-      .then(function(d){ entry.version_id=d.version_id||''; renderLoras(); debouncedCost(); })
+      .then(function(d){ entry.version_id=d.version_id||''; entry.lora_base_type=d.lora_base_model_type||'';
+        entry.trigger_words=d.trigger_words||''; renderLoras(); refreshLoraNotes(); debouncedCost(); })
       .catch(function(){ renderLoras(); });
+  }
+  // --- LoRA<->base compatibility gate + trigger-word offers ------------------
+  // A LoRA runs on a base ONLY if its loraBaseModelType == the base's modelType (exact enum
+  // equality). Family-level only (Pony/Illustrious/vanilla all = SDXL_MODEL) so this is a HARD
+  // block on architecture mismatch, never a quality promise. Fails OPEN on unknown types.
+  function prettyType(t){ t=(t||'').toUpperCase();
+    if(t.indexOf('SDXL')>=0)return 'SDXL'; if(t.indexOf('SD_V1')>=0)return 'SD1.5';
+    if(t.indexOf('DIT7')>=0)return 'DiT-7B'; if(t.indexOf('MMDIT')>=0)return 'MMDiT';
+    if(t.indexOf('DIT9')>=0)return 'DiT-9'; if(t.indexOf('SD3')>=0)return 'SD3';
+    if(t.indexOf('Z_IMAGE')>=0)return 'Z-Image'; return t||'?'; }
+  function loraIncompat(e){
+    var b=selected&&selected.model_type, l=e&&e.lora_base_type;
+    if(!b||!l) return false;                       // unknown -> don't block
+    return String(b).toUpperCase()!==String(l).toUpperCase();
+  }
+  function anyIncompat(){ return loras.some(loraIncompat); }
+  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat(); }
+  function triggersInPrompt(tw){
+    var first=(tw||'').split(',')[0].trim().toLowerCase();
+    return first && (el('gen-prompt').value||'').toLowerCase().indexOf(first)>=0;
+  }
+  function refreshLoraNotes(){
+    var box=el('gen-lora-note'); if(!box) return; box.innerHTML='';
+    loras.forEach(function(e){                      // incompatibility warnings (blocking)
+      if(!loraIncompat(e)) return;
+      var w=document.createElement('div'); w.className='lora-warn';
+      w.innerHTML='\\u26a0 <b>'+esc(e.title)+'</b> needs a '+esc(prettyType(e.lora_base_type))
+        +' base, but '+esc(selected.title)+' is '+esc(prettyType(selected.model_type))
+        +'. It would fail on submit \\u2014 remove it or switch the base.';
+      box.appendChild(w);
+    });
+    loras.forEach(function(e,i){                    // trigger-word offers (skip incompatible)
+      if(!e.trigger_words || loraIncompat(e) || triggersInPrompt(e.trigger_words)) return;
+      var t=document.createElement('div'); t.className='lora-trig';
+      t.innerHTML='\\u2728 <b>'+esc(e.title)+'</b> triggers: <code>'+esc(e.trigger_words)+'</code>'
+        +'<button type="button" onclick="Gen.insertTriggers('+i+',this)">Insert</button>';
+      box.appendChild(t);
+    });
+    updateGoState();
+  }
+  function insertTriggers(i, btn){
+    var e=loras[i]; if(!e||!e.trigger_words) return;
+    var ta=el('gen-prompt'), cur=(ta.value||'').trim();
+    ta.value = cur ? (cur.replace(/,\\s*$/,'')+', '+e.trigger_words) : e.trigger_words;
+    if(btn){ btn.textContent='Inserted \\u2713'; btn.className='done'; btn.disabled=true; }
+    refreshCost();
   }
   function renderLoras(){
     var box=el('gen-loras'); if(!box) return; box.innerHTML='';
     loras.forEach(function(l,i){
-      var d=document.createElement('div'); d.className='lora-chip';
+      var d=document.createElement('div'); d.className='lora-chip'+(loraIncompat(l)?' incompat':'');
       d.innerHTML=(l.preview_url?'<img src="'+esc(l.preview_url)+'" alt="">':'')
         +'<span class="nm" title="'+esc(l.title)+'">'+esc(l.title)+(l.version_id?'':' \\u23f3')+'</span>'
         +'<input type="number" step="0.05" min="0" max="2" value="'+l.weight+'" title="Weight" onchange="Gen.loraWeight('+i+', this.value)">'
@@ -3292,7 +3403,7 @@ var Gen = (function(){
   }
   function loraWeight(i, v){ if(!loras[i]) return;
     v=parseFloat(v); loras[i].weight=(isNaN(v)?0.7:Math.max(0,Math.min(2,v))); debouncedCost(); }
-  function loraRemove(i){ loras.splice(i,1); renderLoras();
+  function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes();
     if(kind==='lora') search(); debouncedCost(); }
   function openLoraBrowser(){
     var f=el('model-flyout');
@@ -3308,9 +3419,10 @@ var Gen = (function(){
     el('gen-selname').textContent=m.title+' \\u2026';
     fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
       .then(function(r){return r.json();})
-      .then(function(d){ selected.version_id=d.version_id||'';
+      .then(function(d){ selected.version_id=d.version_id||''; selected.model_type=d.model_type||'';
         el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)');
-        el('gen-go').disabled = !d.version_id; refreshCost(); })
+        refreshLoraNotes();   // re-check any attached LoRAs against the new base + set go-state
+        refreshCost(); })
       .catch(function(){ el('gen-selname').textContent=m.title; });
   }
   var genRef=null;   // {media_id, thumb} -- the img2img reference, or null
@@ -3672,6 +3784,7 @@ var Gen = (function(){
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
+          insertTriggers:insertTriggers, setSort:setSort, setCat:setCat,
           setEditSub:setEditSub, addVideoRefs:addVideoRefs, videoCost:videoCost,
           videoAudioToggle:videoAudioToggle,
           vpOnInput:vpOnInput, vpChipify:vpChipify,
@@ -4847,13 +4960,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/model-search")
     def api_model_search():
-        """Search PixAI models/LoRAs for the picker grid via the /v2 search (clean
-        MODEL/LORA split + thumbnails). Read-only, but uses the owner's key -> localhost
-        only. ?q=&kind=base|lora&size=N&offset=N."""
+        """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key -> localhost only.
+        ?q=&kind=base|lora&size=N&offset=N&category=&sort=popular|newest.
+
+        Two data sources by design: the REST /search (default) has RICH rows (description /
+        refCount / official badge) but silently ignores market filters; the GraphQL
+        `generationModels` connection actually honors category + a Newest sort but has leaner
+        rows. So we use GraphQL ONLY when a category or Newest is requested, REST otherwise --
+        the card renders both (leaner rows just hide the missing fields)."""
         if not _is_local_request():
             return jsonify({"error": "generation is localhost-only", "results": []}), 403
         q = (request.args.get("q") or "").strip()
         usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
+        category = (request.args.get("category") or "").strip().lower()
+        sort = (request.args.get("sort") or "").strip().lower()
         try:
             size = max(1, min(int(request.args.get("size") or 24), 50))
             offset = max(0, int(request.args.get("offset") or 0))
@@ -4861,6 +4981,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             size, offset = 24, 0
         try:
             core, session = _gen_session()
+            use_market = category in core.MARKET_CATEGORIES or sort == "newest"
+            if use_market:
+                return jsonify(core.model_search_market_gql(
+                    session, keyword=q, category=category, sort=sort, usage=usage, limit=size))
             return jsonify(core.model_search_rest(session, keyword=q, usage=usage,
                                                   size=size, offset=offset))
         except Exception as e:
@@ -4868,8 +4992,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/model-version")
     def api_model_version():
-        """Resolve a model_id (from the grid) to its generatable version id, on selection.
-        Localhost-only; read-only."""
+        """Resolve a model_id (from the grid) to its generatable version id + the version
+        metadata the picker needs: model_type (for LoRA↔base compat), lora_base_model_type,
+        trigger_words (to offer inserting into the prompt), and the author's tuned preset.
+        Localhost-only; read-only, one API call."""
         if not _is_local_request():
             return jsonify({"error": "localhost-only", "version_id": ""}), 403
         mid = (request.args.get("model_id") or "").strip()
@@ -4877,7 +5003,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"error": "model_id required", "version_id": ""}), 400
         try:
             core, session = _gen_session()
-            return jsonify({"version_id": core.resolve_latest_version(session, mid)})
+            return jsonify(core.resolve_version_meta(session, mid))
         except Exception as e:
             return jsonify({"error": str(e)[:200], "version_id": ""}), 200
 
