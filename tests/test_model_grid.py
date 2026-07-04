@@ -31,25 +31,27 @@ def test_model_search_rest_shapes_rows(monkeypatch):
 
 
 def test_model_search_rest_preview_card_fields(monkeypatch):
-    """Enrichment for the model-preview pop-out: description/author/tags/cover_url
-    pass through when present, default empty when the API omits them."""
+    """Enrichment for the model-preview pop-out. Uses the REAL /v2 search field names
+    (probed 2026-07-04): modelDescription, category (base family), curations (official
+    badge), commentCount, refCount, authorId. See private/GENERATOR_SURFACE.md."""
     rich = {"data": [
-        {"id": "1", "title": "Rich", "type": "MMDIT26A_MODEL", "likedCount": 3,
+        {"id": "1", "title": "Rich", "type": "SDXL_MODEL", "likedCount": 3,
          "flag": {}, "media": {"thumbnailUrl": "t", "publicUrl": "p"},
-         "description": "d" * 500, "user": {"displayName": "Nel"},
-         "tags": ["anime", {"bad": "obj"}, "night"] + ["t{}".format(i) for i in range(9)]},
+         "modelDescription": "d" * 700, "category": "uploaded-sdxl",
+         "curations": ["inhouse"], "commentCount": 42, "refCount": 999, "authorId": "77"},
     ], "hasMore": False}
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: rich)
     m = core.model_search_rest(object())["results"][0]
-    assert len(m["description"]) == 400                 # truncated
-    assert m["author"] == "Nel"
-    assert m["tags"][:2] == ["anime", "night"] and len(m["tags"]) <= 8  # strings only, capped
+    assert len(m["description"]) == 600                 # truncated at 600
+    assert m["base_model"] == "uploaded-sdxl"           # base-model family chip
+    assert m["official"] is True and m["curations"] == ["inhouse"]
+    assert m["comment_count"] == 42 and m["ref_count"] == 999 and m["author_id"] == "77"
     assert m["cover_url"] == "p"                        # full-res preferred for the card
 
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: _SEARCH)
     m = core.model_search_rest(object())["results"][0]  # fields absent in response
-    assert m["description"] == "" and m["author"] == "" and m["tags"] == []
-    assert m["cover_url"] == "https://cdn/pub/x"
+    assert m["description"] == "" and m["base_model"] == "" and m["official"] is False
+    assert m["comment_count"] == 0 and m["cover_url"] == "https://cdn/pub/x"
 
 
 def test_model_search_rest_omits_empty_keyword(monkeypatch):

@@ -2434,6 +2434,10 @@ document.addEventListener('DOMContentLoaded', function(){
   #model-preview .mp-desc{font-size:11px;color:var(--subtext);margin-top:5px;line-height:1.45;max-height:88px;overflow:hidden;}
   #model-preview .mp-tags{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px;}
   #model-preview .mp-tags span{font-size:10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;padding:1px 6px;color:var(--subtext);}
+  #model-preview .mp-badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
+  #model-preview .mp-badges .bdg{font-size:10px;font-weight:600;letter-spacing:.02em;border-radius:5px;padding:1px 7px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);text-transform:uppercase;}
+  #model-preview .mp-badges .bdg.base{color:#c9b8ff;border-color:#4a3f78;}
+  #model-preview .mp-badges .bdg.official{color:#0f1017;background:linear-gradient(180deg,#ffd27a,#e6a94b);border-color:#e6a94b;}
 </style>
 <div id="gen-scrim" onclick="Gen.close()"></div>
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
@@ -2907,15 +2911,27 @@ var Gen = (function(){
       grid.appendChild(c);
     });
   }
+  function baseLabel(cat){ // "uploaded-sdxl" -> "SDXL", "flux-1" -> "Flux 1"
+    cat=(cat||'').replace(/^uploaded-/,'').replace(/[-_]+/g,' ').trim();
+    if(!cat) return '';
+    if(/sdxl/i.test(cat)) return 'SDXL'; if(/sd3/i.test(cat)) return 'SD3';
+    if(/^sd ?v?1/i.test(cat)) return 'SD1.5'; if(/flux/i.test(cat)) return 'Flux';
+    if(/pony/i.test(cat)) return 'Pony'; if(/illustrious/i.test(cat)) return 'Illustrious';
+    return cat.replace(/\\b\\w/g,function(c){return c.toUpperCase();}); }
   function showPreview(m, anchor){
     var p=el('model-preview'); if(!p||!m) return;
     var src=m.cover_url||m.preview_url;
+    var base=baseLabel(m.base_model);
+    var badges='';
+    if(base) badges+='<span class="bdg base">'+esc(base)+'</span>';
+    if(m.official) badges+='<span class="bdg official" title="In-house / official model">\\u2713 Official</span>';
+    var stats='<span class="ty">'+tyShort(m.type)+'</span><span>\\u2665 '+fmt(m.liked_count)+'</span>';
+    if(m.comment_count) stats+='<span>\\ud83d\\udcac '+fmt(m.comment_count)+'</span>';
     var html = (src?'<img src="'+esc(src)+'"'+(m.should_blur?' class="blur"':'')+' alt="">':'')
       +'<div class="mp-meta"><div class="mp-nm">'+esc(m.title)+'</div>'
-      +'<div class="mp-sub"><span class="ty">'+tyShort(m.type)+'</span><span>\\u2665 '+fmt(m.liked_count)+'</span>'
-      +(m.author?'<span>by '+esc(m.author)+'</span>':'')+'</div>'
+      +'<div class="mp-sub">'+stats+'</div>'
+      +(badges?'<div class="mp-badges">'+badges+'</div>':'')
       +(m.description?'<div class="mp-desc">'+esc(m.description)+'</div>':'')
-      +((m.tags&&m.tags.length)?'<div class="mp-tags">'+m.tags.map(function(t){return '<span>'+esc(t)+'</span>';}).join('')+'</div>':'')
       +'</div>';
     p.innerHTML=html; p.classList.add('open'); p.setAttribute('aria-hidden','false');
     placePreview(p, anchor);
