@@ -2051,6 +2051,17 @@ document.addEventListener('DOMContentLoaded', function(){
   .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
   #pick-up{flex:0 0 auto;height:33px;padding:0 12px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;}
   #pick-up:hover{border-color:var(--overlay0);}
+  #model-preview{position:fixed;z-index:220;width:300px;max-width:80vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);display:none;overflow:hidden;pointer-events:none;}
+  #model-preview.open{display:block;}
+  #model-preview img{width:100%;max-height:340px;object-fit:cover;display:block;background:var(--surface1);}
+  #model-preview img.blur{filter:blur(18px);}
+  #model-preview .mp-meta{padding:9px 11px;}
+  #model-preview .mp-nm{font-size:13px;font-weight:600;color:var(--text);}
+  #model-preview .mp-sub{display:flex;gap:8px;font-size:11px;margin-top:3px;color:var(--subtext);}
+  #model-preview .mp-sub .ty{color:var(--emerald);}
+  #model-preview .mp-desc{font-size:11px;color:var(--subtext);margin-top:5px;line-height:1.45;max-height:88px;overflow:hidden;}
+  #model-preview .mp-tags{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px;}
+  #model-preview .mp-tags span{font-size:10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;padding:1px 6px;color:var(--subtext);}
 </style>
 <div id="gen-scrim" onclick="Gen.close()"></div>
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
@@ -2072,7 +2083,8 @@ document.addEventListener('DOMContentLoaded', function(){
     </div>
     <div id="gen-mode-generate">
     <div class="gen-lbl" style="margin-top:0;">Model</div>
-    <button type="button" id="gen-selrow" onclick="Gen.toggleFlyout()">
+    <button type="button" id="gen-selrow" onclick="Gen.toggleFlyout()"
+            onmouseenter="Gen.previewSelected(event)" onmouseleave="Gen.hidePreview()">
       <img id="gen-selthumb" alt="" style="display:none;">
       <span id="gen-selname">none &mdash; browse models</span>
       <span class="hint">&#9666; browse</span>
@@ -2180,6 +2192,7 @@ document.addEventListener('DOMContentLoaded', function(){
   <div id="pick-grid" onscroll="Picker.onScroll()"></div>
   <div class="pick-empty" id="pick-empty" style="display:none;"></div>
 </div>
+<div id="model-preview" aria-hidden="true"></div>
 <script>
 var Picker = (function(){
   var cb=null, timer=null, page=1, more=false, loading=false, curQ='';
@@ -2242,11 +2255,13 @@ var Gen = (function(){
     el('gen-drawer').classList.remove('open'); el('gen-scrim').classList.remove('open');
     el('gen-drawer').setAttribute('aria-hidden','true');
     var f=el('model-flyout'); if(f){ f.classList.remove('open'); f.setAttribute('aria-hidden','true'); }
+    hidePreview();
   }
   function toggleFlyout(){
     var f=el('model-flyout'), on=!f.classList.contains('open');
     f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
     if(on){ if(!el('gen-grid').children.length) search(); setTimeout(function(){el('gen-q').focus();},120); }
+    else hidePreview();
   }
   function setDock(d){
     d=(d==='left'||d==='top'||d==='bottom')?d:'right';
@@ -2289,9 +2304,30 @@ var Gen = (function(){
       var cov = m.preview_url ? '<img class="cov'+(m.should_blur?' blur':'')+'" loading="lazy" src="'+esc(m.preview_url)+'" alt="">' : '<div class="cov"></div>';
       c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span></div></div>';
       c.onclick=function(){ selectCard(m, c); };
+      c.onmouseenter=function(){ showPreview(m, c); };
+      c.onmouseleave=hidePreview;
       grid.appendChild(c);
     });
   }
+  function showPreview(m, anchor){
+    var p=el('model-preview'); if(!p||!m) return;
+    var src=m.cover_url||m.preview_url;
+    var html = (src?'<img src="'+esc(src)+'"'+(m.should_blur?' class="blur"':'')+' alt="">':'')
+      +'<div class="mp-meta"><div class="mp-nm">'+esc(m.title)+'</div>'
+      +'<div class="mp-sub"><span class="ty">'+tyShort(m.type)+'</span><span>\\u2665 '+fmt(m.liked_count)+'</span>'
+      +(m.author?'<span>by '+esc(m.author)+'</span>':'')+'</div>'
+      +(m.description?'<div class="mp-desc">'+esc(m.description)+'</div>':'')
+      +((m.tags&&m.tags.length)?'<div class="mp-tags">'+m.tags.map(function(t){return '<span>'+esc(t)+'</span>';}).join('')+'</div>':'')
+      +'</div>';
+    p.innerHTML=html; p.classList.add('open'); p.setAttribute('aria-hidden','false');
+    var r=anchor.getBoundingClientRect(), w=300, gap=14;
+    var x = r.left - w - gap;
+    if(x < 8) x = Math.min(r.right + gap, window.innerWidth - w - 8);
+    var y = Math.max(8, Math.min(r.top - 20, window.innerHeight - 470));
+    p.style.left=x+'px'; p.style.top=y+'px';
+  }
+  function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
+  function previewSelected(ev){ if(selected) showPreview(selected, ev.currentTarget); }
   function selectCard(m, c){
     document.querySelectorAll('.gen-card.sel').forEach(function(x){x.classList.remove('sel');});
     c.classList.add('sel'); selected=Object.assign({}, m);
@@ -2510,6 +2546,7 @@ var Gen = (function(){
           renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
           setVideoMode:setVideoMode, videoGenerate:videoGenerate, renderVideoSlots:renderVideoSlots,
           setDock:setDock, toggleFlyout:toggleFlyout,
+          previewSelected:previewSelected, hidePreview:hidePreview,
           get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
