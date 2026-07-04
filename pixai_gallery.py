@@ -2017,6 +2017,18 @@ document.addEventListener('DOMContentLoaded', function(){
   #fix-wrap{position:relative;display:inline-block;max-width:100%;line-height:0;}
   #fix-img{max-width:100%;display:block;border-radius:8px;}
   #fix-canvas{position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;}
+  #pick-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
+  #pick-scrim.open{display:block;}
+  #pick-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:640px;max-width:94vw;max-height:82vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
+  #pick-modal.open{display:flex;}
+  .pick-head{display:flex;align-items:center;margin-bottom:10px;}
+  .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
+  .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
+  #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;overflow-y:auto;transition:opacity .12s;}
+  .pick-cell{aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--surface0);}
+  .pick-cell:hover{border-color:var(--lavender);}
+  .pick-cell img{width:100%;height:100%;object-fit:cover;display:block;}
+  .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
 </style>
 <div id="gen-scrim" onclick="Gen.close()"></div>
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
@@ -2069,7 +2081,10 @@ document.addEventListener('DOMContentLoaded', function(){
     <div id="gen-mode-edit" style="display:none;">
       <div class="gen-lbl">Editing image</div>
       <img id="edit-src-img" alt="source" style="width:100%;border-radius:10px;display:none;margin-bottom:8px;">
-      <input id="edit-src" class="gen-search" placeholder="Source media_id (or open an image &amp; click Edit)" autocomplete="off">
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input id="edit-src" class="gen-search" style="margin-bottom:0;flex:1;" placeholder="Source media_id" autocomplete="off">
+        <button type="button" class="gen-seg" style="flex:0 0 auto;padding:7px 11px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;" onclick="Picker.open(function(mid){ Gen.setEditSource(mid); })">&#9648; Pick</button>
+      </div>
       <textarea id="edit-ins" class="gen-ta" rows="3" placeholder="Describe the change &mdash; &lsquo;make it night, add snow&rsquo;&hellip;"></textarea>
       <div class="gen-row" style="margin-top:8px;">
         <div style="flex:1;"><div class="gen-lbl">Resolution</div>
@@ -2098,7 +2113,39 @@ document.addEventListener('DOMContentLoaded', function(){
     </div>
   </div>
 </aside>
+<div id="pick-scrim" onclick="Picker.close()"></div>
+<div id="pick-modal" aria-hidden="true" aria-label="Pick from your gallery">
+  <div class="pick-head"><span class="t">&#9648; Select from your gallery</span>
+    <button class="x" onclick="Picker.close()" aria-label="Close">&times;</button></div>
+  <input class="gen-search" id="pick-q" placeholder="Search your images&hellip;" autocomplete="off">
+  <div id="pick-grid"></div>
+  <div class="pick-empty" id="pick-empty" style="display:none;"></div>
+</div>
 <script>
+var Picker = (function(){
+  var cb=null, timer=null;
+  function el(id){return document.getElementById(id);}
+  function open(callback){ cb=callback; el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
+    el('pick-q').value=''; load(''); setTimeout(function(){el('pick-q').focus();},120); }
+  function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; }
+  function onInput(){ clearTimeout(timer); timer=setTimeout(function(){ load(el('pick-q').value.trim()); }, 280); }
+  function load(q){
+    var grid=el('pick-grid'), empty=el('pick-empty'); grid.style.opacity='.5';
+    fetch('/api/gallery-images?limit=48&q='+encodeURIComponent(q||'')).then(function(r){return r.json();}).then(function(d){
+      grid.innerHTML=''; grid.style.opacity='1'; var imgs=d.images||[];
+      if(!imgs.length){ empty.textContent='No images found.'; empty.style.display='block'; return; }
+      empty.style.display='none';
+      imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
+        c.innerHTML='<img loading="lazy" src="'+m.thumb+'" alt="">';
+        c.onclick=function(){ var f=cb; close(); if(f) f(m.media_id, m.thumb); }; grid.appendChild(c); });
+    }).catch(function(){ grid.style.opacity='1'; });
+  }
+  return {open:open, close:close, onInput:onInput};
+})();
+document.addEventListener('DOMContentLoaded', function(){
+  var pq=document.getElementById('pick-q'); if(pq) pq.addEventListener('input', Picker.onInput);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') Picker.close(); });
+});
 var Gen = (function(){
   var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null;
   var workflows=null, enhTimer=null;
