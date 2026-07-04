@@ -2226,6 +2226,8 @@ document.addEventListener('DOMContentLoaded', function(){
   .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
   #pick-up{flex:0 0 auto;height:33px;padding:0 12px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;}
   #pick-up:hover{border-color:var(--overlay0);}
+  #pick-more{margin-top:10px;padding:8px 0;width:100%;flex:0 0 auto;font-size:12.5px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;}
+  #pick-more:hover{border-color:var(--lavender);color:var(--lavender);}
   #model-preview{position:fixed;z-index:220;width:300px;max-width:80vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);display:none;overflow:hidden;pointer-events:none;}
   #model-preview.open{display:block;}
   #model-preview img{width:100%;max-height:340px;object-fit:cover;display:block;background:var(--surface1);}
@@ -2432,6 +2434,7 @@ document.addEventListener('DOMContentLoaded', function(){
   <label class="gen-check" style="margin:0 0 8px;"><input type="checkbox" id="pick-copy" onchange="Picker.toggleCopy()"> Copy the image&rsquo;s prompt to the clipboard when picking</label>
   <div id="pick-grid" onscroll="Picker.onScroll()"></div>
   <div class="pick-empty" id="pick-empty" style="display:none;"></div>
+  <button type="button" id="pick-more" onclick="Picker.more()" style="display:none;">Load more</button>
 </div>
 <div id="model-preview" aria-hidden="true"></div>
 <div id="ctx-menu"></div>
@@ -2487,18 +2490,25 @@ var Picker = (function(){
   }
   function load(append){
     if(loading) return; loading=true;
-    var grid=el('pick-grid'), empty=el('pick-empty'); if(!append) grid.style.opacity='.5';
+    var grid=el('pick-grid'), empty=el('pick-empty'), moreBtn=el('pick-more');
+    if(!append) grid.style.opacity='.5';
+    if(moreBtn){ moreBtn.style.display='none'; }
     fetch('/api/gallery-images?limit=60&page='+page+'&q='+encodeURIComponent(curQ)+filterQS()).then(function(r){return r.json();}).then(function(d){
       loading=false; grid.style.opacity='1'; var imgs=d.images||[];
       if(!append) grid.innerHTML='';
       more = ((d.page||1)*(d.limit||60)) < (d.total||0);
-      if(!imgs.length && !append){ empty.textContent='No images found.'; empty.style.display='block'; return; }
+      if(!imgs.length && !append){ empty.textContent='No images found.'; empty.style.display='block'; if(moreBtn) moreBtn.style.display='none'; return; }
       empty.style.display='none';
       imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
         c.innerHTML='<img loading="lazy" decoding="async" src="'+m.thumb+'" alt="">';
         c.onclick=function(){ pick(m); }; grid.appendChild(c); });
+      if(moreBtn) moreBtn.style.display = more ? '' : 'none';
+      // If the loaded tiles don't fill the grid, there's no scrollbar to drive
+      // infinite scroll -- keep pulling pages until it overflows (or we're done).
+      if(more && grid.scrollHeight <= grid.clientHeight + 4){ page++; load(true); }
     }).catch(function(){ loading=false; grid.style.opacity='1'; });
   }
+  function more_(){ if(more && !loading){ page++; load(true); } }
   function onScroll(){ var g=el('pick-grid');
     if(more && !loading && g.scrollTop + g.clientHeight > g.scrollHeight - 320){ page++; load(true); } }
   function toggleCopy(){ try{ localStorage.setItem('pick-copyprompt', el('pick-copy').checked?'1':'0'); }catch(e){} }
@@ -2514,7 +2524,7 @@ var Picker = (function(){
       pick({media_id:d.media_id, prompt:''}, URL.createObjectURL(f));
     }).catch(function(){ el('pick-file').value=''; empty.textContent='\\u26a0 Upload failed (network).'; });
   }
-  return {open:open, close:close, onInput:onInput, onFilter:onFilter, onScroll:onScroll, toggleCopy:toggleCopy, upload:upload, onFile:onFile};
+  return {open:open, close:close, onInput:onInput, onFilter:onFilter, onScroll:onScroll, more:more_, toggleCopy:toggleCopy, upload:upload, onFile:onFile};
 })();
 document.addEventListener('DOMContentLoaded', function(){
   var pq=document.getElementById('pick-q'); if(pq) pq.addEventListener('input', Picker.onInput);
