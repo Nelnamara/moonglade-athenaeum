@@ -656,9 +656,11 @@ function GalleryPick({ onPick, onClose }) {
         <div style={{ flex: 1, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(110px,1fr))", gap: 8, alignContent: "start" }}>
           {imgs.map((m) => (
             <div key={m.media_id} title={m.prompt}
-                 style={{ aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid var(--line, #3a3550)", cursor: "pointer" }}
+                 style={{ aspectRatio: "1", minHeight: 0, borderRadius: 8, overflow: "hidden", border: "1px solid var(--line, #3a3550)", cursor: "pointer" }}
                  onClick={() => onPick(m.media_id, m.thumb)}>
-              <img src={m.thumb} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+              <img src={m.thumb} loading="lazy" decoding="async" alt=""
+                style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0, transition: "opacity .18s" }}
+                onLoad={(e) => { e.target.style.opacity = 1; }} />
             </div>))}
         </div>
         {imgs.length < total &&
