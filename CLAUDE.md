@@ -211,7 +211,7 @@ recovered task's full submit shape (bank any param shape with no browser capture
 Deeper RE detail (submit shapes, the full app op catalog, kaisuuken/upload/edit captures, pricing) is
 in git-ignored `private/GENERATOR_SURFACE.md` + `private/APP_OPERATIONS_FULL.md`.
 
-## The web suite (v1.9.0): the Generate drawer + Edit Bay
+## The web suite (v1.9.0): the Generate drawer + The Loom
 
 The Flask gallery is a full creation suite. Everything below is **localhost-gated**
 (`_is_local_request`) -- LAN browsers can look, only the owner's machine can spend.
@@ -231,7 +231,7 @@ The Flask gallery is a full creation suite. Everything below is **localhost-gate
   autocomplete in the prompt boxes; TAB accepts. Field-probed 2026-07-04.
 - **Gallery bridges**: lightbox ✎ Edit / ▶ To Video buttons; right-click context menu on
   cards; bulk-bar **Send to Video** (multi-select -> R2V refs).
-- **Edit Bay** (`/edit-bay`): the Seedance-style storyboard (acts/shots/cast/frame handoff)
+- **The Loom** (`/edit-bay`): the Seedance-style storyboard (acts/shots/cast/frame handoff)
   with **Generate shot** on PixAI + gallery picking for cast/frames. Manual: `docs/EDIT_BAY.md`.
 - **Async engine**: submit (`/api/generate|edit|enhance|fix|editbay/generate`) -> poll
   (`/api/task-status`) -> auto-download + catalog (`source='api'`, videos to `videos/`).

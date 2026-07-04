@@ -1055,7 +1055,7 @@ ENHANCE_PLUGINS = {
 EDITBAY_PAGE = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Edit Bay - Moonglade Athenaeum</title>
+<title>The Loom - Moonglade Athenaeum</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7/babel.min.js" crossorigin></script>
@@ -1076,11 +1076,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 <button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex'"
   style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:#8b7bd8;color:#15131C;border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
-  title="How the Edit Bay works">?</button>
+  title="How The Loom works">?</button>
 <div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
   style="position:fixed;inset:0;z-index:301;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
   <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:#1d1a26;border:1px solid #3a3550;border-radius:14px;padding:22px 26px;color:#d8d4e8;font:13.5px/1.55 system-ui,sans-serif;">
-    <h2 style="margin:0 0 4px;color:#fff;">The Edit Bay &mdash; quick guide</h2>
+    <h2 style="margin:0 0 4px;color:#fff;">The Loom &mdash; quick guide</h2>
     <p style="color:#9a93b5;margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
     <p><b>Acts &amp; Shots.</b> Your video is a list of <i>acts</i>, each holding <i>shot cards</i>. The reel bar tracks total runtime against your target. Add a shot, give it a duration, and write what happens.</p>
     <p><b>Modes.</b> Each shot has a generation mode: <b>T2V</b> text-only &middot; <b>I2V</b> animate from one image &middot; <b>FLF</b> morph from a start frame to an end frame &middot; <b>R2V</b> multi-reference (cast + scenes) &middot; <b>V2V</b> extend/transform an existing clip.</p>
@@ -1617,7 +1617,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <div class="head-nav">
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
-    <a class="btn" href="/edit-bay" title="Seedance video storyboard">&#9648; Edit Bay</a>
+    <a class="btn" href="/edit-bay" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     <a class="btn" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
     <a class="btn" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
   </div>
@@ -1793,7 +1793,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <div class="actions-menu" id="actions-menu">
       <button onclick="bulkAddCollection();closeActionsMenu()">&#43; Add to collection</button>
       <button onclick="bulkSendVideo();closeActionsMenu()">&#9654; Send to Video</button>
-      <button onclick="bulkSendCast();closeActionsMenu()">&#9648; Send to Edit Bay cast</button>
+      <button onclick="bulkSendCast();closeActionsMenu()">&#9648; Send to The Loom (cast)</button>
       <button onclick="bulkContactSheet();closeActionsMenu()">&#128424; Print sheet</button>
       <button onclick="downloadZip();closeActionsMenu()">&#8681; Download ZIP</button>
       <button onclick="bulkReplacePrompt();closeActionsMenu()">Find / replace in prompts</button>
@@ -3623,7 +3623,7 @@ document.addEventListener('DOMContentLoaded', function() {
       onclick="suggestPrompt(this)"
       title="Ask PixAI to read this image back into a prompt (free)">&#9998; Suggest prompt</button>
     <a class="btn btn-primary" href="/?edit={{ row.media_id }}"
-      title="Open this image in the gallery's Edit Bay">&#10022; Edit this</a>
+      title="Open this image in the Edit tab">&#10022; Edit this</a>
     {% endif %}
     {% if row.is_video != '1' %}
     <button class="btn"
@@ -4554,7 +4554,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/gallery-images")
     def api_gallery_images():
-        """Pick-from-your-gallery source for the create surfaces + Edit Bay: recent (or
+        """Pick-from-your-gallery source for the create surfaces + The Loom: recent (or
         keyword-filtered) IMAGE media_ids with thumbnails -> use the media_id full-res, no
         re-upload. Read-only. NOT localhost-gated: it reads ONLY the local catalog and
         returns the same thumbnails/prompts the gallery already serves openly, so the gate
@@ -5104,7 +5104,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
         backend (window.storage swapped for /api/editbay/*). Localhost-only."""
         if not _is_local_request():
-            return "The Edit Bay is localhost-only.", 403
+            return "The Loom is localhost-only.", 403
         import re as _re
         src = Path(__file__).resolve().parent / "editbay" / "seedance-storyboard.jsx"
         try:
