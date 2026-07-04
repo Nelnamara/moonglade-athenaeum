@@ -2044,11 +2044,13 @@ document.addEventListener('DOMContentLoaded', function(){
   .pick-head{display:flex;align-items:center;margin-bottom:10px;}
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
   .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
-  #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;overflow-y:auto;transition:opacity .12s;}
+  #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;overflow-y:auto;transition:opacity .12s;flex:1;min-height:120px;align-content:start;}
   .pick-cell{aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--surface0);}
   .pick-cell:hover{border-color:var(--lavender);}
   .pick-cell img{width:100%;height:100%;object-fit:cover;display:block;}
   .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
+  #pick-up{flex:0 0 auto;height:33px;padding:0 12px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;}
+  #pick-up:hover{border-color:var(--overlay0);}
 </style>
 <div id="gen-scrim" onclick="Gen.close()"></div>
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
@@ -2169,30 +2171,58 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="pick-modal" aria-hidden="true" aria-label="Pick from your gallery">
   <div class="pick-head"><span class="t">&#9648; Select from your gallery</span>
     <button class="x" onclick="Picker.close()" aria-label="Close">&times;</button></div>
-  <input class="gen-search" id="pick-q" placeholder="Search your images&hellip;" autocomplete="off">
-  <div id="pick-grid"></div>
+  <div style="display:flex;gap:6px;">
+    <input class="gen-search" id="pick-q" style="flex:1;" placeholder="Search your images&hellip;" autocomplete="off">
+    <button type="button" id="pick-up" onclick="Picker.upload()" title="Upload a local file (free)">&#8679; Upload</button>
+    <input type="file" id="pick-file" accept="image/*" style="display:none;" onchange="Picker.onFile()">
+  </div>
+  <label class="gen-check" style="margin:0 0 8px;"><input type="checkbox" id="pick-copy" onchange="Picker.toggleCopy()"> Copy the image&rsquo;s prompt to the clipboard when picking</label>
+  <div id="pick-grid" onscroll="Picker.onScroll()"></div>
   <div class="pick-empty" id="pick-empty" style="display:none;"></div>
 </div>
 <script>
 var Picker = (function(){
-  var cb=null, timer=null;
+  var cb=null, timer=null, page=1, more=false, loading=false, curQ='';
   function el(id){return document.getElementById(id);}
   function open(callback){ cb=callback; el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
-    el('pick-q').value=''; load(''); setTimeout(function(){el('pick-q').focus();},120); }
+    el('pick-q').value=''; curQ=''; page=1; load(false); setTimeout(function(){el('pick-q').focus();},120);
+    try{ el('pick-copy').checked = localStorage.getItem('pick-copyprompt')==='1'; }catch(e){} }
   function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; }
-  function onInput(){ clearTimeout(timer); timer=setTimeout(function(){ load(el('pick-q').value.trim()); }, 280); }
-  function load(q){
-    var grid=el('pick-grid'), empty=el('pick-empty'); grid.style.opacity='.5';
-    fetch('/api/gallery-images?limit=48&q='+encodeURIComponent(q||'')).then(function(r){return r.json();}).then(function(d){
-      grid.innerHTML=''; grid.style.opacity='1'; var imgs=d.images||[];
-      if(!imgs.length){ empty.textContent='No images found.'; empty.style.display='block'; return; }
+  function onInput(){ clearTimeout(timer); timer=setTimeout(function(){ curQ=el('pick-q').value.trim(); page=1; load(false); }, 280); }
+  function pick(m, thumb){
+    try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
+    var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'');
+  }
+  function load(append){
+    if(loading) return; loading=true;
+    var grid=el('pick-grid'), empty=el('pick-empty'); if(!append) grid.style.opacity='.5';
+    fetch('/api/gallery-images?limit=60&page='+page+'&q='+encodeURIComponent(curQ)).then(function(r){return r.json();}).then(function(d){
+      loading=false; grid.style.opacity='1'; var imgs=d.images||[];
+      if(!append) grid.innerHTML='';
+      more = ((d.page||1)*(d.limit||60)) < (d.total||0);
+      if(!imgs.length && !append){ empty.textContent='No images found.'; empty.style.display='block'; return; }
       empty.style.display='none';
       imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
         c.innerHTML='<img loading="lazy" src="'+m.thumb+'" alt="">';
-        c.onclick=function(){ var f=cb; close(); if(f) f(m.media_id, m.thumb); }; grid.appendChild(c); });
-    }).catch(function(){ grid.style.opacity='1'; });
+        c.onclick=function(){ pick(m); }; grid.appendChild(c); });
+    }).catch(function(){ loading=false; grid.style.opacity='1'; });
   }
-  return {open:open, close:close, onInput:onInput};
+  function onScroll(){ var g=el('pick-grid');
+    if(more && !loading && g.scrollTop + g.clientHeight > g.scrollHeight - 320){ page++; load(true); } }
+  function toggleCopy(){ try{ localStorage.setItem('pick-copyprompt', el('pick-copy').checked?'1':'0'); }catch(e){} }
+  function upload(){ el('pick-file').click(); }
+  function onFile(){
+    var f=el('pick-file').files[0]; if(!f) return;
+    var empty=el('pick-empty'); empty.textContent='Uploading '+f.name+'\\u2026'; empty.style.display='block';
+    var fd=new FormData(); fd.append('file', f);
+    fetch('/api/upload',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
+      el('pick-file').value='';
+      if(d.error||!d.media_id){ empty.textContent='\\u26a0 Upload failed: '+(d.error||'no media id'); return; }
+      empty.style.display='none';
+      pick({media_id:d.media_id, prompt:''}, URL.createObjectURL(f));
+    }).catch(function(){ el('pick-file').value=''; empty.textContent='\\u26a0 Upload failed (network).'; });
+  }
+  return {open:open, close:close, onInput:onInput, onScroll:onScroll, toggleCopy:toggleCopy, upload:upload, onFile:onFile};
 })();
 document.addEventListener('DOMContentLoaded', function(){
   var pq=document.getElementById('pick-q'); if(pq) pq.addEventListener('input', Picker.onInput);
@@ -3371,8 +3401,37 @@ function savePrompt() {
             if not mid:
                 continue
             out.append({"media_id": str(mid), "thumb": "/thumbs/{}.jpg".format(mid),
-                        "prompt": (r.get("prompt_preview") or r.get("prompt_full") or "")[:80]})
-        return jsonify({"images": out, "total": total, "page": page})
+                        "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
+        return jsonify({"images": out, "total": total, "page": page,
+                        "limit": limit})
+
+    @app.route("/api/upload", methods=["POST"])
+    def api_upload():
+        """Upload a local file from the picker -> PixAI media_id (the same free
+        3-step S3 handshake as the CLI's --upload). Owner-only: localhost-gated,
+        spends nothing."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "no file"}), 400
+        import os as _os
+        import tempfile
+        suffix = _os.path.splitext(f.filename)[1][:8] or ".png"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            f.save(tmp)
+            tmp.close()
+            core, session = _gen_session()
+            mid = core.upload_media(session, tmp.name)
+            return jsonify({"media_id": str(mid)})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 200
+        finally:
+            try:
+                _os.unlink(tmp.name)
+            except OSError:
+                pass
 
     def _gen_args_from_payload(p):
         """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
