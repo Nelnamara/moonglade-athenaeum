@@ -1095,9 +1095,31 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </body></html>"""
 
 
+def _build_stamp():
+    """Version + short git SHA of the code THIS process loaded, computed once at
+    startup. If you pull without restarting, this keeps showing the OLD sha -- which
+    is precisely how you tell a stale server from a fresh one. Fails soft."""
+    try:
+        import pixai_gallery_backup as _core
+        ver = getattr(_core, "__version__", "?")
+    except Exception:
+        ver = "?"
+    sha = ""
+    try:
+        import subprocess
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(Path(__file__).resolve().parent),
+            stderr=subprocess.DEVNULL, timeout=4).decode().strip()
+    except Exception:
+        sha = ""
+    return "v{}".format(ver) + (" · {}".format(sha) if sha else "")
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
     db_path = out_dir / "catalog.db"
+    build_stamp = _build_stamp()
     init_db(db_path)
     backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
@@ -1148,6 +1170,7 @@ def create_app(out_dir: Path):
   @keyframes mark-glow { 0%,100% { box-shadow: 0 0 10px rgba(182,146,230,.55); } 50% { box-shadow: 0 0 3px rgba(182,146,230,.2); } }
   header h1 { font-size: 18px; color: var(--text); flex-shrink: 0; font-weight: 600; border-bottom: 2px solid var(--gold); padding-bottom: 1px; line-height: 1.1; }
   .tagline { font-size: 10.5px; color: var(--overlay0); font-style: italic; margin-top: 3px; transition: opacity .5s; letter-spacing: .02em; }
+  .ver-badge { font-size: 10px; font-weight: 500; color: var(--overlay0); font-family: ui-monospace, monospace; border: 1px solid var(--surface1); border-radius: 5px; padding: 1px 6px; vertical-align: middle; margin-left: 4px; letter-spacing: 0; }
   .header-stats { color: var(--subtext); font-size: 12px; } .header-stats b { color: var(--text); }
   .gen-live { color: var(--lavender); margin-left: 8px; }
   @media (prefers-reduced-motion: reduce) {
@@ -1447,7 +1470,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <div class="brand">
     <span class="mark">M</span>
     <div class="brand-txt">
-      <h1>Moonglade Athenaeum</h1>
+      <h1>Moonglade Athenaeum <span class="ver-badge" title="Running build (git short SHA). If this doesn't change after a pull, the server wasn't restarted.">{{ build_stamp }}</span></h1>
       <span id="tagline" class="tagline">a library against the Void</span>
     </div>
   </div>
@@ -1526,7 +1549,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <button type="submit" class="btn btn-primary">Filter</button>
     <a href="/" class="btn">Reset</a>
     <button type="button" class="btn" id="adv-toggle" onclick="toggleAdvanced()"
-      aria-expanded="{{ 'true' if adv_active else 'false' }}">{{ 'Less &#9652;' if adv_active else 'More &#9662;' }}</button>
+      aria-expanded="{{ 'true' if adv_active else 'false' }}">{{ 'Less ▴' if adv_active else 'More ▾' }}</button>
   </div>
 </div>
 <div class="filters filters-adv" id="filters-adv" {% if not adv_active %}style="display:none;"{% endif %}>
@@ -2216,13 +2239,16 @@ document.addEventListener('DOMContentLoaded', function(){
   .pick-head{display:flex;align-items:center;margin-bottom:10px;}
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
   .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
-  #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;overflow-y:auto;transition:opacity .12s;flex:1;min-height:120px;align-content:start;}
+  /* FIXED row height -- the bulletproof image-grid pattern. No aspect-ratio, no
+     percentage heights, so cells can't collapse to slivers or blow out tall. */
+  #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));grid-auto-rows:120px;gap:8px;overflow-y:auto;transition:opacity .12s;flex:1;min-height:120px;align-content:start;}
   .pick-cell{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--surface0);}
   .pick-cell:hover{border-color:var(--lavender);}
   /* aspect-ratio on the IMG (not the cell) -- mirrors the main gallery grid. Putting it
      on the cell + height:100% on the img is a percentage-height-against-indefinite-height
      trap: the img blows out to its intrinsic height and cells overlap into a torn smear. */
-  .pick-cell img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:var(--surface0);}
+  .pick-cell{grid-row:span 1;}
+  .pick-cell img{width:100%;height:100%;object-fit:cover;display:block;background:var(--surface0);}
   .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
   #pick-up{flex:0 0 auto;height:33px;padding:0 12px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;}
   #pick-up:hover{border-color:var(--overlay0);}
@@ -2503,9 +2529,10 @@ var Picker = (function(){
         c.innerHTML='<img loading="lazy" decoding="async" src="'+m.thumb+'" alt="">';
         c.onclick=function(){ pick(m); }; grid.appendChild(c); });
       if(moreBtn) moreBtn.style.display = more ? '' : 'none';
-      // If the loaded tiles don't fill the grid, there's no scrollbar to drive
-      // infinite scroll -- keep pulling pages until it overflows (or we're done).
-      if(more && grid.scrollHeight <= grid.clientHeight + 4){ page++; load(true); }
+      // If the loaded tiles don't fill the grid there's no scrollbar to drive infinite
+      // scroll -- pull one more page so it overflows. Capped at page 4 so a tall window
+      // (or any layout glitch) can't runaway-load; the Load-more button covers the rest.
+      if(more && page < 4 && grid.scrollHeight <= grid.clientHeight + 4){ page++; load(true); }
     }).catch(function(){ loading=false; grid.style.opacity='1'; });
   }
   function more_(){ if(more && !loading){ page++; load(true); } }
@@ -3735,6 +3762,7 @@ function savePrompt() {
             lora_filter=lora_filter, media_type=media_type, source_filter=source,
             collection=collection, collections=collections,
             rows=page_rows, total=total, page=page, stats=catalog_counts(db_path),
+            build_stamp=build_stamp,
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
             date_from=date_from,
