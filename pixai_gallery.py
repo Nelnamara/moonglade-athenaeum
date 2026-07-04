@@ -2040,6 +2040,7 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="gen-seg" id="gen-mode-seg" style="margin-bottom:12px;">
       <button id="gm-generate" class="on" onclick="Gen.setMode('generate')">Generate</button>
       <button id="gm-edit" onclick="Gen.setMode('edit')">Edit</button>
+      <button id="gm-video" onclick="Gen.setMode('video')">Video</button>
     </div>
     <div id="gen-mode-generate">
     <div class="gen-seg">
@@ -2110,6 +2111,21 @@ document.addEventListener('DOMContentLoaded', function(){
       <div id="fix-wrap"><img id="fix-img" alt="fix source"><canvas id="fix-canvas"></canvas></div>
       <button id="fix-go" class="gen-go" onclick="Gen.fix()" style="margin-top:8px;">Fix marked regions</button>
       <div id="fix-result" class="gen-result" style="display:none;"></div>
+    </div>
+    <div id="gen-mode-video" style="display:none;">
+      <div class="gen-seg" style="margin-bottom:10px;">
+        <button id="vm-i2v" class="on" onclick="Gen.setVideoMode('i2v')">First frame</button>
+        <button id="vm-flf" onclick="Gen.setVideoMode('flf')">First + last</button>
+        <button id="vm-r2v" onclick="Gen.setVideoMode('r2v')">Multi-ref</button>
+      </div>
+      <div class="gen-lbl" id="video-slots-lbl">Source image (first frame)</div>
+      <div id="video-slots"></div>
+      <textarea id="video-prompt" class="gen-ta" rows="3" style="margin-top:8px;" placeholder="Describe the motion &mdash; &lsquo;slow cinematic pan right, gentle waves&hellip;&rsquo;"></textarea>
+      <div class="gen-lbl" style="margin-top:8px;">Duration (seconds)</div>
+      <select id="video-dur" class="gen-sel"><option>5</option><option>6</option><option>10</option><option>15</option></select>
+      <div class="gen-cost free" id="video-cost" style="margin-top:10px;">&#9648; Free with a V4.0 card &middot; else ~27,500 credits</div>
+      <button id="video-go" class="gen-go" onclick="Gen.videoGenerate()">Generate video</button>
+      <div id="video-result" class="gen-result" style="display:none;"></div>
     </div>
   </div>
 </aside>
@@ -2269,12 +2285,11 @@ var Gen = (function(){
             {past:'Generated', btn:el('gen-go'), busy:'Generating\\u2026', idle:'Generate'});
   }
   function setMode(m){
-    var isEdit=(m==='edit');
-    el('gen-mode-generate').style.display=isEdit?'none':'';
-    el('gen-mode-edit').style.display=isEdit?'':'none';
-    el('gm-generate').classList.toggle('on',!isEdit);
-    el('gm-edit').classList.toggle('on',isEdit);
-    if(isEdit){ if(el('edit-src').value.trim()) editCost(); loadWorkflows().then(renderWorkflows); }
+    ['generate','edit','video'].forEach(function(x){
+      var pane=el('gen-mode-'+x); if(pane) pane.style.display=(x===m)?'':'none';
+      var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
+    if(m==='edit'){ if(el('edit-src').value.trim()) editCost(); loadWorkflows().then(renderWorkflows); }
+    if(m==='video') renderVideoSlots();
   }
   function editSrc(){ return el('edit-src').value.trim(); }
   function setEditSource(mid){
@@ -2372,10 +2387,43 @@ var Gen = (function(){
     if(!src){ el('edit-src').focus(); return; }
     runTask('/api/enhance', {source:src, workflow_id:wid}, el('enh-result'), {past:'Enhanced'});
   }
+  var vmode='i2v', vslots=[null];
+  function setVideoMode(m){
+    vmode=m;
+    ['i2v','flf','r2v'].forEach(function(x){ var b=el('vm-'+x); if(b) b.classList.toggle('on',x===m); });
+    if(m==='i2v'){ vslots=[vslots[0]||null]; el('video-slots-lbl').textContent='Source image (first frame)'; }
+    else if(m==='flf'){ vslots=[vslots[0]||null,vslots[1]||null]; el('video-slots-lbl').textContent='Start & end frame'; }
+    else { if(!vslots.length) vslots=[null]; el('video-slots-lbl').textContent='Reference images (@image1, @image2\\u2026)'; }
+    renderVideoSlots();
+  }
+  function renderVideoSlots(){
+    var wrap=el('video-slots'); if(!wrap) return; wrap.innerHTML=''; wrap.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+    vslots.forEach(function(s,i){
+      var box=document.createElement('div');
+      box.style.cssText='width:78px;height:78px;border-radius:8px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;overflow:hidden;display:grid;place-items:center;color:var(--subtext);font-size:11px;text-align:center;';
+      if(s){ box.innerHTML='<img src="'+s.thumb+'" style="width:100%;height:100%;object-fit:cover;">'; }
+      else { box.textContent=(vmode==='flf'?(i===0?'+ start':'+ end'):'+ pick'); }
+      box.onclick=function(){ Picker.open(function(mid,thumb){ vslots[i]={media_id:mid,thumb:thumb}; renderVideoSlots(); }); };
+      wrap.appendChild(box);
+    });
+    if(vmode==='r2v' && vslots.length<9){
+      var add=document.createElement('button'); add.type='button'; add.textContent='+ add';
+      add.style.cssText='width:78px;height:78px;border-radius:8px;border:1px dashed var(--surface1);background:transparent;color:var(--subtext);cursor:pointer;font-size:11px;';
+      add.onclick=function(){ vslots.push(null); renderVideoSlots(); }; wrap.appendChild(add);
+    }
+  }
+  function videoGenerate(){
+    var imgs=vslots.filter(function(s){return s&&s.media_id;}).map(function(s){return s.media_id;});
+    var res=el('video-result');
+    if(!imgs.length){ res.style.display='block'; res.innerHTML='<span style="color:var(--red);font-size:12px;">Pick a source image first.</span>'; return; }
+    runTask('/api/editbay/generate', {mode:vmode.toUpperCase(), prompt:el('video-prompt').value.trim(), images:imgs, duration:+el('video-dur').value},
+            res, {past:'Rendered', btn:el('video-go'), busy:'Rendering\\u2026', idle:'Generate video'});
+  }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
           renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
+          setVideoMode:setVideoMode, videoGenerate:videoGenerate, renderVideoSlots:renderVideoSlots,
           get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
