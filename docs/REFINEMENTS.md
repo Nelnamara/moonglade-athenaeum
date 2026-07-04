@@ -16,6 +16,8 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
 | 9 | Printer integration? | 💬 | v1: print stylesheet + Print button on detail (image centered, chrome hidden) + contact sheets from a selection/collection. OS dialog does paper handling. |
 | 10 | Image → 3D model → 3D printer? | 💬 | Viable: Hunyuan3D-2 (open weights, figurine-grade from one image), TRELLIS, TripoSR, Meshy (API). Pipeline: image → GLB → Blender cleanup → watertight STL → slicer. Roadmap spike: a "Foundry" module in the provider-deck pattern. |
 | 11 | What are we missing? | 💬 | Claude's adds: **Jobs tray** (running/recent tasks survive drawer close), **credits + card balance in the header**, **Suggest-prompt button** on images (engine built, no UI), **prompt snippets/favorites**. |
+| 11a | Robust, eye-popping top banner + header — "this is a suite, not an AOL home page with dancing hamsters" | 💬 | Part of the #8 identity redesign; owner's notes pass drives it. |
+| 🥚 | An easter egg | ✅ | Hidden. The moon guides those who remember the old codes. |
 
 ## Also queued (pre-existing, same arc)
 
