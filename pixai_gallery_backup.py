@@ -3812,11 +3812,26 @@ query {
     tasks { totalCount }
     followerCount
     followingCount
+    referralCode { code }
     membership { membershipId tier privilege }
     subscription { planId provider interval status startAt endAt cancelAtPeriodEnd }
   }
 }
 """
+
+
+def artwork_views(session, artwork_id):
+    """Live view count for one of the owner's published artworks (ad-hoc `artwork(id){views}`,
+    no persisted hash). Views dwarf likes and aren't stored locally -> the 'Your Art' panel's
+    headline signal. Read-only; 0 on any failure."""
+    if not artwork_id:
+        return 0
+    try:
+        d = gql_adhoc(session, "query($id:ID!){ artwork(id:$id){ views } }",
+                      {"id": str(artwork_id)})
+        return int(((d or {}).get("artwork") or {}).get("views") or 0)
+    except (PixAIError, TypeError, ValueError):
+        return 0
 
 
 def account_info(session):
@@ -3852,6 +3867,8 @@ def run_account_info(args):
     if me.get("followerCount") is not None:
         print("Followers        : {:,}  (following {:,})".format(
             int(me.get("followerCount") or 0), int(me.get("followingCount") or 0)))
+    if me.get("referralCode"):
+        print("Referral code    : {}".format((me.get("referralCode") or {}).get("code", "-")))
     if mem:
         print("Membership       : {} (tier {})".format(
             mem.get("membershipId", "-"), mem.get("tier", "-")))
@@ -3859,6 +3876,20 @@ def run_account_info(args):
             print("Daily free claim : {:,}".format(int(priv["dailyClaimAdded"])))
         if priv.get("professionalMode"):
             print("Professional mode: on")
+        # The rest of the membership entitlements (were fetched, never shown).
+        if priv.get("paidCredit"):
+            print("Credit ceiling   : {:,}".format(int(priv["paidCredit"])))
+        slots = []
+        if priv.get("lora") is not None:
+            slots.append("{} LoRA".format(priv["lora"]))
+        if priv.get("freeUserLora") is not None:
+            slots.append("{} free-user LoRA".format(priv["freeUserLora"]))
+        if priv.get("privateModel") is not None:
+            slots.append("{} private-model".format(priv["privateModel"]))
+        if slots:
+            print("Slots            : {}".format(", ".join(slots)))
+        if priv.get("extraPackageValue"):
+            print("Extra package    : {:,}".format(int(priv["extraPackageValue"])))
     if sub:
         renew = "cancels at period end" if sub.get("cancelAtPeriodEnd") else "renews"
         print("Subscription     : {} {} via {} ({}); {} {}".format(
