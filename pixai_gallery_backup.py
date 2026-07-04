@@ -929,8 +929,10 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
     for m in data.get("data") or []:
         med = m.get("media") or {}
         flag = m.get("flag") or {}
-        user = m.get("user") or m.get("author") or {}
-        tags = m.get("tags") or []
+        # Real field names (probed 2026-07-04): the rich description lives under
+        # `modelDescription`, base-model family under `category`, and an official
+        # badge under `curations` (e.g. ["inhouse"]). See private/GENERATOR_SURFACE.md.
+        cur = m.get("curations") or []
         out.append({
             "title": m.get("title") or "",
             "type": m.get("type") or "",
@@ -939,12 +941,14 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
             "should_blur": bool(flag.get("shouldBlur")),
             "preview_url": med.get("thumbnailUrl") or med.get("publicUrl") or "",
             "has_version": bool(m.get("hasLatestAvailableVersion")),
-            # Extra surface for the preview pop-out card (optional in the
-            # response; empty when the API doesn't send them).
-            "description": (m.get("description") or "")[:400],
-            "author": (user.get("displayName") or user.get("username") or "")
-                      if isinstance(user, dict) else "",
-            "tags": [t for t in tags if isinstance(t, str)][:8],
+            # Rich surface for the preview pop-out card.
+            "description": (m.get("modelDescription") or "")[:600],
+            "base_model": m.get("category") or "",
+            "curations": [c for c in cur if isinstance(c, str)],
+            "official": any((c or "").lower() == "inhouse" for c in cur if isinstance(c, str)),
+            "comment_count": int(m.get("commentCount") or 0),
+            "ref_count": int(m.get("refCount") or 0),
+            "author_id": str(m.get("authorId") or ""),
             "cover_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
         })
     return {"results": out, "has_more": bool(data.get("hasMore"))}
