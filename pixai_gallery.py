@@ -1963,8 +1963,9 @@ document.addEventListener('DOMContentLoaded', function(){
 <style>
   #gen-scrim{position:fixed;inset:0;background:rgba(6,4,16,.55);z-index:200;opacity:0;visibility:hidden;transition:opacity .18s;}
   #gen-scrim.open{opacity:1;visibility:visible;}
-  #gen-drawer{position:fixed;top:0;right:0;height:100%;width:372px;max-width:94vw;background:var(--mantle);border-left:1px solid var(--surface1);z-index:201;transform:translateX(100%);transition:transform .2s ease;display:flex;flex-direction:column;}
+  #gen-drawer{position:fixed;top:0;right:0;height:100%;width:372px;max-width:94vw;background:var(--mantle);border-left:1px solid var(--surface1);z-index:201;transform:translateX(100%);transition:transform .2s ease,width .2s ease;display:flex;flex-direction:column;}
   #gen-drawer.open{transform:translateX(0);}
+  #gen-drawer.wide{width:600px;}
   .gen-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--surface0);}
   .gen-head .spark{color:var(--lavender);font-size:18px;}
   .gen-head .t{font-size:15px;font-weight:600;color:var(--text);}
@@ -2288,6 +2289,7 @@ var Gen = (function(){
     ['generate','edit','video'].forEach(function(x){
       var pane=el('gen-mode-'+x); if(pane) pane.style.display=(x===m)?'':'none';
       var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
+    el('gen-drawer').classList.toggle('wide', m==='video');
     if(m==='edit'){ if(el('edit-src').value.trim()) editCost(); loadWorkflows().then(renderWorkflows); }
     if(m==='video') renderVideoSlots();
   }
