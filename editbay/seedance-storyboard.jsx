@@ -286,6 +286,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showCast, setShowCast] = useState(true);
+  const [genState, setGenState] = useState({});   // cardId -> {phase, msg, mid}
   const saveTimer = useRef(null);
 
   useEffect(() => {
@@ -370,6 +371,48 @@ export default function App() {
     return L.join("\n");
   };
   const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
+
+  /* ---- Generate shot on PixAI (video provider) ---- */
+  const setCardStatus = (cardId, patch) => setProject((p) => ({ ...p, acts: p.acts.map((a) =>
+    ({ ...a, cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch }) })) }));
+  const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
+    : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
+  const generateShot = async (entry) => {
+    const c = entry.c;
+    const tagNum = (t) => { const m = /(\d+)/.exec(t || ""); return m ? +m[1] : 99; };
+    const imgs = [];
+    (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
+      .forEach((as) => { const d = imgSrc(as.thumbId, as.source); if (d) imgs.push({ tag: as.tag, d }); });
+    [c.openFrame, c.mode === "FLF" ? c.closeFrame : null].filter(Boolean).forEach((f) => {
+      const d = imgSrc(f.thumbId, f.source); if (d) imgs.push({ tag: f.tag || "@image9", d }); });
+    (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
+      const d = imgSrc(r.thumbId, r.source); if (d) imgs.push({ tag: r.tag, d }); });
+    const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
+    imgs.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
+    if (!imgs.length && !vids.length) {
+      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } })); return; }
+    setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
+    setCardStatus(c.id, { status: "wip" });
+    try {
+      const r = await fetch("/api/editbay/generate", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: c.mode, prompt: shotText(entry, project), images: imgs.map((x) => x.d),
+          video_refs: vids, duration: c.duration }) });
+      const d = await r.json();
+      if (d.error || !d.task_id) { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error || "submit failed" } })); return; }
+      pollShot(c.id, d.task_id);
+    } catch { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
+  };
+  const pollShot = (cardId, tid) => {
+    setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(tid).slice(-6) + ")" } }));
+    const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
+      if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
+        setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } }));
+        setCardStatus(cardId, { status: "done", resultMid: mid }); }
+      else if (d.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error || "failed" } }));
+      else setTimeout(tick, 4000);
+    }).catch(() => setTimeout(tick, 5000));
+    setTimeout(tick, 2500);
+  };
   const download = (text, name, type) => { const url = URL.createObjectURL(new Blob([text], { type }));
     const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
   const exportAll = () => { let out = `${project.name}\nRuntime target ${fmt(project.target)}\n`;
@@ -507,7 +550,7 @@ export default function App() {
                     const prev = gIdx > 0 ? entries[gIdx - 1] : null;
                     return (
                       <CardView key={card.id} {...{ act, card, ci, ai, code, prev, project, thumbs, open, setOpen,
-                        setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, entries }} />
+                        setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries }} />
                     );
                   })}
                   <button className="sb-add" onClick={() => addCard(act.id)}>+ Add shot to {act.name}</button>
@@ -523,7 +566,7 @@ export default function App() {
 }
 
 /* ===================== CARD ===================== */
-function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpen, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, entries }) {
+function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpen, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries }) {
   const isOpen = open[card.id];
   const framePrev = (f) => f.thumbId ? thumbs[f.thumbId] : (f.source && f.source.startsWith("http") ? f.source : null);
   const openImg = framePrev(card.openFrame), closeImg = framePrev(card.closeFrame);
@@ -572,7 +615,7 @@ function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpe
           </div>
         </div>
       ) : (
-        <CardEditor {...{ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, entry, framePrev }} />
+        <CardEditor {...{ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev }} />
       )}
     </article>
   );
@@ -597,7 +640,7 @@ function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, ext
   );
 }
 
-function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, entry, framePrev }) {
+function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev }) {
   const [palFor, setPalFor] = useState(null);
   const setF = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: val }));
   const append = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: c[field] ? `${c[field]}, ${val}` : val }));
@@ -725,6 +768,9 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
 
       <div className="sb-toolbar">
         <button className="sb-btn amber sm" onClick={() => copyShot(entry)}>Copy shot</button>
+        {(() => { const g = genState[card.id] || {}; const busy = g.phase === "submitting" || g.phase === "running";
+          return <button className="sb-btn sm" disabled={busy} onClick={() => generateShot(entry)}
+            title="Render this shot on PixAI (free with a V4.0 card)">{busy ? "Generating…" : "▶ Generate shot"}</button>; })()}
         <button className="sb-btn ghost sm" onClick={() => moveCard(act.id, ci, -1)}>↑</button>
         <button className="sb-btn ghost sm" onClick={() => moveCard(act.id, ci, 1)}>↓</button>
         <select className="sb-sel sm" style={{ width: "auto", fontSize: 12, padding: "6px 8px" }} value="" onChange={(e) => e.target.value && moveCardToAct(act.id, card, e.target.value)}>
@@ -733,6 +779,13 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
         <button className="sb-btn ghost sm" onClick={() => dupCard(act.id, card)}>Duplicate</button>
         <button className="sb-btn ghost sm danger" onClick={() => delCard(act.id, card)}>Delete</button>
       </div>
+      {(() => { const g = genState[card.id]; if (!g) return null;
+        const col = g.phase === "done" ? "var(--green)" : g.phase === "error" ? "var(--coral)" : "var(--amber)";
+        return (<div style={{ fontSize: 12, color: col, display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
+          <span>{g.phase === "done" ? "✓ " : g.phase === "error" ? "⚠ " : "… "}{g.msg}</span>
+          {g.phase === "done" && g.mid && (<a className="sb-mono" href={"/image/" + g.mid} target="_blank" rel="noreferrer"
+            style={{ color: "var(--cyan)" }}>open clip ↗</a>)}
+        </div>); })()}
     </div>
   );
 }

@@ -2569,6 +2569,40 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
     return params
 
 
+def _snap_video_duration(d):
+    """Snap a requested duration (seconds) to the nearest allowed PixAI video length."""
+    try:
+        d = float(d)
+    except (TypeError, ValueError):
+        return 5
+    return min(VIDEO_DURATIONS, key=lambda v: abs(v - d))
+
+
+def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=(),
+                            *, duration=5, generate_audio=False):
+    """PixAI video PROVIDER ADAPTER: map an Edit Bay shot (mode + prompt + @-ordered ref
+    media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
+    other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
+    i2vPro; R2V/V2V/any-with-refs -> referenceVideo. Duration snaps to PixAI's allowed
+    lengths. (Card auto-apply happens at the route: a V4.0 card makes it free.)"""
+    m = (mode or "R2V").upper()
+    imgs = [str(i) for i in (image_ids or []) if str(i).strip()]
+    vids = [str(v) for v in (video_ids or []) if str(v).strip()]
+    auds = [str(a) for a in (audio_ids or []) if str(a).strip()]
+    dur = _snap_video_duration(duration)
+    if m == "I2V" and imgs:
+        return build_video_parameters(prompt, imgs[0], duration=dur, generate_audio=generate_audio)
+    if m == "FLF" and len(imgs) >= 2:
+        return build_video_parameters(prompt, imgs[0], tail_media_id=imgs[1],
+                                      duration=dur, generate_audio=generate_audio)
+    if imgs or vids or auds:                       # R2V / V2V / any mode carrying references
+        return build_reference_video_parameters(prompt, image_media_ids=imgs,
+                                                 video_media_ids=vids, audio_media_ids=auds,
+                                                 duration=dur, generate_audio=generate_audio)
+    raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
+                     "(mode {}) -- attach a cast image or an open frame.".format(m))
+
+
 def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
                                  strength=None, extra_inputs=None, priority=1000,
                                  is_private=False, kaisuuken_id=""):
@@ -3064,21 +3098,26 @@ def generation_status(session, task_id):
 
 
 def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_"):
-    """Download + catalog a COMPLETED generation's image output(s) into out_dir -> {media_ids,
-    saved}. Reuses the shared image download/catalog. Call only once status is 'done'."""
+    """Download + catalog a COMPLETED task's output(s) into out_dir -> {media_ids, saved,
+    is_video}. Auto-detects video (outputs.videos) vs image and uses the matching shared
+    downloader. Call only once status is 'done'."""
     from types import SimpleNamespace
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     init_db(out / "catalog.db")
     result = task_detail_gql(session, task_id) or {}
-    fm = extract_full_meta(result)
     a = SimpleNamespace(name_length=name_length, name_sep=name_sep)
-    saved = _download_image_task(session, result, task_id, out, a,
-                                 prompt=fm.get("prompt_full", ""))
+    vouts, _shared = video_outputs(result)
+    if vouts:
+        saved = _download_video_task(session, result, task_id, out, a, {})
+        mids = [str(o["video_media_id"]) for o in vouts if o.get("video_media_id")]
+        return {"media_ids": mids, "saved": len(saved), "is_video": True}
+    fm = extract_full_meta(result)
+    saved = _download_image_task(session, result, task_id, out, a, prompt=fm.get("prompt_full", ""))
     outputs = result.get("outputs") or {}
     mids = ([str(outputs["mediaId"])] if outputs.get("mediaId") else []) + \
            [str(m) for m in (outputs.get("batchMediaIds") or [])]
-    return {"media_ids": list(dict.fromkeys(mids)), "saved": len(saved)}
+    return {"media_ids": list(dict.fromkeys(mids)), "saved": len(saved), "is_video": False}
 
 
 def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll_timeout=240):
