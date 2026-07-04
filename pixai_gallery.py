@@ -1981,6 +1981,12 @@ document.addEventListener('DOMContentLoaded', function(){
   .enh-item{display:block;width:100%;text-align:left;padding:6px 9px;margin-bottom:4px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.3;}
   .enh-item:hover{border-color:var(--overlay0);}
   .enh-item .ty{color:var(--overlay0);font-size:10px;}
+  .fix-tags{display:flex;gap:5px;margin-bottom:6px;}
+  .fix-tags button{padding:4px 10px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
+  .fix-tags button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
+  #fix-wrap{position:relative;display:inline-block;max-width:100%;line-height:0;}
+  #fix-img{max-width:100%;display:block;border-radius:8px;}
+  #fix-canvas{position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;}
 </style>
 <div id="gen-scrim" onclick="Gen.close()"></div>
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
@@ -2050,6 +2056,15 @@ document.addEventListener('DOMContentLoaded', function(){
       <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
       <div id="enh-list"></div>
       <div id="enh-result" class="gen-result" style="display:none;"></div>
+      <div class="gen-lbl" style="margin-top:14px;">Fix hands / faces <span style="text-transform:none;color:var(--subtext);">&middot; drag a box</span></div>
+      <div class="fix-tags">
+        <button type="button" id="fix-tag-face" class="on" onclick="Gen.fixTag('face')">Face</button>
+        <button type="button" id="fix-tag-hand" onclick="Gen.fixTag('hand')">Hand</button>
+        <button type="button" onclick="Gen.fixClear()">Clear</button>
+      </div>
+      <div id="fix-wrap"><img id="fix-img" alt="fix source"><canvas id="fix-canvas"></canvas></div>
+      <button id="fix-go" class="gen-go" onclick="Gen.fix()" style="margin-top:8px;">Fix marked regions</button>
+      <div id="fix-result" class="gen-result" style="display:none;"></div>
     </div>
   </div>
 </aside>
@@ -2057,6 +2072,7 @@ document.addEventListener('DOMContentLoaded', function(){
 var Gen = (function(){
   var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null;
   var workflows=null, enhTimer=null;
+  var fixTag_='face', fixBoxes=[], fixStart=null;
   function el(id){return document.getElementById(id);}
   function open(){
     el('gen-drawer').classList.add('open'); el('gen-scrim').classList.add('open');
@@ -2187,7 +2203,7 @@ var Gen = (function(){
   function setEditSource(mid){
     el('edit-src').value=mid||'';
     var img=el('edit-src-img');
-    if(mid){ img.onerror=function(){img.style.display='none';}; img.src='/thumbs/'+mid+'.jpg'; img.style.display='block'; }
+    if(mid){ img.onerror=function(){img.style.display='none';}; img.src='/thumbs/'+mid+'.jpg'; img.style.display='block'; fixInit(); fixLoad(mid); }
     else { img.style.display='none'; }
     debEditCost();
   }
@@ -2217,6 +2233,44 @@ var Gen = (function(){
     runTask('/api/edit', p, el('edit-result'),
             {past:'Edited', btn:el('edit-go'), busy:'Editing\\u2026', idle:'Apply edit'});
   }
+  function fixTag(t){ fixTag_=t; el('fix-tag-face').classList.toggle('on',t==='face'); el('fix-tag-hand').classList.toggle('on',t==='hand'); }
+  function fixClear(){ fixBoxes=[]; fixRedraw(); }
+  function fixColor(tag){ return tag==='face' ? '#b692e6' : '#4fc99a'; }
+  function fixRedraw(){
+    var cv=el('fix-canvas'); if(!cv || !cv.getContext) return;
+    var ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height);
+    fixBoxes.forEach(function(b){
+      ctx.strokeStyle=fixColor(b.tag); ctx.lineWidth=2; ctx.strokeRect(b.x,b.y,b.w,b.h);
+      ctx.fillStyle=fixColor(b.tag); ctx.font='11px system-ui'; ctx.fillText(b.tag,b.x+3,b.y+13);
+    });
+  }
+  function fixResize(){
+    var img=el('fix-img'), cv=el('fix-canvas'); if(!img||!cv) return;
+    cv.width=img.clientWidth; cv.height=img.clientHeight;
+    cv.style.width=img.clientWidth+'px'; cv.style.height=img.clientHeight+'px'; fixRedraw();
+  }
+  function fixLoad(mid){
+    fixBoxes=[]; var img=el('fix-img'); if(!img) return;
+    img.onload=fixResize; img.onerror=function(){ el('fix-canvas').width=0; };
+    img.src='/full/'+encodeURIComponent(mid);
+  }
+  function fixInit(){
+    var cv=el('fix-canvas'); if(!cv || cv._wired) return; cv._wired=true;
+    function pos(e){ var r=cv.getBoundingClientRect(); var t=e.touches&&e.touches[0]?e.touches[0]:e; return {x:t.clientX-r.left,y:t.clientY-r.top}; }
+    function down(e){ fixStart=pos(e); e.preventDefault(); }
+    function move(e){ if(!fixStart)return; var p=pos(e); fixRedraw(); var ctx=cv.getContext('2d'); ctx.strokeStyle=fixColor(fixTag_); ctx.lineWidth=2; ctx.strokeRect(fixStart.x,fixStart.y,p.x-fixStart.x,p.y-fixStart.y); e.preventDefault(); }
+    function up(e){ if(!fixStart)return; var p=e.changedTouches&&e.changedTouches[0]?{x:e.changedTouches[0].clientX-cv.getBoundingClientRect().left,y:e.changedTouches[0].clientY-cv.getBoundingClientRect().top}:pos(e); var x=Math.min(fixStart.x,p.x),y=Math.min(fixStart.y,p.y),w=Math.abs(p.x-fixStart.x),h=Math.abs(p.y-fixStart.y); fixStart=null; if(w>6&&h>6) fixBoxes.push({x:x,y:y,w:w,h:h,tag:fixTag_}); fixRedraw(); }
+    cv.addEventListener('mousedown',down); cv.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+    cv.addEventListener('touchstart',down,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); cv.addEventListener('touchend',up);
+  }
+  function fix(){
+    var src=editSrc(); if(!src){ el('edit-src').focus(); return; }
+    if(!fixBoxes.length){ el('fix-result').style.display='block'; el('fix-result').innerHTML='<span style="color:var(--subtext);font-size:12px;">Drag a box over a hand or face first.</span>'; return; }
+    var img=el('fix-img'); var scale = (img.naturalWidth && img.clientWidth) ? (img.naturalWidth/img.clientWidth) : 1;
+    var boxes=fixBoxes.map(function(b){ return {x:Math.round(b.x*scale),y:Math.round(b.y*scale),width:Math.round(b.w*scale),height:Math.round(b.h*scale),tag:b.tag}; });
+    runTask('/api/fix', {source:src, boxes:boxes}, el('fix-result'),
+            {past:'Fixed', btn:el('fix-go'), busy:'Fixing\\u2026', idle:'Fix marked regions'});
+  }
   function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
   function loadWorkflows(){
     if(workflows) return Promise.resolve(workflows);
@@ -2244,7 +2298,7 @@ var Gen = (function(){
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
-          renderWorkflows:renderWorkflows,
+          renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
           get selected(){return selected;}};
 })();
 document.addEventListener('DOMContentLoaded', function(){
@@ -3257,6 +3311,26 @@ function savePrompt() {
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
+            return jsonify({"task_id": task_id})
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+    @app.route("/api/fix", methods=["POST"])
+    def api_fix():
+        """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
+        pixel coords. Localhost-gated; returns {task_id} for the async poller."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            src = str(p.get("source") or "").strip()
+            boxes = p.get("boxes") or []
+            if not src:
+                return jsonify({"error": "pick an image first"}), 400
+            if not boxes:
+                return jsonify({"error": "draw a box over a hand or face"}), 400
+            task_id = core.submit_fixer(session, src, boxes)
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200

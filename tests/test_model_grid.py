@@ -107,3 +107,26 @@ def test_collect_generation(monkeypatch, tmp_path):
     monkeypatch.setattr(core, "_download_image_task", lambda *a, **k: ["/M1.webp"])
     got = core.collect_generation(object(), "T", str(tmp_path))
     assert got["media_ids"] == ["M1"] and got["saved"] == 1
+
+
+def test_submit_fixer_filters_and_submits(monkeypatch):
+    seen = {}
+    def fake_post(s, path, body, **k):
+        seen["path"] = path
+        seen["body"] = body
+        return {"id": "F1"}
+    monkeypatch.setattr(core, "_rest_post", fake_post)
+    tid = core.submit_fixer(object(), "M", [
+        {"x": 10, "y": 20, "width": 30, "height": 40, "tag": "FACE"},  # kept (tag lowercased)
+        {"x": 1, "y": 1, "width": 0, "height": 5, "tag": "hand"},      # dropped (w == 0)
+        {"x": 1, "y": 1, "width": 5, "height": 5, "tag": "nope"},      # dropped (bad tag)
+    ])
+    assert tid == "F1" and seen["path"] == "/task/fixer" and seen["body"]["mediaId"] == "M"
+    assert seen["body"]["boxes"] == [{"x": 10, "y": 20, "width": 30, "height": 40, "tag": "face"}]
+
+
+def test_submit_fixer_needs_a_box(monkeypatch):
+    import pytest
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"id": "x"})
+    with pytest.raises(core.PixAIError):
+        core.submit_fixer(object(), "M", [])

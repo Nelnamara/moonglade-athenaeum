@@ -3022,6 +3022,32 @@ def submit_generation(session, params):
     return str(task_id)
 
 
+def submit_fixer(session, media_id, boxes):
+    """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
+    generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
+    'hand' | 'face' (<=20). Builds a mask from the boxes and repairs those regions. Raises."""
+    clean = []
+    for b in (boxes or []):
+        tag = str((b or {}).get("tag") or "").lower()
+        if tag not in ("hand", "face"):
+            continue
+        try:
+            x, y = max(0, int(b["x"])), max(0, int(b["y"]))
+            w, h = int(b["width"]), int(b["height"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if w > 0 and h > 0:
+            clean.append({"x": x, "y": y, "width": w, "height": h, "tag": tag})
+    if not clean:
+        raise PixAIError("fixer needs at least one hand/face box")
+    data = _rest_post(session, "/task/fixer",
+                      {"mediaId": str(media_id), "boxes": clean[:20]}) or {}
+    tid = data.get("id")
+    if not tid:
+        raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
+    return str(tid)
+
+
 _GEN_DONE = ("completed", "success", "succeeded", "done", "finished")
 _GEN_FAIL = ("failed", "error", "cancelled", "canceled", "rejected")
 
