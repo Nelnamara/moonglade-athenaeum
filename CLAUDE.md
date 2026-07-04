@@ -74,7 +74,7 @@ mass commit. Follow this protocol:
 | `embed_metadata()` | Write prompt/IDs/date into PNG text chunks or JPEG EXIF |
 | `build_stem_name()` | Filesystem-safe names from prompt |
 | `already_downloaded()` | Resume check: rglob the whole tree for `*_<mediaId>.*` |
-| `cmd_organize()` | Sort flat files into `batches/` and `YYYY-MM/`; writes batch name to catalog |
+| `cmd_organize()` | Re-normalize the WHOLE backup (`rglob`) into ONE scheme — `YYYY-MM/` month folders, descriptive names, no `batches/` (collapsed 2026-06-27, `9e3f4a1`). Reversible via `organize_manifest.csv` / `--undo-organize` |
 | `_ensure_db()` | Auto-migrates catalog.csv → catalog.db if needed; used by all commands |
 | `audit_collection()` | Filesystem-truth duplicate audit: Class A (same media_id in >1 folder) + Class B (byte-identical, different id via size-bucketed hashing) |
 | `cmd_audit()` / `cmd_dedup()` | Read-only report / quarantine-or-delete redundant copies, keep most-organized, reconcile catalog |
@@ -139,7 +139,7 @@ mass commit. Follow this protocol:
 
 4. **`catalog.db` is the source of truth** for `--organize` and related commands. Don't make those modes depend on re-querying the API.
 
-5. **`--organize` only moves flat files in `images/`** (non-recursive glob). This makes it idempotent. Do not switch to rglob.
+5. **`--organize` re-normalizes the WHOLE backup via `rglob`** into one collapsed scheme — `out/YYYY-MM/<prompt_taskid_mediaid>` month folders (since `9e3f4a1`, 2026-06-27; the old `images/`-only non-recursive glob and `batches/` mode are gone — do NOT reintroduce them). It stays idempotent (files already at target = "already in place"), byte-safe (identical dupes dropped, differing kept side-by-side), and reversible (`organize_manifest.csv` + `--undo-organize`). Skips `gallery/`, `_duplicates/`, `videos/`, `imported/`; leaves `source='local'` + videos untouched.
 
 6. **`find_image_file` excludes `out_dir/gallery/`** to prevent thumbnails from being returned as full-res images.
 
