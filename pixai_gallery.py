@@ -655,6 +655,40 @@ def save_ach_state(out_dir, state):
         return False
 
 
+def top_published_rows(db_path, limit=12):
+    """The owner's top published artworks by likes -> rows with artwork_id + engagement.
+    Feeds the 'Your Art' panel (live views are fetched per artwork_id on top of this)."""
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT media_id, artwork_id, title, prompt_preview, aes_score, "
+            "CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes, "
+            "CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments "
+            "FROM catalog WHERE is_published = '1' AND COALESCE(artwork_id,'') != '' "
+            "ORDER BY likes DESC, comments DESC LIMIT ?", (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+
+
+def published_totals(db_path):
+    """At-a-glance totals across ALL the owner's published artworks (from --sync-artworks)."""
+    con = _connect(db_path)
+    try:
+        r = con.execute(
+            "SELECT COUNT(*) AS c, "
+            "COALESCE(SUM(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),0) AS likes, "
+            "COALESCE(SUM(CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER)),0) AS comments "
+            "FROM catalog WHERE is_published = '1'").fetchone()
+        return {"count": int(r[0] or 0), "likes": int(r[1] or 0), "comments": int(r[2] or 0)}
+    except sqlite3.Error:
+        return {"count": 0, "likes": 0, "comments": 0}
+    finally:
+        con.close()
+
+
 def distinct_task_count(db_path):
     """How many distinct generation TASKS the local catalog holds. This is the apples-to-apples
     counterpart to the server's `me.tasks.totalCount` (also tasks, not images) -> backup coverage
@@ -1827,6 +1861,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <a class="btn" href="/edit-bay" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     <button type="button" class="btn" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
     <button type="button" class="btn" onclick="Contests.open()" title="Live PixAI contests &mdash; the Oasis was never a 1-player game">&#127941; Contests</button>
+    <button type="button" class="btn" onclick="YourArt.open()" title="How your published art is doing &mdash; views, likes, comments">&#128200; My Art</button>
     <a class="btn" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
     <a class="btn" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
   </div>
@@ -2918,7 +2953,29 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="ct-foot">A community thing &mdash; the Oasis was never a 1-player game. Enter from the PixAI site. <a href="#" onclick="Contests.toggleAll(event)" id="ct-all">Show ended too</a></div>
   </div>
 </div>
+<div id="art-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)YourArt.close()">
+  <div class="ach-panel" role="dialog" aria-label="Your art">
+    <button type="button" class="ach-x" onclick="YourArt.close()" aria-label="Close">&times;</button>
+    <div class="ach-htitle">&#128200; Your Art</div>
+    <div class="ach-hsub" id="art-sub">Loading&hellip;</div>
+    <div id="art-grid" class="art-grid"></div>
+    <div class="ct-foot" id="art-foot"></div>
+  </div>
+</div>
 <style>
+  .art-tot{display:flex;gap:22px;margin:16px 0 4px;}
+  .art-tot .cell{display:flex;flex-direction:column;}
+  .art-tot .num{font-size:22px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;}
+  .art-tot .num.v{color:var(--lavender);} .art-tot .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);}
+  .art-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:11px;margin-top:14px;}
+  .art-card{display:flex;gap:10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:11px;padding:9px;align-items:center;}
+  .art-card img{width:52px;height:52px;border-radius:7px;object-fit:cover;background:var(--surface1);flex:0 0 auto;}
+  .art-card .ab{min-width:0;flex:1;}
+  .art-card .anm{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .art-card .ast{display:flex;gap:9px;font-size:11px;color:var(--subtext);margin-top:4px;font-variant-numeric:tabular-nums;}
+  .art-card .ast .v{color:var(--lavender);}
+  .art-rank{font-size:11px;font-weight:700;color:var(--overlay0);width:18px;text-align:right;flex:0 0 auto;}
+  .ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}
   .ct-sect{font-size:13px;font-weight:700;color:var(--text);margin:18px 0 9px;display:flex;align-items:center;gap:7px;}
   .ct-sect .ct-count{font-size:10.5px;font-weight:500;color:var(--overlay0);}
   .ct-sect.official{color:var(--gold);}
@@ -3172,6 +3229,47 @@ var Contests = (function(){
   }
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
   return { open:open, close:close, toggleAll:toggleAll };
+})();
+var YourArt = (function(){
+  function el(id){return document.getElementById(id);}
+  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmt(n){ return (Number(n)||0).toLocaleString(); }
+  var loaded=false;
+  function open(){ el('art-modal').classList.add('open'); el('art-modal').setAttribute('aria-hidden','false'); if(!loaded) load(); }
+  function close(){ el('art-modal').classList.remove('open'); el('art-modal').setAttribute('aria-hidden','true'); }
+  function load(){
+    el('art-sub').textContent='Loading\\u2026';
+    fetch('/api/your-art').then(function(r){return r.json();}).then(function(d){ loaded=true; render(d); })
+      .catch(function(){ el('art-sub').textContent='Could not load your art.'; });
+  }
+  function render(d){
+    var items=d.items||[], t=d.totals||{};
+    if(!t.count){ el('art-sub').innerHTML='No published art synced yet \\u2014 run <code>--sync-artworks</code> to pull your posted works\\u2019 stats.'; el('art-grid').innerHTML=''; el('art-foot').textContent=''; return; }
+    el('art-sub').innerHTML='<div class="art-tot">'
+      +'<div class="cell"><span class="num">'+fmt(t.count)+'</span><span class="lbl">published</span></div>'
+      +(d.views_synced?'<div class="cell"><span class="num v">'+fmt(t.views_top)+'</span><span class="lbl">views (top 12)</span></div>':'')
+      +'<div class="cell"><span class="num">'+fmt(t.likes)+'</span><span class="lbl">likes</span></div>'
+      +'<div class="cell"><span class="num">'+fmt(t.comments)+'</span><span class="lbl">comments</span></div></div>'
+      +'<div style="font-size:12px;color:var(--subtext);margin-top:2px;">Your top posts'+(d.views_synced?' by views':' by likes')+':</div>';
+    var g=el('art-grid'); g.innerHTML='';
+    items.forEach(function(m,i){
+      var c=document.createElement('div'); c.className='art-card';
+      var stats='';
+      if(m.views!=null) stats+='<span class="v">\\ud83d\\udc41 '+fmt(m.views)+'</span>';
+      stats+='<span>\\u2665 '+fmt(m.likes)+'</span>';
+      if(m.comments) stats+='<span>\\ud83d\\udcac '+fmt(m.comments)+'</span>';
+      if(m.aes_score) stats+='<span>\\u2726 '+esc(String(m.aes_score).slice(0,4))+'</span>';
+      c.innerHTML='<span class="art-rank">'+(i+1)+'</span>'
+        +'<img loading="lazy" src="/thumbs/'+esc(m.media_id)+'.jpg" alt="" onerror="this.style.visibility=\\'hidden\\'">'
+        +'<div class="ab"><div class="anm" title="'+esc(m.title||m.prompt_preview||'')+'">'+esc(m.title||m.prompt_preview||'(untitled)')+'</div>'
+        +'<div class="ast">'+stats+'</div></div>';
+      g.appendChild(c);
+    });
+    el('art-foot').innerHTML = d.views_synced ? 'Live view counts, fetched fresh. Likes/comments from your last <code>--sync-artworks</code>.'
+      : 'Ranked by likes (live views load on the localhost server). Run <code>--sync-artworks</code> to refresh stats.';
+  }
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
+  return { open:open, close:close };
 })();
 var Picker = (function(){
   var cb=null, timer=null, page=1, more=false, loading=false, curQ='';
@@ -4155,6 +4253,19 @@ document.addEventListener('DOMContentLoaded', function() {
     <span class="lbl">Title</span>
     <span class="val">{{ row.title }}</span>
     {% endif %}
+    {% if row.is_published == '1' %}
+    <span class="lbl">Engagement</span>
+    <span class="val">
+      <span id="detail-views" data-artwork="{{ row.artwork_id }}">{% if row.artwork_id %}&#128065; &hellip;{% endif %}</span>
+      {% if row.liked_count %}&#9829; {{ row.liked_count }}{% endif %}
+      {% if row.comment_count and row.comment_count != '0' %} &middot; &#128172; {{ row.comment_count }}{% endif %}
+      {% if row.aes_score %} &middot; &#10022; {{ row.aes_score[:4] }}{% endif %}
+    </span>
+    {% endif %}
+    {% if row.nsfw_scores %}
+    <span class="lbl">Content</span>
+    <span class="val" id="detail-nsfw" data-scores="{{ row.nsfw_scores|e }}"></span>
+    {% endif %}
     {% if row.art_tags %}
     <span class="lbl">Tags</span>
     <span class="val">{{ row.art_tags }}</span>
@@ -4250,6 +4361,28 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
 </div>
 <script>
+// Published-artwork engagement: live views (per artwork_id) + the captured granular NSFW
+// breakdown (nsfw_scores JSON). Both only present for synced published works.
+document.addEventListener('DOMContentLoaded', function(){
+  var vEl = document.getElementById('detail-views');
+  if (vEl && vEl.getAttribute('data-artwork')) {
+    fetch('/api/artwork-views?id='+encodeURIComponent(vEl.getAttribute('data-artwork')))
+      .then(function(r){return r.json();})
+      .then(function(d){ if(d && d.views!=null) vEl.innerHTML='\\ud83d\\udc41 '+Number(d.views).toLocaleString()+' '; })
+      .catch(function(){ vEl.textContent=''; });
+  }
+  var nEl = document.getElementById('detail-nsfw');
+  if (nEl && nEl.getAttribute('data-scores')) {
+    try {
+      var s = JSON.parse(nEl.getAttribute('data-scores'));
+      var parts = Object.keys(s).map(function(k){ return [k, s[k]]; })
+        .filter(function(p){ return p[1] >= 0.05; })
+        .sort(function(a,b){ return b[1]-a[1]; })
+        .map(function(p){ return p[0]+' '+Math.round(p[1]*100)+'%'; });
+      nEl.textContent = parts.length ? parts.join(' \\u00b7 ') : 'clean';
+    } catch(e){ nEl.textContent=''; }
+  }
+});
 function copyPrompt(btn) {
   var text = btn.getAttribute('data-prompt');
   navigator.clipboard.writeText(text).then(function(){
@@ -5395,6 +5528,44 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "community": sum(1 for c in contests if c["type"] != "official")})
         except Exception as e:
             return jsonify({"error": str(e)[:200], "contests": []}), 200
+
+    @app.route("/api/artwork-views")
+    def api_artwork_views():
+        """Live view count for one published artwork -> the detail page's Views metric.
+        Localhost-only (owner key). ?id=<artwork_id>."""
+        if not _is_local_request():
+            return jsonify({"views": None}), 403
+        aid = (request.args.get("id") or "").strip()
+        if not aid:
+            return jsonify({"views": None}), 400
+        try:
+            core, session = _gen_session()
+            return jsonify({"views": core.artwork_views(session, aid)})
+        except Exception as e:
+            return jsonify({"views": None, "error": str(e)[:120]}), 200
+
+    @app.route("/api/your-art")
+    def api_your_art():
+        """'Your Art' panel: the owner's top published works ranked by likes (from the catalog,
+        so it works over LAN) enriched with LIVE view counts (fetched per artwork_id, localhost
+        only since that uses the owner key). Read-only, no spend."""
+        top = top_published_rows(db_path, 12)
+        totals = published_totals(db_path)
+        views_synced = False
+        if top and _is_local_request():
+            try:
+                core, session = _gen_session()
+                import concurrent.futures as _cf
+                with _cf.ThreadPoolExecutor(max_workers=6) as ex:
+                    vs = list(ex.map(lambda r: core.artwork_views(session, r["artwork_id"]), top))
+                for r, v in zip(top, vs):
+                    r["views"] = v
+                top.sort(key=lambda r: (r.get("views") or 0, r.get("likes") or 0), reverse=True)
+                totals["views_top"] = sum(vs)
+                views_synced = True
+            except Exception:
+                pass
+        return jsonify({"items": top, "totals": totals, "views_synced": views_synced})
 
     @app.route("/api/achievements")
     def api_achievements():

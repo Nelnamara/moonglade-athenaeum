@@ -396,6 +396,38 @@ def test_api_contests_route(tmp_path, monkeypatch):
     assert all(c["active"] for c in d["contests"])
 
 
+def test_your_art_ranks_published_and_enriches_views(tmp_path, monkeypatch):
+    import pixai_gallery as g
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    # views come from a per-artwork call; mock it deterministically off the artwork_id
+    monkeypatch.setattr(core, "artwork_views", lambda s, aid: {"aw1": 500, "aw2": 90}.get(aid, 0))
+    cli = _client(tmp_path, [
+        _row(media_id="1", artwork_id="aw1", filename="a_1.png", is_published="1",
+             liked_count="4", comment_count="2", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", artwork_id="aw2", filename="b_2.png", is_published="1",
+             liked_count="40", comment_count="0", created_at="2025-01-02T00:00:00"),
+        _row(media_id="3", filename="c_3.png", is_published="",  # not published -> excluded
+             liked_count="99", created_at="2025-01-03T00:00:00"),
+    ])
+    # pure helpers
+    assert [r["media_id"] for r in g.top_published_rows(tmp_path / "catalog.db")] == ["2", "1"]  # by likes
+    assert g.published_totals(tmp_path / "catalog.db") == {"count": 2, "likes": 44, "comments": 2}
+    # route: localhost -> enriched with views, re-sorted by views (aw1=500 > aw2=90)
+    d = cli.get("/api/your-art").get_json()
+    assert d["views_synced"] is True and d["totals"]["count"] == 2
+    assert [m["media_id"] for m in d["items"]] == ["1", "2"]     # aw1 (500 views) now first
+    assert d["items"][0]["views"] == 500
+
+
+def test_artwork_views_route(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "artwork_views", lambda s, aid: 174)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.get("/api/artwork-views?id=aw9").get_json() == {"views": 174}
+    assert cli.get("/api/artwork-views").get_json()["views"] is None   # missing id -> 400/null
+
+
 def test_branding_absent_is_404(tmp_path):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
