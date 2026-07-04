@@ -2202,10 +2202,12 @@ document.addEventListener('DOMContentLoaded', function(){
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
   .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
   #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;overflow-y:auto;transition:opacity .12s;flex:1;min-height:120px;align-content:start;}
-  .pick-cell{aspect-ratio:1;min-height:0;border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--surface0);}
+  .pick-cell{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--surface0);}
   .pick-cell:hover{border-color:var(--lavender);}
-  .pick-cell img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .18s;}
-  .pick-cell img.loaded{opacity:1;}
+  /* aspect-ratio on the IMG (not the cell) -- mirrors the main gallery grid. Putting it
+     on the cell + height:100% on the img is a percentage-height-against-indefinite-height
+     trap: the img blows out to its intrinsic height and cells overlap into a torn smear. */
+  .pick-cell img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:var(--surface0);}
   .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
   #pick-up{flex:0 0 auto;height:33px;padding:0 12px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;}
   #pick-up:hover{border-color:var(--overlay0);}
@@ -2478,9 +2480,8 @@ var Picker = (function(){
       if(!imgs.length && !append){ empty.textContent='No images found.'; empty.style.display='block'; return; }
       empty.style.display='none';
       imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
-        c.innerHTML='<img loading="lazy" decoding="async" onload="this.classList.add(\\'loaded\\')" src="'+m.thumb+'" alt="">';
-        c.onclick=function(){ pick(m); }; grid.appendChild(c);
-        var im=c.querySelector('img'); if(im&&im.complete) im.classList.add('loaded'); });
+        c.innerHTML='<img loading="lazy" decoding="async" src="'+m.thumb+'" alt="">';
+        c.onclick=function(){ pick(m); }; grid.appendChild(c); });
     }).catch(function(){ loading=false; grid.style.opacity='1'; });
   }
   function onScroll(){ var g=el('pick-grid');
