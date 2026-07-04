@@ -3818,6 +3818,120 @@ def run_account_info(args):
     return {"quota": me.get("quotaAmount"), "membership": mem.get("membershipId")}
 
 
+# --- Live event push (WebSocket) ------------------------------------------------
+# PixAI pushes personal events over a graphql-transport-ws WebSocket at
+# wss://gw.pixai.art/graphql -- a SEPARATE transport from the api.pixai.art HTTP API.
+# The `personalEvents` subscription (no args) streams two channels: `taskUpdated`
+# (your generations changing state) and `newNotification`. Listening is READ-ONLY and
+# far gentler on PixAI than periodic polling. Confirmed reachable with the same Bearer
+# token the tool already holds (see private/APP_OPERATIONS_FULL.md).
+#
+# STATUS: this `--watch` command is the live monitor + the capture tool for the ONE
+# unknown -- the exact `status` string a completed task emits. Run it, start a
+# generation in the PixAI web UI, and it prints the frames; that pins the completion
+# enum so a future event-driven backup can trigger on it (instead of polling).
+_WS_URI = "wss://gw.pixai.art/graphql"
+_WS_SUBSCRIPTION = (
+    "subscription Watch { personalEvents { "
+    "taskUpdated { id status updatedAt mediaId media { id urls { url } } priority userId } "
+    "newNotification { id title createdAt userId } } }")
+
+
+async def _watch_events_async(auth_header, on_event, seconds):
+    """Connect, handshake, subscribe to personalEvents, and dispatch each `next` frame's
+    payload to on_event(dict). Replies to server pings. Runs until `seconds` elapses (None =
+    until cancelled). Read-only: sends only connection_init / subscribe / pong / complete."""
+    import asyncio
+    import websockets
+    async def _run():
+        async with websockets.connect(
+                _WS_URI, subprotocols=["graphql-transport-ws"],
+                additional_headers={"Origin": "https://pixai.art"}) as ws:
+            await ws.send(json.dumps({"type": "connection_init",
+                                      "payload": {"Authorization": auth_header}}))
+            ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            if ack.get("type") != "connection_ack":
+                raise PixAIError("WebSocket handshake failed (no connection_ack): {!r}".format(ack))
+            await ws.send(json.dumps({"id": "watch", "type": "subscribe",
+                                      "payload": {"query": _WS_SUBSCRIPTION}}))
+            on_event({"__meta__": "subscribed"})
+            while True:
+                msg = json.loads(await ws.recv())
+                mtype = msg.get("type")
+                if mtype == "ping":
+                    await ws.send(json.dumps({"type": "pong"})); continue
+                if mtype == "error":
+                    raise PixAIError("subscription rejected: {}".format(
+                        json.dumps(msg.get("payload"))))
+                if mtype == "complete":
+                    break
+                if mtype == "next":
+                    ev = (((msg.get("payload") or {}).get("data") or {})
+                          .get("personalEvents") or {})
+                    on_event(ev)
+    if seconds:
+        try:
+            await asyncio.wait_for(_run(), timeout=seconds)
+        except asyncio.TimeoutError:
+            pass
+    else:
+        await _run()
+
+
+def run_watch(args):
+    """CLI: live-monitor your PixAI events over the push WebSocket (read-only). Prints each
+    taskUpdated / newNotification as it arrives. Also the capture tool for the completion-status
+    enum: run it, fire ONE generation in the browser, and read the printed `status`."""
+    import asyncio
+    session = _make_session(getattr(args, "token", None))
+    auth = session.headers.get("Authorization")
+    if not auth:
+        print("No Authorization token on the session -- check your API key.")
+        return
+    seconds = getattr(args, "watch_seconds", 0) or None
+    enc = (sys.stdout.encoding or "utf-8")
+
+    def _safe(t):
+        return str(t).encode(enc, "replace").decode(enc, "replace")
+
+    seen = {"n": 0}
+
+    def on_event(ev):
+        if ev.get("__meta__") == "subscribed":
+            print("[*] connected + subscribed to personalEvents. Listening"
+                  + (" for {}s".format(seconds) if seconds else " (Ctrl-C to stop)") + "...")
+            print("    -> now START ONE generation in the PixAI web UI to capture a completion "
+                  "frame.\n")
+            return
+        seen["n"] += 1
+        tu = ev.get("taskUpdated")
+        nn = ev.get("newNotification")
+        if tu:
+            urls = (((tu.get("media") or {}).get("urls")) or [])
+            url = (urls[0].get("url") if urls else "") or ""
+            print("  [taskUpdated] status={:<14} task={} media={} {}".format(
+                _safe(tu.get("status")), tu.get("id"), tu.get("mediaId") or "-", _safe(url)[:70]))
+        if nn:
+            print("  [notification] {} — {}".format(
+                _safe(nn.get("title")), (nn.get("createdAt") or "")[:19]))
+        if not tu and not nn:
+            print("  [event] " + _safe(json.dumps(ev))[:200])
+
+    print("Watching PixAI live events at {} (read-only; gentler than polling).".format(_WS_URI))
+    try:
+        asyncio.run(_watch_events_async(auth, on_event, seconds))
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print("\nWatch ended: {}".format(_safe(str(e)[:200])))
+        return
+    print("\nStopped. Captured {} event(s).".format(seen["n"]))
+    if seen["n"]:
+        print("If you saw a taskUpdated with a terminal status (the value when your gen "
+              "FINISHED), tell me that exact `status=` string — it's the last piece for "
+              "event-driven backup.")
+
+
 # --- Free "cards" (kaisuuken / 回数券) -------------------------------------------
 # PixAI grants free-generation tickets ("kaisuuken", model-locked) via membership/events.
 # These live on the oRPC /v2 REST API, NOT GraphQL (verified 2026-07-03 from the app's
@@ -4984,6 +5098,11 @@ def main():
     ap.add_argument("--cards", action="store_true",
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
+    ap.add_argument("--watch", action="store_true",
+                    help="live-monitor your PixAI events over the push WebSocket (read-only; "
+                         "gentler than polling). Prints task/notification events as they arrive")
+    ap.add_argument("--watch-seconds", type=int, default=0, metavar="N",
+                    help="with --watch, auto-stop after N seconds (default: run until Ctrl-C)")
     ap.add_argument("--claims", action="store_true",
                     help="list your claimable rewards (daily credits, agent stamina), then "
                          "exit. Read-only")
@@ -5186,6 +5305,9 @@ def main():
             return
         if getattr(args, "cards", False):
             run_cards(args)
+            return
+        if getattr(args, "watch", False):
+            run_watch(args)
             return
         if getattr(args, "claims", False) or getattr(args, "claim", ""):
             run_claims(args)
