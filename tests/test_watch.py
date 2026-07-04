@@ -80,6 +80,41 @@ def test_watch_answers_ping_and_raises_on_error(monkeypatch):
     assert any(m.get("type") == "pong" for m in ws.sent)   # replied to the ping
 
 
+def test_watch_backup_mirrors_completed_only(monkeypatch, tmp_path):
+    """--watch-backup mirrors a task the instant it hits 'completed' (and only then), once."""
+    import threading
+    from types import SimpleNamespace
+
+    # feed a full lifecycle through a fake transport, synchronously
+    async def fake_watch(auth, on_event, seconds):
+        on_event({"__meta__": "subscribed"})
+        on_event({"taskUpdated": {"id": "T9", "status": "waiting"}})
+        on_event({"taskUpdated": {"id": "T9", "status": "running"}})
+        on_event({"taskUpdated": {"id": "T9", "status": "completed", "mediaId": "M9"}})
+        on_event({"taskUpdated": {"id": "T9", "status": "completed", "mediaId": "M9"}})  # dup
+    monkeypatch.setattr(core, "_watch_events_async", fake_watch)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
+
+    class _FakeThread:   # run the mirror synchronously so the test is deterministic
+        def __init__(self, target=None, args=(), daemon=None):
+            self._t, self._a = target, args
+        def start(self):
+            self._t(*self._a)
+    monkeypatch.setattr(threading, "Thread", _FakeThread)
+
+    calls = []
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, tid, out, **k: calls.append(tid) or {"saved": 4})
+
+    args = SimpleNamespace(token=None, watch_seconds=0, watch_backup=True, out=str(tmp_path))
+    core.run_watch(args)
+    assert calls == ["T9"]   # mirrored exactly once, only on 'completed' (waiting/running ignored)
+
+
+class _Sess:
+    headers = {"Authorization": "Bearer sk-x"}
+
+
 def test_watch_no_ack_raises(monkeypatch):
     ws = _FakeWS([json.dumps({"type": "connection_error", "payload": "nope"})])
     monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)

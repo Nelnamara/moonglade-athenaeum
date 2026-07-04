@@ -3835,6 +3835,9 @@ _WS_SUBSCRIPTION = (
     "subscription Watch { personalEvents { "
     "taskUpdated { id status updatedAt mediaId media { id urls { url } } priority userId } "
     "newNotification { id title createdAt userId } } }")
+# Confirmed lifecycle (owner-captured 2026-07-04): waiting -> running -> completed. The
+# 'completed' frame is the one carrying a populated mediaId, so that's when we mirror.
+_WS_DONE_STATUS = "completed"
 
 
 async def _watch_events_async(auth_header, on_event, seconds):
@@ -3880,28 +3883,43 @@ async def _watch_events_async(auth_header, on_event, seconds):
 
 def run_watch(args):
     """CLI: live-monitor your PixAI events over the push WebSocket (read-only). Prints each
-    taskUpdated / newNotification as it arrives. Also the capture tool for the completion-status
-    enum: run it, fire ONE generation in the browser, and read the printed `status`."""
+    taskUpdated / newNotification as it arrives. With --watch-backup, a task reaching
+    'completed' is downloaded + cataloged the instant it finishes -- event-driven backup
+    (the polling loop becomes a fallback, not the default). This is the 'live mirror' mode."""
     import asyncio
+    import threading
     session = _make_session(getattr(args, "token", None))
     auth = session.headers.get("Authorization")
     if not auth:
         print("No Authorization token on the session -- check your API key.")
         return
     seconds = getattr(args, "watch_seconds", 0) or None
+    do_backup = bool(getattr(args, "watch_backup", False))
+    out_dir = getattr(args, "out", "pixai_backup") or "pixai_backup"
     enc = (sys.stdout.encoding or "utf-8")
 
     def _safe(t):
         return str(t).encode(enc, "replace").decode(enc, "replace")
 
-    seen = {"n": 0}
+    seen = {"n": 0, "saved": 0}
+    backed = set()   # task ids already mirrored this session (a 'completed' can repeat)
+
+    def _mirror(tid):
+        """Download + catalog one finished task off the event loop (own session per thread)."""
+        try:
+            res = collect_generation(_make_session(getattr(args, "token", None)), tid, out_dir)
+            n = res.get("saved") or 0
+            seen["saved"] += n
+            print("      -> mirrored task {}: {} file(s) {}".format(
+                tid, n, "[video]" if res.get("is_video") else ""))
+        except Exception as e:
+            print("      -> backup of task {} failed: {}".format(tid, _safe(str(e)[:140])))
 
     def on_event(ev):
         if ev.get("__meta__") == "subscribed":
-            print("[*] connected + subscribed to personalEvents. Listening"
-                  + (" for {}s".format(seconds) if seconds else " (Ctrl-C to stop)") + "...")
-            print("    -> now START ONE generation in the PixAI web UI to capture a completion "
-                  "frame.\n")
+            mode = "mirroring completed tasks -> {}".format(out_dir) if do_backup else "monitor only"
+            print("[*] connected + subscribed to personalEvents ({}). Listening".format(mode)
+                  + (" for {}s".format(seconds) if seconds else " (Ctrl-C to stop)") + "...\n")
             return
         seen["n"] += 1
         tu = ev.get("taskUpdated")
@@ -3909,8 +3927,13 @@ def run_watch(args):
         if tu:
             urls = (((tu.get("media") or {}).get("urls")) or [])
             url = (urls[0].get("url") if urls else "") or ""
+            status = tu.get("status")
+            tid = str(tu.get("id") or "")
             print("  [taskUpdated] status={:<14} task={} media={} {}".format(
-                _safe(tu.get("status")), tu.get("id"), tu.get("mediaId") or "-", _safe(url)[:70]))
+                _safe(status), tid or "-", tu.get("mediaId") or "-", _safe(url)[:70]))
+            if do_backup and status == _WS_DONE_STATUS and tid and tid not in backed:
+                backed.add(tid)
+                threading.Thread(target=_mirror, args=(tid,), daemon=True).start()
         if nn:
             print("  [notification] {} — {}".format(
                 _safe(nn.get("title")), (nn.get("createdAt") or "")[:19]))
@@ -3925,11 +3948,10 @@ def run_watch(args):
     except Exception as e:
         print("\nWatch ended: {}".format(_safe(str(e)[:200])))
         return
-    print("\nStopped. Captured {} event(s).".format(seen["n"]))
-    if seen["n"]:
-        print("If you saw a taskUpdated with a terminal status (the value when your gen "
-              "FINISHED), tell me that exact `status=` string — it's the last piece for "
-              "event-driven backup.")
+    msg = "\nStopped. Saw {} event(s)".format(seen["n"])
+    if do_backup:
+        msg += ", mirrored {} file(s)".format(seen["saved"])
+    print(msg + ".")
 
 
 # --- Contests (community + official) --------------------------------------------
@@ -5202,6 +5224,9 @@ def main():
                          "gentler than polling). Prints task/notification events as they arrive")
     ap.add_argument("--watch-seconds", type=int, default=0, metavar="N",
                     help="with --watch, auto-stop after N seconds (default: run until Ctrl-C)")
+    ap.add_argument("--watch-backup", action="store_true",
+                    help="with --watch, mirror each generation into --out the instant it "
+                         "reaches 'completed' (event-driven backup; no polling). Read-only")
     ap.add_argument("--claims", action="store_true",
                     help="list your claimable rewards (daily credits, agent stamina), then "
                          "exit. Read-only")
