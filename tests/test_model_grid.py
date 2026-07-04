@@ -170,6 +170,43 @@ def test_model_search_market_gql(monkeypatch):
     assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
 
 
+def test_task_image_media_prefers_batch_over_grid():
+    """A batchSize>1 task stores a composite GRID under outputs.mediaId and the individual
+    images under outputs.batch[] -- we must save the individuals (with per-image seeds), never
+    the grid. This is the batch-under-capture fix."""
+    outputs = {"mediaId": "GRID", "seed": "111", "batch": [
+        {"mediaId": "A", "seed": "111"}, {"mediaId": "B", "seed": "222"},
+        {"mediaId": "C"},                                   # missing seed -> shared
+        {"mediaId": ""},                                     # empty -> skipped
+    ]}
+    media = core._task_image_media(outputs)
+    assert [m for m, _ in media] == ["A", "B", "C"]          # the reals, NOT "GRID"
+    assert dict(media) == {"A": "111", "B": "222", "C": "111"}  # per-image seed, shared fallback
+
+
+def test_task_image_media_single_and_legacy():
+    # single image: no batch -> use mediaId
+    assert core._task_image_media({"mediaId": "X", "seed": "9"}) == [("X", "9")]
+    # legacy shape (batchMediaIds, no batch) still works, deduped
+    m = core._task_image_media({"mediaId": "X", "seed": "9", "batchMediaIds": ["X", "Y"]})
+    assert [mid for mid, _ in m] == ["X", "Y"]
+    assert core._task_image_media({}) == []
+
+
+def test_task_detail_query_adhoc_fallback(monkeypatch):
+    """When TASK_DETAIL_HASH is missing, _task_detail_query uses the ad-hoc task(id:) query
+    (no persisted hash) -- unblocking --full-meta. When present, it uses task_detail_gql."""
+    monkeypatch.setattr(core, "TASK_DETAIL_HASH", "")
+    monkeypatch.setattr(core, "gql_adhoc",
+                        lambda s, q, v=None: {"task": {"id": v["id"], "status": "completed"}})
+    t = core._task_detail_query(object(), "T7")
+    assert t["id"] == "T7" and t["status"] == "completed"
+    # with a hash present it delegates to the persisted getTaskById
+    monkeypatch.setattr(core, "TASK_DETAIL_HASH", "deadbeef")
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {"id": tid, "via": "persisted"})
+    assert core._task_detail_query(object(), "T8") == {"id": "T8", "via": "persisted"}
+
+
 def test_workflow_catalog(monkeypatch):
     monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"workflows": {"edges": [
         {"node": {"id": "1794855217667308480", "name": "Image Upscale",
