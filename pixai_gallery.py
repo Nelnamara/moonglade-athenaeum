@@ -1296,8 +1296,6 @@ def create_app(out_dir: Path):
     header h1 { font-size: 16px; }
     header .back-link { font-size: 12px; }
   .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-  .head-nav a.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; color: var(--text); }
-  .head-nav a.btn:hover { border-color: var(--overlay0); text-decoration: none; }
     .filter-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 12px 0; }
     .filters { display: none; flex-direction: column; align-items: stretch; padding: 10px 12px; }
     .filters.open { display: flex; }
@@ -1314,12 +1312,23 @@ def create_app(out_dir: Path):
     .filters { padding: 10px 14px; }
     .grid { padding: 12px 14px; }
   }
-  .btn { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 13px; }
-  .btn:hover { background: var(--surface1); }
+  .btn { background: linear-gradient(180deg, #2b2748 0%, #211f3a 100%); color: var(--text); border: 1px solid var(--surface1); border-radius: 7px; padding: 6px 14px; cursor: pointer; font-size: 13px; line-height: 1.2; transition: border-color .14s, box-shadow .14s, transform .05s; }
+  a.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; color: var(--text); }
+  .btn:hover { border-color: var(--lavender); box-shadow: 0 0 0 1px rgba(182,146,230,.28), 0 3px 10px -3px rgba(182,146,230,.45); text-decoration: none; }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible { outline: 2px solid var(--lavender); outline-offset: 1px; }
   .btn-danger { background: var(--red); color: var(--base); border-color: var(--red); font-weight: 600; }
-  .btn-danger:hover { opacity: 0.85; }
-  .btn-primary { background: var(--lavender); color: var(--base); border-color: var(--lavender); font-weight: 600; }
-  .btn-primary:hover { opacity: 0.85; }
+  .btn-danger:hover { opacity: 0.9; box-shadow: 0 3px 10px -3px rgba(243,139,168,.5); }
+  .btn-primary { background: linear-gradient(180deg, #c4a6f0 0%, var(--lavender) 100%); color: var(--base); border-color: var(--lavender); font-weight: 600; }
+  .btn-primary:hover { box-shadow: 0 0 0 1px rgba(182,146,230,.5), 0 4px 14px -4px rgba(182,146,230,.7); }
+  /* All dropdowns share the button look: dark, rounded, custom lavender-grey caret. */
+  .filters select, #preset-select, select.p-sel { -webkit-appearance: none; appearance: none;
+    background-color: var(--surface0);
+    background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="10" height="6"%3E%3Cpath d="M0 0l5 6 5-6z" fill="%239a93ab"/%3E%3C/svg%3E');
+    background-repeat: no-repeat; background-position: right 10px center;
+    border: 1px solid var(--surface1); border-radius: 7px; color: var(--text);
+    padding: 6px 28px 6px 12px; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .filters select:hover, #preset-select:hover, select.p-sel:hover { border-color: var(--lavender); }
 
   /* Active-filter chips */
   .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px 0; align-items: center; }
@@ -3694,7 +3703,7 @@ function savePrompt() {
 {% endmacro %}
 <header>
   <div class="brand"><span class="mark">M</span><h1>Collection Health</h1></div>
-  <a class="back-link" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
+  <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 
 <div style="padding:8px 20px 24px;max-width:1100px;">
@@ -3796,7 +3805,7 @@ function savePrompt() {
     DUPES_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <header>
   <div class="brand"><span class="mark">M</span><h1>Duplicate Review</h1></div>
-  <a class="back-link" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
+  <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 <div style="padding:10px 20px 28px;max-width:1100px;">
   {% if not groups %}
@@ -3857,7 +3866,7 @@ function savePrompt() {
 <header>
   <div class="brand"><span class="mark">M</span><h1>Control Panel</h1></div>
   <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
-  <a class="back-link" href="{{ url_for('index') }}">↑ Back to gallery</a>
+  <a class="btn" href="{{ url_for('index') }}">↑ Back to gallery</a>
 </header>
 <div class="panel">
   <div class="p-sec">
