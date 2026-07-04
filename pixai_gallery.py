@@ -2237,9 +2237,20 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="gen-lbl" id="video-slots-lbl">Source image (first frame)</div>
       <div id="video-slots"></div>
       <textarea id="video-prompt" class="gen-ta" rows="3" style="margin-top:8px;" placeholder="Describe the motion &mdash; &lsquo;slow cinematic pan right, gentle waves&hellip;&rsquo;"></textarea>
-      <div class="gen-lbl" style="margin-top:8px;">Duration (seconds)</div>
-      <select id="video-dur" class="gen-sel"><option>5</option><option>6</option><option>10</option><option>15</option></select>
-      <div class="gen-cost free" id="video-cost" style="margin-top:10px;">&#9648; Free with a V4.0 card &middot; else ~27,500 credits</div>
+      <div class="gen-row" style="margin-top:8px;">
+        <div style="flex:1.4;"><div class="gen-lbl">Model</div>
+          <select id="video-model" class="gen-sel" onchange="Gen.videoCost()">
+            <option value="v4.0.1" selected>V4.0 &middot; multi-ref &middot; 15s &middot; audio</option>
+            <option value="v4.0">V4.0 (alt)</option>
+            <option value="v3.2">V3.2 &middot; audio &middot; prompt-following</option>
+            <option value="v3.0.2">V3.0 Lite</option>
+            <option value="v3.0">V3.0 &middot; high consistency</option>
+          </select></div>
+        <div style="flex:1;"><div class="gen-lbl">Duration (s)</div>
+          <select id="video-dur" class="gen-sel" onchange="Gen.videoCost()"><option>5</option><option>6</option><option>10</option><option>15</option></select></div>
+      </div>
+      <label class="gen-check"><input type="checkbox" id="video-audio" onchange="Gen.videoCost()"> Generate audio <span style="color:var(--overlay0);">(V4.0 / V3.2 &middot; spoken lines in the prompt become voiceover)</span></label>
+      <div class="gen-cost" id="video-cost" style="margin-top:10px;">Pick a source image to see the cost.</div>
       <button id="video-go" class="gen-go" onclick="Gen.videoGenerate()">Generate video</button>
       <div id="video-result" class="gen-result" style="display:none;"></div>
     </div>
@@ -2691,6 +2702,31 @@ var Gen = (function(){
       add.style.cssText='width:78px;height:78px;border-radius:8px;border:1px dashed var(--surface1);background:transparent;color:var(--subtext);cursor:pointer;font-size:11px;';
       add.onclick=function(){ vslots.push(null); renderVideoSlots(); }; wrap.appendChild(add);
     }
+    videoCost();
+  }
+  var vcostTimer=null;
+  function videoPayload(){
+    return { mode:vmode.toUpperCase(), prompt:el('video-prompt').value.trim(),
+      images:vslots.filter(function(s){return s&&s.media_id;}).map(function(s){return s.media_id;}),
+      duration:+el('video-dur').value, audio:el('video-audio').checked,
+      video_model:el('video-model').value };
+  }
+  function videoCost(){ clearTimeout(vcostTimer); vcostTimer=setTimeout(videoCostNow, 250); }
+  function videoCostNow(){
+    var cost=el('video-cost'); if(!cost) return;
+    var p=videoPayload();
+    if(!p.images.length){ cost.className='gen-cost'; cost.textContent='Pick a source image to see the cost.'; return; }
+    cost.className='gen-cost'; cost.textContent='Checking cost\\u2026'; var mine=++costSeq;
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine!==costSeq)return;
+        if(d.note){ cost.textContent=d.note; return; }
+        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
+        var n=d.cost!=null?d.cost.toLocaleString():'?';
+        if(d.free){ cost.className='gen-cost free';
+          cost.textContent='\\ud83c\\udfab FREE \\u2014 a video card covers this'+(d.cards?' ('+d.cards+' left)':'')+' \\u00b7 saves ~'+n+' credits'; }
+        else { cost.textContent='\\u2248 '+n+' credits'; }
+      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
   }
   function addVideoRefs(refs){
     refs=(refs||[]).slice(0,9); if(!refs.length) return;
@@ -2703,10 +2739,9 @@ var Gen = (function(){
     renderVideoSlots();
   }
   function videoGenerate(){
-    var imgs=vslots.filter(function(s){return s&&s.media_id;}).map(function(s){return s.media_id;});
-    var res=el('video-result');
-    if(!imgs.length){ res.style.display='block'; res.innerHTML='<span style="color:var(--red);font-size:12px;">Pick a source image first.</span>'; return; }
-    runTask('/api/editbay/generate', {mode:vmode.toUpperCase(), prompt:el('video-prompt').value.trim(), images:imgs, duration:+el('video-dur').value},
+    var p=videoPayload(), res=el('video-result');
+    if(!p.images.length){ res.style.display='block'; res.innerHTML='<span style="color:var(--red);font-size:12px;">Pick a source image first.</span>'; return; }
+    runTask('/api/editbay/generate', p,
             res, {past:'Rendered', btn:el('video-go'), busy:'Rendering\\u2026', idle:'Generate video'});
   }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
@@ -2717,7 +2752,7 @@ var Gen = (function(){
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
-          setEditSub:setEditSub, addVideoRefs:addVideoRefs,
+          setEditSub:setEditSub, addVideoRefs:addVideoRefs, videoCost:videoCost,
           get selected(){return selected;}};
 })();
 var Tags = (function(){
@@ -3800,12 +3835,26 @@ function savePrompt() {
             quality=(p.get("quality") or "medium"))
 
     def _params_and_nocard(core, p):
-        """Route a drawer payload to either generate or edit params. Returns (params,
+        """Route a drawer payload to generate, edit, or video params. Returns (params,
         no_card, note). note is set (params None) when something's missing."""
-        if (p or {}).get("mode") == "edit":
+        p = p or {}
+        if p.get("mode") == "edit":
             params = _edit_params_from_payload(core, p)
-            return (params, bool((p or {}).get("no_card")),
+            return (params, bool(p.get("no_card")),
                     None if params else "pick an image to edit")
+        if p.get("mode") in ("I2V", "FLF", "R2V"):
+            imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
+            if not imgs:
+                return None, bool(p.get("no_card")), "pick a source image"
+            try:
+                params = core.build_shot_video_params(
+                    p["mode"], (p.get("prompt") or "").strip(), image_ids=imgs,
+                    duration=p.get("duration") or 5,
+                    generate_audio=bool(p.get("audio")),
+                    model=(p.get("video_model") or ""))
+            except core.PixAIError as e:
+                return None, bool(p.get("no_card")), str(e)[:140]
+            return params, bool(p.get("no_card")), None
         args = _gen_args_from_payload(p)
         if not args.model:
             return None, args.no_card, "pick a model"
@@ -3825,6 +3874,7 @@ function savePrompt() {
             cost = core.price_task(session, params)
             best = None if no_card else core.match_kaisuuken(session, params)
             return jsonify({"cost": cost, "free": bool(best),
+                            "cards": (best or {}).get("total"),
                             "card_expires": (best or {}).get("expiresAt")})
         except Exception as e:
             return jsonify({"error": str(e)[:200], "cost": None}), 200
@@ -4045,7 +4095,10 @@ function savePrompt() {
             params = core.build_shot_video_params(
                 p.get("mode") or "R2V", (p.get("prompt") or "").strip(),
                 image_ids=image_ids, video_ids=video_ids, audio_ids=audio_ids,
-                duration=p.get("duration") or 5, generate_audio=bool(p.get("generate_audio")))
+                duration=p.get("duration") or 5,
+                generate_audio=bool(p.get("generate_audio") or p.get("audio")),
+                model=(p.get("video_model") or ""),
+                audio_language=(p.get("audio_language") or "english"))
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
