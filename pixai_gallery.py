@@ -1179,6 +1179,55 @@ def create_app(out_dir: Path):
                                 encoding="utf-8", errors="replace")
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
 
+    # ---- Automated tasks: run a SAFE job on an interval while the app is open ----
+    # Persisted to out_dir/schedule.json. Only non-destructive actions are schedulable.
+    # An in-process daemon: fires while the gallery/GUI is running (it is NOT an OS-level
+    # cron -- for always-on, point Windows Task Scheduler at `--update` instead).
+    _sched_lock = threading.Lock()
+
+    def _sched_path():
+        return out_dir / "schedule.json"
+
+    def _load_sched():
+        try:
+            if _sched_path().exists():
+                s = json.loads(_sched_path().read_text(encoding="utf-8"))
+                if isinstance(s, dict):
+                    return s
+        except (OSError, ValueError):
+            pass
+        return {"enabled": False, "action": "update", "interval_hours": 6, "last_run": None}
+
+    def _save_sched(s):
+        try:
+            _sched_path().write_text(json.dumps(s), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _scheduler_loop():
+        import time as _time
+        while True:
+            _time.sleep(60)
+            try:
+                s = _load_sched()
+                action = s.get("action")
+                if not s.get("enabled") or action not in PANEL_ACTIONS \
+                        or PANEL_ACTIONS[action]["destructive"]:
+                    continue
+                interval = max(1, int(s.get("interval_hours") or 6)) * 3600
+                if _time.time() - (s.get("last_run") or 0) < interval:
+                    continue
+                with _panel_lock:
+                    if _panel_job["status"] == "running":
+                        continue
+                _panel_run(action)
+                s["last_run"] = _time.time()
+                _save_sched(s)
+            except Exception:              # noqa: BLE001 -- a bad schedule must not kill the loop
+                pass
+
+    threading.Thread(target=_scheduler_loop, daemon=True).start()
+
     # ------------------------------------------------------------------
     # Template
     # ------------------------------------------------------------------
@@ -1217,8 +1266,8 @@ def create_app(out_dir: Path):
   header > * { position: relative; z-index: 1; }
   .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .brand-txt { display: flex; flex-direction: column; line-height: 1; }
-  .brand .mark { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: var(--base); font-weight: 700; font-size: 15px; position: relative; overflow: hidden; box-shadow: 0 0 0 rgba(182,146,230,0); animation: mark-glow 5.5s ease-in-out infinite; }
-  .brand .mark::after { content: ''; position: absolute; top: 5px; right: 5px; width: 4px; height: 4px; border-radius: 50%; background: var(--gold); z-index: 2; }
+  .brand .mark { width: 42px; height: 42px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: var(--base); font-weight: 700; font-size: 23px; position: relative; overflow: hidden; box-shadow: 0 0 0 rgba(182,146,230,0); animation: mark-glow 5.5s ease-in-out infinite; flex-shrink: 0; }
+  .brand .mark::after { content: ''; position: absolute; top: 7px; right: 7px; width: 5px; height: 5px; border-radius: 50%; background: var(--gold); z-index: 2; }
   .brand .mark::before { content: ''; position: absolute; inset: 0; border-radius: 7px; background: var(--mantle); transform: translateX(-108%); animation: mark-eclipse 5.5s ease-in-out infinite; }
   @keyframes mark-eclipse { 0%,100% { transform: translateX(-108%); } 46%,54% { transform: translateX(0); } }
   @keyframes mark-glow { 0%,100% { box-shadow: 0 0 10px rgba(182,146,230,.55); } 50% { box-shadow: 0 0 3px rgba(182,146,230,.2); } }
@@ -1236,7 +1285,8 @@ def create_app(out_dir: Path):
   .filters { background: var(--mantle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--surface0); }
   .filters input, .filters select { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
   .filters input { width: 280px; }
-  .filters .f-grow { flex: 1 1 320px; min-width: 220px; } .filters .f-grow input { width: 100%; }
+  .filters .f-grow { flex: 0 1 440px; min-width: 200px; } .filters .f-grow input { width: 100%; }
+  .filters .filter-actions { margin-left: auto; align-self: flex-end; display: flex; gap: 6px; }
   .filters-adv { border-top: 1px dashed var(--surface1); }
   .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(79,201,154,.25); }
   .filters label { color: var(--subtext); font-size: 12px; }
@@ -1549,7 +1599,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <span id="gen-live" class="gen-live" style="display:none;"></span>
   </span>
   <div class="head-nav">
-    <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="display:none;"></span>
+    <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
     <a class="btn" href="/edit-bay" title="Seedance video storyboard">&#9648; Edit Bay</a>
     <a class="btn" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
@@ -1614,7 +1664,7 @@ document.addEventListener('DOMContentLoaded', function() {
       {% endfor %}
     </select>
   </div>
-  <div style="align-self:flex-end">
+  <div class="filter-actions">
     <button type="submit" class="btn btn-primary">Filter</button>
     <a href="/" class="btn">Reset</a>
     <button type="button" class="btn" id="adv-toggle" onclick="toggleAdvanced()"
@@ -2587,7 +2637,9 @@ document.addEventListener('DOMContentLoaded', function(){
   .snip-ins:hover{background:var(--surface0);color:var(--lavender);}
   .snip-btn{background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);border-radius:6px;font-size:11px;padding:3px 8px;cursor:pointer;}
   .snip-btn:hover{color:var(--lavender);border-color:var(--overlay0);}
-  .acct-chip{font-size:12.5px;color:var(--subtext);background:var(--surface0);border:1px solid var(--surface1);border-radius:20px;padding:4px 12px;white-space:nowrap;}
+  /* matches .btn so the balance sits in the same button row; links to the Panel */
+  a.acct-chip{font-size:13px;color:var(--text);background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;padding:5px 14px;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;}
+  a.acct-chip:hover{border-color:var(--lavender);text-decoration:none;}
   .acct-chip b{color:var(--text);} .acct-chip .cd{color:var(--lavender);}
   #jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:270px;min-width:190px;max-width:560px;max-height:64vh;overflow:auto;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;padding:8px;}
   #jobs-tray.big{width:440px;}
@@ -3795,6 +3847,9 @@ function savePrompt() {
   .jobbtn .d{font-size:11px;color:var(--subtext);}
   .jobbtn.danger{border-color:#5a3a4a;} .jobbtn.danger .t{color:var(--red);}
   .p-note{font-size:12px;color:var(--subtext);margin-top:10px;}
+  .p-fl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);margin-bottom:4px;}
+  .p-sel{background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 9px;font-size:13px;font-family:inherit;}
+  .p-check{display:inline-flex;align-items:center;gap:7px;color:var(--text);font-size:13px;cursor:pointer;}
   #joblog{background:var(--base);border:1px solid var(--surface1);border-radius:8px;padding:12px 14px;font-family:ui-monospace,monospace;font-size:12px;color:var(--subtext);white-space:pre-wrap;line-height:1.5;max-height:340px;overflow-y:auto;margin-top:12px;display:none;}
   #jobstatus{font-size:12.5px;margin-top:6px;}
   .st-running{color:var(--lavender);} .st-done{color:var(--emerald);} .st-failed{color:var(--red);}
@@ -3825,6 +3880,24 @@ function savePrompt() {
     <div id="jobstatus"></div>
     <pre id="joblog"></pre>
     <div class="p-note">One job runs at a time. Backup / audit / dry-runs never delete anything. Organize and Dedup move files (both reversible &mdash; Organize writes an undo manifest, Dedup quarantines to <code>_duplicates/</code>).</div>
+  </div>
+
+  <div class="p-sec">
+    <h2>Automated tasks</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
+      <label class="p-check"><input type="checkbox" id="sch-enabled"> Enabled</label>
+      <div><div class="p-fl">Run</div>
+        <select id="sch-action" class="p-sel"></select></div>
+      <div><div class="p-fl">Every</div>
+        <select id="sch-interval" class="p-sel">
+          <option value="1">1 hour</option><option value="3">3 hours</option>
+          <option value="6" selected>6 hours</option><option value="12">12 hours</option>
+          <option value="24">1 day</option><option value="48">2 days</option><option value="168">1 week</option>
+        </select></div>
+      <button class="jobbtn" style="flex:0 0 auto;min-width:0;" id="sch-save" onclick="saveSchedule()"><span class="t">Save schedule</span></button>
+      <span id="sch-status" style="font-size:12.5px;color:var(--subtext);"></span>
+    </div>
+    <div class="p-note">Only safe jobs can be scheduled (no file deletion). It fires <b>while the app is open</b> &mdash; this isn't an OS cron. For always-on, point Windows Task Scheduler at <code>pixai_gallery_backup.py --update</code>.</div>
   </div>
 
   <div class="p-sec">
@@ -3873,7 +3946,26 @@ function loadAcct(){
     var chip=el('acct-chip'); if(chip && d.credits!=null){ chip.innerHTML='\\u25c8 <b>'+d.credits.toLocaleString()+'</b> \\u00b7 <span style="color:var(--lavender)">\\ud83c\\udfab '+(d.cards||0)+'</span>'; chip.style.display=''; }
   }).catch(function(){});
 }
-renderJobs(); loadAcct();
+function loadSchedule(){
+  var sel=el('sch-action');
+  ACTIONS.filter(function(a){return !a.destructive;}).forEach(function(a){
+    var o=document.createElement('option'); o.value=a.action; o.textContent=a.label; sel.appendChild(o); });
+  fetch('/api/panel/schedule').then(function(r){return r.json();}).then(function(s){
+    el('sch-enabled').checked=!!s.enabled;
+    if(s.action) sel.value=s.action;
+    if(s.interval_hours) el('sch-interval').value=String(s.interval_hours);
+    if(s.last_run){ var dt=new Date(s.last_run*1000); el('sch-status').textContent='last run: '+dt.toLocaleString(); }
+  }).catch(function(){});
+}
+function saveSchedule(){
+  var body={enabled:el('sch-enabled').checked, action:el('sch-action').value, interval_hours:+el('sch-interval').value};
+  fetch('/api/panel/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();}).then(function(s){
+      if(s.error){ el('sch-status').textContent='\\u26a0 '+s.error; return; }
+      el('sch-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved'+(s.enabled?(' \\u00b7 every '+s.interval_hours+'h while open'):' \\u00b7 disabled')+'</span>';
+    }).catch(function(){ el('sch-status').textContent='\\u26a0 network error'; });
+}
+renderJobs(); loadAcct(); loadSchedule();
 // if a job was already running when the page loaded, resume polling
 fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });
 </script>
@@ -3942,6 +4034,29 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"status": _panel_job["status"], "action": _panel_job["action"],
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
                             "lines": list(_panel_job["lines"])})
+
+    @app.route("/api/panel/schedule", methods=["GET", "POST"])
+    def api_panel_schedule():
+        """Automated tasks: run a safe job every N hours while the app is open. GET
+        returns the current schedule; POST {enabled, action, interval_hours} saves it.
+        Only non-destructive actions are allowed. Localhost-only."""
+        if not _is_local_request():
+            return jsonify({}), 403
+        with _sched_lock:
+            s = _load_sched()
+            if request.method == "POST":
+                body = request.get_json(silent=True) or {}
+                action = str(body.get("action") or s.get("action") or "update")
+                if action not in PANEL_ACTIONS or PANEL_ACTIONS[action]["destructive"]:
+                    return jsonify({"error": "only safe jobs can be scheduled"}), 400
+                try:
+                    hrs = max(1, min(int(body.get("interval_hours") or 6), 168))
+                except (TypeError, ValueError):
+                    hrs = 6
+                s = {"enabled": bool(body.get("enabled")), "action": action,
+                     "interval_hours": hrs, "last_run": s.get("last_run")}
+                _save_sched(s)
+            return jsonify(s)
 
     @app.route("/duplicates")
     def duplicates():
