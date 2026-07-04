@@ -204,6 +204,19 @@ def test_contact_sheet_captions_off(tmp_path):
     assert "class='cap'" not in html
 
 
+def test_contact_sheet_photo_and_strip(tmp_path):
+    cli = _client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", created_at="2025-01-02T00:00:00"),
+    ])
+    photo = cli.get("/contact-sheet?ids=1&format=photo").get_data(as_text=True)
+    assert "size:4in 6in" in photo and "/full/1" in photo
+    strip = cli.get("/contact-sheet?ids=1,2&format=strip").get_data(as_text=True)
+    # two identical strips (for cutting), frames cycle to fill four
+    assert strip.count("class='strip'") == 2
+    assert strip.count("/full/1") == 4 and strip.count("/full/2") == 4
+
+
 def test_catalog_counts(tmp_path):
     import pixai_gallery as g
     g.save_catalog(tmp_path / "catalog.db", [

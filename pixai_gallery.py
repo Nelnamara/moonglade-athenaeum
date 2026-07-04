@@ -3324,7 +3324,11 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endif %}
     <button class="btn" data-cmd="{{ row.media_id }}" onclick="copyCmd(this)"
       title="Copy this image's media_id (paste into the GUI Video/Edit tab)">Copy media id</button>
-    <button class="btn" onclick="window.print()" title="Print this image with its details">&#128424; Print</button>
+    <button class="btn" onclick="window.print()" title="Print this image with its details (Letter)">&#128424; Print</button>
+    {% if row.is_video != '1' %}
+    <a class="btn" href="/contact-sheet?ids={{ row.media_id }}&format=photo" target="_blank" title="Print as a 4x6 photo">4&times;6 photo</a>
+    <a class="btn" href="/contact-sheet?ids={{ row.media_id }}&format=strip" target="_blank" title="Print as a photo-booth strip (cut into two 2x6 strips)">Photo strip</a>
+    {% endif %}
     {% if row.is_video != '1' %}
     <button class="btn" id="suggest-prompt-btn" data-mid="{{ row.media_id }}"
       onclick="suggestPrompt(this)"
@@ -4103,11 +4107,15 @@ function savePrompt() {
 
     @app.route("/contact-sheet")
     def contact_sheet():
-        """Print-ready grid of images for physical curation. Sources: ?ids=a,b,c
-        (from a gallery selection) or ?collection=<name>. ?cols=N (default 4),
-        ?captions=0 to hide the date/rating line. Opens the print dialog on load."""
+        """Print-ready views for physical output. ?format=letter (grid, default) |
+        photo (single 4x6) | strip (photo-booth: 2x2in strips on a 4x6, for the
+        Sinfonia). Sources: ?ids=a,b,c or ?collection=<name>. ?cols / ?captions for
+        the grid. Opens the print dialog on load."""
         ids_arg = (request.args.get("ids") or "").strip()
         collection = (request.args.get("collection") or "").strip()
+        fmt = (request.args.get("format") or "letter").lower()
+        if fmt not in ("letter", "photo", "strip"):
+            fmt = "letter"
         try:
             cols = max(2, min(int(request.args.get("cols") or 4), 8))
         except ValueError:
@@ -4124,6 +4132,49 @@ function savePrompt() {
         else:
             rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
             title = "Recent"
+
+        mids = [str(r.get("media_id")) for r in rows if r.get("media_id")]
+        _autoprint = ("<script>window.addEventListener('load',function(){"
+                      "setTimeout(function(){window.print();},350);});</script>")
+        _bar = ("<div class='bar'><h1>{t}</h1><button onclick='window.print()'>"
+                "\U0001f5a8 Print</button><a href='/' style='margin-left:auto'>"
+                "&larr; gallery</a></div>")
+
+        if fmt == "photo" and mids:
+            return ("<!DOCTYPE html><html><head><meta charset='UTF-8'><title>4x6 photo</title>"
+                    "<style>@page{size:4in 6in;margin:0}html,body{margin:0;height:100%;"
+                    "background:#fff;font-family:system-ui,sans-serif}"
+                    ".bar{display:flex;gap:12px;align-items:center;padding:10px}"
+                    ".bar h1{font-size:15px;margin:0}"
+                    ".photo{width:100%;height:100vh;display:flex;align-items:center;"
+                    "justify-content:center;overflow:hidden}"
+                    ".photo img{max-width:100%;max-height:100%;object-fit:contain}"
+                    "@media print{.bar{display:none}}</style></head><body>"
+                    + _bar.format(t="4&times;6 photo")
+                    + "<div class='photo'><img src='/full/{}'></div>".format(mids[0])
+                    + _autoprint + "</body></html>")
+
+        if fmt == "strip" and mids:
+            frames = [mids[i % len(mids)] for i in range(4)]
+            frame_html = "".join(
+                "<div class='frame'><img src='/full/{}'></div>".format(m) for m in frames)
+            one = "<div class='strip'>" + frame_html + "</div>"
+            return ("<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Photo strip</title>"
+                    "<style>@page{size:4in 6in;margin:0}html,body{margin:0;height:100%;"
+                    "background:#fff;font-family:system-ui,sans-serif}"
+                    ".bar{display:flex;gap:12px;align-items:center;padding:10px}"
+                    ".bar h1{font-size:15px;margin:0}"
+                    ".strips{display:flex;width:4in;height:6in}"
+                    ".strip{width:2in;height:6in;display:flex;flex-direction:column;"
+                    "padding:0.05in;box-sizing:border-box}"
+                    ".strip:first-child{border-right:1px dashed #bbb}"
+                    ".frame{flex:1;margin:0.03in 0;overflow:hidden}"
+                    ".frame img{width:100%;height:100%;object-fit:cover;display:block}"
+                    "@media print{.bar{display:none}}</style></head><body>"
+                    + _bar.format(t="Photo-booth strip (cut in two)")
+                    + "<div class='strips'>" + one + one + "</div>"
+                    + _autoprint + "</body></html>")
+
         cells = []
         for r in rows:
             mid = str(r.get("media_id") or "")
