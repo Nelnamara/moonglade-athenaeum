@@ -62,3 +62,45 @@ shows larger on the desktop. Send me the file and I make the multi-size `.ico`.
 
 Swap **[ICON]** per milestone: an open book (catalog size), a stacked film reel (videos made), a
 full moon (streaks), a crossed brush + quill (creations), a treasure chest (collections).
+
+---
+
+## Banner v2 + emblem — the "Dumbledore's got style" pass (2026-07-04)
+
+**Hard composition rules for the HEADER banner** (learned from v1):
+- Ultra-wide (2048×512 or wider). The header shows it at ~16% opacity behind the title.
+- **All important art in the LEFT third** — the CSS mask fades the banner to fully
+  transparent by 62% across. Anything right of center is invisible.
+- **No text anywhere in the image** (say it twice to Mio — it loves signage).
+- It sits BEHIND UI: favor atmosphere over subject detail; high contrast shapes read best.
+
+### Banner prompt A — The Archmage's Library (pure atmosphere)
+> Ultra-wide fantasy banner, no text anywhere. The grand study of an archmage at night,
+> left-weighted composition: towering bookshelves of ancient tomes climbing out of frame on the
+> far left, a tall arched window spilling silver moonlight, dozens of floating candles drifting
+> at different heights, gold filigree scrollwork on dark violet walls, sparkling motes of arcane
+> dust hanging in the air, a crescent moon visible through the window. Deep purple and midnight
+> blue palette with rich antique gold accents, opulent, stately, wizardly grandeur, painterly
+> semi-realistic style, soft glow, the right half fading into plain darkness.
+
+### Banner prompt B — Nelnamara, Keeper of the Athenaeum (subject + flair)
+> Ultra-wide fantasy banner, no text anywhere. A stunning night elf woman with purple-lavender
+> skin and glowing pupil-less silver eyes stands at the far left in a magnificent midnight-violet
+> robe embroidered with gold celestial patterns — flowing sleeves, high ornate collar, moon-phase
+> clasps down the front, tasteful and regal like a beloved old headmaster's finest robes. She
+> holds a staff crowned with a softly glowing crescent moon. Behind her, floating candles and
+> towering bookshelves dissolve into darkness toward the right. Deep purples, silver moonlight,
+> antique gold trim, drifting sparkles, painterly semi-realistic, majestic and warm.
+
+### Emblem / header icon (replaces the "M" tile — the slot ANIMATES it)
+The gallery now animates ANY custom logo: a lavender glow that hugs the art's silhouette, a
+light-glint that sweeps INSIDE the shape, and a gold twinkle. Strong silhouettes glint best.
+> A single ornate emblem, centered, on a flat pure-green #00FF00 background, no shadow, no text.
+> A crescent moon wrapped in delicate gold filigree scrollwork, a tiny four-pointed star caught
+> in the curve, wizardly and elegant, deep violet and silver with antique gold accents, clean
+> bold silhouette, flat vector-like fantasy crest, crisp edges.
+
+Ask for the **#00FF00 flat background** so the transparency cut is clean (AI "transparent"
+backgrounds are painted fakes — we key the green out instead). Drop the finished cut at
+`pixai_backup/branding/logo.png` (512px, transparent PNG) and it's live on refresh — glow,
+glint, twinkle and all. Banner goes to `pixai_backup/branding/banner.png`.

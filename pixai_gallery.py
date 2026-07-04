@@ -1432,11 +1432,27 @@ def create_app(out_dir: Path):
   /* When a real logo image is present it replaces the "M" tile: box + animation off. */
   .brand .mark .mark-m { position: relative; z-index: 4; }
   .brand .mark .mark-logo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 5; }
+  /* Custom logo present: the tile disappears but the MAGIC stays. The glow becomes a
+     drop-shadow that hugs the art's alpha shape; the eclipse ::before becomes a glint band
+     sweeping INSIDE the art (masked to the logo's own alpha, so it never spills past the
+     silhouette); the gold-dot ::after becomes a twinkling star. Dumbledore's got style. */
   .brand .mark:has(.mark-logo) { background: transparent; box-shadow: none; animation: none; overflow: visible; }
   .brand .mark:has(.mark-logo) .mark-m { display: none; }
-  .brand .mark:has(.mark-logo)::before, .brand .mark:has(.mark-logo)::after { display: none; }
+  .brand .mark:has(.mark-logo) .mark-logo { animation: logo-glow 5.5s ease-in-out infinite; }
+  .brand .mark:has(.mark-logo)::before { content: ''; position: absolute; inset: 0; border-radius: 0; transform: none;
+    background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,.6) 47%, rgba(182,146,230,.4) 53%, transparent 68%);
+    background-size: 260% 100%; background-position: 200% 0; background-repeat: no-repeat;
+    -webkit-mask: url('/branding/logo.png') center / contain no-repeat; mask: url('/branding/logo.png') center / contain no-repeat;
+    animation: logo-glint 5.5s ease-in-out infinite; z-index: 6; pointer-events: none; }
+  .brand .mark:has(.mark-logo)::after { content: '\2726'; width: auto; height: auto; top: -7px; right: -8px;
+    background: none; border-radius: 0; color: var(--gold); font-size: 11px; line-height: 1;
+    text-shadow: 0 0 6px rgba(212,175,55,.9); animation: logo-twinkle 5.5s ease-in-out infinite; z-index: 7; }
   @keyframes mark-eclipse { 0%,100% { transform: translateX(-108%); } 46%,54% { transform: translateX(0); } }
   @keyframes mark-glow { 0%,100% { box-shadow: 0 0 10px rgba(182,146,230,.55); } 50% { box-shadow: 0 0 3px rgba(182,146,230,.2); } }
+  @keyframes logo-glow { 0%,100% { filter: drop-shadow(0 0 7px rgba(182,146,230,.65)); } 50% { filter: drop-shadow(0 0 2px rgba(182,146,230,.18)); } }
+  @keyframes logo-glint { 0%, 58% { background-position: 200% 0; } 78%, 100% { background-position: -100% 0; } }
+  @keyframes logo-twinkle { 0%, 40%, 100% { opacity: 0; transform: scale(.5) rotate(0deg); }
+    55% { opacity: 1; transform: scale(1.15) rotate(18deg); } 70% { opacity: .25; transform: scale(.8) rotate(36deg); } }
   header h1 { font-size: 18px; color: var(--text); flex-shrink: 0; font-weight: 600; border-bottom: 2px solid var(--gold); padding-bottom: 1px; line-height: 1.1; }
   .tagline { font-size: 10.5px; color: var(--overlay0); font-style: italic; margin-top: 3px; transition: opacity .5s; letter-spacing: .02em; }
   .ver-badge { font-size: 10px; font-weight: 500; color: var(--overlay0); font-family: ui-monospace, monospace; border: 1px solid var(--surface1); border-radius: 5px; padding: 1px 6px; vertical-align: middle; margin-left: 4px; letter-spacing: 0; }
@@ -1444,6 +1460,9 @@ def create_app(out_dir: Path):
   .gen-live { color: var(--lavender); margin-left: 8px; }
   @media (prefers-reduced-motion: reduce) {
     .brand .mark { animation: none; } .brand .mark::before { animation: none; transform: translateX(-108%); }
+    .brand .mark:has(.mark-logo) .mark-logo { animation: none; filter: drop-shadow(0 0 6px rgba(182,146,230,.45)); }
+    .brand .mark:has(.mark-logo)::before { animation: none; background-position: 200% 0; }
+    .brand .mark:has(.mark-logo)::after { animation: none; opacity: .8; transform: none; }
     .tagline { transition: none; }
   }
 
