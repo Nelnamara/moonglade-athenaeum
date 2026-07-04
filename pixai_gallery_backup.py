@@ -3932,6 +3932,100 @@ def run_watch(args):
               "event-driven backup.")
 
 
+# --- Contests (community + official) --------------------------------------------
+# PixAI's live contest board lives at REST `GET /v2/contest/list?page=N&pageSize=M`
+# (NOT the GraphQL `contests` connection, which is a stale official-only archive).
+# "Active" is the server-computed `runtimeStatus == "running"` -- no client date math.
+# Read-only: browsing contests never spends. See private/APP_OPERATIONS_FULL.md.
+_CONTEST_PAGE_SIZE = 50
+
+
+def _contest_title(t):
+    """Contest title/description come as {en, zh, ja, ko, ...} (or occasionally a bare
+    string). Prefer English, fall back to the first non-empty value."""
+    if isinstance(t, dict):
+        return t.get("en") or next((v for v in t.values() if v), "") or ""
+    return t or ""
+
+
+def list_contests(session, active_only=False, max_pages=6):
+    """Return the PixAI contest board as normalized dicts, newest-first. `active_only`
+    keeps just the currently-running ones (runtimeStatus=='running'). Pages through
+    /v2/contest/list up to max_pages (the board is ~2 pages). Read-only, no spend."""
+    out = []
+    page = 1
+    while True:
+        d = _rest_get(session, "/contest/list",
+                      params={"page": page, "pageSize": _CONTEST_PAGE_SIZE}) or {}
+        rows = d.get("data") or []
+        for r in rows:
+            status = (r.get("runtimeStatus") or "").lower()
+            active = status == "running"
+            if active_only and not active:
+                continue
+            mid = str(r.get("mediaId") or "")
+            slug = r.get("slug") or ""
+            out.append({
+                "id": str(r.get("id") or ""),
+                "title": _contest_title(r.get("title")),
+                "slug": slug,
+                "type": (r.get("type") or "").lower(),          # 'official' | 'community'
+                "status": status,                                # 'running' | 'ended'
+                "active": active,
+                "vote_type": r.get("voteType") or "",            # creator_pick | user_vote
+                "prize_amount": int(r.get("prizeAmount") or 0),
+                "prize_distribution": [p for p in (r.get("prizeDistribution") or [])
+                                       if isinstance(p, dict)],
+                "cover_url": ("https://api.pixai.art/v1/media/%s/thumbnail" % mid) if mid else "",
+                "start_at": r.get("startAt") or "",
+                "end_at": r.get("endAt") or "",
+                "result_at": r.get("resultAt") or "",
+                "url": ("https://pixai.art/en/contest/%s" % slug) if slug else "",
+                "description": _contest_title(r.get("description"))[:600],
+            })
+        total_page = int(d.get("totalPage") or 1)
+        if page >= total_page or page >= max_pages:
+            break
+        page += 1
+    return out
+
+
+def run_contests(args):
+    """CLI: list PixAI contests (default: only the currently-running ones). Read-only.
+    --all-contests includes ended ones. Encourages community engagement -- see what's live."""
+    session = _make_session(getattr(args, "token", None))
+    active_only = not getattr(args, "all_contests", False)
+    try:
+        contests = list_contests(session, active_only=active_only)
+    except PixAIError as e:
+        print("Could not fetch contests: {}".format(str(e)[:160]))
+        return
+    if not contests:
+        print("No {}contests found.".format("active " if active_only else ""))
+        return
+    enc = (sys.stdout.encoding or "utf-8")
+
+    def _safe(t):
+        return str(t).encode(enc, "replace").decode(enc, "replace")
+    official = [c for c in contests if c["type"] == "official"]
+    community = [c for c in contests if c["type"] != "official"]
+    label = "active" if active_only else "all"
+    print("PixAI contests ({}): {} official, {} community\n".format(
+        label, len(official), len(community)))
+    for group, name in ((official, "OFFICIAL"), (community, "COMMUNITY")):
+        if not group:
+            continue
+        print("-- {} --".format(name))
+        for c in group:
+            flag = "" if c["active"] else " (ended)"
+            prize = "  {:,} cr".format(c["prize_amount"]) if c["prize_amount"] else ""
+            print("  {}{}{}".format(_safe(c["title"])[:52], prize, flag))
+            print("    {} -> {}   {}".format(
+                (c["start_at"] or "")[:10], (c["end_at"] or "")[:10], c["url"]))
+        print("")
+    print("(Read-only. Enter a contest from the PixAI website.)")
+
+
 # --- Free "cards" (kaisuuken / 回数券) -------------------------------------------
 # PixAI grants free-generation tickets ("kaisuuken", model-locked) via membership/events.
 # These live on the oRPC /v2 REST API, NOT GraphQL (verified 2026-07-03 from the app's
@@ -5098,6 +5192,11 @@ def main():
     ap.add_argument("--cards", action="store_true",
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
+    ap.add_argument("--contests", action="store_true",
+                    help="list PixAI contests currently running (community + official), then "
+                         "exit. Read-only. Add --all-contests to include ended ones")
+    ap.add_argument("--all-contests", action="store_true",
+                    help="with --contests, include ended contests too")
     ap.add_argument("--watch", action="store_true",
                     help="live-monitor your PixAI events over the push WebSocket (read-only; "
                          "gentler than polling). Prints task/notification events as they arrive")
@@ -5305,6 +5404,9 @@ def main():
             return
         if getattr(args, "cards", False):
             run_cards(args)
+            return
+        if getattr(args, "contests", False):
+            run_contests(args)
             return
         if getattr(args, "watch", False):
             run_watch(args)

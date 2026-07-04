@@ -1818,6 +1818,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
     <a class="btn" href="/edit-bay" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     <button type="button" class="btn" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
+    <button type="button" class="btn" onclick="Contests.open()" title="Live PixAI contests &mdash; the Oasis was never a 1-player game">&#127941; Contests</button>
     <a class="btn" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
     <a class="btn" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
   </div>
@@ -2900,7 +2901,34 @@ document.addEventListener('DOMContentLoaded', function(){
     <div id="ach-skins" class="ach-skins"></div>
   </div>
 </div>
+<div id="contest-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Contests.close()">
+  <div class="ach-panel" role="dialog" aria-label="PixAI contests">
+    <button type="button" class="ach-x" onclick="Contests.close()" aria-label="Close">&times;</button>
+    <div class="ach-htitle">&#127941; Contests</div>
+    <div class="ach-hsub" id="contest-sub">Loading the community&hellip;</div>
+    <div id="contest-body"></div>
+    <div class="ct-foot">A community thing &mdash; the Oasis was never a 1-player game. Enter from the PixAI site. <a href="#" onclick="Contests.toggleAll(event)" id="ct-all">Show ended too</a></div>
+  </div>
+</div>
 <style>
+  .ct-sect{font-size:13px;font-weight:700;color:var(--text);margin:18px 0 9px;display:flex;align-items:center;gap:7px;}
+  .ct-sect .ct-count{font-size:10.5px;font-weight:500;color:var(--overlay0);}
+  .ct-sect.official{color:var(--gold);}
+  .ct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:11px;}
+  .ct-card{display:flex;flex-direction:column;background:var(--surface0);border:1px solid var(--surface1);border-radius:11px;overflow:hidden;text-decoration:none;transition:transform .12s,box-shadow .12s,border-color .12s;}
+  .ct-card:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.4);border-color:var(--lavender);text-decoration:none;}
+  .ct-card.official{border-color:#5a4a1e;} .ct-card.official:hover{border-color:var(--gold);}
+  .ct-cover{width:100%;height:104px;object-fit:cover;background:var(--surface1);display:block;}
+  .ct-body{padding:9px 11px 11px;display:flex;flex-direction:column;gap:4px;flex:1;}
+  .ct-nm{font-size:13px;font-weight:650;color:var(--text);line-height:1.25;}
+  .ct-badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:1px;}
+  .ct-badges span{font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;border-radius:5px;padding:1px 6px;background:var(--surface1);color:var(--subtext);}
+  .ct-badges .prize{color:#0f1017;background:linear-gradient(180deg,#ffd27a,#e6a94b);}
+  .ct-badges .ends-soon{color:var(--peach);border:1px solid var(--peach);background:transparent;}
+  .ct-badges .ended{color:var(--overlay0);border:1px solid var(--surface1);background:transparent;}
+  .ct-when{font-size:10.5px;color:var(--subtext);margin-top:auto;font-variant-numeric:tabular-nums;}
+  .ct-foot{margin-top:20px;font-size:11px;color:var(--overlay0);font-style:italic;}
+  .ct-foot a{color:var(--lavender);font-style:normal;}
   .ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}
   .ach-modal.open{display:flex;}
   .ach-panel{position:relative;width:760px;max-width:96vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:16px;box-shadow:0 30px 90px rgba(0,0,0,.6);padding:24px 26px 28px;}
@@ -3073,6 +3101,69 @@ var Ach = (function(){
   // On load: mark-and-toast any freshly earned feats, and reconcile the active skin.
   document.addEventListener('DOMContentLoaded', function(){ load(true); });
   return { open:open, close:close };
+})();
+var Contests = (function(){
+  function el(id){return document.getElementById(id);}
+  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmt(n){ return (Number(n)||0).toLocaleString(); }
+  var showAll=false, loaded=false;
+  function open(){ el('contest-modal').classList.add('open'); el('contest-modal').setAttribute('aria-hidden','false');
+    if(!loaded) load(); }
+  function close(){ el('contest-modal').classList.remove('open'); el('contest-modal').setAttribute('aria-hidden','true'); }
+  function toggleAll(ev){ if(ev) ev.preventDefault(); showAll=!showAll;
+    el('ct-all').textContent = showAll ? 'Active only' : 'Show ended too'; load(); }
+  function load(){
+    el('contest-sub').textContent='Loading the community\\u2026';
+    fetch('/api/contests'+(showAll?'?all=1':''))
+      .then(function(r){return r.json();})
+      .then(function(d){ loaded=true; render(d); })
+      .catch(function(){ el('contest-sub').textContent='Could not load contests.'; });
+  }
+  function daysLeft(endIso){
+    if(!endIso) return null;
+    var ms=new Date(endIso).getTime()-Date.now();
+    if(isNaN(ms)) return null;
+    return Math.ceil(ms/86400000);
+  }
+  function card(c){
+    var a=document.createElement('a');
+    a.className='ct-card'+(c.type==='official'?' official':'');
+    a.href=c.url||'#'; a.target='_blank'; a.rel='noopener';
+    var cover = c.cover_url ? '<img class="ct-cover" loading="lazy" src="'+esc(c.cover_url)+'" alt="" onerror="this.style.display=\\'none\\'">' : '<div class="ct-cover"></div>';
+    var badges='';
+    if(c.prize_amount) badges+='<span class="prize">\\u2666 '+fmt(c.prize_amount)+' cr</span>';
+    var dl=daysLeft(c.end_at);
+    if(!c.active) badges+='<span class="ended">ended</span>';
+    else if(dl!=null && dl<=2) badges+='<span class="ends-soon">'+(dl<=0?'ends today':(dl+'d left'))+'</span>';
+    if(c.vote_type) badges+='<span>'+esc(c.vote_type.replace(/_/g,' '))+'</span>';
+    var when=((c.start_at||'').slice(0,10))+' \\u2192 '+((c.end_at||'').slice(0,10))
+      + (c.active && dl!=null && dl>2 ? '  \\u00b7 '+dl+' days left' : '');
+    a.innerHTML=cover+'<div class="ct-body"><div class="ct-nm">'+esc(c.title||'(untitled)')+'</div>'
+      +'<div class="ct-badges">'+badges+'</div><div class="ct-when">'+esc(when)+'</div></div>';
+    return a;
+  }
+  function section(list, name, cls){
+    if(!list.length) return '';
+    var wrap=document.createElement('div');
+    var hd=document.createElement('div'); hd.className='ct-sect '+cls;
+    hd.innerHTML=name+' <span class="ct-count">'+list.length+'</span>';
+    var grid=document.createElement('div'); grid.className='ct-grid';
+    list.forEach(function(c){ grid.appendChild(card(c)); });
+    wrap.appendChild(hd); wrap.appendChild(grid); return wrap;
+  }
+  function render(d){
+    var body=el('contest-body'); body.innerHTML='';
+    var list=d.contests||[];
+    if(d.error){ el('contest-sub').textContent='\\u26a0 '+d.error; return; }
+    if(!list.length){ el('contest-sub').textContent = showAll?'No contests found.':'No contests running right now \\u2014 check back soon.'; return; }
+    var official=list.filter(function(c){return c.type==='official';});
+    var community=list.filter(function(c){return c.type!=='official';});
+    el('contest-sub').innerHTML='<b>'+official.length+'</b> official \\u00b7 <b>'+community.length+'</b> community '+(showAll?'(all)':'running now');
+    var so=section(official,'\\ud83c\\udf1f Official','official'); if(so) body.appendChild(so);
+    var sc=section(community,'\\ud83e\\udd1d Community','community'); if(sc) body.appendChild(sc);
+  }
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
+  return { open:open, close:close, toggleAll:toggleAll };
 })();
 var Picker = (function(){
   var cb=null, timer=null, page=1, more=false, loading=false, curQ='';
@@ -5281,6 +5372,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"snippets": snips})
 
     _ach_lock = threading.Lock()
+
+    @app.route("/api/contests")
+    def api_contests():
+        """The live PixAI contest board (community + official). Read-only PUBLIC data (not
+        owner-private, no spend), so NOT localhost-gated -- the owner browsing over LAN still
+        sees it. ?all=1 includes ended contests; default is only the currently-running ones."""
+        show_all = request.args.get("all") == "1"
+        try:
+            core, session = _gen_session()
+            contests = core.list_contests(session, active_only=not show_all)
+            return jsonify({"contests": contests,
+                            "official": sum(1 for c in contests if c["type"] == "official"),
+                            "community": sum(1 for c in contests if c["type"] != "official")})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200], "contests": []}), 200
 
     @app.route("/api/achievements")
     def api_achievements():
