@@ -912,6 +912,70 @@ def is_lora_type(model_type):
     return "LORA" in (model_type or "").upper()
 
 
+def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
+    """Search models/LoRAs via the oRPC GET /v2/generation-model/search endpoint. Unlike
+    the GraphQL `generationModels` connection (which conflates base models + LoRAs), this
+    cleanly separates them by `usageType` (MODEL vs LORA) and returns cover thumbnails.
+    Returns {results:[{title, type, model_id, liked_count, should_blur, preview_url,
+    has_version}], has_more}. Read-only (no spend). NOTE: `model_id` is the MODEL id --
+    resolve the generatable version id with resolve_latest_version() on selection."""
+    params = {"usageType": (usage or "MODEL").upper(),
+              "size": max(1, min(int(size), 50)), "offset": max(0, int(offset))}
+    kw = (keyword or "").strip()
+    if kw:
+        params["keyword"] = kw
+    data = _rest_get(session, "/generation-model/search", params=params) or {}
+    out = []
+    for m in data.get("data") or []:
+        med = m.get("media") or {}
+        flag = m.get("flag") or {}
+        user = m.get("user") or m.get("author") or {}
+        tags = m.get("tags") or []
+        out.append({
+            "title": m.get("title") or "",
+            "type": m.get("type") or "",
+            "model_id": str(m.get("id") or ""),
+            "liked_count": int(m.get("likedCount") or 0),
+            "should_blur": bool(flag.get("shouldBlur")),
+            "preview_url": med.get("thumbnailUrl") or med.get("publicUrl") or "",
+            "has_version": bool(m.get("hasLatestAvailableVersion")),
+            # Extra surface for the preview pop-out card (optional in the
+            # response; empty when the API doesn't send them).
+            "description": (m.get("description") or "")[:400],
+            "author": (user.get("displayName") or user.get("username") or "")
+                      if isinstance(user, dict) else "",
+            "tags": [t for t in tags if isinstance(t, str)][:8],
+            "cover_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
+        })
+    return {"results": out, "has_more": bool(data.get("hasMore"))}
+
+
+def workflow_catalog(session, first=80):
+    """List PixAI enhance/panelplugin WORKFLOWS via the `workflows` GraphQL connection ->
+    [{id, name, type, cover_media_id}]. `id` is the numeric workflowId that
+    build_panelplugin_parameters wants. Covers upscale / remove-background / line-art /
+    sketch-colorizer / inpaint / outpaint / style converters / etc. Read-only."""
+    q = "query($n:Int){ workflows(first:$n){ edges { node { id name type coverMediaId } } } }"
+    d = gql_adhoc(session, q, {"n": int(first)}) or {}
+    out = []
+    for e in (d.get("workflows") or {}).get("edges") or []:
+        n = e.get("node") or {}
+        if not n.get("id"):
+            continue
+        out.append({"id": str(n["id"]), "name": n.get("name") or "",
+                    "type": n.get("type") or "", "cover_media_id": str(n.get("coverMediaId") or "")})
+    return out
+
+
+def resolve_latest_version(session, model_id):
+    """Resolve a model's latest generatable VERSION id (what createGenerationTask's
+    `modelId` actually wants) from its MODEL id, via GET /v2/generation-model/{id}/versions.
+    Returns '' when the model has no version. Read-only."""
+    data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
+    rows = data if isinstance(data, list) else (data or {}).get("data") or []
+    return str(rows[0].get("id") or "") if rows else ""
+
+
 def run_list_models(args):
     """CLI: search PixAI models and print name / type / generatable version id."""
     session = _make_session(getattr(args, "token", None))
@@ -2514,13 +2578,56 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
     return params
 
 
-def build_panelplugin_parameters(media_id, workflow_id, *, strength=None,
-                                 extra_inputs=None, priority=1000, is_private=False,
-                                 kaisuuken_id=""):
-    """Enhance via a PixAI panelplugin WORKFLOW (face-fix / upscale / bg-remove / handfix …).
-    VERIFIED shape (2026-07-02): model 'pixai-panelplugin', numeric `workflowId`, and
-    `inputs.image = {type:'media', media_id}` (+ optional strength / per-plugin args).
-    Produces an image output. Builder spends nothing."""
+def _snap_video_duration(d):
+    """Snap a requested duration (seconds) to the nearest allowed PixAI video length."""
+    try:
+        d = float(d)
+    except (TypeError, ValueError):
+        return 5
+    return min(VIDEO_DURATIONS, key=lambda v: abs(v - d))
+
+
+def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=(),
+                            *, duration=5, generate_audio=False, model="",
+                            audio_language="english"):
+    """PixAI video PROVIDER ADAPTER: map an Edit Bay shot (mode + prompt + @-ordered ref
+    media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
+    other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
+    i2vPro; R2V/V2V/any-with-refs -> referenceVideo. Duration snaps to PixAI's allowed
+    lengths. (Card auto-apply happens at the route: a V4.0 card makes it free.)"""
+    m = (mode or "R2V").upper()
+    imgs = [str(i) for i in (image_ids or []) if str(i).strip()]
+    vids = [str(v) for v in (video_ids or []) if str(v).strip()]
+    auds = [str(a) for a in (audio_ids or []) if str(a).strip()]
+    dur = _snap_video_duration(duration)
+    mdl = (model or "").strip() or DEFAULT_VIDEO_MODEL
+    if m == "I2V" and imgs:
+        return build_video_parameters(prompt, imgs[0], model=mdl, duration=dur,
+                                      generate_audio=generate_audio,
+                                      audio_language=audio_language)
+    if m == "FLF" and len(imgs) >= 2:
+        return build_video_parameters(prompt, imgs[0], model=mdl, tail_media_id=imgs[1],
+                                      duration=dur, generate_audio=generate_audio,
+                                      audio_language=audio_language)
+    if imgs or vids or auds:                       # R2V / V2V / any mode carrying references
+        return build_reference_video_parameters(prompt, image_media_ids=imgs,
+                                                 video_media_ids=vids, audio_media_ids=auds,
+                                                 model=mdl, duration=dur,
+                                                 generate_audio=generate_audio,
+                                                 audio_language=audio_language)
+    raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
+                     "(mode {}) -- attach a cast image or an open frame.".format(m))
+
+
+def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
+                                 strength=None, extra_inputs=None, priority=1000,
+                                 is_private=False, kaisuuken_id=""):
+    """Enhance via a PixAI panelplugin WORKFLOW (face-fix / bg-remove / handfix / lineart …).
+    VERIFIED shape (2026-07-02): model 'pixai-panelplugin', `inputs.image = {type:'media',
+    media_id}` (+ optional strength / per-plugin args). A workflow is addressed by either a
+    numeric `workflowId` (VERIFIED path) OR a `workflowName` like 'mymusise/hand-fix' (mined
+    from the app; unverified until fired -- a rejected submit costs no credits). Produces an
+    image output. Builder spends nothing."""
     inputs = {"image": {"type": "media", "media_id": str(media_id)}}
     if strength is not None:
         inputs["strength"] = float(strength)
@@ -2533,8 +2640,13 @@ def build_panelplugin_parameters(media_id, workflow_id, *, strength=None,
         "isPrivate": bool(is_private),
         "enablePreview": True,
         "hidePrompts": False,
-        "workflowId": str(workflow_id),
     }
+    if workflow_name:
+        params["workflowName"] = str(workflow_name)
+    elif workflow_id:
+        params["workflowId"] = str(workflow_id)
+    else:
+        raise PixAIError("panelplugin needs a workflow_id or workflow_name")
     if kaisuuken_id:
         params["kaisuukenId"] = str(kaisuuken_id)
     return params
@@ -2948,6 +3060,93 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     if rows:
         save_catalog(db_path, rows)
     return saved
+
+
+def submit_generation(session, params):
+    """Submit a createGenerationTask and return the task id immediately -- no wait, no
+    download. The card (if any) must already be attached to `params`. Raises on no id."""
+    created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+    task_id = (created.get("createGenerationTask") or {}).get("id")
+    if not task_id:
+        raise PixAIError("no task id returned: " + json.dumps(created)[:200])
+    return str(task_id)
+
+
+def submit_fixer(session, media_id, boxes):
+    """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
+    generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
+    'hand' | 'face' (<=20). Builds a mask from the boxes and repairs those regions. Raises."""
+    clean = []
+    for b in (boxes or []):
+        tag = str((b or {}).get("tag") or "").lower()
+        if tag not in ("hand", "face"):
+            continue
+        try:
+            x, y = max(0, int(b["x"])), max(0, int(b["y"]))
+            w, h = int(b["width"]), int(b["height"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if w > 0 and h > 0:
+            clean.append({"x": x, "y": y, "width": w, "height": h, "tag": tag})
+    if not clean:
+        raise PixAIError("fixer needs at least one hand/face box")
+    data = _rest_post(session, "/task/fixer",
+                      {"mediaId": str(media_id), "boxes": clean[:20]}) or {}
+    tid = data.get("id")
+    if not tid:
+        raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
+    return str(tid)
+
+
+_GEN_DONE = ("completed", "success", "succeeded", "done", "finished")
+_GEN_FAIL = ("failed", "error", "cancelled", "canceled", "rejected")
+
+
+def generation_status(session, task_id):
+    """One status check for a task -> {status, phase, paid_credit}. `phase` normalizes the
+    raw status into 'running' | 'done' | 'failed' for the async poller. Read-only."""
+    d = gql_adhoc(session, _GEN_STATUS, {"id": str(task_id)}) or {}
+    t = d.get("task") or {}
+    raw = (t.get("status") or "").lower()
+    phase = ("done" if raw in _GEN_DONE else
+             "failed" if raw in _GEN_FAIL else "running")
+    return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit")}
+
+
+def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_"):
+    """Download + catalog a COMPLETED task's output(s) into out_dir -> {media_ids, saved,
+    is_video}. Auto-detects video (outputs.videos) vs image and uses the matching shared
+    downloader. Call only once status is 'done'."""
+    from types import SimpleNamespace
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    init_db(out / "catalog.db")
+    result = task_detail_gql(session, task_id) or {}
+    a = SimpleNamespace(name_length=name_length, name_sep=name_sep)
+    vouts, _shared = video_outputs(result)
+    if vouts:
+        saved = _download_video_task(session, result, task_id, out, a, {})
+        mids = [str(o["video_media_id"]) for o in vouts if o.get("video_media_id")]
+        return {"media_ids": mids, "saved": len(saved), "is_video": True}
+    fm = extract_full_meta(result)
+    saved = _download_image_task(session, result, task_id, out, a, prompt=fm.get("prompt_full", ""))
+    outputs = result.get("outputs") or {}
+    mids = ([str(outputs["mediaId"])] if outputs.get("mediaId") else []) + \
+           [str(m) for m in (outputs.get("batchMediaIds") or [])]
+    return {"media_ids": list(dict.fromkeys(mids)), "saved": len(saved), "is_video": False}
+
+
+def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll_timeout=240):
+    """Synchronous submit -> wait -> download+catalog (used by tests / any blocking caller).
+    The async gallery routes use submit_generation + generation_status + collect_generation
+    instead. Returns {task_id, media_ids, saved, paid_credit}."""
+    task_id = submit_generation(session, params)
+    paid = _poll_task_status(session, task_id, poll_timeout, interval=3,
+                             label="generate", fail_noun="generation")
+    got = collect_generation(session, task_id, out_dir,
+                             name_length=name_length, name_sep=name_sep)
+    return {"task_id": task_id, "media_ids": got["media_ids"],
+            "saved": got["saved"], "paid_credit": paid}
 
 
 def run_generate_video(args):
@@ -3570,6 +3769,21 @@ def suggest_prompt(session, media_id):
     style tag list + a natural-language description variant). FREE, read-only. Raises."""
     data = _rest_get(session, "/tag/suggest-prompt/" + str(media_id)) or {}
     return data.get("output") or []
+
+
+def tag_search_gql(session, prefix, first=8):
+    """Tag autocomplete for the prompt writer -- the site's "Tag Suggestions" dropdown.
+    GraphQL `tags(q:$prefix, first:$n)` (field-probed 2026-07-04; node has name/
+    category/id/weight, no usage count -- the site's counts are client-side). Returns
+    a list of tag names. FREE, read-only. Raises on GraphQL error."""
+    q = "query($k:String!,$n:Int){ tags(q:$k, first:$n){ edges{ node{ name } } } }"
+    d = gql_adhoc(session, q, {"k": str(prefix), "n": int(first)}) or {}
+    out = []
+    for e in (d.get("tags") or {}).get("edges") or []:
+        name = (e.get("node") or {}).get("name")
+        if name:
+            out.append(name)
+    return out
 
 
 def run_suggest_prompt(args):

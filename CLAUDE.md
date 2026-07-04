@@ -211,15 +211,41 @@ recovered task's full submit shape (bank any param shape with no browser capture
 Deeper RE detail (submit shapes, the full app op catalog, kaisuuken/upload/edit captures, pricing) is
 in git-ignored `private/GENERATOR_SURFACE.md` + `private/APP_OPERATIONS_FULL.md`.
 
+## The web suite (v1.9.0): the Generate drawer + Edit Bay
+
+The Flask gallery is a full creation suite. Everything below is **localhost-gated**
+(`_is_local_request`) -- LAN browsers can look, only the owner's machine can spend.
+
+- **Generate drawer** (header ✦, dockable Left/Top/Bottom/Right, persisted): three tabs.
+  - *Generate*: base model + attachable **LoRA chips with weights** (separate state; rides
+    `loras:[{version_id,weight}]` -> `loraParameters`), model/LoRA browser in a **flyout**
+    with a **hover preview card** (cover/likes/author/tags), live cost + free-card check.
+  - *Edit* (600px wide): sub-tabs **Edit | Enhance | Fix** over a shared source; instruct-edit,
+    the 80-workflow enhance catalog, hand/face fixer boxes.
+  - *Video* (600px wide): I2V / FLF (first+last) / R2V modes, **gallery Picker slots** with
+    @image badges + hover previews + remove, contenteditable prompt with **@image chips**,
+    model picker (v4.0.1/v4.0/v3.2/v3.0.2/v3.0), audio toggle, **live cost + card count**.
+- **Picker** (`/api/gallery-images` + `/api/upload`): whole-catalog infinite scroll, search,
+  Collection/Source/Rating/Sort filters, upload -> media_id, optional copy-prompt-on-pick.
+- **Tag Suggestions** (`/api/tag-suggest` -> GraphQL `tags(q:...)`): Danbooru-style
+  autocomplete in the prompt boxes; TAB accepts. Field-probed 2026-07-04.
+- **Gallery bridges**: lightbox ✎ Edit / ▶ To Video buttons; right-click context menu on
+  cards; bulk-bar **Send to Video** (multi-select -> R2V refs).
+- **Edit Bay** (`/edit-bay`): the Seedance-style storyboard (acts/shots/cast/frame handoff)
+  with **Generate shot** on PixAI + gallery picking for cast/frames. Manual: `docs/EDIT_BAY.md`.
+- **Async engine**: submit (`/api/generate|edit|enhance|fix|editbay/generate`) -> poll
+  (`/api/task-status`) -> auto-download + catalog (`source='api'`, videos to `videos/`).
+  Free cards auto-apply on every path.
+
 ## Test suite
 
-246 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
+311 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
 
 ---
 
 ## Current state
 
-- **Version:** `1.5.0` on `master`
+- **Version:** `1.9.0` on `master`
 - **Branch strategy:** feature branches, merge to master with `--no-ff`, tag releases
 - **Owner:** Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev
 

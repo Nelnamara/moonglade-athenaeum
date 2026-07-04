@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 try:
-    from flask import (Flask, redirect, render_template_string, request,
+    from flask import (Flask, jsonify, redirect, render_template_string, request,
                        send_file, send_from_directory, url_for)
 except ImportError:
     sys.exit("Flask is required for the gallery server.\n"
@@ -994,6 +994,64 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
 # Flask app factory
 # ---------------------------------------------------------------------------
 
+# One-click enhance plugins for the Edit tab. `detail-fix` is the VERIFIED workflowId
+# (fired for real 2026-07-02). `hand-fix` / `face-fix` use workflowNames mined from the
+# app bundle -- unverified until fired, but a rejected panelplugin submit costs no credits,
+# so they're safe to offer and confirm live. More arrive once we have the full catalog.
+ENHANCE_PLUGINS = {
+    "detail-fix": {"label": "Detail fix", "workflow_id": "1797414829336369706"},
+    "hand-fix":   {"label": "Fix hands",  "workflow_name": "mymusise/hand-fix"},
+    "face-fix":   {"label": "Fix face",   "workflow_name": "kyo/face-detailer"},
+}
+
+
+# The Edit Bay (Seedance video storyboard tool) is served at /edit-bay. Its React source
+# lives in editbay/seedance-storyboard.jsx; this page loads React+Babel from a CDN and, per
+# the tool's own integration notes, swaps window.storage onto the gallery backend so a board
+# persists server-side (shared across devices) instead of per-browser localStorage.
+EDITBAY_PAGE = r"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Edit Bay - Moonglade Athenaeum</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js" crossorigin></script>
+</head><body style="margin:0;background:#15131C">
+<div id="root"></div>
+<script>
+window.storage = {
+  get:function(k){ return fetch('/api/editbay/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },
+  set:function(k,v){ return fetch('/api/editbay/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})}); },
+  list:function(p){ return fetch('/api/editbay/list?prefix='+encodeURIComponent(p||'')).then(function(r){return r.json();}).then(function(d){ return {keys:(d&&d.keys)||[]}; }); },
+  delete:function(k){ return fetch('/api/editbay/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
+};
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+__JSX__
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex'"
+  style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:#8b7bd8;color:#15131C;border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
+  title="How the Edit Bay works">?</button>
+<div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
+  style="position:fixed;inset:0;z-index:301;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
+  <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:#1d1a26;border:1px solid #3a3550;border-radius:14px;padding:22px 26px;color:#d8d4e8;font:13.5px/1.55 system-ui,sans-serif;">
+    <h2 style="margin:0 0 4px;color:#fff;">The Edit Bay &mdash; quick guide</h2>
+    <p style="color:#9a93b5;margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
+    <p><b>Acts &amp; Shots.</b> Your video is a list of <i>acts</i>, each holding <i>shot cards</i>. The reel bar tracks total runtime against your target. Add a shot, give it a duration, and write what happens.</p>
+    <p><b>Modes.</b> Each shot has a generation mode: <b>T2V</b> text-only &middot; <b>I2V</b> animate from one image &middot; <b>FLF</b> morph from a start frame to an end frame &middot; <b>R2V</b> multi-reference (cast + scenes) &middot; <b>V2V</b> extend/transform an existing clip.</p>
+    <p><b>Cast &amp; Assets.</b> Reusable references. Cite them in shot text as <b>@image1 @video1 @audio1</b> (lowercase). "Lock appearance" keeps a character consistent across shots.</p>
+    <p><b>Frame handoff.</b> Every card has an open and close frame. "&#8627; inherit prev close" chains one shot's last frame into the next shot's first &mdash; the &#10003;/&#9888; dots show whether the chain is intact.</p>
+    <p><b>&#9654; Generate shot.</b> Renders the card on PixAI's video engine (V4.0): your cast + frames upload in @-order, the shot text becomes the prompt, and the finished clip lands in the gallery catalog &mdash; free when a V4.0 card covers it. Status shows on the card; "open clip &#8599;" plays it.</p>
+    <p><b>Copy shot.</b> The same assembled prompt, to your clipboard &mdash; paste it into any Seedance-style generator. The board is engine-agnostic by design: plan here, render anywhere.</p>
+    <p><b>Saving.</b> The board autosaves to the gallery server (survives restarts). Backup .json / export .txt live in the header.</p>
+    <p style="color:#9a93b5;">Full manual: <code>docs/EDIT_BAY.md</code> in the repo.</p>
+  </div>
+</div>
+</body></html>"""
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
     db_path = out_dir / "catalog.db"
@@ -1269,6 +1327,34 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
   </div>
 </div>
+<style>
+  .ee-star{position:fixed;top:-40px;z-index:400;pointer-events:none;color:var(--lavender);text-shadow:0 0 14px rgba(182,146,230,.9),0 0 30px rgba(182,146,230,.5);animation:ee-fall linear forwards;}
+  @keyframes ee-fall{to{transform:translateY(112vh) rotate(540deg);opacity:.05;}}
+  .ee-toast{position:fixed;left:50%;top:36%;transform:translate(-50%,-50%);z-index:401;background:var(--mantle);border:1px solid var(--lavender);border-radius:14px;padding:18px 32px;font-size:19px;color:var(--text);text-align:center;box-shadow:0 0 70px rgba(182,146,230,.55);pointer-events:none;animation:ee-toast 6s ease forwards;}
+  @keyframes ee-toast{0%{opacity:0;transform:translate(-50%,-50%) scale(.85);}10%{opacity:1;transform:translate(-50%,-50%) scale(1);}82%{opacity:1;}100%{opacity:0;}}
+</style>
+<script>
+(function(){
+  var seq=[38,38,40,40,37,39,37,39,66,65], pos=0, busy=false;
+  document.addEventListener('keydown', function(e){
+    pos = (e.keyCode===seq[pos]) ? pos+1 : (e.keyCode===seq[0] ? 1 : 0);
+    if(pos!==seq.length) return;
+    pos=0; if(busy) return; busy=true;
+    var g=['✦','✧','★','✪','✺'];
+    for(var i=0;i<46;i++){ var s=document.createElement('div'); s.className='ee-star';
+      s.textContent=g[i%g.length];
+      s.style.left=(Math.random()*100)+'vw';
+      s.style.fontSize=(13+Math.random()*24)+'px';
+      s.style.animationDuration=(2.2+Math.random()*2.6)+'s';
+      s.style.animationDelay=(Math.random()*1.8)+'s';
+      document.body.appendChild(s); }
+    var t=document.createElement('div'); t.className='ee-toast';
+    t.innerHTML='✺ Elune-adore, Nelnamara ✺<div style="font-size:12.5px;color:var(--subtext);margin-top:7px;">The Athenaeum casts Starfall. Moonfire spam remains a lifestyle.</div>';
+    document.body.appendChild(t);
+    setTimeout(function(){ document.querySelectorAll('.ee-star,.ee-toast').forEach(function(n){n.remove();}); busy=false; }, 7000);
+  });
+})();
+</script>
 </body>
 </html>
 """
@@ -1293,7 +1379,9 @@ document.addEventListener('DOMContentLoaded', function() {
 <header>
   <div class="brand"><span class="mark">M</span><h1>Moonglade Athenaeum</h1></div>
   <span class="header-stats">{{ '{:,}'.format(total) }} images</span>
-  <a class="back-link" href="{{ url_for('health') }}" style="margin-left:auto;">Collection health →</a>
+  <button type="button" class="btn btn-primary" onclick="Gen.open()" style="margin-left:auto;">&#10022; Generate</button>
+  <a class="back-link" href="/edit-bay" title="Seedance video storyboard">&#9648; Edit Bay</a>
+  <a class="back-link" href="{{ url_for('health') }}">Collection health &rarr;</a>
 </header>
 
 <button type="button" class="filter-toggle btn" onclick="toggleFilters()"
@@ -1455,6 +1543,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <button class="btn" id="bulk-zip-btn" style="display:none" onclick="downloadZip()">Download ZIP</button>
   <button class="btn" id="bulk-replace-btn" style="display:none" onclick="bulkReplacePrompt()" title="Find/replace text in the prompts of selected images">Find/Replace</button>
   <button class="btn btn-primary" id="bulk-collection-btn" onclick="bulkAddCollection()" title="Check some images/videos first, then click to add them to a named collection (files are not moved)">+ Add to Collection</button>
+  <button class="btn" id="bulk-video-btn" style="display:none" onclick="bulkSendVideo()" title="Send up to 9 selected images to the Video tab as references">&#9654; Send to Video</button>
   <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
   <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
           title="Saved views"><option value="">Saved views…</option></select>
@@ -1507,6 +1596,8 @@ document.addEventListener('DOMContentLoaded', function() {
   <div class="lb-bar">
     <span id="lb-caption"></span>
     <span class="lb-actions">
+      <button class="btn" onclick="lbEdit()" title="Open in the Edit tab">✎ Edit</button>
+      <button class="btn" onclick="lbVideo()" title="Send to the Video tab as a reference">▶ To Video</button>
       <a id="lb-details" class="btn" href="#">Details</a>
       <button class="btn" id="lb-play" onclick="toggleSlideshow()">▶ Slideshow</button>
       <button class="btn" onclick="closeLightbox()">✕ Close</button>
@@ -1620,6 +1711,8 @@ function refreshSelUI() {
   if (rb) rb.style.display = sel.size ? 'inline-block' : 'none';
   var cb = document.getElementById('bulk-del-cloud-btn');
   if (cb) cb.style.display = sel.size ? 'inline-block' : 'none';
+  var vb = document.getElementById('bulk-video-btn');
+  if (vb) vb.style.display = sel.size ? 'inline-block' : 'none';
 }
 function onCheck() {
   var sel = selGet();
@@ -1917,6 +2010,945 @@ document.addEventListener('DOMContentLoaded', function(){
   }
 });
 </script>
+
+<style>
+  #gen-scrim{position:fixed;inset:0;background:rgba(6,4,16,.55);z-index:200;opacity:0;visibility:hidden;transition:opacity .18s;}
+  #gen-scrim.open{opacity:1;visibility:visible;}
+  #gen-drawer{position:fixed;top:0;right:0;height:100%;width:420px;max-width:94vw;background:var(--mantle);border-left:1px solid var(--surface1);z-index:201;transform:translateX(100%);transition:transform .2s ease,width .2s ease;display:flex;flex-direction:column;}
+  #gen-drawer.open{transform:none;}
+  #gen-drawer.wide{width:600px;}
+  #gen-drawer.dock-left{right:auto;left:0;border-left:none;border-right:1px solid var(--surface1);transform:translateX(-100%);}
+  #gen-drawer.dock-top{right:auto;left:0;top:0;bottom:auto;width:100%;max-width:100vw;height:auto;max-height:64vh;border:none;border-bottom:1px solid var(--surface1);transform:translateY(-100%);}
+  #gen-drawer.dock-bottom{right:auto;left:0;top:auto;bottom:0;width:100%;max-width:100vw;height:auto;max-height:64vh;border:none;border-top:1px solid var(--surface1);transform:translateY(100%);}
+  #gen-drawer.dock-top.wide,#gen-drawer.dock-bottom.wide{width:100%;}
+  #gen-drawer.dock-top .gen-body,#gen-drawer.dock-bottom .gen-body{width:100%;max-width:940px;margin:0 auto;}
+  .dock-ctl{margin-left:auto;display:flex;gap:3px;}
+  .dock-ctl button{background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);border-radius:5px;width:22px;height:22px;font-size:10px;line-height:1;cursor:pointer;padding:0;}
+  .dock-ctl button:hover{color:var(--text);}
+  .dock-ctl button.on{color:var(--lavender);border-color:var(--lavender);}
+  .gen-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--surface0);}
+  .gen-head .spark{color:var(--lavender);font-size:18px;}
+  .gen-head .t{font-size:15px;font-weight:600;color:var(--text);}
+  .gen-head .x{margin-left:4px;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
+  .gen-head .x:hover{color:var(--red);}
+  .gen-body{padding:12px 14px;overflow-y:auto;flex:1;}
+  .gen-seg{display:flex;gap:6px;margin-bottom:10px;}
+  .gen-seg button{flex:1;padding:6px 0;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
+  .gen-seg button.on{background:var(--lavender);color:var(--base);border-color:var(--lavender);font-weight:600;}
+  .gen-search{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;margin-bottom:10px;}
+  .gen-search:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+  .gen-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .12s;}
+  .gen-card{border-radius:12px;overflow:hidden;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;position:relative;}
+  .gen-card:hover{border-color:var(--overlay0);}
+  .gen-card.sel{border:2px solid var(--lavender);box-shadow:0 0 0 2px rgba(182,146,230,.25);}
+  .gen-card .cov{aspect-ratio:1;width:100%;object-fit:cover;display:block;background:var(--surface1);}
+  .gen-card .cov.blur{filter:blur(15px);}
+  .gen-card .meta{padding:5px 7px;}
+  .gen-card .nm{font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .gen-card .sub{display:flex;justify-content:space-between;align-items:center;margin-top:2px;font-size:10px;}
+  .gen-card .ty{color:var(--emerald);}
+  .gen-card .lk{color:var(--subtext);}
+  .gen-card .chk{position:absolute;top:4px;right:4px;color:var(--lavender);background:var(--mantle);border-radius:50%;font-size:12px;width:18px;height:18px;display:none;align-items:center;justify-content:center;border:1px solid var(--lavender);}
+  .gen-card.sel .chk{display:flex;}
+  .gen-empty{color:var(--subtext);font-size:12px;padding:22px 4px;text-align:center;}
+  .gen-form{border-top:1px dashed var(--surface1);margin-top:12px;padding-top:10px;}
+  .gen-lbl{color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;}
+  .gen-ta{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 9px;font-size:13px;font-family:inherit;resize:vertical;}
+  .gen-ta:focus,.gen-sel:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+  #gen-selname{color:var(--lavender);font-size:12.5px;margin-bottom:8px;}
+  .gen-aspects{display:flex;gap:5px;flex-wrap:wrap;}
+  .gen-aspects button{padding:4px 9px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
+  .gen-aspects button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
+  .gen-row{display:flex;gap:8px;}
+  .gen-sel{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12.5px;}
+  .gen-check{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:12px;margin-top:8px;cursor:pointer;}
+  .gen-cost{margin:12px 0 8px;padding:8px 10px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12.5px;color:var(--text);}
+  .gen-cost.free{border-color:var(--emerald);color:var(--emerald);}
+  .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
+  .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
+  .gen-ce{min-height:66px;white-space:pre-wrap;overflow-y:auto;max-height:180px;}
+  .gen-ce:empty::before{content:attr(data-placeholder);color:var(--overlay0);pointer-events:none;}
+  .gen-ce:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+  .vp-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:5px;padding:1px 6px 1px 2px;font-size:11.5px;color:var(--lavender);margin:0 2px;vertical-align:-3px;cursor:default;user-select:none;}
+  .vp-chip img{width:16px;height:16px;border-radius:3px;object-fit:cover;}
+  .gen-moon{display:inline-block;width:15px;height:15px;border-radius:50%;background:var(--lavender);position:relative;overflow:hidden;vertical-align:-3px;margin-right:7px;box-shadow:0 0 9px rgba(182,146,230,.75);}
+  .gen-moon::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--mantle);animation:gen-eclipse 2.6s ease-in-out infinite;}
+  @keyframes gen-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}
+  .gen-result{margin-top:12px;} .gen-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
+  .gen-result a{color:var(--accent-soft);font-size:12px;text-decoration:none;}
+  #enh-list{max-height:230px;overflow-y:auto;margin-top:2px;}
+  .enh-item{display:block;width:100%;text-align:left;padding:6px 9px;margin-bottom:4px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.3;}
+  .enh-item:hover{border-color:var(--overlay0);}
+  .enh-item .ty{color:var(--overlay0);font-size:10px;}
+  .fix-tags{display:flex;gap:5px;margin-bottom:6px;}
+  .fix-tags button{padding:4px 10px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
+  .fix-tags button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
+  #fix-wrap{position:relative;display:inline-block;max-width:100%;line-height:0;}
+  #fix-img{max-width:100%;display:block;border-radius:8px;}
+  #fix-canvas{position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;}
+  #gen-loras{display:flex;flex-direction:column;gap:5px;}
+  .lora-chip{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12px;color:var(--text);}
+  .lora-chip img{width:24px;height:24px;border-radius:4px;object-fit:cover;flex:0 0 auto;}
+  .lora-chip .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lora-chip input{width:58px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:11.5px;padding:2px 4px;}
+  .lora-chip .rm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
+  .lora-chip .rm:hover{color:var(--red);}
+  #lora-add{width:100%;margin-top:5px;padding:5px 0;font-size:11.5px;border-radius:6px;background:transparent;color:var(--subtext);border:1px dashed var(--surface1);cursor:pointer;}
+  #lora-add:hover{color:var(--text);border-color:var(--overlay0);}
+  #gen-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);color:var(--text);cursor:pointer;font-size:12.5px;text-align:left;}
+  #gen-selrow:hover{border-color:var(--overlay0);}
+  #gen-selthumb{width:30px;height:30px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
+  #gen-selrow .hint{margin-left:auto;color:var(--overlay0);font-size:11px;flex:0 0 auto;}
+  #model-flyout{position:absolute;top:0;right:100%;height:100%;width:372px;max-width:92vw;background:var(--mantle);border:1px solid var(--surface1);border-right:none;display:none;flex-direction:column;box-shadow:-14px 0 34px rgba(0,0,0,.4);}
+  #model-flyout.open{display:flex;}
+  #model-flyout .x{margin-left:auto;}
+  #gen-drawer.dock-left #model-flyout{right:auto;left:100%;border-right:1px solid var(--surface1);border-left:none;box-shadow:14px 0 34px rgba(0,0,0,.4);}
+  #gen-drawer.dock-top #model-flyout{top:100%;bottom:auto;right:auto;left:50%;transform:translateX(-50%);height:auto;max-height:58vh;border-top:none;box-shadow:0 14px 34px rgba(0,0,0,.4);}
+  #gen-drawer.dock-bottom #model-flyout{top:auto;bottom:100%;right:auto;left:50%;transform:translateX(-50%);height:auto;max-height:58vh;border-bottom:none;box-shadow:0 -14px 34px rgba(0,0,0,.4);}
+  #pick-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
+  #pick-scrim.open{display:block;}
+  #pick-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
+  .pick-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+  .pick-filters select{background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:5px 8px;font-size:12px;}
+  #pick-modal.open{display:flex;}
+  .pick-head{display:flex;align-items:center;margin-bottom:10px;}
+  .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
+  .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
+  #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;overflow-y:auto;transition:opacity .12s;flex:1;min-height:120px;align-content:start;}
+  .pick-cell{aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--surface0);}
+  .pick-cell:hover{border-color:var(--lavender);}
+  .pick-cell img{width:100%;height:100%;object-fit:cover;display:block;}
+  .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
+  #pick-up{flex:0 0 auto;height:33px;padding:0 12px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;}
+  #pick-up:hover{border-color:var(--overlay0);}
+  #model-preview{position:fixed;z-index:220;width:300px;max-width:80vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);display:none;overflow:hidden;pointer-events:none;}
+  #model-preview.open{display:block;}
+  #model-preview img{width:100%;max-height:340px;object-fit:cover;display:block;background:var(--surface1);}
+  #model-preview img.blur{filter:blur(18px);}
+  #model-preview .mp-meta{padding:9px 11px;}
+  #model-preview .mp-nm{font-size:13px;font-weight:600;color:var(--text);}
+  #model-preview .mp-sub{display:flex;gap:8px;font-size:11px;margin-top:3px;color:var(--subtext);}
+  #model-preview .mp-sub .ty{color:var(--emerald);}
+  #model-preview .mp-desc{font-size:11px;color:var(--subtext);margin-top:5px;line-height:1.45;max-height:88px;overflow:hidden;}
+  #model-preview .mp-tags{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px;}
+  #model-preview .mp-tags span{font-size:10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;padding:1px 6px;color:var(--subtext);}
+</style>
+<div id="gen-scrim" onclick="Gen.close()"></div>
+<aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
+  <div class="gen-head">
+    <span class="spark">&#10022;</span><span class="t">Generate</span>
+    <span class="dock-ctl">
+      <button type="button" data-dock="left" onclick="Gen.setDock('left')" title="Dock left">&#9612;</button>
+      <button type="button" data-dock="top" onclick="Gen.setDock('top')" title="Dock top">&#9600;</button>
+      <button type="button" data-dock="bottom" onclick="Gen.setDock('bottom')" title="Dock bottom">&#9604;</button>
+      <button type="button" data-dock="right" class="on" onclick="Gen.setDock('right')" title="Dock right">&#9616;</button>
+    </span>
+    <button class="x" onclick="Gen.close()" aria-label="Close">&times;</button>
+  </div>
+  <div class="gen-body">
+    <div class="gen-seg" id="gen-mode-seg" style="margin-bottom:12px;">
+      <button id="gm-generate" class="on" onclick="Gen.setMode('generate')">Generate</button>
+      <button id="gm-edit" onclick="Gen.setMode('edit')">Edit</button>
+      <button id="gm-video" onclick="Gen.setMode('video')">Video</button>
+    </div>
+    <div id="gen-mode-generate">
+    <div class="gen-lbl" style="margin-top:0;">Model</div>
+    <button type="button" id="gen-selrow" onclick="Gen.toggleFlyout()"
+            onmouseenter="Gen.previewSelected(event)" onmouseleave="Gen.hidePreview()">
+      <img id="gen-selthumb" alt="" style="display:none;">
+      <span id="gen-selname">none &mdash; browse models</span>
+      <span class="hint">&#9666; browse</span>
+    </button>
+    <div class="gen-lbl">LoRAs</div>
+    <div id="gen-loras"></div>
+    <button type="button" id="lora-add" onclick="Gen.openLoraBrowser()">+ Add LoRA</button>
+    <div class="gen-form" style="border-top:none;margin-top:0;padding-top:0;">
+      <textarea id="gen-prompt" class="gen-ta" rows="3" style="margin-top:8px;" placeholder="Describe your image&hellip;"></textarea>
+      <details style="margin-top:6px;">
+        <summary style="cursor:pointer;color:var(--subtext);font-size:11px;">Negative prompt</summary>
+        <textarea id="gen-neg" class="gen-ta" rows="2" placeholder="lowres, text, watermark&hellip;" style="margin-top:5px;"></textarea>
+      </details>
+      <div class="gen-lbl">Aspect</div>
+      <div class="gen-aspects" id="gen-aspects">
+        <button type="button" data-w="512" data-h="512" class="on">1:1</button>
+        <button type="button" data-w="512" data-h="768">2:3</button>
+        <button type="button" data-w="768" data-h="512">3:2</button>
+        <button type="button" data-w="512" data-h="896">9:16</button>
+        <button type="button" data-w="896" data-h="512">16:9</button>
+      </div>
+      <div class="gen-row" style="margin-top:8px;">
+        <div style="flex:1;"><div class="gen-lbl">Mode</div>
+          <select id="gen-mode" class="gen-sel"><option value="auto">Auto</option><option value="lite">Lite</option><option value="standard">Standard</option><option value="pro">Pro</option><option value="ultra">Ultra</option></select></div>
+        <div style="flex:1;"><div class="gen-lbl">Count</div>
+          <select id="gen-count" class="gen-sel"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+      </div>
+      <label class="gen-check"><input type="checkbox" id="gen-hp"> High priority (faster, costs more)</label>
+      <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
+      <div id="gen-cost" class="gen-cost">Pick a model to see the cost.</div>
+      <button id="gen-go" class="gen-go" onclick="Gen.generate()" disabled>Generate</button>
+      <div id="gen-result" class="gen-result" style="display:none;"></div>
+    </div>
+    </div>
+    <div id="gen-mode-edit" style="display:none;">
+      <div class="gen-lbl">Editing image</div>
+      <img id="edit-src-img" alt="source" style="width:100%;border-radius:10px;display:none;margin-bottom:8px;">
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input id="edit-src" class="gen-search" style="margin-bottom:0;flex:1;" placeholder="Source media_id" autocomplete="off">
+        <button type="button" class="gen-seg" style="flex:0 0 auto;padding:7px 11px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;" onclick="Picker.open(function(mid){ Gen.setEditSource(mid); })">&#9648; Pick</button>
+      </div>
+      <div class="gen-seg" style="margin:10px 0;">
+        <button id="es-edit" class="on" onclick="Gen.setEditSub('edit')">Edit</button>
+        <button id="es-enhance" onclick="Gen.setEditSub('enhance')">Enhance</button>
+        <button id="es-fix" onclick="Gen.setEditSub('fix')">Fix</button>
+      </div>
+      <div id="edit-sub-edit">
+        <textarea id="edit-ins" class="gen-ta" rows="3" placeholder="Describe the change &mdash; &lsquo;make it night, add snow&rsquo;&hellip;"></textarea>
+        <div class="gen-row" style="margin-top:8px;">
+          <div style="flex:1;"><div class="gen-lbl">Resolution</div>
+            <select id="edit-res" class="gen-sel"><option>1K</option><option>2K</option><option>4K</option></select></div>
+          <div style="flex:1;"><div class="gen-lbl">Quality</div>
+            <select id="edit-qual" class="gen-sel"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+        </div>
+        <div class="gen-lbl">Aspect</div>
+        <select id="edit-aspect" class="gen-sel"><option value="3:4">3:4</option><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select>
+        <div id="edit-cost" class="gen-cost">Pick an image to see the cost.</div>
+        <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
+        <div id="edit-result" class="gen-result" style="display:none;"></div>
+      </div>
+      <div id="edit-sub-enhance" style="display:none;">
+        <div class="gen-lbl">One-click enhance <span style="text-transform:none;color:var(--subtext);">&middot; on the source</span></div>
+        <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
+        <div id="enh-list"></div>
+        <div id="enh-result" class="gen-result" style="display:none;"></div>
+      </div>
+      <div id="edit-sub-fix" style="display:none;">
+        <div class="gen-lbl">Fix hands / faces <span style="text-transform:none;color:var(--subtext);">&middot; drag a box</span></div>
+        <div class="fix-tags">
+          <button type="button" id="fix-tag-face" class="on" onclick="Gen.fixTag('face')">Face</button>
+          <button type="button" id="fix-tag-hand" onclick="Gen.fixTag('hand')">Hand</button>
+          <button type="button" onclick="Gen.fixClear()">Clear</button>
+        </div>
+        <div id="fix-wrap"><img id="fix-img" alt="fix source"><canvas id="fix-canvas"></canvas></div>
+        <button id="fix-go" class="gen-go" onclick="Gen.fix()" style="margin-top:8px;">Fix marked regions</button>
+        <div id="fix-result" class="gen-result" style="display:none;"></div>
+      </div>
+    </div>
+    <div id="gen-mode-video" style="display:none;">
+      <div class="gen-seg" style="margin-bottom:10px;">
+        <button id="vm-i2v" class="on" onclick="Gen.setVideoMode('i2v')">First frame</button>
+        <button id="vm-flf" onclick="Gen.setVideoMode('flf')">First + last</button>
+        <button id="vm-r2v" onclick="Gen.setVideoMode('r2v')">Multi-ref</button>
+      </div>
+      <div class="gen-lbl" id="video-slots-lbl">Source image (first frame)</div>
+      <div id="video-slots"></div>
+      <div id="video-prompt" class="gen-ta gen-ce" contenteditable="true" style="margin-top:8px;"
+           data-placeholder="Describe the motion &mdash; &lsquo;slow cinematic pan right, gentle waves&hellip;&rsquo;"></div>
+      <div class="gen-row" style="margin-top:8px;">
+        <div style="flex:1.4;"><div class="gen-lbl">Model</div>
+          <select id="video-model" class="gen-sel" onchange="Gen.videoCost()">
+            <option value="v4.0.1" selected>V4.0 &middot; multi-ref &middot; 15s &middot; audio</option>
+            <option value="v4.0">V4.0 (alt)</option>
+            <option value="v3.2">V3.2 &middot; audio &middot; prompt-following</option>
+            <option value="v3.0.2">V3.0 Lite</option>
+            <option value="v3.0">V3.0 &middot; high consistency</option>
+          </select></div>
+        <div style="flex:1;"><div class="gen-lbl">Duration (s)</div>
+          <select id="video-dur" class="gen-sel" onchange="Gen.videoCost()"><option>5</option><option>6</option><option>10</option><option>15</option></select></div>
+      </div>
+      <label class="gen-check"><input type="checkbox" id="video-audio" onchange="Gen.videoCost()"> Generate audio <span style="color:var(--overlay0);">(V4.0 / V3.2 &middot; spoken lines in the prompt become voiceover)</span></label>
+      <div class="gen-cost" id="video-cost" style="margin-top:10px;">Pick a source image to see the cost.</div>
+      <button id="video-go" class="gen-go" onclick="Gen.videoGenerate()">Generate video</button>
+      <div id="video-result" class="gen-result" style="display:none;"></div>
+    </div>
+  </div>
+  <div id="model-flyout" aria-hidden="true" aria-label="Models and LoRAs">
+    <div class="gen-head"><span class="t">Models &amp; LoRAs</span>
+      <button class="x" onclick="Gen.toggleFlyout()" aria-label="Close">&times;</button></div>
+    <div class="gen-body">
+      <div class="gen-seg">
+        <button id="gen-k-base" class="on" onclick="Gen.setKind('base')">Models</button>
+        <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
+      </div>
+      <input class="gen-search" id="gen-q" placeholder="Search models&hellip;" autocomplete="off">
+      <div class="gen-grid" id="gen-grid"></div>
+      <div class="gen-empty" id="gen-empty" style="display:none;"></div>
+    </div>
+  </div>
+</aside>
+<div id="pick-scrim" onclick="Picker.close()"></div>
+<div id="pick-modal" aria-hidden="true" aria-label="Pick from your gallery">
+  <div class="pick-head"><span class="t">&#9648; Select from your gallery</span>
+    <button class="x" onclick="Picker.close()" aria-label="Close">&times;</button></div>
+  <div style="display:flex;gap:6px;">
+    <input class="gen-search" id="pick-q" style="flex:1;" placeholder="Search your images&hellip;" autocomplete="off">
+    <button type="button" id="pick-up" onclick="Picker.upload()" title="Upload a local file (free)">&#8679; Upload</button>
+    <input type="file" id="pick-file" accept="image/*" style="display:none;" onchange="Picker.onFile()">
+  </div>
+  <div class="pick-filters">
+    <select id="pick-collection" onchange="Picker.onFilter()">
+      <option value="">All collections</option>
+      {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+    <select id="pick-source" onchange="Picker.onFilter()">
+      <option value="">Any source</option>
+      <option value="api">Generated (AI)</option>
+      <option value="local">Imported local</option>
+    </select>
+    <select id="pick-rating" onchange="Picker.onFilter()">
+      <option value="0">Any rating</option>
+      <option value="1">&#9733;+</option><option value="2">&#9733;&#9733;+</option>
+      <option value="3">&#9733;&#9733;&#9733;+</option><option value="4">&#9733;&#9733;&#9733;&#9733;+</option>
+      <option value="5">&#9733;&#9733;&#9733;&#9733;&#9733;</option>
+    </select>
+    <select id="pick-sort" onchange="Picker.onFilter()">
+      <option value="newest">Newest first</option>
+      <option value="oldest">Oldest first</option>
+    </select>
+  </div>
+  <label class="gen-check" style="margin:0 0 8px;"><input type="checkbox" id="pick-copy" onchange="Picker.toggleCopy()"> Copy the image&rsquo;s prompt to the clipboard when picking</label>
+  <div id="pick-grid" onscroll="Picker.onScroll()"></div>
+  <div class="pick-empty" id="pick-empty" style="display:none;"></div>
+</div>
+<div id="model-preview" aria-hidden="true"></div>
+<div id="ctx-menu"></div>
+<div id="tag-suggest"></div>
+<style>
+  #ctx-menu{position:fixed;z-index:230;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:180px;padding:4px;}
+  #ctx-menu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:7px 10px;border-radius:5px;cursor:pointer;}
+  #ctx-menu button:hover{background:var(--surface0);}
+  #tag-suggest{position:fixed;z-index:240;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:210px;max-width:320px;padding:4px;}
+  #tag-suggest .ts-head{display:flex;justify-content:space-between;gap:14px;color:var(--overlay0);font-size:10px;padding:3px 8px;text-transform:uppercase;letter-spacing:.05em;}
+  #tag-suggest button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:6px 9px;border-radius:5px;cursor:pointer;}
+  #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
+</style>
+<script>
+var Picker = (function(){
+  var cb=null, timer=null, page=1, more=false, loading=false, curQ='';
+  function el(id){return document.getElementById(id);}
+  function open(callback){ cb=callback; el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
+    el('pick-q').value=''; curQ=''; page=1; load(false); setTimeout(function(){el('pick-q').focus();},120);
+    try{ el('pick-copy').checked = localStorage.getItem('pick-copyprompt')==='1'; }catch(e){} }
+  function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; }
+  function onInput(){ clearTimeout(timer); timer=setTimeout(function(){ curQ=el('pick-q').value.trim(); page=1; load(false); }, 280); }
+  function onFilter(){ page=1; load(false); }
+  function filterQS(){
+    var v=function(id){ var e=el(id); return e?encodeURIComponent(e.value):''; };
+    return '&collection='+v('pick-collection')+'&source='+v('pick-source')
+         +'&rating_min='+v('pick-rating')+'&sort='+v('pick-sort');
+  }
+  function pick(m, thumb){
+    try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
+    var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'');
+  }
+  function load(append){
+    if(loading) return; loading=true;
+    var grid=el('pick-grid'), empty=el('pick-empty'); if(!append) grid.style.opacity='.5';
+    fetch('/api/gallery-images?limit=60&page='+page+'&q='+encodeURIComponent(curQ)+filterQS()).then(function(r){return r.json();}).then(function(d){
+      loading=false; grid.style.opacity='1'; var imgs=d.images||[];
+      if(!append) grid.innerHTML='';
+      more = ((d.page||1)*(d.limit||60)) < (d.total||0);
+      if(!imgs.length && !append){ empty.textContent='No images found.'; empty.style.display='block'; return; }
+      empty.style.display='none';
+      imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
+        c.innerHTML='<img loading="lazy" src="'+m.thumb+'" alt="">';
+        c.onclick=function(){ pick(m); }; grid.appendChild(c); });
+    }).catch(function(){ loading=false; grid.style.opacity='1'; });
+  }
+  function onScroll(){ var g=el('pick-grid');
+    if(more && !loading && g.scrollTop + g.clientHeight > g.scrollHeight - 320){ page++; load(true); } }
+  function toggleCopy(){ try{ localStorage.setItem('pick-copyprompt', el('pick-copy').checked?'1':'0'); }catch(e){} }
+  function upload(){ el('pick-file').click(); }
+  function onFile(){
+    var f=el('pick-file').files[0]; if(!f) return;
+    var empty=el('pick-empty'); empty.textContent='Uploading '+f.name+'\\u2026'; empty.style.display='block';
+    var fd=new FormData(); fd.append('file', f);
+    fetch('/api/upload',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
+      el('pick-file').value='';
+      if(d.error||!d.media_id){ empty.textContent='\\u26a0 Upload failed: '+(d.error||'no media id'); return; }
+      empty.style.display='none';
+      pick({media_id:d.media_id, prompt:''}, URL.createObjectURL(f));
+    }).catch(function(){ el('pick-file').value=''; empty.textContent='\\u26a0 Upload failed (network).'; });
+  }
+  return {open:open, close:close, onInput:onInput, onFilter:onFilter, onScroll:onScroll, toggleCopy:toggleCopy, upload:upload, onFile:onFile};
+})();
+document.addEventListener('DOMContentLoaded', function(){
+  var pq=document.getElementById('pick-q'); if(pq) pq.addEventListener('input', Picker.onInput);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') Picker.close(); });
+});
+var Gen = (function(){
+  var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null;
+  var workflows=null, enhTimer=null;
+  var fixTag_='face', fixBoxes=[], fixStart=null;
+  function el(id){return document.getElementById(id);}
+  function open(){
+    el('gen-drawer').classList.add('open'); el('gen-scrim').classList.add('open');
+    el('gen-drawer').setAttribute('aria-hidden','false');
+    setTimeout(function(){el('gen-prompt').focus();},200);
+  }
+  function close(){
+    el('gen-drawer').classList.remove('open'); el('gen-scrim').classList.remove('open');
+    el('gen-drawer').setAttribute('aria-hidden','true');
+    var f=el('model-flyout'); if(f){ f.classList.remove('open'); f.setAttribute('aria-hidden','true'); }
+    hidePreview();
+  }
+  function toggleFlyout(){
+    var f=el('model-flyout'), on=!f.classList.contains('open');
+    f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
+    if(on){ if(!el('gen-grid').children.length) search(); setTimeout(function(){el('gen-q').focus();},120); }
+    else hidePreview();
+  }
+  function setDock(d){
+    d=(d==='left'||d==='top'||d==='bottom')?d:'right';
+    var dr=el('gen-drawer');
+    ['left','top','bottom'].forEach(function(x){ dr.classList.toggle('dock-'+x, d===x); });
+    document.querySelectorAll('.dock-ctl button').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-dock')===d); });
+    try{ localStorage.setItem('gen-dock', d); }catch(e){}
+  }
+  function setKind(k){
+    if(k===kind) return; kind=k;
+    el('gen-k-base').classList.toggle('on',k==='base');
+    el('gen-k-lora').classList.toggle('on',k==='lora');
+    el('gen-q').placeholder = (k==='lora'?'Search LoRAs':'Search models')+'\\u2026';
+    search();
+  }
+  function onInput(){ q=el('gen-q').value.trim(); clearTimeout(timer); timer=setTimeout(search,280); }
+  function search(){
+    var mine=++seq, grid=el('gen-grid'); grid.style.opacity='.45';
+    fetch('/api/model-search?kind='+kind+'&size=24&q='+encodeURIComponent(q))
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine!==seq)return; render(d.results||[], d.error); grid.style.opacity='1'; })
+      .catch(function(){ if(mine!==seq)return; render([], 'network error'); grid.style.opacity='1'; });
+  }
+  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmt(n){ return (n||0).toLocaleString(); }
+  function tyShort(t){ t=(t||'').toUpperCase();
+    if(t.indexOf('LORA')>=0)return 'LoRA'; if(t.indexOf('MMDIT')>=0)return 'MMDiT';
+    if(t.indexOf('DIT')>=0)return 'DiT'; if(t.indexOf('SDXL')>=0)return 'SDXL';
+    if(t.indexOf('SD_V1')>=0)return 'SD1.5'; if(t.indexOf('SD3')>=0)return 'SD3';
+    if(t.indexOf('Z_IMAGE')>=0)return 'Z-Image'; if(t.indexOf('CHAT')>=0)return 'Chat';
+    return (t.split('_')[0]||'model').toLowerCase(); }
+  function render(rows, err){
+    var grid=el('gen-grid'), empty=el('gen-empty'); grid.innerHTML='';
+    if(err){ empty.textContent='\\u26a0 '+err; empty.style.display='block'; return; }
+    if(!rows.length){ empty.textContent='No results \\u2014 try another search.'; empty.style.display='block'; return; }
+    empty.style.display='none';
+    rows.forEach(function(m){
+      var c=document.createElement('div'); c.className='gen-card';
+      if(kind==='lora' ? loras.some(function(l){return l.model_id===m.model_id;})
+                       : (selected && selected.model_id===m.model_id)) c.classList.add('sel');
+      var cov = m.preview_url ? '<img class="cov'+(m.should_blur?' blur':'')+'" loading="lazy" src="'+esc(m.preview_url)+'" alt="">' : '<div class="cov"></div>';
+      c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span></div></div>';
+      c.onclick=function(){ selectCard(m, c); };
+      c.onmouseenter=function(){ showPreview(m, c); };
+      c.onmouseleave=hidePreview;
+      grid.appendChild(c);
+    });
+  }
+  function showPreview(m, anchor){
+    var p=el('model-preview'); if(!p||!m) return;
+    var src=m.cover_url||m.preview_url;
+    var html = (src?'<img src="'+esc(src)+'"'+(m.should_blur?' class="blur"':'')+' alt="">':'')
+      +'<div class="mp-meta"><div class="mp-nm">'+esc(m.title)+'</div>'
+      +'<div class="mp-sub"><span class="ty">'+tyShort(m.type)+'</span><span>\\u2665 '+fmt(m.liked_count)+'</span>'
+      +(m.author?'<span>by '+esc(m.author)+'</span>':'')+'</div>'
+      +(m.description?'<div class="mp-desc">'+esc(m.description)+'</div>':'')
+      +((m.tags&&m.tags.length)?'<div class="mp-tags">'+m.tags.map(function(t){return '<span>'+esc(t)+'</span>';}).join('')+'</div>':'')
+      +'</div>';
+    p.innerHTML=html; p.classList.add('open'); p.setAttribute('aria-hidden','false');
+    placePreview(p, anchor);
+  }
+  function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
+  function placePreview(p, anchor){
+    var r=anchor.getBoundingClientRect(), w=300, gap=14;
+    var x = r.left - w - gap;
+    if(x < 8) x = Math.min(r.right + gap, window.innerWidth - w - 8);
+    var y = Math.max(8, Math.min(r.top - 20, window.innerHeight - 470));
+    p.style.left=x+'px'; p.style.top=y+'px';
+  }
+  function showRefPreview(mid, anchor){
+    var p=el('model-preview'); if(!p||!mid) return;
+    p.innerHTML='<img src="/thumbs/'+mid+'.jpg" alt="">';
+    p.classList.add('open'); p.setAttribute('aria-hidden','false');
+    placePreview(p, anchor);
+  }
+  function previewSelected(ev){ if(selected) showPreview(selected, ev.currentTarget); }
+  var loras=[];
+  function toggleLora(m, c){
+    var i=-1; loras.forEach(function(l,j){ if(l.model_id===m.model_id) i=j; });
+    if(i>=0){ loras.splice(i,1); c.classList.remove('sel'); renderLoras(); debouncedCost(); return; }
+    if(loras.length>=6) return;
+    var entry={model_id:m.model_id, title:m.title, preview_url:m.preview_url, version_id:'', weight:0.7};
+    loras.push(entry); c.classList.add('sel'); renderLoras();
+    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
+      .then(function(r){return r.json();})
+      .then(function(d){ entry.version_id=d.version_id||''; renderLoras(); debouncedCost(); })
+      .catch(function(){ renderLoras(); });
+  }
+  function renderLoras(){
+    var box=el('gen-loras'); if(!box) return; box.innerHTML='';
+    loras.forEach(function(l,i){
+      var d=document.createElement('div'); d.className='lora-chip';
+      d.innerHTML=(l.preview_url?'<img src="'+esc(l.preview_url)+'" alt="">':'')
+        +'<span class="nm" title="'+esc(l.title)+'">'+esc(l.title)+(l.version_id?'':' \\u23f3')+'</span>'
+        +'<input type="number" step="0.05" min="0" max="2" value="'+l.weight+'" title="Weight" onchange="Gen.loraWeight('+i+', this.value)">'
+        +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>';
+      box.appendChild(d);
+    });
+  }
+  function loraWeight(i, v){ if(!loras[i]) return;
+    v=parseFloat(v); loras[i].weight=(isNaN(v)?0.7:Math.max(0,Math.min(2,v))); debouncedCost(); }
+  function loraRemove(i){ loras.splice(i,1); renderLoras();
+    if(kind==='lora') search(); debouncedCost(); }
+  function openLoraBrowser(){
+    var f=el('model-flyout');
+    if(!f.classList.contains('open')) toggleFlyout();
+    setKind('lora');
+  }
+  function selectCard(m, c){
+    if(kind==='lora'){ toggleLora(m, c); return; }
+    document.querySelectorAll('.gen-card.sel').forEach(function(x){x.classList.remove('sel');});
+    c.classList.add('sel'); selected=Object.assign({}, m);
+    var th=el('gen-selthumb');
+    if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
+    el('gen-selname').textContent=m.title+' \\u2026';
+    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
+      .then(function(r){return r.json();})
+      .then(function(d){ selected.version_id=d.version_id||'';
+        el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)');
+        el('gen-go').disabled = !d.version_id; refreshCost(); })
+      .catch(function(){ el('gen-selname').textContent=m.title; });
+  }
+  function curAspect(){ var b=document.querySelector('#gen-aspects button.on');
+    return b?{w:+b.getAttribute('data-w'),h:+b.getAttribute('data-h')}:{w:512,h:512}; }
+  function payload(){ var a=curAspect();
+    return { version_id:(selected&&selected.version_id)||'', prompt:el('gen-prompt').value.trim(),
+      negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
+      count:+el('gen-count').value, high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
+      loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
+  function refreshCost(){
+    if(!(selected&&selected.version_id)) return;
+    var cost=el('gen-cost'); cost.className='gen-cost'; cost.textContent='Checking cost\\u2026';
+    var mine=++costSeq;
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine!==costSeq)return;
+        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
+        var n = d.cost!=null ? d.cost.toLocaleString() : '?';
+        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 a card covers this (saves ~'+n+' credits)'; }
+        else { cost.textContent='\\u2248 '+n+' credits'; }
+      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
+  }
+  function debouncedCost(){ clearTimeout(costTimer); costTimer=setTimeout(refreshCost,250); }
+  function renderResult(res, d, past){
+    res.style.display='block';
+    if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
+    var ids=d.media_ids||[];
+    var cost = d.paid_credit===0 ? 'free (card used)' : ((d.paid_credit||0).toLocaleString()+' credits');
+    var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 '+past+' \\u2014 '+cost+'. Added to your gallery.</div>';
+    ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
+    if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');Gen.setMode(\\'edit\\');return false;">Edit this result \\u2192</a>'; }
+    res.innerHTML=html;
+  }
+  function pollTask(tid, res, past, done){
+    fetch('/api/task-status?task_id='+encodeURIComponent(tid))
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.phase==='done'){ done(); renderResult(res, d, past); }
+        else if(d.phase==='failed'){ done(); renderResult(res, {error:d.error||('task '+(d.status||'failed'))}); }
+        else { res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Rendering under the eclipse\\u2026 (task '+String(tid).slice(-6)+')</span>'; setTimeout(function(){ pollTask(tid,res,past,done); }, 3000); }
+      }).catch(function(){ setTimeout(function(){ pollTask(tid,res,past,done); }, 4000); });
+  }
+  function runTask(url, p, res, opts){
+    opts=opts||{};
+    res.style.display='block'; res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
+    if(opts.btn){ opts.btn.disabled=true; opts.btn.textContent=opts.busy; }
+    function done(){ if(opts.btn){ opts.btn.disabled=false; opts.btn.textContent=opts.idle; } }
+    fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.error || !d.task_id){ done(); renderResult(res, {error:d.error||'submit failed'}); return; }
+        res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
+        pollTask(d.task_id, res, opts.past, done);
+      }).catch(function(){ done(); renderResult(res, {error:'network error'}); });
+  }
+  function generate(){
+    var p=payload();
+    if(!p.version_id) return;
+    if(!p.prompt){ el('gen-prompt').focus(); return; }
+    runTask('/api/generate', p, el('gen-result'),
+            {past:'Generated', btn:el('gen-go'), busy:'Generating\\u2026', idle:'Generate'});
+  }
+  function setMode(m){
+    ['generate','edit','video'].forEach(function(x){
+      var pane=el('gen-mode-'+x); if(pane) pane.style.display=(x===m)?'':'none';
+      var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
+    el('gen-drawer').classList.toggle('wide', m==='video'||m==='edit');
+    if(m==='edit'){ if(el('edit-src').value.trim()) editCost(); loadWorkflows().then(renderWorkflows); }
+    if(m==='video') renderVideoSlots();
+  }
+  function setEditSub(s){
+    ['edit','enhance','fix'].forEach(function(x){
+      var pane=el('edit-sub-'+x); if(pane) pane.style.display=(x===s)?'':'none';
+      var b=el('es-'+x); if(b) b.classList.toggle('on', x===s); });
+    if(s==='enhance') loadWorkflows().then(renderWorkflows);
+    if(s==='fix') fixResize();
+  }
+  function editSrc(){ return el('edit-src').value.trim(); }
+  function setEditSource(mid){
+    el('edit-src').value=mid||'';
+    var img=el('edit-src-img');
+    if(mid){ img.onerror=function(){img.style.display='none';}; img.src='/thumbs/'+mid+'.jpg'; img.style.display='block'; fixInit(); fixLoad(mid); }
+    else { img.style.display='none'; }
+    debEditCost();
+  }
+  function editPayload(){
+    return { mode:'edit', source:editSrc(), instruction:el('edit-ins').value.trim(),
+      resolution:el('edit-res').value, quality:el('edit-qual').value, aspect:el('edit-aspect').value };
+  }
+  function editCost(){
+    var cost=el('edit-cost');
+    if(!editSrc()){ cost.className='gen-cost'; cost.textContent='Pick an image to see the cost.'; return; }
+    cost.className='gen-cost'; cost.textContent='Checking cost\\u2026'; var mine=++costSeq;
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(editPayload())})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine!==costSeq)return;
+        if(d.note){ cost.textContent=d.note; return; }
+        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
+        var n=d.cost!=null?d.cost.toLocaleString():'?';
+        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 an Edit card covers this (saves ~'+n+' credits)'; }
+        else { cost.textContent='\\u2248 '+n+' credits'; }
+      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
+  }
+  function debEditCost(){ clearTimeout(costTimer); costTimer=setTimeout(editCost,250); }
+  function edit(){
+    var p=editPayload();
+    if(!p.source){ el('edit-src').focus(); return; }
+    if(!p.instruction){ el('edit-ins').focus(); return; }
+    runTask('/api/edit', p, el('edit-result'),
+            {past:'Edited', btn:el('edit-go'), busy:'Editing\\u2026', idle:'Apply edit'});
+  }
+  function fixTag(t){ fixTag_=t; el('fix-tag-face').classList.toggle('on',t==='face'); el('fix-tag-hand').classList.toggle('on',t==='hand'); }
+  function fixClear(){ fixBoxes=[]; fixRedraw(); }
+  function fixColor(tag){ return tag==='face' ? '#b692e6' : '#4fc99a'; }
+  function fixRedraw(){
+    var cv=el('fix-canvas'); if(!cv || !cv.getContext) return;
+    var ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height);
+    fixBoxes.forEach(function(b){
+      ctx.strokeStyle=fixColor(b.tag); ctx.lineWidth=2; ctx.strokeRect(b.x,b.y,b.w,b.h);
+      ctx.fillStyle=fixColor(b.tag); ctx.font='11px system-ui'; ctx.fillText(b.tag,b.x+3,b.y+13);
+    });
+  }
+  function fixResize(){
+    var img=el('fix-img'), cv=el('fix-canvas'); if(!img||!cv) return;
+    cv.width=img.clientWidth; cv.height=img.clientHeight;
+    cv.style.width=img.clientWidth+'px'; cv.style.height=img.clientHeight+'px'; fixRedraw();
+  }
+  function fixLoad(mid){
+    fixBoxes=[]; var img=el('fix-img'); if(!img) return;
+    img.onload=fixResize; img.onerror=function(){ el('fix-canvas').width=0; };
+    img.src='/full/'+encodeURIComponent(mid);
+  }
+  function fixInit(){
+    var cv=el('fix-canvas'); if(!cv || cv._wired) return; cv._wired=true;
+    function pos(e){ var r=cv.getBoundingClientRect(); var t=e.touches&&e.touches[0]?e.touches[0]:e; return {x:t.clientX-r.left,y:t.clientY-r.top}; }
+    function down(e){ fixStart=pos(e); e.preventDefault(); }
+    function move(e){ if(!fixStart)return; var p=pos(e); fixRedraw(); var ctx=cv.getContext('2d'); ctx.strokeStyle=fixColor(fixTag_); ctx.lineWidth=2; ctx.strokeRect(fixStart.x,fixStart.y,p.x-fixStart.x,p.y-fixStart.y); e.preventDefault(); }
+    function up(e){ if(!fixStart)return; var p=e.changedTouches&&e.changedTouches[0]?{x:e.changedTouches[0].clientX-cv.getBoundingClientRect().left,y:e.changedTouches[0].clientY-cv.getBoundingClientRect().top}:pos(e); var x=Math.min(fixStart.x,p.x),y=Math.min(fixStart.y,p.y),w=Math.abs(p.x-fixStart.x),h=Math.abs(p.y-fixStart.y); fixStart=null; if(w>6&&h>6) fixBoxes.push({x:x,y:y,w:w,h:h,tag:fixTag_}); fixRedraw(); }
+    cv.addEventListener('mousedown',down); cv.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+    cv.addEventListener('touchstart',down,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); cv.addEventListener('touchend',up);
+  }
+  function fix(){
+    var src=editSrc(); if(!src){ el('edit-src').focus(); return; }
+    if(!fixBoxes.length){ el('fix-result').style.display='block'; el('fix-result').innerHTML='<span style="color:var(--subtext);font-size:12px;">Drag a box over a hand or face first.</span>'; return; }
+    var img=el('fix-img'); var scale = (img.naturalWidth && img.clientWidth) ? (img.naturalWidth/img.clientWidth) : 1;
+    var boxes=fixBoxes.map(function(b){ return {x:Math.round(b.x*scale),y:Math.round(b.y*scale),width:Math.round(b.w*scale),height:Math.round(b.h*scale),tag:b.tag}; });
+    runTask('/api/fix', {source:src, boxes:boxes}, el('fix-result'),
+            {past:'Fixed', btn:el('fix-go'), busy:'Fixing\\u2026', idle:'Fix marked regions'});
+  }
+  function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
+  function loadWorkflows(){
+    if(workflows) return Promise.resolve(workflows);
+    return fetch('/api/workflows').then(function(r){return r.json();})
+      .then(function(d){ workflows=d.workflows||[]; return workflows; })
+      .catch(function(){ workflows=[]; return workflows; });
+  }
+  function renderWorkflows(){
+    var list=el('enh-list'); if(!list) return;
+    var qq=(el('enh-q').value||'').toLowerCase().trim();
+    list.innerHTML='';
+    (workflows||[]).filter(function(w){ return !qq || w.name.toLowerCase().indexOf(qq)>=0; })
+      .slice(0,50).forEach(function(w){
+        var b=document.createElement('button'); b.type='button'; b.className='enh-item';
+        var nm=w.name.split('|')[0].split('/')[0].trim();
+        b.innerHTML=esc(nm)+' <span class="ty">'+esc((w.type||'').toLowerCase())+'</span>';
+        b.onclick=function(){ enhance(w.id); }; list.appendChild(b);
+      });
+  }
+  function enhance(wid){
+    var src=editSrc();
+    if(!src){ el('edit-src').focus(); return; }
+    runTask('/api/enhance', {source:src, workflow_id:wid}, el('enh-result'), {past:'Enhanced'});
+  }
+  var vmode='i2v', vslots=[null];
+  function setVideoMode(m){
+    vmode=m;
+    ['i2v','flf','r2v'].forEach(function(x){ var b=el('vm-'+x); if(b) b.classList.toggle('on',x===m); });
+    var vp=el('video-prompt');
+    if(m==='i2v'){ vslots=[vslots[0]||null]; el('video-slots-lbl').textContent='Source image (first frame)';
+      vp.setAttribute('data-placeholder','Describe the motion \\u2014 \\u2018slow cinematic pan right, gentle waves\\u2026\\u2019'); }
+    else if(m==='flf'){ vslots=[vslots[0]||null,vslots[1]||null]; el('video-slots-lbl').textContent='Start & end frame';
+      vp.setAttribute('data-placeholder','Describe the transition from start frame to end frame\\u2026'); }
+    else { if(!vslots.length) vslots=[null]; el('video-slots-lbl').textContent='Reference images';
+      vp.setAttribute('data-placeholder','Type @image1 to cite a ref \\u2014 it becomes a chip \\u2014 \\u2018the girl from @image1 walks the pier\\u2026\\u2019'); }
+    renderVideoSlots();
+  }
+  function renderVideoSlots(){
+    var wrap=el('video-slots'); if(!wrap) return; wrap.innerHTML=''; wrap.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+    var refN=0;
+    vslots.forEach(function(s,i){
+      var box=document.createElement('div');
+      box.style.cssText='position:relative;width:78px;height:78px;border-radius:8px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;overflow:hidden;display:grid;place-items:center;color:var(--subtext);font-size:11px;text-align:center;';
+      if(s){
+        refN++;
+        var tag=(vmode==='flf'?(i===0?'start':'end'):'@image'+refN);
+        box.innerHTML='<img src="'+s.thumb+'" style="width:100%;height:100%;object-fit:cover;">'
+          +'<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.85);color:var(--lavender);font-size:9.5px;padding:1px 5px;border-radius:4px;">'+tag+'</span>'
+          +'<button type="button" class="vs-x" style="position:absolute;top:2px;right:2px;width:17px;height:17px;border-radius:50%;border:none;background:rgba(21,19,28,.85);color:var(--subtext);font-size:11px;line-height:1;cursor:pointer;padding:0;">&times;</button>';
+        box.querySelector('.vs-x').onclick=function(ev){ ev.stopPropagation(); hidePreview();
+          if(vmode==='r2v'){ vslots.splice(i,1); if(!vslots.length) vslots=[null]; } else vslots[i]=null;
+          renderVideoSlots(); };
+        box.onmouseenter=function(){ showRefPreview(s.media_id, box); };
+        box.onmouseleave=hidePreview;
+      }
+      else { box.textContent=(vmode==='flf'?(i===0?'+ start':'+ end'):'+ pick'); }
+      box.onclick=function(){ Picker.open(function(mid,thumb){ vslots[i]={media_id:mid,thumb:thumb}; renderVideoSlots(); }); };
+      wrap.appendChild(box);
+    });
+    if(vmode==='r2v' && vslots.length<9){
+      var add=document.createElement('button'); add.type='button'; add.textContent='+ add';
+      add.style.cssText='width:78px;height:78px;border-radius:8px;border:1px dashed var(--surface1);background:transparent;color:var(--subtext);cursor:pointer;font-size:11px;';
+      add.onclick=function(){ vslots.push(null); renderVideoSlots(); }; wrap.appendChild(add);
+    }
+    videoCost();
+  }
+  var vcostTimer=null, vpTimer=null;
+  function vpRefs(){
+    var map={}, n=0;
+    vslots.forEach(function(s){ if(s&&s.media_id){ n++; map['@image'+n]={thumb:s.thumb, mid:s.media_id}; } });
+    return map;
+  }
+  function vpMakeChip(tag, info){
+    var c=document.createElement('span'); c.className='vp-chip'; c.contentEditable='false';
+    c.setAttribute('data-ref', tag);
+    c.innerHTML=(info&&info.thumb?'<img src="'+info.thumb+'" alt="">':'')+tag;
+    if(info&&info.mid){ c.onmouseenter=function(){ showRefPreview(info.mid, c); }; c.onmouseleave=hidePreview; }
+    return c;
+  }
+  function vpChipify(final){
+    var vp=el('video-prompt'); if(!vp) return;
+    var map=vpRefs(), sel=window.getSelection();
+    var walker=document.createTreeWalker(vp, NodeFilter.SHOW_TEXT), nodes=[], tn;
+    while((tn=walker.nextNode())) nodes.push(tn);
+    var re=/@image\\d+/g;
+    nodes.forEach(function(node){
+      var t=node.nodeValue, m, found=[];
+      re.lastIndex=0;
+      while((m=re.exec(t))!==null){
+        if(!map[m[0]]) continue;
+        if(!final && m.index+m[0].length===t.length) continue;  // still typing at the end
+        found.push({i:m.index, tag:m[0]});
+      }
+      if(!found.length) return;
+      var caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer===node;
+      var frag=document.createDocumentFragment(), pos=0;
+      found.forEach(function(f){
+        if(f.i>pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
+        frag.appendChild(vpMakeChip(f.tag, map[f.tag]));
+        pos=f.i+f.tag.length;
+      });
+      var tail=document.createTextNode(t.slice(pos)); frag.appendChild(tail);
+      node.parentNode.replaceChild(frag, node);
+      if(caretHere){ var r=document.createRange(); r.setStart(tail, tail.length); r.collapse(true);
+        sel.removeAllRanges(); sel.addRange(r); }
+    });
+  }
+  function vpText(){
+    var vp=el('video-prompt'), out='';
+    (function walk(n){ n.childNodes.forEach(function(c){
+      if(c.nodeType===3) out+=c.nodeValue;
+      else if(c.classList&&c.classList.contains('vp-chip')) out+=c.getAttribute('data-ref');
+      else if(c.nodeName==='BR') out+='\\n';
+      else walk(c);
+    });})(vp);
+    return out.replace(/\\u00a0/g,' ').trim();
+  }
+  function vpOnInput(){ clearTimeout(vpTimer); vpTimer=setTimeout(function(){ vpChipify(false); videoCost(); }, 300); }
+  function videoPayload(){
+    return { mode:vmode.toUpperCase(), prompt:vpText(),
+      images:vslots.filter(function(s){return s&&s.media_id;}).map(function(s){return s.media_id;}),
+      duration:+el('video-dur').value, audio:el('video-audio').checked,
+      video_model:el('video-model').value };
+  }
+  function videoCost(){ clearTimeout(vcostTimer); vcostTimer=setTimeout(videoCostNow, 250); }
+  function videoCostNow(){
+    var cost=el('video-cost'); if(!cost) return;
+    var p=videoPayload();
+    if(!p.images.length){ cost.className='gen-cost'; cost.textContent='Pick a source image to see the cost.'; return; }
+    cost.className='gen-cost'; cost.textContent='Checking cost\\u2026'; var mine=++costSeq;
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine!==costSeq)return;
+        if(d.note){ cost.textContent=d.note; return; }
+        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
+        var n=d.cost!=null?d.cost.toLocaleString():'?';
+        if(d.free){ cost.className='gen-cost free';
+          cost.textContent='\\ud83c\\udfab FREE \\u2014 a video card covers this'+(d.cards?' ('+d.cards+' left)':'')+' \\u00b7 saves ~'+n+' credits'; }
+        else { cost.textContent='\\u2248 '+n+' credits'; }
+      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
+  }
+  function addVideoRefs(refs){
+    refs=(refs||[]).slice(0,9); if(!refs.length) return;
+    open(); setMode('video');
+    if(refs.length>1) setVideoMode('r2v');
+    var slots=refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; });
+    if(refs.length>1){ vslots=slots; }
+    else if(vmode==='r2v'){ vslots=[slots[0]]; }
+    else { vslots[0]=slots[0]; }
+    renderVideoSlots();
+  }
+  function videoGenerate(){
+    var p=videoPayload(), res=el('video-result');
+    if(!p.images.length){ res.style.display='block'; res.innerHTML='<span style="color:var(--red);font-size:12px;">Pick a source image first.</span>'; return; }
+    runTask('/api/editbay/generate', p,
+            res, {past:'Rendered', btn:el('video-go'), busy:'Rendering\\u2026', idle:'Generate video'});
+  }
+  return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
+          refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
+          editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
+          renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
+          setVideoMode:setVideoMode, videoGenerate:videoGenerate, renderVideoSlots:renderVideoSlots,
+          setDock:setDock, toggleFlyout:toggleFlyout,
+          previewSelected:previewSelected, hidePreview:hidePreview,
+          loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
+          setEditSub:setEditSub, addVideoRefs:addVideoRefs, videoCost:videoCost,
+          vpOnInput:vpOnInput, vpChipify:vpChipify,
+          get selected(){return selected;}};
+})();
+var Tags = (function(){
+  var items=[], hot=0, ta=null, timer=null, seq=0;
+  function box(){ return document.getElementById('tag-suggest'); }
+  function seg(){
+    var v=ta.value, p=ta.selectionStart;
+    var start=Math.max(v.lastIndexOf(',', p-1), v.lastIndexOf('\\n', p-1))+1;
+    return {start:start, text:v.slice(start, p)};
+  }
+  function hide(){ var b=box(); if(b) b.style.display='none'; items=[]; }
+  function accept(i){
+    if(!items[i]||!ta) return;
+    var s=seg(), v=ta.value, lead=v.slice(0, s.start);
+    var pad=(lead && !/\\s$/.test(lead)) ? ' ' : '';
+    var ins=lead+pad+items[i]+', ';
+    ta.value=ins+v.slice(ta.selectionStart);
+    ta.setSelectionRange(ins.length, ins.length); ta.focus(); hide();
+  }
+  function show(){
+    var b=box(); if(!items.length){ hide(); return; }
+    b.innerHTML='<div class="ts-head"><span>Tag suggestions</span><span>TAB accepts</span></div>'
+      + items.map(function(t,i){ return '<button type="button" class="'+(i===hot?'hot':'')
+          +'" onmousedown="event.preventDefault();Tags.accept('+i+')">'+t.replace(/[&<>]/g,'')+'</button>'; }).join('');
+    var r=ta.getBoundingClientRect();
+    b.style.display='block';
+    b.style.left=Math.min(r.left, window.innerWidth-b.offsetWidth-8)+'px';
+    var top=r.bottom+4;
+    if(top+b.offsetHeight > window.innerHeight-8) top=r.top-b.offsetHeight-4;
+    b.style.top=top+'px';
+  }
+  function query(){
+    var t=seg().text.trim();
+    if(t.length<2){ hide(); return; }
+    var mine=++seq;
+    fetch('/api/tag-suggest?q='+encodeURIComponent(t)).then(function(r){return r.json();}).then(function(d){
+      if(mine!==seq) return; items=(d.tags||[]).slice(0,8); hot=0; show();
+    }).catch(function(){});
+  }
+  function onInput(e){ ta=e.target; clearTimeout(timer); timer=setTimeout(query, 220); }
+  function onKey(e){
+    var b=box(); if(!b || b.style.display!=='block') return;
+    if(e.key==='Tab'){ e.preventDefault(); accept(hot); }
+    else if(e.key==='ArrowDown'){ e.preventDefault(); hot=Math.min(hot+1, items.length-1); show(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); hot=Math.max(hot-1, 0); show(); }
+    else if(e.key==='Escape'){ e.stopPropagation(); hide(); }
+  }
+  function attach(id){ var t=document.getElementById(id); if(!t) return;
+    t.addEventListener('input', onInput); t.addEventListener('keydown', onKey);
+    t.addEventListener('blur', function(){ setTimeout(hide, 150); }); }
+  return {attach:attach, accept:accept, hide:hide};
+})();
+function lbMid(){ var m=(document.getElementById('lb-details').href||'').match(/\\/image\\/([^/?]+)/); return m?decodeURIComponent(m[1]):''; }
+function lbEdit(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.openEdit(mid); }
+function lbVideo(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); }
+var Ctx = (function(){
+  var mid='', isVideo=false;
+  function m(){ return document.getElementById('ctx-menu'); }
+  function hide(){ var e=m(); if(e) e.style.display='none'; }
+  function show(e, card){
+    mid=card.getAttribute('data-mid'); isVideo=card.getAttribute('data-video')==='1';
+    var menu=m();
+    menu.innerHTML=(isVideo?'':'<button onclick="Ctx.edit()">\\u270e Edit image</button>'
+        +'<button onclick="Ctx.video()">\\u25b6 Send to Video</button>')
+      +'<button onclick="Ctx.copy()">\\u2398 Copy media id</button>'
+      +'<button onclick="Ctx.detail()">Open details</button>';
+    menu.style.display='block';
+    menu.style.left=Math.min(e.clientX, window.innerWidth-menu.offsetWidth-8)+'px';
+    menu.style.top=Math.min(e.clientY, window.innerHeight-menu.offsetHeight-8)+'px';
+  }
+  document.addEventListener('click', hide);
+  document.addEventListener('scroll', hide, true);
+  document.addEventListener('contextmenu', function(e){
+    var card=e.target && e.target.closest ? e.target.closest('.card') : null;
+    if(!card || !card.getAttribute('data-mid')){ hide(); return; }
+    e.preventDefault(); show(e, card);
+  });
+  return {
+    edit:function(){ hide(); Gen.openEdit(mid); },
+    video:function(){ hide(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); },
+    copy:function(){ hide(); try{ navigator.clipboard.writeText(mid); }catch(e){} },
+    detail:function(){ hide(); location.href='/image/'+mid; }
+  };
+})();
+function bulkSendVideo(){
+  var refs=[];
+  selGet().forEach(function(mid){
+    var card=document.getElementById('card-'+mid);
+    if(card && card.getAttribute('data-video')==='1') return;   // videos can't be image refs
+    refs.push({mid:mid, thumb:'/thumbs/'+mid+'.jpg'});
+  });
+  if(!refs.length) return;
+  Gen.addVideoRefs(refs.slice(0,9));
+}
+document.addEventListener('DOMContentLoaded', function(){
+  var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
+  try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
+  ['gen-prompt','gen-neg','edit-ins'].forEach(Tags.attach);
+  var vp=document.getElementById('video-prompt');
+  if(vp){ vp.addEventListener('input', Gen.vpOnInput);
+          vp.addEventListener('blur', function(){ Gen.vpChipify(true); }); }
+  var asp=document.getElementById('gen-aspects');
+  if(asp) asp.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b)return;
+    asp.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on'); Gen.refreshCost(); });
+  ['gen-mode','gen-count','gen-hp','gen-ph'].forEach(function(id){
+    var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.refreshCost); });
+  ['edit-res','edit-qual','edit-aspect'].forEach(function(id){
+    var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.editCost); });
+  var es=document.getElementById('edit-src');
+  if(es) es.addEventListener('input', function(){ Gen.setEditSource(es.value.trim()); });
+  var eq=document.getElementById('enh-q'); if(eq) eq.addEventListener('input', Gen.renderWorkflows);
+  var em=new URLSearchParams(location.search).get('edit');
+  if(em) Gen.openEdit(em);
+});
+</script>
 """)
 
     DETAIL_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
@@ -2060,10 +3092,10 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endif %}
     <button class="btn" data-cmd="{{ row.media_id }}" onclick="copyCmd(this)"
       title="Copy this image's media_id (paste into the GUI Video/Edit tab)">Copy media id</button>
-    <button class="btn"
-      data-cmd='python pixai_gallery_backup.py --edit-image --edit-src {{ row.media_id }} --prompt "describe the change"'
-      onclick="copyCmd(this)"
-      title="Copy a ready-to-run Edit command (paste in your terminal; add --confirm to run)">Edit this → cmd</button>
+    {% if row.is_video != '1' %}
+    <a class="btn btn-primary" href="/?edit={{ row.media_id }}"
+      title="Open this image in the gallery's Edit Bay">&#10022; Edit this</a>
+    {% endif %}
     {% if row.is_video != '1' %}
     <button class="btn"
       data-cmd='python pixai_gallery_backup.py --generate-video --image {{ row.media_id }} --prompt "describe the motion"'
@@ -2716,6 +3748,481 @@ function savePrompt() {
         return send_file(mem, mimetype="application/zip", as_attachment=True,
                          download_name="pixai_selection_{}.zip".format(n))
 
+    # --- Generation surface (localhost-gated) --------------------------------
+    # The Generate drawer talks to PixAI with the OWNER's API key and can spend
+    # credits. So every generation endpoint is gated to local requests: exposing the
+    # gallery on the LAN (--host 0.0.0.0) must never let another device use the key or
+    # spend credits. Read-only browsing stays open; generation is owner-only.
+    def _is_local_request():
+        ra = (request.remote_addr or "").strip()
+        return ra in ("127.0.0.1", "::1", "localhost", "")
+
+    def _gen_session():
+        import pixai_gallery_backup as core
+        return core, core._make_session(None)
+
+    @app.route("/api/model-search")
+    def api_model_search():
+        """Search PixAI models/LoRAs for the picker grid via the /v2 search (clean
+        MODEL/LORA split + thumbnails). Read-only, but uses the owner's key -> localhost
+        only. ?q=&kind=base|lora&size=N&offset=N."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only", "results": []}), 403
+        q = (request.args.get("q") or "").strip()
+        usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
+        try:
+            size = max(1, min(int(request.args.get("size") or 24), 50))
+            offset = max(0, int(request.args.get("offset") or 0))
+        except ValueError:
+            size, offset = 24, 0
+        try:
+            core, session = _gen_session()
+            return jsonify(core.model_search_rest(session, keyword=q, usage=usage,
+                                                  size=size, offset=offset))
+        except Exception as e:
+            return jsonify({"error": str(e)[:200], "results": []}), 200
+
+    @app.route("/api/model-version")
+    def api_model_version():
+        """Resolve a model_id (from the grid) to its generatable version id, on selection.
+        Localhost-only; read-only."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only", "version_id": ""}), 403
+        mid = (request.args.get("model_id") or "").strip()
+        if not mid:
+            return jsonify({"error": "model_id required", "version_id": ""}), 400
+        try:
+            core, session = _gen_session()
+            return jsonify({"version_id": core.resolve_latest_version(session, mid)})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200], "version_id": ""}), 200
+
+    @app.route("/api/gallery-images")
+    def api_gallery_images():
+        """Pick-from-your-gallery source for the create surfaces + Edit Bay: recent (or
+        keyword-filtered) IMAGE media_ids with thumbnails -> use the media_id full-res, no
+        re-upload. Read-only, localhost-only. ?q=&limit=&page="""
+        if not _is_local_request():
+            return jsonify({"images": []}), 403
+        q = (request.args.get("q") or "").strip()
+        try:
+            limit = max(1, min(int(request.args.get("limit") or 40), 100))
+            page = max(1, int(request.args.get("page") or 1))
+            rating_min = max(0, min(int(request.args.get("rating_min") or 0), 5))
+        except ValueError:
+            limit, page, rating_min = 40, 1, 0
+        sort = "oldest" if (request.args.get("sort") or "") == "oldest" else "newest"
+        rows, total = query_catalog(
+            db_path, q=q, sort=sort, page=page, page_size=limit,
+            collection=(request.args.get("collection") or "").strip(),
+            source=(request.args.get("source") or "").strip(),
+            rating_min=rating_min)
+        out = []
+        for r in rows:
+            if str(r.get("is_video") or "") == "1":
+                continue
+            mid = r.get("media_id")
+            if not mid:
+                continue
+            out.append({"media_id": str(mid), "thumb": "/thumbs/{}.jpg".format(mid),
+                        "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
+        return jsonify({"images": out, "total": total, "page": page,
+                        "limit": limit})
+
+    @app.route("/api/tag-suggest")
+    def api_tag_suggest():
+        """Tag autocomplete for the drawer's prompt boxes (the site's Tag Suggestions
+        dropdown). Read-only, free, localhost-only. ?q=<prefix>."""
+        if not _is_local_request():
+            return jsonify({"tags": []}), 403
+        q = (request.args.get("q") or "").strip()
+        if len(q) < 2:
+            return jsonify({"tags": []})
+        try:
+            core, session = _gen_session()
+            return jsonify({"tags": core.tag_search_gql(session, q, first=8)})
+        except Exception as e:
+            return jsonify({"tags": [], "error": str(e)[:200]}), 200
+
+    @app.route("/api/upload", methods=["POST"])
+    def api_upload():
+        """Upload a local file from the picker -> PixAI media_id (the same free
+        3-step S3 handshake as the CLI's --upload). Owner-only: localhost-gated,
+        spends nothing."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "no file"}), 400
+        import os as _os
+        import tempfile
+        suffix = _os.path.splitext(f.filename)[1][:8] or ".png"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            f.save(tmp)
+            tmp.close()
+            core, session = _gen_session()
+            mid = core.upload_media(session, tmp.name)
+            return jsonify({"media_id": str(mid)})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 200
+        finally:
+            try:
+                _os.unlink(tmp.name)
+            except OSError:
+                pass
+
+    def _gen_args_from_payload(p):
+        """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
+        feeds to core._gen_parameters -- so web + CLI build identical params (one source
+        of truth). Clamped to safe ranges."""
+        from types import SimpleNamespace
+        p = p or {}
+        def num(k, d, cast=int):
+            try:
+                return cast(p.get(k, d))
+            except (TypeError, ValueError):
+                return d
+        loras = []
+        for lo in (p.get("loras") or []):
+            vid = str((lo or {}).get("version_id") or "").strip()
+            if vid:
+                loras.append((vid, (lo or {}).get("weight", 0.7)))
+        seed_raw = str(p.get("seed") or "").strip()
+        hp = p.get("high_priority") in (True, "1", "true", "on")
+        return SimpleNamespace(
+            params_json="", prompt=(p.get("prompt") or "").strip(),
+            negative=(p.get("negative") or "").strip(),
+            model=(p.get("version_id") or "").strip(),
+            width=num("width", 512), height=num("height", 512),
+            steps=num("steps", 25), cfg=num("cfg", 7, float),
+            count=max(1, min(num("count", 1), 4)),
+            priority=(1000 if hp else 500), mode=(p.get("mode") or "auto"),
+            seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
+            lora=loras,
+            prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
+            kaisuuken_id="", no_card=bool(p.get("no_card")))
+
+    def _edit_params_from_payload(core, p):
+        """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
+        catalog media_id (the image being edited). Returns None if no source."""
+        p = p or {}
+        src = str(p.get("source") or "").strip()
+        if not src:
+            return None
+        return core.build_chat_edit_parameters(
+            (p.get("instruction") or "").strip(), [src],
+            resolution=(p.get("resolution") or "1K"),
+            aspect_ratio=(p.get("aspect") or "3:4"),
+            quality=(p.get("quality") or "medium"))
+
+    def _params_and_nocard(core, p):
+        """Route a drawer payload to generate, edit, or video params. Returns (params,
+        no_card, note). note is set (params None) when something's missing."""
+        p = p or {}
+        if p.get("mode") == "edit":
+            params = _edit_params_from_payload(core, p)
+            return (params, bool(p.get("no_card")),
+                    None if params else "pick an image to edit")
+        if p.get("mode") in ("I2V", "FLF", "R2V"):
+            imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
+            if not imgs:
+                return None, bool(p.get("no_card")), "pick a source image"
+            try:
+                params = core.build_shot_video_params(
+                    p["mode"], (p.get("prompt") or "").strip(), image_ids=imgs,
+                    duration=p.get("duration") or 5,
+                    generate_audio=bool(p.get("audio")),
+                    model=(p.get("video_model") or ""))
+            except core.PixAIError as e:
+                return None, bool(p.get("no_card")), str(e)[:140]
+            return params, bool(p.get("no_card")), None
+        args = _gen_args_from_payload(p)
+        if not args.model:
+            return None, args.no_card, "pick a model"
+        return core._gen_parameters(args), args.no_card, None
+
+    @app.route("/api/price", methods=["POST"])
+    def api_price():
+        """Live cost + free-card check for the drawer's current settings (generate OR
+        edit). Read-only (no spend). Localhost-only."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only", "cost": None}), 403
+        try:
+            core, session = _gen_session()
+            params, no_card, note = _params_and_nocard(core, request.get_json(silent=True) or {})
+            if params is None:
+                return jsonify({"cost": None, "free": False, "note": note})
+            cost = core.price_task(session, params)
+            best = None if no_card else core.match_kaisuuken(session, params)
+            return jsonify({"cost": cost, "free": bool(best),
+                            "cards": (best or {}).get("total"),
+                            "card_expires": (best or {}).get("expiresAt")})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200], "cost": None}), 200
+
+    @app.route("/api/generate", methods=["POST"])
+    def api_generate():
+        """Submit a generation from the drawer, wait, and catalog it into THIS gallery's
+        backup. Localhost-only (spends the owner's credits/cards). A matching free card is
+        auto-applied unless no_card is set. Returns {task_id, media_ids, paid_credit}."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            core, session = _gen_session()
+            args = _gen_args_from_payload(request.get_json(silent=True) or {})
+            if not args.model:
+                return jsonify({"error": "pick a model first"}), 400
+            if not args.prompt:
+                return jsonify({"error": "enter a prompt"}), 400
+            params = core._gen_parameters(args)
+            core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
+            task_id = core.submit_generation(session, params)
+            return jsonify({"task_id": task_id})
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+    @app.route("/api/edit", methods=["POST"])
+    def api_edit():
+        """Instruct-edit an existing gallery image ('make it night'). Localhost-gated;
+        auto-applies an Edit-Pro card unless no_card. Catalogs the result into this
+        backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            from types import SimpleNamespace
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            params = _edit_params_from_payload(core, p)
+            if params is None:
+                return jsonify({"error": "pick an image to edit"}), 400
+            if not (p.get("instruction") or "").strip():
+                return jsonify({"error": "describe the edit"}), 400
+            core._apply_kaisuuken(session, params,
+                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
+            task_id = core.submit_generation(session, params)
+            return jsonify({"task_id": task_id})
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+    @app.route("/api/enhance", methods=["POST"])
+    def api_enhance():
+        """One-click enhance (panelplugin) on the Edit tab's source image. Localhost-gated;
+        auto-applies a card if one matches. A rejected/unknown workflow just errors (no
+        credits spent). Returns {task_id, media_ids, paid_credit}."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            from types import SimpleNamespace
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            src = str(p.get("source") or "").strip()
+            wid = str(p.get("workflow_id") or "").strip()
+            plug = ENHANCE_PLUGINS.get(str(p.get("plugin") or "").strip())
+            if not src:
+                return jsonify({"error": "pick an image first"}), 400
+            if wid:
+                params = core.build_panelplugin_parameters(src, wid)
+            elif plug:
+                params = core.build_panelplugin_parameters(
+                    src, plug.get("workflow_id", ""), workflow_name=plug.get("workflow_name", ""))
+            else:
+                return jsonify({"error": "pick an enhance workflow"}), 400
+            core._apply_kaisuuken(session, params,
+                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
+            task_id = core.submit_generation(session, params)
+            return jsonify({"task_id": task_id})
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+    @app.route("/api/fix", methods=["POST"])
+    def api_fix():
+        """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
+        pixel coords. Localhost-gated; returns {task_id} for the async poller."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            src = str(p.get("source") or "").strip()
+            boxes = p.get("boxes") or []
+            if not src:
+                return jsonify({"error": "pick an image first"}), 400
+            if not boxes:
+                return jsonify({"error": "draw a box over a hand or face"}), 400
+            task_id = core.submit_fixer(session, src, boxes)
+            return jsonify({"task_id": task_id})
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+    # --- The Edit Bay (Seedance storyboard) ---------------------------------
+    import threading
+    _editbay_lock = threading.Lock()
+
+    def _editbay_store():
+        d = out_dir / "editbay"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "store.json"
+
+    def _editbay_load():
+        p = _editbay_store()
+        if p.exists():
+            try:
+                import json as _j
+                return _j.loads(p.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                return {}
+        return {}
+
+    def _editbay_save(data):
+        import json as _j
+        _editbay_store().write_text(_j.dumps(data), encoding="utf-8")
+
+    @app.route("/edit-bay")
+    def edit_bay():
+        """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
+        backend (window.storage swapped for /api/editbay/*). Localhost-only."""
+        if not _is_local_request():
+            return "The Edit Bay is localhost-only.", 403
+        import re as _re
+        src = Path(__file__).resolve().parent / "editbay" / "seedance-storyboard.jsx"
+        try:
+            jsx = src.read_text(encoding="utf-8")
+        except OSError:
+            return "Edit Bay source not found (editbay/seedance-storyboard.jsx).", 404
+        jsx = _re.sub(r"(?m)^\s*import\s+React.*$", "", jsx)          # React is a CDN global
+        jsx = jsx.replace("export default function App()", "function App()")
+        return EDITBAY_PAGE.replace("__JSX__", jsx)
+
+    @app.route("/api/editbay/get")
+    def editbay_get():
+        if not _is_local_request():
+            return jsonify({"value": None}), 403
+        with _editbay_lock:
+            return jsonify({"value": _editbay_load().get(request.args.get("key") or "")})
+
+    @app.route("/api/editbay/set", methods=["POST"])
+    def editbay_set():
+        if not _is_local_request():
+            return jsonify({"ok": False}), 403
+        p = request.get_json(silent=True) or {}
+        k = p.get("key")
+        if not k:
+            return jsonify({"ok": False}), 400
+        with _editbay_lock:
+            data = _editbay_load()
+            data[k] = p.get("value")
+            _editbay_save(data)
+        return jsonify({"ok": True})
+
+    @app.route("/api/editbay/list")
+    def editbay_list():
+        if not _is_local_request():
+            return jsonify({"keys": []}), 403
+        pre = request.args.get("prefix") or ""
+        with _editbay_lock:
+            keys = [k for k in _editbay_load().keys() if k.startswith(pre)]
+        return jsonify({"keys": keys})
+
+    @app.route("/api/editbay/delete", methods=["POST"])
+    def editbay_delete():
+        if not _is_local_request():
+            return jsonify({"ok": False}), 403
+        k = (request.get_json(silent=True) or {}).get("key")
+        with _editbay_lock:
+            data = _editbay_load()
+            if k in data:
+                del data[k]
+                _editbay_save(data)
+        return jsonify({"ok": True})
+
+    @app.route("/api/editbay/generate", methods=["POST"])
+    def editbay_generate():
+        """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
+        Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
+        video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Localhost."""
+        if not _is_local_request():
+            return jsonify({"error": "generation is localhost-only"}), 403
+        try:
+            import base64
+            import hashlib
+            from types import SimpleNamespace
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            updir = out_dir / "editbay" / "_uploads"
+            updir.mkdir(parents=True, exist_ok=True)
+
+            def resolve_img(val):
+                s = str(val or "").strip()
+                if not s:
+                    return ""
+                if s.isdigit():                       # already a PixAI media_id
+                    return s
+                if s.startswith("data:"):             # an Edit Bay thumbnail -> upload it
+                    try:
+                        head, b64 = s.split(",", 1)
+                        raw = base64.b64decode(b64)
+                    except Exception:
+                        return ""
+                    ext = ".png" if "png" in head[:24] else ".jpg"
+                    fp = updir / (hashlib.sha1(raw).hexdigest()[:16] + ext)
+                    if not fp.exists():
+                        fp.write_bytes(raw)
+                    return core.upload_media(session, str(fp))
+                return ""                             # a bare filename/URL we can't fetch
+
+            image_ids = [m for m in (resolve_img(x) for x in (p.get("images") or [])) if m]
+            video_ids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip().isdigit()]
+            audio_ids = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip().isdigit()]
+            params = core.build_shot_video_params(
+                p.get("mode") or "R2V", (p.get("prompt") or "").strip(),
+                image_ids=image_ids, video_ids=video_ids, audio_ids=audio_ids,
+                duration=p.get("duration") or 5,
+                generate_audio=bool(p.get("generate_audio") or p.get("audio")),
+                model=(p.get("video_model") or ""),
+                audio_language=(p.get("audio_language") or "english"))
+            core._apply_kaisuuken(session, params,
+                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
+            task_id = core.submit_generation(session, params)
+            return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
+        except Exception as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+    @app.route("/api/task-status")
+    def api_task_status():
+        """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
+        catalogs the result into this backup and returns media_ids + paid_credit. Read-only
+        until done; localhost-only."""
+        if not _is_local_request():
+            return jsonify({"phase": "failed", "error": "localhost-only"}), 403
+        tid = (request.args.get("task_id") or "").strip()
+        if not tid:
+            return jsonify({"phase": "failed", "error": "task_id required"}), 400
+        try:
+            core, session = _gen_session()
+            st = core.generation_status(session, tid)
+            if st["phase"] == "done":
+                got = core.collect_generation(session, tid, str(out_dir))
+                return jsonify({"phase": "done", "media_ids": got["media_ids"],
+                                "paid_credit": st["paid_credit"]})
+            if st["phase"] == "failed":
+                return jsonify({"phase": "failed", "status": st["status"]})
+            return jsonify({"phase": "running", "status": st["status"]})
+        except Exception as e:
+            return jsonify({"phase": "failed", "error": str(e)[:200]}), 200
+
+    @app.route("/api/workflows")
+    def api_workflows():
+        """Live enhance-workflow catalog (id + name + type) for the Edit tab picker.
+        Read-only; localhost-only (owner key)."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only", "workflows": []}), 403
+        try:
+            core, session = _gen_session()
+            return jsonify({"workflows": core.workflow_catalog(session)})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200], "workflows": []}), 200
+
     @app.after_request
     def _gzip_html(resp):
         # Compress only HTML pages (the big card grids). File responses are
@@ -2755,6 +4262,9 @@ def main():
                          "browsers show a one-time certificate warning)")
     ap.add_argument("--rebuild-thumbs", action="store_true",
                     help="regenerate all thumbnails even if they already exist")
+    ap.add_argument("--skip-thumbs", action="store_true",
+                    help="don't build catalog thumbnails on startup (fast boot; missing "
+                         "ones show 'no preview'). Per-generation thumbs are still made.")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
@@ -2775,8 +4285,11 @@ def main():
     thumb_dir = out_dir / "gallery" / "thumbs"
     print("Loading catalog...")
     rows = load_catalog(db_path)
-    print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
-    build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
+    if args.skip_thumbs:
+        print("Skipping thumbnail build (--skip-thumbs).")
+    else:
+        print("Building thumbnails (new only — use --rebuild-thumbs to force all)...")
+        build_thumbnails(rows, out_dir, thumb_dir, force=args.rebuild_thumbs)
 
     ssl_context = None
     scheme = "http"

@@ -20,6 +20,19 @@ def test_panelplugin_omits_strength_when_none():
     assert "strength" not in core.build_panelplugin_parameters("1", "wf")["inputs"]
 
 
+def test_panelplugin_by_workflow_name():
+    p = core.build_panelplugin_parameters("M", workflow_name="mymusise/hand-fix")
+    assert p["workflowName"] == "mymusise/hand-fix" and "workflowId" not in p
+    assert p["model"] == "pixai-panelplugin"
+    assert p["inputs"]["image"] == {"type": "media", "media_id": "M"}
+
+
+def test_panelplugin_needs_a_workflow():
+    import pytest
+    with pytest.raises(core.PixAIError):
+        core.build_panelplugin_parameters("M")
+
+
 # ---- art filter (pixai-image-filter) ----
 
 def test_filter_matches_real_submit():
