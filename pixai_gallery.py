@@ -495,6 +495,27 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
         con.close()
 
 
+def rows_for_media_ids(db_path, ids):
+    """Fetch catalog rows for a specific list of media_ids, preserving the given order.
+    Used by the contact-sheet print view. Chunked to stay under SQLite's variable cap."""
+    ids = [str(i) for i in (ids or []) if str(i).strip()]
+    if not ids:
+        return []
+    con = _connect(db_path)
+    try:
+        found = {}
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            ph = ",".join("?" * len(chunk))
+            for r in con.execute(
+                "SELECT * FROM catalog WHERE media_id IN ({})".format(ph), chunk
+            ).fetchall():
+                found[str(r["media_id"])] = dict(r)
+        return [found[i] for i in ids if i in found]
+    finally:
+        con.close()
+
+
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
                    media_type="", source="", collection=""):
@@ -1237,6 +1258,15 @@ def create_app(out_dir: Path):
   .focus-mode .detail-nav { width: 100%; max-width: 900px; }
   .focus-mode .detail-img { width: 100%; display: flex; justify-content: center; }
   .focus-mode .detail-img img { max-height: 90vh; max-width: 95vw; width: auto; height: auto; }
+  @media print {
+    @page { size: letter; margin: 12mm; }
+    header, .detail-nav, .detail-actions, .detail-stars, #suggest-box, #lightbox { display: none !important; }
+    body, .detail-wrap { background: #fff !important; color: #000 !important; }
+    .detail-wrap { max-width: 100% !important; padding: 0 !important; }
+    .detail-img img { max-width: 100%; max-height: 78vh; width: auto; height: auto; display: block; margin: 0 auto; }
+    .detail-meta { background: #fff !important; border: none !important; margin-top: 8mm; grid-template-columns: 130px 1fr; }
+    .detail-meta .lbl { color: #555 !important; } .detail-meta .val { color: #000 !important; }
+  }
   .back-link { display: inline-block; color: var(--blue); text-decoration: none; font-size: 13px; }
   .back-link:hover { text-decoration: underline; }
   .detail-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
@@ -1546,6 +1576,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <button class="btn" id="bulk-replace-btn" style="display:none" onclick="bulkReplacePrompt()" title="Find/replace text in the prompts of selected images">Find/Replace</button>
   <button class="btn btn-primary" id="bulk-collection-btn" onclick="bulkAddCollection()" title="Check some images/videos first, then click to add them to a named collection (files are not moved)">+ Add to Collection</button>
   <button class="btn" id="bulk-video-btn" style="display:none" onclick="bulkSendVideo()" title="Send up to 9 selected images to the Video tab as references">&#9654; Send to Video</button>
+  <button class="btn" id="bulk-print-btn" style="display:none" onclick="bulkContactSheet()" title="Open a print-ready contact sheet of the selected images">&#128424; Print sheet</button>
   <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
   <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
           title="Saved views"><option value="">Saved views…</option></select>
@@ -1715,6 +1746,13 @@ function refreshSelUI() {
   if (cb) cb.style.display = sel.size ? 'inline-block' : 'none';
   var vb = document.getElementById('bulk-video-btn');
   if (vb) vb.style.display = sel.size ? 'inline-block' : 'none';
+  var pb = document.getElementById('bulk-print-btn');
+  if (pb) pb.style.display = sel.size ? 'inline-block' : 'none';
+}
+function bulkContactSheet() {
+  var ids = Array.from(selGet());
+  if (!ids.length) return;
+  window.open('/contact-sheet?ids=' + encodeURIComponent(ids.join(',')), '_blank');
 }
 function onCheck() {
   var sel = selGet();
@@ -3204,6 +3242,7 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endif %}
     <button class="btn" data-cmd="{{ row.media_id }}" onclick="copyCmd(this)"
       title="Copy this image's media_id (paste into the GUI Video/Edit tab)">Copy media id</button>
+    <button class="btn" onclick="window.print()" title="Print this image with its details">&#128424; Print</button>
     {% if row.is_video != '1' %}
     <button class="btn" id="suggest-prompt-btn" data-mid="{{ row.media_id }}"
       onclick="suggestPrompt(this)"
@@ -3964,6 +4003,67 @@ function savePrompt() {
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
         return jsonify({"images": out, "total": total, "page": page,
                         "limit": limit})
+
+    @app.route("/contact-sheet")
+    def contact_sheet():
+        """Print-ready grid of images for physical curation. Sources: ?ids=a,b,c
+        (from a gallery selection) or ?collection=<name>. ?cols=N (default 4),
+        ?captions=0 to hide the date/rating line. Opens the print dialog on load."""
+        ids_arg = (request.args.get("ids") or "").strip()
+        collection = (request.args.get("collection") or "").strip()
+        try:
+            cols = max(2, min(int(request.args.get("cols") or 4), 8))
+        except ValueError:
+            cols = 4
+        captions = (request.args.get("captions") or "1") not in ("0", "false", "no")
+        if ids_arg:
+            ids = [x for x in ids_arg.split(",") if x.strip()]
+            rows = rows_for_media_ids(db_path, ids)
+            title = "{} selected".format(len(rows))
+        elif collection:
+            rows, _ = query_catalog(db_path, collection=collection, sort="newest",
+                                    page=1, page_size=400)
+            title = "Collection: {}".format(collection)
+        else:
+            rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
+            title = "Recent"
+        cells = []
+        for r in rows:
+            mid = str(r.get("media_id") or "")
+            if not mid:
+                continue
+            cap = ""
+            if captions:
+                date = (r.get("created_at") or "")[:10]
+                try:
+                    stars = "★" * int(r.get("rating") or 0)
+                except (TypeError, ValueError):
+                    stars = ""
+                cap = "<div class='cap'>{}{}</div>".format(
+                    date, (" " + stars) if stars else "")
+            cells.append(
+                "<figure><img src='/thumbs/{}.jpg' alt=''>{}</figure>".format(mid, cap))
+        html = """<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Contact sheet &middot; {title}</title>
+<style>
+  @page {{ size: letter; margin: 12mm; }}
+  body {{ font-family: system-ui, sans-serif; margin: 18px; color: #111; }}
+  .bar {{ display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }}
+  .bar h1 {{ font-size: 16px; margin: 0; font-weight: 600; }}
+  .bar button {{ font-size: 13px; padding: 6px 14px; cursor: pointer; }}
+  .grid {{ display: grid; grid-template-columns: repeat({cols}, 1fr); gap: 8px; }}
+  figure {{ margin: 0; break-inside: avoid; }}
+  figure img {{ width: 100%; aspect-ratio: 1; object-fit: cover; border: 1px solid #ddd; border-radius: 4px; display: block; }}
+  .cap {{ font-size: 9px; color: #555; margin-top: 2px; text-align: center; }}
+  @media print {{ .bar {{ display: none; }} body {{ margin: 0; }} }}
+</style></head><body>
+<div class="bar"><h1>{title} &middot; {n} images</h1>
+  <button onclick="window.print()">&#128424; Print</button>
+  <a href="/" style="margin-left:auto;">&larr; back to gallery</a></div>
+<div class="grid">{cells}</div>
+<script>window.addEventListener('load', function(){{ setTimeout(function(){{ window.print(); }}, 350); }});</script>
+</body></html>""".format(title=title, cols=cols, n=len(cells), cells="".join(cells))
+        return html
 
     @app.route("/api/account")
     def api_account():

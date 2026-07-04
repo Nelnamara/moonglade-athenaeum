@@ -167,3 +167,38 @@ def test_suggest_prompt_route(tmp_path, monkeypatch):
     assert cli.get("/api/suggest-prompt?media_id=55").get_json() == {
         "suggestions": ["1girl, night", "a girl at night"]}
     assert cli.get("/api/suggest-prompt").status_code == 400   # no media_id
+
+
+def test_rows_for_media_ids_preserves_order_drops_missing():
+    import pixai_gallery as g
+
+    class FakeCon:
+        def execute(self, sql, params):
+            rows = [{"media_id": p, "rating": "0"} for p in params if p != "99"]
+            return type("C", (), {"fetchall": lambda self: rows})()
+
+        def close(self):
+            pass
+
+    import unittest.mock as mock
+    with mock.patch.object(g, "_connect", return_value=FakeCon()):
+        rows = g.rows_for_media_ids("db", ["3", "1", "99", "2"])
+    assert [r["media_id"] for r in rows] == ["3", "1", "2"]   # order kept, 99 dropped
+
+
+def test_contact_sheet_renders_selection(tmp_path):
+    cli = _client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-02T00:00:00", rating="3"),
+        _row(media_id="2", filename="b_2.png", created_at="2025-01-01T00:00:00"),
+    ])
+    html = cli.get("/contact-sheet?ids=2,1").get_data(as_text=True)
+    # both cells present, selection order (2 then 1), stars for the rated one, auto-print
+    assert html.index("/thumbs/2.jpg") < html.index("/thumbs/1.jpg")
+    assert "★★★" in html and "window.print()" in html
+
+
+def test_contact_sheet_captions_off(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-02T00:00:00", rating="3")])
+    html = cli.get("/contact-sheet?ids=1&captions=0").get_data(as_text=True)
+    assert "class='cap'" not in html
