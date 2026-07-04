@@ -3182,7 +3182,8 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
     if vouts:
         saved = _download_video_task(session, result, task_id, out, a, {})
         mids = [str(o["video_media_id"]) for o in vouts if o.get("video_media_id")]
-        return {"media_ids": mids, "saved": len(saved), "is_video": True}
+        dur = probe_video_duration(saved[0]) if saved else None   # real clip length for the reel
+        return {"media_ids": mids, "saved": len(saved), "is_video": True, "duration": dur}
     fm = extract_full_meta(result)
     saved = _download_image_task(session, result, task_id, out, a, prompt=fm.get("prompt_full", ""))
     outputs = result.get("outputs") or {}

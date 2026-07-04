@@ -428,7 +428,9 @@ export default function App() {
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
         setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } }));
-        setCardStatus(cardId, { status: "done", resultMid: mid }); }
+        // capture the clip's REAL length so the reel reflects what was rendered, not planned
+        setCardStatus(cardId, { status: "done", resultMid: mid,
+          ...(d.duration ? { actualDur: d.duration } : {}) }); }
       else if (d.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error || "failed" } }));
       else setTimeout(tick, 4000);
     }).catch(() => setTimeout(tick, 5000));
@@ -449,7 +451,9 @@ export default function App() {
   if (!project) return <div className="sb-root"><style>{STYLES}</style><div className="sb-empty">Loading the bay…</div></div>;
 
   const entries = flat(project);
-  const total = entries.reduce((s, x) => s + (Number(x.c.duration) || 0), 0);
+  // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration
+  const durOf = (c) => Number(c.actualDur || c.duration) || 0;
+  const total = entries.reduce((s, x) => s + durOf(x.c), 0);
   const done = entries.filter((x) => x.c.status === "done").length;
   const scale = Math.max(total, project.target) || 1;
   const over = total - project.target;
@@ -492,8 +496,8 @@ export default function App() {
         <div className="sb-reel-wrap">
           <div className="sb-reel">
             {entries.map((x, i) => (<div key={i} className={"sb-seg " + x.c.status}
-              style={{ width: `${((Number(x.c.duration) || 0) / scale) * 100}%` }}
-              title={`${x.code} ${x.c.title || ""} · ${x.c.duration}s`} />))}
+              style={{ width: `${(durOf(x.c) / scale) * 100}%` }}
+              title={`${x.code} ${x.c.title || ""} · ${durOf(x.c)}s${x.c.actualDur ? " (rendered)" : ""}`} />))}
             <div className="sb-target" style={{ left: `${(project.target / scale) * 100}%` }} />
           </div>
           <div className="sb-reel-legend">

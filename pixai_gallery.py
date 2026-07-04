@@ -5270,6 +5270,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if st["phase"] == "done":
                 got = core.collect_generation(session, tid, str(out_dir))
                 return jsonify({"phase": "done", "media_ids": got["media_ids"],
+                                "is_video": got.get("is_video", False),
+                                "duration": got.get("duration"),
                                 "paid_credit": st["paid_credit"]})
             if st["phase"] == "failed":
                 return jsonify({"phase": "failed", "status": st["status"]})
