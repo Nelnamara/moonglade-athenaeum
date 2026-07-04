@@ -954,6 +954,65 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
     return {"results": out, "has_more": bool(data.get("hasMore"))}
 
 
+# Model-Market categories the GraphQL `generationModels` connection actually honors (probed
+# 2026-07-04). NOTE 'concept' is NOT a real server value (returns empty) -- excluded.
+MARKET_CATEGORIES = ("character", "style", "pose", "clothing", "background", "detail", "other")
+
+
+def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24):
+    """Market-style model browse via the GraphQL `generationModels` connection, which -- unlike
+    the REST /search -- actually HONORS `category` and a date `orderBy`. Use this for category
+    chips + a Newest sort; the REST path (model_search_rest) stays the default for keyword/Popular
+    because its rows are richer (description/refCount/official). Returns the SAME row shape as
+    model_search_rest so the picker renders both interchangeably (REST-only fields come back
+    empty and the card hides them), plus GraphQL-only extras: tags + created_at + author.
+
+    category: one of MARKET_CATEGORIES (ignored if not). sort: 'newest' -> orderBy -createdAt;
+    anything else -> the connection's default order. usage MODEL/LORA splits base vs LoRA rows
+    (the connection conflates them). Read-only, no spend."""
+    cat = (category or "").strip().lower()
+    # category/orderBy come from a fixed whitelist -> safe to interpolate; keyword stays a
+    # bound $variable (never interpolate user text into a query).
+    args = ["keyword:$k", "first:$n"]
+    if cat in MARKET_CATEGORIES:
+        args.append('category:"%s"' % cat)
+    if (sort or "").strip().lower() == "newest":
+        args.append('orderBy:"-createdAt"')
+    q = ("query($k:String,$n:Int){ generationModels(" + ", ".join(args) + "){ "
+         "pageInfo{ hasNextPage } edges { node { id title type isNsfw likedCount "
+         "latestVersion { id } media { id urls { url } } tags { name } author { displayName } "
+         "createdAt } } } }")
+    data = (gql_adhoc(session, q, {"k": keyword or "", "n": int(limit)}) or {}).get("generationModels") or {}
+    want_lora = (usage or "MODEL").upper() == "LORA"
+    out = []
+    for e in data.get("edges") or []:
+        n = e.get("node") or {}
+        mtype = (n.get("type") or "").upper()
+        is_lora = "LORA" in mtype
+        if want_lora and not is_lora:
+            continue
+        if not want_lora and (is_lora or "VIDEO" in mtype):
+            continue
+        out.append({
+            "title": n.get("title") or "",
+            "type": n.get("type") or "",
+            "model_id": str(n.get("id") or ""),
+            "liked_count": int(n.get("likedCount") or 0),
+            "should_blur": bool(n.get("isNsfw")),
+            "preview_url": _model_preview_url(n.get("media")),
+            "has_version": bool((n.get("latestVersion") or {}).get("id")),
+            # REST-only rich fields absent here -> empty so the card hides them.
+            "description": "", "base_model": "", "curations": [], "official": False,
+            "comment_count": 0, "ref_count": 0, "author_id": "",
+            "cover_url": _model_preview_url(n.get("media")),
+            # GraphQL-only extras.
+            "tags": [t.get("name") for t in (n.get("tags") or []) if t.get("name")][:8],
+            "author": (n.get("author") or {}).get("displayName") or "",
+            "created_at": n.get("createdAt") or "",
+        })
+    return {"results": out, "has_more": bool((data.get("pageInfo") or {}).get("hasNextPage"))}
+
+
 def workflow_catalog(session, first=80):
     """List PixAI enhance/panelplugin WORKFLOWS via the `workflows` GraphQL connection ->
     [{id, name, type, cover_media_id}]. `id` is the numeric workflowId that
@@ -971,13 +1030,68 @@ def workflow_catalog(session, first=80):
     return out
 
 
+def resolve_version_meta(session, model_id):
+    """Resolve a model's latest generatable version AND the metadata we were throwing away.
+    One GET /v2/generation-model/{id}/versions call returns everything below; the earlier
+    resolve_latest_version() kept only the id. Read-only.
+
+    Returns {version_id, model_type, lora_base_model_type, trigger_words, negative_prompt,
+    sampling_method, sampling_steps, cfg_scale, capabilities}. All keys always present
+    (empty/None when the model has no version or the field is absent).
+
+    - model_type: this version's architecture enum (SDXL_MODEL / DIT7B_MODEL / MULTI_LORA / ...).
+    - lora_base_model_type: for a LoRA, the base-model family it REQUIRES (null for base models).
+      A LoRA runs on a base iff lora_base_model_type == the base's model_type (see is_lora_compatible).
+    - trigger_words: the LoRA's activation tokens (extra.triggerWords|trainedWords); '' if none.
+    - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer."""
+    empty = {"version_id": "", "model_type": "", "lora_base_model_type": "",
+             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
+             "sampling_steps": None, "cfg_scale": None, "capabilities": []}
+    try:
+        data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
+    except PixAIError:
+        return empty
+    rows = data if isinstance(data, list) else (data or {}).get("data") or []
+    if not rows:
+        return empty
+    r = rows[0]
+    extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
+    caps = extra.get("capabilities")
+    return {
+        "version_id": str(r.get("id") or ""),
+        "model_type": (r.get("modelType") or "").strip(),
+        "lora_base_model_type": (r.get("loraBaseModelType") or "").strip() if r.get("loraBaseModelType") else "",
+        "trigger_words": (extra.get("triggerWords") or extra.get("trainedWords") or "").strip(),
+        "negative_prompt": (extra.get("negativePrompts") or "").strip(),
+        "sampling_method": (extra.get("samplingMethod") or "").strip(),
+        "sampling_steps": extra.get("samplingSteps"),
+        "cfg_scale": extra.get("cfgScale"),
+        "capabilities": [c for c in caps if isinstance(c, str)] if isinstance(caps, list) else [],
+    }
+
+
 def resolve_latest_version(session, model_id):
     """Resolve a model's latest generatable VERSION id (what createGenerationTask's
-    `modelId` actually wants) from its MODEL id, via GET /v2/generation-model/{id}/versions.
+    `modelId` actually wants) from its MODEL id. Thin wrapper over resolve_version_meta.
     Returns '' when the model has no version. Read-only."""
-    data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
-    rows = data if isinstance(data, list) else (data or {}).get("data") or []
-    return str(rows[0].get("id") or "") if rows else ""
+    return resolve_version_meta(session, model_id)["version_id"]
+
+
+def is_lora_compatible(base_model_type, lora_base_model_type):
+    """True if a LoRA can run on a base model. The rule is EXACT enum equality: the LoRA's
+    `loraBaseModelType` must equal the base version's `modelType` (both drawn from the same
+    GenerationModelType enum). Mismatched families are rejected server-side -> a wasted
+    generation / burned free card, which this gate prevents pre-submit.
+
+    IMPORTANT: this is FAMILY-level only. Pony / Illustrious / NoobAI / vanilla-SDXL all
+    collapse into SDXL_MODEL, so passing this check is NOT a quality guarantee -- only a hard
+    block on architecture mismatch. Fails OPEN: if either type is unknown/empty we return True
+    (never block a submit on missing data)."""
+    b = (base_model_type or "").strip().upper()
+    lo = (lora_base_model_type or "").strip().upper()
+    if not b or not lo:
+        return True
+    return b == lo
 
 
 def run_list_models(args):
