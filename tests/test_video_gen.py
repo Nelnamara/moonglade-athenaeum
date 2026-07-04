@@ -191,10 +191,12 @@ def test_build_shot_video_params_needs_refs():
 def test_build_shot_video_params_model_and_audio_passthrough():
     p = core.build_shot_video_params("I2V", "sing", image_ids=["1"], duration=5,
                                      model="v3.2", generate_audio=True,
-                                     audio_language="japanese")
+                                     audio_language="japanese", camera_movement="zoom",
+                                     quality="basic")
     i2v = p["i2vPro"]
     assert i2v["model"] == "v3.2" and i2v["generateAudio"] is True
     assert i2v["audioLanguage"] == "japanese"
+    assert i2v["cameraMovement"] == "zoom" and i2v["mode"] == "basic"
     r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], model="v4.0")
     assert r["referenceVideo"]["model"] == "v4.0"
     # empty model falls back to the default on every path
