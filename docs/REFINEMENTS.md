@@ -33,7 +33,8 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
 - ✅ Picker in the Edit Bay (GalleryPick on cast rows + frame slots; mediaId rides Generate-shot).
 - ✅ Housekeeping: merged → master v1.9.0; CLAUDE.md + wiki/Generating.md updated.
 - ✅ **Achievements & skins** shipped (2026-07-04) — see below.
-- Horizon: multi-provider deck (Seedance 2.0 direct), **Turbo-mode capture** (blocked on owner: run one turbo gen on the site → task-id → dump-params; can't be done solo per hands-off), PySide6 ref-video tab.
+- ✅ **Turbo-mode RESOLVED** (captured 2026-07-04 off a real turbo gen, task `2030099...557262`): Turbo is **not a submit parameter** — the whole task object had no turbo/tier/speed field, just `priority: 1000` + `inferenceProfile: lite` + a free card (`paidCredit 0`). It's the fast **member runner** granted server-side, which our `priority:1000` path (CLI `--priority 1000` + web "High priority · Turbo" checkbox) + free-card auto-apply already trigger. Nothing to build; relabeled the drawer checkbox to make it discoverable. Detail in `private/GENERATOR_SURFACE.md`.
+- Horizon: multi-provider deck (Seedance 2.0 direct), PySide6 ref-video tab.
 
 ## Roadmap — banked ideas
 

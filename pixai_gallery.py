@@ -2662,7 +2662,7 @@ document.addEventListener('DOMContentLoaded', function(){
         <div style="flex:1;"><div class="gen-lbl">Count</div>
           <select id="gen-count" class="gen-sel"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
       </div>
-      <label class="gen-check"><input type="checkbox" id="gen-hp"> High priority (faster, costs more)</label>
+      <label class="gen-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it (paidCredit 0) — verified against a real Turbo gen."><input type="checkbox" id="gen-hp"> High priority &middot; Turbo (faster)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
       <div id="gen-cost" class="gen-cost">Pick a model to see the cost.</div>
       <button id="gen-go" class="gen-go" onclick="Gen.generate()" disabled>Generate</button>
