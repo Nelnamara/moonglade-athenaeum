@@ -2634,6 +2634,38 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                      "(mode {}) -- attach a cast image or an open frame.".format(m))
 
 
+def probe_video_duration(path):
+    """Real duration (seconds, float) of a local clip via ffprobe -- powers the Edit
+    Bay's reel from the ACTUAL generated lengths, not the planned ones. None on any
+    failure (ffprobe missing / unreadable). Pure read."""
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            stderr=subprocess.DEVNULL, timeout=20).decode().strip()
+        return round(float(out), 2)
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
+def extract_last_frame(video_path, out_png):
+    """Grab a clip's FINAL frame to out_png via ffmpeg (seek to ~0.15s before end).
+    This is the frame-handoff primitive: the last frame of one shot becomes the
+    opening frame of the next, so a sequence of clips reads as one continuous scene.
+    Returns out_png on success, else None."""
+    import os
+    import subprocess
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-sseof", "-0.15", "-i", str(video_path),
+             "-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=True)
+        return str(out_png) if os.path.exists(out_png) and os.path.getsize(out_png) > 0 else None
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
 def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
                                  strength=None, extra_inputs=None, priority=1000,
                                  is_private=False, kaisuuken_id=""):
