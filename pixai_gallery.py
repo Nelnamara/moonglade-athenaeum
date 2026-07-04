@@ -1238,6 +1238,7 @@ def create_app(out_dir: Path):
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
 <meta name="theme-color" content="#0c0a1c">
 <title>Moonglade Athenaeum</title>
+<link rel="icon" type="image/png" href="/branding/favicon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
@@ -1269,6 +1270,12 @@ def create_app(out_dir: Path):
   .brand .mark { width: 42px; height: 42px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: var(--base); font-weight: 700; font-size: 23px; position: relative; overflow: hidden; box-shadow: 0 0 0 rgba(182,146,230,0); animation: mark-glow 5.5s ease-in-out infinite; flex-shrink: 0; }
   .brand .mark::after { content: ''; position: absolute; top: 7px; right: 7px; width: 5px; height: 5px; border-radius: 50%; background: var(--gold); z-index: 2; }
   .brand .mark::before { content: ''; position: absolute; inset: 0; border-radius: 7px; background: var(--mantle); transform: translateX(-108%); animation: mark-eclipse 5.5s ease-in-out infinite; }
+  /* When a real logo image is present it replaces the "M" tile: box + animation off. */
+  .brand .mark .mark-m { position: relative; z-index: 4; }
+  .brand .mark .mark-logo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 5; }
+  .brand .mark:has(.mark-logo) { background: transparent; box-shadow: none; animation: none; overflow: visible; }
+  .brand .mark:has(.mark-logo) .mark-m { display: none; }
+  .brand .mark:has(.mark-logo)::before, .brand .mark:has(.mark-logo)::after { display: none; }
   @keyframes mark-eclipse { 0%,100% { transform: translateX(-108%); } 46%,54% { transform: translateX(0); } }
   @keyframes mark-glow { 0%,100% { box-shadow: 0 0 10px rgba(182,146,230,.55); } 50% { box-shadow: 0 0 3px rgba(182,146,230,.2); } }
   header h1 { font-size: 18px; color: var(--text); flex-shrink: 0; font-weight: 600; border-bottom: 2px solid var(--gold); padding-bottom: 1px; line-height: 1.1; }
@@ -1597,7 +1604,7 @@ document.addEventListener('DOMContentLoaded', function() {
 <header>
   <img id="brand-banner" src="/branding/banner.png" alt="" onerror="this.remove()">
   <div class="brand">
-    <span class="mark">M</span>
+    <span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="/branding/logo.png" alt="" onerror="this.remove()"></span>
     <div class="brand-txt">
       <h1>Moonglade Athenaeum <span class="ver-badge" title="Running build (git short SHA). If this doesn't change after a pull, the server wasn't restarted.">{{ build_stamp }}</span></h1>
       <span id="tagline" class="tagline">a library against the Void</span>
@@ -3702,7 +3709,7 @@ function savePrompt() {
 </div>
 {% endmacro %}
 <header>
-  <div class="brand"><span class="mark">M</span><h1>Collection Health</h1></div>
+  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="/branding/logo.png" alt="" onerror="this.remove()"></span><h1>Collection Health</h1></div>
   <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 
@@ -3804,7 +3811,7 @@ function savePrompt() {
 
     DUPES_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <header>
-  <div class="brand"><span class="mark">M</span><h1>Duplicate Review</h1></div>
+  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="/branding/logo.png" alt="" onerror="this.remove()"></span><h1>Duplicate Review</h1></div>
   <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 <div style="padding:10px 20px 28px;max-width:1100px;">
@@ -3864,7 +3871,7 @@ function savePrompt() {
   .st-running{color:var(--lavender);} .st-done{color:var(--emerald);} .st-failed{color:var(--red);}
 </style>
 <header>
-  <div class="brand"><span class="mark">M</span><h1>Control Panel</h1></div>
+  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="/branding/logo.png" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
   <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
   <a class="btn" href="{{ url_for('index') }}">↑ Back to gallery</a>
 </header>
