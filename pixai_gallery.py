@@ -2294,10 +2294,15 @@ document.addEventListener('DOMContentLoaded', function(){
 </div>
 <div id="model-preview" aria-hidden="true"></div>
 <div id="ctx-menu"></div>
+<div id="tag-suggest"></div>
 <style>
   #ctx-menu{position:fixed;z-index:230;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:180px;padding:4px;}
   #ctx-menu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:7px 10px;border-radius:5px;cursor:pointer;}
   #ctx-menu button:hover{background:var(--surface0);}
+  #tag-suggest{position:fixed;z-index:240;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:210px;max-width:320px;padding:4px;}
+  #tag-suggest .ts-head{display:flex;justify-content:space-between;gap:14px;color:var(--overlay0);font-size:10px;padding:3px 8px;text-transform:uppercase;letter-spacing:.05em;}
+  #tag-suggest button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:6px 9px;border-radius:5px;cursor:pointer;}
+  #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script>
 var Picker = (function(){
@@ -2715,6 +2720,56 @@ var Gen = (function(){
           setEditSub:setEditSub, addVideoRefs:addVideoRefs,
           get selected(){return selected;}};
 })();
+var Tags = (function(){
+  var items=[], hot=0, ta=null, timer=null, seq=0;
+  function box(){ return document.getElementById('tag-suggest'); }
+  function seg(){
+    var v=ta.value, p=ta.selectionStart;
+    var start=Math.max(v.lastIndexOf(',', p-1), v.lastIndexOf('\\n', p-1))+1;
+    return {start:start, text:v.slice(start, p)};
+  }
+  function hide(){ var b=box(); if(b) b.style.display='none'; items=[]; }
+  function accept(i){
+    if(!items[i]||!ta) return;
+    var s=seg(), v=ta.value, lead=v.slice(0, s.start);
+    var pad=(lead && !/\\s$/.test(lead)) ? ' ' : '';
+    var ins=lead+pad+items[i]+', ';
+    ta.value=ins+v.slice(ta.selectionStart);
+    ta.setSelectionRange(ins.length, ins.length); ta.focus(); hide();
+  }
+  function show(){
+    var b=box(); if(!items.length){ hide(); return; }
+    b.innerHTML='<div class="ts-head"><span>Tag suggestions</span><span>TAB accepts</span></div>'
+      + items.map(function(t,i){ return '<button type="button" class="'+(i===hot?'hot':'')
+          +'" onmousedown="event.preventDefault();Tags.accept('+i+')">'+t.replace(/[&<>]/g,'')+'</button>'; }).join('');
+    var r=ta.getBoundingClientRect();
+    b.style.display='block';
+    b.style.left=Math.min(r.left, window.innerWidth-b.offsetWidth-8)+'px';
+    var top=r.bottom+4;
+    if(top+b.offsetHeight > window.innerHeight-8) top=r.top-b.offsetHeight-4;
+    b.style.top=top+'px';
+  }
+  function query(){
+    var t=seg().text.trim();
+    if(t.length<2){ hide(); return; }
+    var mine=++seq;
+    fetch('/api/tag-suggest?q='+encodeURIComponent(t)).then(function(r){return r.json();}).then(function(d){
+      if(mine!==seq) return; items=(d.tags||[]).slice(0,8); hot=0; show();
+    }).catch(function(){});
+  }
+  function onInput(e){ ta=e.target; clearTimeout(timer); timer=setTimeout(query, 220); }
+  function onKey(e){
+    var b=box(); if(!b || b.style.display!=='block') return;
+    if(e.key==='Tab'){ e.preventDefault(); accept(hot); }
+    else if(e.key==='ArrowDown'){ e.preventDefault(); hot=Math.min(hot+1, items.length-1); show(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); hot=Math.max(hot-1, 0); show(); }
+    else if(e.key==='Escape'){ e.stopPropagation(); hide(); }
+  }
+  function attach(id){ var t=document.getElementById(id); if(!t) return;
+    t.addEventListener('input', onInput); t.addEventListener('keydown', onKey);
+    t.addEventListener('blur', function(){ setTimeout(hide, 150); }); }
+  return {attach:attach, accept:accept, hide:hide};
+})();
 function lbMid(){ var m=(document.getElementById('lb-details').href||'').match(/\\/image\\/([^/?]+)/); return m?decodeURIComponent(m[1]):''; }
 function lbEdit(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.openEdit(mid); }
 function lbVideo(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); }
@@ -2761,6 +2816,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
   try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
+  ['gen-prompt','gen-neg','edit-ins','video-prompt'].forEach(Tags.attach);
   var asp=document.getElementById('gen-aspects');
   if(asp) asp.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b)return;
     asp.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
@@ -3655,6 +3711,21 @@ function savePrompt() {
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
         return jsonify({"images": out, "total": total, "page": page,
                         "limit": limit})
+
+    @app.route("/api/tag-suggest")
+    def api_tag_suggest():
+        """Tag autocomplete for the drawer's prompt boxes (the site's Tag Suggestions
+        dropdown). Read-only, free, localhost-only. ?q=<prefix>."""
+        if not _is_local_request():
+            return jsonify({"tags": []}), 403
+        q = (request.args.get("q") or "").strip()
+        if len(q) < 2:
+            return jsonify({"tags": []})
+        try:
+            core, session = _gen_session()
+            return jsonify({"tags": core.tag_search_gql(session, q, first=8)})
+        except Exception as e:
+            return jsonify({"tags": [], "error": str(e)[:200]}), 200
 
     @app.route("/api/upload", methods=["POST"])
     def api_upload():
