@@ -3758,6 +3758,9 @@ query {
   me {
     id
     quotaAmount
+    tasks { totalCount }
+    followerCount
+    followingCount
     membership { membershipId tier privilege }
     subscription { planId provider interval status startAt endAt cancelAtPeriodEnd }
   }
@@ -3791,6 +3794,13 @@ def run_account_info(args):
         credits = str(me.get("quotaAmount"))
     print("Account ID       : {}".format(me.get("id") or USER_ID))
     print("Credits (balance): {}".format(credits))
+    server_tasks = ((me.get("tasks") or {}).get("totalCount"))
+    if server_tasks is not None:
+        print("Lifetime tasks   : {:,}  (server's count of every generation you've made)".format(
+            int(server_tasks)))
+    if me.get("followerCount") is not None:
+        print("Followers        : {:,}  (following {:,})".format(
+            int(me.get("followerCount") or 0), int(me.get("followingCount") or 0)))
     if mem:
         print("Membership       : {} (tier {})".format(
             mem.get("membershipId", "-"), mem.get("tier", "-")))

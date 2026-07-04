@@ -647,6 +647,21 @@ def save_ach_state(out_dir, state):
         return False
 
 
+def distinct_task_count(db_path):
+    """How many distinct generation TASKS the local catalog holds. This is the apples-to-apples
+    counterpart to the server's `me.tasks.totalCount` (also tasks, not images) -> backup coverage
+    = local/server. Counts distinct non-empty task_id. Fails soft to 0."""
+    con = _connect(db_path)
+    try:
+        return int(con.execute(
+            "SELECT COUNT(DISTINCT task_id) FROM catalog WHERE COALESCE(task_id,'') != ''"
+        ).fetchone()[0] or 0)
+    except sqlite3.Error:
+        return 0
+    finally:
+        con.close()
+
+
 def rows_for_media_ids(db_path, ids):
     """Fetch catalog rows for a specific list of media_ids, preserving the given order.
     Used by the contact-sheet print view. Chunked to stay under SQLite's variable cap."""
@@ -1458,6 +1473,11 @@ def create_app(out_dir: Path):
   .ver-badge { font-size: 10px; font-weight: 500; color: var(--overlay0); font-family: ui-monospace, monospace; border: 1px solid var(--surface1); border-radius: 5px; padding: 1px 6px; vertical-align: middle; margin-left: 4px; letter-spacing: 0; }
   .header-stats { color: var(--subtext); font-size: 12px; } .header-stats b { color: var(--text); }
   .gen-live { color: var(--lavender); margin-left: 8px; }
+  .cover-badge { margin-left: 8px; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--surface1); cursor: default; }
+  .cover-badge b { font-variant-numeric: tabular-nums; }
+  .cover-badge.full { color: var(--emerald); border-color: var(--emerald); }
+  .cover-badge.high { color: var(--lavender); border-color: var(--surface1); }
+  .cover-badge.low  { color: var(--peach); border-color: var(--peach); }
   @media (prefers-reduced-motion: reduce) {
     .brand .mark { animation: none; } .brand .mark::before { animation: none; transform: translateX(-108%); }
     .brand .mark:has(.mark-logo) .mark-logo { animation: none; filter: drop-shadow(0 0 6px rgba(182,146,230,.45)); }
@@ -1790,6 +1810,7 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
   <span class="header-stats">
     <b>{{ '{:,}'.format(stats.images) }}</b> images{% if stats.videos %} &middot; <b>{{ '{:,}'.format(stats.videos) }}</b> videos{% endif %}{% if stats.collections %} &middot; <b>{{ stats.collections }}</b> collections{% endif %}
+    <span id="cover-badge" class="cover-badge" style="display:none;"></span>
     <span id="gen-live" class="gen-live" style="display:none;"></span>
   </span>
   <div class="head-nav">
@@ -3120,11 +3141,24 @@ var Acct = (function(){
   function refresh(){
     var c=chip(); if(!c) return;
     fetch('/api/account').then(function(r){return r.json();}).then(function(d){
-      if(d.error || (d.credits==null && !d.cards)){ return; }
-      var parts=[]; if(d.credits!=null) parts.push('\\u25c8 <b>'+d.credits.toLocaleString()+'</b>');
-      if(d.cards) parts.push('<span class="cd">\\ud83c\\udfab '+d.cards+'</span>');
-      c.innerHTML=parts.join(' \\u00b7 '); c.style.display=parts.length?'':'none';
+      if(d.error){ return; }
+      if(d.credits!=null || d.cards){
+        var parts=[]; if(d.credits!=null) parts.push('\\u25c8 <b>'+d.credits.toLocaleString()+'</b>');
+        if(d.cards) parts.push('<span class="cd">\\ud83c\\udfab '+d.cards+'</span>');
+        c.innerHTML=parts.join(' \\u00b7 '); c.style.display=parts.length?'':'none';
+      }
+      coverage(d);
     }).catch(function(){});
+  }
+  function coverage(d){
+    var b=document.getElementById('cover-badge');
+    if(!b || d.coverage_pct==null || !d.server_tasks){ return; }
+    var pct=d.coverage_pct;
+    b.className='cover-badge '+(pct>=99.5?'full':(pct>=90?'high':'low'));
+    b.innerHTML='\\ud83d\\udcbe <b>'+pct+'%</b> backed up';
+    b.title=d.local_tasks.toLocaleString()+' of '+d.server_tasks.toLocaleString()
+      +' generation tasks archived locally'+(pct>=99.5?' \\u2014 complete backup \\u2728':'');
+    b.style.display='';
   }
   return {refresh:refresh};
 })();
@@ -5202,7 +5236,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     cards += int(k.get("count") or 0)
                 except (TypeError, ValueError):
                     pass
-            return jsonify({"credits": credits, "cards": cards})
+            # Backup coverage: server's lifetime TASK count vs distinct tasks we hold locally.
+            # Both are task counts (not images), so the ratio is honest.
+            try:
+                server_tasks = int((me.get("tasks") or {}).get("totalCount"))
+            except (TypeError, ValueError):
+                server_tasks = None
+            local_tasks = distinct_task_count(db_path)
+            coverage = (round(min(100.0, local_tasks / server_tasks * 100), 1)
+                        if server_tasks else None)
+            return jsonify({"credits": credits, "cards": cards,
+                            "server_tasks": server_tasks, "local_tasks": local_tasks,
+                            "coverage_pct": coverage,
+                            "followers": me.get("followerCount"),
+                            "following": me.get("followingCount")})
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
 

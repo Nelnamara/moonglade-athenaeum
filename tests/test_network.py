@@ -492,7 +492,8 @@ def test_gql_adhoc_raises_on_graphql_error(mocker):
 
 def test_account_info_parses_me(mocker):
     mocker.patch.object(core, "gql_adhoc", return_value={"me": {
-        "id": "42", "quotaAmount": 21290,
+        "id": "42", "quotaAmount": 21290, "tasks": {"totalCount": 19623},
+        "followerCount": 30, "followingCount": 4,
         "membership": {"membershipId": "membership-plus", "tier": 2,
                        "privilege": {"dailyClaimAdded": 10000, "professionalMode": True}},
         "subscription": {"planId": "membership-plus", "status": "active",
@@ -500,6 +501,8 @@ def test_account_info_parses_me(mocker):
     me = core.account_info(mocker.MagicMock())
     assert me["quotaAmount"] == 21290
     assert me["membership"]["membershipId"] == "membership-plus"
+    assert me["tasks"]["totalCount"] == 19623      # server's lifetime task count (backup coverage)
+    assert me["followerCount"] == 30
 
 
 def test_account_info_empty_on_error(mocker):
