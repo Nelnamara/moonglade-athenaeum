@@ -27,10 +27,11 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
 
 ## Also queued (pre-existing, same arc)
 
-- Video card: real cost + card count row (`🎫 1/9` style), model picker (V4.0/Lite/3.2), Add-audio toggle.
-- Reference deck fan-out + hover previews on picked refs + inline `@image1` prompt chips (composer parity).
-- Picker into the Edit Bay's React side (Cast/frames are upload-only there).
-- Housekeeping: push, merge `generate-drawer` → master (v1.9.0), CLAUDE.md test count, wiki (drawer / Video tab / /edit-bay).
+- ✅ Video card: real cost + card count, model picker, audio toggle (shipped).
+- ✅ Composer parity: slot badges/remove/hover previews + `@image1` prompt chips (shipped; the
+  literal collapsed-stack fan animation deferred to the notes pass — cosmetic only).
+- ✅ Picker in the Edit Bay (GalleryPick on cast rows + frame slots; mediaId rides Generate-shot).
+- ✅ Housekeeping: merged → master v1.9.0; CLAUDE.md + wiki/Generating.md updated.
 - Horizon: multi-provider deck (Seedance 2.0 direct), Turbo-mode capture, PySide6 ref-video tab.
 
 ## Working agreement
