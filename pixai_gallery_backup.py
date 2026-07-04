@@ -3834,12 +3834,17 @@ def artwork_views(session, artwork_id):
         return 0
 
 
-def account_info(session):
-    """Fetch credits + membership/subscription via ad-hoc GraphQL. Returns the
-    `me` dict ({} on failure). Read-only."""
+def account_info(session, raise_on_error=False):
+    """Fetch credits + membership/subscription via ad-hoc GraphQL. Returns the `me` dict.
+    Fails soft to {} by default (the web header chip relies on that); pass raise_on_error=True
+    to let the real PixAIError propagate so a caller can report WHY (auth vs transient).
+    Read-only. Note gql_adhoc already retries network/429/5xx 3x with backoff, so an error
+    here means a sustained outage or a real auth/GraphQL problem, not a one-off blip."""
     try:
         return (gql_adhoc(session, _ACCOUNT_QUERY) or {}).get("me") or {}
     except PixAIError:
+        if raise_on_error:
+            raise
         return {}
 
 
@@ -3847,9 +3852,19 @@ def run_account_info(args):
     """Print a read-only account dashboard: credit balance, membership, and
     subscription status. Never initiates payment -- buy credits in the browser."""
     session = _make_session(getattr(args, "token", None))
-    me = account_info(session)
+    try:
+        me = account_info(session, raise_on_error=True)
+    except PixAIError as e:
+        msg = str(e)
+        if "401" in msg or "Unauthorized" in msg:
+            print("Account read failed: your API key is missing or expired -- check config.json.")
+        else:
+            # gql_adhoc already retried; this is a sustained network/API hiccup, not your key.
+            print("Account read failed (temporary API/connection issue) -- try again in a moment.")
+            print("  detail: {}".format(msg[:160]))
+        return {}
     if not me:
-        print("Could not read account info (check API key / connection).")
+        print("Account read returned no data -- try again in a moment.")
         return {}
     mem = me.get("membership") or {}
     sub = me.get("subscription") or {}
