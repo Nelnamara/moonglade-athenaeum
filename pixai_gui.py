@@ -1210,7 +1210,9 @@ class GenerateTab(QWidget):
             mode=self.mode.currentData(),
             prompt_helper=self.prompt_helper.isChecked(),
             lora=["{}:{}".format(vid, w) for vid, _t, w in self._loras],
-            poll_timeout=300, name_length=60, name_sep="_",
+            # 900s: free/card gens can sit in PixAI's queue for many minutes before
+            # they even start -- a short timeout reads as a scary (false) failure.
+            poll_timeout=900, name_length=60, name_sep="_",
         )
 
     def _on_model_pick(self):
@@ -1493,7 +1495,7 @@ class VideoTab(QWidget):
             video_prompt_helper=self.prompt_helper.isChecked(),
             params_json="", confirm=self.confirm.isChecked(),
             task_id=self.task_id.text().strip(),
-            poll_timeout=600, name_length=60,
+            poll_timeout=1200, name_length=60,
         )
 
     def _run_video(self):
@@ -1668,7 +1670,7 @@ class EditTab(QWidget):
             kaisuuken_id=self.kaisuuken.text().strip(),
             params_json="", confirm=self.confirm.isChecked(),
             task_id=self.task_id.text().strip(),
-            poll_timeout=300, name_length=60, name_sep="_",
+            poll_timeout=900, name_length=60, name_sep="_",
         )
 
     def _run_edit(self):
@@ -1831,7 +1833,7 @@ class ReferenceVideoTab(QWidget):
             audio=self.audio.isChecked(), audio_language="english",
             vchannel="private", kaisuuken_id="",
             confirm=self.confirm.isChecked(), task_id=self.task_id.text().strip(),
-            poll_timeout=600, name_length=60, name_sep="_", dump_params=False,
+            poll_timeout=1200, name_length=60, name_sep="_", dump_params=False,
         )
 
     def _run(self):
