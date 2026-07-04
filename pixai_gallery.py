@@ -2146,8 +2146,9 @@ document.addEventListener('DOMContentLoaded', function(){
   #model-flyout.open{display:flex;}
   #model-flyout .x{margin-left:auto;}
   #gen-drawer.dock-left #model-flyout{right:auto;left:100%;border-right:1px solid var(--surface1);border-left:none;box-shadow:14px 0 34px rgba(0,0,0,.4);}
-  #gen-drawer.dock-top #model-flyout{top:100%;bottom:auto;right:auto;left:50%;transform:translateX(-50%);height:auto;max-height:58vh;border-top:none;box-shadow:0 14px 34px rgba(0,0,0,.4);}
-  #gen-drawer.dock-bottom #model-flyout{top:auto;bottom:100%;right:auto;left:50%;transform:translateX(-50%);height:auto;max-height:58vh;border-bottom:none;box-shadow:0 -14px 34px rgba(0,0,0,.4);}
+  /* Top/bottom docks are thin full-width bars -- an edge-popped flyout gets clipped.
+     Render the model browser as a centered overlay instead so it's never obscured. */
+  #gen-drawer.dock-top #model-flyout,#gen-drawer.dock-bottom #model-flyout{position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);width:540px;max-width:92vw;height:auto;max-height:82vh;border:1px solid var(--surface1);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);}
   #pick-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
   #pick-scrim.open{display:block;}
   #pick-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
@@ -2304,7 +2305,20 @@ document.addEventListener('DOMContentLoaded', function(){
         <div style="flex:1;"><div class="gen-lbl">Duration (s)</div>
           <select id="video-dur" class="gen-sel" onchange="Gen.videoCost()"><option>5</option><option>6</option><option>10</option><option>15</option></select></div>
       </div>
-      <label class="gen-check"><input type="checkbox" id="video-audio" onchange="Gen.videoCost()"> Generate audio <span style="color:var(--overlay0);">(V4.0 / V3.2 &middot; spoken lines in the prompt become voiceover)</span></label>
+      <div class="gen-row" style="margin-top:8px;">
+        <div id="video-cam-wrap" style="flex:1;"><div class="gen-lbl">Camera</div>
+          <select id="video-cam" class="gen-sel">
+            <option value="unset">Auto</option><option value="zoom">Zoom</option>
+            <option value="pan">Pan</option><option value="tilt">Tilt</option>
+            <option value="roll">Roll</option><option value="horizontal">Horizontal</option>
+            <option value="vertical-pan">Vertical pan</option>
+          </select></div>
+        <div style="flex:1;"><div class="gen-lbl">Priority</div>
+          <select id="video-vmode" class="gen-sel"><option value="professional">Professional</option><option value="basic">Basic (cheaper)</option></select></div>
+      </div>
+      <label class="gen-check"><input type="checkbox" id="video-audio" onchange="Gen.videoAudioToggle()"> Generate audio <span style="color:var(--overlay0);">(V4.0 / V3.2 &middot; spoken lines in the prompt become voiceover)</span></label>
+      <div id="video-lang-wrap" style="display:none;margin-top:4px;"><div class="gen-lbl">Audio language</div>
+        <select id="video-lang" class="gen-sel"><option value="english">English</option><option value="japanese">Japanese</option><option value="chinese">Chinese</option><option value="korean">Korean</option></select></div>
       <div class="gen-cost" id="video-cost" style="margin-top:10px;">Pick a source image to see the cost.</div>
       <button id="video-go" class="gen-go" onclick="Gen.videoGenerate()">Generate video</button>
       <div id="video-result" class="gen-result" style="display:none;"></div>
@@ -2374,7 +2388,8 @@ document.addEventListener('DOMContentLoaded', function(){
   .snip-btn:hover{color:var(--lavender);border-color:var(--overlay0);}
   .acct-chip{font-size:12.5px;color:var(--subtext);background:var(--surface0);border:1px solid var(--surface1);border-radius:20px;padding:4px 12px;white-space:nowrap;}
   .acct-chip b{color:var(--text);} .acct-chip .cd{color:var(--lavender);}
-  #jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:214px;background:var(--mantle);border:1px solid var(--surface1);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;padding:8px;}
+  #jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:270px;min-width:190px;max-width:560px;max-height:64vh;overflow:auto;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;padding:8px;}
+  #jobs-tray.big{width:440px;}
   #jobs-tray .jt-head{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);margin-bottom:6px;display:flex;justify-content:space-between;}
   .jt-item{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--text);padding:4px 2px;}
   .jt-item .jt-lab{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -2613,9 +2628,12 @@ var Gen = (function(){
   }
   function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
   function placePreview(p, anchor){
-    var r=anchor.getBoundingClientRect(), w=300, gap=14;
-    var x = r.left - w - gap;
-    if(x < 8) x = Math.min(r.right + gap, window.innerWidth - w - 8);
+    var r=anchor.getBoundingClientRect(), w=300, gap=14, x;
+    var dr=el('gen-drawer'), leftish = dr && dr.classList.contains('dock-left');
+    // Preview should open toward screen center, away from the drawer edge: to the RIGHT
+    // of the card when the drawer is docked left, to the LEFT otherwise.
+    if(leftish){ x = r.right + gap; if(x + w > window.innerWidth - 8) x = Math.max(8, r.left - w - gap); }
+    else { x = r.left - w - gap; if(x < 8) x = Math.min(r.right + gap, window.innerWidth - w - 8); }
     var y = Math.max(8, Math.min(r.top - 20, window.innerHeight - 470));
     p.style.left=x+'px'; p.style.top=y+'px';
   }
@@ -2850,6 +2868,7 @@ var Gen = (function(){
       vp.setAttribute('data-placeholder','Describe the transition from start frame to end frame\\u2026'); }
     else { if(!vslots.length) vslots=[null]; el('video-slots-lbl').textContent='Reference images';
       vp.setAttribute('data-placeholder','Type @image1 to cite a ref \\u2014 it becomes a chip \\u2014 \\u2018the girl from @image1 walks the pier\\u2026\\u2019'); }
+    var cam=el('video-cam-wrap'); if(cam) cam.style.visibility=(m==='r2v')?'hidden':'visible';
     renderVideoSlots();
   }
   function renderVideoSlots(){
@@ -2938,8 +2957,12 @@ var Gen = (function(){
     return { mode:vmode.toUpperCase(), prompt:vpText(),
       images:vslots.filter(function(s){return s&&s.media_id;}).map(function(s){return s.media_id;}),
       duration:+el('video-dur').value, audio:el('video-audio').checked,
-      video_model:el('video-model').value };
+      video_model:el('video-model').value,
+      camera_movement:(vmode!=='r2v'?el('video-cam').value:''),
+      quality:el('video-vmode').value,
+      audio_language:el('video-lang').value };
   }
+  function videoAudioToggle(){ el('video-lang-wrap').style.display=el('video-audio').checked?'':'none'; videoCost(); }
   function videoCost(){ clearTimeout(vcostTimer); vcostTimer=setTimeout(videoCostNow, 250); }
   function videoCostNow(){
     var cost=el('video-cost'); if(!cost) return;
@@ -2982,6 +3005,7 @@ var Gen = (function(){
           previewSelected:previewSelected, hidePreview:hidePreview,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           setEditSub:setEditSub, addVideoRefs:addVideoRefs, videoCost:videoCost,
+          videoAudioToggle:videoAudioToggle,
           vpOnInput:vpOnInput, vpChipify:vpChipify,
           videoPromptText:vpText, videoPromptSet:videoPromptSet,
           get selected(){return selected;}};
@@ -4237,7 +4261,10 @@ function savePrompt() {
                     p["mode"], (p.get("prompt") or "").strip(), image_ids=imgs,
                     duration=p.get("duration") or 5,
                     generate_audio=bool(p.get("audio")),
-                    model=(p.get("video_model") or ""))
+                    model=(p.get("video_model") or ""),
+                    camera_movement=(p.get("camera_movement") or ""),
+                    quality=(p.get("quality") or "professional"),
+                    audio_language=(p.get("audio_language") or "english"))
             except core.PixAIError as e:
                 return None, bool(p.get("no_card")), str(e)[:140]
             return params, bool(p.get("no_card")), None
@@ -4483,6 +4510,8 @@ function savePrompt() {
                 duration=p.get("duration") or 5,
                 generate_audio=bool(p.get("generate_audio") or p.get("audio")),
                 model=(p.get("video_model") or ""),
+                camera_movement=(p.get("camera_movement") or ""),
+                quality=(p.get("quality") or "professional"),
                 audio_language=(p.get("audio_language") or "english"))
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
