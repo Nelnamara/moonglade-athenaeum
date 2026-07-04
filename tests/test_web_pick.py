@@ -428,6 +428,23 @@ def test_artwork_views_route(tmp_path, monkeypatch):
     assert cli.get("/api/artwork-views").get_json()["views"] is None   # missing id -> 400/null
 
 
+def test_lan_view_hides_owner_only_controls(tmp_path):
+    """On a LAN-served instance, owner-only controls (Generate / The Loom / Panel / balance chip)
+    are localhost-gated -> the header hides them and shows a read-only note instead of dead buttons.
+    Browse + community surfaces (Contests / My Art / Achievements / Health) stay."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    localhost = cli.get("/").get_data(as_text=True)
+    lan = cli.get("/", environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_data(as_text=True)
+    # The Generate button (btn-primary) + The Loom header link are owner-only -> localhost only.
+    _loom = "video storyboard, where shots"   # unique to the header Loom link title (owner-only)
+    assert _loom in localhost and "read-only LAN view" not in localhost
+    assert _loom not in lan and "read-only LAN view" in lan
+    # community + browse surfaces survive on both
+    for html in (localhost, lan):
+        assert "Contests.open()" in html and "YourArt.open()" in html
+
+
 def test_branding_absent_is_404(tmp_path):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
