@@ -66,3 +66,36 @@ def test_upload_requires_a_file(tmp_path):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.post("/api/upload", data={}).status_code == 400
+
+
+def test_tag_search_gql_shapes_names(monkeypatch):
+    seen = {}
+
+    def fake_gql(session, q, variables=None, **k):
+        seen["q"], seen["vars"] = q, variables
+        return {"tags": {"edges": [{"node": {"name": "no humans"}},
+                                   {"node": {"name": "no shoes"}},
+                                   {"node": {}}]}}
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    out = core.tag_search_gql(object(), "no hu", first=8)
+    assert out == ["no humans", "no shoes"]          # nameless node dropped
+    assert "tags(q:" in seen["q"] and seen["vars"] == {"k": "no hu", "n": 8}
+
+
+def test_tag_suggest_route_short_prefix_is_free(tmp_path, monkeypatch):
+    """Under 2 chars: no session, no network -- just an empty list."""
+    def boom(*a, **k):
+        raise AssertionError("must not touch the network for short prefixes")
+    monkeypatch.setattr(core, "_make_session", boom)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.get("/api/tag-suggest?q=n").get_json() == {"tags": []}
+
+
+def test_tag_suggest_route_returns_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "tag_search_gql", lambda s, q, first=8: ["no humans"])
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    assert cli.get("/api/tag-suggest?q=no hu").get_json() == {"tags": ["no humans"]}

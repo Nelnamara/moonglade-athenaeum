@@ -3764,6 +3764,21 @@ def suggest_prompt(session, media_id):
     return data.get("output") or []
 
 
+def tag_search_gql(session, prefix, first=8):
+    """Tag autocomplete for the prompt writer -- the site's "Tag Suggestions" dropdown.
+    GraphQL `tags(q:$prefix, first:$n)` (field-probed 2026-07-04; node has name/
+    category/id/weight, no usage count -- the site's counts are client-side). Returns
+    a list of tag names. FREE, read-only. Raises on GraphQL error."""
+    q = "query($k:String!,$n:Int){ tags(q:$k, first:$n){ edges{ node{ name } } } }"
+    d = gql_adhoc(session, q, {"k": str(prefix), "n": int(first)}) or {}
+    out = []
+    for e in (d.get("tags") or {}).get("edges") or []:
+        name = (e.get("node") or {}).get("name")
+        if name:
+            out.append(name)
+    return out
+
+
 def run_suggest_prompt(args):
     """--suggest-prompt <media_id|file>: print PixAI's suggested prompt(s) for an image
     (the site's "Image to prompt"). A local file is uploaded first (free); a catalog
