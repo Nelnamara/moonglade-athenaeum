@@ -941,6 +941,23 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
     return {"results": out, "has_more": bool(data.get("hasMore"))}
 
 
+def workflow_catalog(session, first=80):
+    """List PixAI enhance/panelplugin WORKFLOWS via the `workflows` GraphQL connection ->
+    [{id, name, type, cover_media_id}]. `id` is the numeric workflowId that
+    build_panelplugin_parameters wants. Covers upscale / remove-background / line-art /
+    sketch-colorizer / inpaint / outpaint / style converters / etc. Read-only."""
+    q = "query($n:Int){ workflows(first:$n){ edges { node { id name type coverMediaId } } } }"
+    d = gql_adhoc(session, q, {"n": int(first)}) or {}
+    out = []
+    for e in (d.get("workflows") or {}).get("edges") or []:
+        n = e.get("node") or {}
+        if not n.get("id"):
+            continue
+        out.append({"id": str(n["id"]), "name": n.get("name") or "",
+                    "type": n.get("type") or "", "cover_media_id": str(n.get("coverMediaId") or "")})
+    return out
+
+
 def resolve_latest_version(session, model_id):
     """Resolve a model's latest generatable VERSION id (what createGenerationTask's
     `modelId` actually wants) from its MODEL id, via GET /v2/generation-model/{id}/versions.

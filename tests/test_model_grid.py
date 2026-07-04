@@ -67,3 +67,14 @@ def test_web_generate_raises_without_task_id(monkeypatch, tmp_path):
     monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {}})
     with pytest.raises(core.PixAIError):
         core.web_generate(object(), {"prompts": "x", "modelId": "v"}, str(tmp_path))
+
+
+def test_workflow_catalog(monkeypatch):
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"workflows": {"edges": [
+        {"node": {"id": "1794855217667308480", "name": "Image Upscale",
+                  "type": "UPSCALE", "coverMediaId": "9"}},
+        {"node": {"id": "", "name": "no-id skipped"}},
+    ]}})
+    out = core.workflow_catalog(object())
+    assert len(out) == 1 and out[0]["id"] == "1794855217667308480"
+    assert out[0]["name"] == "Image Upscale" and out[0]["cover_media_id"] == "9"
