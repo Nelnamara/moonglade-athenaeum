@@ -191,8 +191,7 @@ Just generate on a model you have a card for — the match is automatic:
 | **V4.0 video** | `--generate-video` / `--reference-video` (5s = 1 card, 15s = 3) |
 
 Overrides: **`--no-card`** forces paying credits even when a card matches; **`--kaisuuken-id <id>`**
-forces a specific card. Cards closest to expiry are used first. Card list + match come from PixAI's
-`/v2/kaisuuken/*` REST API.
+forces a specific card. Cards closest to expiry are used first.
 
 
 ---

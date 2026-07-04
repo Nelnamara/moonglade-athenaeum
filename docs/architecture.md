@@ -13,21 +13,17 @@ catalog access — so catalog logic lives in exactly one place.
 
 ## How it talks to PixAI
 
-There is **no official API for listing your own generations**, so the tool
-reverse-engineers the website's traffic:
-
-1. **Listing** — `listUserTaskSummaries` is an Apollo *persisted query* (GET): the
-   client sends an `operationName` + `sha256Hash`; the query body lives on PixAI's
-   server. Paginated **backward** (`{last, before, userId}`), newest page first.
-2. **Media URLs** — task summaries carry `mediaId` / `batchMediaIds`, not URLs. The
-   full-res URL comes from `GET /v1/media/<id>` (variant `PUBLIC`). Videos expose
-   their mp4 via the GraphQL `media` object's `fileUrl`.
-3. **Everything else** — `gql_adhoc()` POSTs full GraphQL query documents directly.
-   PixAI accepts these under the API-key Bearer, so most operations (generate,
-   delete, account, model search) need **no persisted-hash capture**. This is the
-   foundation that turned a backup tool into a full client.
-4. **Auth** — the official API key (`PIXAI_API_KEY`) is the Bearer credential for
-   every call. HTTPS verification is always on.
+- **Auth** — your official API key (`PIXAI_API_KEY`) is the Bearer credential for
+  every call. Your `USER_ID` is auto-resolved from it; HTTPS verification is always
+  on. Setup is just the key — see [Setup](../../wiki/Setup).
+- **Personal-history operations** — PixAI has no official public API for managing
+  *your own* work (listing your history, task detail, delete), so those reuse the
+  website's own interfaces, with working defaults shipped in the app. You never
+  capture anything by hand; if a default ever goes stale after a PixAI update you
+  get a clear error and update one value — see [Troubleshooting](../../wiki/Troubleshooting).
+- **Media URLs** — task records carry `mediaId` / `batchMediaIds`, not URLs. The
+  full-res URL comes from `GET /v1/media/<id>` (variant `PUBLIC`); videos expose
+  their mp4 via the media object's `fileUrl`.
 
 ## The catalog (`catalog.db`)
 
@@ -80,5 +76,5 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 
 ## Testing
 
-185+ pytest tests in `tests/` (pure functions, filesystem, catalog, gallery
+300+ pytest tests in `tests/` (pure functions, filesystem, catalog, gallery
 routes, mocked network). `python -m pytest`. All must pass before merging.
