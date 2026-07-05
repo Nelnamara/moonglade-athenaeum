@@ -1642,16 +1642,19 @@ def create_app(out_dir: Path):
   /* Header */
   header { background: var(--mantle); padding: 12px 20px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--surface0); position: sticky; top: 0; z-index: 100; overflow: hidden; }
   #brand-banner { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .16; z-index: 0; pointer-events: none; -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 62%); mask-image: linear-gradient(90deg, #000 0%, transparent 62%); }
-  /* Collapsing banner: when branding/banner.png exists the header opens as a full
-     banner and COLLAPSES into the slim bar as you scroll (JS drives --bnr-h height
-     + --bnr-op art opacity from scroll position). Full art on arrival, zero wasted
-     space while browsing. With no JS it just holds --bnr-h's default -- still fine.
-     Tunables live in the bannerCollapse() script: max height + object-position. */
-  header.bannered { height: var(--bnr-h, 200px); align-items: flex-end; padding: 0 20px 11px; transition: none; }
-  header.bannered #brand-banner { opacity: var(--bnr-op, 1); -webkit-mask-image: none; mask-image: none;
-    object-fit: cover; object-position: center 34%; }
+  /* Collapsing banner, JITTER-FREE: a tall header that SLIDES up on scroll via a
+     sticky negative-top -- the browser scrolls it away natively, nothing resizes,
+     so there is zero per-scroll layout thrash (the old JS height-on-scroll caused
+     the jank). At rest you see the full art band; scroll and it pins showing only
+     the bottom --bnr-slim (the nav bar). Pure CSS. Tunables: --bnr-hero (open
+     height) and object-position (which horizontal slice of the art shows). */
+  header.bannered { --bnr-hero: clamp(150px, 22vw, 300px); --bnr-slim: 62px;
+    height: var(--bnr-hero); top: calc(var(--bnr-slim) - var(--bnr-hero));
+    align-items: flex-end; padding: 0 20px 11px; }
+  header.bannered #brand-banner { opacity: 1; -webkit-mask-image: none; mask-image: none;
+    object-fit: cover; object-position: center 32%; }
   header.bannered::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    background: linear-gradient(180deg, rgba(17,17,27,.05) 36%, rgba(17,17,27,.48) 70%, rgba(17,17,27,.92) 100%); }
+    background: linear-gradient(180deg, rgba(17,17,27,.04) 30%, rgba(17,17,27,.4) 62%, rgba(17,17,27,.9) 88%); }
   header > * { position: relative; z-index: 1; }
   .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .brand-txt { display: flex; flex-direction: column; line-height: 1; }
@@ -1993,28 +1996,7 @@ document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.stars[data-mid]').forEach(function(el) {
     buildStars(el.dataset.mid, parseInt(el.dataset.rating) || 0, el);
   });
-  bannerCollapse();
 });
-/* Collapsing banner: full on arrival, shrinks into the slim sticky bar as you
-   scroll. Tunables: HERO_MAX (tallest the banner opens to) and the CSS
-   object-position (which slice of the 1920x480 art shows). */
-function bannerCollapse(){
-  var hdr = document.querySelector('header.bannered'),
-      img = document.getElementById('brand-banner');
-  if (!hdr || !img) return;
-  var SLIM = 60, HERO_MAX = 340, HERO = 200;
-  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  function measure(){ HERO = Math.max(150, Math.min(HERO_MAX, Math.round(hdr.clientWidth / 4.6))); apply(); }
-  function apply(){
-    var span = HERO - SLIM, y = window.scrollY || 0,
-        t = reduce ? 0 : Math.max(0, Math.min(1, y / span));
-    hdr.style.setProperty('--bnr-h', (HERO - span * t) + 'px');
-    hdr.style.setProperty('--bnr-op', (1 - 0.82 * t).toFixed(3));
-  }
-  if (!reduce) window.addEventListener('scroll', apply, { passive: true });
-  window.addEventListener('resize', measure);
-  measure();
-}
 </script>
 </head>
 <body>
