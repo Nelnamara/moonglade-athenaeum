@@ -1304,6 +1304,23 @@ def _build_stamp():
     return "v{}".format(ver) + (" · {}".format(sha) if sha else "")
 
 
+def _supervised():
+    """True when the server was started by the managed launcher (Serve Gallery), which sets
+    MOONGLADE_SUPERVISED=1 and relaunches on exit code 42. Restart is only offered when True."""
+    return os.environ.get("MOONGLADE_SUPERVISED") == "1"
+
+
+def _schedule_server_exit(code):
+    """Let the current HTTP response flush, then exit the process with `code`
+    (0 = stop; 42 = the supervisor's 'relaunch me' signal). Factored out so tests can assert
+    the intended exit code without actually killing the test process."""
+    def _die():
+        import time
+        time.sleep(0.4)
+        os._exit(code)
+    threading.Thread(target=_die, daemon=True).start()
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
     db_path = out_dir / "catalog.db"
@@ -4670,11 +4687,37 @@ function savePrompt() {
   </div>
 
   <div class="p-sec">
+    <h2>Server</h2>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="jobbtn" style="flex:0 0 auto;min-width:0;" id="btn-restart"
+        onclick="restartServer()" {% if not supervised %}disabled title="Start via the 'Serve Gallery' launcher to enable one-click restart"{% endif %}>
+        <span class="t">&#8635; Restart server</span></button>
+      <button class="jobbtn danger" style="flex:0 0 auto;min-width:0;" onclick="stopServer()">
+        <span class="t">&#9632; Stop server</span></button>
+    </div>
+    <div class="p-note">{% if supervised %}Managed by the launcher &mdash; <b>Restart</b> brings the server right back; <b>Stop</b> shuts the whole app down (relaunch from the <code>Serve Gallery</code> shortcut).{% else %}This server was started headlessly (not managed). <b>Stop</b> works; <b>Restart</b> needs the <code>Serve Gallery</code> launcher (which supervises + relaunches it).{% endif %} No more Task Manager.</div>
+  </div>
+
+  <div class="p-sec">
     <h2>This build</h2>
     <div style="font-size:13px;color:var(--subtext);">Running <b style="color:var(--text);">{{ build_stamp }}</b> &middot; library at <code>{{ out_dir }}</code></div>
     <div class="p-note">More settings (default workers, page size, verbose) land here next. Deleting from your PixAI account stays CLI-only, behind its typed confirm &mdash; on purpose.</div>
   </div>
 </div>
+<div id="srv-overlay">
+  <div class="srv-box"><div class="srv-spin"></div>
+    <div class="srv-msg" id="srv-msg">Working&hellip;</div>
+    <div class="srv-sub" id="srv-sub"></div></div>
+</div>
+<style>
+  #srv-overlay{position:fixed;inset:0;z-index:500;background:rgba(6,4,14,.86);backdrop-filter:blur(5px);display:none;align-items:center;justify-content:center;}
+  #srv-overlay.on{display:flex;}
+  .srv-box{text-align:center;color:var(--text);}
+  .srv-spin{width:44px;height:44px;margin:0 auto 18px;border-radius:50%;border:3px solid var(--surface1);border-top-color:var(--accent);animation:srv-sp 0.9s linear infinite;}
+  @keyframes srv-sp{to{transform:rotate(360deg);}}
+  .srv-msg{font-size:18px;font-weight:600;}
+  .srv-sub{font-size:12.5px;color:var(--subtext);margin-top:6px;}
+</style>
 <script>
 var ACTIONS = {{ actions_json|safe }};
 function el(i){return document.getElementById(i);}
@@ -4734,6 +4777,37 @@ function saveSchedule(){
       el('sch-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved'+(s.enabled?(' \\u00b7 every '+s.interval_hours+'h while open'):' \\u00b7 disabled')+'</span>';
     }).catch(function(){ el('sch-status').textContent='\\u26a0 network error'; });
 }
+// --- Server control (Homebridge-style stop / restart from the browser) ---
+function _srvOverlay(msg, sub){ el('srv-msg').textContent=msg; el('srv-sub').textContent=sub||''; el('srv-overlay').classList.add('on'); }
+function stopServer(){
+  if(!confirm('Stop the server?\\n\\nThe web interface goes offline until you relaunch it from the \"Serve Gallery\" shortcut.')) return;
+  _srvOverlay('Stopping the server\\u2026','');
+  fetch('/api/server/stop',{method:'POST'}).catch(function(){});
+  _watchServer(false);
+}
+function restartServer(){
+  if(!confirm('Restart the server?\\n\\nIt goes offline for a few seconds, then this page reconnects automatically.')) return;
+  _srvOverlay('Restarting the server\\u2026','This page reconnects on its own.');
+  fetch('/api/server/restart',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+    if(d && d.error){ el('srv-overlay').classList.remove('on'); alert(d.error); return; }
+    _watchServer(true);
+  }).catch(function(){ _watchServer(true); });
+}
+function _watchServer(comeBack){
+  // Poll liveness. Restart: wait until it goes down THEN comes back -> reload. Stop: wait until it stops answering.
+  var tries=0, sawDown=false;
+  var iv=setInterval(function(){
+    tries++;
+    fetch('/api/ping',{cache:'no-store'}).then(function(r){ return r.ok; }).then(function(ok){
+      if(comeBack && ok && sawDown){ clearInterval(iv); location.reload(); }
+      if(comeBack && ok && tries>=8 && !sawDown){ clearInterval(iv); location.reload(); } // never saw a gap; just reload
+    }).catch(function(){
+      sawDown=true;
+      if(!comeBack){ clearInterval(iv); el('srv-msg').textContent='Server stopped.'; el('srv-sub').textContent='Relaunch any time from the \"Serve Gallery\" shortcut.'; el('srv-spin').style.display='none'; }
+    });
+    if(tries>50){ clearInterval(iv); el('srv-msg').textContent=comeBack?'Still restarting\\u2026 give it a moment, then refresh.':'Server stopped.'; el('srv-spin').style.display='none'; }
+  }, 800);
+}
 renderJobs(); loadAcct(); loadSchedule();
 // if a job was already running when the page loaded, resume polling
 fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });
@@ -4771,7 +4845,34 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                    for k, v in PANEL_ACTIONS.items()]
         return render_template_string(
             PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
-            out_dir=str(out_dir), actions_json=json.dumps(actions))
+            out_dir=str(out_dir), actions_json=json.dumps(actions),
+            supervised=_supervised())
+
+    @app.route("/api/ping")
+    def api_ping():
+        """Cheap liveness probe — the Stop/Restart reconnect overlay polls this. Open."""
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/stop", methods=["POST"])
+    def api_server_stop():
+        """Shut the server down cleanly from the browser (Homebridge-style) instead of Task
+        Manager. Localhost-only. Under the managed launcher this ends the whole app."""
+        if not _is_local_request():
+            return jsonify({"error": "server control is localhost-only"}), 403
+        _schedule_server_exit(0)
+        return jsonify({"ok": True, "action": "stop"})
+
+    @app.route("/api/server/restart", methods=["POST"])
+    def api_server_restart():
+        """Restart the server from the browser. Needs the managed launcher (Serve Gallery),
+        which relaunches on exit code 42; otherwise the process would just stop. Localhost-only."""
+        if not _is_local_request():
+            return jsonify({"error": "server control is localhost-only"}), 403
+        if not _supervised():
+            return jsonify({"error": "Restart needs the managed launcher — start via "
+                                     "'Serve Gallery'. (Stop still works.)"}), 409
+        _schedule_server_exit(42)
+        return jsonify({"ok": True, "action": "restart"})
 
     @app.route("/api/panel/run", methods=["POST"])
     def api_panel_run():

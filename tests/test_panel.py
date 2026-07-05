@@ -108,3 +108,41 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
     assert argv[1].endswith("pixai_gallery_backup.py")
     assert "--audit" in argv and "--no-content" in argv and "--out" in argv
     assert all(isinstance(a, str) for a in argv)
+
+
+# --- Server control: stop / restart from the browser (Homebridge-style) ---
+
+def test_ping_is_open(tmp_path):
+    cli = _client(tmp_path).test_client()
+    assert cli.get("/api/ping").get_json() == {"ok": True}
+
+
+def test_server_stop_schedules_exit_0(tmp_path, monkeypatch):
+    codes = []
+    monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
+    cli = _client(tmp_path).test_client()
+    d = cli.post("/api/server/stop").get_json()
+    assert d == {"ok": True, "action": "stop"} and codes == [0]      # stop -> exit 0
+    # LAN device can't stop the owner's server
+    r = cli.post("/api/server/stop", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r.status_code == 403 and codes == [0]                     # unchanged
+
+
+def test_server_restart_needs_supervisor(tmp_path, monkeypatch):
+    codes = []
+    monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
+    cli = _client(tmp_path).test_client()
+    # not supervised -> refused (409), no exit scheduled
+    monkeypatch.setattr(g, "_supervised", lambda: False)
+    r = cli.post("/api/server/restart")
+    assert r.status_code == 409 and codes == []
+    # supervised -> exit 42 (the relaunch signal)
+    monkeypatch.setattr(g, "_supervised", lambda: True)
+    d = cli.post("/api/server/restart").get_json()
+    assert d["action"] == "restart" and codes == [42]
+
+
+def test_panel_shows_restart_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(g, "_supervised", lambda: True)
+    html = _client(tmp_path).test_client().get("/panel").get_data(as_text=True)
+    assert "Restart server" in html and "Stop server" in html
