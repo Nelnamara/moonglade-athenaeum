@@ -110,6 +110,30 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
     assert all(isinstance(a, str) for a in argv)
 
 
+def test_run_sync_action_spawns_sync_flag(tmp_path, monkeypatch):
+    """'Sync now' is the panel's primary job: one argv, --sync (pull + metadata)."""
+    import subprocess
+    captured = {}
+
+    class FakeProc:
+        def __init__(self):
+            import io
+            self.stdout = io.StringIO("")
+        def wait(self):
+            return 0
+    def fake_popen(argv, **k):
+        captured["argv"] = argv
+        return FakeProc()
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    cli = _client(tmp_path).test_client()
+    r = cli.post("/api/panel/run", json={"action": "sync"})
+    assert r.get_json()["ok"] is True
+    import time
+    time.sleep(0.05)
+    assert "--sync" in captured["argv"]
+
+
 # --- Server control: stop / restart from the browser (Homebridge-style) ---
 
 def test_ping_is_open(tmp_path):
