@@ -607,8 +607,12 @@ def list_marks(out_dir):
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
+    if not isinstance(data, dict):
+        return []          # corrupt manifest degrades to "no marks", never a 500
     out = []
-    for m in data.get("marks", []):
+    for m in data.get("marks") or []:
+        if not isinstance(m, dict):
+            continue
         mid = str(m.get("id") or "")
         if mid and (mdir / (mid + ".png")).exists():
             out.append({"id": mid, "label": m.get("label") or mid,
@@ -624,7 +628,8 @@ def load_branding(out_dir):
     cfg = dict(_BRAND_DEFAULTS)
     try:
         raw = json.loads(_branding_path(out_dir).read_text(encoding="utf-8"))
-        cfg.update({k: str(v) for k, v in raw.items() if k in ("mark", "anim")})
+        if isinstance(raw, dict):   # a corrupt file degrades to defaults, never a 500
+            cfg.update({k: str(v) for k, v in raw.items() if k in ("mark", "anim")})
     except (OSError, ValueError):
         pass
     if cfg["anim"] not in MARK_ANIMS:
@@ -1713,7 +1718,8 @@ def create_app(out_dir: Path):
     .brand .mark:has(.mark-logo) .mark-logo { animation: none; filter: drop-shadow(0 0 6px rgba(182,146,230,.45)); }
     .brand .mark:has(.mark-logo)::before { animation: none; background-position: 200% 0; }
     .brand .mark:has(.mark-logo)::after { animation: none; opacity: .8; transform: none; }
-    .brand .mark .mark-logo, .brand .mark::before, .brand .mark::after { animation: none !important; }
+    /* class-tripled to outrank every per-anim !important rule's specificity */
+    .brand .mark.mark.mark .mark-logo, .brand .mark.mark.mark::before, .brand .mark.mark.mark::after { animation: none !important; }
     .tagline { transition: none; }
   }
 
@@ -4662,7 +4668,7 @@ function savePrompt() {
 </div>
 {% endmacro %}
 <header>
-  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Collection Health</h1></div>
+  <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Collection Health</h1></div>
   <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 
@@ -4764,7 +4770,7 @@ function savePrompt() {
 
     DUPES_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <header>
-  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Duplicate Review</h1></div>
+  <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Duplicate Review</h1></div>
   <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 <div style="padding:10px 20px 28px;max-width:1100px;">
@@ -4828,7 +4834,7 @@ function savePrompt() {
   .jp-txt{font-size:11.5px;color:var(--subtext);margin-top:5px;font-variant-numeric:tabular-nums;}
 </style>
 <header>
-  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
+  <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
   <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
   <a class="btn" href="{{ url_for('index') }}">↑ Back to gallery</a>
 </header>
@@ -5009,6 +5015,7 @@ function saveSchedule(){
 }
 // --- Branding: banner mark + animation + launcher shortcut ---
 var _brandMark='';
+function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function loadBrand(){
   fetch('/api/branding').then(function(r){return r.json();}).then(function(d){
     _brandMark=d.mark;
@@ -5017,9 +5024,9 @@ function loadBrand(){
       row.innerHTML='<span style="font-size:12.5px;color:var(--subtext);">No cut marks on this machine yet (branding/marks/ is empty) &mdash; the header uses the drop-in logo.png.</span>';
     } else {
       row.innerHTML=(d.marks||[]).map(function(m){
-        return '<span class="brand-pick" data-mark="'+m.id+'" title="'+m.label+'" style="cursor:pointer;border:2px solid var(--surface1);border-radius:10px;padding:4px;background:var(--mantle);text-align:center;">'
-          +'<img src="'+m.png+'" style="width:44px;height:44px;display:block;'+(m.kind==='tile'?'border-radius:8px;':'')+'">'
-          +'<span style="display:block;font-size:9.5px;color:var(--subtext);max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+m.label+'</span></span>';
+        return '<span class="brand-pick" data-mark="'+escH(m.id)+'" title="'+escH(m.label)+'" style="cursor:pointer;border:2px solid var(--surface1);border-radius:10px;padding:4px;background:var(--mantle);text-align:center;">'
+          +'<img src="'+escH(m.png)+'" style="width:44px;height:44px;display:block;'+(m.kind==='tile'?'border-radius:8px;':'')+'">'
+          +'<span style="display:block;font-size:9.5px;color:var(--subtext);max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escH(m.label)+'</span></span>';
       }).join('');
       row.querySelectorAll('.brand-pick').forEach(function(p){
         p.onclick=function(){ _brandMark=p.dataset.mark; paintBrand(); };
@@ -5043,8 +5050,8 @@ function saveBrand(){
   fetch('/api/branding',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({mark:_brandMark, anim:(sel?sel.value:'classic')})})
     .then(function(r){return r.json();}).then(function(d){
-      el('brand-status').innerHTML = d.error ? ('\\u26a0 '+d.error)
-        : '<span style="color:var(--emerald)">\\u2713 saved \\u00b7 refresh the gallery to see it</span>';
+      if(d.error){ el('brand-status').textContent='\\u26a0 '+d.error; return; }
+      el('brand-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved \\u00b7 refresh the gallery to see it</span>';
     }).catch(function(){ el('brand-status').textContent='\\u26a0 network error'; });
 }
 function setLauncher(){
@@ -5052,8 +5059,8 @@ function setLauncher(){
   fetch('/api/branding/shortcut',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({mark:_brandMark})})
     .then(function(r){return r.json();}).then(function(d){
-      el('brand-status').innerHTML = d.error ? ('\\u26a0 '+d.error)
-        : '<span style="color:var(--emerald)">\\u2713 Desktop shortcut updated (F5 the Desktop if the icon looks stale)</span>';
+      if(d.error){ el('brand-status').textContent='\\u26a0 '+d.error; return; }
+      el('brand-status').innerHTML='<span style="color:var(--emerald)">\\u2713 Desktop shortcut updated (F5 the Desktop if the icon looks stale)</span>';
     }).catch(function(){ el('brand-status').textContent='\\u26a0 network error'; });
 }
 // --- Server control (Homebridge-style stop / restart from the browser) ---
