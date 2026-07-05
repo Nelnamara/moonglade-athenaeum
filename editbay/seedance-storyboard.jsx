@@ -87,6 +87,11 @@ const STYLES = `
 .sb-trim-read b{color:var(--amber)}
 .sb-trim-reset{margin-left:9px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:5px;font-size:10px;padding:1px 8px;cursor:pointer}
 .sb-trim-reset:hover{border-color:var(--amber);color:var(--amber)}
+.sb-seq{position:fixed;inset:0;z-index:500;background:rgba(4,3,10,.92);display:flex;align-items:center;justify-content:center;padding:22px}
+.sb-seq-box{max-width:1120px;width:100%;display:flex;flex-direction:column;gap:11px}
+.sb-seq video{width:100%;max-height:78vh;background:#000;border-radius:11px;display:block;cursor:pointer}
+.sb-seq-bar{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:13px}
+.sb-seq-bar span{flex:1;font-family:'JetBrains Mono',monospace;color:var(--ink2)}
 
 .sb-fromstrip{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--bg2);
   border-bottom:1px solid var(--line);font-size:11px;color:var(--ink3)}
@@ -305,6 +310,7 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showCast, setShowCast] = useState(true);
   const [genState, setGenState] = useState({});   // cardId -> {phase, msg, mid}
+  const [seq, setSeq] = useState(null);           // Play-sequence: [clip,...] or null
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb) or null
   const [batching, setBatching] = useState(false);
   const openPick = useCallback((cb) => setPickCb(() => cb), []);
@@ -469,6 +475,14 @@ export default function App() {
   if (!project) return <div className="sb-root"><style>{STYLES}</style><div className="sb-empty">Loading the bay…</div></div>;
 
   const entries = flat(project);
+  // Play-sequence: every finished shot (persisted resultMid), in order, with its
+  // in/out trim -- a rough cut played back-to-back, nothing rendered.
+  const playSequence = () => {
+    const clips = entries.filter((e) => e.c.resultMid).map((e) => ({
+      mid: e.c.resultMid, in: e.c.trimIn || 0, out: e.c.trimOut, title: e.c.title, code: e.code }));
+    if (clips.length) setSeq(clips); else alert("No finished shots yet — generate one first.");
+  };
+  const anyDone = entries.some((e) => e.c.resultMid);
   // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration
   const durOf = (c) => Number(c.actualDur || c.duration) || 0;
   const total = entries.reduce((s, x) => s + durOf(x.c), 0);
@@ -493,6 +507,7 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
+      {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
       {pickCb && <GalleryPick onClose={() => setPickCb(null)}
         onPick={(mid, thumb) => { const cb = pickCb; setPickCb(null); cb(mid, thumb); }} />}
 
@@ -506,6 +521,8 @@ export default function App() {
             <button className="sb-btn" onClick={batchGenerate} disabled={batching || !entries.length}
               title="Generate every shot that isn't done yet, one after another">
               {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
+            <button className="sb-btn amber" onClick={playSequence} disabled={!anyDone}
+              title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
           </div>
           <div className="sb-stat"><b>{done}/{entries.length}</b><span>shots done</span></div>
           <div className="sb-stat"><b style={{ color: over > 0 ? "var(--coral)" : "var(--ink)" }}>{fmt(total)}</b>
@@ -697,6 +714,48 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim }) {
         <div className="sb-trim-read">
           {fT(range.in)} &rarr; {fT(effOut)} &middot; <b>{fT(Math.max(0, effOut - range.in))}</b> kept
           {trimmed && <button className="sb-trim-reset" onClick={() => onTrim(0, null)}>reset</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Play-sequence overlay: plays finished shots back-to-back, each from its in
+   point to its out point, then advances. A rough cut with zero rendering --
+   the browser just seeks a single <video> through /video-file/<id> per clip. */
+function SequencePlayer({ clips, onClose }) {
+  const vRef = useRef(null);
+  const [i, setI] = useState(0);
+  const clip = clips[i];
+  useEffect(() => {
+    const v = vRef.current; if (!v || !clip) return;
+    const seekPlay = () => { try { v.currentTime = clip.in || 0; } catch (e) {} v.play().catch(() => {}); };
+    const onTime = () => {
+      const end = (clip.out != null ? clip.out : v.duration) || 0;
+      if (end && v.currentTime >= end - 0.04) {
+        if (i < clips.length - 1) setI(i + 1); else onClose();
+      }
+    };
+    v.addEventListener("loadedmetadata", seekPlay);
+    v.addEventListener("timeupdate", onTime);
+    if (v.readyState >= 1) seekPlay();
+    return () => { v.removeEventListener("loadedmetadata", seekPlay); v.removeEventListener("timeupdate", onTime); };
+  }, [i]);   // eslint-disable-line
+  useEffect(() => {
+    const esc = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc); return () => window.removeEventListener("keydown", esc);
+  }, []);
+  if (!clip) return null;
+  return (
+    <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sb-seq-box">
+        <video ref={vRef} key={clip.mid} src={"/video-file/" + clip.mid} autoPlay playsInline
+          onClick={(e) => { const v = e.currentTarget; v.paused ? v.play() : v.pause(); }} />
+        <div className="sb-seq-bar">
+          <span>Shot {i + 1}/{clips.length}{clip.code ? " · " + clip.code : ""}{clip.title ? " — " + clip.title : ""}</span>
+          <button className="sb-btn ghost sm" onClick={() => setI(Math.max(0, i - 1))} disabled={i === 0}>&#9664; prev</button>
+          <button className="sb-btn ghost sm" onClick={() => { if (i < clips.length - 1) setI(i + 1); else onClose(); }}>next &#9654;</button>
+          <button className="sb-btn sm" onClick={onClose}>&#10005; close</button>
         </div>
       </div>
     </div>
@@ -988,10 +1047,10 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
           {g.phase === "done" && g.mid && (<a className="sb-mono" href={"/image/" + g.mid} target="_blank" rel="noreferrer"
             style={{ color: "var(--cyan)" }}>open full ↗</a>)}
         </div>
-        {g.phase === "done" && g.mid &&
-          <ShotPreview mid={g.mid} trimIn={card.trimIn} trimOut={card.trimOut}
-            onTrim={(i, o) => setCard(act.id, card.id, (c) => ({ ...c, trimIn: i, trimOut: o }))} />}
         </>); })()}
+      {card.resultMid &&
+        <ShotPreview mid={card.resultMid} trimIn={card.trimIn} trimOut={card.trimOut}
+          onTrim={(i, o) => setCard(act.id, card.id, (c) => ({ ...c, trimIn: i, trimOut: o }))} />}
     </div>
   );
 }
