@@ -1642,13 +1642,16 @@ def create_app(out_dir: Path):
   /* Header */
   header { background: var(--mantle); padding: 12px 20px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--surface0); position: sticky; top: 0; z-index: 100; overflow: hidden; }
   #brand-banner { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .16; z-index: 0; pointer-events: none; -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 62%); mask-image: linear-gradient(90deg, #000 0%, transparent 62%); }
-  /* Real banner band: when branding/banner.png exists the header becomes a visible
-     slice of the 1920x480 art with the UI seated in the bottom quarter (~3/4 down).
-     A bottom scrim keeps mark/title/nav legible over any art. */
-  header.bannered { height: 132px; align-items: flex-end; padding-bottom: 12px; }
-  header.bannered #brand-banner { opacity: 1; -webkit-mask-image: none; mask-image: none; object-position: center; }
+  /* Collapsing banner: when branding/banner.png exists the header opens as a full
+     banner and COLLAPSES into the slim bar as you scroll (JS drives --bnr-h height
+     + --bnr-op art opacity from scroll position). Full art on arrival, zero wasted
+     space while browsing. With no JS it just holds --bnr-h's default -- still fine.
+     Tunables live in the bannerCollapse() script: max height + object-position. */
+  header.bannered { height: var(--bnr-h, 200px); align-items: flex-end; padding: 0 20px 11px; transition: none; }
+  header.bannered #brand-banner { opacity: var(--bnr-op, 1); -webkit-mask-image: none; mask-image: none;
+    object-fit: cover; object-position: center 34%; }
   header.bannered::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    background: linear-gradient(180deg, rgba(17,17,27,.15) 0%, rgba(17,17,27,.05) 40%, rgba(17,17,27,.82) 100%); }
+    background: linear-gradient(180deg, rgba(17,17,27,.05) 36%, rgba(17,17,27,.48) 70%, rgba(17,17,27,.92) 100%); }
   header > * { position: relative; z-index: 1; }
   .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .brand-txt { display: flex; flex-direction: column; line-height: 1; }
@@ -1747,7 +1750,7 @@ def create_app(out_dir: Path):
   /* Mobile: collapse the filter bar behind a toggle so the grid leads. */
   @media (max-width: 680px) {
     header h1 { font-size: 16px; }
-    header.bannered { height: 96px; }
+    header.bannered { padding: 0 14px 10px; }
     header .back-link { font-size: 12px; }
   .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
   .lan-note { font-size: 11.5px; color: var(--overlay0); font-style: italic; padding: 5px 10px; border: 1px dashed var(--surface1); border-radius: 7px; }
@@ -1990,7 +1993,28 @@ document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.stars[data-mid]').forEach(function(el) {
     buildStars(el.dataset.mid, parseInt(el.dataset.rating) || 0, el);
   });
+  bannerCollapse();
 });
+/* Collapsing banner: full on arrival, shrinks into the slim sticky bar as you
+   scroll. Tunables: HERO_MAX (tallest the banner opens to) and the CSS
+   object-position (which slice of the 1920x480 art shows). */
+function bannerCollapse(){
+  var hdr = document.querySelector('header.bannered'),
+      img = document.getElementById('brand-banner');
+  if (!hdr || !img) return;
+  var SLIM = 60, HERO_MAX = 340, HERO = 200;
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function measure(){ HERO = Math.max(150, Math.min(HERO_MAX, Math.round(hdr.clientWidth / 4.6))); apply(); }
+  function apply(){
+    var span = HERO - SLIM, y = window.scrollY || 0,
+        t = reduce ? 0 : Math.max(0, Math.min(1, y / span));
+    hdr.style.setProperty('--bnr-h', (HERO - span * t) + 'px');
+    hdr.style.setProperty('--bnr-op', (1 - 0.82 * t).toFixed(3));
+  }
+  if (!reduce) window.addEventListener('scroll', apply, { passive: true });
+  window.addEventListener('resize', measure);
+  measure();
+}
 </script>
 </head>
 <body>
