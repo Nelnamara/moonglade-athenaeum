@@ -55,19 +55,38 @@ cmd = [sys.executable, os.path.join(here, "pixai_gallery.py")] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
 
 
-def _open_browser_once():
-    time.sleep(2.0)                 # give the first server a moment to bind
+def _open_when_ready():
+    """Open the browser ONLY once the server actually answers -- a big backup builds thumbnails
+    for several seconds before it binds the port, so a fixed delay opened the browser too early
+    ('connection refused'). Poll /api/ping up to 2 minutes, then open."""
+    import urllib.request
+    ping = "http://localhost:{}/api/ping".format(PORT)
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(ping, timeout=1)
+            break                   # server is up
+        except Exception:
+            time.sleep(0.5)
     try:
         webbrowser.open("http://localhost:{}/".format(PORT))
     except Exception:
         pass
 
 
+# Capture the child's stdout/stderr to serve.log so a boot failure isn't silent under pythonw
+# (no console). stdin=DEVNULL so the headless child never blocks on input.
+try:
+    _log = open(os.path.join(here, "serve.log"), "a", buffering=1, encoding="utf-8")
+except OSError:
+    _log = subprocess.DEVNULL
+
 first = True
 while True:
-    proc = subprocess.Popen(cmd, env=env, cwd=here)
+    proc = subprocess.Popen(cmd, env=env, cwd=here,
+                            stdin=subprocess.DEVNULL, stdout=_log, stderr=_log)
     if first:
-        threading.Thread(target=_open_browser_once, daemon=True).start()
+        threading.Thread(target=_open_when_ready, daemon=True).start()
         first = False
     rc = proc.wait()                # blocks until the child fully exits (frees the port)
     if rc == RESTART_CODE:
