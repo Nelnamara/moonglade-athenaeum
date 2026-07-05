@@ -241,3 +241,48 @@ def test_cancel_is_localhost_only(tmp_path):
     cli = _client(tmp_path).test_client()
     r = cli.post("/api/panel/cancel", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
     assert r.status_code == 403
+
+
+# --- The Loom: ffmpeg export of the rough cut (mocked -- no real ffmpeg) ---
+
+def test_editbay_export_runs_and_downloads(tmp_path, monkeypatch):
+    import subprocess, shutil, io, time
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "shot_v1.mp4").write_bytes(b"fakemp4")   # media_id 'v1'
+    # the export resolves the clip via the catalog row (is_video + filename)
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="v1", filename="videos/shot_v1.mp4", is_video="1",
+             created_at="2025-01-01T00:00:00")])
+    monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg" if n == "ffmpeg" else None)
+
+    class FakeProc:
+        def __init__(self, argv):
+            open(argv[-1], "wb").write(b"OUTPUT")          # argv[-1] = out path
+            self.stderr = io.StringIO("frame=1 time=00:00:01.00 bitrate=x\n")
+        def wait(self):
+            return 0
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: FakeProc(argv))
+
+    cli = create_app(tmp_path).test_client()
+    r = cli.post("/api/editbay/export",
+                 json={"clips": [{"mid": "v1", "in": 0, "out": 2}], "total_seconds": 2})
+    assert r.get_json().get("ok") is True
+    for _ in range(60):
+        d = cli.get("/api/editbay/export-status").get_json()
+        if d["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert d["status"] == "done" and d["progress"] == 100
+    assert cli.get("/api/editbay/export-file").status_code == 200
+    # LAN can't kick off exports
+    r = cli.post("/api/editbay/export", json={"clips": []},
+                 environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r.status_code == 403
+
+
+def test_editbay_export_needs_a_video(tmp_path, monkeypatch):
+    import shutil
+    monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg")
+    cli = _client(tmp_path).test_client()
+    r = cli.post("/api/editbay/export", json={"clips": [{"mid": "nope", "in": 0}]})
+    assert r.status_code == 400 and "no finished shot" in r.get_json()["error"]

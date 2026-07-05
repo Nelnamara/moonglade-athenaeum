@@ -1465,6 +1465,11 @@ def create_app(out_dir: Path):
                   "rc": None, "started_at": None, "progress": None,
                   "proc": None, "cancelled": False}
     _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in pixai_gallery_backup.py
+    # The Loom's ffmpeg export job (trim + concat finished shots -> one mp4).
+    _export_lock = threading.Lock()
+    _export_job = {"status": "idle", "progress": 0, "elapsed": 0.0,
+                   "out": "", "error": "", "proc": None, "cancelled": False}
+    _export_dir = out_dir / "editbay" / "exports"
 
     # action -> {args (extra flags), label, destructive}
     PANEL_ACTIONS = {
@@ -6626,6 +6631,130 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
+
+    def _run_export(cmd, out_path, total_sec):
+        """Run the ffmpeg concat in a thread, parsing time= for progress. The output
+        (--pix_fmt yuv420p h264) is a normal mp4 the browser can play + download."""
+        import subprocess, re as _re
+        tpat = _re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                    text=True, bufsize=1, encoding="utf-8", errors="replace")
+            with _export_lock:
+                _export_job["proc"] = proc
+            for line in iter(proc.stderr.readline, ""):
+                m = tpat.search(line)
+                if m:
+                    el = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+                    with _export_lock:
+                        _export_job["elapsed"] = round(el, 1)
+                        _export_job["progress"] = min(99, int(el / total_sec * 100)) if total_sec else 0
+            rc = proc.wait()
+            with _export_lock:
+                _export_job["proc"] = None
+                if _export_job.get("cancelled"):
+                    _export_job["status"] = "cancelled"
+                elif rc == 0 and out_path.exists():
+                    _export_job.update(status="done", progress=100, out=out_path.name)
+                else:
+                    _export_job.update(status="failed", error="ffmpeg exited %d" % rc)
+        except Exception as e:
+            with _export_lock:
+                _export_job.update(status="failed", error=str(e)[:200], proc=None)
+
+    @app.route("/api/editbay/export", methods=["POST"])
+    def api_editbay_export():
+        """Trim each finished shot to its in/out and concat into one 720p mp4 -- the
+        rough cut becomes a real deliverable. Async (ffmpeg in a thread); poll
+        /api/editbay/export-status, download /api/editbay/export-file. Localhost-only.
+        Video-only for now (audio is a follow-up). body: {clips:[{mid,in,out}], total_seconds}"""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        import shutil
+        if not shutil.which("ffmpeg"):
+            return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
+        with _export_lock:
+            if _export_job["status"] == "running":
+                return jsonify({"error": "an export is already running"}), 409
+        body = request.get_json(silent=True) or {}
+        try:
+            total_sec = float(body.get("total_seconds") or 0) or 1.0
+        except (TypeError, ValueError):
+            total_sec = 1.0
+        segs = []
+        for c in (body.get("clips") or []):
+            mid = str(c.get("mid") or "")
+            if not mid:
+                continue
+            # Resolve the shot's video the same way /video-file does: catalog row ->
+            # filename (find_files_for_media_id is image-only, so it never sees mp4s).
+            row = get_row(db_path, mid)
+            if not row or str(row.get("is_video") or "") != "1" or not row.get("filename"):
+                continue
+            path = str(out_dir / row["filename"])
+            if not os.path.exists(path):
+                continue
+            try:
+                ci = max(0.0, float(c.get("in") or 0))
+            except (TypeError, ValueError):
+                ci = 0.0
+            co = c.get("out")
+            try:
+                co = float(co) if co not in (None, "") else None
+            except (TypeError, ValueError):
+                co = None
+            segs.append((path, ci, co))
+        if not segs:
+            return jsonify({"error": "no finished shot videos found on disk to export"}), 400
+        _export_dir.mkdir(parents=True, exist_ok=True)
+        out_path = _export_dir / "loom_cut.mp4"
+        W, H = 1280, 720
+        parts, labels = [], ""
+        for i, (path, ci, co) in enumerate(segs):
+            tr = "trim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
+            parts.append("[%d:v]%s,setpts=PTS-STARTPTS,scale=%d:%d:force_original_aspect_ratio=decrease,"
+                         "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24[v%d]" % (i, tr, W, H, W, H, i))
+            labels += "[v%d]" % i
+        fc = ";".join(parts) + ";" + labels + "concat=n=%d:v=1:a=0[vout]" % len(segs)
+        cmd = ["ffmpeg", "-y"]
+        for (path, _ci, _co) in segs:
+            cmd += ["-i", path]
+        cmd += ["-filter_complex", fc, "-map", "[vout]", "-c:v", "libx264",
+                "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", str(out_path)]
+        with _export_lock:
+            _export_job.update(status="running", progress=0, elapsed=0.0, out="",
+                               error="", proc=None, cancelled=False)
+        threading.Thread(target=_run_export, args=(cmd, out_path, total_sec), daemon=True).start()
+        return jsonify({"ok": True, "shots": len(segs)})
+
+    @app.route("/api/editbay/export-status")
+    def api_editbay_export_status():
+        with _export_lock:
+            return jsonify({k: _export_job[k] for k in
+                            ("status", "progress", "elapsed", "out", "error")})
+
+    @app.route("/api/editbay/export-file")
+    def api_editbay_export_file():
+        name = _export_job.get("out") or "loom_cut.mp4"
+        if not (_export_dir / name).exists():
+            return "No export available.", 404
+        return send_from_directory(str(_export_dir), name, as_attachment=True,
+                                   download_name="moonglade-loom-cut.mp4")
+
+    @app.route("/api/editbay/export-cancel", methods=["POST"])
+    def api_editbay_export_cancel():
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        with _export_lock:
+            proc = _export_job.get("proc")
+            if _export_job["status"] == "running" and proc is not None:
+                _export_job["cancelled"] = True
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        return jsonify({"ok": True})
 
     @app.route("/api/task-status")
     def api_task_status():

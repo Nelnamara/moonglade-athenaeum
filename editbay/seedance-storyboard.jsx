@@ -92,6 +92,10 @@ const STYLES = `
 .sb-seq video{width:100%;max-height:78vh;background:#000;border-radius:11px;display:block;cursor:pointer}
 .sb-seq-bar{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:13px}
 .sb-seq-bar span{flex:1;font-family:'JetBrains Mono',monospace;color:var(--ink2)}
+.sb-export-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:13px}
+.sb-exp-bar{height:9px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.sb-exp-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),#f0b866);transition:width .3s}
+.sb-exp-txt{font-size:13px;color:var(--ink);text-align:center;font-family:'JetBrains Mono',monospace}
 .sb-pick-ov{position:fixed;inset:0;z-index:400;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
 .sb-pick-box{width:920px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
 .sb-pick-head{display:flex;align-items:center;gap:9px}
@@ -326,6 +330,8 @@ export default function App() {
   const [showCast, setShowCast] = useState(true);
   const [genState, setGenState] = useState({});   // cardId -> {phase, msg, mid}
   const [seq, setSeq] = useState(null);           // Play-sequence: [clip,...] or null
+  const [exp, setExp] = useState(null);           // export overlay: {status,progress,...} or null
+  const exportPoll = useRef(null);
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
   const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
   const [importOpen, setImportOpen] = useState(false);  // import-collection dialog
@@ -512,6 +518,29 @@ export default function App() {
     if (clips.length) setSeq(clips); else alert("No finished shots yet — generate one first.");
   };
   const anyDone = entries.some((e) => e.c.resultMid);
+  // Export: trim each finished shot + concat into one mp4 (ffmpeg, server-side).
+  const exportCut = () => {
+    const clips = entries.filter((e) => e.c.resultMid).map((e) => {
+      const dur = e.c.actualDur || e.c.duration || 8, cin = e.c.trimIn || 0;
+      const cout = (e.c.trimOut != null ? e.c.trimOut : dur);
+      return { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
+    });
+    if (!clips.length) { alert("No finished shots to export yet — generate one first."); return; }
+    const total = clips.reduce((s, c) => s + c.span, 0);
+    setExp({ status: "running", progress: 0, elapsed: 0 });
+    fetch("/api/editbay/export", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out })), total_seconds: total }) })
+      .then((r) => r.json()).then((d) => {
+        if (d.error) { setExp({ status: "failed", error: d.error }); return; }
+        const tick = () => fetch("/api/editbay/export-status").then((r) => r.json()).then((s) => {
+          setExp(s);
+          if (s.status === "running") exportPoll.current = setTimeout(tick, 1000);
+        }).catch(() => { exportPoll.current = setTimeout(tick, 2000); });
+        tick();
+      }).catch(() => setExp({ status: "failed", error: "network error" }));
+  };
+  const cancelExport = () => { fetch("/api/editbay/export-cancel", { method: "POST" }).catch(() => {}); };
+  const closeExport = () => { if (exportPoll.current) clearTimeout(exportPoll.current); setExp(null); };
   // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration
   const durOf = (c) => Number(c.actualDur || c.duration) || 0;
   const total = entries.reduce((s, x) => s + durOf(x.c), 0);
@@ -537,6 +566,28 @@ export default function App() {
     <div className="sb-root">
       <style>{STYLES}</style>
       {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
+      {exp && (
+        <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
+          <div className="sb-export-box">
+            <div className="sb-pick-head"><span className="sb-pick-t">Export the cut</span>
+              {exp.status !== "running" && <button className="sb-pick-x" onClick={closeExport}>&#215;</button>}</div>
+            {exp.status === "running" && <>
+              <div className="sb-exp-bar"><i style={{ width: (exp.progress || 0) + "%" }} /></div>
+              <div className="sb-exp-txt">Rendering&hellip; {exp.progress || 0}% &middot; {Math.round(exp.elapsed || 0)}s of cut</div>
+              <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={cancelExport}>&#9632; Stop</button>
+            </>}
+            {exp.status === "done" && <>
+              <div className="sb-exp-txt" style={{ color: "var(--green)" }}>&#10003; Cut rendered.</div>
+              <a className="sb-btn amber" href="/api/editbay/export-file" style={{ alignSelf: "center", textDecoration: "none" }}>&#8681; Download mp4</a>
+              <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeExport}>Close</button>
+            </>}
+            {(exp.status === "failed" || exp.status === "cancelled") && <>
+              <div className="sb-exp-txt" style={{ color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" }}>
+                {exp.status === "failed" ? ("⚠ " + (exp.error || "export failed")) : "■ Export stopped."}</div>
+              <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeExport}>Close</button>
+            </>}
+          </div>
+        </div>)}
       {pickCb && <GalleryPick defaultType={pickKind} onClose={() => setPickCb(null)}
         onPick={(mid, thumb, isVideo) => { const cb = pickCb; setPickCb(null); cb(mid, thumb, isVideo); }} />}
       {importOpen && <ImportCollection onClose={() => setImportOpen(false)} onImport={importCollection} />}
@@ -553,6 +604,8 @@ export default function App() {
               {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
             <button className="sb-btn amber" onClick={playSequence} disabled={!anyDone}
               title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
+            <button className="sb-btn" onClick={exportCut} disabled={!anyDone}
+              title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Export</button>
           </div>
           <div className="sb-stat"><b>{done}/{entries.length}</b><span>shots done</span></div>
           <div className="sb-stat"><b style={{ color: over > 0 ? "var(--coral)" : "var(--ink)" }}>{fmt(total)}</b>
