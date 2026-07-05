@@ -412,6 +412,25 @@ def test_sync_artworks_merges_by_media_id(tmp_path, mocker):
     assert row["is_published"] == "1" and row["artwork_id"] == "aw1"
 
 
+def test_sync_artworks_resolves_userid_via_session(tmp_path, mocker):
+    """A config with NO USER_ID must NOT hard-fail: _make_session auto-resolves it from the API
+    key, so run_sync_artworks builds the session FIRST, then proceeds. Regression for the web
+    Control Panel error 'USER_ID missing from config.json'."""
+    from types import SimpleNamespace
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
+    mocker.patch.object(core, "USER_ID", "")                 # config has no user id
+    def fake_session(tok=None):
+        core.USER_ID = "resolved-99"                          # _make_session resolves it live
+        return mocker.MagicMock()
+    mocker.patch.object(core, "_make_session", side_effect=fake_session)
+    mocker.patch.object(core, "artwork_list_gql",
+                        return_value={"edges": [], "pageInfo": {"hasPreviousPage": False}})
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    assert res["artworks"] == 0 and core.USER_ID == "resolved-99"   # ran instead of raising
+
+
 def test_resolve_loras(mocker):
     mocker.patch.object(core, "model_name_gql",
                         side_effect=lambda s, vid: {"111": "DetailLora", "222": "222"}.get(str(vid), str(vid)))

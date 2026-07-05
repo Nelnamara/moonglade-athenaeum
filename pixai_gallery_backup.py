@@ -2159,9 +2159,13 @@ def run_sync_artworks(args):
     generations, so unmatched/undownloaded ones are simply skipped."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    if not USER_ID:
-        raise PixAIError("USER_ID missing from config.json.")
+    # Build the session FIRST -- _make_session auto-resolves USER_ID from the API key when it
+    # isn't pinned in config.json. (Checking before this was the bug: it hard-failed on a config
+    # that never lists USER_ID even though the key can resolve it.)
     session = _make_session(getattr(args, "token", None))
+    if not USER_ID:
+        raise PixAIError("USER_ID is missing and could not be resolved from your API key. "
+                         "Add USER_ID to config.json as a fallback.")
 
     by_mid = {}                      # media_id -> artwork fields
     videos = []                      # (video_media_id, title) for animated artworks
