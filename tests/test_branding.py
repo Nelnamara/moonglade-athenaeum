@@ -112,6 +112,17 @@ def test_subpage_headers_carry_anim_class(tmp_path):
         assert "anim-classic" in html, path
 
 
+def test_banner_band_class(tmp_path):
+    """With no branding/banner.png the header is the classic slim bar; once the
+    file exists the header renders class="bannered" (the visible banner band)."""
+    cli = _app(tmp_path).test_client()
+    assert 'class="bannered"' not in cli.get("/").get_data(as_text=True)
+    bdir = tmp_path / "branding"
+    bdir.mkdir(parents=True, exist_ok=True)
+    (bdir / "banner.png").write_bytes(b"\x89PNG fake")
+    assert 'class="bannered"' in cli.get("/").get_data(as_text=True)
+
+
 def test_shortcut_requires_cut_ico(tmp_path, monkeypatch):
     import subprocess
 
