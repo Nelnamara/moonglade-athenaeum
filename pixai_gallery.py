@@ -1342,7 +1342,8 @@ def create_app(out_dir: Path):
     _cli_dir = str(Path(__file__).resolve().parent)
     _panel_lock = threading.Lock()
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
-                  "rc": None, "started_at": None, "progress": None}
+                  "rc": None, "started_at": None, "progress": None,
+                  "proc": None, "cancelled": False}
     _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in pixai_gallery_backup.py
 
     # action -> {args (extra flags), label, destructive}
@@ -1387,22 +1388,24 @@ def create_app(out_dir: Path):
         rc = proc.wait()
         with _panel_lock:
             _panel_job["rc"] = rc
-            _panel_job["status"] = "done" if rc == 0 else "failed"
+            _panel_job["status"] = ("cancelled" if _panel_job.get("cancelled")
+                                    else ("done" if rc == 0 else "failed"))
             _panel_job["progress"] = None                # clear the bar when the job ends
+            _panel_job["proc"] = None
 
     def _panel_run(action):
         import subprocess
         spec = PANEL_ACTIONS[action]
         argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v"] + spec["args"]
-        with _panel_lock:
-            _panel_job.update(status="running", action=action, label=spec["label"],
-                              lines=["$ " + " ".join(spec["args"])], rc=None,
-                              started_at=None, progress=None)
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
         env = dict(os.environ, MOONGLADE_PROGRESS="1")
         proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1,
                                 encoding="utf-8", errors="replace", env=env)
+        with _panel_lock:
+            _panel_job.update(status="running", action=action, label=spec["label"],
+                              lines=["$ " + " ".join(spec["args"])], rc=None,
+                              started_at=None, progress=None, proc=proc, cancelled=False)
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
 
     # ---- Automated tasks: run a SAFE job on an interval while the app is open ----
@@ -4689,6 +4692,7 @@ function savePrompt() {
     <div class="jobrow" id="jobs-danger"></div>
     <div id="jobprog" class="jobprog" style="display:none;"><div class="jp-bar"><i></i></div><div class="jp-txt"></div></div>
     <div id="jobstatus"></div>
+    <button type="button" id="job-stop" class="jobbtn danger" style="display:none;width:auto;min-width:0;margin-top:8px;" onclick="stopJob()"><span class="t">&#9632; Stop this job</span></button>
     <pre id="joblog"></pre>
     <div class="p-note">One job runs at a time. Backup / audit / dry-runs never delete anything. Organize and Dedup move files (both reversible &mdash; Organize writes an undo manifest, Dedup quarantines to <code>_duplicates/</code>).</div>
   </div>
@@ -4774,13 +4778,22 @@ function poll(){
       jp.querySelector('.jp-txt').textContent=(p.done||0).toLocaleString()+' / '+(p.total||0).toLocaleString()
         +'  ('+(p.pct!=null?p.pct:0)+'%)'+(p.new?('  \\u00b7 +'+p.new+' new'):'');
     } else { jp.style.display='none'; }
-    var st=el('jobstatus');
-    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+d.label+'\\u2026</span>'; setButtons(true); setTimeout(poll,1000); }
-    else { setButtons(false); polling=false;
+    var st=el('jobstatus'), stop=el('job-stop');
+    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+d.label+'\\u2026</span>'; stop.style.display=''; setButtons(true); setTimeout(poll,1000); }
+    else { setButtons(false); polling=false; stop.style.display='none';
       if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
+      else if(d.status==='cancelled'){ st.innerHTML='<span class="st-failed">\\u25a0 '+(d.label||'job')+' stopped by you</span>'; loadAcct(); }
       else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
     }
   }).catch(function(){ polling=false; setButtons(false); });
+}
+function stopJob(){
+  if(!confirm('Stop the running job?\\n\\nDry-runs/backups have nothing to undo; Organize and Dedup are reversible (Organize writes an undo manifest, Dedup quarantines to _duplicates/, nothing is deleted).')) return;
+  el('job-stop').disabled=true;
+  fetch('/api/panel/cancel',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+    el('job-stop').disabled=false;
+    if(d.error) el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>';
+  }).catch(function(){ el('job-stop').disabled=false; });
 }
 function loadAcct(){
   fetch('/api/account').then(function(r){return r.json();}).then(function(d){
@@ -4956,6 +4969,27 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
                             "progress": _panel_job["progress"],
                             "lines": list(_panel_job["lines"])})
+
+    @app.route("/api/panel/cancel", methods=["POST"])
+    def api_panel_cancel():
+        """Stop the running maintenance job from the browser (no Task Manager). Terminates the
+        subprocess; the reader marks it 'cancelled'. Safe: dry-runs/backups do nothing to undo,
+        and organize/dedup are reversible (organize writes an undo manifest, dedup quarantines).
+        Localhost-only."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        with _panel_lock:
+            proc = _panel_job.get("proc")
+            running = _panel_job["status"] == "running"
+            if running and proc is not None:
+                _panel_job["cancelled"] = True
+        if not (running and proc is not None):
+            return jsonify({"ok": False, "error": "no job is running"}), 200
+        try:
+            proc.terminate()   # reader sees stdout close -> finalizes status as 'cancelled'
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:140]}), 200
+        return jsonify({"ok": True, "action": "cancel"})
 
     @app.route("/api/panel/schedule", methods=["GET", "POST"])
     def api_panel_schedule():
