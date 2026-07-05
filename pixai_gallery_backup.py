@@ -2065,14 +2065,11 @@ def run_count(args):
     print("Tasks that are batches    : {}  (>1 image each)".format(batched_tasks))
     print("Fetched in {} request(s).".format(page))
     out = Path(args.out)
-    disk_count = disk_bytes = 0
-    if out.exists():
-        for p in out.rglob("*"):
-            if p.is_file() and p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
-                disk_count += 1
-                disk_bytes += p.stat().st_size
+    disk_count, disk_bytes, thumb_count = _count_backup_images(out) if out.exists() else (0, 0, 0)
     print("\n--- On disk ({}) ---".format(args.out))
     print("Image files on disk       : {}".format(disk_count))
+    if thumb_count:
+        print("  + preview thumbnails    : {}".format(thumb_count))
     print("Total collection size     : {}".format(
         _format_size(disk_bytes) if disk_bytes else "0 B (folder empty or not found)"))
     if images > tasks:
@@ -4545,11 +4542,33 @@ def run_reconcile_deleted(args):
     return {"live": len(live), "flagged": flagged, "cleared": cleared}
 
 
+def _count_backup_images(out):
+    """Count the ORIGINAL image files on disk, split from preview thumbnails. The naive
+    rglob-for-_IMAGE_EXTS double-counts because gallery/thumbs/<id>.jpg is one .jpg per image --
+    which made 'files on disk' look ~2x the catalog. Excludes gallery/ (thumbs) and _duplicates/
+    (quarantined). Returns (originals_count, originals_bytes, thumbnail_count)."""
+    out = Path(out)
+    skip = (out / "gallery", out / "_duplicates")
+    n = b = thumbs = 0
+    for p in out.rglob("*"):
+        if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS or p.name.endswith(".part"):
+            continue
+        if any(s in p.parents for s in skip):
+            if (out / "gallery") in p.parents:
+                thumbs += 1
+            continue
+        n += 1
+        try:
+            b += p.stat().st_size
+        except OSError:
+            pass
+    return n, b, thumbs
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    img_dir = out / "images"
     total = downloaded = missing = pending = 0
     for row in load_catalog(db_path):
         total += 1
@@ -4564,13 +4583,11 @@ def run_catalog_stats(args):
     print("  downloaded files  : {}".format(downloaded))
     print("  resolved, pending : {}".format(pending))
     print("  no URL (missing)  : {}".format(missing))
-    disk_count = disk_bytes = 0
-    for p in out.rglob("*"):
-        if p.is_file() and p.suffix.lower() in _IMAGE_EXTS and not p.name.endswith(".part"):
-            disk_count += 1
-            disk_bytes += p.stat().st_size
+    disk_count, disk_bytes, thumb_count = _count_backup_images(out)
     if disk_count:
         print("Image files on disk : {}  ({})".format(disk_count, _format_size(disk_bytes)))
+    if thumb_count:
+        print("  + {} preview thumbnails (gallery/thumbs, not originals)".format(thumb_count))
 
 
 def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0):
