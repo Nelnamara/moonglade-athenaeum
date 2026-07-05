@@ -3386,16 +3386,24 @@ document.addEventListener('DOMContentLoaded', function(){
 /* ---- Account balance chip (credits + free cards) in the header ---- */
 var Acct = (function(){
   function chip(){ return document.getElementById('acct-chip'); }
+  var CKEY='mg_acct';
+  function paint(d){
+    var c=chip(); if(!c) return;
+    var parts=[]; if(d.credits!=null) parts.push('\\u25c8 <b>'+Number(d.credits).toLocaleString()+'</b>');
+    if(d.cards!=null) parts.push('<span class="cd">\\ud83c\\udfab '+d.cards+'</span>');
+    if(parts.length){ c.innerHTML=parts.join(' \\u00b7 '); c.style.display=''; }
+  }
   function refresh(){
     var c=chip(); if(!c) return;
+    // Paint the last-known balance instantly so navigating never shows a blank chip.
+    try{ var cached=JSON.parse(localStorage.getItem(CKEY)||'null'); if(cached) paint(cached); }catch(e){}
     fetch('/api/account').then(function(r){return r.json();}).then(function(d){
-      if(d.error){ return; }
-      if(d.credits!=null || d.cards){
-        var parts=[]; if(d.credits!=null) parts.push('\\u25c8 <b>'+d.credits.toLocaleString()+'</b>');
-        if(d.cards) parts.push('<span class="cd">\\ud83c\\udfab '+d.cards+'</span>');
-        c.innerHTML=parts.join(' \\u00b7 '); c.style.display=parts.length?'':'none';
-      }
-      coverage(d);
+      // Only a fully-successful read (credits present) updates the chip; a transient
+      // miss or error keeps the last-known value instead of blanking it.
+      if(d.error || d.credits==null){ coverage(d); return; }
+      var good={credits:d.credits, cards:(d.cards!=null?d.cards:0)};
+      try{ localStorage.setItem(CKEY, JSON.stringify(good)); }catch(e){}
+      paint(good); coverage(d);
     }).catch(function(){});
   }
   function coverage(d){
@@ -4795,11 +4803,20 @@ function stopJob(){
     if(d.error) el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>';
   }).catch(function(){ el('job-stop').disabled=false; });
 }
+function _acctPaint(d){
+  if(d.credits!=null && el('ps-credits')) el('ps-credits').textContent=Number(d.credits).toLocaleString();
+  if(d.cards!=null && el('ps-cards')) el('ps-cards').textContent=d.cards;
+  var chip=el('acct-chip'); if(chip && d.credits!=null){ chip.innerHTML='\\u25c8 <b>'+Number(d.credits).toLocaleString()+'</b> \\u00b7 <span style="color:var(--lavender)">\\ud83c\\udfab '+(d.cards||0)+'</span>'; chip.style.display=''; }
+}
 function loadAcct(){
+  // Paint the last-known balance immediately (shared cache with the header chip),
+  // then only overwrite on a good read -- a transient miss never blanks it.
+  try{ var cached=JSON.parse(localStorage.getItem('mg_acct')||'null'); if(cached) _acctPaint(cached); }catch(e){}
   fetch('/api/account').then(function(r){return r.json();}).then(function(d){
-    if(d.credits!=null) el('ps-credits').textContent=d.credits.toLocaleString();
-    if(d.cards!=null) el('ps-cards').textContent=d.cards;
-    var chip=el('acct-chip'); if(chip && d.credits!=null){ chip.innerHTML='\\u25c8 <b>'+d.credits.toLocaleString()+'</b> \\u00b7 <span style="color:var(--lavender)">\\ud83c\\udfab '+(d.cards||0)+'</span>'; chip.style.display=''; }
+    if(d.error || d.credits==null) return;
+    var good={credits:d.credits, cards:(d.cards!=null?d.cards:0)};
+    try{ localStorage.setItem('mg_acct', JSON.stringify(good)); }catch(e){}
+    _acctPaint(good);
   }).catch(function(){});
 }
 function loadSchedule(){
