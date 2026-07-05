@@ -489,6 +489,8 @@ export default function App() {
       <header className="sb-top">
         <div className="sb-topgrid">
           <div className="sb-brand">
+            <a href="/" className="sb-btn ghost sm" title="Back to the gallery"
+              style={{ textDecoration: "none", flexShrink: 0 }}>← Gallery</a>
             <h1 className="sb-disp"><span className="sb-clap">▰</span> The Loom</h1>
             <input className="sb-projname" value={project.name} onChange={(e) => setProject((p) => ({ ...p, name: e.target.value }))} aria-label="Project name" />
             <button className="sb-btn" onClick={batchGenerate} disabled={batching || !entries.length}
