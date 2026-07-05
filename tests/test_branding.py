@@ -90,6 +90,28 @@ def test_shortcut_writes_lnk_via_powershell(tmp_path, monkeypatch):
     assert r.status_code == 403
 
 
+def test_branding_survives_corrupt_manifests(tmp_path):
+    """A hand-edited/corrupt marks.json or branding.json must degrade to the
+    logo.png defaults -- never 500 every page via the context processor."""
+    mdir = tmp_path / "branding" / "marks"
+    mdir.mkdir(parents=True)
+    (mdir / "marks.json").write_text('{"marks": ["not-a-dict", 42]}', encoding="utf-8")
+    (tmp_path / "branding.json").write_text('["not", "an", "object"]', encoding="utf-8")
+    cli = _app(tmp_path).test_client()
+    assert cli.get("/").status_code == 200
+    d = cli.get("/api/branding").get_json()
+    assert d["marks"] == [] and d["mark"] == "logo" and d["anim"] == "classic"
+
+
+def test_subpage_headers_carry_anim_class(tmp_path):
+    """Health/Panel headers must render the same anim-* class as the gallery, so
+    the classic animation isn't muted there and a chosen anim applies everywhere."""
+    cli = _app(tmp_path).test_client()
+    for path in ("/health", "/panel"):
+        html = cli.get(path).get_data(as_text=True)
+        assert "anim-classic" in html, path
+
+
 def test_shortcut_requires_cut_ico(tmp_path, monkeypatch):
     import subprocess
 
