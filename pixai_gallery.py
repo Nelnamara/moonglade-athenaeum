@@ -1469,7 +1469,7 @@ def create_app(out_dir: Path):
         "stats":         {"args": ["--catalog-stats"], "label": "Catalog stats", "destructive": False},
         "audit":         {"args": ["--audit", "--no-content"], "label": "Duplicate audit (fast, read-only)", "destructive": False},
         "sync-artworks": {"args": ["--sync-artworks"], "label": "Sync published-artwork metadata", "destructive": False},
-        "backfill-meta": {"args": ["--backfill-full-meta"], "label": "Backfill full metadata", "destructive": False},
+        "backfill-meta": {"args": ["--backfill-full-meta"], "label": "Backfill full metadata (prompts / seeds / models)", "destructive": False},
         # (Export CSV isn't here on purpose -- in the browser it's a real DOWNLOAD via /export-csv,
         #  not a subprocess that writes catalog.csv into the backup folder.)
         "organize-dry":  {"args": ["--organize", "--dry-run"], "label": "Organize — preview (dry run)", "destructive": False},

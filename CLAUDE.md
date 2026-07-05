@@ -237,15 +237,52 @@ The Flask gallery is a full creation suite. Everything below is **localhost-gate
   (`/api/task-status`) -> auto-download + catalog (`source='api'`, videos to `videos/`).
   Free cards auto-apply on every path.
 
+## Since 1.9.x (shipped in v1.10.0)
+
+- **Live events / push (`--watch`)**: graphql-transport-ws subscription to
+  `wss://gw.pixai.art/graphql`, root field `personalEvents` (taskUpdated +
+  newNotification; done status = `completed`). `--watch-backup` auto-collects each
+  finished task the moment it completes — this is how website gens can land without
+  polling. NOTE: only runs while the watcher runs; gens made on pixai.art otherwise
+  still need `--update`/backfill. ("Live-mirror inside the server" is the planned fix.)
+- **Control Panel jobs**: whitelisted CLI subprocesses with live log, a REAL progress
+  bar (CLI emits `~=MGPROG=~done|total|new` lines when `MOONGLADE_PROGRESS=1`), a
+  **Stop this job** cancel (`/api/panel/cancel`, terminates the subprocess, status
+  `cancelled` not `failed`), and an hourly scheduler for safe jobs. Includes
+  `backfill-meta` (`--backfill-full-meta`) — web parity with the GUI.
+- **Server control**: Homebridge-style **Stop/Restart** from the Panel
+  (`/api/server/stop|restart`; restart = exit 42 relaunched by the `Serve Gallery.pyw`
+  supervisor, `MOONGLADE_SUPERVISED=1`; single-instance guard pings `/api/ping` and
+  just opens the browser if already running; extra args in untracked `serve.txt`,
+  child output in `serve.log`).
+- **CSV export is a browser download** (`/export-csv`, in-memory, lands in Downloads)
+  — deliberately NOT a panel subprocess.
+- **Branding system**: machine-local marks in `out_dir/branding/marks/` (PNG +
+  multi-res ICO + `marks.json`; green-keyed floaters or `mk-tile` rounded tiles),
+  `branding.json` `{mark, anim}`, `/api/branding` GET/POST (POST localhost-only),
+  15 banner-mark animations (`classic` legacy glow/glint/twinkle + glow/shine/aurora/
+  twinkle/shoot/halo/eclipse/ripple/mist/prism/breathe/tilt/float/orbit — per-anim
+  rules use !important over the mute rules; reduced-motion catch-all is
+  class-tripled), Panel > Branding card, and `/api/branding/shortcut` which writes a
+  Desktop `.lnk` (whitelisted mark -> `.ico`; a `.pyw` can't carry an icon, the
+  shortcut can). A context processor injects `mark_url/mark_anim/mark_kind` into
+  every page; corrupt branding JSON degrades to `logo.png`+classic, never a 500.
+- **Header**: frosted glow-pill nav with per-destination hue (`--btn-hue` classes
+  `b-loom/b-ach/b-contest/b-art/b-panel/b-health`); the balance chip caches
+  last-known credits/cards in localStorage so it never blanks on navigation.
+- **Community**: `--contests` + `/api/contests` (REST `/contest/list`); achievements
+  + earnable skins (`/api/achievements`, `/api/skin`).
+
 ## Test suite
 
-311 pytest tests in `tests/`. Run with `python -m pytest`. All tests must pass before merging to master.
+375 pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
+over this number). Run with `python -m pytest`. All tests must pass before merging to master.
 
 ---
 
 ## Current state
 
-- **Version:** `1.9.0` on `master`
+- **Version:** `1.10.0` on `master`
 - **Branch strategy:** feature branches, merge to master with `--no-ff`, tag releases
 - **Owner:** Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev
 
@@ -278,6 +315,9 @@ python pixai_gallery.py --out pixai_backup                # launch gallery at :5
 python pixai_gallery_backup.py --delete-task <id> [<id> ...]        # DRY-RUN: list what would be deleted (nothing happens)
 python pixai_gallery_backup.py --delete-task <id> --apply --yes     # actually delete from your account (irreversible; null=success)
 python pixai_gallery_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
+python pixai_gallery_backup.py --watch                    # live event stream (WS push): watch tasks complete
+python pixai_gallery_backup.py --watch --watch-backup     # + auto-collect each finished gen as it completes
+python pixai_gallery_backup.py --contests                 # list live PixAI contests (read-only)
 # --- creating (all preview-only until --confirm; --task-id recovers a task for free) ---
 python pixai_gallery_backup.py --account                  # read-only credits/membership dashboard
 python pixai_gallery_backup.py --cards                    # read-only free-card (kaisuuken) balances + ids

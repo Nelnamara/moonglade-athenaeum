@@ -70,3 +70,17 @@ Constraints: separate optional install (NOT bundled — heavy deps + weights); r
 ## Working agreement
 
 Owner will spend days note-taking on layout/function once features are in place — build features cheap-to-rearrange (flat CSS, no framework), expect furniture to move.
+
+## v1.10.0 (2026-07-05) — consolidation release
+
+Shipped since 1.9.1:
+- Live events: --watch / --watch-backup (WS push, personalEvents; auto-collect finishing gens)
+- Panel: job progress bar (MGPROG protocol), Stop-this-job cancel, schedulable safe jobs, backfill-meta parity with GUI (label now says prompts/seeds/models)
+- Server: Stop/Restart from the browser; Serve Gallery.pyw supervisor (exit-42 relaunch, single-instance ping guard, serve.txt args)
+- Export CSV = real browser download (/export-csv)
+- Branding system: choosable banner mark (5 cut marks) + 15 animations, frosted-pill nav, Panel Branding card, Desktop-launcher icon via .lnk
+- Balance chip caches last-known credits (no more blank flicker)
+- Contests / achievements / skins surfaces
+- Fixes: batch under-capture (grid vs reals), catalog-stats thumbnail double-count, USER_ID auto-resolve in --sync-artworks, reduced-motion + corrupt-manifest hardening
+
+Next up (agreed backlog): sync-on-pull pipeline (one Sync = pull + full-meta + thumbs + reconcile), live-mirror watcher inside the server, Pixeltable semantic search prototype, Generation Flags (AI QA pass), Loom trim/preview/export (ffmpeg confirmed), banner picker + achievement unlocks.
