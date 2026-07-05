@@ -29,9 +29,27 @@ here = os.path.dirname(os.path.abspath(__file__))
 os.chdir(here)                     # so config.json / pixai_backup resolve here
 sys.path.insert(0, here)
 
-SERVE_ARGS = ["--out", "pixai_backup"]     # add "--host", "0.0.0.0" for LAN, "--port", "5001", etc.
-PORT = 5000                                 # keep in sync with any --port above (for the browser open)
+SERVE_ARGS = ["--out", "pixai_backup"]     # base args (folder). Extra flags go in serve.txt (below).
 RESTART_CODE = 42                           # child exit code that means "relaunch me"
+
+# Machine-local overrides WITHOUT editing this tracked file (so `git pull` never conflicts):
+# put extra flags in an untracked "serve.txt" next to this launcher, e.g. one line:
+#     --host 0.0.0.0 --port 5757
+# (LAN access + a custom port). Whitespace-separated; blank/missing = defaults.
+_serve_txt = os.path.join(here, "serve.txt")
+if os.path.exists(_serve_txt):
+    try:
+        SERVE_ARGS += open(_serve_txt, encoding="utf-8").read().split()
+    except OSError:
+        pass
+
+# Port for the browser-open (parsed from whatever --port ended up in the args; default 5000).
+PORT = 5000
+if "--port" in SERVE_ARGS:
+    try:
+        PORT = int(SERVE_ARGS[SERVE_ARGS.index("--port") + 1])
+    except (ValueError, IndexError):
+        pass
 
 cmd = [sys.executable, os.path.join(here, "pixai_gallery.py")] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
