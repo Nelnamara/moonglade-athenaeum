@@ -328,6 +328,7 @@ export default function App() {
   const [seq, setSeq] = useState(null);           // Play-sequence: [clip,...] or null
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
   const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
+  const [importOpen, setImportOpen] = useState(false);  // import-collection dialog
   const [batching, setBatching] = useState(false);
   const openPick = useCallback((cb, kind) => { setPickKind(kind || "image"); setPickCb(() => cb); }, []);
   const saveTimer = useRef(null);
@@ -380,6 +381,18 @@ export default function App() {
     a.id !== aId ? a : { ...a, cards: a.cards.map((c) => c.id !== cId ? c : fn(c)) }) })), []);
   const setAct = useCallback((aId, patch) => setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, ...patch }) })), []);
   const setAssets = useCallback((fn) => setProject((p) => ({ ...p, assets: fn(p.assets || []) })), []);
+  // Import a whole gallery collection as reusable @image references (media_id kept
+  // -> free reference at generate time). Tags continue from the current max @imageN.
+  const importCollection = (items, cname) => {
+    setImportOpen(false);
+    if (!items || !items.length) return;
+    setAssets((a) => {
+      const base = a.reduce((mx, x) => { const m = /@image(\d+)/.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0);
+      const added = items.map((it, i) => ({ id: uid(), name: it.name || `${cname} ${i + 1}`, kind: "image",
+        tag: `@image${base + i + 1}`, thumbId: "", source: "", mediaId: it.mediaId, lock: false }));
+      return [...a, ...added];
+    });
+  };
 
   const addCard = (aId) => { const c = newCard();
     setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: [...a.cards, c] }) }));
@@ -526,6 +539,7 @@ export default function App() {
       {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
       {pickCb && <GalleryPick defaultType={pickKind} onClose={() => setPickCb(null)}
         onPick={(mid, thumb, isVideo) => { const cb = pickCb; setPickCb(null); cb(mid, thumb, isVideo); }} />}
+      {importOpen && <ImportCollection onClose={() => setImportOpen(false)} onImport={importCollection} />}
 
       <header className="sb-top">
         <div className="sb-topgrid">
@@ -621,8 +635,12 @@ export default function App() {
                   </div>
                 );
               })}
-              <button className="sb-btn ghost sm" style={{ alignSelf: "flex-start" }}
-                onClick={() => setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: `@image${a.filter((x) => x.kind === "image").length + 1}`, thumbId: "", source: "", lock: true }])}>+ Add reference</button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignSelf: "flex-start" }}>
+                <button className="sb-btn ghost sm"
+                  onClick={() => setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: `@image${a.filter((x) => x.kind === "image").length + 1}`, thumbId: "", source: "", lock: true }])}>+ Add reference</button>
+                <button className="sb-btn ghost sm" onClick={() => setImportOpen(true)}
+                  title="Pull a whole gallery collection in as reusable @image references">&#8623; Import collection</button>
+              </div>
             </div>
           )}
         </div>
@@ -913,6 +931,55 @@ function GalleryPick({ onPick, onClose, defaultType }) {
               {m.is_video === "1" && <span className="sb-pick-vid">&#9654;</span>}
             </div>))}
           {!imgs.length && <div className="sb-pick-empty">No matches for these filters.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Import-a-collection dialog: choose a gallery collection, pull its images in as
+   reusable @image references (media_id kept -> free at generate). Reuses the same
+   /api/collections + /api/gallery-images the picker uses. */
+function ImportCollection({ onImport, onClose }) {
+  const [colls, setColls] = useState([]);
+  const [sel, setSel] = useState("");
+  const [total, setTotal] = useState(0);
+  const CAP = 48;
+  useEffect(() => { fetch("/api/collections").then((r) => r.json())
+    .then((d) => setColls(d.collections || [])).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!sel) { setTotal(0); return; }
+    fetch(`/api/gallery-images?type=image&limit=1&collection=${encodeURIComponent(sel)}`)
+      .then((r) => r.json()).then((d) => setTotal(d.total || 0)).catch(() => {});
+  }, [sel]);
+  const doImport = () => {
+    if (!sel) return;
+    fetch(`/api/gallery-images?type=image&limit=${CAP}&sort=newest&collection=${encodeURIComponent(sel)}`)
+      .then((r) => r.json())
+      .then((d) => onImport((d.images || []).map((m) => ({ mediaId: m.media_id, name: (m.prompt || "").slice(0, 26) })), sel))
+      .catch(() => {});
+  };
+  return (
+    <div className="sb-pick-ov" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sb-pick-box" style={{ height: "auto", width: 520 }}>
+        <div className="sb-pick-head">
+          <span className="sb-pick-t">Import a collection</span>
+          <button className="sb-pick-x" onClick={onClose} title="Close">&#215;</button>
+        </div>
+        <p style={{ fontSize: 12.5, color: "var(--ink2)", margin: "0 0 4px", lineHeight: 1.5 }}>
+          Pull a gallery collection in as reusable <b>@image</b> references. Each keeps its
+          PixAI media_id, so every one generates <b>free</b> &mdash; no re-upload.</p>
+        <div className="sb-pick-filters">
+          <select value={sel} onChange={(e) => setSel(e.target.value)} style={{ flex: 1, maxWidth: "none" }}>
+            <option value="">Choose a collection&hellip;</option>
+            {colls.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        {sel && <div style={{ fontSize: 12, color: "var(--ink3)", margin: "6px 0 0" }}>
+          {total.toLocaleString()} image{total === 1 ? "" : "s"}{total > CAP ? ` — importing the newest ${CAP}` : ""}</div>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+          <button className="sb-btn ghost sm" onClick={onClose}>Cancel</button>
+          <button className="sb-btn amber sm" disabled={!sel} onClick={doImport}>Import references</button>
         </div>
       </div>
     </div>
