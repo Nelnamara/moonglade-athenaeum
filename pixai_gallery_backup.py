@@ -1224,6 +1224,28 @@ def _merge_full(fm, kr):
     return {f: (fm.get(f) or kr.get(f, "")) for f in _FULL_META_FIELDS}
 
 
+def carry_local_fields(row, known):
+    """Merge a freshly-rebuilt download row OVER its existing catalog row so LOCAL
+    curation survives a re-pull. A download pass only knows API/file fields
+    (task_id, filename, url, prompt, seed, model, ...); WITHOUT this merge, every
+    re-processed media_id has its locally-owned fields -- collections, rating,
+    art_tags, is_published, title, aes_score, blurhash, and any future local
+    column -- silently blanked by the full-row upsert. This was a real data-loss
+    bug: a --update/--full-meta pass wiped collection tags.
+
+    `known` maps media_id -> the existing catalog row (a pre-download snapshot).
+    An empty fresh value never clobbers an existing one, so a missing download
+    keeps the old filename. New media_ids (absent from `known`) pass through
+    unchanged. Applied at save time, it covers every row-builder path at once."""
+    base = dict(known.get(row.get("media_id", ""), {}))
+    for k, v in row.items():
+        if v not in ("", None):
+            base[k] = v
+        else:
+            base.setdefault(k, "")
+    return base
+
+
 def cmd_convert_existing(args, out):
     """Convert all .webp files in the backup tree to the target format in-place."""
     target = (args.convert or "png").lower()
@@ -5017,7 +5039,7 @@ def run_download(args, progress=None):
                             _tick()
 
                 if page_rows:
-                    save_catalog(db_path, page_rows)
+                    save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
                 seen += len(edges)
                 if args.max and seen >= args.max:
                     print("Reached --max limit.")
@@ -5153,9 +5175,11 @@ def run_download(args, progress=None):
                     if status == "ok":
                         time.sleep(args.delay)
 
-            # Upsert this page's rows so progress is durable even on interrupt
+            # Upsert this page's rows so progress is durable even on interrupt.
+            # _carry() re-merges each row over its existing catalog row so a
+            # re-pull never blanks local curation (collections/rating/tags/...).
             if page_rows:
-                save_catalog(db_path, page_rows)
+                save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
 
                 if getattr(args, "organize_adv_live", False) and batch_results:
                     if is_batch:
