@@ -41,19 +41,38 @@ def test_gallery_images_prefers_full_prompt(tmp_path):
     assert d["total"] == 1 and d["page"] == 1 and d["limit"] >= 1
 
 
-def test_gallery_images_pages_and_skips_videos(tmp_path):
+def test_gallery_images_type_filter_and_paging(tmp_path):
     rows = [_row(media_id=str(i), filename="f_{}.png".format(i), prompt_preview="p",
                  created_at="2025-01-{:02d}T00:00:00".format(i)) for i in range(1, 6)]
     rows.append(_row(media_id="9", filename="v_9.mp4", is_video="1",
                      created_at="2025-02-01T00:00:00"))
     cli = _client(tmp_path, rows)
+    # default type=image: the video is filtered in SQL, so total reflects ONLY the
+    # pickable images (5) -- the old behavior counted 6 then hid one (bad counter).
     d1 = cli.get("/api/gallery-images?limit=2&page=1").get_json()
     d2 = cli.get("/api/gallery-images?limit=2&page=2").get_json()
-    assert d1["total"] == 6                    # total counts all catalog rows
+    assert d1["total"] == 5
     ids1 = [m["media_id"] for m in d1["images"]]
     ids2 = [m["media_id"] for m in d2["images"]]
     assert ids1 and ids2 and not set(ids1) & set(ids2)   # paging advances
-    assert "9" not in ids1 + ids2                        # video row filtered out
+    assert "9" not in ids1 + ids2                        # video excluded from images
+    # type=video: only the video, flagged
+    dv = cli.get("/api/gallery-images?type=video").get_json()
+    assert dv["total"] == 1 and [m["media_id"] for m in dv["images"]] == ["9"]
+    assert dv["images"][0]["is_video"] == "1"
+    # type=all: everything
+    da = cli.get("/api/gallery-images?type=all").get_json()
+    assert da["total"] == 6 and "9" in [m["media_id"] for m in da["images"]]
+
+
+def test_collections_endpoint(tmp_path):
+    rows = [_row(media_id="1", filename="a_1.png", collections="Banners,Faves",
+                 created_at="2025-01-01T00:00:00"),
+            _row(media_id="2", filename="b_2.png", collections="Banners",
+                 created_at="2025-01-02T00:00:00")]
+    cli = _client(tmp_path, rows)
+    d = cli.get("/api/collections").get_json()
+    assert set(d["collections"]) == {"Banners", "Faves"}
 
 
 def test_upload_returns_media_id_and_cleans_temp(tmp_path, monkeypatch):

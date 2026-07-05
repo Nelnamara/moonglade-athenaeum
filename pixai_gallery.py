@@ -5781,22 +5781,32 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except ValueError:
             limit, page, rating_min = 40, 1, 0
         sort = "oldest" if (request.args.get("sort") or "") == "oldest" else "newest"
+        # type: image (default -> back-compat with the create pickers) | video | all.
+        # Filtering happens in SQL (media_type) so pagination + total are correct even
+        # for videos (a tiny slice of the catalog); the old post-query skip returned
+        # near-empty pages for anything video-heavy.
+        gtype = (request.args.get("type") or "image").strip().lower()
+        media_type = gtype if gtype in ("image", "video") else ""   # "" = both
         rows, total = query_catalog(
             db_path, q=q, sort=sort, page=page, page_size=limit,
             collection=(request.args.get("collection") or "").strip(),
             source=(request.args.get("source") or "").strip(),
-            rating_min=rating_min)
+            rating_min=rating_min, media_type=media_type)
         out = []
         for r in rows:
-            if str(r.get("is_video") or "") == "1":
-                continue
             mid = r.get("media_id")
             if not mid:
                 continue
-            out.append({"media_id": str(mid), "thumb": "/thumbs/{}.jpg".format(mid),
+            isv = str(r.get("is_video") or "") == "1"
+            out.append({"media_id": str(mid), "is_video": "1" if isv else "",
+                        "thumb": "/thumbs/{}.jpg".format(mid),
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
-        return jsonify({"images": out, "total": total, "page": page,
-                        "limit": limit})
+        return jsonify({"images": out, "total": total, "page": page, "limit": limit})
+
+    @app.route("/api/collections")
+    def api_collections():
+        """Collection names for the picker/filter dropdowns. Read-only, local catalog."""
+        return jsonify({"collections": unique_collections(db_path)})
 
     @app.route("/branding/<path:fname>")
     def branding(fname):
