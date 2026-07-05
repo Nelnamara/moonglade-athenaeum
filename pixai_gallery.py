@@ -581,6 +581,112 @@ SKINS = [
 ]
 _SKIN_IDS = {s["id"] for s in SKINS}
 
+# ---------------------------------------------------------------------------
+# Branding: the banner mark (the animated icon beside the title) is one of the
+# owner's own cut marks in out_dir/branding/marks/, chosen + animated from the
+# Control Panel. branding.json = {"mark": "mark_4", "anim": "classic"}. The
+# favicon is a plain file (branding/favicon.png); the double-click launcher
+# icon is a Desktop .lnk whose icon we point at a mark's .ico (a .pyw can't
+# carry its own icon -- the shortcut can).
+
+MARK_ANIMS = ["classic", "glow", "shine", "aurora", "twinkle", "shoot", "halo",
+              "eclipse", "ripple", "mist", "prism", "breathe", "tilt", "float",
+              "orbit", "none"]
+_BRAND_DEFAULTS = {"mark": "mark_4", "anim": "classic"}
+
+
+def _branding_path(out_dir):
+    return Path(out_dir) / "branding.json"
+
+
+def list_marks(out_dir):
+    """Marks available on THIS machine: branding/marks/marks.json entries whose
+    .png actually exists. Empty on a fresh install (assets are machine-local)."""
+    mdir = Path(out_dir) / "branding" / "marks"
+    try:
+        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for m in data.get("marks", []):
+        mid = str(m.get("id") or "")
+        if mid and (mdir / (mid + ".png")).exists():
+            out.append({"id": mid, "label": m.get("label") or mid,
+                        "kind": m.get("kind") or "tile",
+                        "png": "/branding/marks/%s.png" % mid,
+                        "ico": (mdir / (mid + ".ico")).exists()})
+    return out
+
+
+def load_branding(out_dir):
+    """Current branding choice, validated against what exists on disk. Falls back
+    to the legacy drop-in logo.png ('logo') when no cut marks are present."""
+    cfg = dict(_BRAND_DEFAULTS)
+    try:
+        raw = json.loads(_branding_path(out_dir).read_text(encoding="utf-8"))
+        cfg.update({k: str(v) for k, v in raw.items() if k in ("mark", "anim")})
+    except (OSError, ValueError):
+        pass
+    if cfg["anim"] not in MARK_ANIMS:
+        cfg["anim"] = "classic"
+    have = {m["id"] for m in list_marks(out_dir)}
+    if cfg["mark"] not in have:
+        cfg["mark"] = _BRAND_DEFAULTS["mark"] if _BRAND_DEFAULTS["mark"] in have else "logo"
+    return cfg
+
+
+def save_branding(out_dir, cfg):
+    _branding_path(out_dir).write_text(
+        json.dumps({"mark": cfg["mark"], "anim": cfg["anim"]}, indent=2),
+        encoding="utf-8")
+
+
+def brand_context(out_dir):
+    """Template vars for the header mark on every page (fed by a context
+    processor, so old installs with only logo.png render exactly as before)."""
+    cfg = load_branding(out_dir)
+    marks = {m["id"]: m for m in list_marks(out_dir)}
+    if cfg["mark"] in marks:
+        m = marks[cfg["mark"]]
+        return {"mark_url": m["png"], "mark_anim": cfg["anim"], "mark_kind": m["kind"]}
+    return {"mark_url": "/branding/logo.png", "mark_anim": cfg["anim"], "mark_kind": "alpha"}
+
+
+def _ps_quote(s):
+    """PowerShell single-quoted literal: double any embedded single quotes."""
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def make_launcher_shortcut(out_dir, mark_id):
+    """Create/refresh the Desktop 'Moonglade Athenaeum.lnk' whose icon is the
+    chosen mark's .ico, targeting Serve Gallery.pyw via pythonw. Returns the
+    .lnk path. Machine-local action -- caller must gate to localhost."""
+    import subprocess
+    ico = Path(out_dir) / "branding" / "marks" / (str(mark_id) + ".ico")
+    if not ico.exists():
+        raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
+    repo = Path(__file__).resolve().parent
+    pyw = repo / "Serve Gallery.pyw"
+    if not pyw.exists():
+        raise RuntimeError("Serve Gallery.pyw not found next to the server")
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    target = pythonw if pythonw.exists() else Path(sys.executable)
+    lnk = Path.home() / "Desktop" / "Moonglade Athenaeum.lnk"
+    ps = ("$sh = New-Object -ComObject WScript.Shell; "
+          "$s = $sh.CreateShortcut(%s); "
+          "$s.TargetPath = %s; "
+          "$s.Arguments = %s; "
+          "$s.WorkingDirectory = %s; "
+          "$s.IconLocation = %s; "
+          "$s.Description = 'Moonglade Athenaeum'; $s.Save()" % (
+              _ps_quote(lnk), _ps_quote(target), _ps_quote('"%s"' % pyw),
+              _ps_quote(repo), _ps_quote(str(ico) + ",0")))
+    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                       capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or "PowerShell failed").strip()[:200])
+    return str(lnk)
+
 
 def achievement_metrics(db_path):
     """The metric bundle every achievement threshold is measured against. Cheap
@@ -1330,6 +1436,12 @@ def create_app(out_dir: Path):
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
 
+    @app.context_processor
+    def _inject_branding():
+        # mark_url / mark_anim / mark_kind on every page render, so the chosen
+        # banner mark + its animation apply to the gallery, panel, health, dupes.
+        return brand_context(out_dir)
+
     # ------------------------------------------------------------------
     # Control Panel: run maintenance CLI ops as background jobs with live
     # logs. Each action is a WHITELISTED argv against pixai_gallery_backup.py
@@ -1540,7 +1652,7 @@ def create_app(out_dir: Path):
   .brand .mark:has(.mark-logo)::before { content: ''; position: absolute; inset: 0; border-radius: 0; transform: none;
     background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,.6) 47%, rgba(182,146,230,.4) 53%, transparent 68%);
     background-size: 260% 100%; background-position: 200% 0; background-repeat: no-repeat;
-    -webkit-mask: url('/branding/logo.png') center / contain no-repeat; mask: url('/branding/logo.png') center / contain no-repeat;
+    -webkit-mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat; mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat;
     animation: logo-glint 5.5s ease-in-out infinite; z-index: 6; pointer-events: none; }
   .brand .mark:has(.mark-logo)::after { content: '\2726'; width: auto; height: auto; top: -7px; right: -8px;
     background: none; border-radius: 0; color: var(--gold); font-size: 11px; line-height: 1;
@@ -1551,6 +1663,41 @@ def create_app(out_dir: Path):
   @keyframes logo-glint { 0%, 58% { background-position: 200% 0; } 78%, 100% { background-position: -100% 0; } }
   @keyframes logo-twinkle { 0%, 40%, 100% { opacity: 0; transform: scale(.5) rotate(0deg); }
     55% { opacity: 1; transform: scale(1.15) rotate(18deg); } 70% { opacity: .25; transform: scale(.8) rotate(36deg); } }
+  /* --- Banner-mark animations (Panel > Branding). 'classic' keeps the legacy
+     glow+glint+twinkle above; any other choice mutes those and drives its own
+     effect off the img and the freed-up ::before/::after layers. Per-anim rules
+     use !important to outrank the mute rules regardless of specificity. --- */
+  .brand .mark.mk-tile .mark-logo { border-radius: 10px; }
+  .brand .mark:not(.anim-classic):has(.mark-logo) .mark-logo { animation: none; }
+  .brand .mark:not(.anim-classic):has(.mark-logo)::before { animation: none; background: none; -webkit-mask: none; mask: none; }
+  .brand .mark:not(.anim-classic):has(.mark-logo)::after { animation: none; opacity: 0; }
+  .brand .mark.anim-shine::before { background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,.6) 47%, rgba(182,146,230,.4) 53%, transparent 68%) !important; background-size: 260% 100% !important; background-position: 200% 0 !important; background-repeat: no-repeat !important; -webkit-mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat !important; mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat !important; animation: logo-glint 2.2s linear infinite !important; }
+  .brand .mark.anim-aurora::before { background: linear-gradient(115deg, transparent 26%, rgba(148,226,213,.6) 45%, rgba(182,146,230,.65) 55%, transparent 74%) !important; background-size: 260% 100% !important; background-position: 200% 0 !important; background-repeat: no-repeat !important; -webkit-mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat !important; mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat !important; animation: logo-glint 3s linear infinite !important; }
+  .brand .mark.anim-glow .mark-logo { animation: mk-glow 2.6s ease-in-out infinite !important; }
+  .brand .mark.anim-glow::before { inset: -14%; border-radius: 50%; background: radial-gradient(circle, rgba(148,226,213,.5), rgba(148,226,213,0) 62%) !important; animation: mk-bloom 2.6s ease-in-out infinite !important; z-index: 3; }
+  .brand .mark.anim-twinkle::after { content: '\2726'; width: auto; height: auto; top: -7px; right: -8px; background: none; border-radius: 0; color: var(--gold); font-size: 11px; line-height: 1; text-shadow: -32px 28px 0 rgba(212,175,55,.7), 0 0 6px rgba(212,175,55,.9); animation: mk-tw 1.7s ease-in-out infinite !important; z-index: 7; }
+  .brand .mark.anim-shoot::after { content: ''; width: 15px; height: 2px; top: 2px; right: auto; left: -4px; border-radius: 2px; background: linear-gradient(90deg, rgba(255,255,255,0), #fff); box-shadow: 0 0 7px 1px rgba(207,232,255,.9); animation: mk-shoot 2.7s ease-in-out infinite !important; z-index: 7; }
+  .brand .mark.anim-halo::before { inset: -12%; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 68%, rgba(148,226,213,.9) 84%, transparent 100%) !important; -webkit-mask: radial-gradient(circle, transparent 58%, #000 62%, #000 74%, transparent 78%) !important; mask: radial-gradient(circle, transparent 58%, #000 62%, #000 74%, transparent 78%) !important; animation: mk-orbit 3.2s linear infinite !important; z-index: 6; }
+  .brand .mark.anim-eclipse::before { inset: 4%; border-radius: 50%; background: radial-gradient(circle at 50% 46%, #10101a 60%, rgba(16,16,26,0) 70%) !important; box-shadow: 0 0 10px 2px rgba(120,90,200,.45); opacity: .92; animation: mk-ecl 4s ease-in-out infinite !important; z-index: 6; }
+  .brand .mark.anim-ripple::before { inset: 10%; border-radius: 50%; border: 1.5px solid rgba(148,226,213,.85); box-shadow: 0 0 8px rgba(148,226,213,.5); animation: mk-ripple 2s ease-out infinite !important; z-index: 6; }
+  .brand .mark.anim-mist::before { inset: -20%; filter: blur(3px); mix-blend-mode: screen; background: radial-gradient(circle at 32% 38%, rgba(90,230,180,.5), transparent 46%), radial-gradient(circle at 68% 62%, rgba(150,110,240,.5), transparent 46%) !important; animation: mk-mist 6s ease-in-out infinite !important; z-index: 3; }
+  .brand .mark.anim-prism .mark-logo { animation: mk-prism 6s linear infinite !important; }
+  .brand .mark.anim-breathe .mark-logo { animation: mk-breathe 2.8s ease-in-out infinite !important; }
+  .brand .mark.anim-tilt .mark-logo { animation: mk-tilt 4.2s ease-in-out infinite !important; }
+  .brand .mark.anim-float .mark-logo { animation: mk-float 3s ease-in-out infinite !important; }
+  .brand .mark.anim-orbit .mark-logo { animation: mk-orbit 9s linear infinite !important; }
+  @keyframes mk-glow { 0%,100% { filter: brightness(1) drop-shadow(0 0 2px rgba(148,226,213,.2)); } 50% { filter: brightness(1.15) drop-shadow(0 0 9px rgba(148,226,213,.8)); } }
+  @keyframes mk-bloom { 0%,100% { opacity: .1; transform: scale(.85); } 50% { opacity: .8; transform: scale(1.05); } }
+  @keyframes mk-tw { 0%,100% { opacity: 0; transform: scale(.3) rotate(0deg); } 50% { opacity: 1; transform: scale(1.1) rotate(20deg); } }
+  @keyframes mk-shoot { 0% { opacity: 0; transform: translate(-8px,-4px) rotate(28deg); } 12% { opacity: 1; } 45% { opacity: 0; transform: translate(46px,26px) rotate(28deg); } 100% { opacity: 0; } }
+  @keyframes mk-ecl { 0% { transform: translateX(-92%); } 50% { transform: translateX(0); } 100% { transform: translateX(92%); } }
+  @keyframes mk-ripple { 0% { opacity: .85; transform: scale(.35); } 100% { opacity: 0; transform: scale(1.5); } }
+  @keyframes mk-mist { 0%,100% { transform: translate(-6%,2%); } 50% { transform: translate(6%,-4%); } }
+  @keyframes mk-prism { to { filter: hue-rotate(360deg); } }
+  @keyframes mk-breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+  @keyframes mk-tilt { 0%,100% { transform: perspective(300px) rotateY(-10deg); } 50% { transform: perspective(300px) rotateY(10deg); } }
+  @keyframes mk-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  @keyframes mk-orbit { to { transform: rotate(360deg); } }
   header h1 { font-size: 18px; color: var(--text); flex-shrink: 0; font-weight: 600; border-bottom: 2px solid var(--gold); padding-bottom: 1px; line-height: 1.1; }
   .tagline { font-size: 10.5px; color: var(--overlay0); font-style: italic; margin-top: 3px; transition: opacity .5s; letter-spacing: .02em; }
   .ver-badge { font-size: 10px; font-weight: 500; color: var(--overlay0); font-family: ui-monospace, monospace; border: 1px solid var(--surface1); border-radius: 5px; padding: 1px 6px; vertical-align: middle; margin-left: 4px; letter-spacing: 0; }
@@ -1566,6 +1713,7 @@ def create_app(out_dir: Path):
     .brand .mark:has(.mark-logo) .mark-logo { animation: none; filter: drop-shadow(0 0 6px rgba(182,146,230,.45)); }
     .brand .mark:has(.mark-logo)::before { animation: none; background-position: 200% 0; }
     .brand .mark:has(.mark-logo)::after { animation: none; opacity: .8; transform: none; }
+    .brand .mark .mark-logo, .brand .mark::before, .brand .mark::after { animation: none !important; }
     .tagline { transition: none; }
   }
 
@@ -1601,15 +1749,23 @@ def create_app(out_dir: Path):
     .filters { padding: 10px 14px; }
     .grid { padding: 12px 14px; }
   }
-  .btn { background: linear-gradient(180deg, #2b2748 0%, #211f3a 100%); color: var(--text); border: 1px solid var(--surface1); border-radius: 7px; padding: 6px 14px; cursor: pointer; font-size: 13px; line-height: 1.2; transition: border-color .14s, box-shadow .14s, transform .05s; }
+  /* Frosted glow pills ("Moonlight, tinted"): pill-shaped frosted glass with a
+     soft per-destination hue (--btn-hue). Generate stays the solid-lavender hero. */
+  .btn { background: rgba(255,255,255,.06); color: var(--text); border: 1px solid rgba(182,146,230,.30); border-radius: 999px; padding: 6px 15px; cursor: pointer; font-size: 13px; line-height: 1.2; box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 0 9px var(--btn-hue, rgba(182,146,230,.14)); transition: border-color .14s, box-shadow .14s, background .14s, transform .09s; }
   a.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; color: var(--text); }
-  .btn:hover { border-color: var(--lavender); box-shadow: 0 0 0 1px rgba(182,146,230,.28), 0 3px 10px -3px rgba(182,146,230,.45); text-decoration: none; }
+  .btn:hover { background: rgba(182,146,230,.15); border-color: var(--lavender); transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 4px 12px -4px rgba(0,0,0,.5), 0 0 14px var(--btn-hue, rgba(182,146,230,.35)); text-decoration: none; }
   .btn:active { transform: translateY(1px); }
   .btn:focus-visible { outline: 2px solid var(--lavender); outline-offset: 1px; }
+  .b-loom    { --btn-hue: rgba(148,226,213,.30); }
+  .b-ach     { --btn-hue: rgba(212,175,55,.32); }
+  .b-contest { --btn-hue: rgba(224,192,106,.30); }
+  .b-art     { --btn-hue: rgba(203,166,247,.32); }
+  .b-panel   { --btn-hue: rgba(180,190,254,.32); }
+  .b-health  { --btn-hue: rgba(245,194,231,.30); }
   .btn-danger { background: var(--red); color: var(--base); border-color: var(--red); font-weight: 600; }
-  .btn-danger:hover { opacity: 0.9; box-shadow: 0 3px 10px -3px rgba(243,139,168,.5); }
+  .btn-danger:hover { opacity: 0.9; background: var(--red); box-shadow: 0 3px 10px -3px rgba(243,139,168,.5); }
   .btn-primary { background: linear-gradient(180deg, #c4a6f0 0%, var(--lavender) 100%); color: var(--base); border-color: var(--lavender); font-weight: 600; }
-  .btn-primary:hover { box-shadow: 0 0 0 1px rgba(182,146,230,.5), 0 4px 14px -4px rgba(182,146,230,.7); }
+  .btn-primary:hover { background: linear-gradient(180deg, #c4a6f0 0%, var(--lavender) 100%); box-shadow: 0 0 0 1px rgba(182,146,230,.5), 0 4px 14px -4px rgba(182,146,230,.7); }
   /* All dropdowns share the button look: dark, rounded, custom lavender-grey caret. */
   .filters select, #preset-select, select.p-sel { -webkit-appearance: none; appearance: none;
     background-color: var(--surface0);
@@ -1886,7 +2042,7 @@ document.addEventListener('DOMContentLoaded', function() {
 <header>
   <img id="brand-banner" src="/branding/banner.png" alt="" onerror="this.remove()">
   <div class="brand">
-    <span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="/branding/logo.png" alt="" onerror="this.remove()"></span>
+    <span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span>
     <div class="brand-txt">
       <h1>Moonglade Athenaeum <span class="ver-badge" title="Running build (git short SHA). If this doesn't change after a pull, the server wasn't restarted.">{{ build_stamp }}</span></h1>
       <span id="tagline" class="tagline">a library against the Void</span>
@@ -1904,17 +2060,17 @@ document.addEventListener('DOMContentLoaded', function() {
     {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
-    <a class="btn" href="/edit-bay" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
+    <a class="btn b-loom" href="/edit-bay" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     {% endif %}
-    <button type="button" class="btn" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
-    <button type="button" class="btn" onclick="Contests.open()" title="Live PixAI contests &mdash; the Oasis was never a 1-player game">&#127941; Contests</button>
-    <button type="button" class="btn" onclick="YourArt.open()" title="How your published art is doing &mdash; views, likes, comments">&#128200; My Art</button>
+    <button type="button" class="btn b-ach" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
+    <button type="button" class="btn b-contest" onclick="Contests.open()" title="Live PixAI contests &mdash; the Oasis was never a 1-player game">&#127941; Contests</button>
+    <button type="button" class="btn b-art" onclick="YourArt.open()" title="How your published art is doing &mdash; views, likes, comments">&#128200; My Art</button>
     {% if is_local %}
-    <a class="btn" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
+    <a class="btn b-panel" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
     {% else %}
     <span class="lan-note" title="Creation &amp; maintenance tools live on the owner's machine (localhost).">&#128065; read-only LAN view</span>
     {% endif %}
-    <a class="btn" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
+    <a class="btn b-health" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
   </div>
 </header>
 
@@ -4506,7 +4662,7 @@ function savePrompt() {
 </div>
 {% endmacro %}
 <header>
-  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="/branding/logo.png" alt="" onerror="this.remove()"></span><h1>Collection Health</h1></div>
+  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Collection Health</h1></div>
   <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 
@@ -4608,7 +4764,7 @@ function savePrompt() {
 
     DUPES_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <header>
-  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="/branding/logo.png" alt="" onerror="this.remove()"></span><h1>Duplicate Review</h1></div>
+  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Duplicate Review</h1></div>
   <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
 </header>
 <div style="padding:10px 20px 28px;max-width:1100px;">
@@ -4672,7 +4828,7 @@ function savePrompt() {
   .jp-txt{font-size:11.5px;color:var(--subtext);margin-top:5px;font-variant-numeric:tabular-nums;}
 </style>
 <header>
-  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="/branding/logo.png" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
+  <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
   <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
   <a class="btn" href="{{ url_for('index') }}">↑ Back to gallery</a>
 </header>
@@ -4721,6 +4877,19 @@ function savePrompt() {
       <span id="sch-status" style="font-size:12.5px;color:var(--subtext);"></span>
     </div>
     <div class="p-note">Only safe jobs can be scheduled (no file deletion). It fires <b>while the app is open</b> &mdash; this isn't an OS cron. For always-on, point Windows Task Scheduler at <code>pixai_gallery_backup.py --update</code>.</div>
+  </div>
+
+  <div class="p-sec">
+    <h2>&#127912; Branding</h2>
+    <div class="p-note">The <b>banner mark</b> &mdash; the icon beside the title &mdash; and its animation. <b>Set launcher icon</b> writes a Desktop shortcut whose icon is the selected mark (a .pyw can't carry its own icon; the shortcut can). The favicon stays the Gem Tome.</div>
+    <div id="brand-marks" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;"></div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
+      <div><div class="p-fl">Animation</div>
+        <select id="brand-anim" class="p-sel"></select></div>
+      <button class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="saveBrand()"><span class="t">Save</span></button>
+      <button class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="setLauncher()" title="Creates/updates the Desktop 'Moonglade Athenaeum' shortcut; its icon becomes the selected mark"><span class="t">&#128279; Set launcher icon</span></button>
+      <span id="brand-status" style="font-size:12.5px;color:var(--subtext);"></span>
+    </div>
   </div>
 
   <div class="p-sec">
@@ -4838,6 +5007,55 @@ function saveSchedule(){
       el('sch-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved'+(s.enabled?(' \\u00b7 every '+s.interval_hours+'h while open'):' \\u00b7 disabled')+'</span>';
     }).catch(function(){ el('sch-status').textContent='\\u26a0 network error'; });
 }
+// --- Branding: banner mark + animation + launcher shortcut ---
+var _brandMark='';
+function loadBrand(){
+  fetch('/api/branding').then(function(r){return r.json();}).then(function(d){
+    _brandMark=d.mark;
+    var row=el('brand-marks'); if(!row) return;
+    if(!(d.marks||[]).length){
+      row.innerHTML='<span style="font-size:12.5px;color:var(--subtext);">No cut marks on this machine yet (branding/marks/ is empty) &mdash; the header uses the drop-in logo.png.</span>';
+    } else {
+      row.innerHTML=(d.marks||[]).map(function(m){
+        return '<span class="brand-pick" data-mark="'+m.id+'" title="'+m.label+'" style="cursor:pointer;border:2px solid var(--surface1);border-radius:10px;padding:4px;background:var(--mantle);text-align:center;">'
+          +'<img src="'+m.png+'" style="width:44px;height:44px;display:block;'+(m.kind==='tile'?'border-radius:8px;':'')+'">'
+          +'<span style="display:block;font-size:9.5px;color:var(--subtext);max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+m.label+'</span></span>';
+      }).join('');
+      row.querySelectorAll('.brand-pick').forEach(function(p){
+        p.onclick=function(){ _brandMark=p.dataset.mark; paintBrand(); };
+      });
+    }
+    var sel=el('brand-anim');
+    if(sel && !sel.options.length){ (d.anims||[]).forEach(function(a){
+      var o=document.createElement('option'); o.value=a; o.textContent=a; sel.appendChild(o); }); }
+    if(sel) sel.value=d.anim;
+    paintBrand();
+  }).catch(function(){});
+}
+function paintBrand(){
+  var row=el('brand-marks'); if(!row) return;
+  row.querySelectorAll('.brand-pick').forEach(function(p){
+    p.style.borderColor = (p.dataset.mark===_brandMark) ? 'var(--lavender)' : 'var(--surface1)';
+  });
+}
+function saveBrand(){
+  var sel=el('brand-anim');
+  fetch('/api/branding',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({mark:_brandMark, anim:(sel?sel.value:'classic')})})
+    .then(function(r){return r.json();}).then(function(d){
+      el('brand-status').innerHTML = d.error ? ('\\u26a0 '+d.error)
+        : '<span style="color:var(--emerald)">\\u2713 saved \\u00b7 refresh the gallery to see it</span>';
+    }).catch(function(){ el('brand-status').textContent='\\u26a0 network error'; });
+}
+function setLauncher(){
+  el('brand-status').textContent='writing shortcut\\u2026';
+  fetch('/api/branding/shortcut',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({mark:_brandMark})})
+    .then(function(r){return r.json();}).then(function(d){
+      el('brand-status').innerHTML = d.error ? ('\\u26a0 '+d.error)
+        : '<span style="color:var(--emerald)">\\u2713 Desktop shortcut updated (F5 the Desktop if the icon looks stale)</span>';
+    }).catch(function(){ el('brand-status').textContent='\\u26a0 network error'; });
+}
 // --- Server control (Homebridge-style stop / restart from the browser) ---
 function _srvOverlay(msg, sub){ el('srv-msg').textContent=msg; el('srv-sub').textContent=sub||''; el('srv-overlay').classList.add('on'); }
 function stopServer(){
@@ -4869,7 +5087,7 @@ function _watchServer(comeBack){
     if(tries>50){ clearInterval(iv); el('srv-msg').textContent=comeBack?'Still restarting\\u2026 give it a moment, then refresh.':'Server stopped.'; el('srv-spin').style.display='none'; }
   }, 800);
 }
-renderJobs(); loadAcct(); loadSchedule();
+renderJobs(); loadAcct(); loadSchedule(); loadBrand();
 // if a job was already running when the page loaded, resume polling
 fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });
 </script>
@@ -5822,6 +6040,52 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             state["skin"] = skin
             save_ach_state(out_dir, state)
         return jsonify({"skin": skin})
+
+    @app.route("/api/branding", methods=["GET", "POST"])
+    def api_branding():
+        """The banner mark (the icon beside the title) + its animation. GET is
+        open (cosmetic; the LAN view renders the same header); POST is owner-only.
+        Persists to out_dir/branding.json."""
+        if request.method == "GET":
+            cfg = load_branding(out_dir)
+            return jsonify({"mark": cfg["mark"], "anim": cfg["anim"],
+                            "anims": MARK_ANIMS, "marks": list_marks(out_dir)})
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        cfg = load_branding(out_dir)
+        have = {m["id"] for m in list_marks(out_dir)}
+        if "anim" in body:
+            anim = str(body["anim"])
+            if anim not in MARK_ANIMS:
+                return jsonify({"error": "unknown animation"}), 400
+            cfg["anim"] = anim
+        if "mark" in body:
+            mark = str(body["mark"])
+            if mark != "logo" and mark not in have:
+                return jsonify({"error": "unknown mark"}), 400
+            cfg["mark"] = mark
+        save_branding(out_dir, cfg)
+        return jsonify({"mark": cfg["mark"], "anim": cfg["anim"]})
+
+    @app.route("/api/branding/shortcut", methods=["POST"])
+    def api_branding_shortcut():
+        """Write/refresh the Desktop launcher shortcut with the chosen mark's
+        .ico. A .pyw can't carry an icon; the .lnk can -- this IS the app icon.
+        Machine-local action -> owner-only."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        mark = str(body.get("mark") or load_branding(out_dir)["mark"])
+        # Whitelist before anything touches the shell: only a known cut mark id
+        # may become an icon path (no traversal, no quoting surprises).
+        if mark not in {m["id"] for m in list_marks(out_dir)}:
+            return jsonify({"error": "unknown mark (no .ico cut for it)"}), 400
+        try:
+            lnk = make_launcher_shortcut(out_dir, mark)
+        except RuntimeError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify({"ok": True, "lnk": lnk})
 
     @app.route("/api/suggest-prompt")
     def api_suggest_prompt():
