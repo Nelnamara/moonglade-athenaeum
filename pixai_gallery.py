@@ -651,10 +651,13 @@ def brand_context(out_dir):
     processor, so old installs with only logo.png render exactly as before)."""
     cfg = load_branding(out_dir)
     marks = {m["id"]: m for m in list_marks(out_dir)}
+    has_banner = (Path(out_dir) / "branding" / "banner.png").exists()
     if cfg["mark"] in marks:
         m = marks[cfg["mark"]]
-        return {"mark_url": m["png"], "mark_anim": cfg["anim"], "mark_kind": m["kind"]}
-    return {"mark_url": "/branding/logo.png", "mark_anim": cfg["anim"], "mark_kind": "alpha"}
+        return {"mark_url": m["png"], "mark_anim": cfg["anim"], "mark_kind": m["kind"],
+                "has_banner": has_banner}
+    return {"mark_url": "/branding/logo.png", "mark_anim": cfg["anim"], "mark_kind": "alpha",
+            "has_banner": has_banner}
 
 
 def _ps_quote(s):
@@ -1465,7 +1468,8 @@ def create_app(out_dir: Path):
 
     # action -> {args (extra flags), label, destructive}
     PANEL_ACTIONS = {
-        "update":        {"args": ["--update"], "label": "Incremental backup (--update)", "destructive": False},
+        "sync":          {"args": ["--sync"], "label": "Sync now — pull new + fill metadata", "destructive": False},
+        "update":        {"args": ["--update"], "label": "Incremental backup only (--update, no metadata)", "destructive": False},
         "stats":         {"args": ["--catalog-stats"], "label": "Catalog stats", "destructive": False},
         "audit":         {"args": ["--audit", "--no-content"], "label": "Duplicate audit (fast, read-only)", "destructive": False},
         "sync-artworks": {"args": ["--sync-artworks"], "label": "Sync published-artwork metadata", "destructive": False},
@@ -1542,7 +1546,7 @@ def create_app(out_dir: Path):
                     return s
         except (OSError, ValueError):
             pass
-        return {"enabled": False, "action": "update", "interval_hours": 6, "last_run": None}
+        return {"enabled": False, "action": "sync", "interval_hours": 6, "last_run": None}
 
     def _save_sched(s):
         try:
@@ -1638,6 +1642,13 @@ def create_app(out_dir: Path):
   /* Header */
   header { background: var(--mantle); padding: 12px 20px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--surface0); position: sticky; top: 0; z-index: 100; overflow: hidden; }
   #brand-banner { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .16; z-index: 0; pointer-events: none; -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 62%); mask-image: linear-gradient(90deg, #000 0%, transparent 62%); }
+  /* Real banner band: when branding/banner.png exists the header becomes a visible
+     slice of the 1920x480 art with the UI seated in the bottom quarter (~3/4 down).
+     A bottom scrim keeps mark/title/nav legible over any art. */
+  header.bannered { height: 132px; align-items: flex-end; padding-bottom: 12px; }
+  header.bannered #brand-banner { opacity: 1; -webkit-mask-image: none; mask-image: none; object-position: center; }
+  header.bannered::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background: linear-gradient(180deg, rgba(17,17,27,.15) 0%, rgba(17,17,27,.05) 40%, rgba(17,17,27,.82) 100%); }
   header > * { position: relative; z-index: 1; }
   .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .brand-txt { display: flex; flex-direction: column; line-height: 1; }
@@ -1736,6 +1747,7 @@ def create_app(out_dir: Path):
   /* Mobile: collapse the filter bar behind a toggle so the grid leads. */
   @media (max-width: 680px) {
     header h1 { font-size: 16px; }
+    header.bannered { height: 96px; }
     header .back-link { font-size: 12px; }
   .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
   .lan-note { font-size: 11.5px; color: var(--overlay0); font-style: italic; padding: 5px 10px; border: 1px dashed var(--surface1); border-radius: 7px; }
@@ -2045,7 +2057,7 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endfor %}
   </select>
 {% endmacro %}
-<header>
+<header{% if has_banner %} class="bannered"{% endif %}>
   <img id="brand-banner" src="/branding/banner.png" alt="" onerror="this.remove()">
   <div class="brand">
     <span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span>
