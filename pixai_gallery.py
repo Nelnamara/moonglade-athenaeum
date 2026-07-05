@@ -1351,7 +1351,8 @@ def create_app(out_dir: Path):
         "audit":         {"args": ["--audit", "--no-content"], "label": "Duplicate audit (fast, read-only)", "destructive": False},
         "sync-artworks": {"args": ["--sync-artworks"], "label": "Sync published-artwork metadata", "destructive": False},
         "backfill-meta": {"args": ["--backfill-full-meta"], "label": "Backfill full metadata", "destructive": False},
-        "export-csv":    {"args": ["--export-csv"], "label": "Export catalog → CSV", "destructive": False},
+        # (Export CSV isn't here on purpose -- in the browser it's a real DOWNLOAD via /export-csv,
+        #  not a subprocess that writes catalog.csv into the backup folder.)
         "organize-dry":  {"args": ["--organize", "--dry-run"], "label": "Organize — preview (dry run)", "destructive": False},
         "dedup-dry":     {"args": ["--dedup"], "label": "Dedup — preview (dry run)", "destructive": False},
         # Routine maintenance that used to be GUI-only (no args, non-destructive -> schedulable).
@@ -4655,6 +4656,10 @@ function savePrompt() {
       <div class="p-stat"><div class="l">Credits</div><div class="v lav" id="ps-credits">—</div></div>
       <div class="p-stat"><div class="l">Free cards</div><div class="v lav" id="ps-cards">—</div></div>
     </div>
+    <div style="margin-top:14px;">
+      <a class="btn" href="{{ url_for('export_csv_download') }}" download>&#11015; Download catalog (CSV)</a>
+      <span style="font-size:11.5px;color:var(--overlay0);margin-left:8px;">saves to your Downloads &mdash; doesn&rsquo;t touch the backup folder</span>
+    </div>
   </div>
 
   <div class="p-sec">
@@ -4873,6 +4878,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                      "'Serve Gallery'. (Stop still works.)"}), 409
         _schedule_server_exit(42)
         return jsonify({"ok": True, "action": "restart"})
+
+    @app.route("/export-csv")
+    def export_csv_download():
+        """Download the catalog as a CSV -- from the browser you get a real file (Downloads),
+        not a copy silently written into the backup folder. Built in memory. Localhost-only.
+        (The CLI --export-csv still writes to disk on purpose, for scripting.)"""
+        if not _is_local_request():
+            return "localhost-only", 403
+        import io
+        import datetime
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=CATALOG_FIELDS)
+        writer.writeheader()
+        for r in load_catalog(db_path):
+            writer.writerow({f: r.get(f, "") for f in CATALOG_FIELDS})
+        mem = io.BytesIO(buf.getvalue().encode("utf-8"))
+        mem.seek(0)
+        return send_file(mem, mimetype="text/csv", as_attachment=True,
+                         download_name="moonglade-catalog-{}.csv".format(
+                             datetime.date.today().isoformat()))
 
     @app.route("/api/panel/run", methods=["POST"])
     def api_panel_run():

@@ -445,6 +445,25 @@ def test_lan_view_hides_owner_only_controls(tmp_path):
         assert "Contests.open()" in html and "YourArt.open()" in html
 
 
+def test_export_csv_downloads_as_attachment(tmp_path):
+    """The web export is a real browser DOWNLOAD (attachment), not a file written into the
+    backup folder. Localhost-only (owner data)."""
+    cli = _client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", prompt_preview="p1", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", prompt_preview="p2", created_at="2025-01-02T00:00:00"),
+    ])
+    r = cli.get("/export-csv")
+    assert r.status_code == 200 and r.mimetype == "text/csv"
+    cd = r.headers.get("Content-Disposition", "")
+    assert "attachment" in cd and ".csv" in cd          # downloads, doesn't render
+    lines = r.get_data(as_text=True).splitlines()
+    assert "media_id" in lines[0]                        # header row present
+    assert sum(1 for ln in lines[1:] if ln.strip()) == 2  # both rows exported
+    # a LAN device can't pull the owner's catalog
+    assert cli.get("/export-csv",
+                   environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 403
+
+
 def test_branding_absent_is_404(tmp_path):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
