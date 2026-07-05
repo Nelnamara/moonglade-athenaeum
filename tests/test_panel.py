@@ -146,3 +146,74 @@ def test_panel_shows_restart_state(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_supervised", lambda: True)
     html = _client(tmp_path).test_client().get("/panel").get_data(as_text=True)
     assert "Restart server" in html and "Stop server" in html
+
+
+# --- Cancel a running maintenance job from the browser (no Task Manager) ---
+
+def test_cancel_with_no_job_is_a_noop(tmp_path):
+    cli = _client(tmp_path).test_client()
+    r = cli.post("/api/panel/cancel")
+    assert r.get_json() == {"ok": False, "error": "no job is running"}
+
+
+def test_cancel_terminates_running_job(tmp_path, monkeypatch):
+    """A running job's subprocess is .terminate()'d and the status becomes
+    'cancelled' -- not 'failed' -- so the UI can say the user stopped it."""
+    import subprocess, threading, time
+
+    class CancelableProc:
+        """stdout blocks until terminate() is called, so the job stays 'running'
+        until we cancel it -- mirroring a long dedup that hasn't finished."""
+        def __init__(self):
+            self._stop = threading.Event()
+            self.terminated = False
+            self._sent = False
+            self.stdout = self
+
+        def readline(self):
+            if not self._sent:
+                self._sent = True
+                return "hashing...\n"
+            self._stop.wait()          # block here until terminate()
+            return ""                  # EOF -> reader loop ends
+
+        def close(self):
+            pass
+
+        def wait(self):
+            self._stop.wait()
+            return 1                    # terminated processes exit non-zero
+
+        def terminate(self):
+            self.terminated = True
+            self._stop.set()
+
+    proc = CancelableProc()
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: proc)
+
+    cli = _client(tmp_path).test_client()
+    assert cli.post("/api/panel/run", json={"action": "dedup-dry"}).get_json()["ok"] is True
+
+    # wait for the job to actually be 'running' (reader thread picked up the proc)
+    for _ in range(50):
+        if cli.get("/api/panel/status").get_json()["status"] == "running":
+            break
+        time.sleep(0.02)
+    assert cli.get("/api/panel/status").get_json()["status"] == "running"
+
+    d = cli.post("/api/panel/cancel").get_json()
+    assert d == {"ok": True, "action": "cancel"}
+    assert proc.terminated is True
+
+    # the reader thread should now settle to 'cancelled' (not 'failed')
+    for _ in range(50):
+        if cli.get("/api/panel/status").get_json()["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert cli.get("/api/panel/status").get_json()["status"] == "cancelled"
+
+
+def test_cancel_is_localhost_only(tmp_path):
+    cli = _client(tmp_path).test_client()
+    r = cli.post("/api/panel/cancel", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r.status_code == 403
