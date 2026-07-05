@@ -2334,6 +2334,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <span class="lb-actions">
       <button class="btn" onclick="lbEdit()" title="Open in the Edit tab">✎ Edit</button>
       <button class="btn" onclick="lbVideo()" title="Send to the Video tab as a reference">▶ To Video</button>
+      <button class="btn" onclick="lbSimilar()" title="Find visually similar images">✧ Similar</button>
       <a id="lb-details" class="btn" href="#">Details</a>
       <button class="btn" id="lb-play" onclick="toggleSlideshow()">▶ Slideshow</button>
       <button class="btn" onclick="closeLightbox()">✕ Close</button>
@@ -2912,6 +2913,11 @@ document.addEventListener('DOMContentLoaded', function(){
   .pick-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
   .pick-filters select{background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:5px 8px;font-size:12px;}
   #pick-modal.open{display:flex;}
+  #similar-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
+  #similar-scrim.open{display:block;}
+  #similar-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
+  #similar-modal.open{display:flex;}
+  #similar-modal #similar-grid{overflow-y:auto;flex:1;min-height:0;}
   .pick-head{display:flex;align-items:center;margin-bottom:10px;}
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
   .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
@@ -3174,6 +3180,13 @@ document.addEventListener('DOMContentLoaded', function(){
   <div id="pick-grid" onscroll="Picker.onScroll()"></div>
   <div class="pick-empty" id="pick-empty" style="display:none;"></div>
   <button type="button" id="pick-more" onclick="Picker.more()" style="display:none;">Load more</button>
+</div>
+<div id="similar-scrim" onclick="Similar.close()"></div>
+<div id="similar-modal" aria-hidden="true" aria-label="Visually similar images">
+  <div class="pick-head"><span class="t">✧ Visually similar</span>
+    <button class="x" onclick="Similar.close()" aria-label="Close">&times;</button></div>
+  <div class="grid" id="similar-grid"></div>
+  <div class="pick-empty" id="similar-empty" style="display:none;"></div>
 </div>
 <div id="model-preview" aria-hidden="true"></div>
 <div id="ctx-menu"></div>
@@ -4348,6 +4361,7 @@ var Tags = (function(){
 function lbMid(){ var m=(document.getElementById('lb-details').href||'').match(/\\/image\\/([^/?]+)/); return m?decodeURIComponent(m[1]):''; }
 function lbEdit(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.openEdit(mid); }
 function lbVideo(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); }
+function lbSimilar(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Similar.open(mid); }
 var Ctx = (function(){
   var mid='', isVideo=false;
   function m(){ return document.getElementById('ctx-menu'); }
@@ -4356,7 +4370,8 @@ var Ctx = (function(){
     mid=card.getAttribute('data-mid'); isVideo=card.getAttribute('data-video')==='1';
     var menu=m();
     menu.innerHTML=(isVideo?'':'<button onclick="Ctx.edit()">\\u270e Edit image</button>'
-        +'<button onclick="Ctx.video()">\\u25b6 Send to Video</button>')
+        +'<button onclick="Ctx.video()">\\u25b6 Send to Video</button>'
+        +'<button onclick="Ctx.similar()">\\u2727 Similar</button>')
       +'<button onclick="Ctx.copy()">\\u2398 Copy media id</button>'
       +'<button onclick="Ctx.detail()">Open details</button>';
     menu.style.display='block';
@@ -4371,11 +4386,41 @@ var Ctx = (function(){
     e.preventDefault(); show(e, card);
   });
   return {
+    similar:function(){ hide(); Similar.open(mid); },
     edit:function(){ hide(); Gen.openEdit(mid); },
     video:function(){ hide(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); },
     copy:function(){ hide(); try{ navigator.clipboard.writeText(mid); }catch(e){} },
     detail:function(){ hide(); location.href='/image/'+mid; }
   };
+})();
+var Similar = (function(){
+  function el(id){ return document.getElementById(id); }
+  function open(mid){
+    if(!mid) return;
+    el('similar-scrim').classList.add('open'); el('similar-modal').classList.add('open');
+    var g=el('similar-grid'), em=el('similar-empty');
+    em.style.display='none';
+    g.innerHTML='<div class="pick-empty">Finding lookalikes\\u2026</div>';
+    fetch('/api/similar/'+encodeURIComponent(mid)+'?k=24').then(function(r){return r.json();}).then(function(d){
+      g.innerHTML='';
+      var imgs=(d&&d.images)||[];
+      if(!imgs.length){ em.textContent=(d&&d.error)?d.error:'No similar images yet \\u2014 the index may still be building.'; em.style.display='block'; return; }
+      imgs.forEach(function(it){
+        var c=document.createElement('div');
+        c.className='card'; c.setAttribute('data-mid', it.media_id);
+        c.setAttribute('data-prompt', it.prompt||'');
+        if(it.is_video==='1') c.setAttribute('data-video','1');
+        c.innerHTML='<a class="cover" href="/image/'+encodeURIComponent(it.media_id)+'"></a>'
+          +'<img class="loaded" src="'+it.thumb+'" loading="lazy" decoding="async" alt="">'
+          +(it.is_video==='1'?'<div class="vbadge" title="Video">\\u25b6</div>':'')
+          +'<div class="meta"><div class="model">\\u2727 '+(it.score!=null?it.score:'')+'</div></div>';
+        g.appendChild(c);
+      });
+    }).catch(function(){ g.innerHTML=''; em.textContent='Could not load similar images.'; em.style.display='block'; });
+  }
+  function close(){ el('similar-scrim').classList.remove('open'); el('similar-modal').classList.remove('open'); }
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape'&&el('similar-modal').classList.contains('open')) close(); });
+  return {open:open, close:close};
 })();
 function bulkSendVideo(){
   var refs=[];
@@ -5807,6 +5852,39 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         "thumb": "/thumbs/{}.jpg".format(mid),
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
         return jsonify({"images": out, "total": total, "page": page, "limit": limit})
+
+    @app.route("/api/similar/<media_id>")
+    def api_similar(media_id):
+        """'More like this': the k catalog images most visually similar to media_id, via the
+        pixai_similar CLIP sidecar index. Mirrors /api/gallery-images's shape so the client
+        reuses the same .card rendering. Read-only; fails soft to an empty list if the sidecar
+        index or its ML stack isn't available/built yet, so it never 500s the gallery."""
+        try:
+            k = max(1, min(int(request.args.get("k") or 24), 60))
+        except ValueError:
+            k = 24
+        row = get_row(db_path, media_id)
+        if not row:
+            return jsonify({"images": [], "total": 0, "error": "unknown media_id"}), 404
+        img_path = find_image_file(out_dir, media_id, row.get("filename"))
+        if not img_path:
+            return jsonify({"images": [], "total": 0, "error": "image file not found"}), 200
+        try:
+            import pixai_similar
+            hits = pixai_similar.similar(str(img_path), k=k, exclude_media_id=media_id)
+        except Exception as e:
+            return jsonify({"images": [], "total": 0,
+                            "error": "similarity index unavailable: " + str(e)[:180]}), 200
+        out = []
+        for mid, score in hits:
+            r = get_row(db_path, mid)
+            if not r:
+                continue        # the sidecar index can drift from later catalog deletes
+            isv = str(r.get("is_video") or "") == "1"
+            out.append({"media_id": str(mid), "is_video": "1" if isv else "",
+                        "thumb": "/thumbs/{}.jpg".format(mid), "score": round(float(score), 3),
+                        "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
+        return jsonify({"images": out, "total": len(out), "query": str(media_id)})
 
     @app.route("/api/collections")
     def api_collections():
