@@ -92,14 +92,19 @@ const STYLES = `
 .sb-seq video{width:100%;max-height:78vh;background:#000;border-radius:11px;display:block;cursor:pointer}
 .sb-seq-bar{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:13px}
 .sb-seq-bar span{flex:1;font-family:'JetBrains Mono',monospace;color:var(--ink2)}
-.sb-pick-ov{position:fixed;inset:0;z-index:400;background:rgba(6,4,16,.74);display:flex;align-items:center;justify-content:center;padding:20px}
-.sb-pick-box{width:900px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
-.sb-pick-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sb-pick-ov{position:fixed;inset:0;z-index:400;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
+.sb-pick-box{width:920px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
+.sb-pick-head{display:flex;align-items:center;gap:9px}
+.sb-pick-t{font-size:15px;font-weight:700;white-space:nowrap}
+.sb-pick-x{background:none;border:none;color:var(--ink2);font-size:24px;line-height:1;cursor:pointer;padding:0 4px}
+.sb-pick-x:hover{color:var(--ink)}
+.sb-pick-filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.sb-pick-filters select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--ink);padding:5px 9px;font-size:12px;cursor:pointer;max-width:210px}
 .sb-pick-count{margin-left:auto;font-size:11px;color:var(--ink3);font-family:'JetBrains Mono',monospace}
-.sb-pick-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:8px;align-content:start}
-.sb-pick-item{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--line);cursor:pointer}
-.sb-pick-item:hover{border-color:var(--amber)}
-.sb-pick-item img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
+.sb-pick-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));grid-auto-rows:118px;gap:8px;align-content:start}
+.sb-pick-cell{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--panel2)}
+.sb-pick-cell:hover{border-color:var(--amber)}
+.sb-pick-cell img{width:100%;height:100%;object-fit:cover;display:block}
 .sb-pick-vid{position:absolute;top:5px;right:5px;background:rgba(6,4,16,.72);color:#fff;font-size:9px;border-radius:4px;padding:1px 6px}
 .sb-pick-empty{grid-column:1/-1;color:var(--ink3);text-align:center;padding:34px;font-size:13px}
 
@@ -838,69 +843,77 @@ function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpe
 function GalleryPick({ onPick, onClose, defaultType }) {
   const [q, setQ] = useState("");
   const [imgs, setImgs] = useState([]);
-  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [coll, setColl] = useState("");
   const [type, setType] = useState(defaultType === "video" ? "video" : defaultType === "all" ? "" : "image");
   const [rating, setRating] = useState(0);
   const [sort, setSort] = useState("newest");
   const [colls, setColls] = useState([]);
+  const pageRef = useRef(1), busyRef = useRef(false), moreRef = useRef(true);
   const qs = (p) => `/api/gallery-images?limit=60&page=${p}&q=${encodeURIComponent(q)}`
     + `&collection=${encodeURIComponent(coll)}&type=${type}&rating_min=${rating}&sort=${sort}`;
   useEffect(() => { fetch("/api/collections").then((r) => r.json())
     .then((d) => setColls(d.collections || [])).catch(() => {}); }, []);
   useEffect(() => {
     const t = setTimeout(() => {
-      fetch(qs(1)).then((r) => r.json())
-        .then((d) => { setImgs(d.images || []); setTotal(d.total || 0); setPage(1); }).catch(() => {});
-    }, 180);
+      busyRef.current = true;
+      fetch(qs(1)).then((r) => r.json()).then((d) => {
+        const im = d.images || []; setImgs(im); setTotal(d.total || 0);
+        pageRef.current = 1; moreRef.current = im.length < (d.total || 0); busyRef.current = false;
+      }).catch(() => { busyRef.current = false; });
+    }, 160);
     return () => clearTimeout(t);
   }, [q, coll, type, rating, sort]);   // eslint-disable-line
-  const loadMore = () => {
-    const p = page + 1;
-    fetch(qs(p)).then((r) => r.json())
-      .then((d) => { setImgs((old) => [...old, ...(d.images || [])]); setPage(p); }).catch(() => {});
+  useEffect(() => { const k = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
+  const more = () => {
+    if (busyRef.current || !moreRef.current) return;
+    busyRef.current = true;
+    const p = pageRef.current + 1;
+    fetch(qs(p)).then((r) => r.json()).then((d) => {
+      const im = d.images || [];
+      setImgs((old) => { const next = [...old, ...im]; moreRef.current = next.length < (d.total || total); return next; });
+      pageRef.current = p; busyRef.current = false;
+    }).catch(() => { busyRef.current = false; });
+  };
+  const onScroll = (e) => {
+    const g = e.currentTarget;
+    if (g.scrollTop + g.clientHeight >= g.scrollHeight - 280) more();
   };
   return (
     <div className="sb-pick-ov" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="sb-pick-box">
-        <div className="sb-pick-row">
-          <b style={{ whiteSpace: "nowrap" }}>Pick from your gallery</b>
-          <input className="sb-in" style={{ flex: 1, minWidth: 120 }} placeholder="Search prompts…" value={q} autoFocus
+        <div className="sb-pick-head">
+          <span className="sb-pick-t">Pick from your gallery</span>
+          <input className="sb-in" style={{ flex: 1, minWidth: 140 }} placeholder="Search your images…" value={q} autoFocus
             onChange={(e) => setQ(e.target.value)} />
-          <button className="sb-btn ghost sm" onClick={onClose}>✕</button>
+          <button className="sb-pick-x" onClick={onClose} title="Close (Esc)">&#215;</button>
         </div>
-        <div className="sb-pick-row">
-          <select className="sb-sel sm" value={coll} onChange={(e) => setColl(e.target.value)} title="Collection">
+        <div className="sb-pick-filters">
+          <select value={coll} onChange={(e) => setColl(e.target.value)} title="Collection">
             <option value="">All collections</option>
             {colls.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-          <select className="sb-sel sm" value={type} onChange={(e) => setType(e.target.value)} title="Media type">
-            <option value="">Image + video</option>
-            <option value="image">Images</option>
-            <option value="video">Videos</option>
+          <select value={type} onChange={(e) => setType(e.target.value)} title="Media type">
+            <option value="">Image + video</option><option value="image">Images</option><option value="video">Videos</option>
           </select>
-          <select className="sb-sel sm" value={rating} onChange={(e) => setRating(+e.target.value)} title="Minimum rating">
-            <option value="0">Any rating</option>
-            <option value="3">3&#9733;+</option><option value="4">4&#9733;+</option><option value="5">5&#9733;</option>
+          <select value={rating} onChange={(e) => setRating(+e.target.value)} title="Minimum rating">
+            <option value="0">Any rating</option><option value="3">3&#9733;+</option><option value="4">4&#9733;+</option><option value="5">5&#9733;</option>
           </select>
-          <select className="sb-sel sm" value={sort} onChange={(e) => setSort(e.target.value)} title="Sort">
+          <select value={sort} onChange={(e) => setSort(e.target.value)} title="Sort">
             <option value="newest">Newest</option><option value="oldest">Oldest</option>
           </select>
-          <span className="sb-pick-count">{(total || 0).toLocaleString()} match</span>
+          <span className="sb-pick-count">{(total || 0).toLocaleString()}</span>
         </div>
-        <div className="sb-pick-grid">
+        <div className="sb-pick-grid" onScroll={onScroll}>
           {imgs.map((m) => (
-            <div key={m.media_id} className="sb-pick-item" title={m.prompt}
+            <div key={m.media_id} className="sb-pick-cell" title={m.prompt}
               onClick={() => onPick(m.media_id, m.thumb, m.is_video === "1")}>
               <img src={m.thumb} loading="lazy" decoding="async" alt="" />
               {m.is_video === "1" && <span className="sb-pick-vid">&#9654;</span>}
             </div>))}
           {!imgs.length && <div className="sb-pick-empty">No matches for these filters.</div>}
         </div>
-        {imgs.length < total &&
-          <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={loadMore}>
-            Load more ({imgs.length}/{total})</button>}
       </div>
     </div>
   );
