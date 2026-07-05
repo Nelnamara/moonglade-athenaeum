@@ -77,6 +77,16 @@ const STYLES = `
   background:rgba(0,0,0,.5);border-radius:5px;padding:2px 7px;pointer-events:none;
   opacity:0;transition:opacity .15s}
 .sb-shotprev:hover .sb-shotprev-hint{opacity:1}
+.sb-shotprev-wrap{margin-top:8px;max-width:340px}
+.sb-trim{margin-top:6px}
+.sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
+.sb-trim-sel{position:absolute;top:0;bottom:0;background:rgba(224,162,78,.26);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
+.sb-trim-h{position:absolute;top:-3px;width:11px;height:26px;margin-left:-6px;border-radius:4px;background:var(--amber);cursor:ew-resize;box-shadow:0 1px 4px rgba(0,0,0,.55);touch-action:none;z-index:2}
+.sb-trim-h:hover{background:#f0b866}
+.sb-trim-read{font-size:11px;color:var(--ink2);margin-top:6px;font-family:'JetBrains Mono',monospace}
+.sb-trim-read b{color:var(--amber)}
+.sb-trim-reset{margin-left:9px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:5px;font-size:10px;padding:1px 8px;cursor:pointer}
+.sb-trim-reset:hover{border-color:var(--amber);color:var(--amber)}
 
 .sb-fromstrip{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--bg2);
   border-bottom:1px solid var(--line);font-size:11px;color:var(--ink3)}
@@ -254,7 +264,7 @@ function newCard(extra = {}) {
     id: uid(), title: "", status: "todo", mode: "I2V", duration: 8, connect: "cut",
     prompt: "", openFrame: emptyFrame(), closeFrame: emptyFrame(),
     cast: [], refs: [], camera: "", lighting: "", audioCue: "",
-    transIn: "", transOut: "", notes: "", discreet: false, ...extra,
+    transIn: "", transOut: "", notes: "", discreet: false, trimIn: 0, trimOut: null, ...extra,
   };
 }
 function seedProject() {
@@ -624,26 +634,71 @@ export default function App() {
 }
 
 /* ===================== CARD ===================== */
-/* Hover-scrub preview: mouse position across the video maps to its timeline,
-   the classic "hover a thumbnail to see the clip" trick. Range requests are
-   already supported server-side (/video-file/<id>), so seeking is instant. */
-function ShotPreview({ mid }) {
-  const vidRef = useRef(null);
-  const [ready, setReady] = useState(false);
+/* Hover-scrub preview + non-destructive TRIM. Hovering the video maps mouse-X to
+   playback time (clamped to the kept region); a track below has draggable in/out
+   handles that store trimIn/trimOut (seconds) on the shot. Nothing is re-encoded
+   here -- trims are just metadata that Play-sequence and Export will honor.
+   /video-file/<id> supports Range requests, so every seek is instant. */
+function ShotPreview({ mid, trimIn, trimOut, onTrim }) {
+  const vidRef = useRef(null), trackRef = useRef(null);
+  const [dur, setDur] = useState(0);
+  const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
+  const rangeRef = useRef(range); rangeRef.current = range;
+  const durRef = useRef(0); durRef.current = dur;
+  const dragRef = useRef(null);
+  useEffect(() => { setRange({ in: trimIn || 0, out: trimOut }); }, [trimIn, trimOut]);
+  const effOut = (range.out == null ? dur : range.out) || dur;
+  const pct = (s) => (dur ? Math.max(0, Math.min(100, (s / dur) * 100)) : 0);
+  const fT = (s) => (s || 0).toFixed(1) + "s";
+  const secAt = (clientX) => {
+    const t = trackRef.current.getBoundingClientRect();
+    return Math.max(0, Math.min(durRef.current, ((clientX - t.left) / t.width) * durRef.current));
+  };
   const scrub = (e) => {
-    const v = vidRef.current;
-    if (!v || !ready || !v.duration) return;
+    const v = vidRef.current; if (!v || !dur) return;
     const r = e.currentTarget.getBoundingClientRect();
     const t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-    v.currentTime = t * v.duration;
+    v.currentTime = range.in + t * Math.max(0.01, effOut - range.in);
   };
+  const onMove = (e) => {
+    if (!dragRef.current || !durRef.current) return;
+    const s = secAt(e.clientX), r = rangeRef.current, eff = (r.out == null ? durRef.current : r.out);
+    setRange(dragRef.current === "in" ? { ...r, in: Math.min(s, eff - 0.1) }
+                                      : { ...r, out: Math.max(s, r.in + 0.1) });
+    const v = vidRef.current; if (v) v.currentTime = s;
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    if (dragRef.current) { const r = rangeRef.current; onTrim(r.in, r.out); }
+    dragRef.current = null;
+  };
+  const startDrag = (which) => (e) => {
+    e.preventDefault(); e.stopPropagation(); dragRef.current = which;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+  const trimmed = range.in > 0 || range.out != null;
   return (
-    <div className="sb-shotprev"
-      onMouseMove={scrub}
-      onMouseLeave={() => { const v = vidRef.current; if (v) v.currentTime = 0; }}>
-      <video ref={vidRef} src={"/video-file/" + mid} muted preload="metadata" playsInline
-        onLoadedMetadata={() => setReady(true)} />
-      <div className="sb-shotprev-hint">hover to scrub</div>
+    <div className="sb-shotprev-wrap">
+      <div className="sb-shotprev" onMouseMove={scrub}
+        onMouseLeave={() => { const v = vidRef.current; if (v) v.currentTime = range.in; }}>
+        <video ref={vidRef} src={"/video-file/" + mid} muted preload="metadata" playsInline
+          onLoadedMetadata={(e) => setDur(e.currentTarget.duration || 0)} />
+        <div className="sb-shotprev-hint">hover to scrub</div>
+      </div>
+      <div className="sb-trim">
+        <div className="sb-trim-track" ref={trackRef}
+          onPointerDown={(e) => { const v = vidRef.current; if (v && dur) v.currentTime = secAt(e.clientX); }}>
+          <div className="sb-trim-sel" style={{ left: pct(range.in) + "%", right: (100 - pct(effOut)) + "%" }} />
+          <div className="sb-trim-h" style={{ left: pct(range.in) + "%" }} onPointerDown={startDrag("in")} title="Trim in" />
+          <div className="sb-trim-h" style={{ left: pct(effOut) + "%" }} onPointerDown={startDrag("out")} title="Trim out" />
+        </div>
+        <div className="sb-trim-read">
+          {fT(range.in)} &rarr; {fT(effOut)} &middot; <b>{fT(Math.max(0, effOut - range.in))}</b> kept
+          {trimmed && <button className="sb-trim-reset" onClick={() => onTrim(0, null)}>reset</button>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -933,7 +988,9 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
           {g.phase === "done" && g.mid && (<a className="sb-mono" href={"/image/" + g.mid} target="_blank" rel="noreferrer"
             style={{ color: "var(--cyan)" }}>open full ↗</a>)}
         </div>
-        {g.phase === "done" && g.mid && <ShotPreview mid={g.mid} />}
+        {g.phase === "done" && g.mid &&
+          <ShotPreview mid={g.mid} trimIn={card.trimIn} trimOut={card.trimOut}
+            onTrim={(i, o) => setCard(act.id, card.id, (c) => ({ ...c, trimIn: i, trimOut: o }))} />}
         </>); })()}
     </div>
   );
