@@ -2735,10 +2735,20 @@ window.addEventListener('pagehide', saveScrollPos);
 window.addEventListener('pageshow', function(){ refreshSelUI(); restoreScrollPos(); });
 document.addEventListener('DOMContentLoaded', function(){
   refreshSelUI(); applyBlur(); refreshPresets(); restoreScrollPos(); applySelectMode();
-  // Keep the bulk action bar stuck just below the sticky header (header height varies).
+  // Keep the bulk action bar stuck just below the sticky header. A collapsing
+  // banner header (.bannered) PINS at its slim height (--bnr-slim), not its full
+  // DOM height -- using offsetHeight there parks the bar mid-screen once scrolled.
   (function() {
     var h = document.querySelector('header');
-    function setTop() { if (h) document.documentElement.style.setProperty('--bulk-top', h.offsetHeight + 'px'); }
+    function setTop() {
+      if (!h) return;
+      var top = h.offsetHeight;
+      if (h.classList.contains('bannered')) {
+        var slim = parseInt(getComputedStyle(h).getPropertyValue('--bnr-slim'), 10);
+        if (slim) top = slim;
+      }
+      document.documentElement.style.setProperty('--bulk-top', top + 'px');
+    }
     setTop(); window.addEventListener('resize', setTop);
   })();
   // Cross-page lightbox: arriving with ?lbopen=first|last auto-opens the overlay so
