@@ -70,6 +70,14 @@ const STYLES = `
 .sb-card:hover{border-color:var(--line2)}
 .sb-card.open{box-shadow:var(--shadow);border-color:var(--amber-d);grid-column:1/-1}
 
+.sb-shotprev{position:relative;margin-top:8px;border-radius:8px;overflow:hidden;
+  background:#000;cursor:col-resize;max-width:340px}
+.sb-shotprev video{width:100%;display:block;aspect-ratio:16/9;object-fit:contain;background:#000}
+.sb-shotprev-hint{position:absolute;right:7px;bottom:6px;font-size:10.5px;color:rgba(255,255,255,.75);
+  background:rgba(0,0,0,.5);border-radius:5px;padding:2px 7px;pointer-events:none;
+  opacity:0;transition:opacity .15s}
+.sb-shotprev:hover .sb-shotprev-hint{opacity:1}
+
 .sb-fromstrip{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--bg2);
   border-bottom:1px solid var(--line);font-size:11px;color:var(--ink3)}
 .sb-fromstrip .sb-linkdot{font-size:12px}
@@ -614,6 +622,30 @@ export default function App() {
 }
 
 /* ===================== CARD ===================== */
+/* Hover-scrub preview: mouse position across the video maps to its timeline,
+   the classic "hover a thumbnail to see the clip" trick. Range requests are
+   already supported server-side (/video-file/<id>), so seeking is instant. */
+function ShotPreview({ mid }) {
+  const vidRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  const scrub = (e) => {
+    const v = vidRef.current;
+    if (!v || !ready || !v.duration) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    v.currentTime = t * v.duration;
+  };
+  return (
+    <div className="sb-shotprev"
+      onMouseMove={scrub}
+      onMouseLeave={() => { const v = vidRef.current; if (v) v.currentTime = 0; }}>
+      <video ref={vidRef} src={"/video-file/" + mid} muted preload="metadata" playsInline
+        onLoadedMetadata={() => setReady(true)} />
+      <div className="sb-shotprev-hint">hover to scrub</div>
+    </div>
+  );
+}
+
 function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpen, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries, openPick }) {
   const isOpen = open[card.id];
   const framePrev = (f) => f.thumbId ? thumbs[f.thumbId]
@@ -893,11 +925,14 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
       </div>
       {(() => { const g = genState[card.id]; if (!g) return null;
         const col = g.phase === "done" ? "var(--green)" : g.phase === "error" ? "var(--coral)" : "var(--amber)";
-        return (<div style={{ fontSize: 12, color: col, display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
+        return (<>
+        <div style={{ fontSize: 12, color: col, display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
           <span>{g.phase === "done" ? "✓ " : g.phase === "error" ? "⚠ " : "… "}{g.msg}</span>
           {g.phase === "done" && g.mid && (<a className="sb-mono" href={"/image/" + g.mid} target="_blank" rel="noreferrer"
-            style={{ color: "var(--cyan)" }}>open clip ↗</a>)}
-        </div>); })()}
+            style={{ color: "var(--cyan)" }}>open full ↗</a>)}
+        </div>
+        {g.phase === "done" && g.mid && <ShotPreview mid={g.mid} />}
+        </>); })()}
     </div>
   );
 }
