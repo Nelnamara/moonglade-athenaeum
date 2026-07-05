@@ -470,3 +470,22 @@ def test_export_csv_roundtrip(tmp_path):
     by_id = {r["media_id"]: r for r in rows}
     assert by_id["m1"]["rating"] == "5"
     assert set(rows[0].keys()) == set(CATALOG_FIELDS)
+
+
+def test_count_backup_images_excludes_thumbnails(tmp_path):
+    """The disk counter must count ORIGINALS only -- not the one-per-image gallery/thumbs
+    previews (which made files-on-disk look ~2x the catalog) and not quarantined _duplicates."""
+    import pixai_gallery_backup as core
+    (tmp_path / "images").mkdir()
+    (tmp_path / "2026-07").mkdir()
+    (tmp_path / "gallery" / "thumbs").mkdir(parents=True)
+    (tmp_path / "_duplicates").mkdir()
+    (tmp_path / "images" / "a_1.png").write_bytes(b"x" * 100)      # original
+    (tmp_path / "2026-07" / "b_2.webp").write_bytes(b"y" * 200)   # original (month folder)
+    (tmp_path / "gallery" / "thumbs" / "1.jpg").write_bytes(b"t")   # thumbnail -> excluded
+    (tmp_path / "gallery" / "thumbs" / "2.jpg").write_bytes(b"t")   # thumbnail -> excluded
+    (tmp_path / "_duplicates" / "c_3.png").write_bytes(b"z")         # quarantined -> excluded
+    (tmp_path / "images" / "half.part").write_bytes(b"nope")         # partial -> excluded
+    n, b, thumbs = core._count_backup_images(tmp_path)
+    assert n == 2 and b == 300          # two originals, their bytes; grid/thumbs/dupes excluded
+    assert thumbs == 2                  # thumbnails reported separately, not in the total
