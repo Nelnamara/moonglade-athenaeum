@@ -434,3 +434,27 @@ def test_parallel_map_progress_called_per_item():
     list(core._parallel_map([1, 2, 3], lambda x: x, workers=2,
                             progress=lambda d, t, n: seen.append((d, t))))
     assert len(seen) == 3 and seen[-1][1] == 3 and {d for d, t in seen} == {1, 2, 3}
+
+
+def test_make_progress_marker_is_strip_safe():
+    """Under the panel (MOONGLADE_PROGRESS=1) the progress callback emits a machine marker the
+    Control Panel parses into a bar; in a terminal it draws the  bar (no marker). The marker
+    prefix must survive str.strip() (it must NOT start with a whitespace-classified char)."""
+    import io, os, contextlib, pixai_gallery_backup as core
+    os.environ.pop("MOONGLADE_PROGRESS", None)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        core._make_progress()(5, 20, 0)
+    assert core.PANEL_PROGRESS_PREFIX not in buf.getvalue()      # terminal: bar only, no marker
+    os.environ["MOONGLADE_PROGRESS"] = "1"
+    try:
+        buf2 = io.StringIO()
+        with contextlib.redirect_stdout(buf2):
+            core._make_progress()(5, 20, 3)
+        line = buf2.getvalue().rstrip("\n")
+        assert line.startswith(core.PANEL_PROGRESS_PREFIX)
+        assert line.strip() == line                              # strip-safe (no whitespace prefix)
+        done, total, new = (int(x) for x in line[len(core.PANEL_PROGRESS_PREFIX):].split("|"))
+        assert (done, total, new) == (5, 20, 3)
+    finally:
+        os.environ.pop("MOONGLADE_PROGRESS", None)

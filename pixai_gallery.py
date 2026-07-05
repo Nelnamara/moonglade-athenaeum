@@ -1342,7 +1342,8 @@ def create_app(out_dir: Path):
     _cli_dir = str(Path(__file__).resolve().parent)
     _panel_lock = threading.Lock()
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
-                  "rc": None, "started_at": None}
+                  "rc": None, "started_at": None, "progress": None}
+    _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in pixai_gallery_backup.py
 
     # action -> {args (extra flags), label, destructive}
     PANEL_ACTIONS = {
@@ -1367,8 +1368,19 @@ def create_app(out_dir: Path):
 
     def _panel_reader(proc):
         for line in iter(proc.stdout.readline, ""):
+            line = line.rstrip("\n")
+            if line.startswith(_PROG_PREFIX):
+                # progress marker (not log): "<prefix>done|total|new" -> drive the bar
+                try:
+                    done, total, new = (int(x) for x in line[len(_PROG_PREFIX):].split("|"))
+                    with _panel_lock:
+                        _panel_job["progress"] = {"done": done, "total": total, "new": new,
+                                                  "pct": round(min(done / total, 1.0) * 100, 1) if total else None}
+                except (ValueError, ZeroDivisionError):
+                    pass
+                continue
             with _panel_lock:
-                _panel_job["lines"].append(line.rstrip("\n"))
+                _panel_job["lines"].append(line)
                 if len(_panel_job["lines"]) > 800:       # ring buffer
                     del _panel_job["lines"][:-800]
         proc.stdout.close()
@@ -1376,6 +1388,7 @@ def create_app(out_dir: Path):
         with _panel_lock:
             _panel_job["rc"] = rc
             _panel_job["status"] = "done" if rc == 0 else "failed"
+            _panel_job["progress"] = None                # clear the bar when the job ends
 
     def _panel_run(action):
         import subprocess
@@ -1384,10 +1397,12 @@ def create_app(out_dir: Path):
         with _panel_lock:
             _panel_job.update(status="running", action=action, label=spec["label"],
                               lines=["$ " + " ".join(spec["args"])], rc=None,
-                              started_at=None)
+                              started_at=None, progress=None)
+        # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
+        env = dict(os.environ, MOONGLADE_PROGRESS="1")
         proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1,
-                                encoding="utf-8", errors="replace")
+                                encoding="utf-8", errors="replace", env=env)
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
 
     # ---- Automated tasks: run a SAFE job on an interval while the app is open ----
@@ -4640,6 +4655,10 @@ function savePrompt() {
   #joblog{background:var(--base);border:1px solid var(--surface1);border-radius:8px;padding:12px 14px;font-family:ui-monospace,monospace;font-size:12px;color:var(--subtext);white-space:pre-wrap;line-height:1.5;max-height:340px;overflow-y:auto;margin-top:12px;display:none;}
   #jobstatus{font-size:12.5px;margin-top:6px;}
   .st-running{color:var(--lavender);} .st-done{color:var(--emerald);} .st-failed{color:var(--red);}
+  .jobprog{margin:12px 0 4px;}
+  .jp-bar{height:10px;border-radius:6px;background:var(--surface1);overflow:hidden;}
+  .jp-bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-soft));transition:width .4s ease;}
+  .jp-txt{font-size:11.5px;color:var(--subtext);margin-top:5px;font-variant-numeric:tabular-nums;}
 </style>
 <header>
   <div class="brand"><span class="mark"><span class="mark-m">M</span><img class="mark-logo" src="/branding/logo.png" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
@@ -4668,6 +4687,7 @@ function savePrompt() {
     <div class="jobrow" id="jobs-safe"></div>
     <div style="font-size:12px;color:var(--overlay0);margin:16px 0 8px;">Changes files &middot; asks first</div>
     <div class="jobrow" id="jobs-danger"></div>
+    <div id="jobprog" class="jobprog" style="display:none;"><div class="jp-bar"><i></i></div><div class="jp-txt"></div></div>
     <div id="jobstatus"></div>
     <pre id="joblog"></pre>
     <div class="p-note">One job runs at a time. Backup / audit / dry-runs never delete anything. Organize and Dedup move files (both reversible &mdash; Organize writes an undo manifest, Dedup quarantines to <code>_duplicates/</code>).</div>
@@ -4748,8 +4768,14 @@ function setButtons(disabled){ document.querySelectorAll('.jobbtn').forEach(func
 function poll(){
   fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     var log=el('joblog'); if(d.lines){ log.textContent=d.lines.join('\\n'); log.scrollTop=log.scrollHeight; }
+    var jp=el('jobprog'), p=d.progress;
+    if(d.status==='running' && p && p.total){
+      jp.style.display=''; jp.querySelector('.jp-bar i').style.width=(p.pct||0)+'%';
+      jp.querySelector('.jp-txt').textContent=(p.done||0).toLocaleString()+' / '+(p.total||0).toLocaleString()
+        +'  ('+(p.pct!=null?p.pct:0)+'%)'+(p.new?('  \\u00b7 +'+p.new+' new'):'');
+    } else { jp.style.display='none'; }
     var st=el('jobstatus');
-    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+d.label+'\\u2026</span>'; setButtons(true); setTimeout(poll,1500); }
+    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+d.label+'\\u2026</span>'; setButtons(true); setTimeout(poll,1000); }
     else { setButtons(false); polling=false;
       if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
       else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
@@ -4928,6 +4954,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         with _panel_lock:
             return jsonify({"status": _panel_job["status"], "action": _panel_job["action"],
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
+                            "progress": _panel_job["progress"],
                             "lines": list(_panel_job["lines"])})
 
     @app.route("/api/panel/schedule", methods=["GET", "POST"])

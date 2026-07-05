@@ -243,6 +243,29 @@ def _progress_line(done, total, new=0, width=40):
     return "\r  Checking: {done} images...{new}  ".format(done=done, new=new_str)
 
 
+# Line prefix the Control Panel greps for to drive its live progress bar. Deliberately a
+# non-whitespace ASCII token (a str.strip() anywhere must NOT be able to eat it) that won't
+# collide with normal log output. Fields after it are done|total|new.
+PANEL_PROGRESS_PREFIX = "~=MGPROG=~"
+
+
+def _make_progress():
+    """Return a progress(done, total, new=0) callback. Under the Control Panel
+    (env MOONGLADE_PROGRESS=1) it emits newline-terminated machine markers the panel parses into
+    a live bar; in a terminal it draws the \\r-overwriting bar. So long jobs (dedup/audit/sync)
+    show real progress in BOTH places instead of just spinning silently."""
+    if os.environ.get("MOONGLADE_PROGRESS") == "1":
+        def _cb(done, total, new=0):
+            print("{}{}|{}|{}".format(PANEL_PROGRESS_PREFIX,
+                                      int(done), int(total or 0), int(new)), flush=True)
+        return _cb
+
+    def _cb(done, total, new=0):
+        sys.stdout.write(_progress_line(done, total, new))
+        sys.stdout.flush()
+    return _cb
+
+
 def _quick_count(session, page_size=500):
     """Paginate through the library to count total images for the progress meter.
     Uses a conservative page size (default 500) to avoid server-side Prisma
@@ -5511,6 +5534,10 @@ def main():
                          "keeper) back to images/")
     args = ap.parse_args()
     set_verbose(getattr(args, "verbose", False))
+    # Give every command a progress callback (terminal bar, or Control Panel markers under
+    # MOONGLADE_PROGRESS=1). Commands that report progress (audit/dedup/sync/...) pick it up;
+    # the rest ignore it.
+    args.progress = _make_progress()
 
     if args.probe and args.count:
         print("Note: --probe exits before --count runs. Run them separately:\n"
