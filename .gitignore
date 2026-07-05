@@ -3,6 +3,7 @@ token.txt
 .env
 config.json
 pixai_gui_settings.json
+serve.txt
 
 # ---- Private dev notes: reverse-engineering ledger, internal maps. NEVER publish ----
 private/
