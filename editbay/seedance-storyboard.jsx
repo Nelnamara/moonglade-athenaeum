@@ -327,6 +327,8 @@ export default function App() {
   const [open, setOpen] = useState({});
   const [busy, setBusy] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showGuide, setShowGuide] = useState(() => {
+    try { return !localStorage.getItem("loom_guide_seen"); } catch (e) { return true; } });
   const [showCast, setShowCast] = useState(true);
   const [genState, setGenState] = useState({});   // cardId -> {phase, msg, mid}
   const [seq, setSeq] = useState(null);           // Play-sequence: [clip,...] or null
@@ -631,6 +633,7 @@ export default function App() {
 
       <div className="sb-wrap">
         <div className="sb-toolbar">
+          <button className="sb-btn sm" onClick={() => setShowGuide((s) => !s)}>{showGuide ? "Hide guide" : "? How it works"}</button>
           <button className="sb-btn ghost sm" onClick={() => setShowHelp((s) => !s)}>{showHelp ? "Hide cheat-sheet" : "Continuity cheat-sheet"}</button>
           <div className="sb-divider" />
           <button className="sb-btn sm" onClick={exportAll}>Export shot list (.txt)</button>
@@ -638,6 +641,24 @@ export default function App() {
           <label className="sb-btn sm ghost" style={{ cursor: "pointer" }}>Restore
             <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => importJSON(e.target.files[0])} /></label>
         </div>
+        {showGuide && (
+          <div className="sb-helpbox" style={{ borderColor: "var(--amber-d)" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <h4 style={{ marginTop: 0 }}>What the Loom is</h4>
+              <button className="sb-btn ghost sm" style={{ marginLeft: "auto" }}
+                onClick={() => { setShowGuide(false); try { localStorage.setItem("loom_guide_seen", "1"); } catch (e) {} }}>Got it</button>
+            </div>
+            The <b>Generate</b> card makes <b>one</b> clip. The Loom is where you <b>direct a sequence</b> &mdash; plan a multi-shot video, generate each shot on PixAI, then trim and stitch them into one cut. Camera vs. editing suite.
+            <h4>The flow, top to bottom</h4>
+            <b>1 &middot; Cast &amp; Assets</b> — build a pool of reusable people / places / refs. <code>&#9636; Pick from gallery</code> or <code>&#8623; Import collection</code> to fill it fast; each keeps its media_id, so referencing it is free.<br />
+            <b>2 &middot; Shots</b> — add cards. Per shot: write the prompt, attach cast + open/close frames, set the mode (I2V / First&rarr;Last / R2V) and duration (5/10/15s).<br />
+            <b>3 &middot; Generate shot</b> — renders on PixAI (free with a V4.0 card). The clip lands in your gallery and appears on the card.<br />
+            <b>4 &middot; Trim</b> — drag the amber in/out handles on each clip to keep only the good seconds.<br />
+            <b>5 &middot; Play &amp; Export</b> — <code>&#9654;&#9654; Play</code> watches the rough cut back-to-back; <code>&#8681; Export</code> stitches it into one mp4.
+            <h4>Chaining shots so cuts flow</h4>
+            Frame handoff, <code>@tags</code>, and cast lock keep continuity across shots &mdash; open the <b>Continuity cheat-sheet</b> for those.
+          </div>
+        )}
         {showHelp && (
           <div className="sb-helpbox">
             <h4>@references in plain terms</h4>
