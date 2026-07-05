@@ -51,6 +51,21 @@ if "--port" in SERVE_ARGS:
     except (ValueError, IndexError):
         pass
 
+# Single instance: if a Moonglade server is ALREADY answering on this port, don't start a second
+# one (on Windows SO_REUSEADDR lets two servers bind the same port and fight) -- just focus the
+# browser and bow out. A 200 from /api/ping means it's ours; anything else -> start fresh.
+import urllib.request
+try:
+    with urllib.request.urlopen("http://localhost:{}/api/ping".format(PORT), timeout=1.5) as _r:
+        if _r.status == 200:
+            try:
+                webbrowser.open("http://localhost:{}/".format(PORT))
+            except Exception:
+                pass
+            sys.exit(0)
+except Exception:
+    pass                            # nothing (of ours) there -> start it below
+
 cmd = [sys.executable, os.path.join(here, "pixai_gallery.py")] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
 
