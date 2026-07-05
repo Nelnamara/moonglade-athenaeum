@@ -29,6 +29,7 @@ from pixeltable.func import Batch
 MODEL = "openai/clip-vit-base-patch32"
 _DIR = "moonglade"
 _TBL = f"{_DIR}.images"
+_IDX = "img_clip"          # explicit index name -> if_exists='ignore' can recognize it
 _DIM = 512
 
 _model_lock = threading.Lock()
@@ -68,19 +69,26 @@ def clip_gpu(imgs: Batch[PIL.Image.Image]) -> Batch[pxt.Array[(512,), pxt.Float]
 
 
 def _get_table():
-    """Get-or-create the sidecar table + GPU embedding index (idempotent, cached)."""
+    """Get-or-create the sidecar table. On an EXISTING table return it as-is and NEVER
+    re-touch the index: re-adding an embedding index on every open — and, worse, an
+    UNNAMED one — is exactly what stacked duplicate indices and broke queries with
+    'Column img has multiple embedding indices'. The index is added exactly ONCE, by
+    explicit name (_IDX), at creation; new rows auto-embed through it."""
     if "t" not in _table:
         with _table_lock:
             if "t" not in _table:
-                pxt.create_dir(_DIR, if_exists="ignore")
-                t = pxt.create_table(
-                    _TBL,
-                    {"media_id": pxt.Required[pxt.String], "img": pxt.Image},
-                    primary_key=["media_id"],
-                    if_exists="ignore",
-                )
-                # new rows auto-embed through this index -> incremental "just works"
-                t.add_embedding_index("img", embedding=clip_gpu, if_exists="ignore")
+                try:
+                    t = pxt.get_table(_TBL)          # exists -> use as-is, no index churn
+                except Exception:
+                    pxt.create_dir(_DIR, if_exists="ignore")
+                    t = pxt.create_table(
+                        _TBL,
+                        {"media_id": pxt.Required[pxt.String], "img": pxt.Image},
+                        primary_key=["media_id"],
+                        if_exists="ignore",
+                    )
+                    t.add_embedding_index("img", idx_name=_IDX, embedding=clip_gpu,
+                                          if_exists="ignore")
                 _table["t"] = t
     return _table["t"]
 
@@ -145,11 +153,30 @@ def sync(items, progress=None, batch: int = 400) -> int:
 sync.last_errors = 0
 
 
+def rebuild(items, progress=None, batch: int = 400):
+    """Nuke and re-embed from scratch — the clean cure for a corrupted / duplicate-index
+    table. Drops the sidecar table (plus any stale dev-probe tables), forgets the cached
+    handle, then a fresh sync() recreates ONE clean named index and re-embeds every image.
+    Returns rows inserted (skipped-row count on sync.last_errors, via sync())."""
+    for name in (_TBL, "mg_probe.imgs", "mg_probe2.imgs", "mg_probe4.imgs"):
+        try:
+            pxt.drop_table(name, force=True, if_not_exists="ignore")
+        except Exception:
+            pass
+    for d in ("mg_probe", "mg_probe2", "mg_probe4"):
+        try:
+            pxt.drop_dir(d, force=True)
+        except Exception:
+            pass
+    _table.clear()                      # forget cached handle -> _get_table recreates fresh
+    return sync(items, progress=progress, batch=batch)
+
+
 def similar(query_path, k: int = 48, exclude_media_id=None):
     """Return [(media_id, score)] for the k images most visually similar to query_path,
     dropping the query's own row (a self-match scores 1.0)."""
     t = _get_table()
-    sim = t.img.similarity(image=str(query_path))
+    sim = t.img.similarity(image=str(query_path), idx=_IDX)
     rows = t.order_by(sim, asc=False).limit(k + 1).select(t.media_id, score=sim).collect()
     out = []
     for r in rows:
