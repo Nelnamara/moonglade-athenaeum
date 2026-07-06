@@ -609,6 +609,16 @@ def media_ids_for(node):
     return list(dict.fromkeys(ids))
 
 
+def _is_video_task_node(node):
+    """A listing node is a VIDEO task iff it carries `i2vProModel` (set for BOTH i2v and
+    reference-video -- verified across the whole feed: 100% of video tasks have it, no image
+    task does). Such a node's `mediaId` is the video's poster STILL, so the image download
+    path must SKIP it -- otherwise that still gets catalogued as a standalone image, a
+    duplicate of the video's own poster (the "video shown as a phantom image" bug). The real
+    video is backed up by run_sync_videos, which keys off this same field."""
+    return bool(node.get("i2vProModel"))
+
+
 def extract_meta(node):
     return {
         "task_id": node.get("id", ""),
@@ -5164,6 +5174,8 @@ def run_download(args, progress=None):
                 for edge in edges:
                     node = edge.get("node", edge)
                     raw_f.write(json.dumps(node, ensure_ascii=False) + "\n")
+                    if _is_video_task_node(node):
+                        continue   # video task: its poster still is NOT a standalone image
                     meta = extract_meta(node)
                     all_mids = media_ids_for(node)
                     full_meta = {}
@@ -5261,6 +5273,8 @@ def run_download(args, progress=None):
             for edge in edges:
                 node = edge.get("node", edge)
                 raw_f.write(json.dumps(node, ensure_ascii=False) + "\n")
+                if _is_video_task_node(node):
+                    continue   # video task: its poster still is NOT a standalone image
                 meta = extract_meta(node)
                 all_mids = media_ids_for(node)
                 is_batch = len(all_mids) > 1
