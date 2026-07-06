@@ -2556,6 +2556,11 @@ function loadPreset(n) {
 /* ---- Cross-page selection (persisted in localStorage) ---- */
 function selGet() { try { return new Set(JSON.parse(localStorage.getItem('gallery_sel') || '[]')); } catch(e) { return new Set(); } }
 function selSave(s) { localStorage.setItem('gallery_sel', JSON.stringify([...s])); }
+// A fresh browser session starts with a CLEAN selection. Selection persists across the
+// gallery's full-page-reload pagination (that's the one reason it lives in localStorage),
+// but a new tab/session must not inherit a stale selection from a previous visit.
+// sessionStorage is wiped when the tab closes, so its absence marks a new session.
+(function(){ try { if(!sessionStorage.getItem('gallery_sel_session')){ localStorage.removeItem('gallery_sel'); sessionStorage.setItem('gallery_sel_session','1'); } } catch(e) {} })();
 function refreshSelUI() {
   var sel = selGet();
   document.querySelectorAll('input[name=media_ids]').forEach(function(cb){
@@ -2597,6 +2602,7 @@ function bulkSendCast() {
     ids.push(mid);
   });
   if (!ids.length) return;
+  localStorage.removeItem('gallery_sel');   // selection is consumed into the Loom cast
   window.location.href = '/loom?cast=' + encodeURIComponent(ids.join(','));
 }
 function onCheck() {
@@ -2691,6 +2697,7 @@ function bulkReplacePrompt() {
   function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
   add('back', location.href); add('find', find); add('replace', repl);
   sel.forEach(function(mid){ add('media_ids', mid); });
+  localStorage.removeItem('gallery_sel');   // consume the selection after the edit commits
   document.body.appendChild(f); f.submit();
 }
 function bulkAddCollection() {
@@ -2703,6 +2710,7 @@ function bulkAddCollection() {
   function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
   add('back', location.href); add('name', name.trim());
   sel.forEach(function(mid){ add('media_ids', mid); });
+  localStorage.removeItem('gallery_sel');   // consume the selection so the NEXT collection starts fresh
   document.body.appendChild(f); f.submit();
 }
 function confirmBulkDelete() {
@@ -4713,6 +4721,7 @@ function bulkSendVideo(){
   });
   if(!refs.length) return;
   Gen.addVideoRefs(refs.slice(0,9));
+  clearAll();   // sent to the video drawer -- clear the gallery selection (we stay on the page)
 }
 document.addEventListener('DOMContentLoaded', function(){
   var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
