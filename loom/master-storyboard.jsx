@@ -10,18 +10,27 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 const STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
 :root{
-  --bg:#15131C;--bg2:#1C1925;--panel:#221E2D;--panel2:#2A2535;
-  --line:#363046;--line2:#46405A;--ink:#ECE7F2;--ink2:#A79EBA;--ink3:#6F6783;
-  --amber:#E0A24E;--amber-d:#B47E33;--cyan:#6FB8B2;--green:#73C281;--coral:#E07A52;
+  /* Loom palette now INHERITS the gallery's design tokens (pixai_gallery.py's
+     DESIGN_TOKENS_CSS, shared with BASE_HTML) instead of hardcoding its own --
+     switching skin in the gallery header re-colors the Loom too. --line
+     deliberately maps to --overlay0 rather than --surface1 (which --panel2
+     already uses) so a --line border never vanishes against a --panel2
+     background (e.g. .sb-trim-track uses both together). */
+  --bg:var(--base);          --bg2:var(--mantle);
+  --panel:var(--surface0);   --panel2:var(--surface1);
+  --line:var(--overlay0);    --line2:color-mix(in srgb, var(--overlay0) 55%, var(--text) 45%);
+  --ink:var(--text);         --ink2:var(--subtext);      --ink3:var(--overlay0);
+  --amber:var(--accent);     --amber-d:color-mix(in srgb, var(--accent) 70%, black);
+  --cyan:var(--emerald);     --green:var(--green);       --coral:var(--red);
   --shadow:0 10px 30px rgba(0,0,0,.45);
 }
 *{box-sizing:border-box}
 .sb-root{font-family:'Inter',system-ui,sans-serif;background:
-  radial-gradient(1200px 600px at 80% -10%,rgba(224,162,78,.07),transparent 60%),var(--bg);
+  radial-gradient(1200px 600px at 80% -10%,rgba(255,255,255,.05),transparent 60%),var(--bg);
   color:var(--ink);min-height:100vh;padding:0 0 80px;-webkit-font-smoothing:antialiased}
 .sb-mono{font-family:'JetBrains Mono',monospace}.sb-disp{font-family:'Bricolage Grotesque','Inter',sans-serif}
 
-.sb-top{position:sticky;top:0;z-index:30;background:rgba(21,19,28,.86);backdrop-filter:blur(10px);
+.sb-top{position:sticky;top:0;z-index:30;background:rgba(0,0,0,.5);backdrop-filter:blur(10px);
   border-bottom:1px solid var(--line);padding:14px 20px}
 .sb-topgrid{display:flex;gap:18px;align-items:center;flex-wrap:wrap;max-width:1320px;margin:0 auto}
 .sb-brand{display:flex;align-items:baseline;gap:10px;flex:1 1 auto;min-width:0}
@@ -42,8 +51,8 @@ const STYLES = `
 .sb-reel{position:relative;height:30px;background:var(--bg2);border:1px solid var(--line);border-radius:7px;display:flex;overflow:hidden}
 .sb-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);transition:filter .15s}
 .sb-seg:hover{filter:brightness(1.35)}
-.sb-seg.todo{background:#3a3450}.sb-seg.wip{background:linear-gradient(var(--amber),var(--amber-d))}
-.sb-seg.done{background:linear-gradient(var(--green),#4f9a5c)}
+.sb-seg.todo{background:var(--surface1)}.sb-seg.wip{background:linear-gradient(var(--amber),var(--amber-d))}
+.sb-seg.done{background:linear-gradient(var(--green),color-mix(in srgb, var(--green) 70%, black))}
 .sb-target{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--coral);z-index:4}
 .sb-target::after{content:'8:00';position:absolute;top:-15px;left:50%;transform:translateX(-50%);
   font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--coral);white-space:nowrap}
@@ -82,7 +91,7 @@ const STYLES = `
 .sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
 .sb-trim-sel{position:absolute;top:0;bottom:0;background:rgba(224,162,78,.26);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
 .sb-trim-h{position:absolute;top:-3px;width:11px;height:26px;margin-left:-6px;border-radius:4px;background:var(--amber);cursor:ew-resize;box-shadow:0 1px 4px rgba(0,0,0,.55);touch-action:none;z-index:2}
-.sb-trim-h:hover{background:#f0b866}
+.sb-trim-h:hover{background:var(--gold)}
 .sb-trim-read{font-size:11px;color:var(--ink2);margin-top:6px;font-family:'JetBrains Mono',monospace}
 .sb-trim-read b{color:var(--amber)}
 .sb-trim-reset{margin-left:9px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:5px;font-size:10px;padding:1px 8px;cursor:pointer}
@@ -94,7 +103,7 @@ const STYLES = `
 .sb-seq-bar span{flex:1;font-family:'JetBrains Mono',monospace;color:var(--ink2)}
 .sb-export-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:13px}
 .sb-exp-bar{height:9px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;overflow:hidden}
-.sb-exp-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),#f0b866);transition:width .3s}
+.sb-exp-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--gold));transition:width .3s}
 .sb-exp-txt{font-size:13px;color:var(--ink);text-align:center;font-family:'JetBrains Mono',monospace}
 .sb-pick-ov{position:fixed;inset:0;z-index:400;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
 .sb-pick-box{width:920px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
@@ -109,7 +118,7 @@ const STYLES = `
 .sb-pick-cell{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--panel2)}
 .sb-pick-cell:hover{border-color:var(--amber)}
 .sb-pick-cell img{width:100%;height:100%;object-fit:cover;display:block}
-.sb-pick-vid{position:absolute;top:5px;right:5px;background:rgba(6,4,16,.72);color:#fff;font-size:9px;border-radius:4px;padding:1px 6px}
+.sb-pick-vid{position:absolute;top:5px;right:5px;background:rgba(6,4,16,.72);color:var(--ink);font-size:9px;border-radius:4px;padding:1px 6px}
 .sb-pick-empty{grid-column:1/-1;color:var(--ink3);text-align:center;padding:34px;font-size:13px}
 
 .sb-fromstrip{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--bg2);
@@ -120,10 +129,10 @@ const STYLES = `
   border:1px solid rgba(111,184,178,.4);border-radius:4px;padding:1px 6px;margin-left:auto}
 
 .sb-slate{display:flex;align-items:center;gap:10px;padding:11px 13px;
-  background:repeating-linear-gradient(45deg,#211d2c,#211d2c 9px,#1b1825 9px,#1b1825 18px);
+  background:repeating-linear-gradient(45deg,var(--panel),var(--panel) 9px,var(--bg) 9px,var(--bg) 18px);
   border-bottom:1px solid var(--line)}
 .sb-code{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;color:var(--amber);
-  background:#15131c;border:1px solid var(--line2);border-radius:5px;padding:3px 7px;white-space:nowrap}
+  background:var(--base);border:1px solid var(--line2);border-radius:5px;padding:3px 7px;white-space:nowrap}
 .sb-ctitle{flex:1 1 auto;min-width:0;background:transparent;border:none;color:var(--ink);font:inherit;
   font-weight:600;font-size:14px;padding:2px 0;text-overflow:ellipsis}
 .sb-ctitle:focus{outline:none}
@@ -133,7 +142,7 @@ const STYLES = `
 .sb-tick{width:22px;height:22px;border-radius:6px;border:1.5px solid var(--line2);background:transparent;
   cursor:pointer;flex:none;display:grid;place-items:center;color:transparent;transition:all .12s;padding:0}
 .sb-tick.wip{border-color:var(--amber);color:var(--amber)}
-.sb-tick.done{border-color:var(--green);background:var(--green);color:#15131c}
+.sb-tick.done{border-color:var(--green);background:var(--green);color:var(--base)}
 
 .sb-body{padding:12px 13px;display:flex;flex-direction:column;gap:11px}
 .sb-frames-mini{display:flex;align-items:stretch;gap:8px}
@@ -173,7 +182,7 @@ const STYLES = `
   display:grid;place-items:center;color:var(--ink3);font-size:11px;cursor:pointer;position:relative}
 .sb-frameprev img{width:100%;height:100%;object-fit:cover}
 .sb-frameprev.discreet img{filter:blur(9px)}
-.sb-tagin{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--cyan);background:#15131c;
+.sb-tagin{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--cyan);background:var(--base);
   border:1px solid var(--line2);border-radius:5px;padding:3px 6px;width:90px}
 
 .sb-pal{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
@@ -197,8 +206,8 @@ const STYLES = `
 .sb-btn{font:inherit;font-size:12.5px;font-weight:500;border-radius:7px;padding:7px 12px;cursor:pointer;
   border:1px solid var(--line2);background:var(--panel2);color:var(--ink);transition:all .12s;display:inline-flex;align-items:center;gap:6px}
 .sb-btn:hover{border-color:var(--amber);color:var(--amber)}
-.sb-btn.amber{background:var(--amber);color:#15131c;border-color:var(--amber);font-weight:600}
-.sb-btn.amber:hover{filter:brightness(1.08);color:#15131c}
+.sb-btn.amber{background:var(--amber);color:var(--base);border-color:var(--amber);font-weight:600}
+.sb-btn.amber:hover{filter:brightness(1.08);color:var(--base)}
 .sb-btn.ghost{background:transparent}.sb-btn.sm{font-size:11px;padding:5px 9px}
 .sb-btn.danger:hover{border-color:var(--coral);color:var(--coral)}
 .sb-ico{background:transparent;border:none;color:var(--ink3);cursor:pointer;padding:5px;border-radius:6px;font-size:14px;line-height:1;transition:all .12s}
@@ -623,7 +632,7 @@ export default function App() {
             <div className="sb-target" style={{ left: `${(project.target / scale) * 100}%` }} />
           </div>
           <div className="sb-reel-legend">
-            <span><i style={{ background: "#3a3450" }} />to do</span>
+            <span><i style={{ background: "var(--surface1)" }} />to do</span>
             <span><i style={{ background: "var(--amber)" }} />in progress</span>
             <span><i style={{ background: "var(--green)" }} />done</span>
             <span style={{ marginLeft: "auto" }}>{entries.length} clips · target 8:00</span>
