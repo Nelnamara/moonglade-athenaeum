@@ -1417,6 +1417,7 @@ body { background: var(--base); margin: 0; }
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7/babel.min.js" crossorigin></script>
+<script src="/static/picker-core.js"></script>
 </head><body>
 <div id="root"></div>
 <script>
@@ -3347,6 +3348,7 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:6px 9px;border-radius:5px;cursor:pointer;}
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
+<script src="/static/picker-core.js"></script>
 <script>
 var Ach = (function(){
   function el(id){return document.getElementById(id);}
@@ -3551,47 +3553,55 @@ var YourArt = (function(){
   return { open:open, close:close };
 })();
 var Picker = (function(){
-  var cb=null, timer=null, page=1, more=false, loading=false, curQ='';
+  // Browse/filter/page/infinite-scroll logic lives in PickerCore now (shared with the
+  // Loom's GalleryPick); this IIFE is a thin DOM-binding shim over it -- same ids, same
+  // CSS, same 3 call sites, same behavior as before the refactor.
+  var cb=null, core=null;
   function el(id){return document.getElementById(id);}
+  function readFilters(){
+    var v=function(id){ var e=el(id); return e?e.value:''; };
+    return {collection:v('pick-collection'), source:v('pick-source'), rating_min:v('pick-rating'), sort:v('pick-sort')};
+  }
+  function markLoading(){ el('pick-grid').style.opacity='.5'; var mb=el('pick-more'); if(mb) mb.style.display='none'; }
+  function ensureCore(){
+    if(core) return core;
+    // type stays '' -- /api/gallery-images already treats '' the same as an absent
+    // param (defaults to "image"), so this is byte-identical to the pre-refactor
+    // behavior (images only) with no explicit type filter in this UI.
+    core = PickerCore.create({
+      onResults: function(imgs, meta){
+        var grid=el('pick-grid'), empty=el('pick-empty'), moreBtn=el('pick-more');
+        grid.style.opacity='1';
+        if(!meta.append) grid.innerHTML='';
+        if(!imgs.length && !meta.append){ empty.textContent='No images found.'; empty.style.display='block'; if(moreBtn) moreBtn.style.display='none'; return; }
+        empty.style.display='none';
+        imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
+          c.innerHTML='<img loading="lazy" decoding="async" src="'+m.thumb+'" alt="">';
+          c.onclick=function(){ pick(m); }; grid.appendChild(c); });
+        if(moreBtn) moreBtn.style.display = meta.hasMore ? '' : 'none';
+        // If the loaded tiles don't fill the grid there's no scrollbar to drive infinite
+        // scroll -- pull one more page so it overflows (core caps this so a tall window
+        // can't runaway-load; the Load-more button covers the rest).
+        core.maybeFillPage(grid);
+      },
+      onError: function(){ el('pick-grid').style.opacity='1'; }
+    });
+    return core;
+  }
   function open(callback){ cb=callback; el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
-    el('pick-q').value=''; curQ=''; page=1; load(false); setTimeout(function(){el('pick-q').focus();},120);
+    el('pick-q').value=''; markLoading();
+    ensureCore().setFilters(Object.assign({q:''}, readFilters()));
+    setTimeout(function(){el('pick-q').focus();},120);
     try{ el('pick-copy').checked = localStorage.getItem('pick-copyprompt')==='1'; }catch(e){} }
   function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; }
-  function onInput(){ clearTimeout(timer); timer=setTimeout(function(){ curQ=el('pick-q').value.trim(); page=1; load(false); }, 280); }
-  function onFilter(){ page=1; load(false); }
-  function filterQS(){
-    var v=function(id){ var e=el(id); return e?encodeURIComponent(e.value):''; };
-    return '&collection='+v('pick-collection')+'&source='+v('pick-source')
-         +'&rating_min='+v('pick-rating')+'&sort='+v('pick-sort');
-  }
+  function onInput(){ ensureCore().setQuery(el('pick-q').value.trim()); }
+  function onFilter(){ markLoading(); ensureCore().setFilters(readFilters()); }
   function pick(m, thumb){
     try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
     var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'');
   }
-  function load(append){
-    if(loading) return; loading=true;
-    var grid=el('pick-grid'), empty=el('pick-empty'), moreBtn=el('pick-more');
-    if(!append) grid.style.opacity='.5';
-    if(moreBtn){ moreBtn.style.display='none'; }
-    fetch('/api/gallery-images?limit=60&page='+page+'&q='+encodeURIComponent(curQ)+filterQS()).then(function(r){return r.json();}).then(function(d){
-      loading=false; grid.style.opacity='1'; var imgs=d.images||[];
-      if(!append) grid.innerHTML='';
-      more = ((d.page||1)*(d.limit||60)) < (d.total||0);
-      if(!imgs.length && !append){ empty.textContent='No images found.'; empty.style.display='block'; if(moreBtn) moreBtn.style.display='none'; return; }
-      empty.style.display='none';
-      imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
-        c.innerHTML='<img loading="lazy" decoding="async" src="'+m.thumb+'" alt="">';
-        c.onclick=function(){ pick(m); }; grid.appendChild(c); });
-      if(moreBtn) moreBtn.style.display = more ? '' : 'none';
-      // If the loaded tiles don't fill the grid there's no scrollbar to drive infinite
-      // scroll -- pull one more page so it overflows. Capped at page 4 so a tall window
-      // (or any layout glitch) can't runaway-load; the Load-more button covers the rest.
-      if(more && page < 4 && grid.scrollHeight <= grid.clientHeight + 4){ page++; load(true); }
-    }).catch(function(){ loading=false; grid.style.opacity='1'; });
-  }
-  function more_(){ if(more && !loading){ page++; load(true); } }
-  function onScroll(){ var g=el('pick-grid');
-    if(more && !loading && g.scrollTop + g.clientHeight > g.scrollHeight - 320){ page++; load(true); } }
+  function more_(){ ensureCore().loadMore(); }
+  function onScroll(){ ensureCore().onScroll(el('pick-grid'), 320); }
   function toggleCopy(){ try{ localStorage.setItem('pick-copyprompt', el('pick-copy').checked?'1':'0'); }catch(e){} }
   function upload(){ el('pick-file').click(); }
   function onFile(){
