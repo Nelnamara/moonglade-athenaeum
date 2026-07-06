@@ -509,6 +509,46 @@ def test_enhance_shelf_promotes_official_tools(tmp_path):
     assert 'id="enh-q"' in html          # the browse-all search still present below the shelf
 
 
+def test_edit_model_id_and_quality_omit():
+    """The Edit-model registry maps picker keys to the right model ids, and
+    build_chat_edit_parameters omits 'quality' when empty (Reference Pro has no quality)."""
+    assert core.edit_model_id("edit-pro") == core.EDIT_PRO_MODEL_ID
+    assert core.edit_model_id("reference-pro") == "1948514378441961474"
+    assert core.edit_model_id("nope") == "" and core.edit_model_id("") == ""
+    ref = core.build_chat_edit_parameters("x", ["10"], quality="")     # ref-pro: no quality knob
+    assert "quality" not in ref["chat"]["modelConfig"]
+    ep = core.build_chat_edit_parameters("x", ["10"], quality="high")
+    assert ep["chat"]["modelConfig"]["quality"] == "high"
+
+
+def test_edit_price_uses_selected_model(tmp_path, monkeypatch):
+    """The Edit card's model picker drives the submitted modelId + valid option set:
+    Reference Pro -> model 1948..., 4K/21:9, no quality; Edit Pro -> Edit Pro model + quality."""
+    seen = {}
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli.post("/api/price", json={"mode": "edit", "edit_model": "reference-pro", "source": "55",
+                                 "resolution": "4K", "quality": "", "aspect": "21:9"})
+    chat = seen["p"]["chat"]
+    assert chat["modelId"] == "1948514378441961474"
+    assert chat["modelConfig"]["resolution"] == "4K" and chat["modelConfig"]["aspectRatio"] == "21:9"
+    assert "quality" not in chat["modelConfig"]            # Reference Pro sends no quality
+    seen.clear()
+    cli.post("/api/price", json={"mode": "edit", "edit_model": "edit-pro", "source": "55",
+                                 "resolution": "2K", "quality": "high", "aspect": "1:1"})
+    chat = seen["p"]["chat"]
+    assert chat["modelId"] == core.EDIT_PRO_MODEL_ID and chat["modelConfig"]["quality"] == "high"
+
+
+def test_edit_card_has_model_picker(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert 'id="em-edit-pro"' in html and 'id="em-reference-pro"' in html
+    assert "Gen.setEditModel('reference-pro')" in html
+    assert "EDIT_CAPS" in html and "'reference-pro'" in html   # capability-driven dropdowns
+
+
 def test_generate_card_has_size_and_custom_dimensions(tmp_path):
     """The Generate card must expose real dimensions — size presets + custom W/H + a wider
     aspect set — not the old 5 hardcoded ~512px buttons. The API has no size cap (backend

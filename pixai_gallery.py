@@ -3278,7 +3278,12 @@ document.addEventListener('DOMContentLoaded', function(){
         <button id="es-fix" onclick="Gen.setEditSub('fix')">Fix</button>
       </div>
       <div id="edit-sub-edit">
-        <div class="gen-lbl" style="margin-top:0;">Toolbox preset <span style="text-transform:none;color:var(--subtext);">&middot; canned effects &middot; overrides the instruction</span></div>
+        <div class="gen-lbl" style="margin-top:0;">Edit model</div>
+        <div class="gen-seg" style="margin-bottom:9px;">
+          <button id="em-edit-pro" type="button" class="on" onclick="Gen.setEditModel('edit-pro')" title="Instruct edit + up to 4 reference images &middot; 1K/2K">Edit Pro</button>
+          <button id="em-reference-pro" type="button" onclick="Gen.setEditModel('reference-pro')" title="Reference edit + up to 10 reference images &middot; 2K/4K">Reference Pro</button>
+        </div>
+        <div class="gen-lbl">Toolbox preset <span style="text-transform:none;color:var(--subtext);">&middot; canned effects &middot; overrides the instruction</span></div>
         <div style="display:flex;gap:6px;margin-bottom:6px;">
           <select id="edit-preset" class="gen-sel" style="flex:1;" onchange="Gen.editCost()">
             <option value="">None &mdash; custom instruction below</option>
@@ -3289,12 +3294,12 @@ document.addEventListener('DOMContentLoaded', function(){
         <textarea id="edit-ins" class="gen-ta" rows="3" placeholder="Describe the change &mdash; &lsquo;make it night, add snow&rsquo;&hellip;"></textarea>
         <div class="gen-row" style="margin-top:8px;">
           <div style="flex:1;"><div class="gen-lbl">Resolution</div>
-            <select id="edit-res" class="gen-sel"><option>1K</option><option>2K</option><option>4K</option></select></div>
-          <div style="flex:1;"><div class="gen-lbl">Quality</div>
-            <select id="edit-qual" class="gen-sel"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+            <select id="edit-res" class="gen-sel"></select></div>
+          <div style="flex:1;" id="edit-qual-wrap"><div class="gen-lbl">Quality</div>
+            <select id="edit-qual" class="gen-sel"></select></div>
         </div>
         <div class="gen-lbl">Aspect</div>
-        <select id="edit-aspect" class="gen-sel"><option value="3:4">3:4</option><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select>
+        <select id="edit-aspect" class="gen-sel"></select>
         <div id="edit-cost" class="gen-cost">Pick an image to see the cost.</div>
         <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
         <div id="edit-result" class="gen-result" style="display:none;"></div>
@@ -4475,10 +4480,33 @@ var Gen = (function(){
     else { img.style.display='none'; }
     debEditCost();
   }
+  var EDIT_CAPS={
+    'edit-pro':{max_refs:4,resolutions:['1K','2K'],qualities:['low','medium','high'],
+      aspects:['16:9','9:16','1:1','2:3','3:2','3:4','4:3','4:5','5:4','1:3','3:1'],
+      def:{resolution:'1K',quality:'medium',aspect:'3:4'}},
+    'reference-pro':{max_refs:10,resolutions:['2K','4K'],qualities:[],
+      aspects:['16:9','9:16','1:1','2:3','3:2','3:4','4:3','4:5','5:4','21:9'],
+      def:{resolution:'2K',quality:'',aspect:'3:4'}}
+  }; /* mirrors core.EDIT_MODELS caps (capability probe 2026-07-06) */
+  var editModel='edit-pro';
+  function _fillEditSel(id,opts,val){ var s=el(id); if(!s)return; s.innerHTML='';
+    opts.forEach(function(o){ var e2=document.createElement('option'); e2.value=o; e2.textContent=o;
+      if(o===val)e2.selected=true; s.appendChild(e2); }); }
+  function setEditModel(k){
+    var c=EDIT_CAPS[k]; if(!c)return; editModel=k;
+    var a=el('em-edit-pro'), b=el('em-reference-pro');
+    if(a)a.classList.toggle('on',k==='edit-pro'); if(b)b.classList.toggle('on',k==='reference-pro');
+    _fillEditSel('edit-res',c.resolutions,c.def.resolution);
+    _fillEditSel('edit-aspect',c.aspects,c.def.aspect);
+    var qw=el('edit-qual-wrap');
+    if(c.qualities.length){ if(qw)qw.style.display=''; _fillEditSel('edit-qual',c.qualities,c.def.quality); }
+    else { if(qw)qw.style.display='none'; if(el('edit-qual'))el('edit-qual').innerHTML=''; }
+    editCost();
+  }
   function editPayload(){
-    return { mode:'edit', source:editSrc(), instruction:el('edit-ins').value.trim(),
+    return { mode:'edit', edit_model:editModel, source:editSrc(), instruction:el('edit-ins').value.trim(),
       preset:(el('edit-preset')?el('edit-preset').value:''),
-      resolution:el('edit-res').value, quality:el('edit-qual').value, aspect:el('edit-aspect').value };
+      resolution:el('edit-res').value, quality:(el('edit-qual')?el('edit-qual').value:''), aspect:el('edit-aspect').value };
   }
   var presetsLoaded=false;
   function loadPresets(){
@@ -4736,7 +4764,7 @@ var Gen = (function(){
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           insertTriggers:insertTriggers, setSort:setSort, setCat:setCat,
-          setEditSub:setEditSub, addVideoRefs:addVideoRefs, videoCost:videoCost,
+          setEditSub:setEditSub, setEditModel:setEditModel, addVideoRefs:addVideoRefs, videoCost:videoCost,
           videoAudioToggle:videoAudioToggle,
           vpOnInput:vpOnInput, vpChipify:vpChipify,
           videoPromptText:vpText, videoPromptSet:videoPromptSet,
@@ -4892,6 +4920,7 @@ document.addEventListener('DOMContentLoaded', function(){
   if(document.getElementById('gen-dim-note') && window.Gen) Gen.refreshCost();
   ['edit-res','edit-qual','edit-aspect'].forEach(function(id){
     var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.editCost); });
+  if(document.getElementById('em-edit-pro') && window.Gen) Gen.setEditModel('edit-pro');  // populate the option lists
   var es=document.getElementById('edit-src');
   if(es) es.addEventListener('input', function(){ Gen.setEditSource(es.value.trim()); });
   var eq=document.getElementById('enh-q'); if(eq) eq.addEventListener('input', Gen.renderWorkflows);
@@ -6894,12 +6923,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             instruction = pre.get("prompt") or instruction
             scene_id = pre.get("scene_id") or ""
             model_id = pre.get("model_id") or ""
+        # A preset pins its own model; otherwise resolve from the Edit-card model picker.
+        if not model_id:
+            model_id = core.edit_model_id(p.get("edit_model") or "") or core.EDIT_PRO_MODEL_ID
+        # quality: omitted (passed "") for models with no quality option (Reference Pro);
+        # default medium only when the client sent no quality key at all.
+        q = p.get("quality")
+        if q is None:
+            q = "medium"
         kwargs = dict(resolution=(p.get("resolution") or "1K"),
                       aspect_ratio=(p.get("aspect") or "3:4"),
-                      quality=(p.get("quality") or "medium"),
-                      scene_id=scene_id)
-        if model_id:
-            kwargs["model_id"] = model_id
+                      quality=q, scene_id=scene_id, model_id=model_id)
         return core.build_chat_edit_parameters(instruction, [src], **kwargs)
 
     @app.route("/api/presets", methods=["GET", "POST"])
