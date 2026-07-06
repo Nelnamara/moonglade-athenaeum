@@ -5693,7 +5693,10 @@ def main():
             # with a clean catalog costs almost nothing extra.
             args.update = True
             args.full_meta = True
-            run_download(args)
+            # run_download uses its `progress` PARAM (not args.progress), so hand it over
+            # explicitly -- otherwise the panel's progress bar is blank during the
+            # download step (fix_models/backfill already read args.progress themselves).
+            run_download(args, progress=getattr(args, "progress", None))
             print("\nSync: resolving any unlabeled model names...")
             run_fix_models(args)
             print("Sync: filling any rows still missing metadata...")
