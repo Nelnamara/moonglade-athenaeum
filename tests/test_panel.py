@@ -124,6 +124,41 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
     assert all(isinstance(a, str) for a in argv)
 
 
+def test_watch_status_default_shape(tmp_path):
+    """conftest sets MOONGLADE_DISABLE_WATCH=1 for every test (see its docstring --
+    without it, create_app() would open a real WebSocket to PixAI using whatever real
+    credentials happen to be on this machine, on every single test in the suite).
+    /api/watch/status must still answer safely with the never-started default shape,
+    and stay localhost-gated like every other panel status endpoint."""
+    cli = _client(tmp_path).test_client()
+    d = cli.get("/api/watch/status").get_json()
+    assert d["connected"] is False and d["mirrored"] == 0 and d["events_seen"] == 0
+    r = cli.get("/api/watch/status", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r.status_code == 403
+
+
+def test_watch_autostarts_unless_disabled(tmp_path, monkeypatch):
+    """The live-mirror watcher auto-starts (a background thread targeting _watch_loop)
+    unless MOONGLADE_DISABLE_WATCH=1. This test explicitly clears the flag conftest sets
+    globally to prove the auto-start WIRING is correct -- but replaces threading.Thread
+    with a recorder that never calls .start() for real, so nothing actually attempts a
+    live connection even with the flag cleared."""
+    import threading
+    monkeypatch.delenv("MOONGLADE_DISABLE_WATCH", raising=False)
+    targets = []
+
+    class _RecordingThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            targets.append(target)
+        def start(self):
+            pass   # deliberately a no-op -- see docstring
+    monkeypatch.setattr(threading, "Thread", _RecordingThread)
+
+    create_app(tmp_path)
+
+    assert any(t and t.__name__ == "_watch_loop" for t in targets)
+
+
 def test_run_sync_action_spawns_sync_flag(tmp_path, monkeypatch):
     """'Sync now' is the panel's primary job: one argv, --sync (pull + metadata)."""
     import subprocess

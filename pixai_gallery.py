@@ -1646,6 +1646,80 @@ def create_app(out_dir: Path):
 
     threading.Thread(target=_scheduler_loop, daemon=True).start()
 
+    # ---- Live-mirror watcher: event-driven backup over PixAI's push WebSocket -----
+    # Keeps the CLI's --watch/--watch-backup machinery (pixai_gallery_backup.py)
+    # connected for as long as the gallery runs, auto-reconnecting with backoff on any
+    # drop. Each generation is downloaded + cataloged the INSTANT it completes -- this
+    # is what makes --update a fallback instead of the only way gens land locally.
+    # Read-only listening + free downloads (no credits spent). Always-on by design.
+    _watch_lock = threading.Lock()
+    _watch_status = {"connected": False, "last_event_at": None, "mirrored": 0,
+                      "events_seen": 0, "last_error": None, "started_at": None}
+
+    def _watch_mirror(tid):
+        """Download + catalog one finished task off the watcher's event loop (own
+        session per call, matching the CLI's --watch-backup pattern)."""
+        import pixai_gallery_backup as core
+        try:
+            session = core._make_session(None)
+            core.collect_generation(session, tid, str(out_dir))
+            with _watch_lock:
+                _watch_status["mirrored"] += 1
+        except Exception as e:
+            with _watch_lock:
+                _watch_status["last_error"] = str(e)[:200]
+
+    def _watch_loop():
+        import asyncio
+        import time as _time
+        import pixai_gallery_backup as core
+        backed = set()   # task ids already mirrored this process's lifetime (a
+                         # 'completed' event can repeat)
+        with _watch_lock:
+            _watch_status["started_at"] = _time.time()
+        backoff = 5
+        while True:
+            try:
+                # _make_session raises PixAIError (caught below) when no credentials
+                # are configured -- it never returns a session with a blank auth
+                # header, so there's nothing else to check here before subscribing.
+                session = core._make_session(None)
+                auth = session.headers.get("Authorization")
+
+                def on_event(ev):
+                    if ev.get("__meta__") == "subscribed":
+                        with _watch_lock:
+                            _watch_status["connected"] = True
+                            _watch_status["last_error"] = None
+                        return
+                    tu = ev.get("taskUpdated")
+                    if not tu:
+                        return
+                    with _watch_lock:
+                        _watch_status["events_seen"] += 1
+                        _watch_status["last_event_at"] = _time.time()
+                    status = tu.get("status")
+                    tid = str(tu.get("id") or "")
+                    if status == core._WS_DONE_STATUS and tid and tid not in backed:
+                        backed.add(tid)
+                        threading.Thread(target=_watch_mirror, args=(tid,), daemon=True).start()
+
+                asyncio.run(core._watch_events_async(auth, on_event, None))
+                backoff = 5   # a clean disconnect resets the backoff
+            except Exception as e:
+                with _watch_lock:
+                    _watch_status["last_error"] = str(e)[:200]
+            with _watch_lock:
+                _watch_status["connected"] = False
+            _time.sleep(backoff)
+            backoff = min(backoff * 3, 60)
+
+    # MOONGLADE_DISABLE_WATCH=1 skips auto-start -- set by the test suite's conftest so
+    # create_app() (called by ~every test) never opens a real WebSocket to PixAI using
+    # whatever real credentials happen to be in this machine's config.json.
+    if os.environ.get("MOONGLADE_DISABLE_WATCH") != "1":
+        threading.Thread(target=_watch_loop, daemon=True).start()
+
     # ------------------------------------------------------------------
     # Template
     # ------------------------------------------------------------------
@@ -5002,6 +5076,15 @@ function savePrompt() {
   </div>
 
   <div class="p-sec">
+    <h2>Live Mirror</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;">
+      <span id="watch-dot" style="width:9px;height:9px;border-radius:50%;background:var(--overlay0);flex:0 0 auto;"></span>
+      <span id="watch-status" style="font-size:12.5px;color:var(--subtext);">checking&hellip;</span>
+    </div>
+    <div class="p-note">Listens for your generations to finish over PixAI's push connection and mirrors each one the instant it completes &mdash; <code>--update</code> becomes a fallback, not the only way gens land locally. Read-only + free; always on while the server runs.</div>
+  </div>
+
+  <div class="p-sec">
     <h2>&#127912; Branding</h2>
     <div class="p-note">The <b>banner mark</b> &mdash; the icon beside the title &mdash; and its animation. <b>Set launcher icon</b> writes a Desktop shortcut whose icon is the selected mark (a .pyw can't carry its own icon; the shortcut can). The favicon stays the Gem Tome.</div>
     <div id="brand-marks" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;"></div>
@@ -5130,6 +5213,27 @@ function saveSchedule(){
       el('sch-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved'+(s.enabled?(' \\u00b7 every '+s.interval_hours+'h while open'):' \\u00b7 disabled')+'</span>';
     }).catch(function(){ el('sch-status').textContent='\\u26a0 network error'; });
 }
+function _timeAgo(ts){
+  var s=Math.max(0, Math.floor(Date.now()/1000 - ts));
+  if(s<60) return s+'s ago';
+  if(s<3600) return Math.floor(s/60)+'m ago';
+  return Math.floor(s/3600)+'h ago';
+}
+function loadWatchStatus(){
+  fetch('/api/watch/status').then(function(r){return r.json();}).then(function(d){
+    var dot=el('watch-dot'), st=el('watch-status'); if(!dot||!st) return;
+    if(d.connected){
+      dot.style.background='var(--emerald)';
+      var bits=['\\u25c9 connected'];
+      if(d.last_event_at) bits.push('last event '+_timeAgo(d.last_event_at));
+      bits.push((d.mirrored||0)+' mirrored this session');
+      st.textContent=bits.join(' \\u00b7 ');
+    } else {
+      dot.style.background = d.last_error ? 'var(--red)' : 'var(--overlay0)';
+      st.textContent = d.last_error ? ('reconnecting\\u2026 ('+d.last_error+')') : 'connecting\\u2026';
+    }
+  }).catch(function(){ var st=el('watch-status'); if(st) st.textContent='status unavailable'; });
+}
 // --- Branding: banner mark + animation + launcher shortcut ---
 var _brandMark='';
 function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -5211,7 +5315,8 @@ function _watchServer(comeBack){
     if(tries>50){ clearInterval(iv); el('srv-msg').textContent=comeBack?'Still restarting\\u2026 give it a moment, then refresh.':'Server stopped.'; el('srv-spin').style.display='none'; }
   }, 800);
 }
-renderJobs(); loadAcct(); loadSchedule(); loadBrand();
+renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadWatchStatus();
+setInterval(loadWatchStatus, 8000);
 // if a job was already running when the page loaded, resume polling
 fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });
 </script>
@@ -5335,6 +5440,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "progress": _panel_job["progress"],
                             "lines": list(_panel_job["lines"])})
 
+    @app.route("/api/watch/status")
+    def api_watch_status():
+        """Live-mirror watcher health: is the push WebSocket connected right now, when
+        did it last see an event, how many gens has it mirrored this server run."""
+        if not _is_local_request():
+            return jsonify({"connected": False}), 403
+        with _watch_lock:
+            return jsonify(dict(_watch_status))
+
     @app.route("/api/panel/cancel", methods=["POST"])
     def api_panel_cancel():
         """Stop the running maintenance job from the browser (no Task Manager). Terminates the
@@ -5367,7 +5481,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             s = _load_sched()
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
-                action = str(body.get("action") or s.get("action") or "update")
+                action = str(body.get("action") or s.get("action") or "sync")
                 if action not in PANEL_ACTIONS or PANEL_ACTIONS[action]["destructive"]:
                     return jsonify({"error": "only safe jobs can be scheduled"}), 400
                 try:
