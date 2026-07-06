@@ -2815,10 +2815,17 @@ function lbShow() {
   if (card.dataset.video === '1') {
     im.style.display = 'none'; im.removeAttribute('src');
     vid.style.display = '';
+    vid.onerror = function(){                   // surface the real reason on mobile (MediaError code)
+      var c = (vid.error && vid.error.code) || '?';
+      document.getElementById('lb-caption').textContent =
+        "Video won't play (error " + c + ") — open Details to download it.";
+    };
     vid.src = '/video-file/' + mid;
-    vid.currentTime = 0;
+    vid.load();                                // iOS Safari requires load() after a src change
+    // NOTE: do NOT set currentTime here — seeking before metadata loads throws on iOS.
     vid.play().catch(function(){});            // autoplay may be blocked; controls still work
   } else {
+    vid.onerror = null;
     vid.pause(); vid.removeAttribute('src'); vid.load(); vid.style.display = 'none';
     im.style.display = '';
     im.src = lbUrl(mid);
