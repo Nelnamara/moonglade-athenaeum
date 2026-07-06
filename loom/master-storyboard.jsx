@@ -942,6 +942,8 @@ function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpe
    is correct). Picking a media_id references it directly at generate time -- no
    re-upload. defaultType presets the type toggle for the calling context. */
 function GalleryPick({ onPick, onClose, defaultType }) {
+  // Browse/filter/page/scroll logic now lives in PickerCore (shared with the gallery's
+  // own Picker) -- this component keeps its own JSX/CSS and just drives the core.
   const [q, setQ] = useState("");
   const [imgs, setImgs] = useState([]);
   const [total, setTotal] = useState(0);
@@ -950,37 +952,34 @@ function GalleryPick({ onPick, onClose, defaultType }) {
   const [rating, setRating] = useState(0);
   const [sort, setSort] = useState("newest");
   const [colls, setColls] = useState([]);
-  const pageRef = useRef(1), busyRef = useRef(false), moreRef = useRef(true);
-  const qs = (p) => `/api/gallery-images?limit=60&page=${p}&q=${encodeURIComponent(q)}`
-    + `&collection=${encodeURIComponent(coll)}&type=${type}&rating_min=${rating}&sort=${sort}`;
-  useEffect(() => { fetch("/api/collections").then((r) => r.json())
-    .then((d) => setColls(d.collections || [])).catch(() => {}); }, []);
+  const coreRef = useRef(null);
+  const gridRef = useRef(null);
+  if (!coreRef.current) {
+    coreRef.current = PickerCore.create({
+      defaultFilters: { type, collection: coll, rating_min: rating, sort },
+      onResults: (im, meta) => {
+        setImgs((old) => (meta.append ? [...old, ...im] : im));
+        setTotal(meta.total);
+      },
+      onCollections: setColls,
+    });
+  }
+  useEffect(() => { coreRef.current.fetchCollections(); return () => coreRef.current.destroy(); }, []);   // eslint-disable-line
+  // Single combined debounce over every filter (q included) -- same 160ms + same
+  // "any of these changing restarts the timer" shape as before the refactor.
   useEffect(() => {
     const t = setTimeout(() => {
-      busyRef.current = true;
-      fetch(qs(1)).then((r) => r.json()).then((d) => {
-        const im = d.images || []; setImgs(im); setTotal(d.total || 0);
-        pageRef.current = 1; moreRef.current = im.length < (d.total || 0); busyRef.current = false;
-      }).catch(() => { busyRef.current = false; });
+      coreRef.current.setFilters({ q, collection: coll, type, rating_min: rating, sort });
     }, 160);
     return () => clearTimeout(t);
   }, [q, coll, type, rating, sort]);   // eslint-disable-line
+  // Auto-pull extra pages if the grid doesn't yet overflow -- closes a real gap the
+  // gallery's own Picker already guarded against (a narrow/tall Loom viewport could
+  // leave `more` stuck unreachable with no scrollbar to ever trigger infinite scroll).
+  useEffect(() => { if (gridRef.current) coreRef.current.maybeFillPage(gridRef.current); }, [imgs]);
   useEffect(() => { const k = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
-  const more = () => {
-    if (busyRef.current || !moreRef.current) return;
-    busyRef.current = true;
-    const p = pageRef.current + 1;
-    fetch(qs(p)).then((r) => r.json()).then((d) => {
-      const im = d.images || [];
-      setImgs((old) => { const next = [...old, ...im]; moreRef.current = next.length < (d.total || total); return next; });
-      pageRef.current = p; busyRef.current = false;
-    }).catch(() => { busyRef.current = false; });
-  };
-  const onScroll = (e) => {
-    const g = e.currentTarget;
-    if (g.scrollTop + g.clientHeight >= g.scrollHeight - 280) more();
-  };
+  const onScroll = (e) => coreRef.current.onScroll(e.currentTarget, 280);
   return (
     <div className="sb-pick-ov" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="sb-pick-box">
@@ -1006,7 +1005,7 @@ function GalleryPick({ onPick, onClose, defaultType }) {
           </select>
           <span className="sb-pick-count">{(total || 0).toLocaleString()}</span>
         </div>
-        <div className="sb-pick-grid" onScroll={onScroll}>
+        <div className="sb-pick-grid" ref={gridRef} onScroll={onScroll}>
           {imgs.map((m) => (
             <div key={m.media_id} className="sb-pick-cell" title={m.prompt}
               onClick={() => onPick(m.media_id, m.thumb, m.is_video === "1")}>
