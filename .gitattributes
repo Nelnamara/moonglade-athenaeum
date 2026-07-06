@@ -24,6 +24,10 @@
 *.cmd   text eol=crlf
 *.ps1   text eol=crlf
 
+# Vendored third-party JS (loom/vendor/) -- byte-for-byte as downloaded, never
+# line-ending-normalized (overrides the `*.js text` rule above; more specific wins).
+loom/vendor/*.js binary
+
 # Binary — git must never touch these
 *.png   binary
 *.jpg   binary
