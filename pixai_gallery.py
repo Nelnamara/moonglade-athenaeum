@@ -6147,14 +6147,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/sw.js")
     def service_worker():
         # Cache-first for immutable thumbnails/images; network for everything else.
+        # v2: only cache OK (200) responses -- NEVER a 404 -- so a thumbnail that
+        # didn't exist yet (poster-less video mid-collect) can't get its miss frozen
+        # into the cache. Bumping the cache name + deleting old caches on activate
+        # self-heals any client still holding a poisoned v1 404 (no hard-refresh needed).
         sw = (
-            "const C='pixai-img-v1';\n"
+            "const C='pixai-img-v2';\n"
             "self.addEventListener('install',e=>self.skipWaiting());\n"
-            "self.addEventListener('activate',e=>self.clients.claim());\n"
+            "self.addEventListener('activate',e=>e.waitUntil(\n"
+            "  caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k))))\n"
+            "  .then(()=>self.clients.claim())));\n"
             "self.addEventListener('fetch',e=>{\n"
             " const u=new URL(e.request.url);\n"
             " if(e.request.method==='GET' && (u.pathname.startsWith('/thumbs/')||u.pathname.startsWith('/img/')||u.pathname.startsWith('/full/'))){\n"
-            "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>r||fetch(e.request).then(resp=>{c.put(e.request,resp.clone());return resp;}))));\n"
+            "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;}))));\n"
             " }\n"
             "});\n")
         return app.response_class(sw, mimetype="application/javascript")

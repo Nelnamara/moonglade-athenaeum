@@ -3384,6 +3384,7 @@ def _download_video_task(session, result, task_id, out, args, params):
 
     from pixai_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
+    thumb_dir.mkdir(parents=True, exist_ok=True)
     vdir = out / "videos"
     vdir.mkdir(parents=True, exist_ok=True)
     db_path = out / "catalog.db"
@@ -3414,6 +3415,7 @@ def _download_video_task(session, result, task_id, out, args, params):
             "height": str(detail.get("height") or ""),
         })
         pm = o.get("poster_media_id")
+        thumb_path = thumb_dir / "{}.jpg".format(vmid)
         if pm:
             purl, _pi = resolve_media(session, pm)
             if purl:
@@ -3421,7 +3423,12 @@ def _download_video_task(session, result, task_id, out, args, params):
                 ptmp.mkdir(parents=True, exist_ok=True)
                 st, pp = download(session, purl, ptmp / str(pm))
                 if st in ("ok", "skip") and pp:
-                    make_thumbnail(pp, thumb_dir / "{}.jpg".format(vmid))
+                    make_thumbnail(pp, thumb_path)
+        # Poster-less (or poster fetch failed): ffmpeg the mp4's first frame, so the
+        # gallery never shows a blank tile waiting on a later sync. Matches _do_task /
+        # run_import_local; no-op if ffmpeg isn't on PATH.
+        if not thumb_path.exists():
+            video_poster_thumb(path, thumb_path)
         rows.append(full)
         saved.append(str(path))
     if rows:

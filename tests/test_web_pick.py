@@ -488,3 +488,16 @@ def test_branding_absent_is_404(tmp_path):
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/branding/banner.png").status_code == 404      # onerror removes the img
     assert cli.get("/branding/../catalog.db").status_code == 404    # traversal rejected
+
+
+def test_service_worker_never_caches_misses(tmp_path):
+    """The SW must NOT freeze a 404 (a thumbnail that didn't exist yet) into its cache --
+    that was the 'blank video tile until a hard-refresh' bug. It must only cache OK
+    responses, use a bumped cache name, and delete the old (poisoned) cache on activate
+    so existing clients self-heal without Ctrl+Shift+R."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    sw = cli.get("/sw.js").get_data(as_text=True)
+    assert "resp.ok" in sw and "c.put" in sw                # caches only successful fetches
+    assert "pixai-img-v2" in sw and "pixai-img-v1" not in sw  # bumped cache name
+    assert "caches.delete" in sw                            # purges the poisoned old cache
