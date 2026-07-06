@@ -74,7 +74,14 @@ def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypat
     monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
 
     client = create_app(tmp_path).test_client()
-    client.post("/delete-tasks-bulk", data={"media_ids": ["100", "200"], "back": "/"})
+    r = client.post("/delete-tasks-bulk", data={"media_ids": ["100", "200"], "back": "/"})
+    assert "bulkdel=started" in r.headers["Location"]            # async now: kicks off + reports to the card
+
+    import time
+    for _ in range(200):                                         # wait for the background delete thread
+        if not load_catalog(db):
+            break
+        time.sleep(0.02)
 
     assert calls == ["T1"]                                       # cloud delete fired once, task-level
     deleted = tmp_path / g.DELETED_DIRNAME
@@ -82,3 +89,42 @@ def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypat
     for name in ("100.png", "101.png", "200.png"):
         assert (deleted / name).exists()
     assert {r["media_id"] for r in load_catalog(db)} == set()    # all three rows cleared
+
+
+def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch):
+    """The async delete registers a 'delete' job that shows in /api/jobs and reaches 'done'."""
+    import time
+    import pixai_gallery_backup as core
+    _seed(tmp_path, [_row(media_id="a1", task_id="TA", filename="a1.png")], {"a1.png": b"x"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: None)
+
+    client = create_app(tmp_path).test_client()
+    client.post("/delete-tasks-bulk", data={"media_ids": ["a1"], "back": "/"})
+
+    job = None
+    for _ in range(200):
+        jobs = client.get("/api/jobs").get_json()["jobs"]
+        job = next((j for j in jobs if j.get("type") == "delete"), None)
+        if job and job["status"] in ("done", "failed"):
+            break
+        time.sleep(0.02)
+    assert job is not None and job["status"] == "done" and job["total"] == 1
+
+
+def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
+    """A LAN request must NOT be able to delete from the owner's PixAI account."""
+    import time
+    import pixai_gallery_backup as core
+    db = _seed(tmp_path, [_row(media_id="z1", task_id="TZ", filename="z1.png")], {"z1.png": b"x"})
+    fired = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.append(tid))
+
+    client = create_app(tmp_path).test_client()
+    r = client.post("/delete-tasks-bulk", data={"media_ids": ["z1"], "back": "/"},
+                    environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert "delerr" in r.headers["Location"]        # refused with an error, not a delete
+    time.sleep(0.1)                                  # give any wrongly-spawned thread a beat
+    assert fired == []                               # nothing deleted from the cloud
+    assert {x["media_id"] for x in load_catalog(db)} == {"z1"}   # row intact

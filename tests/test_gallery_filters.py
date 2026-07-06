@@ -403,8 +403,15 @@ def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypat
     # select ONE image of task T1, plus the local-only import
     r = client.post("/delete-tasks-bulk", data={"media_ids": ["m1", "loc"], "back": "/"})
     assert r.status_code == 302
+    assert "bulkdel=started" in r.headers["Location"]   # async: kicked off, reports to the Activity card
+
+    import time
+    for _ in range(200):                                # wait for the background delete thread
+        if not load_catalog(db):
+            break
+        time.sleep(0.02)
+
     assert calls == ["T1"]                       # cloud delete fired once for the task
-    assert "deleted=1" in r.headers["Location"]
     remaining = {x["media_id"] for x in load_catalog(db)}
     assert remaining == set()                    # whole task (m1+m2) + import all purged
     assert not (tmp_path / "images" / "b_m2.png").exists()   # batch sibling gone too

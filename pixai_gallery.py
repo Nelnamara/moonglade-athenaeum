@@ -1529,6 +1529,11 @@ def create_app(out_dir: Path):
     _export_job = {"status": "idle", "progress": 0, "elapsed": 0.0,
                    "out": "", "error": "", "proc": None, "cancelled": False}
     _export_dir = out_dir / "loom" / "exports"
+    # Bulk cloud-delete runs OFF-THREAD (it's irreversible and can be many network calls)
+    # and reports to the Activity card via the job log. Single-flight so two runs can never
+    # interleave their deletes.
+    _bulkdel_lock = threading.Lock()
+    _bulkdel_running = {"on": False}
 
     # action -> {args (extra flags), label, destructive}
     # action -> {args, label, destructive, panel_visible}. panel_visible=False actions
@@ -1557,6 +1562,9 @@ def create_app(out_dir: Path):
     }
 
     def _panel_reader(proc):
+        with _panel_lock:
+            jid = _panel_job.get("job_id")
+        last_pct = -1
         for line in iter(proc.stdout.readline, ""):
             line = line.rstrip("\n")
             if line.startswith(_PROG_PREFIX):
@@ -1566,6 +1574,11 @@ def create_app(out_dir: Path):
                     with _panel_lock:
                         _panel_job["progress"] = {"done": done, "total": total, "new": new,
                                                   "pct": round(min(done / total, 1.0) * 100, 1) if total else None}
+                    if jid and total:                    # mirror into the Activity card, throttled
+                        pct = int(min(done / total, 1.0) * 100)
+                        if pct != last_pct:              # ~once per 1% tick, not every line
+                            last_pct = pct
+                            _log_job(jid, status="running", done=done, total=total)
                 except (ValueError, ZeroDivisionError):
                     pass
                 continue
@@ -1576,11 +1589,15 @@ def create_app(out_dir: Path):
         proc.stdout.close()
         rc = proc.wait()
         with _panel_lock:
+            cancelled = _panel_job.get("cancelled")
+            status = "cancelled" if cancelled else ("done" if rc == 0 else "failed")
             _panel_job["rc"] = rc
-            _panel_job["status"] = ("cancelled" if _panel_job.get("cancelled")
-                                    else ("done" if rc == 0 else "failed"))
+            _panel_job["status"] = status
             _panel_job["progress"] = None                # clear the bar when the job ends
             _panel_job["proc"] = None
+        if jid:                                          # cancelled/done both close the card row cleanly
+            _log_job(jid, status=("failed" if status == "failed" else "done"),
+                     error=("exited {}".format(rc) if status == "failed" else None))
 
     def _panel_run(action):
         import subprocess
@@ -1599,10 +1616,14 @@ def create_app(out_dir: Path):
         proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1,
                                 encoding="utf-8", errors="replace", env=env)
+        import uuid
+        job_id = "panel-" + uuid.uuid4().hex[:12]
         with _panel_lock:
             _panel_job.update(status="running", action=action, label=spec["label"],
                               lines=["$ " + " ".join(spec["args"])], rc=None,
-                              started_at=None, progress=None, proc=proc, cancelled=False)
+                              started_at=None, progress=None, proc=proc, cancelled=False,
+                              job_id=job_id)
+        _log_job(job_id, status="running", type="panel", label=spec["label"])
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
 
     # ---- Automated tasks: run a SAFE job on an interval while the app is open ----
@@ -2371,6 +2392,31 @@ document.addEventListener('DOMContentLoaded', function() {
 {% if request.args.get('delerr') %}
 <div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--red);border-radius:4px;color:var(--text);font-size:13px;">
   Delete error: {{ request.args.get('delerr') }}</div>
+{% endif %}
+{% if request.args.get('bulkdel') == 'started' %}
+<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--lavender);border-radius:4px;color:var(--text);font-size:13px;">
+  <span class="gen-moon"></span> Deleting {{ request.args.get('n') }} item(s) from PixAI&hellip; watch the Activity card. This page refreshes when it finishes.</div>
+<script>
+// The delete runs in the background (Activity card shows progress). Poll the job log and,
+// once the delete job finishes, reload the grid so it stops showing rows that were purged.
+(function(){
+  var tries=0;
+  function reloadClean(){
+    var p=new URLSearchParams(location.search); p.delete('bulkdel'); p.delete('n');
+    var qs=p.toString();
+    location.replace(location.pathname + (qs ? ('?'+qs) : ''));
+  }
+  function chk(){
+    tries++;
+    fetch('/api/jobs').then(function(r){return r.json();}).then(function(d){
+      var j=((d&&d.jobs)||[]).filter(function(x){return x.type==='delete';})[0];
+      if(j && (j.status==='done' || j.status==='failed')){ reloadClean(); return; }
+      if(tries<150){ setTimeout(chk, 800); }
+    }).catch(function(){ if(tries<150){ setTimeout(chk, 1500); } });
+  }
+  setTimeout(chk, 800);
+})();
+</script>
 {% endif %}
 
 <div class="bulk-bar">
@@ -5915,10 +5961,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Delete the selected images' TASKS from PixAI (irreversible) AND purge
         them locally, so cloud and catalog never drift. Task-level: deleting any
         image deletes its whole task (all batch images), cloud + local. Imports
-        with no task id are purged locally only."""
+        with no task id are purged locally only. Runs OFF-THREAD and reports progress
+        to the Activity card; localhost-only (this destroys on the owner's account)."""
         import urllib.parse
+        import uuid
         import pixai_gallery_backup as core   # lazy: avoid import cycle
         back = request.form.get("back") or url_for("index")
+
+        def _back(**params):
+            sep = "&" if "?" in back else "?"
+            return redirect(back + sep + urllib.parse.urlencode(params))
+
+        # Defense-in-depth: the UI hides this for LAN viewers, but the endpoint itself
+        # must refuse a non-local request -- it deletes from the owner's PixAI account.
+        if not _is_local_request():
+            return _back(delerr="deleting from PixAI is localhost-only")
         sel = request.form.getlist("media_ids")
         if not sel:
             return redirect(back)
@@ -5934,41 +5991,69 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         task_ids = sorted({(r.get("task_id") or "").strip()
                            for r in sel_rows if (r.get("task_id") or "").strip()})
         local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
+        total = len(task_ids) + len(local_only)
+        if not total:
+            return redirect(back)
 
-        def _err(msg):
-            sep = "&" if "?" in back else "?"
-            return redirect("{}{}delerr={}".format(back, sep, urllib.parse.quote(msg[:160])))
+        # Single-flight: never let two bulk deletes interleave their cloud calls.
+        with _bulkdel_lock:
+            if _bulkdel_running["on"]:
+                return _back(delerr="a bulk delete is already running -- see the Activity card")
+            _bulkdel_running["on"] = True
 
-        deleted = failed = removed = 0
-        if task_ids:
+        job_id = "bulkdel-" + uuid.uuid4().hex[:12]
+        label = ("Delete {} task(s) from PixAI".format(len(task_ids)) if task_ids
+                 else "Purge {} local item(s)".format(len(local_only)))
+        _log_job(job_id, status="running", type="delete", label=label, done=0, total=total)
+
+        def _work():
+            deleted = failed = removed = done = 0
+            step = max(1, total // 50)          # throttle progress writes (~every 2%)
+            def _tick():
+                if done % step == 0 or done == total:
+                    _log_job(job_id, status="running", done=done, total=total)
             try:
-                session = core._make_session(None)
-            except core.PixAIError as e:
-                return _err(str(e))
-            for tid in task_ids:
-                try:
-                    core.delete_task_gql(session, tid)   # cloud delete (irreversible)
-                except Exception:                        # noqa: BLE001
-                    failed += 1
-                    continue
-                deleted += 1
-                con = _connect(db_path)
-                try:
-                    media = con.execute(
-                        "SELECT media_id, filename FROM catalog WHERE task_id=?", (tid,)
-                    ).fetchall()
-                finally:
-                    con.close()
-                for m in media:
-                    _purge_local(m[0], m[1])
-                    removed += 1
-        for r in local_only:
-            _purge_local(r["media_id"], r.get("filename"))
-            removed += 1
+                session = core._make_session(None) if task_ids else None
+                for tid in task_ids:
+                    try:
+                        core.delete_task_gql(session, tid)      # cloud delete (irreversible)
+                        deleted += 1
+                    except Exception:                            # noqa: BLE001
+                        failed += 1
+                        done += 1; _tick(); continue
+                    con2 = _connect(db_path)
+                    try:
+                        media = con2.execute(
+                            "SELECT media_id, filename FROM catalog WHERE task_id=?", (tid,)
+                        ).fetchall()
+                    finally:
+                        con2.close()
+                    for m in media:
+                        _purge_local(m[0], m[1]); removed += 1
+                    done += 1; _tick()
+                for r in local_only:
+                    _purge_local(r["media_id"], r.get("filename")); removed += 1
+                    done += 1; _tick()
+                summary = "Deleted {} · purged {} local · {} failed".format(deleted, removed, failed)
+                # ANY failure is a non-clean result -- surface it RED on the card. Don't bury
+                # "3 failed" inside a green 'done': those tasks still exist on PixAI (drift).
+                status = "failed" if failed else "done"
+                _log_job(job_id, status=status, label=summary, done=total, total=total,
+                         error=(summary if failed else None))
+            except Exception as e:                               # noqa: BLE001
+                _log_job(job_id, status="failed", error=str(e)[:200])
+            finally:
+                with _bulkdel_lock:
+                    _bulkdel_running["on"] = False
 
-        sep = "&" if "?" in back else "?"
-        return redirect("{}{}deleted={}&failed={}&removed={}".format(
-            back, sep, deleted, failed, removed))
+        try:
+            threading.Thread(target=_work, daemon=True).start()
+        except Exception as e:                               # noqa: BLE001 -- OS thread exhaustion, etc.
+            with _bulkdel_lock:                              # never wedge single-flight forever
+                _bulkdel_running["on"] = False
+            _log_job(job_id, status="failed", error="could not start delete thread: " + str(e)[:160])
+            return _back(delerr="could not start bulk delete -- try again")
+        return _back(bulkdel="started", n=total)
 
     @app.route("/rate/<media_id>", methods=["POST"])
     def rate(media_id):
