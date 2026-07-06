@@ -124,6 +124,46 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
     assert all(isinstance(a, str) for a in argv)
 
 
+def test_workers_setting_persists_merges_and_reaches_argv(tmp_path, monkeypatch):
+    """The Download-workers selector persists to schedule.json so BOTH manual runs and
+    the scheduled run use it, is injected as --workers N into the spawned argv, and its
+    partial POST merges (doesn't wipe the schedule fields the other control wrote)."""
+    import subprocess
+    cli = _client(tmp_path).test_client()
+
+    # seed a schedule, then a workers-ONLY post must not wipe it (merge, not replace)
+    cli.post("/api/panel/schedule", json={"enabled": True, "action": "sync", "interval_hours": 12})
+    cli.post("/api/panel/schedule", json={"workers": 8})
+    s = cli.get("/api/panel/schedule").get_json()
+    assert s["workers"] == 8 and s["enabled"] is True
+    assert s["action"] == "sync" and s["interval_hours"] == 12
+    # out-of-range clamps to [1, 16]
+    assert cli.post("/api/panel/schedule", json={"workers": 999}).get_json()["workers"] == 16
+    assert cli.post("/api/panel/schedule", json={"workers": 0}).get_json()["workers"] == 1
+
+    # set a real value; a spawned job must carry --workers N reflecting it
+    cli.post("/api/panel/schedule", json={"workers": 6})
+    captured = {}
+
+    class FakeProc:
+        def __init__(self):
+            import io
+            self.stdout = io.StringIO("")
+        def wait(self):
+            return 0
+
+    def fake_popen(argv, **k):
+        captured["argv"] = argv
+        return FakeProc()
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    cli.post("/api/panel/run", json={"action": "sync"})
+    import time
+    time.sleep(0.05)
+    argv = captured["argv"]
+    assert "--workers" in argv and argv[argv.index("--workers") + 1] == "6"
+
+
 def test_watch_status_default_shape(tmp_path):
     """conftest sets MOONGLADE_DISABLE_WATCH=1 for every test (see its docstring --
     without it, create_app() would open a real WebSocket to PixAI using whatever real
