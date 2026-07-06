@@ -2697,7 +2697,7 @@ def video_faststart(path):
     if not ff or not p.exists() or _mp4_is_faststart(p):
         return False
     import subprocess
-    tmp = p.with_suffix(p.suffix + ".fs.tmp")
+    tmp = p.with_name(p.stem + ".__fstmp__" + p.suffix)   # keep the real ext so ffmpeg picks the muxer
     try:
         r = subprocess.run([ff, "-y", "-v", "error", "-i", str(p),
                             "-c", "copy", "-movflags", "+faststart", str(tmp)],
@@ -3223,6 +3223,35 @@ _UPLOAD_MEDIA_MUT = (
 # PixAI "Edit Pro" (instruct-editing) model. Override with --edit-model.
 EDIT_PRO_MODEL_ID = "2006468692917575683"
 
+# The two image models (modelType CHAT) that accept an instruct/reference edit. Caps VERIFIED
+# via the model-capability probe 2026-07-06 (extra.chatEditing). Drives the Edit card's model
+# picker + its resolution/quality/aspect option lists + reference-image cap. Reference Pro
+# exposes NO quality option (qualities empty) and adds 21:9; Edit Pro is 1K/2K, Reference 2K/4K.
+EDIT_MODELS = {
+    "edit-pro": {
+        "model_id": EDIT_PRO_MODEL_ID,
+        "label": "Edit Pro", "max_refs": 4,
+        "resolutions": ["1K", "2K"],
+        "qualities": ["low", "medium", "high"],
+        "aspects": ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "1:3", "3:1"],
+        "default": {"resolution": "1K", "quality": "medium", "aspect": "3:4"},
+    },
+    "reference-pro": {
+        "model_id": "1948514378441961474",
+        "label": "Reference Pro", "max_refs": 10,
+        "resolutions": ["2K", "4K"],
+        "qualities": [],
+        "aspects": ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "21:9"],
+        "default": {"resolution": "2K", "quality": "", "aspect": "3:4"},
+    },
+}
+DEFAULT_EDIT_MODEL = "edit-pro"
+
+
+def edit_model_id(key):
+    """model_id for an Edit-card model key ('edit-pro'/'reference-pro'); '' if unknown."""
+    return (EDIT_MODELS.get((key or "").strip()) or {}).get("model_id", "")
+
 
 def upload_media(session, path, media_type="IMAGE"):
     """Upload a LOCAL image file to PixAI and return its media_id.
@@ -3295,9 +3324,10 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
         "mediaId": ids[0],
         "mediaIds": ids,
         "modelId": str(model_id or EDIT_PRO_MODEL_ID),
-        "modelConfig": {"resolution": resolution,
-                        "aspectRatio": aspect_ratio,
-                        "quality": quality},
+        # quality is omitted when empty -- Reference Pro exposes no quality option, so sending
+        # one would be a bogus knob; Edit Pro still sends low/medium/high.
+        "modelConfig": dict({"resolution": resolution, "aspectRatio": aspect_ratio},
+                            **({"quality": quality} if quality else {})),
     }}
     if scene_id:
         params["sceneId"] = str(scene_id)
