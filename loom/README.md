@@ -1,4 +1,4 @@
-# The Edit Bay — Seedance 2.0 Storyboard / Shot-Blocking Tool
+# The Loom — Seedance 2.0 Storyboard / Shot-Blocking Tool
 
 A reusable, single-file storyboard board for planning multi-clip AI-video pieces
 (built around Seedance 2.0's prompting + `@reference` grammar, but model-agnostic —

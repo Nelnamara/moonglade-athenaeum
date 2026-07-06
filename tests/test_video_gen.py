@@ -160,7 +160,7 @@ def test_reference_video_requires_a_ref(tmp_path):
         core.run_reference_video(_refvid_args(tmp_path, ref_image=None))
 
 
-# ---- shot -> video params (the PixAI provider adapter for the Edit Bay) ----
+# ---- shot -> video params (the PixAI provider adapter for the Loom) ----
 
 def test_snap_video_duration():
     assert core._snap_video_duration(4) == 5

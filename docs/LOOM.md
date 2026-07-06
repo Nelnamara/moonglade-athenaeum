@@ -3,7 +3,7 @@
 The Loom is Moonglade Athenaeum's **video storyboard**: a shot-blocking board for
 planning a multi-clip AI video, wired directly into PixAI's video engine so every card
 can render itself. Open it from the gallery header (**▦ The Loom**) or at
-`http://localhost:<port>/edit-bay`.
+`http://localhost:<port>/loom`.
 
 It is deliberately **engine-agnostic**: the same board that generates on PixAI can hand
 its prompts to any Seedance-style generator via **Copy shot**. Plan here, render anywhere.
@@ -78,7 +78,7 @@ you cast shots.
 
 ## Saving, backup, export
 
-- The board **autosaves to the gallery server** (`editbay/store.json` in your backup
+- The board **autosaves to the gallery server** (`loom/store.json` in your backup
   folder) — it survives restarts and browser changes.
 - **Backup .json** exports the whole project; importing one restores it.
 - **Export .txt** writes the full shot list as text — a script you can read, annotate,

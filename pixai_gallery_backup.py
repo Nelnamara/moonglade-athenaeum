@@ -2782,7 +2782,7 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                             *, duration=5, generate_audio=False, model="",
                             audio_language="english", camera_movement="",
                             quality="professional"):
-    """PixAI video PROVIDER ADAPTER: map an Edit Bay shot (mode + prompt + @-ordered ref
+    """PixAI video PROVIDER ADAPTER: map a Loom shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
     i2vPro; R2V/V2V/any-with-refs -> referenceVideo. Duration snaps to PixAI's allowed

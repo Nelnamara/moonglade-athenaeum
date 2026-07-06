@@ -231,9 +231,9 @@ The Flask gallery is a full creation suite. Everything below is **localhost-gate
   autocomplete in the prompt boxes; TAB accepts. Field-probed 2026-07-04.
 - **Gallery bridges**: lightbox ✎ Edit / ▶ To Video buttons; right-click context menu on
   cards; bulk-bar **Send to Video** (multi-select -> R2V refs).
-- **The Loom** (`/edit-bay`): the Seedance-style storyboard (acts/shots/cast/frame handoff)
-  with **Generate shot** on PixAI + gallery picking for cast/frames. Manual: `docs/EDIT_BAY.md`.
-- **Async engine**: submit (`/api/generate|edit|enhance|fix|editbay/generate`) -> poll
+- **The Loom** (`/loom`): the Seedance-style storyboard (acts/shots/cast/frame handoff)
+  with **Generate shot** on PixAI + gallery picking for cast/frames. Manual: `docs/LOOM.md`.
+- **Async engine**: submit (`/api/generate|edit|enhance|fix|loom/generate`) -> poll
   (`/api/task-status`) -> auto-download + catalog (`source='api'`, videos to `videos/`).
   Free cards auto-apply on every path.
 

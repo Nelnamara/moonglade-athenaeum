@@ -217,6 +217,6 @@ but only the owner's machine can spend credits or cards.
 - Results are downloaded and cataloged automatically (`source='api'`; videos into `videos/`),
   so everything you make lands in your own library the moment it finishes.
 
-The **Edit Bay** (`/edit-bay`) is the storyboard for multi-clip video — acts, shots, cast,
-frame handoff, and per-shot **Generate** on the same engine. Full manual: `docs/EDIT_BAY.md`
+**The Loom** (`/loom`) is the storyboard for multi-clip video — acts, shots, cast,
+frame handoff, and per-shot **Generate** on the same engine. Full manual: `docs/LOOM.md`
 (or the ? button on the page).

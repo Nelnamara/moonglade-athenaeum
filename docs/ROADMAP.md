@@ -32,7 +32,7 @@ PixAI is already **provider #1** behind the seam — `submit_generation` /
 
 **Shape:**
 - `providers.json` (owner-local, git-ignored): API keys + enabled providers.
-- A **provider picker** in the drawer / Edit Bay (choose backend per generation).
+- A **provider picker** in the drawer / Loom (choose backend per generation).
 - Each provider is one adapter file mirroring the interface — Seedance is a *second file*,
   not a rewrite (the discipline that kept PixAI Phase-2 seam-clean).
 
