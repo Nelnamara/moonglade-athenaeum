@@ -2586,6 +2586,7 @@ def run_sync_videos(args):
                     "video_duration": str(shared.get("duration") or ""),
                 })
                 _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
+                video_faststart(path)                # iOS needs moov at the front to stream
                 rows.append(full)
             else:
                 rows.append(status)
@@ -2651,6 +2652,90 @@ def video_poster_thumb(video_path, thumb_path):
     except OSError:
         pass
     return bool(ok)
+
+
+def _mp4_is_faststart(path):
+    """True if an mp4's `moov` atom precedes `mdat` — i.e. iOS/Safari can stream it
+    progressively over HTTP. Best-effort top-level box scan; returns True on any parse
+    trouble so we never remux a file we can't read."""
+    import struct
+    order = []
+    try:
+        with open(path, "rb") as f:
+            while len(order) < 12:
+                hdr = f.read(8)
+                if len(hdr) < 8:
+                    break
+                size = struct.unpack(">I", hdr[:4])[0]
+                order.append(hdr[4:8].decode("latin1", "replace"))
+                if size == 1:                       # 64-bit extended size
+                    size = struct.unpack(">Q", f.read(8))[0]; f.seek(size - 16, 1)
+                elif size == 0:                     # extends to EOF
+                    break
+                else:
+                    f.seek(size - 8, 1)
+                if "moov" in order and "mdat" in order:
+                    break
+    except (OSError, struct.error, ValueError):
+        return True
+    if "moov" not in order:
+        return True
+    di = order.index("mdat") if "mdat" in order else 10 ** 9
+    return order.index("moov") < di
+
+
+def video_faststart(path):
+    """Losslessly move an mp4's `moov` atom to the front (ffmpeg -c copy -movflags
+    +faststart) so iOS/Safari will play it over HTTP -- PixAI serves videos with moov at
+    the END, which desktop tolerates but iOS refuses (MediaError 4). No re-encode, no
+    quality loss. Returns True only when it rewrote the file; no-op (False) if ffmpeg is
+    absent, the file is already faststart, or the remux fails (original left untouched)."""
+    p = Path(path)
+    if p.suffix.lower() not in (".mp4", ".mov", ".m4v"):
+        return False
+    ff = _ffmpeg_path()
+    if not ff or not p.exists() or _mp4_is_faststart(p):
+        return False
+    import subprocess
+    tmp = p.with_suffix(p.suffix + ".fs.tmp")
+    try:
+        r = subprocess.run([ff, "-y", "-v", "error", "-i", str(p),
+                            "-c", "copy", "-movflags", "+faststart", str(tmp)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            os.replace(str(tmp), str(p))            # atomic swap
+            return True
+    except Exception:                               # noqa: BLE001 -- remux must never crash a collect
+        pass
+    try:
+        if tmp.exists():
+            tmp.unlink()
+    except OSError:
+        pass
+    return False
+
+
+def run_faststart_videos(args):
+    """Rewrite every non-faststart mp4 under videos/ so iOS can stream them (lossless
+    -c copy +faststart). Idempotent -- skips files already faststart. Touches only the
+    video files, never the catalog. Fixes the 'plays on desktop, error 4 on iPhone' bug
+    for the existing library; new videos are faststarted at collect time automatically."""
+    out = Path(args.out)
+    vdir = out / "videos"
+    vids = sorted(p for p in vdir.rglob("*")
+                  if p.is_file() and p.suffix.lower() in (".mp4", ".mov", ".m4v")) if vdir.exists() else []
+    if not _ffmpeg_path():
+        print("ffmpeg not found on PATH; cannot faststart."); return {"fixed": 0, "total": len(vids)}
+    print("Faststart pass over {} video(s) in {}...".format(len(vids), vdir), flush=True)
+    fixed = skipped = 0
+    for i, p in enumerate(vids, 1):
+        if _mp4_is_faststart(p):
+            skipped += 1
+        elif video_faststart(p):
+            fixed += 1
+            print("  [{}/{}] faststart -> {}".format(i, len(vids), p.name), flush=True)
+    print("Done: {} rewritten, {} already OK ({} total).".format(fixed, skipped, len(vids)))
+    return {"fixed": fixed, "skipped": skipped, "total": len(vids)}
 
 
 def run_import_local(args):
@@ -2748,6 +2833,7 @@ def run_import_local(args):
         rows.append(full)
         if is_vid:
             video_poster_thumb(stored, thumb_dir / "{}.jpg".format(mid))  # ffmpeg, optional
+            video_faststart(stored)                  # iOS needs moov at the front to stream
         else:
             make_thumbnail(stored, thumb_dir / "{}.jpg".format(mid))
         made += 1
@@ -3456,6 +3542,7 @@ def _download_video_task(session, result, task_id, out, args, params):
         # run_import_local; no-op if ffmpeg isn't on PATH.
         if not thumb_path.exists():
             video_poster_thumb(path, thumb_path)
+        video_faststart(path)                        # iOS needs moov at the front to stream
         rows.append(full)
         saved.append(str(path))
     if rows:
@@ -5653,6 +5740,9 @@ def main():
     ap.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
                          "each mp4 into videos/, and catalog them (is_video), then exit")
+    ap.add_argument("--faststart-videos", dest="faststart_videos", action="store_true",
+                    help="losslessly move every video's moov atom to the front (ffmpeg "
+                         "-c copy +faststart) so iOS/Safari can play them over HTTP, then exit")
     ap.add_argument("--account", action="store_true",
                     help="show a read-only account dashboard (credit balance, membership, "
                          "subscription) and exit. Never moves money")
@@ -5879,6 +5969,9 @@ def main():
             return
         if args.sync_videos:
             run_sync_videos(args)
+            return
+        if getattr(args, "faststart_videos", False):
+            run_faststart_videos(args)
             return
         if args.account:
             run_account_info(args)
