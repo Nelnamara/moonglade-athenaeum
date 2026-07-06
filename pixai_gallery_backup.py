@@ -2696,6 +2696,7 @@ def run_import_local(args):
     existing_mids = {r.get("media_id") for r in catalog_rows if r.get("media_id")}
     gallery_dir = out / "gallery"
     quarantine = out / "_duplicates"
+    branding_dir = out / "branding"   # app chrome (banner/logo/marks) -- never gallery content
 
     print("Scanning {} for media (this can take a moment on a large backup)...".format(src),
           flush=True)
@@ -2714,7 +2715,8 @@ def run_import_local(args):
     for idx, p in enumerate(candidates):
         if _prog:
             _prog(idx + 1, total, 0)
-        if not external and (_under(p, gallery_dir) or _under(p, quarantine)):
+        if not external and (_under(p, gallery_dir) or _under(p, quarantine)
+                             or _under(p, branding_dir)):
             continue
         is_vid = p.suffix.lower() in _VIDEO_EXTS
         if external:
