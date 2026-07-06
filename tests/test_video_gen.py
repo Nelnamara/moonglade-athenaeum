@@ -8,15 +8,16 @@ import pixai_gallery_backup as core
 
 
 def test_build_video_parameters_matches_real_submit():
-    # EXACT structure of a real captured createGenerationTask submit (2026-07-01):
-    # variables.parameters = {channel, i2vPro:{...}} -- no {type,version} wrapper.
+    # EXACT structure of a real CARD-COVERED submit (verified 2026-07-06 via --dump-params):
+    # top-level modelId (REQUIRED -- resolved from the .model name) + i2vPro block + privacy
+    # flags. No `channel`. Omitting modelId was the "video card won't tap" bug.
     p = core.build_video_parameters(
         "", media_id="738340964113285867", model="v4.0.1",
         tail_media_id="738340489931639723", duration=5, mode="professional",
         generate_audio=True,
     )
     assert p == {
-        "channel": "private",
+        "priority": 1000,
         "i2vPro": {
             "model": "v4.0.1",
             "mediaId": "738340964113285867",
@@ -28,16 +29,21 @@ def test_build_video_parameters_matches_real_submit():
             "audioLanguage": "english",
             "tailMediaId": "738340489931639723",
         },
+        "isPrivate": False,
+        "enablePreview": True,
+        "hidePrompts": False,
+        "modelId": "2003969750675682808",   # v4.0.1 (Lite) -> its numeric id
     }
 
 
 def test_single_source_image_omits_tail():
     p = core.build_video_parameters("motion", media_id="100")
     i2v = p["i2vPro"]
-    assert p["channel"] == "private"
+    assert "channel" not in p and p["isPrivate"] is False
     assert i2v["mediaId"] == "100"
     assert "tailMediaId" not in i2v                 # no tail => single-source i2v
     assert i2v["model"] == core.DEFAULT_VIDEO_MODEL
+    assert p["modelId"] == "2003969750675682808"    # DEFAULT (v4.0.1) resolved to its numeric id
 
 
 def test_gen_video_parameters_from_args():
@@ -91,9 +97,25 @@ def test_camera_movement_omitted_by_default_and_on_unset():
         "p", media_id="1", camera_movement="unset")["i2vPro"]
 
 
-def test_channel_default_private_and_override_normal():
-    assert core.build_video_parameters("p", media_id="1")["channel"] == "private"
-    assert core.build_video_parameters("p", media_id="1", channel="normal")["channel"] == "normal"
+def test_isprivate_default_and_modelid_required():
+    p = core.build_video_parameters("p", media_id="1")
+    assert "channel" not in p and p["isPrivate"] is False   # channel retired; isPrivate now
+    assert p["enablePreview"] is True and p["hidePrompts"] is False
+    # the REQUIRED top-level modelId resolves from the .model name (the video-card fix)
+    assert p["modelId"] == core.video_model_id(core.DEFAULT_VIDEO_MODEL) == "2003969750675682808"
+    assert core.build_video_parameters("p", media_id="1", is_private=True)["isPrivate"] is True
+
+
+def test_shot_params_carry_correct_modelid():
+    # i2v: the numeric modelId must ride along, resolved per model (was missing entirely --
+    # PixAI logged "Unknown or removed model" and no card matched without it).
+    assert core.build_shot_video_params(
+        "I2V", "x", image_ids=["1"], model="v4.0.1")["modelId"] == "2003969750675682808"
+    assert core.build_shot_video_params(
+        "I2V", "x", image_ids=["1"], model="v4.0")["modelId"] == "2003968021137101826"
+    # R2V: the reference path no longer hardcodes the Lite id -- full V4.0 gets the full id.
+    assert core.build_shot_video_params(
+        "R2V", "@image1", image_ids=["1"], model="v4.0")["modelId"] == "2003968021137101826"
 
 
 # ---- --dump-params: bank any submit shape off a recovered task ----
