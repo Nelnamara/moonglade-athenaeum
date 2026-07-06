@@ -481,7 +481,9 @@ def test_sync_runs_all_three_steps_in_order(tmp_path, mocker, monkeypatch):
     and the metadata backfill (previously just 2 steps), so a synced catalog is always
     fully labeled without a separate click/action."""
     calls = []
-    mocker.patch.object(core, "run_download", side_effect=lambda a: calls.append("download"))
+    seen = {}
+    mocker.patch.object(core, "run_download",
+                        side_effect=lambda a, progress=None: calls.append("download") or seen.__setitem__("dl_progress", progress))
     mocker.patch.object(core, "run_fix_models", side_effect=lambda a: calls.append("fix_models"))
     mocker.patch.object(core, "run_backfill_full_meta", side_effect=lambda a: calls.append("backfill"))
     monkeypatch.setattr("sys.argv", ["prog", "--sync", "--out", str(tmp_path)])
@@ -489,6 +491,9 @@ def test_sync_runs_all_three_steps_in_order(tmp_path, mocker, monkeypatch):
     core.main()
 
     assert calls == ["download", "fix_models", "backfill"]
+    # the download step must receive args.progress (main() sets it via _make_progress),
+    # else the panel's progress bar is blank during the download -- the thing the owner hit.
+    assert callable(seen["dl_progress"])
 
 
 def test_progress_counter_does_not_double_count(tmp_path, mocker):
