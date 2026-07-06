@@ -245,7 +245,7 @@ def test_cancel_is_localhost_only(tmp_path):
 
 # --- The Loom: ffmpeg export of the rough cut (mocked -- no real ffmpeg) ---
 
-def test_editbay_export_runs_and_downloads(tmp_path, monkeypatch):
+def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
     import subprocess, shutil, io, time
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "shot_v1.mp4").write_bytes(b"fakemp4")   # media_id 'v1'
@@ -264,25 +264,25 @@ def test_editbay_export_runs_and_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: FakeProc(argv))
 
     cli = create_app(tmp_path).test_client()
-    r = cli.post("/api/editbay/export",
+    r = cli.post("/api/loom/export",
                  json={"clips": [{"mid": "v1", "in": 0, "out": 2}], "total_seconds": 2})
     assert r.get_json().get("ok") is True
     for _ in range(60):
-        d = cli.get("/api/editbay/export-status").get_json()
+        d = cli.get("/api/loom/export-status").get_json()
         if d["status"] != "running":
             break
         time.sleep(0.02)
     assert d["status"] == "done" and d["progress"] == 100
-    assert cli.get("/api/editbay/export-file").status_code == 200
+    assert cli.get("/api/loom/export-file").status_code == 200
     # LAN can't kick off exports
-    r = cli.post("/api/editbay/export", json={"clips": []},
+    r = cli.post("/api/loom/export", json={"clips": []},
                  environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
     assert r.status_code == 403
 
 
-def test_editbay_export_needs_a_video(tmp_path, monkeypatch):
+def test_loom_export_needs_a_video(tmp_path, monkeypatch):
     import shutil
     monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg")
     cli = _client(tmp_path).test_client()
-    r = cli.post("/api/editbay/export", json={"clips": [{"mid": "nope", "in": 0}]})
+    r = cli.post("/api/loom/export", json={"clips": [{"mid": "nope", "in": 0}]})
     assert r.status_code == 400 and "no finished shot" in r.get_json()["error"]

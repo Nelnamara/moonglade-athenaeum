@@ -72,8 +72,8 @@ per skin (e.g. "Emerald Dream," "Void," "Elune's Light"), each keyed to a differ
   WoW-achievement look: gold ring, icon in the center, glow. One per achievement.
 - Displays ~64 px; keep the icon readable small.
 
-## 7. Edit Bay mark — optional
-Small square sigil for the `/edit-bay` header (currently "▰ The Edit Bay" text). 256×256 PNG,
+## 7. Loom mark — optional
+Small square sigil for the `/loom` header (currently "▰ The Loom" text). 256×256 PNG,
 transparent. A clapperboard-meets-moon motif.
 
 ---

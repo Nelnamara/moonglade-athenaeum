@@ -1350,11 +1350,11 @@ ENHANCE_PLUGINS = {
 }
 
 
-# The Edit Bay (Seedance video storyboard tool) is served at /edit-bay. Its React source
-# lives in editbay/seedance-storyboard.jsx; this page loads React+Babel from a CDN and, per
+# The Loom (Seedance video storyboard tool) is served at /loom. Its React source
+# lives in loom/master-storyboard.jsx; this page loads React+Babel from a CDN and, per
 # the tool's own integration notes, swaps window.storage onto the gallery backend so a board
 # persists server-side (shared across devices) instead of per-browser localStorage.
-EDITBAY_PAGE = r"""<!DOCTYPE html>
+LOOM_PAGE = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Loom - Moonglade Athenaeum</title>
@@ -1365,10 +1365,10 @@ EDITBAY_PAGE = r"""<!DOCTYPE html>
 <div id="root"></div>
 <script>
 window.storage = {
-  get:function(k){ return fetch('/api/editbay/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },
-  set:function(k,v){ return fetch('/api/editbay/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})}); },
-  list:function(p){ return fetch('/api/editbay/list?prefix='+encodeURIComponent(p||'')).then(function(r){return r.json();}).then(function(d){ return {keys:(d&&d.keys)||[]}; }); },
-  delete:function(k){ return fetch('/api/editbay/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
+  get:function(k){ return fetch('/api/loom/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },
+  set:function(k,v){ return fetch('/api/loom/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})}); },
+  list:function(p){ return fetch('/api/loom/list?prefix='+encodeURIComponent(p||'')).then(function(r){return r.json();}).then(function(d){ return {keys:(d&&d.keys)||[]}; }); },
+  delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
 };
 </script>
 <script type="text/babel" data-presets="react">
@@ -1391,7 +1391,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     <p><b>&#9654; Generate shot.</b> Renders the card on PixAI's video engine (V4.0): your cast + frames upload in @-order, the shot text becomes the prompt, and the finished clip lands in the gallery catalog &mdash; free when a V4.0 card covers it. Status shows on the card; "open clip &#8599;" plays it.</p>
     <p><b>Copy shot.</b> The same assembled prompt, to your clipboard &mdash; paste it into any Seedance-style generator. The board is engine-agnostic by design: plan here, render anywhere.</p>
     <p><b>Saving.</b> The board autosaves to the gallery server (survives restarts). Backup .json / export .txt live in the header.</p>
-    <p style="color:#9a93b5;">Full manual: <code>docs/EDIT_BAY.md</code> in the repo.</p>
+    <p style="color:#9a93b5;">Full manual: <code>docs/LOOM.md</code> in the repo.</p>
   </div>
 </div>
 </body></html>"""
@@ -1469,7 +1469,7 @@ def create_app(out_dir: Path):
     _export_lock = threading.Lock()
     _export_job = {"status": "idle", "progress": 0, "elapsed": 0.0,
                    "out": "", "error": "", "proc": None, "cancelled": False}
-    _export_dir = out_dir / "editbay" / "exports"
+    _export_dir = out_dir / "loom" / "exports"
 
     # action -> {args (extra flags), label, destructive}
     PANEL_ACTIONS = {
@@ -2089,7 +2089,7 @@ document.addEventListener('DOMContentLoaded', function() {
     {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
-    <a class="btn b-loom" href="/edit-bay" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
+    <a class="btn b-loom" href="/loom" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     {% endif %}
     <button type="button" class="btn b-ach" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
     <button type="button" class="btn b-contest" onclick="Contests.open()" title="Live PixAI contests &mdash; the Oasis was never a 1-player game">&#127941; Contests</button>
@@ -2483,7 +2483,7 @@ function bulkSendCast() {
     ids.push(mid);
   });
   if (!ids.length) return;
-  window.location.href = '/edit-bay?cast=' + encodeURIComponent(ids.join(','));
+  window.location.href = '/loom?cast=' + encodeURIComponent(ids.join(','));
 }
 function onCheck() {
   var sel = selGet();
@@ -4296,7 +4296,7 @@ var Gen = (function(){
   function videoGenerate(){
     var p=videoPayload(), res=el('video-result');
     if(!p.images.length){ res.style.display='block'; res.innerHTML='<span style="color:var(--red);font-size:12px;">Pick a source image first.</span>'; return; }
-    runTask('/api/editbay/generate', p,
+    runTask('/api/loom/generate', p,
             res, {past:'Rendered', btn:el('video-go'), busy:'Rendering\\u2026', idle:'Generate video'});
   }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
@@ -6550,16 +6550,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
 
-    # --- The Edit Bay (Seedance storyboard) ---------------------------------
-    _editbay_lock = threading.Lock()
+    # --- The Loom (Seedance storyboard) -------------------------------------
+    _loom_lock = threading.Lock()
 
-    def _editbay_store():
-        d = out_dir / "editbay"
+    def _loom_store():
+        d = out_dir / "loom"
         d.mkdir(parents=True, exist_ok=True)
         return d / "store.json"
 
-    def _editbay_load():
-        p = _editbay_store()
+    def _loom_load():
+        p = _loom_store()
         if p.exists():
             try:
                 import json as _j
@@ -6568,70 +6568,70 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return {}
         return {}
 
-    def _editbay_save(data):
+    def _loom_save(data):
         import json as _j
-        _editbay_store().write_text(_j.dumps(data), encoding="utf-8")
+        _loom_store().write_text(_j.dumps(data), encoding="utf-8")
 
-    @app.route("/edit-bay")
-    def edit_bay():
+    @app.route("/loom")
+    def loom():
         """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
-        backend (window.storage swapped for /api/editbay/*). Localhost-only."""
+        backend (window.storage swapped for /api/loom/*). Localhost-only."""
         if not _is_local_request():
             return "The Loom is localhost-only.", 403
         import re as _re
-        src = Path(__file__).resolve().parent / "editbay" / "seedance-storyboard.jsx"
+        src = Path(__file__).resolve().parent / "loom" / "master-storyboard.jsx"
         try:
             jsx = src.read_text(encoding="utf-8")
         except OSError:
-            return "Edit Bay source not found (editbay/seedance-storyboard.jsx).", 404
+            return "Loom source not found (loom/master-storyboard.jsx).", 404
         jsx = _re.sub(r"(?m)^\s*import\s+React.*$", "", jsx)          # React is a CDN global
         jsx = jsx.replace("export default function App()", "function App()")
-        return EDITBAY_PAGE.replace("__JSX__", jsx)
+        return LOOM_PAGE.replace("__JSX__", jsx)
 
-    @app.route("/api/editbay/get")
-    def editbay_get():
+    @app.route("/api/loom/get")
+    def loom_get():
         if not _is_local_request():
             return jsonify({"value": None}), 403
-        with _editbay_lock:
-            return jsonify({"value": _editbay_load().get(request.args.get("key") or "")})
+        with _loom_lock:
+            return jsonify({"value": _loom_load().get(request.args.get("key") or "")})
 
-    @app.route("/api/editbay/set", methods=["POST"])
-    def editbay_set():
+    @app.route("/api/loom/set", methods=["POST"])
+    def loom_set():
         if not _is_local_request():
             return jsonify({"ok": False}), 403
         p = request.get_json(silent=True) or {}
         k = p.get("key")
         if not k:
             return jsonify({"ok": False}), 400
-        with _editbay_lock:
-            data = _editbay_load()
+        with _loom_lock:
+            data = _loom_load()
             data[k] = p.get("value")
-            _editbay_save(data)
+            _loom_save(data)
         return jsonify({"ok": True})
 
-    @app.route("/api/editbay/list")
-    def editbay_list():
+    @app.route("/api/loom/list")
+    def loom_list():
         if not _is_local_request():
             return jsonify({"keys": []}), 403
         pre = request.args.get("prefix") or ""
-        with _editbay_lock:
-            keys = [k for k in _editbay_load().keys() if k.startswith(pre)]
+        with _loom_lock:
+            keys = [k for k in _loom_load().keys() if k.startswith(pre)]
         return jsonify({"keys": keys})
 
-    @app.route("/api/editbay/delete", methods=["POST"])
-    def editbay_delete():
+    @app.route("/api/loom/delete", methods=["POST"])
+    def loom_delete():
         if not _is_local_request():
             return jsonify({"ok": False}), 403
         k = (request.get_json(silent=True) or {}).get("key")
-        with _editbay_lock:
-            data = _editbay_load()
+        with _loom_lock:
+            data = _loom_load()
             if k in data:
                 del data[k]
-                _editbay_save(data)
+                _loom_save(data)
         return jsonify({"ok": True})
 
-    @app.route("/api/editbay/handoff", methods=["POST"])
-    def editbay_handoff():
+    @app.route("/api/loom/handoff", methods=["POST"])
+    def loom_handoff():
         """Frame handoff: given a generated shot's video media_id, extract its LAST frame,
         upload it, and return the new frame media_id -- which the storyboard sets as the
         next shot's opening frame, chaining clips into one continuous scene. The clip must
@@ -6662,7 +6662,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         break
             if vid is None:
                 return jsonify({"error": "clip not downloaded yet -- generate/collect it first"}), 200
-            fdir = out_dir / "editbay" / "_frames"
+            fdir = out_dir / "loom" / "_frames"
             fdir.mkdir(parents=True, exist_ok=True)
             png = fdir / (mid + "_last.png")
             if not core.extract_last_frame(str(vid), str(png)):
@@ -6673,8 +6673,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
 
-    @app.route("/api/editbay/generate", methods=["POST"])
-    def editbay_generate():
+    @app.route("/api/loom/generate", methods=["POST"])
+    def loom_generate():
         """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
         Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
         video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Localhost."""
@@ -6686,7 +6686,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             from types import SimpleNamespace
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            updir = out_dir / "editbay" / "_uploads"
+            updir = out_dir / "loom" / "_uploads"
             updir.mkdir(parents=True, exist_ok=True)
 
             def resolve_img(val):
@@ -6695,7 +6695,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     return ""
                 if s.isdigit():                       # already a PixAI media_id
                     return s
-                if s.startswith("data:"):             # an Edit Bay thumbnail -> upload it
+                if s.startswith("data:"):             # a Loom thumbnail -> upload it
                     try:
                         head, b64 = s.split(",", 1)
                         raw = base64.b64decode(b64)
@@ -6757,11 +6757,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             with _export_lock:
                 _export_job.update(status="failed", error=str(e)[:200], proc=None)
 
-    @app.route("/api/editbay/export", methods=["POST"])
-    def api_editbay_export():
+    @app.route("/api/loom/export", methods=["POST"])
+    def api_loom_export():
         """Trim each finished shot to its in/out and concat into one 720p mp4 -- the
         rough cut becomes a real deliverable. Async (ffmpeg in a thread); poll
-        /api/editbay/export-status, download /api/editbay/export-file. Localhost-only.
+        /api/loom/export-status, download /api/loom/export-file. Localhost-only.
         Video-only for now (audio is a follow-up). body: {clips:[{mid,in,out}], total_seconds}"""
         if not _is_local_request():
             return jsonify({"error": "localhost-only"}), 403
@@ -6822,22 +6822,22 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         threading.Thread(target=_run_export, args=(cmd, out_path, total_sec), daemon=True).start()
         return jsonify({"ok": True, "shots": len(segs)})
 
-    @app.route("/api/editbay/export-status")
-    def api_editbay_export_status():
+    @app.route("/api/loom/export-status")
+    def api_loom_export_status():
         with _export_lock:
             return jsonify({k: _export_job[k] for k in
                             ("status", "progress", "elapsed", "out", "error")})
 
-    @app.route("/api/editbay/export-file")
-    def api_editbay_export_file():
+    @app.route("/api/loom/export-file")
+    def api_loom_export_file():
         name = _export_job.get("out") or "loom_cut.mp4"
         if not (_export_dir / name).exists():
             return "No export available.", 404
         return send_from_directory(str(_export_dir), name, as_attachment=True,
                                    download_name="moonglade-loom-cut.mp4")
 
-    @app.route("/api/editbay/export-cancel", methods=["POST"])
-    def api_editbay_export_cancel():
+    @app.route("/api/loom/export-cancel", methods=["POST"])
+    def api_loom_export_cancel():
         if not _is_local_request():
             return jsonify({"error": "localhost-only"}), 403
         with _export_lock:
