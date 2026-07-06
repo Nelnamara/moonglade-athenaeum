@@ -232,3 +232,54 @@ def test_collect_generation_detects_video(monkeypatch, tmp_path):
     monkeypatch.setattr(core, "_download_video_task", lambda *a, **k: ["/V9.mp4"])
     got = core.collect_generation(object(), "T", str(tmp_path))
     assert got["is_video"] is True and got["media_ids"] == ["V9"] and got["saved"] == 1
+
+
+def test_download_video_task_posterless_makes_ffmpeg_thumb(monkeypatch, tmp_path):
+    """A poster-less API-generated video (no still-frame) must get its thumbnail from
+    the mp4's first frame AT COLLECT TIME (via video_poster_thumb) -- not wait for a
+    later --sync-videos pass. This is the fix for the blank-video-tile bug."""
+    from pathlib import Path
+    # No poster on the output -> the ffmpeg fallback branch must fire.
+    monkeypatch.setattr(core, "video_outputs",
+                        lambda r: ([{"video_media_id": "V1", "poster_media_id": "", "seed": 1}],
+                                   {"prompt": "p", "duration": 5}))
+    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
+
+    def _fake_download(session, url, stem, **kw):
+        p = Path(str(stem) + ".mp4"); p.write_bytes(b"\x00\x00\x00\x18ftypmp42"); return "ok", p
+    monkeypatch.setattr(core, "download", _fake_download)
+
+    calls = []
+    def _fake_vpt(video_path, thumb_path):
+        calls.append((str(video_path), str(thumb_path))); Path(thumb_path).write_bytes(b"jpg"); return True
+    monkeypatch.setattr(core, "video_poster_thumb", _fake_vpt)
+
+    core._download_video_task(object(), {}, "T1", tmp_path, SimpleNamespace(name_length=60), {})
+
+    assert len(calls) == 1, "ffmpeg first-frame fallback should fire exactly once for a poster-less video"
+    assert calls[0][1].endswith("V1.jpg")
+    assert (tmp_path / "gallery" / "thumbs" / "V1.jpg").exists()
+
+
+def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
+    """When PixAI DID return a still-frame poster, we thumbnail that -- ffmpeg fallback
+    must NOT run (no redundant decode)."""
+    from pathlib import Path
+    monkeypatch.setattr(core, "video_outputs",
+                        lambda r: ([{"video_media_id": "V2", "poster_media_id": "P2", "seed": 1}],
+                                   {"prompt": "p", "duration": 5}))
+    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
+    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("http://x/p.png", {}))
+
+    def _fake_download(session, url, stem, **kw):
+        p = Path(str(stem)); p.parent.mkdir(parents=True, exist_ok=True)
+        p = p.with_suffix(p.suffix or ".bin"); p.write_bytes(b"data"); return "ok", p
+    monkeypatch.setattr(core, "download", _fake_download)
+    monkeypatch.setattr("pixai_gallery.make_thumbnail",
+                        lambda src, dst: (Path(dst).write_bytes(b"jpg"), True)[1])
+
+    called = []
+    monkeypatch.setattr(core, "video_poster_thumb", lambda *a, **k: called.append(1))
+    core._download_video_task(object(), {}, "T2", tmp_path, SimpleNamespace(name_length=60), {})
+    assert called == [], "poster present -> ffmpeg fallback should be skipped"
+    assert (tmp_path / "gallery" / "thumbs" / "V2.jpg").exists()
