@@ -1400,9 +1400,11 @@ ENHANCE_PLUGINS = {
 
 
 # The Loom (Seedance video storyboard tool) is served at /loom. Its React source
-# lives in loom/master-storyboard.jsx; this page loads React+Babel from a CDN and, per
-# the tool's own integration notes, swaps window.storage onto the gallery backend so a board
-# persists server-side (shared across devices) instead of per-browser localStorage.
+# lives in loom/master-storyboard.jsx; this page loads React+Babel+picker-core from
+# locally-vendored files (loom/vendor/, served by /loom/vendor/<file>; zero network
+# calls to paint) and, per the tool's own integration notes, swaps window.storage onto
+# the gallery backend so a board persists server-side (shared across devices) instead
+# of per-browser localStorage.
 LOOM_PAGE = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1414,9 +1416,9 @@ try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.docu
 __DESIGN_TOKENS__
 body { background: var(--base); margin: 0; }
 </style>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone@7/babel.min.js" crossorigin></script>
+<script src="/loom/vendor/react.production.min.js"></script>
+<script src="/loom/vendor/react-dom.production.min.js"></script>
+<script src="/loom/vendor/babel.min.js"></script>
 <script src="/static/picker-core.js"></script>
 </head><body>
 <div id="root"></div>
@@ -6607,6 +6609,23 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def _loom_save(data):
         import json as _j
         _loom_store().write_text(_j.dumps(data), encoding="utf-8")
+
+    @app.route("/loom/vendor/<path:fname>")
+    def loom_vendor(fname):
+        """Serve the Loom's vendored JS (React/ReactDOM/Babel UMD builds) from
+        loom/vendor/ so the page paints with zero network calls. Path-safe; absent
+        files 404. Not gated by _is_local_request -- these are static library files,
+        not gallery data, and /loom itself already enforces localhost-only above."""
+        from flask import send_from_directory, abort
+        vdir = (Path(__file__).resolve().parent / "loom" / "vendor").resolve()
+        try:
+            target = (vdir / fname).resolve()
+            target.relative_to(vdir)          # reject path traversal
+        except (ValueError, OSError):
+            abort(404)
+        if not target.is_file():
+            abort(404)
+        return send_from_directory(str(vdir), fname, max_age=31536000)
 
     @app.route("/loom")
     def loom():
