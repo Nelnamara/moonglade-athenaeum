@@ -1708,6 +1708,39 @@ def create_app(out_dir: Path):
             with _watch_lock:
                 _watch_status["last_error"] = str(e)[:200]
 
+    def _reconcile_job(tid, ws_status):
+        """Resolve OUR Activity/job log for a task straight from a live event, so a
+        generation whose Generate-card poller was closed (you navigated into the panel)
+        still lands as done/failed instead of hanging at 'running' forever. Only touches a
+        job we already track -- never invents one for a task generated on the website."""
+        import pixai_gallery_backup as core
+        try:
+            term = "failed" if ws_status in core._GEN_FAIL else "done"
+            j = next((x for x in core.read_jobs(out_dir)
+                      if str(x.get("job_id")) == str(tid)), None)
+            if j and j.get("status") not in ("done", "failed"):
+                _log_job(str(tid), status=term,
+                         error=(ws_status if term == "failed" else None))
+        except Exception:                          # noqa: BLE001 -- reconciling must not kill the watcher
+            pass
+
+    def _reconcile_orphan_jobs():
+        """One-shot on watcher start: ask PixAI the real status of any job still marked
+        'running' and resolve stale ones (read-only; no spend). Catches jobs orphaned when
+        the app closed or a Generate card was dismissed before its poll resolved -- e.g. a
+        task that failed while nobody was watching. Session is built lazily so a log with
+        no running generate jobs costs nothing."""
+        import pixai_gallery_backup as core
+        box = {"s": None}
+        def _status(tid):
+            if box["s"] is None:
+                box["s"] = core._make_session(None)
+            return core.generation_status(box["s"], tid)
+        try:
+            core.resolve_orphan_jobs(out_dir, _status)
+        except Exception:                          # noqa: BLE001
+            pass
+
     def _watch_loop():
         import asyncio
         import time as _time
@@ -1716,6 +1749,7 @@ def create_app(out_dir: Path):
                          # 'completed' event can repeat)
         with _watch_lock:
             _watch_status["started_at"] = _time.time()
+        _reconcile_orphan_jobs()   # clear any job left hanging at 'running' from a prior session
         backoff = 5
         while True:
             try:
@@ -1742,6 +1776,10 @@ def create_app(out_dir: Path):
                     if status == core._WS_DONE_STATUS and tid and tid not in backed:
                         backed.add(tid)
                         threading.Thread(target=_watch_mirror, args=(tid,), daemon=True).start()
+                    # Reconcile the Activity log from the SAME event stream, so a job resolves
+                    # even if the Generate card that was polling /api/task-status is gone.
+                    if tid and (status in core._GEN_DONE or status in core._GEN_FAIL):
+                        _reconcile_job(tid, status)
 
                 asyncio.run(core._watch_events_async(auth, on_event, None))
                 backoff = 5   # a clean disconnect resets the backoff
