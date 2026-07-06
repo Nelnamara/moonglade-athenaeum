@@ -12,6 +12,16 @@ def _no_pixai_token(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_watch(monkeypatch):
+    """create_app() is called by ~every test in this suite. Without this, its
+    live-mirror watcher thread would call _make_session(None), which re-reads THIS
+    machine's real config.json (whatever real credentials happen to be there) and open
+    a genuine WebSocket to wss://gw.pixai.art -- during every single test run. Skip its
+    auto-start entirely in tests; see MOONGLADE_DISABLE_WATCH in pixai_gallery.py."""
+    monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
+
+
+@pytest.fixture(autouse=True)
 def _no_live_card_network(monkeypatch):
     """The card list/match hit PixAI's live /v2 REST API. Keep unit tests offline by
     default: _rest_get/_rest_post raise (so list_kaisuukens -> [] and match_kaisuuken ->
