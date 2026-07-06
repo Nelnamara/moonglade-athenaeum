@@ -381,6 +381,31 @@ def read_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE, now=None):
     return _select_jobs(jobs, order, time.time() if now is None else now, keep, max_age)
 
 
+def resolve_orphan_jobs(out_dir, status_fn):
+    """Resolve jobs stuck at 'running' by asking `status_fn(task_id)` for their true state
+    and appending a terminal event when it has finished. Only PixAI-task-keyed generate
+    jobs (job_id is the numeric task id) are checked -- panel/delete jobs are local and
+    self-report. `status_fn` returns 'running' | 'done' | 'failed' (a raised exception on
+    one job is skipped, not fatal). Fixes jobs orphaned when a Generate card was closed
+    before its poll resolved. Returns the number of jobs resolved to a terminal state."""
+    resolved = 0
+    for j in read_jobs(out_dir):
+        if j.get("status") in _JOBS_TERMINAL:
+            continue
+        jid = str(j.get("job_id") or "")
+        if j.get("type") != "generate" or not jid.isdigit():
+            continue
+        try:
+            phase = status_fn(jid)
+        except Exception:                          # noqa: BLE001 -- one bad lookup must not stop the rest
+            continue
+        if phase in _JOBS_TERMINAL:
+            append_job_event(out_dir, jid, status=phase,
+                             error=("task " + phase if phase == "failed" else None))
+            resolved += 1
+    return resolved
+
+
 def maybe_compact_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE):
     """Opportunistically rewrite jobs.jsonl down to exactly the records _select_jobs keeps,
     so the append-only log can't grow without bound. Only fires once the raw file passes
