@@ -2917,7 +2917,12 @@ document.addEventListener('DOMContentLoaded', function(){
   #similar-scrim.open{display:block;}
   #similar-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
   #similar-modal.open{display:flex;}
-  #similar-modal #similar-grid{overflow-y:auto;flex:1;min-height:0;}
+  /* Bulletproof fixed-tile grid (same pattern as #pick-grid) -- the aspect-ratio .card
+     pattern collapses to slivers inside this flex modal, which is why it didn't scroll. */
+  #similar-modal #similar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));grid-auto-rows:150px;gap:10px;overflow-y:auto;flex:1;min-height:0;align-content:start;padding:4px;}
+  #similar-modal #similar-grid .card{grid-row:span 1;}
+  #similar-modal #similar-grid .card img{width:100%;height:100%;aspect-ratio:auto;object-fit:cover;}
+  #similar-modal #similar-grid .card .meta{position:absolute;left:0;right:0;bottom:0;margin:0;padding:2px 6px;background:linear-gradient(transparent,rgba(0,0,0,.72));pointer-events:none;}
   .pick-head{display:flex;align-items:center;margin-bottom:10px;}
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
   .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
@@ -4401,7 +4406,7 @@ var Similar = (function(){
     var g=el('similar-grid'), em=el('similar-empty');
     em.style.display='none';
     g.innerHTML='<div class="pick-empty">Finding lookalikes\\u2026</div>';
-    fetch('/api/similar/'+encodeURIComponent(mid)+'?k=24').then(function(r){return r.json();}).then(function(d){
+    fetch('/api/similar/'+encodeURIComponent(mid)+'?k=48').then(function(r){return r.json();}).then(function(d){
       g.innerHTML='';
       var imgs=(d&&d.images)||[];
       if(!imgs.length){ em.textContent=(d&&d.error)?d.error:'No similar images yet \\u2014 the index may still be building.'; em.style.display='block'; return; }
