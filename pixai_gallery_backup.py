@@ -4610,6 +4610,28 @@ def _count_backup_images(out):
     return n, b, thumbs
 
 
+def run_rebuild_similar(args):
+    """--rebuild-similar: drop + re-embed the visual-similarity ('Similar') index from
+    scratch off the on-disk backup. Cures a corrupted/duplicate-index table by building
+    ONE clean named index. Uses the shared progress callback (terminal bar + Control Panel
+    marker). No network; needs torch/pixeltable. Run it when the gallery is NOT serving
+    Similar queries (both touch the same embedded Postgres)."""
+    try:
+        import pixai_similar as ps
+    except Exception as e:
+        sys.exit("Similar index unavailable (pixeltable/torch not installed): {}".format(e))
+    if not ps.is_available():
+        sys.exit("Similar index needs torch -- install the ML deps (torch/transformers/pixeltable).")
+    out = Path(args.out)
+    if not out.exists():
+        sys.exit("No backup dir at {}.".format(out))
+    print("Rebuilding the Similar index from {} -- drops the old table, re-embeds every image.".format(out))
+    n = ps.rebuild(ps.scan_dir(out), progress=getattr(args, "progress", None))
+    print()  # finish the \r progress line
+    print("Similar index rebuilt: embedded {:,} images ({:,} in index, {} skipped).".format(
+        n, ps.count(), ps.sync.last_errors))
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
@@ -5560,6 +5582,10 @@ def main():
     ap.add_argument("--restore-orphans", action="store_true",
                     help="with --verify-dupes, move any orphaned quarantined files (no surviving "
                          "keeper) back to images/")
+    ap.add_argument("--rebuild-similar", action="store_true",
+                    help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
+                         "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
+                         "named index. ~decode-bound, no network. Needs torch/pixeltable.")
     args = ap.parse_args()
     set_verbose(getattr(args, "verbose", False))
     # Give every command a progress callback (terminal bar, or Control Panel markers under
@@ -5583,6 +5609,9 @@ def main():
             return
         if args.catalog_stats:
             run_catalog_stats(args)
+            return
+        if getattr(args, "rebuild_similar", False):
+            run_rebuild_similar(args)
             return
         if args.export_csv:
             if not db_path.exists():
