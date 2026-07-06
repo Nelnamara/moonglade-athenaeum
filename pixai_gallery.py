@@ -1611,6 +1611,15 @@ def create_app(out_dir: Path):
     # cron -- for always-on, point Windows Task Scheduler at `--update` instead).
     _sched_lock = threading.Lock()
 
+    def _log_job(job_id, **fields):
+        """Append a job event to out_dir/jobs.jsonl for the Jobs card. Fails soft --
+        activity logging must never break the request that triggered it."""
+        try:
+            import pixai_gallery_backup as _core
+            _core.append_job_event(out_dir, job_id, **fields)
+        except Exception:
+            pass
+
     def _sched_path():
         return out_dir / "schedule.json"
 
@@ -3301,7 +3310,9 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="model-preview" aria-hidden="true"></div>
 <div id="ctx-menu"></div>
 <div id="tag-suggest"></div>
-<div id="jobs-tray"></div>
+<div id="jobs-fab" onclick="JobsCard.open()" title="Activity"><span class="jf-dot"></span><span class="jf-badge" id="jobs-fab-badge"></span><span>Activity</span></div>
+<div id="jobs-tray" aria-label="Job activity"></div>
+<div id="mg-toasts" aria-live="polite"></div>
 <div id="snip-menu"></div>
 <div id="ach-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
   <div class="ach-panel" role="dialog" aria-label="Achievements and skins">
@@ -3420,15 +3431,57 @@ document.addEventListener('DOMContentLoaded', function(){
   a.acct-chip{font-size:13px;color:var(--text);background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;padding:5px 14px;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;}
   a.acct-chip:hover{border-color:var(--lavender);text-decoration:none;}
   .acct-chip b{color:var(--text);} .acct-chip .cd{color:var(--lavender);}
-  #jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:270px;min-width:190px;max-width:560px;max-height:64vh;overflow:auto;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;padding:8px;}
-  #jobs-tray.big{width:440px;}
-  #jobs-tray .jt-head{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);margin-bottom:6px;display:flex;justify-content:space-between;}
-  .jt-item{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--text);padding:4px 2px;}
-  .jt-item .jt-lab{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .jt-item img{width:26px;height:26px;border-radius:4px;object-fit:cover;}
-  .jt-item .jt-x{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;}
-  .jt-item .jt-x:hover{color:var(--red);}
-  .jt-ok{color:var(--emerald);} .jt-err{color:var(--red);}
+  /* ---- Jobs card: the activity tracker (bottom-left, always openable) ---- */
+  #jobs-fab{position:fixed;left:14px;bottom:14px;z-index:234;display:none;align-items:center;gap:7px;background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);color:var(--subtext);cursor:pointer;padding:7px 13px 7px 10px;font-size:11.5px;letter-spacing:.02em;transition:border-color .15s,color .15s;}
+  #jobs-fab.show{display:inline-flex;}
+  #jobs-fab:hover{border-color:var(--lavender);color:var(--text);}
+  #jobs-fab .jf-dot{width:8px;height:8px;border-radius:50%;background:var(--overlay0);flex:none;}
+  #jobs-fab.busy .jf-dot{background:var(--lavender);box-shadow:0 0 9px rgba(182,146,230,.8);animation:jf-pulse 1.6s ease-in-out infinite;}
+  #jobs-fab .jf-badge{background:var(--lavender);color:var(--base);border-radius:999px;font-size:10px;font-weight:700;padding:1px 6px;min-width:15px;text-align:center;display:none;}
+  #jobs-fab.busy .jf-badge{display:inline-block;}
+  @keyframes jf-pulse{0%,100%{opacity:.5;}50%{opacity:1;}}
+  #jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:320px;min-width:236px;max-width:560px;max-height:min(70vh,560px);display:none;flex-direction:column;overflow:hidden;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55);}
+  #jobs-tray.open{display:flex;}
+  #jobs-tray .jt-head{display:flex;align-items:center;gap:6px;padding:9px 11px;border-bottom:1px solid var(--surface0);background:linear-gradient(180deg,var(--surface0),transparent);}
+  #jobs-tray .jt-title{font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:var(--lavender);font-weight:700;flex:1;display:flex;align-items:center;gap:7px;}
+  #jobs-tray .jt-count{color:var(--overlay0);font-weight:600;letter-spacing:.03em;}
+  #jobs-tray .jt-hbtn{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:11px;padding:3px 7px;border-radius:6px;}
+  #jobs-tray .jt-hbtn:hover{color:var(--text);background:var(--surface1);}
+  #jobs-tray .jt-body{overflow:auto;padding:6px;flex:1;}
+  .jt-empty{color:var(--overlay0);font-size:12px;text-align:center;padding:30px 16px;line-height:1.55;}
+  .jt-item{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:var(--text);padding:8px;border-radius:8px;}
+  .jt-item + .jt-item{margin-top:1px;}
+  .jt-item:hover{background:var(--surface0);}
+  .jt-item.st-failed{background:rgba(243,139,168,.09);}
+  .jt-ic{flex:none;width:18px;display:flex;align-items:center;justify-content:center;margin-top:1px;}
+  .jt-ic .gen-moon{margin:0;}
+  .jt-ok{color:var(--emerald);font-size:14px;} .jt-err{color:var(--red);font-size:14px;}
+  .jt-main{flex:1;min-width:0;}
+  .jt-lab{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .jt-sub{font-size:10.5px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;}
+  .jt-sub .jt-when{color:var(--overlay0);} .jt-sub .jt-kind{color:var(--subtext);text-transform:capitalize;}
+  .jt-errmsg{color:var(--red);font-size:10.5px;margin-top:3px;white-space:normal;}
+  .jt-bar{height:4px;border-radius:3px;background:var(--surface1);margin-top:6px;overflow:hidden;}
+  .jt-bar i{display:block;height:100%;background:var(--lavender);border-radius:3px;transition:width .3s;}
+  .jt-thumb{flex:none;} .jt-thumb img{width:30px;height:30px;border-radius:5px;object-fit:cover;display:block;}
+  .jt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 2px;flex:none;line-height:1;}
+  .jt-x:hover{color:var(--red);}
+  /* ---- Toasts: small, corner-stacked, reusable (job notices; achievements can adopt) ---- */
+  #mg-toasts{position:fixed;right:16px;bottom:16px;z-index:420;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;}
+  .mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .28s cubic-bezier(.2,.9,.3,1.2);}
+  .mg-toast.out{animation:mg-toast-out .3s ease forwards;}
+  .mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);}
+  .mg-toast .mt-ic{flex:none;font-size:15px;margin-top:1px;color:var(--lavender);}
+  .mg-toast.ok .mt-ic{color:var(--emerald);} .mg-toast.err .mt-ic{color:var(--red);}
+  .mg-toast .mt-main{flex:1;min-width:0;}
+  .mg-toast .mt-title{font-size:12.5px;color:var(--text);font-weight:600;}
+  .mg-toast .mt-msg{font-size:11px;color:var(--subtext);margin-top:2px;white-space:normal;}
+  .mg-toast .mt-thumb{width:34px;height:34px;border-radius:6px;object-fit:cover;flex:none;}
+  .mg-toast .mt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 1px;flex:none;line-height:1;}
+  .mg-toast .mt-x:hover{color:var(--text);}
+  @keyframes mg-toast-in{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes mg-toast-out{to{opacity:0;transform:translateX(20px);}}
+  @media (prefers-reduced-motion: reduce){ #jobs-fab.busy .jf-dot{animation:none;} .mg-toast,.mg-toast.out{animation:none;} }
   #ctx-menu{position:fixed;z-index:230;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:180px;padding:4px;}
   #ctx-menu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:7px 10px;border-radius:5px;cursor:pointer;}
   #ctx-menu button:hover{background:var(--surface0);}
@@ -3745,47 +3798,155 @@ var Acct = (function(){
   }
   return {refresh:refresh};
 })();
-/* ---- Jobs tray: tasks survive closing the drawer ---- */
+/* ---- Toasts: small corner notices, reusable (job notices now; achievements can adopt) ---- */
+var Toast = (function(){
+  function box(){ var b=document.getElementById('mg-toasts');
+    if(!b){ b=document.createElement('div'); b.id='mg-toasts'; b.setAttribute('aria-live','polite'); document.body.appendChild(b); }
+    return b; }
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function show(o){
+    o=o||{};
+    var kind=o.kind||'';   // '' | 'ok' | 'err'
+    var el=document.createElement('div');
+    el.className='mg-toast'+(kind?(' '+kind):'');
+    var ic=o.icon||(kind==='ok'?'\\u2713':(kind==='err'?'\\u26a0':'\\u25c9'));
+    var thumb=o.thumb?'<img class="mt-thumb" src="'+esc(o.thumb)+'" alt="">':'';
+    el.innerHTML='<span class="mt-ic">'+ic+'</span><div class="mt-main"><div class="mt-title">'+esc(o.title||'')+'</div>'
+      +(o.msg?'<div class="mt-msg">'+esc(o.msg)+'</div>':'')+'</div>'+thumb
+      +'<button class="mt-x" aria-label="Dismiss">\\u00d7</button>';
+    function remove(){ if(!el.parentNode) return; el.classList.add('out'); setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 320); }
+    el.querySelector('.mt-x').onclick=remove;
+    box().appendChild(el);
+    if(!o.sticky){ setTimeout(remove, o.ttl||5200); }
+    return remove;
+  }
+  return {show:show};
+})();
+/* ---- Jobs: submit-driver. Registers each gen in the server activity log, then polls
+   task-status so the download+catalog still happens (and survives the drawer closing).
+   The CARD (JobsCard) renders from the server log, NOT from here. ---- */
 var Jobs = (function(){
-  var jobs={}, order=[];
-  function tray(){ return document.getElementById('jobs-tray'); }
+  var seen={};
   function track(id, label, cb){
-    if(jobs[id]) return; jobs[id]={id:id, label:label||'Task', status:'running', mid:'', cb:cb};
-    order.unshift(id); render(); poll(id);
+    if(!id || seen[id]) return; seen[id]=true;
+    // Register immediately so the card shows it running (paper trail survives reload).
+    fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({job_id:id, type:'generate', label:label||'Generation', status:'running'})}).catch(function(){});
+    if(window.JobsCard) JobsCard.refresh();
+    poll(id, cb);
   }
-  function poll(id){
-    if(!jobs[id]) return;
+  function poll(id, cb){
     fetch('/api/task-status?task_id='+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){
-      var j=jobs[id]; if(!j) return;
-      if(d.phase==='done'){ j.status='done'; j.mid=(d.media_ids||[])[0]||''; render(); if(j.cb) j.cb('done', d); }
-      else if(d.phase==='failed'){ j.status='failed'; render(); if(j.cb) j.cb('failed', d); }
-      else { if(j.cb) j.cb('running', d); setTimeout(function(){ poll(id); }, 3000); }
-    }).catch(function(){ setTimeout(function(){ poll(id); }, 4000); });
+      if(d.phase==='done'){ if(cb) cb('done', d); if(window.JobsCard) JobsCard.refresh(); }
+      else if(d.phase==='failed'){ if(cb) cb('failed', d); if(window.JobsCard) JobsCard.refresh(); }
+      else { if(cb) cb('running', d); setTimeout(function(){ poll(id, cb); }, 3000); }
+    }).catch(function(){ setTimeout(function(){ poll(id, cb); }, 4000); });
   }
-  function dismiss(id){ delete jobs[id]; order=order.filter(function(x){return x!==id;}); render(); }
-  function clearDone(){ order.slice().forEach(function(id){ if(jobs[id]&&jobs[id].status!=='running') dismiss(id); }); }
-  function liveBadge(){
-    var running=order.filter(function(id){ return jobs[id]&&jobs[id].status==='running'; }).length;
-    var live=document.getElementById('gen-live');
-    if(live){ if(running){ live.textContent='\\u25c9 '+running+' generating'; live.style.display=''; } else live.style.display='none'; }
+  return {track:track};
+})();
+/* ---- JobsCard: the always-openable activity card, backed by /api/jobs. Renders the
+   server-side job log (survives reload), shows a short history, fires toasts on
+   completion/failure, and keeps failures until dismissed. ---- */
+var JobsCard = (function(){
+  var last={}, seeded=false, timer=null, LSK='mg_jobs_open';
+  function el(i){ return document.getElementById(i); }
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function isOpen(){ try{ return localStorage.getItem(LSK)==='1'; }catch(e){ return false; } }
+  function applyState(){
+    var t=el('jobs-tray'), f=el('jobs-fab'); if(!t||!f) return;
+    if(isOpen()){ t.classList.add('open'); f.classList.remove('show'); }
+    else { t.classList.remove('open'); f.classList.add('show'); }
   }
-  function render(){
-    liveBadge();
-    var t=tray(); if(!t) return;
-    if(!order.length){ t.style.display='none'; t.innerHTML=''; return; }
-    t.style.display='block';
-    var html='<div class="jt-head"><span>Jobs</span><button class="jt-x" onclick="Jobs.clearDone()" title="Clear finished">clear</button></div>';
-    order.forEach(function(id){ var j=jobs[id];
-      var icon = j.status==='done'?'<span class="jt-ok">\\u2713</span>'
-               : j.status==='failed'?'<span class="jt-err">\\u26a0</span>'
-               : '<span class="gen-moon"></span>';
-      var thumb = (j.status==='done'&&j.mid)?'<a href="/image/'+j.mid+'"><img src="/thumbs/'+j.mid+'.jpg" alt=""></a>':'';
-      html+='<div class="jt-item">'+icon+'<span class="jt-lab">'+j.label+' \\u00b7 '+j.status+'</span>'+thumb
-          +'<button class="jt-x" onclick="Jobs.dismiss(\\''+id+'\\')">\\u00d7</button></div>';
+  function setOpen(v){ try{ localStorage.setItem(LSK, v?'1':'0'); }catch(e){} applyState(); }
+  function open(){ setOpen(true); refresh(); }
+  function close(){ setOpen(false); }
+  function ago(ts){
+    var s=Math.max(0, Math.floor(Date.now()/1000 - (ts||0)));
+    if(s<60) return 'just now';
+    if(s<3600) return Math.floor(s/60)+'m ago';
+    if(s<86400) return Math.floor(s/3600)+'h ago';
+    return Math.floor(s/86400)+'d ago';
+  }
+  function row(j){
+    var st=j.status||'running', fin=(st==='done'||st==='failed');
+    var ic = st==='done'?'<span class="jt-ok">\\u2713</span>'
+           : st==='failed'?'<span class="jt-err">\\u26a0</span>'
+           : '<span class="gen-moon"></span>';
+    var mid=(j.media_ids||[])[0]||'';
+    var thumb=(st==='done'&&mid)?'<a class="jt-thumb" href="/image/'+encodeURIComponent(mid)+'"><img src="/thumbs/'+encodeURIComponent(mid)+'.jpg" alt=""></a>':'';
+    var bar='';
+    if(st==='running' && j.total){ var pct=Math.min(100, Math.round((j.done||0)/j.total*100)); bar='<div class="jt-bar"><i style="width:'+pct+'%"></i></div>'; }
+    var errmsg=(st==='failed'&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
+    var sub='<div class="jt-sub"><span class="jt-kind">'+esc(j.type||'job')+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
+    var x=fin?'<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">\\u00d7</button>':'';
+    return '<div class="jt-item'+(st==='failed'?' st-failed':'')+'"><div class="jt-ic">'+ic+'</div>'
+         +'<div class="jt-main"><div class="jt-lab">'+esc(j.label||'Generation')+'</div>'+sub+bar+errmsg+'</div>'
+         +thumb+x+'</div>';
+  }
+  function render(jobs){
+    var t=el('jobs-tray'); if(!t) return;
+    var running=0; jobs.forEach(function(j){ if((j.status||'running')==='running') running++; });
+    var head='<div class="jt-head"><span class="jt-title">\\u25c9 Activity'
+      +(jobs.length?' <span class="jt-count">'+jobs.length+'</span>':'')+'</span>'
+      +'<button class="jt-hbtn" data-act="clear" title="Clear finished">clear</button>'
+      +'<button class="jt-hbtn" data-act="close" title="Collapse">\\u2013</button></div>';
+    var body='';
+    if(!jobs.length){ body='<div class="jt-empty">No jobs yet.<br>Generations and syncs show up here \\u2014 with a short history.</div>'; }
+    else { jobs.forEach(function(j){ body+=row(j); }); }
+    t.innerHTML=head+'<div class="jt-body">'+body+'</div>';
+    var f=el('jobs-fab'); if(f){ f.classList.toggle('busy', running>0); var b=el('jobs-fab-badge'); if(b) b.textContent=running||''; }
+    var live=el('gen-live'); if(live){ if(running){ live.textContent='\\u25c9 '+running+' running'; live.style.display=''; } else live.style.display='none'; }
+  }
+  function toastTransitions(jobs){
+    jobs.forEach(function(j){
+      var st=j.status||'running', prev=last[j.job_id];
+      if(seeded && prev!=='done' && prev!=='failed' && (st==='done'||st==='failed')){
+        if(st==='done'){
+          var mid=(j.media_ids||[])[0]||'';
+          Toast.show({kind:'ok', title:(j.label||'Generation')+' \\u2014 done', msg:'Added to your gallery.',
+                      thumb: mid?('/thumbs/'+encodeURIComponent(mid)+'.jpg'):null});
+        } else {
+          Toast.show({kind:'err', sticky:true, title:(j.label||'Job')+' failed', msg:j.error||'See the activity card.'});
+        }
+      }
+      last[j.job_id]=st;
     });
-    t.innerHTML=html;
+    seeded=true;
   }
-  return {track:track, dismiss:dismiss, clearDone:clearDone};
+  function refresh(){
+    return fetch('/api/jobs').then(function(r){return r.json();}).then(function(d){
+      var jobs=(d&&d.jobs)||[];
+      toastTransitions(jobs); render(jobs);
+    }).catch(function(){});
+  }
+  function schedule(){
+    if(timer) clearTimeout(timer);
+    var f=el('jobs-fab'); var busy=f&&f.classList.contains('busy');
+    timer=setTimeout(function(){
+      if(document.hidden){ schedule(); return; }
+      refresh().then(schedule);
+    }, busy?2500:7000);
+  }
+  function dismiss(id){
+    fetch('/api/jobs/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id})})
+      .then(function(){ delete last[id]; refresh(); }).catch(function(){});
+  }
+  function clearFinished(){
+    fetch('/api/jobs/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({finished:true})})
+      .then(refresh).catch(function(){});
+  }
+  document.addEventListener('DOMContentLoaded', function(){
+    applyState();
+    var t=el('jobs-tray');
+    if(t){ t.addEventListener('click', function(e){
+      var x=e.target.closest?e.target.closest('.jt-x[data-job]'):null;
+      if(x){ dismiss(x.getAttribute('data-job')); return; }
+      var h=e.target.closest?e.target.closest('.jt-hbtn[data-act]'):null;
+      if(h){ var a=h.getAttribute('data-act'); if(a==='clear') clearFinished(); else if(a==='close') close(); }
+    }); }
+    refresh().then(schedule);
+  });
+  return {open:open, close:close, refresh:refresh, dismiss:dismiss, clearFinished:clearFinished};
 })();
 /* ---- Prompt snippets / favorites (server-stored) ---- */
 var Snips = (function(){
@@ -7070,15 +7231,79 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             st = core.generation_status(session, tid)
             if st["phase"] == "done":
                 got = core.collect_generation(session, tid, str(out_dir))
+                # authoritative done event -- written server-side so the Jobs card gets the
+                # outcome even if the browser tab that submitted it has since closed.
+                _log_job(tid, status="done", media_ids=got["media_ids"],
+                         is_video=got.get("is_video", False))
                 return jsonify({"phase": "done", "media_ids": got["media_ids"],
                                 "is_video": got.get("is_video", False),
                                 "duration": got.get("duration"),
                                 "paid_credit": st["paid_credit"]})
             if st["phase"] == "failed":
+                _log_job(tid, status="failed", error=(st.get("status") or "failed"))
                 return jsonify({"phase": "failed", "status": st["status"]})
             return jsonify({"phase": "running", "status": st["status"]})
         except Exception as e:
+            # A transient PixAI blip (5xx/429/timeout) raises here even though the task may
+            # still be running -- or already finished. Do NOT write an authoritative 'failed'
+            # job event: that would brick the card with a sticky false failure + a red toast
+            # for a task that likely succeeded. Leave the job at its last-known state (it ages
+            # out, or the live-mirror watcher collects the real result). Only a genuine
+            # st["phase"] == "failed" above logs a terminal failure.
             return jsonify({"phase": "failed", "error": str(e)[:200]}), 200
+
+    @app.route("/api/jobs")
+    def api_jobs():
+        """Reconstructed job list for the Jobs card (newest-first) -- the paper trail that
+        survives a reload. The card polls this. Localhost-only, like the creation suite."""
+        if not _is_local_request():
+            return jsonify({"jobs": []}), 403
+        import pixai_gallery_backup as core
+        try:
+            jobs = core.read_jobs(out_dir)
+            core.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
+        except Exception:
+            jobs = []
+        return jsonify({"jobs": jobs})
+
+    @app.route("/api/jobs", methods=["POST"])
+    def api_jobs_register():
+        """Register/update a job in the log. The Jobs card calls this the moment a gen is
+        submitted (status=running) so it shows immediately; the authoritative done/failed
+        events are written server-side by /api/task-status. Localhost-only."""
+        if not _is_local_request():
+            return jsonify({"ok": False}), 403
+        body = request.get_json(silent=True) or {}
+        jid = str(body.get("job_id") or "").strip()
+        if not jid:
+            return jsonify({"ok": False, "error": "job_id required"}), 400
+        _log_job(jid, status=(body.get("status") or "running"),
+                 type=body.get("type"), label=body.get("label"),
+                 done=body.get("done"), total=body.get("total"),
+                 source=body.get("source") or "web")
+        return jsonify({"ok": True})
+
+    @app.route("/api/jobs/dismiss", methods=["POST"])
+    def api_jobs_dismiss():
+        """Dismiss one job (job_id) or every finished job (finished:true) from the card --
+        this is how a sticky failure gets cleared. Localhost-only."""
+        if not _is_local_request():
+            return jsonify({"ok": False}), 403
+        import pixai_gallery_backup as core
+        body = request.get_json(silent=True) or {}
+        if body.get("finished"):
+            try:
+                for j in core.read_jobs(out_dir):
+                    if j.get("status") in ("done", "failed"):
+                        _log_job(j.get("job_id"), dismissed=True)
+            except Exception:
+                pass
+        else:
+            jid = str(body.get("job_id") or "").strip()
+            if not jid:
+                return jsonify({"ok": False, "error": "job_id required"}), 400
+            _log_job(jid, dismissed=True)
+        return jsonify({"ok": True})
 
     @app.route("/api/workflows")
     def api_workflows():
