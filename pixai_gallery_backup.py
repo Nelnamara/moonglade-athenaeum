@@ -4465,11 +4465,26 @@ def list_kaisuukens(session):
     return [_normalize_kaisuuken(k) for k in rows]
 
 
-def match_kaisuuken(session, parameters):
+def _target_model_id(parameters):
+    """The model id a generation targets, wherever it lives: top-level `modelId` for
+    plain gen + video, or `chat.modelId` for an instruct edit. Empty string if none."""
+    if not isinstance(parameters, dict):
+        return ""
+    return str(parameters.get("modelId")
+               or (parameters.get("chat") or {}).get("modelId") or "").strip()
+
+
+def match_kaisuuken(session, parameters, enrich=False):
     """POST /v2/kaisuuken/check with a generation's `parameters` and return the single
     nearest-expiry matching TICKET as {id, expiresAt, templateId, total} -- or None when
     no card matches. READ-ONLY: this only *checks*; the card is consumed later, when the
-    task is submitted with the returned id attached. Fails soft (returns None)."""
+    task is submitted with the returned id attached. Fails soft (returns None).
+
+    `enrich=True` cross-references /kaisuuken/summary to (a) PREFER the card locked to this
+    generation's own model when more than one template is eligible -- so an Edit gen spends
+    an Edit card, not a same-expiry Reference card that merely also matched -- and (b) attach
+    the card's human `name` for honest UI ("Edit Pro Only covers this", not a guess). The
+    default (False) keeps the original single-call behavior for every existing caller."""
     if not parameters:
         return None
     try:
@@ -4477,8 +4492,21 @@ def match_kaisuuken(session, parameters):
                           {"type": "generation-task", "parameters": parameters}) or {}
     except (PixAIError, ValueError):
         return None
+    matches = data.get("matches") or []
+    if not matches:
+        return None
+    by_tid = {c.get("template_id"): c for c in list_kaisuukens(session)} if enrich else {}
+    # (A) When several cards are eligible, prefer the one whose model IS this generation's
+    # model; fall back to the full set if none match (or we didn't enrich).
+    want = _target_model_id(parameters)
+    pool = matches
+    if enrich and want and len(matches) > 1:
+        preferred = [mt for mt in matches
+                     if str((by_tid.get(mt.get("templateId")) or {}).get("model_version_id") or "") == want]
+        if preferred:
+            pool = preferred
     best = None
-    for mt in (data.get("matches") or []):
+    for mt in pool:
         for k in (mt.get("kaisuukens") or []):
             kid = k.get("id")
             if not kid:
@@ -4491,6 +4519,8 @@ def match_kaisuuken(session, parameters):
                         "_exp": exp}
     if best:
         best.pop("_exp", None)
+        if enrich:                                     # (B) name the card for honest UI
+            best["name"] = (by_tid.get(best["templateId"]) or {}).get("name")
     return best
 
 
@@ -4672,11 +4702,12 @@ def _apply_kaisuuken(session, params, args):
     if getattr(args, "no_card", False):
         print("  --no-card: not using a free card (this WILL spend credits).")
         return ""
-    best = match_kaisuuken(session, params)
+    best = match_kaisuuken(session, params, enrich=True)   # prefer the model-matching card
     if best and best.get("id"):
         params["kaisuukenId"] = best["id"]
-        print("  free card matches -> attaching it; this costs 0 credits "
-              "(card expires {}).".format((best.get("expiresAt") or "never")[:10]))
+        print("  free card matches ({}) -> attaching it; this costs 0 credits "
+              "(card expires {}).".format(best.get("name") or "card",
+                                          (best.get("expiresAt") or "never")[:10]))
         return best["id"]
     print("  no matching free card -> this will spend credits.")
     return ""

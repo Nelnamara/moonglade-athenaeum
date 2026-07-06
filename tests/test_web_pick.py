@@ -140,7 +140,7 @@ def test_price_route_video_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "price_task",
                         lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken",
-                        lambda s, params: {"id": "c1", "total": 9, "expiresAt": 1})
+                        lambda s, params, enrich=False: {"id": "c1", "total": 9, "expiresAt": 1})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "I2V", "images": ["55"], "prompt": "pan",
@@ -332,7 +332,7 @@ def test_presets_import_and_use(tmp_path, monkeypatch):
     # price path uses the banked preset: canned prompt + sceneId + its model
     seen = {}
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params: None)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli.post("/api/price", json={"mode": "edit", "source": "55",
                                  "preset": "character-card"})
     assert seen["p"]["sceneId"] == "character-card"
