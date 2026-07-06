@@ -184,6 +184,48 @@ def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
     assert res["imported"] == 1   # cataloged fine; just no poster
 
 
+def _mp4(*types):
+    """Build a minimal mp4 from top-level boxes (each an 8-byte header + tiny payload)."""
+    import struct
+    out = b""
+    for t in types:
+        pay = b"\x00" * 8
+        out += struct.pack(">I", 8 + len(pay)) + t + pay
+    return out
+
+
+def test_mp4_faststart_detection(tmp_path):
+    """moov BEFORE mdat = faststart (iOS-streamable); moov after = not."""
+    fs = tmp_path / "fs.mp4"; fs.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
+    nf = tmp_path / "nf.mp4"; nf.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
+    assert core._mp4_is_faststart(fs) is True
+    assert core._mp4_is_faststart(nf) is False
+
+
+def test_video_faststart_noop_without_ffmpeg(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    nf = tmp_path / "nf.mp4"; nf.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
+    before = nf.read_bytes()
+    assert core.video_faststart(nf) is False       # no ffmpeg -> graceful no-op
+    assert nf.read_bytes() == before               # original untouched
+
+
+def test_video_faststart_skips_already_faststart(tmp_path, monkeypatch):
+    # ffmpeg 'present' but the file is already faststart -> short-circuits, no remux attempt
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+    fs = tmp_path / "fs.mp4"; fs.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
+    assert core.video_faststart(fs) is False
+    assert core.video_faststart(tmp_path / "x.webm") is False   # non-mp4 ignored
+
+
+def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "a.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
+    res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
+    assert res["fixed"] == 0 and res["total"] == 1
+
+
 def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     """The branding folder (banner/logo/marks) is app chrome, NOT gallery content —
     a backup scan must never sweep it into the catalog, or the gallery fills with UI art."""
