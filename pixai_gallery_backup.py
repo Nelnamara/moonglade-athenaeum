@@ -266,6 +266,148 @@ def _make_progress():
     return _cb
 
 
+# ---------------------------------------------------------------------------
+# Job log: an APPEND-ONLY activity registry that the web "Jobs" card reads.
+# Several processes write it -- the Flask server, panel subprocesses, and the
+# CLI run straight from a terminal -- so every writer just opens in "a" mode
+# and appends ONE json line recording a job's current state. Readers replay the
+# tail and collapse by job_id (last event wins; a terminal done/failed never
+# reverts to running). Append-only sidesteps the read-modify-write races a
+# single mutated JSON blob would have across processes. It doubles as a plain
+# debug dump -- open jobs.jsonl and read it. Consumed by pixai_gallery.py.
+# ---------------------------------------------------------------------------
+JOBS_LOG_NAME = "jobs.jsonl"
+JOBS_KEEP = 50                 # show at most this many most-recent jobs
+JOBS_MAX_AGE = 24 * 3600       # drop FINISHED jobs older than this (seconds)
+_JOBS_TERMINAL = ("done", "failed")
+_JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many lines
+
+
+def _jobs_path(out_dir):
+    return Path(out_dir) / JOBS_LOG_NAME
+
+
+def append_job_event(out_dir, job_id, status=None, **fields):
+    """Append ONE job event to jobs.jsonl (append-only; safe from many processes).
+    Each call records a job's CURRENT state; readers collapse by job_id. Known
+    fields: type, label, done, total, media_ids, error, source, dismissed. `ts`
+    is stamped here. Fails soft -- logging a job must never break the job."""
+    if not job_id:
+        return
+    rec = {"ts": time.time(), "job_id": str(job_id)}
+    if status is not None:
+        rec["status"] = status
+    for k, v in fields.items():
+        if v is not None:
+            rec[k] = v
+    try:
+        with _jobs_path(out_dir).open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
+    except OSError:
+        pass
+
+
+def _reconstruct_jobs(out_dir):
+    """Replay the whole log, collapsing by job_id. Returns (jobs_by_id, first_seen_order,
+    raw_line_count). A terminal (done/failed) job is sticky: a later non-terminal event (a
+    stale/interleaved heartbeat) can neither revert its status nor inject progress fields
+    onto it -- only an explicit dismiss is honored once a job has finished."""
+    jobs, order, n = {}, [], 0
+    try:
+        with _jobs_path(out_dir).open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                n += 1
+                try:
+                    rec = json.loads(raw)
+                except ValueError:
+                    continue
+                jid = rec.get("job_id")
+                if not jid:
+                    continue
+                cur = jobs.get(jid)
+                if cur is None:
+                    jobs[jid] = rec
+                    order.append(jid)
+                elif cur.get("status") in _JOBS_TERMINAL and rec.get("status") not in _JOBS_TERMINAL:
+                    # finished job + a stale heartbeat: ignore all of it EXCEPT an explicit
+                    # dismiss (which is exactly how a done/failed job gets cleared).
+                    if "dismissed" in rec:
+                        cur["dismissed"] = rec["dismissed"]
+                else:
+                    cur.update(rec)
+    except OSError:
+        return {}, [], 0
+    return jobs, order, n
+
+
+def _job_expired(job, now, max_age):
+    """A job is expired once there's been no activity (its last event's ts) for max_age.
+    This applies to RUNNING jobs too: a 'running' entry with no heartbeat for a full day is
+    a zombie (the tab closed, or a blip hit before the done poll) -- ageing it out keeps the
+    card honest and stops orphaned entries leaking into the log forever."""
+    return bool(max_age) and (now - float(job.get("ts") or 0)) > max_age
+
+
+def _select_jobs(jobs, order, now, keep, max_age):
+    """The single canonical selection used by BOTH read_jobs and maybe_compact_jobs, so the
+    card and the on-disk compaction can never disagree about which jobs survive. Drops
+    dismissed + expired; keeps ALL surviving running jobs (never capped away mid-flight);
+    caps only the FINISHED history to `keep`. Returns newest-first; ties break by first-seen
+    order (stable), which is identical at both call sites."""
+    live, done = [], []
+    for jid in order:                       # order = first-seen -> a stable, shared tiebreak
+        j = jobs[jid]
+        if j.get("dismissed") or _job_expired(j, now, max_age):
+            continue
+        (live if j.get("status") not in _JOBS_TERMINAL else done).append(j)
+    live.sort(key=lambda j: float(j.get("ts") or 0), reverse=True)
+    done.sort(key=lambda j: float(j.get("ts") or 0), reverse=True)
+    if keep:
+        done = done[:keep]                  # cap the finished history only, never running
+    merged = live + done
+    merged.sort(key=lambda j: float(j.get("ts") or 0), reverse=True)
+    return merged
+
+
+def read_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE, now=None):
+    """Current job list for the web card: newest-first, collapsed by job_id, dismissed
+    removed, stale jobs aged out, finished history capped to keep (running never capped)."""
+    jobs, order, _n = _reconstruct_jobs(out_dir)
+    if not jobs:
+        return []
+    return _select_jobs(jobs, order, time.time() if now is None else now, keep, max_age)
+
+
+def maybe_compact_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE):
+    """Opportunistically rewrite jobs.jsonl down to exactly the records _select_jobs keeps,
+    so the append-only log can't grow without bound. Only fires once the raw file passes
+    _JOBS_COMPACT_AT lines. Uses the SAME selection as read_jobs, so compaction can never
+    delete a job the card is currently showing, nor drop an in-flight running job. A
+    concurrent append from another process during the rewrite could be lost -- acceptable
+    for a display/paper-trail log, and rare (compaction only). Called by the web reader."""
+    jobs, order, n = _reconstruct_jobs(out_dir)
+    if n <= _JOBS_COMPACT_AT:
+        return
+    kept = _select_jobs(jobs, order, time.time(), keep, max_age)
+    kept.reverse()                          # write oldest-first so append order stays chronological
+    path = _jobs_path(out_dir)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as fh:
+            for j in kept:
+                fh.write(json.dumps(j, separators=(",", ":")) + "\n")
+        tmp.replace(path)
+    except OSError:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+
+
 def _quick_count(session, page_size=500):
     """Paginate through the library to count total images for the progress meter.
     Uses a conservative page size (default 500) to avoid server-side Prisma
