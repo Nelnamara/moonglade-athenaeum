@@ -18,8 +18,20 @@ def _client(tmp_path):
 def test_panel_page_renders_with_actions(tmp_path):
     html = _client(tmp_path).test_client().get("/panel").get_data(as_text=True)
     assert "Control Panel" in html
-    assert '"action": "update"' in html or '"action":"update"' in html   # actions_json
-    assert "Incremental backup" in html
+    assert "Sync now" in html
+    # ACTIONS drives the Maintenance BUTTONS (panel_visible only); ALL_ACTIONS drives the
+    # scheduler dropdown and must still include the background-only jobs.
+    buttons_json = html.split("var ACTIONS = ", 1)[1].split(";", 1)[0]
+    dropdown_json = html.split("var ALL_ACTIONS = ", 1)[1].split(";", 1)[0]
+    assert '"action": "sync"' in buttons_json
+    # update/backfill-meta/fix-models folded into --sync -- no longer standalone actions
+    for gone in ("update", "backfill-meta", "fix-models"):
+        assert gone not in buttons_json and gone not in dropdown_json
+    # sync-videos etc. lost their BUTTON...
+    for hidden in ("sync-videos", "reconcile-deleted", "sync-artworks"):
+        assert hidden not in buttons_json
+        # ...but stay selectable in the scheduler dropdown -- that's their only home now
+        assert '"action": "{}"'.format(hidden) in dropdown_json
 
 
 def test_run_rejects_unknown_action(tmp_path):
@@ -52,7 +64,7 @@ def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
 
     app = _client(tmp_path)
     cli = app.test_client()
-    r = cli.post("/api/panel/run", json={"action": "update"})
+    r = cli.post("/api/panel/run", json={"action": "sync"})
     assert r.get_json()["ok"] is True
     # reader thread is a daemon; poll status until it finishes
     import time
@@ -69,10 +81,12 @@ def test_schedule_roundtrip_and_safe_only(tmp_path):
     cli = _client(tmp_path).test_client()
     # default: disabled
     assert cli.get("/api/panel/schedule").get_json()["enabled"] is False
-    # save a valid safe schedule
+    # save a valid safe schedule -- sync-videos has NO panel button anymore (it's
+    # panel_visible=False, a full-feed scan meant for the scheduler), but must still be
+    # schedulable: that's its only home now that the button is gone.
     s = cli.post("/api/panel/schedule",
-                 json={"enabled": True, "action": "update", "interval_hours": 12}).get_json()
-    assert s["enabled"] is True and s["action"] == "update" and s["interval_hours"] == 12
+                 json={"enabled": True, "action": "sync-videos", "interval_hours": 12}).get_json()
+    assert s["enabled"] is True and s["action"] == "sync-videos" and s["interval_hours"] == 12
     assert (tmp_path / "schedule.json").exists()
     assert cli.get("/api/panel/schedule").get_json()["interval_hours"] == 12
     # destructive actions cannot be scheduled

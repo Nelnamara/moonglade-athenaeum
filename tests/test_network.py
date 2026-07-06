@@ -476,6 +476,21 @@ def test_fix_models_resolves_numeric_names(tmp_path, mocker):
     assert rows["m3"]["model_name"] == "Already Named"   # untouched
 
 
+def test_sync_runs_all_three_steps_in_order(tmp_path, mocker, monkeypatch):
+    """Control Panel consolidation: --sync now folds fix-models in between the pull
+    and the metadata backfill (previously just 2 steps), so a synced catalog is always
+    fully labeled without a separate click/action."""
+    calls = []
+    mocker.patch.object(core, "run_download", side_effect=lambda a: calls.append("download"))
+    mocker.patch.object(core, "run_fix_models", side_effect=lambda a: calls.append("fix_models"))
+    mocker.patch.object(core, "run_backfill_full_meta", side_effect=lambda a: calls.append("backfill"))
+    monkeypatch.setattr("sys.argv", ["prog", "--sync", "--out", str(tmp_path)])
+
+    core.main()
+
+    assert calls == ["download", "fix_models", "backfill"]
+
+
 def test_progress_counter_does_not_double_count(tmp_path, mocker):
     # Regression: the progress counter must NOT be seeded with the on-disk count
     # (that double-counted already-downloaded items and overshot 100%).

@@ -5292,8 +5292,9 @@ def main():
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
     ap.add_argument("--sync", action="store_true",
                     help="One-shot sync: incremental pull WITH full metadata "
-                         "(equivalent to --update --full-meta), then fill any catalog "
-                         "rows still missing prompts/seeds/models. Idempotent.")
+                         "(equivalent to --update --full-meta), then re-resolve any "
+                         "unlabeled model names, then fill any catalog rows still "
+                         "missing prompts/seeds/models. Idempotent.")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="print timestamped diagnostics (per-page fetch, per-image "
                          "resolve/download timing, disk-scan time) so you can see what a "
@@ -5685,12 +5686,17 @@ def main():
             return
         if getattr(args, "sync", False):
             # Sync = the "it should just happen" pipeline: incremental pull that
-            # arrives WITH metadata, then a targeted fill of anything still blank
+            # arrives WITH metadata, then re-resolve any model ids that came back
+            # blank/numeric, then a targeted fill of anything still blank
             # (run_backfill_full_meta already skips rows that have prompt_full).
+            # All three steps are idempotent/self-limiting, so re-running --sync
+            # with a clean catalog costs almost nothing extra.
             args.update = True
             args.full_meta = True
             run_download(args)
-            print("\nSync: filling any rows still missing metadata...")
+            print("\nSync: resolving any unlabeled model names...")
+            run_fix_models(args)
+            print("Sync: filling any rows still missing metadata...")
             run_backfill_full_meta(args)
             print("Sync complete.")
             return

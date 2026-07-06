@@ -1529,22 +1529,26 @@ def create_app(out_dir: Path):
     _export_dir = out_dir / "loom" / "exports"
 
     # action -> {args (extra flags), label, destructive}
+    # action -> {args, label, destructive, panel_visible}. panel_visible=False actions
+    # are still valid for /api/panel/run and the scheduler dropdown, but don't render as
+    # a Maintenance button -- they're full-feed-scan jobs meant to run periodically in
+    # the background, not be clicked after every pull. --sync itself now folds
+    # fix-models + backfill-full-meta internally (see the CLI's --sync handler), so
+    # those two are gone as standalone actions entirely.
     PANEL_ACTIONS = {
         "sync":          {"args": ["--sync"], "label": "Sync now — pull new + fill metadata", "destructive": False},
-        "update":        {"args": ["--update"], "label": "Incremental backup only (--update, no metadata)", "destructive": False},
         "stats":         {"args": ["--catalog-stats"], "label": "Catalog stats", "destructive": False},
         "audit":         {"args": ["--audit", "--no-content"], "label": "Duplicate audit (fast, read-only)", "destructive": False},
-        "sync-artworks": {"args": ["--sync-artworks"], "label": "Sync published-artwork metadata", "destructive": False},
-        "backfill-meta": {"args": ["--backfill-full-meta"], "label": "Backfill full metadata (prompts / seeds / models)", "destructive": False},
         # (Export CSV isn't here on purpose -- in the browser it's a real DOWNLOAD via /export-csv,
         #  not a subprocess that writes catalog.csv into the backup folder.)
         "organize-dry":  {"args": ["--organize", "--dry-run"], "label": "Organize — preview (dry run)", "destructive": False},
         "dedup-dry":     {"args": ["--dedup"], "label": "Dedup — preview (dry run)", "destructive": False},
-        # Routine maintenance that used to be GUI-only (no args, non-destructive -> schedulable).
-        # import-local stays CLI/GUI: it needs a folder path the fixed-button panel can't supply.
-        "sync-videos":     {"args": ["--sync-videos"], "label": "Sync i2v videos (back up mp4s)", "destructive": False},
-        "reconcile-deleted": {"args": ["--reconcile-deleted"], "label": "Reconcile deleted (flag cloud-removed rows)", "destructive": False},
-        "fix-models":      {"args": ["--fix-model-names"], "label": "Fix model names (re-resolve ids)", "destructive": False},
+        # --- background-only: full-feed scans, run by the scheduler, not a button ---
+        # (both re-walk the WHOLE history every run, no --update-style short-circuit --
+        # fine hourly/daily, wasteful to click after every incremental pull)
+        "sync-artworks":     {"args": ["--sync-artworks"], "label": "Sync published-artwork metadata", "destructive": False, "panel_visible": False},
+        "sync-videos":       {"args": ["--sync-videos"], "label": "Sync i2v videos (back up mp4s)", "destructive": False, "panel_visible": False},
+        "reconcile-deleted": {"args": ["--reconcile-deleted"], "label": "Reconcile deleted (flag cloud-removed rows)", "destructive": False, "panel_visible": False},
         # --- destructive: require confirm=true ---
         "organize":      {"args": ["--organize"], "label": "Organize into month folders", "destructive": True},
         "dedup-apply":   {"args": ["--dedup", "--apply"], "label": "Dedup — quarantine dupes to _duplicates/", "destructive": True},
@@ -5041,7 +5045,8 @@ function savePrompt() {
   .srv-sub{font-size:12.5px;color:var(--subtext);margin-top:6px;}
 </style>
 <script>
-var ACTIONS = {{ actions_json|safe }};
+var ACTIONS = {{ actions_json|safe }};       // Maintenance buttons -- panel_visible only
+var ALL_ACTIONS = {{ all_actions_json|safe }};  // scheduler dropdown -- includes background-only jobs
 function el(i){return document.getElementById(i);}
 function renderJobs(){
   var safe=el('jobs-safe'), danger=el('jobs-danger');
@@ -5106,7 +5111,7 @@ function loadAcct(){
 }
 function loadSchedule(){
   var sel=el('sch-action');
-  ACTIONS.filter(function(a){return !a.destructive;}).forEach(function(a){
+  ALL_ACTIONS.filter(function(a){return !a.destructive;}).forEach(function(a){
     var o=document.createElement('option'); o.value=a.action; o.textContent=a.label; sel.appendChild(o); });
   fetch('/api/panel/schedule').then(function(r){return r.json();}).then(function(s){
     el('sch-enabled').checked=!!s.enabled;
@@ -5237,10 +5242,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/panel")
     def panel():
-        actions = [{"action": k, "label": v["label"], "destructive": v["destructive"]}
-                   for k, v in PANEL_ACTIONS.items()]
+        # actions -> Maintenance buttons (panel_visible only). all_actions -> the
+        # scheduler dropdown, which needs the background-only jobs too (that's their
+        # only home now that they're not buttons).
+        all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"]}
+                       for k, v in PANEL_ACTIONS.items()]
+        actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
+                  if v.get("panel_visible", True)]
         return render_template_string(
             PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
+            all_actions_json=json.dumps(all_actions),
             out_dir=str(out_dir), actions_json=json.dumps(actions),
             supervised=_supervised())
 
