@@ -4636,8 +4636,11 @@ def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
     db_path = _ensure_db(out)
+    _prog = getattr(args, "progress", None)
+    rows = load_catalog(db_path)
+    n = len(rows)
     total = downloaded = missing = pending = 0
-    for row in load_catalog(db_path):
+    for i, row in enumerate(rows):
         total += 1
         if row.get("filename"):
             downloaded += 1
@@ -4645,6 +4648,8 @@ def run_catalog_stats(args):
             missing += 1
         else:
             pending += 1
+        if _prog and (i % 1000 == 0 or i + 1 == n):
+            _prog(i + 1, n)
     print("Catalog: {}".format(db_path))
     print("Total image entries : {}".format(total))
     print("  downloaded files  : {}".format(downloaded))
