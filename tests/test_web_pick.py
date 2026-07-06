@@ -490,6 +490,19 @@ def test_branding_absent_is_404(tmp_path):
     assert cli.get("/branding/../catalog.db").status_code == 404    # traversal rejected
 
 
+def test_generate_card_has_size_and_custom_dimensions(tmp_path):
+    """The Generate card must expose real dimensions — size presets + custom W/H + a wider
+    aspect set — not the old 5 hardcoded ~512px buttons. The API has no size cap (backend
+    _dim only floors to /8), so the card shouldn't self-throttle to half a megapixel."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert 'id="gen-size"' in html and 'id="gen-cw"' in html and 'id="gen-ch"' in html
+    assert 'data-rw="16" data-rh="9"' in html and 'data-rw="3" data-rh="1"' in html  # ratio-based
+    assert 'value="1536"' in html and 'value="2048"' in html   # L / XL presets
+    assert 'data-w="512"' not in html                           # old hardcoded caps gone
+
+
 def test_lightbox_video_uses_load_not_premature_seek(tmp_path):
     """Mobile (iOS Safari) fix: after changing the lightbox <video> src we must call
     load() and must NOT seek currentTime before metadata loads (that throws on iOS and

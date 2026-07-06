@@ -3222,12 +3222,31 @@ document.addEventListener('DOMContentLoaded', function(){
       </details>
       <div class="gen-lbl">Aspect</div>
       <div class="gen-aspects" id="gen-aspects">
-        <button type="button" data-w="512" data-h="512" class="on">1:1</button>
-        <button type="button" data-w="512" data-h="768">2:3</button>
-        <button type="button" data-w="768" data-h="512">3:2</button>
-        <button type="button" data-w="512" data-h="896">9:16</button>
-        <button type="button" data-w="896" data-h="512">16:9</button>
+        <button type="button" data-rw="1" data-rh="1" class="on">1:1</button>
+        <button type="button" data-rw="3" data-rh="4">3:4</button>
+        <button type="button" data-rw="4" data-rh="3">4:3</button>
+        <button type="button" data-rw="2" data-rh="3">2:3</button>
+        <button type="button" data-rw="3" data-rh="2">3:2</button>
+        <button type="button" data-rw="9" data-rh="16">9:16</button>
+        <button type="button" data-rw="16" data-rh="9">16:9</button>
+        <button type="button" data-rw="3" data-rh="1">3:1</button>
       </div>
+      <div class="gen-row" style="margin-top:8px;">
+        <div style="flex:1;"><div class="gen-lbl">Size &middot; long edge</div>
+          <select id="gen-size" class="gen-sel">
+            <option value="768">S &middot; 768</option>
+            <option value="1024" selected>M &middot; 1024</option>
+            <option value="1536">L &middot; 1536</option>
+            <option value="2048">XL &middot; 2048</option>
+          </select></div>
+        <div style="flex:1;"><div class="gen-lbl">Custom W&times;H <span style="text-transform:none;color:var(--subtext);">&middot; overrides</span></div>
+          <div style="display:flex;gap:5px;align-items:center;">
+            <input id="gen-cw" class="gen-sel" type="number" min="64" max="4096" step="8" placeholder="W" style="flex:1;min-width:0;">
+            <span style="color:var(--subtext);">&times;</span>
+            <input id="gen-ch" class="gen-sel" type="number" min="64" max="4096" step="8" placeholder="H" style="flex:1;min-width:0;">
+          </div></div>
+      </div>
+      <div id="gen-dim-note" style="font-size:11px;color:var(--subtext);margin-top:5px;"></div>
       <div class="gen-row" style="margin-top:8px;">
         <div style="flex:1;"><div class="gen-lbl">Mode</div>
           <select id="gen-mode" class="gen-sel"><option value="auto">Auto</option><option value="lite">Lite</option><option value="standard">Standard</option><option value="pro">Pro</option><option value="ultra">Ultra</option></select></div>
@@ -4342,15 +4361,27 @@ var Gen = (function(){
     }
   }
   function refStrength(v){ el('gen-ref-sval').textContent=(+v).toFixed(2); debouncedCost(); }
-  function curAspect(){ var b=document.querySelector('#gen-aspects button.on');
-    return b?{w:+b.getAttribute('data-w'),h:+b.getAttribute('data-h')}:{w:512,h:512}; }
-  function payload(){ var a=curAspect();
+  function d8(n){ n=Math.round(n/8)*8; return Math.max(64, Math.min(4096, n)); }
+  function dims(){
+    // Custom W&H (both set) win; else aspect ratio scaled so the LONG edge = chosen size.
+    var cw=+(el('gen-cw')&&el('gen-cw').value||0), ch=+(el('gen-ch')&&el('gen-ch').value||0);
+    if(cw>0 && ch>0) return {w:d8(cw), h:d8(ch), custom:true};
+    var b=document.querySelector('#gen-aspects button.on');
+    var rw=b?+b.getAttribute('data-rw'):1, rh=b?+b.getAttribute('data-rh'):1;
+    var size=+((el('gen-size')&&el('gen-size').value)||1024);
+    var w,h; if(rw>=rh){ w=size; h=size*rh/rw; } else { h=size; w=size*rw/rh; }
+    return {w:d8(w), h:d8(h), custom:false};
+  }
+  function updateDimNote(){ var n=el('gen-dim-note'); if(!n) return; var d=dims();
+    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px'); }
+  function payload(){ var a=dims();
     return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
       count:+el('gen-count').value, high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
       ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
       loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
   function refreshCost(){
+    updateDimNote();
     if(!(selected&&selected.version_id)) return;
     var cost=el('gen-cost'); cost.className='gen-cost'; cost.textContent='Checking cost\\u2026';
     var mine=++costSeq;
@@ -4832,8 +4863,11 @@ document.addEventListener('DOMContentLoaded', function(){
   if(asp) asp.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b)return;
     asp.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
     b.classList.add('on'); Gen.refreshCost(); });
-  ['gen-mode','gen-count','gen-hp','gen-ph'].forEach(function(id){
+  ['gen-mode','gen-count','gen-hp','gen-ph','gen-size'].forEach(function(id){
     var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.refreshCost); });
+  ['gen-cw','gen-ch'].forEach(function(id){
+    var e2=document.getElementById(id); if(e2) e2.addEventListener('input', Gen.refreshCost); });
+  if(document.getElementById('gen-dim-note') && window.Gen) Gen.refreshCost();
   ['edit-res','edit-qual','edit-aspect'].forEach(function(id){
     var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.editCost); });
   var es=document.getElementById('edit-src');
