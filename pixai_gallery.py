@@ -4462,7 +4462,7 @@ var Gen = (function(){
       var pane=el('gen-mode-'+x); if(pane) pane.style.display=(x===m)?'':'none';
       var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
     el('gen-drawer').classList.toggle('wide', m==='video'||m==='edit');
-    if(m==='edit'){ if(el('edit-src').value.trim()) editCost(); loadWorkflows().then(renderWorkflows); if(!presetsLoaded) loadPresets(); }
+    if(m==='edit'){ setEditModel(editModel); loadWorkflows().then(renderWorkflows); if(!presetsLoaded) loadPresets(); }
     if(m==='video') renderVideoSlots();
   }
   function setEditSub(s){
