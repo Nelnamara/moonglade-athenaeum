@@ -3084,6 +3084,11 @@ document.addEventListener('DOMContentLoaded', function(){
   .enh-item{display:block;width:100%;text-align:left;padding:6px 9px;margin-bottom:4px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.3;}
   .enh-item:hover{border-color:var(--overlay0);}
   .enh-item .ty{color:var(--overlay0);font-size:10px;}
+  .enh-shelf{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 12px;}
+  .enh-sec{flex:0 0 100%;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--overlay0);margin:7px 0 1px;}
+  .enh-sec:first-child{margin-top:0;}
+  .enh-card{padding:6px 11px;border-radius:7px;background:var(--surface1);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.2;}
+  .enh-card:hover{border-color:var(--accent);background:var(--surface0);}
   .fix-tags{display:flex;gap:5px;margin-bottom:6px;}
   .fix-tags button{padding:4px 10px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
   .fix-tags button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
@@ -3295,7 +3300,24 @@ document.addEventListener('DOMContentLoaded', function(){
         <div id="edit-result" class="gen-result" style="display:none;"></div>
       </div>
       <div id="edit-sub-enhance" style="display:none;">
-        <div class="gen-lbl">One-click enhance <span style="text-transform:none;color:var(--subtext);">&middot; on the source</span></div>
+        <div class="gen-lbl">One-click tools <span style="text-transform:none;color:var(--subtext);">&middot; official PixAI workflows &middot; runs on the source</span></div>
+        <div class="enh-shelf">
+          <div class="enh-sec">Upscale</div>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1794855217667308480')" title="Upscale the image">Upscale</button>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1804744873525448983')" title="Upscale in 2x2 tiles (higher detail)">Upscale 2&times;2</button>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1803967880822088690')" title="Upscale and re-detail">Upscale + Enhance</button>
+          <div class="enh-sec">Cleanup</div>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1793505053210462325')" title="Remove the background">Remove BG</button>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1793473388466817128')" title="Precise masked inpaint / edit">Precise inpaint</button>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1793713293591365899')" title="Extend the frame outward (outpaint)">Outpaint</button>
+          <div class="enh-sec">Convert</div>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1796053397111789217')" title="Convert to line art">To line art</button>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1793447160259872021')" title="Colorize a sketch / line art">Sketch colorizer</button>
+          <div class="enh-sec">Light</div>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1801729774701480692')" title="Relight: warm sunshine">Relight: sun</button>
+          <button type="button" class="enh-card" onclick="Gen.enhance('1801752508134768728')" title="Relight: backlighting">Relight: backlight</button>
+        </div>
+        <div class="gen-lbl">Browse all workflows <span style="text-transform:none;color:var(--subtext);">&middot; 140+ community ComfyUI</span></div>
         <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
         <div id="enh-list"></div>
         <div id="enh-result" class="gen-result" style="display:none;"></div>
