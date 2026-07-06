@@ -6931,9 +6931,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         q = p.get("quality")
         if q is None:
             q = "medium"
-        kwargs = dict(resolution=(p.get("resolution") or "1K"),
-                      aspect_ratio=(p.get("aspect") or "3:4"),
-                      quality=q, scene_id=scene_id, model_id=model_id)
+        res, q, asp = core.clamp_edit_config(model_id, (p.get("resolution") or "1K"), q,
+                                             (p.get("aspect") or "3:4"))   # never send an invalid knob
+        kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id, model_id=model_id)
         return core.build_chat_edit_parameters(instruction, [src], **kwargs)
 
     @app.route("/api/presets", methods=["GET", "POST"])
