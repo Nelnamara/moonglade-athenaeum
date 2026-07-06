@@ -3253,6 +3253,34 @@ def edit_model_id(key):
     return (EDIT_MODELS.get((key or "").strip()) or {}).get("model_id", "")
 
 
+def edit_model_by_id(model_id):
+    """The EDIT_MODELS spec whose model_id matches `model_id`, else None -- used to clamp a
+    submitted edit's resolution/quality/aspect to what that model actually supports."""
+    mid = str(model_id or "")
+    for spec in EDIT_MODELS.values():
+        if spec.get("model_id") == mid:
+            return spec
+    return None
+
+
+def clamp_edit_config(model_id, resolution, quality, aspect):
+    """Snap an edit's (resolution, quality, aspect) to the resolved model's real capabilities,
+    so NO path -- preset, stale UI, old client -- can send an option the model rejects (the
+    preset-with-Reference-Pro bug). Unknown models pass through unchanged. Returns the tuple."""
+    spec = edit_model_by_id(model_id)
+    if not spec:
+        return resolution, quality, aspect
+    if not spec["qualities"]:
+        quality = ""                                   # model exposes no quality knob
+    elif quality and quality not in spec["qualities"]:
+        quality = spec["default"].get("quality", "")
+    if resolution not in spec["resolutions"]:
+        resolution = spec["default"]["resolution"]
+    if aspect not in spec["aspects"]:
+        aspect = spec["default"]["aspect"]
+    return resolution, quality, aspect
+
+
 def upload_media(session, path, media_type="IMAGE"):
     """Upload a LOCAL image file to PixAI and return its media_id.
 

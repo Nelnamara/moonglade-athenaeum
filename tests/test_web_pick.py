@@ -549,6 +549,30 @@ def test_edit_card_has_model_picker(tmp_path):
     assert "EDIT_CAPS" in html and "'reference-pro'" in html   # capability-driven dropdowns
 
 
+def test_clamp_edit_config_snaps_to_model_caps():
+    """Backend guard (fixes the skeptic-found preset bug): any resolution/quality/aspect that
+    the resolved model doesn't support is snapped to a valid one — no path sends an invalid knob."""
+    # Reference Pro: no quality knob + 1K unsupported -> quality dropped, resolution -> 2K default
+    assert core.clamp_edit_config("1948514378441961474", "1K", "medium", "21:9") == ("2K", "", "21:9")
+    # Edit Pro: 4K unsupported -> 1K default; valid quality kept; unknown aspect -> default 3:4
+    assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "4K", "high", "nope") == ("1K", "high", "3:4")
+    # unknown model -> pass through untouched
+    assert core.clamp_edit_config("999", "8K", "ultra", "5:1") == ("8K", "ultra", "5:1")
+
+
+def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch):
+    """End-to-end: Reference Pro sent with Edit-Pro-style knobs (the preset-mismatch case) is
+    clamped server-side to valid values before the params ever reach PixAI."""
+    seen = {}
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli.post("/api/price", json={"mode": "edit", "edit_model": "reference-pro", "source": "55",
+                                 "resolution": "1K", "quality": "medium", "aspect": "3:4"})
+    mc = seen["p"]["chat"]["modelConfig"]
+    assert mc["resolution"] == "2K" and "quality" not in mc      # snapped + quality dropped
+
+
 def test_generate_card_has_size_and_custom_dimensions(tmp_path):
     """The Generate card must expose real dimensions — size presets + custom W/H + a wider
     aspect set — not the old 5 hardcoded ~512px buttons. The API has no size cap (backend
