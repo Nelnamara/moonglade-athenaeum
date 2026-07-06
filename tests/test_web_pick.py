@@ -490,6 +490,18 @@ def test_branding_absent_is_404(tmp_path):
     assert cli.get("/branding/../catalog.db").status_code == 404    # traversal rejected
 
 
+def test_lightbox_video_uses_load_not_premature_seek(tmp_path):
+    """Mobile (iOS Safari) fix: after changing the lightbox <video> src we must call
+    load() and must NOT seek currentTime before metadata loads (that throws on iOS and
+    aborts playback). Guards against reintroducing the desktop-only-works regression."""
+    cli = _client(tmp_path, [_row(media_id="9", filename="v_9.mp4", is_video="1",
+                                  created_at="2025-02-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "vid.load()" in html                       # explicit reload after src change
+    assert "vid.currentTime = 0;" not in html          # the premature seek is gone
+    assert "vid.error" in html                          # surfaces the MediaError code on failure
+
+
 def test_service_worker_never_caches_misses(tmp_path):
     """The SW must NOT freeze a 404 (a thumbnail that didn't exist yet) into its cache --
     that was the 'blank video tile until a hard-refresh' bug. It must only cache OK
