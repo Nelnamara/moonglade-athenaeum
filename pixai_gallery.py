@@ -1585,7 +1585,15 @@ def create_app(out_dir: Path):
     def _panel_run(action):
         import subprocess
         spec = PANEL_ACTIONS[action]
-        argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v"] + spec["args"]
+        # Worker count is a persisted panel setting (schedule.json), so BOTH manual
+        # clicks and the scheduled run use it. Harmless on jobs that ignore --workers
+        # (organize/dedup/audit); speeds up the ones that don't (sync's pull + backfill).
+        try:
+            workers = max(1, min(int(_load_sched().get("workers") or 4), 16))
+        except (TypeError, ValueError):
+            workers = 4
+        argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v",
+                "--workers", str(workers)] + spec["args"]
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
         env = dict(os.environ, MOONGLADE_PROGRESS="1")
         proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
@@ -1614,7 +1622,8 @@ def create_app(out_dir: Path):
                     return s
         except (OSError, ValueError):
             pass
-        return {"enabled": False, "action": "sync", "interval_hours": 6, "last_run": None}
+        return {"enabled": False, "action": "sync", "interval_hours": 6,
+                "last_run": None, "workers": 4}
 
     def _save_sched(s):
         try:
@@ -5054,7 +5063,15 @@ function savePrompt() {
     <div id="jobstatus"></div>
     <button type="button" id="job-stop" class="jobbtn danger" style="display:none;width:auto;min-width:0;margin-top:8px;" onclick="stopJob()"><span class="t">&#9632; Stop this job</span></button>
     <pre id="joblog"></pre>
-    <div class="p-note">One job runs at a time. Backup / audit / dry-runs never delete anything. Organize and Dedup move files (both reversible &mdash; Organize writes an undo manifest, Dedup quarantines to <code>_duplicates/</code>).</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap;">
+      <span style="font-size:12.5px;color:var(--subtext);">Download workers</span>
+      <select id="dl-workers" class="p-sel" onchange="saveWorkers()">
+        <option value="1">1</option><option value="2">2</option><option value="4" selected>4</option>
+        <option value="6">6</option><option value="8">8</option><option value="12">12</option><option value="16">16</option>
+      </select>
+      <span id="workers-status" style="font-size:11.5px;color:var(--overlay0);">parallel fetches for Sync + the scheduled run</span>
+    </div>
+    <div class="p-note">One job runs at a time. Backup / audit / dry-runs never delete anything. Organize and Dedup move files (both reversible &mdash; Organize writes an undo manifest, Dedup quarantines to <code>_duplicates/</code>). <b>Sync</b> only pulls what's new (it stops once it hits already-downloaded items) &mdash; more workers mainly speed a big metadata backfill or a first catch-up.</div>
   </div>
 
   <div class="p-sec">
@@ -5202,8 +5219,17 @@ function loadSchedule(){
     el('sch-enabled').checked=!!s.enabled;
     if(s.action) sel.value=s.action;
     if(s.interval_hours) el('sch-interval').value=String(s.interval_hours);
+    if(s.workers && el('dl-workers')) el('dl-workers').value=String(s.workers);
     if(s.last_run){ var dt=new Date(s.last_run*1000); el('sch-status').textContent='last run: '+dt.toLocaleString(); }
   }).catch(function(){});
+}
+function saveWorkers(){
+  var w=+el('dl-workers').value, st=el('workers-status');
+  fetch('/api/panel/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workers:w})})
+    .then(function(r){return r.json();}).then(function(s){
+      if(s.error){ st.textContent='\\u26a0 '+s.error; return; }
+      st.innerHTML='<span style="color:var(--emerald)">\\u2713 '+(s.workers||w)+' workers</span> \\u00b7 Sync + scheduled run';
+    }).catch(function(){ st.textContent='\\u26a0 network error'; });
 }
 function saveSchedule(){
   var body={enabled:el('sch-enabled').checked, action:el('sch-action').value, interval_hours:+el('sch-interval').value};
@@ -5472,24 +5498,33 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/panel/schedule", methods=["GET", "POST"])
     def api_panel_schedule():
-        """Automated tasks: run a safe job every N hours while the app is open. GET
-        returns the current schedule; POST {enabled, action, interval_hours} saves it.
-        Only non-destructive actions are allowed. Localhost-only."""
+        """Panel settings: the automated-task schedule + the download-workers count. GET
+        returns the current settings; POST MERGES only the fields present (so the schedule
+        toggle and the workers selector -- two separate controls writing this one file --
+        never wipe each other). Only non-destructive actions are schedulable. Localhost-only."""
         if not _is_local_request():
             return jsonify({}), 403
         with _sched_lock:
             s = _load_sched()
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
-                action = str(body.get("action") or s.get("action") or "sync")
-                if action not in PANEL_ACTIONS or PANEL_ACTIONS[action]["destructive"]:
+                if "action" in body and body.get("action"):
+                    s["action"] = str(body.get("action"))
+                if "enabled" in body:
+                    s["enabled"] = bool(body.get("enabled"))
+                if "interval_hours" in body:
+                    try:
+                        s["interval_hours"] = max(1, min(int(body.get("interval_hours") or 6), 168))
+                    except (TypeError, ValueError):
+                        s["interval_hours"] = 6
+                if "workers" in body:
+                    try:
+                        # no `or 4` -- workers=0 must clamp to 1, not fall through to 4
+                        s["workers"] = max(1, min(int(body.get("workers")), 16))
+                    except (TypeError, ValueError):
+                        s["workers"] = 4
+                if s.get("action") not in PANEL_ACTIONS or PANEL_ACTIONS[s["action"]]["destructive"]:
                     return jsonify({"error": "only safe jobs can be scheduled"}), 400
-                try:
-                    hrs = max(1, min(int(body.get("interval_hours") or 6), 168))
-                except (TypeError, ValueError):
-                    hrs = 6
-                s = {"enabled": bool(body.get("enabled")), "action": action,
-                     "interval_hours": hrs, "last_run": s.get("last_run")}
                 _save_sched(s)
             return jsonify(s)
 
