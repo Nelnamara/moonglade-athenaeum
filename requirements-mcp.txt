@@ -1,0 +1,4 @@
+# Optional deps for moonglade_mcp.py -- the AI-curation MCP server.
+# NOT needed for the CLI / gallery / GUI. Install with:
+#     pip install -r requirements-mcp.txt
+fastmcp>=3.4
