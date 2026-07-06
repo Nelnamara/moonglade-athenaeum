@@ -2921,7 +2921,7 @@ document.addEventListener('DOMContentLoaded', function(){
      pattern collapses to slivers inside this flex modal, which is why it didn't scroll. */
   #similar-modal #similar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));grid-auto-rows:150px;gap:10px;overflow-y:auto;flex:1;min-height:0;align-content:start;padding:4px;}
   #similar-modal #similar-grid .card{grid-row:span 1;}
-  #similar-modal #similar-grid .card img{width:100%;height:100%;aspect-ratio:auto;object-fit:cover;}
+  #similar-modal #similar-grid .card img{width:100%;height:100%;aspect-ratio:auto;object-fit:contain;background:var(--crust);}
   #similar-modal #similar-grid .card .meta{position:absolute;left:0;right:0;bottom:0;margin:0;padding:2px 6px;background:linear-gradient(transparent,rgba(0,0,0,.72));pointer-events:none;}
   .pick-head{display:flex;align-items:center;margin-bottom:10px;}
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
