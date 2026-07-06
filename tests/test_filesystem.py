@@ -184,6 +184,23 @@ def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
     assert res["imported"] == 1   # cataloged fine; just no poster
 
 
+def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
+    """The branding folder (banner/logo/marks) is app chrome, NOT gallery content —
+    a backup scan must never sweep it into the catalog, or the gallery fills with UI art."""
+    from pixai_gallery import load_catalog
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    (tmp_path / "branding" / "marks").mkdir(parents=True)
+    (tmp_path / "branding" / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    (tmp_path / "branding" / "marks" / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    assert res["imported"] == 1                       # only the video, not the 2 branding pngs
+    files = [r.get("filename", "") for r in load_catalog(tmp_path / "catalog.db")]
+    assert not any("branding" in f for f in files)     # branding stayed out of the gallery
+    assert any(f.endswith("v.mp4") for f in files)
+
+
 def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
     from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
