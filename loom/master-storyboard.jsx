@@ -355,7 +355,7 @@ export default function App() {
     })();
   }, []);
 
-  // Gallery -> cast: /edit-bay?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
+  // Gallery -> cast: /loom?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
   // action) adds those images as reusable @image cast members, once, then clears the URL.
   useEffect(() => {
     if (!project || castImported.current) return;
@@ -476,7 +476,7 @@ export default function App() {
     setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     setCardStatus(c.id, { status: "wip" });
     try {
-      const r = await fetch("/api/editbay/generate", { method: "POST", headers: { "Content-Type": "application/json" },
+      const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: c.mode, prompt: shotText(entry, project), images: imgs.map((x) => x.d),
           video_refs: vids, duration: c.duration }) });
       const d = await r.json();
@@ -530,18 +530,18 @@ export default function App() {
     if (!clips.length) { alert("No finished shots to export yet — generate one first."); return; }
     const total = clips.reduce((s, c) => s + c.span, 0);
     setExp({ status: "running", progress: 0, elapsed: 0 });
-    fetch("/api/editbay/export", { method: "POST", headers: { "Content-Type": "application/json" },
+    fetch("/api/loom/export", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out })), total_seconds: total }) })
       .then((r) => r.json()).then((d) => {
         if (d.error) { setExp({ status: "failed", error: d.error }); return; }
-        const tick = () => fetch("/api/editbay/export-status").then((r) => r.json()).then((s) => {
+        const tick = () => fetch("/api/loom/export-status").then((r) => r.json()).then((s) => {
           setExp(s);
           if (s.status === "running") exportPoll.current = setTimeout(tick, 1000);
         }).catch(() => { exportPoll.current = setTimeout(tick, 2000); });
         tick();
       }).catch(() => setExp({ status: "failed", error: "network error" }));
   };
-  const cancelExport = () => { fetch("/api/editbay/export-cancel", { method: "POST" }).catch(() => {}); };
+  const cancelExport = () => { fetch("/api/loom/export-cancel", { method: "POST" }).catch(() => {}); };
   const closeExport = () => { if (exportPoll.current) clearTimeout(exportPoll.current); setExp(null); };
   // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration
   const durOf = (c) => Number(c.actualDur || c.duration) || 0;
@@ -580,7 +580,7 @@ export default function App() {
             </>}
             {exp.status === "done" && <>
               <div className="sb-exp-txt" style={{ color: "var(--green)" }}>&#10003; Cut rendered.</div>
-              <a className="sb-btn amber" href="/api/editbay/export-file" style={{ alignSelf: "center", textDecoration: "none" }}>&#8681; Download mp4</a>
+              <a className="sb-btn amber" href="/api/loom/export-file" style={{ alignSelf: "center", textDecoration: "none" }}>&#8681; Download mp4</a>
               <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeExport}>Close</button>
             </>}
             {(exp.status === "failed" || exp.status === "cancelled") && <>
@@ -1093,7 +1093,7 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
     const rmid = prev.c.resultMid;
     if (rmid) {
       setHandoff("wip");
-      fetch("/api/editbay/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
+      fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ video_media_id: rmid }) })
         .then((r) => r.json()).then((d) => {
           if (d.error || !d.frame_media_id) { setHandoff("err"); return; }

@@ -9,9 +9,9 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
 | 2 | Image picker larger + robust filters (Collection, etc.) — "a MESS to look at" | ✅ | 900px × 84vh modal; Collection / Source / Rating / Sort filters; whole-catalog infinite scroll + Upload + copy-prompt. Further visual polish → owner's notes pass. |
 | 3 | Edit card needs more real estate | ✅ | Edit mode widens to 600px; tools split into Edit \| Enhance \| Fix sub-tabs over a shared source picker. |
 | 4 | Generate/Edit/Enhance all a bit cramped | ✅ | Same pass as #3 + base width 420 + docking. Remaining taste-level tweaks → notes pass. |
-| 5 | Edit Bay full README + instructions ("even for me :P") | ✅ | In-app ❓ quick-guide overlay on /edit-bay + full manual at docs/EDIT_BAY.md. |
+| 5 | Loom full README + instructions ("even for me :P") | ✅ | In-app ❓ quick-guide overlay on /loom + full manual at docs/LOOM.md. |
 | 6 | Detail-page action buttons (Edit / create video) in the lightbox; right-click menu on thumbnail cards | ✅ | Lightbox: ✎ Edit + ▶ To Video. Right-click a card: Edit / Send to Video / Copy media id / Details. |
-| 7 | Multi-select images in gallery → send directly to the video workspace | ✅ | Bulk bar "▶ Send to Video": selection (tap/drag-paint) → Video tab refs (≤9, auto Multi-ref). Later: send to Edit Bay cast. |
+| 7 | Multi-select images in gallery → send directly to the video workspace | ✅ | Bulk bar "▶ Send to Video": selection (tap/drag-paint) → Video tab refs (≤9, auto Multi-ref). Later: send to Loom cast. |
 | 8 | Gallery search bar bolder/deeper — redesign for the suite ("This is more than a gallery. It is a SUITE.") | 💬 | The banked two-drawer design: LEFT Filters drawer mirroring the right Generate drawer. Sketch AFTER the owner's layout-notes pass. |
 | 9 | Printer integration? | ✅ | Letter contact sheets (grid) + **4x6 photo** + **photo-booth strip** (`?format=photo|strip`, for the owner's Sinfonia 4x6/strip printer); detail-page Print / 4x6 / Strip buttons; bulk "Print sheet". Refine layouts later. |
 | 10 | Image → 3D model → 3D printer? | 📋 (roadmap) | **CONFIRMED for roadmap.** HW: RTX 4070 Super **12GB** + resin **Anycubic**. Plan: local **Hunyuan3D-2 mini/turbo** (fits ~12GB) → GLB → Blender (already wired) cleanup → **STL** → Photon Workshop; resin target (hide hallucinated back). "Foundry" module, separate install. Work breakdown below. |
@@ -30,7 +30,7 @@ Owner's working list (2026-07-03) + triage. Status: ✅ done · 🔧 building ·
 - ✅ Video card: real cost + card count, model picker, audio toggle (shipped).
 - ✅ Composer parity: slot badges/remove/hover previews + `@image1` prompt chips (shipped; the
   literal collapsed-stack fan animation deferred to the notes pass — cosmetic only).
-- ✅ Picker in the Edit Bay (GalleryPick on cast rows + frame slots; mediaId rides Generate-shot).
+- ✅ Picker in the Loom (GalleryPick on cast rows + frame slots; mediaId rides Generate-shot).
 - ✅ Housekeeping: merged → master v1.9.0; CLAUDE.md + wiki/Generating.md updated.
 - ✅ **Achievements & skins** shipped (2026-07-04) — see below.
 - ✅ **Turbo-mode RESOLVED** (captured 2026-07-04 off a real turbo gen, task `2030099...557262`): Turbo is **not a submit parameter** — the whole task object had no turbo/tier/speed field, just `priority: 1000` + `inferenceProfile: lite` + a free card (`paidCredit 0`). It's the fast **member runner** granted server-side, which our `priority:1000` path (CLI `--priority 1000` + web "High priority · Turbo" checkbox) + free-card auto-apply already trigger. Nothing to build; relabeled the drawer checkbox to make it discoverable. Detail in `private/GENERATOR_SURFACE.md`.
