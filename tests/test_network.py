@@ -300,6 +300,38 @@ def test_update_mode_stops_early(tmp_path, mocker):
     assert gql.call_count == 2  # page3 never requested
 
 
+def test_is_video_task_node():
+    assert core._is_video_task_node({"i2vProModel": "v4.0.1"}) is True
+    assert core._is_video_task_node({"i2vProModel": ""}) is False   # empty = not a video task
+    assert core._is_video_task_node({"mediaId": "x"}) is False
+    assert core._is_video_task_node({}) is False
+
+
+def test_download_skips_video_task_posters(tmp_path, mocker):
+    """A video task's node (i2vProModel set) must NOT be catalogued as an image -- its
+    mediaId is the video's poster still (handled by run_sync_videos). Regression for the
+    138 phantom poster-image duplicate rows."""
+    from pixai_gallery import load_catalog
+    dl = _patch_download_layer(mocker)
+    img_node = {"id": "task_img", "mediaId": "IMG1", "batchMediaIds": [],
+                "createdAt": "2024-01-01T00:00:00", "promptsPreview": "p", "status": "ok"}
+    vid_node = {"id": "task_vid", "mediaId": "POSTER1", "batchMediaIds": [],
+                "createdAt": "2024-01-01T00:00:00", "promptsPreview": "p", "status": "ok",
+                "i2vProModel": "v4.0.1"}                       # <-- marks it a video task
+    page = {"user": {"taskSummaries": {
+        "edges": [{"node": img_node}, {"node": vid_node}],
+        "pageInfo": {"hasPreviousPage": False, "startCursor": ""}}}}
+    mocker.patch.object(core, "gql", side_effect=[page])
+
+    core.run_download(_dl_args(tmp_path))
+
+    stems = [str(c.args[2]) for c in dl.call_args_list]        # stem is the 3rd positional
+    assert any("IMG1" in s for s in stems)                     # the image WAS fetched
+    assert not any("POSTER1" in s for s in stems)              # the video poster was NOT
+    mids = {r["media_id"] for r in load_catalog(tmp_path / "catalog.db")}
+    assert "IMG1" in mids and "POSTER1" not in mids            # no phantom poster-image row
+
+
 def test_populated_catalog_skips_network_count(tmp_path, mocker):
     # With a populated catalog, the progress total comes from the catalog size --
     # no full-history _quick_count network walk.
