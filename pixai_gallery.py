@@ -3264,10 +3264,10 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="gen-row" style="margin-top:8px;">
         <div style="flex:1.4;"><div class="gen-lbl">Model</div>
           <select id="video-model" class="gen-sel" onchange="Gen.videoCost()">
-            <option value="v4.0.1" selected>V4.0 &middot; multi-ref &middot; 15s &middot; audio</option>
-            <option value="v4.0">V4.0 (alt)</option>
+            <option value="v4.0.1" selected>V4.0 Lite Preview &middot; multi-ref &middot; 15s &middot; audio</option>
+            <option value="v4.0">V4.0 Preview (full) &middot; top quality &middot; pricier</option>
             <option value="v3.2">V3.2 &middot; audio &middot; prompt-following</option>
-            <option value="v3.0.2">V3.0 Lite</option>
+            <option value="v3.0.2">V3.0 Lite &middot; complex motion</option>
             <option value="v3.0">V3.0 &middot; high consistency</option>
           </select></div>
         <div style="flex:1;"><div class="gen-lbl">Duration (s)</div>

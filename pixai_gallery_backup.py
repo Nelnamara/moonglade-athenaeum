@@ -2828,6 +2828,24 @@ DEFAULT_VIDEO_MODEL = "v4.0.1"
 VIDEO_CAMERA_MOVES = ("unset", "horizontal", "pan", "roll", "tilt", "vertical-pan", "zoom")
 VIDEO_AUDIO_LANGS = ("english", "japanese", "chinese", "korean", "none")  # "none" = SE only
 VIDEO_DURATIONS = (5, 6, 10, 15)                                          # 15 is v4.0-only
+
+# Video model registry: the `.model` NAME a submit carries -> its numeric top-level
+# `modelId` (+ a UI label). A real (card-covered) submit carries BOTH; WITHOUT the modelId
+# PixAI resolves "Unknown or removed model" and no free card can match -- that was the
+# "video card won't tap" bug. All five VERIFIED via --dump-params of real gens (2026-07-06).
+VIDEO_MODELS = {
+    "v4.0.1": {"model_id": "2003969750675682808", "label": "V4.0 Lite Preview"},
+    "v4.0":   {"model_id": "2003968021137101826", "label": "V4.0 Preview (full)"},
+    "v3.2":   {"model_id": "1961182207978260675", "label": "V3.2"},
+    "v3.0.2": {"model_id": "2014412117889628958", "label": "V3.0 Lite"},
+    "v3.0":   {"model_id": "1919508300549460046", "label": "V3.0"},
+}
+
+
+def video_model_id(name):
+    """Numeric top-level `modelId` for a video `.model` name ('' if unknown). A submit MUST
+    include this or PixAI can't resolve the model and no free card can match."""
+    return (VIDEO_MODELS.get((name or "").strip()) or {}).get("model_id", "")
 VIDEO_CHANNELS = ("private", "normal")                                     # private = "Enhanced" (Plus/Premium)
 
 
@@ -2835,14 +2853,14 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
                            tail_media_id="", duration=5, mode="professional",
                            generate_audio=False, audio_language="english",
                            negative="", use_prompt_helper=False, kaisuuken_id="",
-                           camera_movement="", channel="private"):
+                           camera_movement="", model_id="", is_private=False):
     """Build createGenerationTask's `parameters` for an image-to-video (i2vPro) job.
 
-    VERIFIED against a real submit (2026-07-01): video uses the SAME
-    createGenerationTask mutation, and `variables.parameters` = {channel, i2vPro:{...}}
-    -- NOT a {type,version,parameters} envelope (that earlier wrapper made the server
-    ignore i2vPro and default to a plain image). `media_id` = source/first frame;
-    `tail_media_id` (optional) = last frame for first/last-frame interpolation.
+    VERIFIED against a real card-covered submit (2026-07-06 via --dump-params): the shape
+    is a top-level `modelId` (REQUIRED -- resolved from `model` via VIDEO_MODELS; omitting
+    it made PixAI log "Unknown or removed model" and NO free card could match) + the
+    `i2vPro` block + privacy/preview flags. There is NO `channel` field. `media_id` =
+    source/first frame; `tail_media_id` (optional) = last frame for FLF interpolation.
 
     NOTE: video costs FAR more than images (~27.5k credits for a 5s V4.0 clip), so
     submission stays gated behind explicit --confirm. This builder spends nothing.
@@ -2865,7 +2883,14 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     # (the verified v4.0 submit omits it entirely -> keep it out by default).
     if camera_movement and camera_movement != "unset":
         i2v["cameraMovement"] = camera_movement
-    params = {"channel": channel or "private", "i2vPro": i2v}
+    params = {
+        "priority": 1000,
+        "i2vPro": i2v,
+        "isPrivate": bool(is_private),
+        "enablePreview": True,
+        "hidePrompts": False,
+        "modelId": str(model_id or video_model_id(model)),   # REQUIRED -- see docstring
+    }
     if kaisuuken_id:
         params["kaisuukenId"] = str(kaisuuken_id)   # spend a free card instead of credits
     return params
@@ -2936,22 +2961,24 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     dur = _snap_video_duration(duration)
     mdl = (model or "").strip() or DEFAULT_VIDEO_MODEL
     qual = (quality or "professional").strip() or "professional"
+    mid_num = video_model_id(mdl)                  # the REQUIRED numeric modelId for this model
     if m == "I2V" and imgs:
         return build_video_parameters(prompt, imgs[0], model=mdl, duration=dur,
                                       mode=qual, generate_audio=generate_audio,
                                       audio_language=audio_language,
-                                      camera_movement=camera_movement)
+                                      camera_movement=camera_movement, model_id=mid_num)
     if m == "FLF" and len(imgs) >= 2:
         return build_video_parameters(prompt, imgs[0], model=mdl, tail_media_id=imgs[1],
                                       duration=dur, mode=qual, generate_audio=generate_audio,
                                       audio_language=audio_language,
-                                      camera_movement=camera_movement)
+                                      camera_movement=camera_movement, model_id=mid_num)
     if imgs or vids or auds:                       # R2V / V2V / any mode carrying references
         return build_reference_video_parameters(prompt, image_media_ids=imgs,
                                                  video_media_ids=vids, audio_media_ids=auds,
                                                  model=mdl, duration=dur, mode=qual,
                                                  generate_audio=generate_audio,
-                                                 audio_language=audio_language)
+                                                 audio_language=audio_language,
+                                                 model_id=(mid_num or REFVIDEO_MODEL_ID))
     raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
                      "(mode {}) -- attach a cast image or an open frame.".format(m))
 
@@ -3057,7 +3084,7 @@ def _gen_video_parameters(args):
         use_prompt_helper=bool(getattr(args, "video_prompt_helper", False)),
         kaisuuken_id=getattr(args, "kaisuuken_id", "") or "",
         camera_movement=getattr(args, "camera_movement", "") or "",
-        channel=getattr(args, "vchannel", "") or "private",
+        is_private=((getattr(args, "vchannel", "") or "private") == "private"),
     )
 
 
