@@ -490,6 +490,25 @@ def test_branding_absent_is_404(tmp_path):
     assert cli.get("/branding/../catalog.db").status_code == 404    # traversal rejected
 
 
+def test_enhance_shelf_promotes_official_tools(tmp_path):
+    """The Enhance sub-tab leads with a grouped shelf of curated one-click official tools
+    (Upscale / Cleanup / Convert / Light) above the flat 140+ community list — so real
+    tools aren't buried among junk workflows. Each card fires Gen.enhance(<workflow_id>)."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert 'class="enh-shelf"' in html
+    for section in ("Upscale", "Cleanup", "Convert", "Light"):
+        assert ">" + section + "<" in html
+    # a few of the curated official workflow ids are wired as one-click cards
+    for wid in ("1794855217667308480",   # Image Upscale
+                "1793505053210462325",   # Remove background
+                "1793713293591365899",   # Basic Outpainting
+                "1801729774701480692"):  # relight sunshine
+        assert "Gen.enhance('" + wid + "')" in html
+    assert 'id="enh-q"' in html          # the browse-all search still present below the shelf
+
+
 def test_generate_card_has_size_and_custom_dimensions(tmp_path):
     """The Generate card must expose real dimensions — size presets + custom W/H + a wider
     aspect set — not the old 5 hardcoded ~512px buttons. The API has no size cap (backend
