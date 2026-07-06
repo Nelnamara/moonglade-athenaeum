@@ -241,7 +241,7 @@ const STYLES = `
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 `;
 
-const MODES = ["T2V", "I2V", "R2V", "V2V", "FLF"];
+const MODES = ["I2V", "R2V", "V2V", "FLF"];   // T2V retired: these video models need an input frame/ref
 const MODE_HINT = {
   T2V: "Text only — describe the whole scene",
   I2V: "Image-to-video — ref is first frame; prompt only motion",
@@ -264,6 +264,11 @@ const CAM_PALETTE = {
 };
 const TRANS_PALETTE = ["cut", "hard cut", "match cut", "smash cut", "dissolve", "crossfade",
   "fade in", "fade to black", "J-cut", "L-cut", "wipe", "whip-pan transition"];
+const LIGHTING_PALETTE = ["golden hour", "blue hour", "low-key", "high-key", "warm haze", "cool moonlight",
+  "candlelit", "firelight", "neon glow", "backlit / rim light", "soft diffused", "hard shadows",
+  "chiaroscuro", "volumetric god rays", "overcast", "silhouette"];
+const AUDIO_PALETTE = ["no music", "room tone", "ambient hum", "soft breathing", "whispered dialogue",
+  "distant music", "rain", "heartbeat", "beat sync", "diegetic only", "muffled", "rustling fabric"];
 const CONTINUITY_PHRASE = "Smooth, continuous, seamless — no hard cut.";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -471,7 +476,8 @@ export default function App() {
     ({ ...a, cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch }) })) }));
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
     : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
-  const generateShot = async (entry) => {
+  /* Build the /api/loom/generate + /api/price payload for a shot (single source). */
+  const shotPayload = (entry) => {
     const c = entry.c;
     const tagNum = (t) => { const m = /(\d+)/.exec(t || ""); return m ? +m[1] : 99; };
     const imgs = [];
@@ -483,14 +489,34 @@ export default function App() {
       const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) imgs.push({ tag: r.tag, d }); });
     const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
     imgs.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
-    if (!imgs.length && !vids.length) {
+    return { mode: c.mode, prompt: shotText(entry, project), images: imgs.map((x) => x.d),
+             video_refs: vids, duration: c.duration, hasInput: (imgs.length + vids.length) > 0 };
+  };
+  /* READ-ONLY cost + free-card check for a shot (reuses the drawer's /api/price; spends nothing). */
+  const priceShot = async (entry) => {
+    try {
+      const r = await fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(shotPayload(entry)) });
+      return await r.json();   // {cost, free, cards, note}
+    } catch { return null; }
+  };
+  const generateShot = async (entry, opts = {}) => {
+    const c = entry.c;
+    const p = shotPayload(entry);
+    if (!p.hasInput) {
       setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } })); return; }
+    // GUARDRAIL: never spend credits silently. Check cost + free-card, confirm any credit spend.
+    if (!opts.skipConfirm) {
+      const pr = await priceShot(entry);
+      if (pr && !pr.free && pr.cost != null &&
+          !window.confirm(`No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.\n\nGenerate anyway?`)) return;
+    }
     setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     setCardStatus(c.id, { status: "wip" });
     try {
       const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: c.mode, prompt: shotText(entry, project), images: imgs.map((x) => x.d),
-          video_refs: vids, duration: c.duration }) });
+        body: JSON.stringify({ mode: p.mode, prompt: p.prompt, images: p.images,
+          video_refs: p.video_refs, duration: p.duration }) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error || "submit failed" } })); return; }
       pollShot(c.id, d.task_id);
@@ -567,10 +593,17 @@ export default function App() {
   const batchGenerate = async () => {
     const todo = entries.filter((e) => e.c.status !== "done");
     if (!todo.length) return;
-    if (!window.confirm(`Generate ${todo.length} shot(s) on PixAI? Each is free with a V4.0 card; otherwise credits apply.`)) return;
+    // Price every shot FIRST so the confirm shows real cost + card coverage — no silent spend.
     setBatching(true);
+    const prices = await Promise.all(todo.map((e) => priceShot(e)));
+    let free = 0, paid = 0, credits = 0;
+    prices.forEach((pr) => { if (pr && pr.free) free++; else { paid++; if (pr && pr.cost != null) credits += pr.cost; } });
+    const msg = `Generate ${todo.length} shot(s)?\n\n` +
+      `🎫 ${free} covered by a free card\n` +
+      `≈ ${paid} will spend credits — about ${credits.toLocaleString()} total.`;
+    if (!window.confirm(msg)) { setBatching(false); return; }
     for (const e of todo) {
-      try { await generateShot(e); } catch (_e) { /* keep going */ }
+      try { await generateShot(e, { skipConfirm: true }); } catch (_e) { /* keep going */ }
       await new Promise((r) => setTimeout(r, 2200));
     }
     setBatching(false);
@@ -1221,10 +1254,12 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
       </div>
 
       <div className="sb-row">
-        <div className="sb-field"><label className="sb-lab">Lighting &amp; mood</label>
-          <input className="sb-in" value={card.lighting} onChange={(e) => setF("lighting", e.target.value)} placeholder="golden hour, low-key, warm haze…" /></div>
-        <div className="sb-field"><label className="sb-lab">Music / audio cue</label>
-          <input className="sb-in" value={card.audioCue} onChange={(e) => setF("audioCue", e.target.value)} placeholder="track, beat sync, room tone…" /></div>
+        <div className="sb-field"><label className="sb-lab">Lighting &amp; mood <button className="sb-ico" style={{ fontSize: 11 }} onClick={() => setPalFor(palFor === "lighting" ? null : "lighting")}>＋terms</button></label>
+          <input className="sb-in" value={card.lighting} onChange={(e) => setF("lighting", e.target.value)} placeholder="golden hour, low-key, warm haze…" />
+          {palFor === "lighting" && <div className="sb-pal">{LIGHTING_PALETTE.map((t) => <button key={t} className="sb-pchip sb-mono" onClick={() => append("lighting", t)}>{t}</button>)}</div>}</div>
+        <div className="sb-field"><label className="sb-lab">Music / audio cue <button className="sb-ico" style={{ fontSize: 11 }} onClick={() => setPalFor(palFor === "audio" ? null : "audio")}>＋terms</button></label>
+          <input className="sb-in" value={card.audioCue} onChange={(e) => setF("audioCue", e.target.value)} placeholder="track, beat sync, room tone…" />
+          {palFor === "audio" && <div className="sb-pal">{AUDIO_PALETTE.map((t) => <button key={t} className="sb-pchip sb-mono" onClick={() => append("audioCue", t)}>{t}</button>)}</div>}</div>
       </div>
 
       <div className="sb-row">
