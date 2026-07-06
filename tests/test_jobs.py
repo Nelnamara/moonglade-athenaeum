@@ -216,6 +216,46 @@ def test_dismiss_finished_clears_done_and_failed_only(tmp_path):
     assert ids == ["r"]                        # running survives; finished cleared
 
 
+def test_resolve_orphan_jobs_resolves_stuck_running(tmp_path):
+    """A generate job stuck at 'running' (its Generate-card poller was closed before the
+    task finished) gets resolved to its true terminal state by asking PixAI once. Only
+    numeric-task-id generate jobs are checked; panel/delete jobs are left alone. This is
+    the fix for the 'failed on PixAI but our Activity still says in progress' bug."""
+    core.append_job_event(tmp_path, "2030945851997330461", status="running",
+                          type="generate", label="Edited")     # the orphaned edit
+    core.append_job_event(tmp_path, "999", status="running", type="generate", label="live gen")
+    core.append_job_event(tmp_path, "panel-abc", status="running", type="panel", label="Sync")
+    core.append_job_event(tmp_path, "5", status="done", type="generate")  # already terminal
+
+    asked = []
+    def _status(tid):
+        asked.append(tid)
+        return {"2030945851997330461": "failed", "999": "running"}.get(tid, "running")
+
+    n = core.resolve_orphan_jobs(tmp_path, _status)
+
+    assert n == 1                                   # only the failed one resolved
+    assert set(asked) == {"2030945851997330461", "999"}   # panel + already-done skipped
+    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    assert by_id["2030945851997330461"]["status"] == "failed"
+    assert by_id["999"]["status"] == "running"      # genuinely still running -> untouched
+    assert by_id["panel-abc"]["status"] == "running"
+
+
+def test_resolve_orphan_jobs_survives_lookup_errors(tmp_path):
+    """One task whose status lookup raises must not stop the others from resolving."""
+    core.append_job_event(tmp_path, "111", status="running", type="generate")
+    core.append_job_event(tmp_path, "222", status="running", type="generate")
+    def _status(tid):
+        if tid == "111":
+            raise RuntimeError("network blip")
+        return "done"
+    n = core.resolve_orphan_jobs(tmp_path, _status)
+    assert n == 1
+    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    assert by_id["111"]["status"] == "running" and by_id["222"]["status"] == "done"
+
+
 def test_jobs_endpoints_are_localhost_only(tmp_path):
     cli = _client(tmp_path)
     core.append_job_event(tmp_path, "j1", status="running")
