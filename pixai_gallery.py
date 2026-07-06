@@ -3932,20 +3932,22 @@ var Gen = (function(){
     if(!f.classList.contains('open')) toggleFlyout();
     setKind('lora');
   }
+  var selSeq=0;   // guards selectCard's async version fetch against a stale-response race
   function selectCard(m, c){
     if(kind==='lora'){ toggleLora(m, c); return; }
     document.querySelectorAll('.gen-card.sel').forEach(function(x){x.classList.remove('sel');});
-    c.classList.add('sel'); selected=Object.assign({}, m);
+    c.classList.add('sel'); selected=Object.assign({}, m); var mySeq=++selSeq;
     var th=el('gen-selthumb');
     if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
     el('gen-selname').textContent=m.title+' \\u2026';
     fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
       .then(function(r){return r.json();})
-      .then(function(d){ selected.version_id=d.version_id||''; selected.model_type=d.model_type||'';
+      .then(function(d){ if(mySeq!==selSeq) return;   // a newer pick superseded this fetch
+        selected.version_id=d.version_id||''; selected.model_type=d.model_type||'';
         el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)');
         refreshLoraNotes();   // re-check any attached LoRAs against the new base + set go-state
         refreshCost(); })
-      .catch(function(){ el('gen-selname').textContent=m.title; });
+      .catch(function(){ if(mySeq===selSeq) el('gen-selname').textContent=m.title; });
   }
   var genRef=null;   // {media_id, thumb} -- the img2img reference, or null
   function refPick(){
@@ -3969,7 +3971,7 @@ var Gen = (function(){
   function curAspect(){ var b=document.querySelector('#gen-aspects button.on');
     return b?{w:+b.getAttribute('data-w'),h:+b.getAttribute('data-h')}:{w:512,h:512}; }
   function payload(){ var a=curAspect();
-    return { version_id:(selected&&selected.version_id)||'', prompt:el('gen-prompt').value.trim(),
+    return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
       count:+el('gen-count').value, high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
       ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
@@ -6453,7 +6455,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"error": "generation is localhost-only"}), 403
         try:
             core, session = _gen_session()
-            args = _gen_args_from_payload(request.get_json(silent=True) or {})
+            body = request.get_json(silent=True) or {}
+            args = _gen_args_from_payload(body)
+            # Authoritative model resolution: if the drawer sent the base model_id, re-resolve
+            # the CURRENT version server-side and IGNORE the client's cached version_id (which
+            # can be stale/raced). This is what stops gens landing as "Unknown model" + missing
+            # the feed. Falls back to the client version_id when no model_id was sent.
+            _mid = str(body.get("model_id") or "").strip()
+            if _mid:
+                _vid = (core.resolve_version_meta(session, _mid) or {}).get("version_id") or ""
+                if _vid:
+                    args.model = _vid
             if not args.model:
                 return jsonify({"error": "pick a model first"}), 400
             if not args.prompt:
