@@ -1339,6 +1339,55 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
 # Flask app factory
 # ---------------------------------------------------------------------------
 
+# Design tokens: the SINGLE source of truth for the gallery's palette + achievement
+# skins, shared (via the __DESIGN_TOKENS__ marker + .replace(), same idiom as LOOM_PAGE's
+# __JSX__) by BASE_HTML and LOOM_PAGE so both surfaces re-skin together instead of the
+# Loom carrying its own copy that silently drifts from this one.
+DESIGN_TOKENS_CSS = r"""
+  :root {
+    /* Palette sampled from two reference images:
+       731004762264180451.webp — teal "magic glow", green gems, rare gold trim.
+       s1_06.png              — the deep violet armor (#33236d/#241f5b/#36345a/#643aac)
+                                that tints the ground and surfaces below. */
+    --base:    #0c0a1c; --mantle:  #0a0818; --surface0:#211f3a;
+    --surface1:#3a3460; --overlay0:#6a6088; --text:    #d6d2e2;
+    --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
+    --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
+    --blue:    #47cbc3; --sapphire:#3a8a93;
+    /* Moonglade Athenaeum palette: lavender leads, emerald is the "magic"
+       highlight (Nelnamara's gems), gold filigree is rare. */
+    --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
+    --purple-deep: #33236d; --purple-bright: #643aac;
+  }
+  /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
+     the meaningful subset of the palette; everything else inherits :root. Applied
+     via <html data-skin="..."> (set pre-paint from localStorage in <head>). ---- */
+  html[data-skin="nightfallen"] {
+    --base:#0a0713; --mantle:#080610; --surface0:#241a3f; --surface1:#3c2b63;
+    --text:#e7ddff; --subtext:#a493c9; --overlay0:#7a6aa6;
+    --accent:#a678f0; --lavender:#c9a6ff; --mauve:#d3b6ff;
+    --emerald:#7f6fe0; --accent-soft:#8b7ae6; --gold:#d9b3ff;
+  }
+  html[data-skin="moonlit"] {
+    --base:#0b1018; --mantle:#080d15; --surface0:#1c2735; --surface1:#334358;
+    --text:#e6eefb; --subtext:#93a6bd; --overlay0:#6f8298;
+    --accent:#8fb8e8; --lavender:#bcd6f5; --mauve:#c6dbf7;
+    --emerald:#68d5e0; --accent-soft:#6fc9d6; --gold:#cfe1f5;
+  }
+  html[data-skin="ember"] {
+    --base:#160c0c; --mantle:#120909; --surface0:#33201c; --surface1:#5a352c;
+    --text:#fbe6df; --subtext:#c79b8d; --overlay0:#a5786a;
+    --accent:#e8935f; --lavender:#f0b48f; --mauve:#f3c3a5;
+    --emerald:#e0a94b; --accent-soft:#d67f4b; --gold:#ffcf7a;
+  }
+  html[data-skin="verdant"] {
+    --base:#0a1410; --mantle:#08110d; --surface0:#173026; --surface1:#2a5140;
+    --text:#e2f5ea; --subtext:#93bda6; --overlay0:#6f9d84;
+    --accent:#5fd39a; --lavender:#8fe8bf; --mauve:#a5f3cf;
+    --emerald:#4fc99a; --accent-soft:#4bd68f; --gold:#c8e6a8;
+  }
+"""
+
 # One-click enhance plugins for the Edit tab. `detail-fix` is the VERIFIED workflowId
 # (fired for real 2026-07-02). `hand-fix` / `face-fix` use workflowNames mined from the
 # app bundle -- unverified until fired, but a rejected panelplugin submit costs no credits,
@@ -1358,10 +1407,17 @@ LOOM_PAGE = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Loom - Moonglade Athenaeum</title>
+<script>/* apply saved skin before first paint (no FOUC) -- same key/origin the gallery
+   header writes, so switching skin there re-colors the Loom too */
+try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>
+<style>
+__DESIGN_TOKENS__
+body { background: var(--base); margin: 0; }
+</style>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7/babel.min.js" crossorigin></script>
-</head><body style="margin:0;background:#15131C">
+</head><body>
 <div id="root"></div>
 <script>
 window.storage = {
@@ -1377,13 +1433,13 @@ __JSX__
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 <button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex'"
-  style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:#8b7bd8;color:#15131C;border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
+  style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="How The Loom works">?</button>
 <div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
   style="position:fixed;inset:0;z-index:301;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
-  <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:#1d1a26;border:1px solid #3a3550;border-radius:14px;padding:22px 26px;color:#d8d4e8;font:13.5px/1.55 system-ui,sans-serif;">
-    <h2 style="margin:0 0 4px;color:#fff;">The Loom &mdash; quick guide</h2>
-    <p style="color:#9a93b5;margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
+  <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:var(--surface0);border:1px solid var(--surface1);border-radius:14px;padding:22px 26px;color:var(--text);font:13.5px/1.55 system-ui,sans-serif;">
+    <h2 style="margin:0 0 4px;color:var(--text);">The Loom &mdash; quick guide</h2>
+    <p style="color:var(--subtext);margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
     <p><b>Acts &amp; Shots.</b> Your video is a list of <i>acts</i>, each holding <i>shot cards</i>. The reel bar tracks total runtime against your target. Add a shot, give it a duration, and write what happens.</p>
     <p><b>Modes.</b> Each shot has a generation mode: <b>T2V</b> text-only &middot; <b>I2V</b> animate from one image &middot; <b>FLF</b> morph from a start frame to an end frame &middot; <b>R2V</b> multi-reference (cast + scenes) &middot; <b>V2V</b> extend/transform an existing clip.</p>
     <p><b>Cast &amp; Assets.</b> Reusable references. Cite them in shot text as <b>@image1 @video1 @audio1</b> (lowercase). "Lock appearance" keeps a character consistent across shots.</p>
@@ -1391,10 +1447,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     <p><b>&#9654; Generate shot.</b> Renders the card on PixAI's video engine (V4.0): your cast + frames upload in @-order, the shot text becomes the prompt, and the finished clip lands in the gallery catalog &mdash; free when a V4.0 card covers it. Status shows on the card; "open clip &#8599;" plays it.</p>
     <p><b>Copy shot.</b> The same assembled prompt, to your clipboard &mdash; paste it into any Seedance-style generator. The board is engine-agnostic by design: plan here, render anywhere.</p>
     <p><b>Saving.</b> The board autosaves to the gallery server (survives restarts). Backup .json / export .txt live in the header.</p>
-    <p style="color:#9a93b5;">Full manual: <code>docs/LOOM.md</code> in the repo.</p>
+    <p style="color:var(--subtext);">Full manual: <code>docs/LOOM.md</code> in the repo.</p>
   </div>
 </div>
-</body></html>"""
+</body></html>""".replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS)
 
 
 def _build_stamp():
@@ -1599,48 +1655,7 @@ def create_app(out_dir: Path):
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
 <script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>
 <style>
-  :root {
-    /* Palette sampled from two reference images:
-       731004762264180451.webp — teal "magic glow", green gems, rare gold trim.
-       s1_06.png              — the deep violet armor (#33236d/#241f5b/#36345a/#643aac)
-                                that tints the ground and surfaces below. */
-    --base:    #0c0a1c; --mantle:  #0a0818; --surface0:#211f3a;
-    --surface1:#3a3460; --overlay0:#6a6088; --text:    #d6d2e2;
-    --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
-    --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
-    --blue:    #47cbc3; --sapphire:#3a8a93;
-    /* Moonglade Athenaeum palette: lavender leads, emerald is the "magic"
-       highlight (Nelnamara's gems), gold filigree is rare. */
-    --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
-    --purple-deep: #33236d; --purple-bright: #643aac;
-  }
-  /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
-     the meaningful subset of the palette; everything else inherits :root. Applied
-     via <html data-skin="..."> (set pre-paint from localStorage in <head>). ---- */
-  html[data-skin="nightfallen"] {
-    --base:#0a0713; --mantle:#080610; --surface0:#241a3f; --surface1:#3c2b63;
-    --text:#e7ddff; --subtext:#a493c9; --overlay0:#7a6aa6;
-    --accent:#a678f0; --lavender:#c9a6ff; --mauve:#d3b6ff;
-    --emerald:#7f6fe0; --accent-soft:#8b7ae6; --gold:#d9b3ff;
-  }
-  html[data-skin="moonlit"] {
-    --base:#0b1018; --mantle:#080d15; --surface0:#1c2735; --surface1:#334358;
-    --text:#e6eefb; --subtext:#93a6bd; --overlay0:#6f8298;
-    --accent:#8fb8e8; --lavender:#bcd6f5; --mauve:#c6dbf7;
-    --emerald:#68d5e0; --accent-soft:#6fc9d6; --gold:#cfe1f5;
-  }
-  html[data-skin="ember"] {
-    --base:#160c0c; --mantle:#120909; --surface0:#33201c; --surface1:#5a352c;
-    --text:#fbe6df; --subtext:#c79b8d; --overlay0:#a5786a;
-    --accent:#e8935f; --lavender:#f0b48f; --mauve:#f3c3a5;
-    --emerald:#e0a94b; --accent-soft:#d67f4b; --gold:#ffcf7a;
-  }
-  html[data-skin="verdant"] {
-    --base:#0a1410; --mantle:#08110d; --surface0:#173026; --surface1:#2a5140;
-    --text:#e2f5ea; --subtext:#93bda6; --overlay0:#6f9d84;
-    --accent:#5fd39a; --lavender:#8fe8bf; --mauve:#a5f3cf;
-    --emerald:#4fc99a; --accent-soft:#4bd68f; --gold:#c8e6a8;
-  }
+__DESIGN_TOKENS__
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--base); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
 
@@ -2049,7 +2064,7 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 </body>
 </html>
-"""
+""".replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS)
 
     INDEX_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 {% macro date_select(prefix, value, years) %}
