@@ -4359,7 +4359,7 @@ var Gen = (function(){
       .then(function(d){ if(mine!==costSeq)return;
         if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
         var n = d.cost!=null ? d.cost.toLocaleString() : '?';
-        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 a card covers this (saves ~'+n+' credits)'; }
+        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 '+(d.card_name||'a card')+' covers this (saves ~'+n+' credits)'; }
         else { cost.textContent='\\u2248 '+n+' credits'; }
       }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
   }
@@ -4460,7 +4460,7 @@ var Gen = (function(){
         if(d.note){ cost.textContent=d.note; return; }
         if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
         var n=d.cost!=null?d.cost.toLocaleString():'?';
-        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 an Edit card covers this (saves ~'+n+' credits)'; }
+        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 '+(d.card_name||'an Edit card')+' covers this (saves ~'+n+' credits)'; }
         else { cost.textContent='\\u2248 '+n+' credits'; }
       }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
   }
@@ -4653,7 +4653,7 @@ var Gen = (function(){
         if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
         var n=d.cost!=null?d.cost.toLocaleString():'?';
         if(d.free){ cost.className='gen-cost free';
-          cost.textContent='\\ud83c\\udfab FREE \\u2014 a video card covers this'+(d.cards?' ('+d.cards+' left)':'')+' \\u00b7 saves ~'+n+' credits'; }
+          cost.textContent='\\ud83c\\udfab FREE \\u2014 '+(d.card_name||'a video card')+' covers this'+(d.cards?' ('+d.cards+' left)':'')+' \\u00b7 saves ~'+n+' credits'; }
         else { cost.textContent='\\u2248 '+n+' credits'; }
       }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
   }
@@ -6932,9 +6932,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if params is None:
                 return jsonify({"cost": None, "free": False, "note": note})
             cost = core.price_task(session, params)
-            best = None if no_card else core.match_kaisuuken(session, params)
+            best = None if no_card else core.match_kaisuuken(session, params, enrich=True)
             return jsonify({"cost": cost, "free": bool(best),
                             "cards": (best or {}).get("total"),
+                            "card_name": (best or {}).get("name"),
                             "card_expires": (best or {}).get("expiresAt")})
         except Exception as e:
             return jsonify({"error": str(e)[:200], "cost": None}), 200

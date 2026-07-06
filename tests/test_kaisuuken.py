@@ -81,6 +81,59 @@ def test_match_no_matches_returns_none(monkeypatch):
     assert core.match_kaisuuken(object(), {"modelId": "x"}) is None
 
 
+def test_target_model_id_reads_top_level_and_chat():
+    assert core._target_model_id({"modelId": "111"}) == "111"
+    assert core._target_model_id({"chat": {"modelId": "222"}}) == "222"   # instruct edit
+    assert core._target_model_id({}) == "" and core._target_model_id(None) == ""
+
+
+# When several cards are eligible, enrich=True must PREFER the one locked to the gen's model.
+_TWO_CARDS = {"matches": [
+    {"templateId": "tpl-edit", "total": 17, "kaisuukens": [
+        {"id": "edit-tkt", "expiresAt": "2026-07-17T20:00:00Z"}]},          # later expiry
+    {"templateId": "tpl-ref", "total": 5, "kaisuukens": [
+        {"id": "ref-tkt", "expiresAt": "2026-07-16T20:00:00Z"}]},           # SOONER expiry
+], "total": 22}
+
+_SUMMARY = [
+    {"template_id": "tpl-edit", "name": "Edit Pro Only", "model_version_id": "2006468692917575683"},
+    {"template_id": "tpl-ref", "name": "Reference Pro Only", "model_version_id": "1948514378441961474"},
+]
+
+
+def test_match_enrich_prefers_model_matching_card(monkeypatch):
+    """Both cards match + the Reference one expires SOONER. Old behavior grabbed nearest-
+    expiry (Reference). enrich=True must instead pick the EDIT card because the generation
+    targets the Edit Pro model -- so an edit spends an Edit card, not a Reference one."""
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: _TWO_CARDS)
+    monkeypatch.setattr(core, "list_kaisuukens", lambda s: _SUMMARY)
+    edit_params = core.build_chat_edit_parameters("x", ["10"])   # chat.modelId = Edit Pro
+    best = core.match_kaisuuken(object(), edit_params, enrich=True)
+    assert best["id"] == "edit-tkt" and best["templateId"] == "tpl-edit"
+    assert best["name"] == "Edit Pro Only"                       # honest label data
+
+
+def test_match_without_enrich_keeps_nearest_expiry(monkeypatch):
+    """Default (enrich=False) is unchanged: nearest-expiry across all matches, no summary
+    call, no name -- so existing callers behave exactly as before."""
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: _TWO_CARDS)
+    monkeypatch.setattr(core, "list_kaisuukens",
+                        lambda s: (_ for _ in ()).throw(AssertionError("must not fetch summary")))
+    best = core.match_kaisuuken(object(), core.build_chat_edit_parameters("x", ["10"]))
+    assert best["id"] == "ref-tkt"                               # sooner expiry wins, model-blind
+    assert "name" not in best
+
+
+def test_match_enrich_falls_back_when_no_model_match(monkeypatch):
+    """enrich=True but the gen's model matches NO eligible card's model -> don't drop the
+    free card; fall back to nearest-expiry across all (still names it)."""
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: _TWO_CARDS)
+    monkeypatch.setattr(core, "list_kaisuukens", lambda s: _SUMMARY)
+    best = core.match_kaisuuken(object(), {"modelId": "9999-unknown"}, enrich=True)
+    assert best["id"] == "ref-tkt"                               # nearest-expiry fallback
+    assert best["name"] == "Reference Pro Only"
+
+
 def test_match_fails_soft(monkeypatch):
     monkeypatch.setattr(core, "_rest_post",
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("400")))
@@ -118,14 +171,14 @@ def test_apply_no_card_pays_credits(monkeypatch):
 
 def test_apply_auto_match_attaches(monkeypatch):
     monkeypatch.setattr(core, "match_kaisuuken",
-                        lambda s, p: {"id": "id-soon", "expiresAt": "2026-07-06T00:00:00Z"})
+                        lambda s, p, enrich=False: {"id": "id-soon", "expiresAt": "2026-07-06T00:00:00Z"})
     params = {"modelId": "1983308862240288769"}
     assert core._apply_kaisuuken(object(), params, _args()) == "id-soon"
     assert params["kaisuukenId"] == "id-soon"
 
 
 def test_apply_no_match_pays_credits(monkeypatch):
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, p: None)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False: None)
     params = {"modelId": "m"}
     assert core._apply_kaisuuken(object(), params, _args()) == ""
     assert "kaisuukenId" not in params
