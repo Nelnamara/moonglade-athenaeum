@@ -3609,8 +3609,10 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-card{display:flex;gap:11px;align-items:flex-start;background:var(--surface0);border:1px solid var(--surface1);border-left-width:3px;border-radius:11px;padding:11px 12px;transition:transform .12s,box-shadow .12s;}
   .ach-card.locked{opacity:.62;}
   .ach-card.earned:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.35);}
-  .ach-card .ico{font-size:27px;line-height:1;filter:grayscale(1) brightness(.8);flex-shrink:0;}
+  .ach-card .ico{position:relative;width:46px;height:46px;font-size:27px;line-height:1;filter:grayscale(1) brightness(.8);flex-shrink:0;display:flex;align-items:center;justify-content:center;}
   .ach-card.earned .ico{filter:none;}
+  .ach-card .ico .ico-badge{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
+  .ach-card.clickable{cursor:pointer;}
   .ach-card .nm{font-size:13.5px;font-weight:650;color:var(--text);}
   .ach-card .ds{font-size:11px;color:var(--subtext);margin-top:2px;line-height:1.35;}
   .ach-card .tier{font-size:9px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-top:5px;display:inline-block;}
@@ -3640,6 +3642,39 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-toast .at-n{font-size:19px;font-weight:700;color:var(--text);margin-top:3px;}
   .ach-toast .at-n .ai{margin-right:7px;}
   .ach-toast .at-d{font-size:11.5px;color:var(--subtext);margin-top:4px;}
+  /* ---- the mid-screen achievement MOMENT (Nel presents; rarity-scaled) ---- */
+  .ach-moment{position:fixed;inset:0;z-index:430;display:flex;align-items:center;justify-content:center;}
+  .am-scrim{position:absolute;inset:0;background:radial-gradient(circle at 50% 48%,rgba(6,5,14,.45),rgba(6,5,14,.86));opacity:0;transition:opacity .4s;}
+  .ach-moment.go .am-scrim{opacity:1;}
+  .ach-moment.t-legendary .am-scrim{background:radial-gradient(circle at 50% 48%,rgba(40,28,6,.4),rgba(6,5,14,.92));}
+  .am-flash{position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 46%,rgba(255,241,205,.9),transparent 55%);}
+  .ach-moment.go .am-flash{animation:am-flash .8s ease-out;}
+  @keyframes am-flash{0%{opacity:0;transform:scale(.5);}16%{opacity:.9;}100%{opacity:0;transform:scale(1.5);}}
+  .am-stage{position:relative;z-index:2;text-align:center;display:flex;flex-direction:column;align-items:center;pointer-events:none;}
+  .am-badge{width:clamp(140px,22vw,220px);height:auto;transform:scale(.5);opacity:0;filter:drop-shadow(0 8px 26px rgba(0,0,0,.55));}
+  .ach-moment.go .am-badge{animation:am-pop .7s cubic-bezier(.18,.9,.2,1.15) .05s forwards;}
+  .ach-moment.leg .am-badge{width:clamp(180px,28vw,300px);}
+  @keyframes am-pop{0%{transform:scale(.5);opacity:0;}60%{transform:scale(1.1);opacity:1;}100%{transform:scale(1);opacity:1;}}
+  .am-nel{position:absolute;right:5%;bottom:0;max-height:min(46vh,340px);opacity:0;z-index:1;pointer-events:none;filter:drop-shadow(0 8px 24px rgba(0,0,0,.5));}
+  .ach-moment.go .am-nel{animation:am-nel .6s cubic-bezier(.2,.8,.25,1) .15s forwards;}
+  @keyframes am-nel{from{opacity:0;transform:translateY(26px) scale(.92);}to{opacity:1;transform:none;}}
+  .am-eyebrow{font-size:12px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold);margin-top:16px;opacity:0;}
+  .am-name{font-size:30px;font-weight:700;color:#fff;line-height:1.1;opacity:0;text-wrap:balance;}
+  .am-desc{color:var(--subtext);font-size:14px;margin-top:5px;opacity:0;max-width:34ch;}
+  .am-tier{margin-top:10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;border:1px solid;border-radius:999px;padding:2px 11px;opacity:0;}
+  .ach-moment.go .am-eyebrow{animation:am-fade .5s ease .5s forwards;}
+  .ach-moment.go .am-name{animation:am-fade .5s ease .6s forwards;}
+  .ach-moment.go .am-desc{animation:am-fade .5s ease .72s forwards;}
+  .ach-moment.go .am-tier{animation:am-fade .5s ease .84s forwards;}
+  @keyframes am-fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+  .ach-moment.out{opacity:0;transition:opacity .5s;}
+  .ach-moment.t-common .am-tier{color:#8fb3d9;border-color:#8fb3d9;}
+  .ach-moment.t-rare .am-tier{color:var(--blue,#8ab6f4);border-color:var(--blue,#8ab6f4);}
+  .ach-moment.t-epic .am-tier{color:var(--mauve);border-color:var(--mauve);}
+  .ach-moment.t-legendary .am-tier{color:var(--gold);border-color:var(--gold);}
+  .am-conf{position:absolute;top:-6%;width:7px;height:14px;border-radius:2px;z-index:1;pointer-events:none;animation:am-conffall linear forwards;}
+  @keyframes am-conffall{to{transform:translateY(112vh) rotate(720deg);opacity:.55;}}
+  @media (prefers-reduced-motion: reduce){ .ach-moment *{animation:none!important;} .am-badge,.am-nel,.am-stage>*{opacity:1!important;transform:none!important;} }
 </style>
 <style>
   #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:240px;max-width:340px;max-height:300px;overflow-y:auto;padding:5px;}
@@ -3750,13 +3785,16 @@ var Ach = (function(){
       (d.achievements||[]).forEach(function(a){
         var c=document.createElement('div');
         c.className='ach-card t-'+a.tier+(a.earned?' earned':' locked');
-        var body='<div class="ico">'+esc(a.icon)+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
+        var ico=a.earned?('<img class="ico-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon)):esc(a.icon);
+        var body='<div class="ico">'+ico+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
           +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>';
         if(a.skin) body+='<div class="unlk">&#9733; unlocks '+esc(skinName(d,a.skin))+' skin</div>';
         if(!a.earned){ var pct=Math.min(100,Math.round(a.current/a.threshold*100));
           body+='<div class="ach-bar"><i style="width:'+pct+'%"></i></div>'
               +'<div class="ach-num">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div>'; }
-        body+='</div>'; c.innerHTML=body; g.appendChild(c);
+        body+='</div>'; c.innerHTML=body;
+        if(a.earned){ c.classList.add('clickable'); c.title='Replay this celebration'; c.onclick=(function(x){ return function(){ celebrate(x); }; })(a); }
+        g.appendChild(c);
       });
     }
     var sk=el('ach-skins'); if(sk){ sk.innerHTML='';
@@ -3800,7 +3838,48 @@ var Ach = (function(){
                       +'\\ud83c\\udfc6 to review them.', skin:false});
       return;
     }
-    newly.forEach(function(a,i){ setTimeout(function(){ showToast(a); }, i*1400); });
+    newly.forEach(function(a){ celebrate(a); });   // real unlocks get the mid-screen moment (queued)
+  }
+  // ---- the mid-screen achievement MOMENT: Nel presents the badge, flair scales with rarity ----
+  var _q=[], _playing=false, _actx=null;
+  function _chime(tier){
+    try{ _actx=_actx||new (window.AudioContext||window.webkitAudioContext)(); if(_actx.state==='suspended')_actx.resume(); }catch(e){ return; }
+    var seq={common:[523,660],rare:[523,660,784],epic:[523,660,784,988],legendary:[392,523,660,784,1047]}[tier]||[660];
+    var t=_actx.currentTime+0.02;
+    seq.forEach(function(f,i){ var o=_actx.createOscillator(),g=_actx.createGain(); o.type='triangle'; o.frequency.value=f;
+      o.connect(g); g.connect(_actx.destination); var s=t+i*0.1;
+      g.gain.setValueAtTime(0.0001,s); g.gain.linearRampToValueAtTime(0.15,s+0.02); g.gain.exponentialRampToValueAtTime(0.0001,s+0.5);
+      o.start(s); o.stop(s+0.55); });
+    if(tier==='legendary'){ var lo=_actx.createOscillator(),lg=_actx.createGain(); lo.type='sine'; lo.frequency.value=98;
+      lo.connect(lg); lg.connect(_actx.destination); lg.gain.setValueAtTime(0.0001,t); lg.gain.linearRampToValueAtTime(0.28,t+0.02);
+      lg.gain.exponentialRampToValueAtTime(0.0001,t+1.2); lo.start(t); lo.stop(t+1.3); }
+  }
+  function _stars(parent,n){ for(var i=0;i<n;i++){ var s=document.createElement('div'); s.className='ee-star';
+      s.textContent=['\\u2726','\\u2727','\\u2b50'][i%3]; s.style.left=(Math.random()*100)+'vw'; s.style.color='var(--gold)';
+      s.style.fontSize=(12+Math.random()*20)+'px'; s.style.animationDuration=(2.4+Math.random()*2.4)+'s';
+      s.style.animationDelay=(Math.random()*1.2)+'s'; parent.appendChild(s); } }
+  function _conf(parent,n){ var cols=['#b692e6','#d4af37','#4fc99a','#c4a6f0','#ffffff'];
+    for(var i=0;i<n;i++){ var c=document.createElement('i'); c.className='am-conf'; c.style.background=cols[i%cols.length];
+      c.style.left=(Math.random()*100)+'%'; c.style.animationDuration=(1.8+Math.random()*1.6)+'s'; c.style.animationDelay=(Math.random()*0.5)+'s'; parent.appendChild(c); } }
+  function celebrate(a){ if(a){ _q.push(a); if(!_playing) _next(); } }
+  function _next(){
+    if(!_q.length){ _playing=false; return; } _playing=true;
+    var a=_q.shift(), tier=a.tier||'common';
+    var hold={common:3000,rare:3600,epic:4200,legendary:5200}[tier]||3200;
+    var big=(tier==='epic'||tier==='legendary'), leg=(tier==='legendary');
+    var m=document.createElement('div'); m.className='ach-moment t-'+tier+(leg?' leg':'');
+    m.innerHTML='<div class="am-scrim"></div>'+(leg?'<div class="am-flash"></div>':'')
+      +'<div class="am-stage"><img class="am-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'
+      +'<div class="am-eyebrow">Achievement Unlocked</div><div class="am-name">'+esc(a.name)+'</div>'
+      +'<div class="am-desc">'+esc(a.desc)+'</div><div class="am-tier">'+esc(tier)+'</div></div>'
+      +'<img class="am-nel" src="/branding/mascots/present_'+tier+'.png" onerror="this.remove()">';
+    document.body.appendChild(m);
+    _stars(m, leg?46:(big?34:22)); if(big) _conf(m, leg?90:44); _chime(tier);
+    void m.offsetWidth; m.classList.add('go');
+    var done=function(){ if(m._d)return; m._d=true; m.classList.add('out');
+      setTimeout(function(){ if(m.parentNode)m.remove(); _next(); }, 500); };
+    m._t=setTimeout(done, hold);
+    m.addEventListener('click', function(){ clearTimeout(m._t); done(); });
   }
   function showToast(a){
     var t=document.createElement('div'); t.className='ach-toast';
