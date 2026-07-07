@@ -654,6 +654,13 @@ def test_import_task_by_id(tmp_path, monkeypatch):
     assert d.get("error") and "tid" not in called                          # non-numeric rejected, no collect
     d = cli.post("/api/import-task", json={"task_id": "2030585251815688815"}).get_json()
     assert d["ok"] and d["saved"] == 1 and called["tid"] == "2030585251815688815"
+    # already in the gallery -> reports it + hands back the media, does NOT re-fetch ("behind the milk")
+    save_catalog(tmp_path / "catalog.db", [_row(media_id="ex1", filename="e.png", task_id="999",
+                                                created_at="2025-01-02T00:00:00")])
+    called.clear()
+    d = cli.post("/api/import-task", json={"task_id": "999"}).get_json()
+    assert d.get("already") is True and d["saved"] == 0 and "ex1" in d["media_ids"]
+    assert "tid" not in called                                             # no re-collect
     html = cli.get("/panel").get_data(as_text=True)
     assert 'id="import-tid"' in html and "importTask()" in html            # the panel card + wiring
 

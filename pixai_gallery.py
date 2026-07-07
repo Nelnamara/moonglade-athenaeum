@@ -5706,6 +5706,9 @@ function importTask(){
   fetch('/api/import-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid})})
     .then(function(r){return r.json();}).then(function(d){
       if(d.error){ st.innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>'; return; }
+      if(d.already){ var n=(d.media_ids||[]).length, mid=(d.media_ids||[])[0];
+        st.innerHTML='<span class="st-done">\\u2713 Already in your gallery ('+n+' item'+(n===1?'':'s')+')'
+          +(mid?' \\u2014 <a href="/image/'+mid+'" style="color:var(--lavender);text-decoration:underline;">view it \\u2192</a>':'')+'</span>'; return; }
       if(!d.saved){ st.innerHTML='<span class="st-failed">\\u26a0 Task resolved but no media to import.</span>'; return; }
       st.innerHTML='<span class="st-done">\\u2713 Imported '+d.saved+' item(s) from task '+tid+' \\u2014 open the gallery to see it.</span>';
       document.getElementById('import-tid').value=''; loadAcct();
@@ -5967,6 +5970,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         tid = str((request.get_json(silent=True) or {}).get("task_id") or "").strip()
         if not tid.isdigit():
             return jsonify({"error": "enter a numeric task id"}), 200
+        # "Look behind the milk": if this task is already catalogued, don't re-fetch --
+        # just report it's here + hand back its media so the UI can jump straight to it.
+        con = _connect(db_path)
+        try:
+            pre = [r[0] for r in con.execute(
+                "SELECT media_id FROM catalog WHERE task_id=?", (tid,)).fetchall()]
+        finally:
+            con.close()
+        if pre:
+            return jsonify({"ok": True, "already": True, "saved": 0, "media_ids": pre})
         job_id = "import-" + tid[-8:]
         _log_job(job_id, status="running", type="import", label="Import task " + tid)
         try:
