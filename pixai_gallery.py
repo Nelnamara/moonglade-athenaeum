@@ -2261,6 +2261,7 @@ document.addEventListener('DOMContentLoaded', function() {
        read-only note instead of dead buttons. Browse/curate + community stay available. #}
     {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
+    <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
     <a class="btn b-loom" href="/loom" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     {% endif %}
@@ -3578,6 +3579,8 @@ document.addEventListener('DOMContentLoaded', function(){
   a.acct-chip{font-size:13px;color:var(--text);background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;padding:5px 14px;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;}
   a.acct-chip:hover{border-color:var(--lavender);text-decoration:none;}
   .acct-chip b{color:var(--text);} .acct-chip .cd{color:var(--lavender);}
+  .acct-claim{font-size:12px;border:1px solid var(--emerald);background:rgba(166,227,161,.13);color:var(--emerald);border-radius:6px;padding:5px 11px;cursor:pointer;white-space:nowrap;}
+  .acct-claim:hover{background:rgba(166,227,161,.24);}
   /* ---- Jobs card: the activity tracker (bottom-left, always openable) ---- */
   #jobs-fab{position:fixed;left:14px;bottom:14px;z-index:234;display:none;align-items:center;gap:7px;background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);color:var(--subtext);cursor:pointer;padding:7px 13px 7px 10px;font-size:11.5px;letter-spacing:.02em;transition:border-color .15s,color .15s;}
   #jobs-fab.show{display:inline-flex;}
@@ -3913,12 +3916,29 @@ document.addEventListener('DOMContentLoaded', function(){
 /* ---- Account balance chip (credits + free cards) in the header ---- */
 var Acct = (function(){
   function chip(){ return document.getElementById('acct-chip'); }
+  function claimEl(){ return document.getElementById('acct-claim'); }
   var CKEY='mg_acct';
+  function daysUntil(d){ if(!d) return 999; var t=(new Date(d+'T00:00:00')).getTime();
+    return isNaN(t)?999:Math.ceil((t-Date.now())/86400000); }
   function paint(d){
     var c=chip(); if(!c) return;
     var parts=[]; if(d.credits!=null) parts.push('\\u25c8 <b>'+Number(d.credits).toLocaleString()+'</b>');
     if(d.cards!=null) parts.push('<span class="cd">\\ud83c\\udfab '+d.cards+'</span>');
-    if(parts.length){ c.innerHTML=parts.join(' \\u00b7 '); c.style.display=''; }
+    // urgency: soonest card expiry, or a subscription cliff that stops card grants
+    var warn=[], ce=daysUntil(d.card_expiry);
+    if(d.card_expiry && ce<=3) warn.push('cards expire in '+Math.max(0,ce)+'d ('+d.card_expiry+')');
+    if(d.sub && d.sub.cancel && d.sub.end && daysUntil(d.sub.end)<=7)
+      warn.push('premium ends '+d.sub.end+' \\u2014 card grants stop');
+    if(parts.length){ c.innerHTML=(warn.length?'\\u26a0 ':'')+parts.join(' \\u00b7 '); c.style.display=''; }
+    // rich tooltip: per-card breakdown + any warnings
+    var tip=['Your PixAI balance \\u2014 open the Control Panel'];
+    (d.cards_by||[]).forEach(function(k){ if(k.count) tip.push('\\ud83c\\udfab '+k.count+' '+(k.name||'')+(k.expires?' (exp '+k.expires+')':'')); });
+    warn.forEach(function(w){ tip.push('\\u26a0 '+w); });
+    c.title=tip.join('\\n');
+    // claimable free-credits badge
+    var b=claimEl();
+    if(b){ if(d.claim_credits){ b.textContent='\\ud83c\\udf81 +'+Number(d.claim_credits).toLocaleString()+' claim'; b.style.display=''; }
+           else b.style.display='none'; }
   }
   function refresh(){
     var c=chip(); if(!c) return;
@@ -3928,10 +3948,19 @@ var Acct = (function(){
       // Only a fully-successful read (credits present) updates the chip; a transient
       // miss or error keeps the last-known value instead of blanking it.
       if(d.error || d.credits==null){ coverage(d); return; }
-      var good={credits:d.credits, cards:(d.cards!=null?d.cards:0)};
+      var good={credits:d.credits, cards:(d.cards!=null?d.cards:0), cards_by:d.cards_by,
+                card_expiry:d.card_expiry, claim_credits:d.claim_credits, sub:d.sub};
       try{ localStorage.setItem(CKEY, JSON.stringify(good)); }catch(e){}
       paint(good); coverage(d);
     }).catch(function(){});
+  }
+  function claim(){
+    var b=claimEl(); if(b) b.textContent='claiming\\u2026';
+    fetch('/api/claim',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      if(d && d.error){ if(window.Toast) Toast.show({kind:'err',title:'Claim failed',msg:d.error}); }
+      else if(window.Toast) Toast.show({kind:'ok',title:'Claimed +'+Number((d&&d.credits)||0).toLocaleString()+' credits'});
+      refresh();
+    }).catch(function(){ refresh(); });
   }
   function coverage(d){
     var b=document.getElementById('cover-badge');
@@ -3943,7 +3972,7 @@ var Acct = (function(){
       +' generation tasks archived locally'+(pct>=99.5?' \\u2014 complete backup \\u2728':'');
     b.style.display='';
   }
-  return {refresh:refresh};
+  return {refresh:refresh, claim:claim};
 })();
 /* ---- Toasts: small corner notices, reusable (job notices now; achievements can adopt) ---- */
 var Toast = (function(){
@@ -6642,11 +6671,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             except (TypeError, ValueError):
                 credits = None
             cards = 0
+            cards_by, expiries = [], []
             for k in core.list_kaisuukens(session):
                 try:
-                    cards += int(k.get("count") or 0)
+                    n = int(k.get("count") or 0)
                 except (TypeError, ValueError):
-                    pass
+                    n = 0
+                cards += n
+                exp = (k.get("expires") or "")[:10]
+                cards_by.append({"name": k.get("name"), "count": n, "expires": exp})
+                if exp and n:
+                    expiries.append(exp)
+            card_expiry = min(expiries) if expiries else None
+            # claimable daily rewards (free credits/stamina) -- for the "+N claim" badge
+            claim_credits, claim_ids = 0, []
+            for c in core.list_claims(session):
+                if not c.get("canClaim"):
+                    continue
+                claim_ids.append(c.get("id"))
+                if "credit" in str(c.get("id") or "").lower():
+                    try:
+                        claim_credits += int(c.get("amount") or 0)
+                    except (TypeError, ValueError):
+                        pass
+            sub = me.get("subscription") or {}
             # Backup coverage: server's lifetime TASK count vs distinct tasks we hold locally.
             # Both are task counts (not images), so the ratio is honest.
             try:
@@ -6657,10 +6705,38 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             coverage = (round(min(100.0, local_tasks / server_tasks * 100), 1)
                         if server_tasks else None)
             return jsonify({"credits": credits, "cards": cards,
+                            "cards_by": cards_by, "card_expiry": card_expiry,
+                            "claim_credits": claim_credits, "claim_ids": claim_ids,
+                            "sub": {"end": (sub.get("endAt") or "")[:10],
+                                    "cancel": bool(sub.get("cancelAtPeriodEnd"))},
                             "server_tasks": server_tasks, "local_tasks": local_tasks,
                             "coverage_pct": coverage,
                             "followers": me.get("followerCount"),
                             "following": me.get("followingCount")})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 200
+
+    @app.route("/api/claim", methods=["POST"])
+    def api_claim():
+        """Claim ready daily rewards (free credits/stamina to the owner's OWN account -- no
+        money moves). Localhost-only; the header click IS the confirmation. One bad claim
+        doesn't abort the rest. Returns {claimed, credits}."""
+        if not _is_local_request():
+            return jsonify({"error": "claiming is localhost-only"}), 403
+        try:
+            core, session = _gen_session()
+            claimed, credits = 0, 0
+            for c in core.list_claims(session):
+                if not c.get("canClaim"):
+                    continue
+                try:
+                    core.claim_reward(session, c.get("id"))
+                    claimed += 1
+                    if "credit" in str(c.get("id") or "").lower():
+                        credits += int(c.get("amount") or 0)
+                except Exception:                        # noqa: BLE001
+                    pass
+            return jsonify({"claimed": claimed, "credits": credits})
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
 
