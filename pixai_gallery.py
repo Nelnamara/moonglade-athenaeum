@@ -3259,6 +3259,8 @@ document.addEventListener('DOMContentLoaded', function(){
         <div style="flex:1;"><div class="gen-lbl">Count</div>
           <select id="gen-count" class="gen-sel"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
       </div>
+      <div style="margin-top:8px;"><div class="gen-lbl">Seed <span style="text-transform:none;color:var(--subtext);">&middot; blank = random</span></div>
+        <input id="gen-seed" class="gen-sel" type="number" placeholder="random" autocomplete="off" style="width:100%;"></div>
       <label class="gen-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it (paidCredit 0) — verified against a real Turbo gen."><input type="checkbox" id="gen-hp"> High priority &middot; Turbo (faster)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
       <div id="gen-cost" class="gen-cost">Pick a model to see the cost.</div>
@@ -4435,7 +4437,8 @@ var Gen = (function(){
   function payload(){ var a=dims();
     return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
-      count:+el('gen-count').value, high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
+      count:+el('gen-count').value, seed:(el('gen-seed')?el('gen-seed').value.trim():''),
+      high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
       ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
       loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
   function refreshCost(){
@@ -4671,7 +4674,18 @@ var Gen = (function(){
   function enhance(wid){
     var src=editSrc();
     if(!src){ el('edit-src').focus(); return; }
-    runTask('/api/enhance', {source:src, workflow_id:wid}, el('enh-result'), {past:'Enhanced'});
+    function run(){ runTask('/api/enhance', {source:src, workflow_id:wid}, el('enh-result'), {past:'Enhanced'}); }
+    // Enhance tools spend credits -- free cards do NOT cover panelplugin workflows. Price it
+    // and confirm before firing, so a click never silently burns credits.
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mode:'enhance', source:src, workflow_id:wid})})
+      .then(function(r){return r.json();}).then(function(d){
+        if(d && d.free){ run(); return; }
+        var c=(d && d.cost!=null)?(' (~'+Number(d.cost).toLocaleString()+' credits)'):'';
+        if(window.confirm('This Enhance tool spends credits'+c+' \\u2014 free cards do not cover Enhance workflows. Run it?')) run();
+      }).catch(function(){
+        if(window.confirm('Run this Enhance tool? It spends credits (free cards do not cover Enhance workflows).')) run();
+      });
   }
   var vmode='i2v', vslots=[null];
   function setVideoMode(m){
@@ -7119,6 +7133,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             except core.PixAIError as e:
                 return None, bool(p.get("no_card")), str(e)[:140]
             return params, bool(p.get("no_card")), None
+        if p.get("mode") == "enhance":
+            src = str(p.get("source") or "").strip()
+            wid = str(p.get("workflow_id") or "").strip()
+            if not (src and wid):
+                return None, bool(p.get("no_card")), "pick an image + a tool"
+            try:
+                return core.build_panelplugin_parameters(src, wid), bool(p.get("no_card")), None
+            except Exception:                        # noqa: BLE001
+                return None, bool(p.get("no_card")), "could not build that workflow"
         args = _gen_args_from_payload(p)
         if not args.model:
             return None, args.no_card, "pick a model"
