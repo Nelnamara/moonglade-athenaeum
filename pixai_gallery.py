@@ -3665,7 +3665,7 @@ document.addEventListener('DOMContentLoaded', function(){
   #jobs-fab .jf-badge{background:var(--lavender);color:var(--base);border-radius:999px;font-size:10px;font-weight:700;padding:1px 6px;min-width:15px;text-align:center;display:none;}
   #jobs-fab.busy .jf-badge{display:inline-block;}
   @keyframes jf-pulse{0%,100%{opacity:.5;}50%{opacity:1;}}
-  #jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:320px;min-width:236px;max-width:560px;max-height:min(70vh,560px);display:none;flex-direction:column;overflow:hidden;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55);}
+  #jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:366px;min-width:260px;max-width:560px;max-height:min(74vh,600px);display:none;flex-direction:column;overflow:hidden;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55);}
   #jobs-tray.open{display:flex;}
   #jobs-tray .jt-head{display:flex;align-items:center;gap:6px;padding:9px 11px;border-bottom:1px solid var(--surface0);background:linear-gradient(180deg,var(--surface0),transparent);}
   #jobs-tray .jt-title{font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:var(--lavender);font-weight:700;flex:1;display:flex;align-items:center;gap:7px;}
@@ -3678,9 +3678,15 @@ document.addEventListener('DOMContentLoaded', function(){
   .jt-item + .jt-item{margin-top:1px;}
   .jt-item:hover{background:var(--surface0);}
   .jt-item.st-failed{background:rgba(243,139,168,.09);}
-  .jt-ic{flex:none;width:18px;display:flex;align-items:center;justify-content:center;margin-top:1px;}
+  .jt-ic{flex:none;width:34px;height:34px;display:flex;align-items:center;justify-content:center;margin-top:1px;position:relative;}
   .jt-ic .gen-moon{margin:0;}
-  .jt-ok{color:var(--emerald);font-size:14px;} .jt-err{color:var(--red);font-size:14px;}
+  .jt-glyph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
+  .jt-ok{color:var(--emerald);font-size:15px;} .jt-err{color:var(--red);font-size:15px;}
+  .jt-nel{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
+  .jt-spin{position:relative;width:34px;height:34px;}
+  .jt-spin .jt-nel{inset:4px;width:26px;height:26px;border-radius:50%;object-fit:cover;object-position:60% 32%;}
+  .jt-spin .gen-ring{position:absolute;inset:2px;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
+  .jt-empty-nel{width:104px;height:104px;object-fit:contain;margin:0 auto 8px;display:block;opacity:.92;}
   .jt-main{flex:1;min-width:0;}
   .jt-lab{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .jt-sub{font-size:10.5px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;}
@@ -4120,9 +4126,11 @@ var JobsCard = (function(){
   }
   function row(j){
     var st=j.status||'running', fin=(st==='done'||st==='failed');
-    var ic = st==='done'?'<span class="jt-ok">\\u2713</span>'
-           : st==='failed'?'<span class="jt-err">\\u26a0</span>'
-           : '<span class="gen-moon"></span>';
+    var ic = st==='done'
+           ? '<span class="jt-ok jt-glyph">\\u2713</span><img class="jt-nel" src="/branding/mascots/trk_done.png" onerror="this.remove()">'
+           : st==='failed'
+           ? '<span class="jt-err jt-glyph">\\u26a0</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
+           : '<span class="jt-spin"><img class="jt-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span>';
     var mid=(j.media_ids||[])[0]||'';
     var thumb=(st==='done'&&mid)?'<a class="jt-thumb" href="/image/'+encodeURIComponent(mid)+'"><img src="/thumbs/'+encodeURIComponent(mid)+'.jpg" alt=""></a>':'';
     var bar='';
@@ -4142,7 +4150,7 @@ var JobsCard = (function(){
       +'<button class="jt-hbtn" data-act="clear" title="Clear finished">clear</button>'
       +'<button class="jt-hbtn" data-act="close" title="Collapse">\\u2013</button></div>';
     var body='';
-    if(!jobs.length){ body='<div class="jt-empty">No jobs yet.<br>Generations and syncs show up here \\u2014 with a short history.</div>'; }
+    if(!jobs.length){ body='<div class="jt-empty"><img class="jt-empty-nel" src="/branding/mascots/trk_empty.png" onerror="this.remove()"><div>The archive is quiet.<br>Generations and syncs will appear here.</div></div>'; }
     else { jobs.forEach(function(j){ body+=row(j); }); }
     t.innerHTML=head+'<div class="jt-body">'+body+'</div>';
     var f=el('jobs-fab'); if(f){ f.classList.toggle('busy', running>0); var b=el('jobs-fab-badge'); if(b) b.textContent=running||''; }
