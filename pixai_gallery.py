@@ -3300,6 +3300,8 @@ document.addEventListener('DOMContentLoaded', function(){
         </div>
         <div class="gen-lbl">Aspect</div>
         <select id="edit-aspect" class="gen-sel"></select>
+        <div class="gen-lbl">Reference images <span id="edit-ref-cap" style="text-transform:none;color:var(--subtext);"></span></div>
+        <div id="edit-refs" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
         <div id="edit-cost" class="gen-cost">Pick an image to see the cost.</div>
         <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
         <div id="edit-result" class="gen-result" style="display:none;"></div>
@@ -4478,6 +4480,7 @@ var Gen = (function(){
     var img=el('edit-src-img');
     if(mid){ img.onerror=function(){img.style.display='none';}; img.src='/thumbs/'+mid+'.jpg'; img.style.display='block'; fixInit(); fixLoad(mid); }
     else { img.style.display='none'; }
+    renderEditRefs();   // primary changed -> @image1 slot + cap count update
     debEditCost();
   }
   var EDIT_CAPS={
@@ -4501,10 +4504,36 @@ var Gen = (function(){
     var qw=el('edit-qual-wrap');
     if(c.qualities.length){ if(qw)qw.style.display=''; _fillEditSel('edit-qual',c.qualities,c.def.quality); }
     else { if(qw)qw.style.display='none'; if(el('edit-qual'))el('edit-qual').innerHTML=''; }
+    var maxAdd=Math.max(0, editRefCap()-(editSrc()?1:0));   // trim refs that no longer fit the model cap
+    if(editRefs.length>maxAdd) editRefs=editRefs.slice(0,maxAdd);
+    renderEditRefs();
     editCost();
   }
+  var editRefs=[];   /* ADDITIONAL reference images beyond the primary edit-src (@image2..) */
+  function editRefCap(){ return (EDIT_CAPS[editModel]||{max_refs:4}).max_refs; }
+  function renderEditRefs(){
+    var wrap=el('edit-refs'); if(!wrap) return; wrap.innerHTML='';
+    var cap=editRefCap(), prim=editSrc(), used=(prim?1:0)+editRefs.length;
+    function slot(inner,dashed){ var d=document.createElement('div');
+      d.style.cssText='position:relative;width:64px;height:64px;border-radius:8px;border:1px '+(dashed?'dashed':'solid')+' var(--surface1);background:var(--surface0);overflow:hidden;display:grid;place-items:center;color:var(--subtext);font-size:10px;text-align:center;';
+      d.innerHTML=inner; return d; }
+    function tag(t){ return '<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.85);color:var(--lavender);font-size:9px;padding:1px 4px;border-radius:4px;">'+t+'</span>'; }
+    if(prim) wrap.appendChild(slot('<img src="/thumbs/'+esc(prim)+'.jpg" style="width:100%;height:100%;object-fit:cover;">'+tag('@image1'),false));
+    editRefs.forEach(function(r,i){
+      var d=slot('<img src="'+esc(r.thumb)+'" style="width:100%;height:100%;object-fit:cover;">'+tag('@image'+(i+2))
+        +'<button type="button" style="position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;border:none;background:rgba(21,19,28,.85);color:var(--subtext);font-size:11px;line-height:1;cursor:pointer;padding:0;">&times;</button>',false);
+      d.querySelector('button').onclick=function(ev){ ev.stopPropagation(); editRefs.splice(i,1); renderEditRefs(); debEditCost(); };
+      wrap.appendChild(d);
+    });
+    if(used<cap){ var add=slot('+ ref',true); add.style.cursor='pointer';
+      add.onclick=function(){ Picker.open(function(mid){ if(mid){ editRefs.push({media_id:mid,thumb:'/thumbs/'+mid+'.jpg'}); renderEditRefs(); debEditCost(); } }); };
+      wrap.appendChild(add); }
+    var capEl=el('edit-ref-cap'); if(capEl) capEl.textContent='\\u00b7 '+used+'/'+cap+' (@image1 = the image being edited)';
+  }
   function editPayload(){
-    return { mode:'edit', edit_model:editModel, source:editSrc(), instruction:el('edit-ins').value.trim(),
+    var prim=editSrc();
+    var sources=[prim].concat(editRefs.map(function(r){return r.media_id;})).filter(Boolean);
+    return { mode:'edit', edit_model:editModel, source:prim, sources:sources, instruction:el('edit-ins').value.trim(),
       preset:(el('edit-preset')?el('edit-preset').value:''),
       resolution:el('edit-res').value, quality:(el('edit-qual')?el('edit-qual').value:''), aspect:el('edit-aspect').value };
   }
@@ -6934,7 +6963,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         res, q, asp = core.clamp_edit_config(model_id, (p.get("resolution") or "1K"), q,
                                              (p.get("aspect") or "3:4"))   # never send an invalid knob
         kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id, model_id=model_id)
-        return core.build_chat_edit_parameters(instruction, [src], **kwargs)
+        # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
+        # capped to the model's reference limit (Edit Pro 4 / Reference Pro 10).
+        media = p.get("sources")
+        media = [str(m).strip() for m in media if str(m).strip()] if isinstance(media, list) else []
+        if not media:
+            media = [src]
+        spec = core.edit_model_by_id(model_id)
+        if spec:
+            media = media[:spec["max_refs"]] or [src]
+        return core.build_chat_edit_parameters(instruction, media, **kwargs)
 
     @app.route("/api/presets", methods=["GET", "POST"])
     def api_presets():
