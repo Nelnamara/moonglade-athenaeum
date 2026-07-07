@@ -1902,7 +1902,11 @@ __DESIGN_TOKENS__
   .tagline { font-size: 10.5px; color: var(--overlay0); font-style: italic; margin-top: 3px; transition: opacity .5s; letter-spacing: .02em; }
   .ver-badge { font-size: 10px; font-weight: 500; color: var(--overlay0); font-family: ui-monospace, monospace; border: 1px solid var(--surface1); border-radius: 5px; padding: 1px 6px; vertical-align: middle; margin-left: 4px; letter-spacing: 0; }
   .header-stats { color: var(--subtext); font-size: 12px; } .header-stats b { color: var(--text); }
-  .gen-live { color: var(--lavender); margin-left: 8px; }
+  .gen-live { color: var(--lavender); margin-left: 8px; display:inline-flex; align-items:center; }
+  .gen-nel-wrap{position:relative;display:inline-block;width:22px;height:22px;margin-right:5px;vertical-align:middle;flex:none;}
+  .gen-nel{position:absolute;inset:3px;width:16px;height:16px;border-radius:50%;object-fit:cover;object-position:60% 32%;}
+  .gen-ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
+  @keyframes gen-spin{to{transform:rotate(360deg);}}
   .cover-badge { margin-left: 8px; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--surface1); cursor: default; }
   .cover-badge b { font-variant-numeric: tabular-nums; }
   .cover-badge.full { color: var(--emerald); border-color: var(--emerald); }
@@ -4142,7 +4146,16 @@ var JobsCard = (function(){
     else { jobs.forEach(function(j){ body+=row(j); }); }
     t.innerHTML=head+'<div class="jt-body">'+body+'</div>';
     var f=el('jobs-fab'); if(f){ f.classList.toggle('busy', running>0); var b=el('jobs-fab-badge'); if(b) b.textContent=running||''; }
-    var live=el('gen-live'); if(live){ if(running){ live.textContent='\\u25c9 '+running+' running'; live.style.display=''; } else live.style.display='none'; }
+    var live=el('gen-live');
+    if(live){
+      if(running){
+        if(!live.querySelector('.gen-nel-wrap')){   // build the spinner once so it doesn't restart each poll
+          live.innerHTML='<span class="gen-nel-wrap"><img class="gen-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span><span class="gen-live-txt"></span>';
+        }
+        var gt=live.querySelector('.gen-live-txt'); if(gt){ gt.textContent=running+' running'; }
+        live.style.display='';
+      } else { live.style.display='none'; }
+    }
   }
   function toastTransitions(jobs){
     jobs.forEach(function(j){
