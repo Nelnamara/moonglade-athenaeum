@@ -5552,6 +5552,16 @@ function savePrompt() {
   </div>
 
   <div class="p-sec">
+    <h2>Recover a task by ID</h2>
+    <div style="font-size:12px;color:var(--overlay0);margin-bottom:10px;">Pull a specific generation or edit straight from PixAI into your gallery by its task id &mdash; handy for edits and anything stuck in Favorites that Sync misses (edits aren&rsquo;t in the listing Sync pages). Downloads your own finished media; spends nothing.</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <input id="import-tid" class="p-sel" style="flex:1;min-width:220px;" placeholder="task id, e.g. 2030585251815688815" autocomplete="off" onkeydown="if(event.key==='Enter')importTask()">
+      <button type="button" class="jobbtn" style="width:auto;min-width:0;" onclick="importTask()"><span class="t">&#11015; Import</span></button>
+    </div>
+    <div id="import-status" style="font-size:12.5px;margin-top:8px;"></div>
+  </div>
+
+  <div class="p-sec">
     <h2>Automated tasks</h2>
     <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
       <label class="p-check"><input type="checkbox" id="sch-enabled"> Enabled</label>
@@ -5687,6 +5697,19 @@ function loadAcct(){
     try{ localStorage.setItem('mg_acct', JSON.stringify(good)); }catch(e){}
     _acctPaint(good);
   }).catch(function(){});
+}
+function importTask(){
+  var tid=(document.getElementById('import-tid').value||'').trim();
+  var st=document.getElementById('import-status');
+  if(!/^\\d+$/.test(tid)){ st.innerHTML='<span class="st-failed">Enter a numeric task id.</span>'; return; }
+  st.innerHTML='<span class="st-running">\\u25c9 Pulling task '+tid+'\\u2026</span>';
+  fetch('/api/import-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ st.innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>'; return; }
+      if(!d.saved){ st.innerHTML='<span class="st-failed">\\u26a0 Task resolved but no media to import.</span>'; return; }
+      st.innerHTML='<span class="st-done">\\u2713 Imported '+d.saved+' item(s) from task '+tid+' \\u2014 open the gallery to see it.</span>';
+      document.getElementById('import-tid').value=''; loadAcct();
+    }).catch(function(){ st.innerHTML='<span class="st-failed">\\u26a0 network error</span>'; });
 }
 function loadSchedule(){
   var sel=el('sch-action');
@@ -5931,6 +5954,31 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _panel_run(action)
             return jsonify({"ok": True, "action": action, "label": spec["label"]})
         except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 200
+
+    @app.route("/api/import-task", methods=["POST"])
+    def api_import_task():
+        """Pull ONE generation/edit task's media into the gallery by its task id -- recovers
+        edits + anything stuck in Favorites that --update's listing skips (edits aren't in that
+        listing). Downloads the owner's OWN finished media; spends nothing. Localhost-only.
+        Logs to the Activity card. Returns {saved, media_ids, is_video} or {error}."""
+        if not _is_local_request():
+            return jsonify({"error": "import is localhost-only"}), 403
+        tid = str((request.get_json(silent=True) or {}).get("task_id") or "").strip()
+        if not tid.isdigit():
+            return jsonify({"error": "enter a numeric task id"}), 200
+        job_id = "import-" + tid[-8:]
+        _log_job(job_id, status="running", type="import", label="Import task " + tid)
+        try:
+            core, session = _gen_session()
+            res = core.collect_generation(session, tid, str(out_dir))
+            n, mids = int(res.get("saved") or 0), (res.get("media_ids") or [])
+            _log_job(job_id, status="done", media_ids=mids,
+                     label="Imported {} media from task {}".format(n, tid))
+            return jsonify({"ok": True, "saved": n, "media_ids": mids,
+                            "is_video": bool(res.get("is_video"))})
+        except Exception as e:
+            _log_job(job_id, status="failed", error=str(e)[:200])
             return jsonify({"error": str(e)[:200]}), 200
 
     @app.route("/api/panel/status")

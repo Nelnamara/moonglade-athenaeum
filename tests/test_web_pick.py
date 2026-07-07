@@ -641,6 +641,23 @@ def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch
     assert "free cards do not cover Enhance" in html    # the confirm guardrail
 
 
+def test_import_task_by_id(tmp_path, monkeypatch):
+    """Panel 'Recover a task by ID' -> collect_generation. Localhost-gated; numeric-only;
+    recovers edits/favorites-only tasks that Sync's listing skips."""
+    called = {}
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, tid, out, **k: called.update(tid=tid) or {"saved": 1, "media_ids": ["m1"], "is_video": False})
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    assert cli.post("/api/import-task", json={"task_id": "123"},
+                    environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 403   # LAN refused
+    d = cli.post("/api/import-task", json={"task_id": "nope"}).get_json()
+    assert d.get("error") and "tid" not in called                          # non-numeric rejected, no collect
+    d = cli.post("/api/import-task", json={"task_id": "2030585251815688815"}).get_json()
+    assert d["ok"] and d["saved"] == 1 and called["tid"] == "2030585251815688815"
+    html = cli.get("/panel").get_data(as_text=True)
+    assert 'id="import-tid"' in html and "importTask()" in html            # the panel card + wiring
+
+
 def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     """The header balance surface exposes per-card breakdown + soonest expiry, claimable
     free credits, and the subscription cliff — the data the chip/badge/warnings render."""
