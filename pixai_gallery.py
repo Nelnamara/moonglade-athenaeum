@@ -3657,7 +3657,7 @@ document.addEventListener('DOMContentLoaded', function(){
   @keyframes am-pop{0%{transform:scale(.5);opacity:0;}60%{transform:scale(1.1);opacity:1;}100%{transform:scale(1);opacity:1;}}
   .am-nelwrap{position:absolute;right:4%;bottom:0;z-index:1;pointer-events:none;opacity:0;}
   .am-nelwrap::before{content:"";position:absolute;left:50%;bottom:8%;width:128%;height:78%;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse at center,rgba(203,166,247,.55),rgba(226,181,61,.22) 42%,transparent 72%);filter:blur(16px);z-index:-1;}
-  .am-nel{max-height:min(46vh,340px);display:block;filter:drop-shadow(0 8px 22px rgba(0,0,0,.55)) brightness(1.13) contrast(1.06) saturate(1.08);-webkit-mask:radial-gradient(125% 100% at 50% 44%,#000 62%,transparent 93%);mask:radial-gradient(125% 100% at 50% 44%,#000 62%,transparent 93%);}
+  .am-nel{max-height:min(46vh,340px);display:block;border:0;outline:0;background:none;filter:drop-shadow(0 8px 22px rgba(0,0,0,.55)) brightness(1.1) contrast(1.04);}
   .ach-moment.go .am-nelwrap{animation:am-nel .6s cubic-bezier(.2,.8,.25,1) .15s forwards;}
   @keyframes am-nel{from{opacity:0;transform:translateY(26px) scale(.92);}to{opacity:1;transform:none;}}
   .am-eyebrow{font-size:12px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold);margin-top:16px;opacity:0;}
@@ -6795,7 +6795,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             abort(404)
         if not target.is_file():
             abort(404)
-        return send_from_directory(str(bdir), fname)
+        resp = send_from_directory(str(bdir), fname)
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
+        return resp
 
     @app.route("/contact-sheet")
     def contact_sheet():
