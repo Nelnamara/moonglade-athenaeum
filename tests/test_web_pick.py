@@ -594,6 +594,39 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
     assert seen["p"]["chat"]["mediaIds"] == ["9"]
 
 
+def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
+    """The header balance surface exposes per-card breakdown + soonest expiry, claimable
+    free credits, and the subscription cliff — the data the chip/badge/warnings render."""
+    monkeypatch.setattr(core, "account_info", lambda s: {
+        "quotaAmount": 140, "subscription": {"endAt": "2026-07-27T00:00:00Z", "cancelAtPeriodEnd": True}})
+    monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
+        {"name": "Edit Pro Only", "count": 17, "expires": "2026-07-17T20:11:09Z"},
+        {"name": "Reference Pro Only", "count": 5, "expires": "2026-07-17T20:11:09Z"}])
+    monkeypatch.setattr(core, "list_claims", lambda s: [
+        {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
+        {"id": "agent-daily-stamina", "amount": 20, "canClaim": True}])
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/account").get_json()
+    assert d["credits"] == 140 and d["cards"] == 22
+    assert d["card_expiry"] == "2026-07-17" and len(d["cards_by"]) == 2
+    assert d["claim_credits"] == 30000 and "pixai-daily-credits" in d["claim_ids"]
+    assert d["sub"]["end"] == "2026-07-27" and d["sub"]["cancel"] is True
+
+
+def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "list_claims", lambda s: [
+        {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
+        {"id": "agent-startup-stamina", "amount": 15, "canClaim": False}])   # not ready -> skipped
+    claimed = []
+    monkeypatch.setattr(core, "claim_reward", lambda s, cid: claimed.append(cid))
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    # LAN request refused (claiming is on the owner's account)
+    assert cli.post("/api/claim", environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 403
+    d = cli.post("/api/claim").get_json()
+    assert d["claimed"] == 1 and d["credits"] == 30000       # only the ready credit reward
+    assert claimed == ["pixai-daily-credits"]
+
+
 def test_edit_card_has_reference_slots(tmp_path):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
