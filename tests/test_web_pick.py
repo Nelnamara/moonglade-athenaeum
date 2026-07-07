@@ -594,6 +594,12 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
     assert seen["p"]["chat"]["mediaIds"] == ["9"]
 
 
+def test_toasts_anchored_top_right(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "#mg-toasts{position:fixed;right:16px;top:64px" in html   # top-right, clear of the header
+
+
 def test_generate_card_has_seed_field(tmp_path):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
