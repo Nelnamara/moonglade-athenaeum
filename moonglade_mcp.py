@@ -76,7 +76,7 @@ def get_image(media_id: str, include_image: bool = True):
     meta = _slim(row)
     if not include_image:
         return meta
-    path = g.find_image_file(str(OUT), media_id, row.get("filename") or "")
+    path = g.find_image_file(OUT, media_id, row.get("filename") or "")
     if not path:
         return {**meta, "note": "image file not found on disk"}
     try:
@@ -97,7 +97,7 @@ def similar(media_id: str, limit: int = 24) -> dict:
     row = g.get_row(DB, media_id)
     if not row:
         return {"error": "no such media_id", "neighbors": []}
-    path = g.find_image_file(str(OUT), media_id, row.get("filename") or "")
+    path = g.find_image_file(OUT, media_id, row.get("filename") or "")
     if not path:
         return {"error": "image file not on disk", "neighbors": []}
     try:

@@ -594,6 +594,15 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
     assert seen["p"]["chat"]["mediaIds"] == ["9"]
 
 
+def test_video_v40_full_cost_warning(tmp_path):
+    """The Video card hard-warns when the pricier v4.0 full model is picked (14k/s vs
+    Lite's 5.5k -- a 15s clip is 210k credits), so it's never a silent surprise."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert ".gen-cost.warn" in html                 # the warn style
+    assert "V4.0 full" in html and "2.5" in html      # the ~2.5x-Lite warning text
+
+
 def test_toasts_anchored_top_right(tmp_path):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
