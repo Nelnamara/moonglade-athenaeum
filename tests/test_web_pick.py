@@ -594,6 +594,17 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
     assert seen["p"]["chat"]["mediaIds"] == ["9"]
 
 
+def test_portrait_mobile_pass(tmp_path):
+    """The <=480px portrait pass: 2-up grid, header nav swipe strip, full-width drawer +
+    centered model flyout, lightbox arrows moved off the image."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "@media (max-width: 480px)" in html
+    assert "repeat(2, minmax(0, 1fr)) !important" in html           # 2-up grid, ignores saved --thumb
+    assert "#model-flyout" in html and "translate(-50%, -50%)" in html  # flyout centered (was clipped)
+    assert "#gen-drawer.wide { width: 100%" in html or "#gen-drawer.wide" in html  # full-width sheet
+
+
 def test_video_v40_full_cost_warning(tmp_path):
     """The Video card hard-warns when the pricier v4.0 full model is picked (14k/s vs
     Lite's 5.5k -- a 15s clip is 210k credits), so it's never a silent surprise."""
