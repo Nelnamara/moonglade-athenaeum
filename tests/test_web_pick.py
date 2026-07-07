@@ -573,6 +573,34 @@ def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch):
     assert mc["resolution"] == "2K" and "quality" not in mc      # snapped + quality dropped
 
 
+def test_edit_multi_reference_sources(tmp_path, monkeypatch):
+    """Multi-image references: the Edit card sends sources[] -> chat.mediaIds carries them all
+    (primary first), capped to the model's ref limit; falls back to [source] when absent."""
+    seen = {}
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli.post("/api/price", json={"mode": "edit", "edit_model": "edit-pro", "source": "100",
+                                 "sources": ["100", "200", "300"], "resolution": "1K",
+                                 "quality": "medium", "aspect": "3:4"})
+    chat = seen["p"]["chat"]
+    assert chat["mediaId"] == "100" and chat["mediaIds"] == ["100", "200", "300"]
+    seen.clear()   # Edit Pro caps at 4 -> a 6-image list is trimmed
+    cli.post("/api/price", json={"mode": "edit", "edit_model": "edit-pro", "source": "1",
+                                 "sources": ["1", "2", "3", "4", "5", "6"]})
+    assert seen["p"]["chat"]["mediaIds"] == ["1", "2", "3", "4"]
+    seen.clear()   # no sources[] -> falls back to the single source
+    cli.post("/api/price", json={"mode": "edit", "edit_model": "edit-pro", "source": "9"})
+    assert seen["p"]["chat"]["mediaIds"] == ["9"]
+
+
+def test_edit_card_has_reference_slots(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert 'id="edit-refs"' in html and 'id="edit-ref-cap"' in html
+    assert "renderEditRefs" in html and "editRefs" in html
+
+
 def test_generate_card_has_size_and_custom_dimensions(tmp_path):
     """The Generate card must expose real dimensions — size presets + custom W/H + a wider
     aspect set — not the old 5 hardcoded ~512px buttons. The API has no size cap (backend
