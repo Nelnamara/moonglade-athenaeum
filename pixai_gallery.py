@@ -1944,6 +1944,62 @@ __DESIGN_TOKENS__
     .chips { padding: 8px 12px 0; }
     .filters input, .filters select { font-size: 16px; }  /* >=16px stops iOS zoom-on-focus */
   }
+  /* ---- Portrait phones (<=480px): the mobile pass. Layers on top of the 680px rules. ---- */
+  @media (max-width: 480px) {
+    /* HEADER stays ONE row so the collapsing-banner's slim pinned band still shows the nav.
+       Free width (shrink brand, drop tagline + stats) and turn .head-nav into a swipe strip. */
+    .brand { flex-shrink: 1; min-width: 0; }
+    header h1 { font-size: 15px; }
+    .brand .mark { width: 34px; height: 34px; font-size: 18px; }
+    .tagline { display: none; }
+    .header-stats { display: none; }
+    .head-nav { flex: 1 1 auto; min-width: 0; margin-left: 8px; flex-wrap: nowrap;
+      justify-content: flex-start; overflow-x: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: none; gap: 8px; }
+    .head-nav::-webkit-scrollbar { display: none; }
+    .head-nav > * { flex: 0 0 auto; }
+    .head-nav .btn, .acct-chip, .acct-claim { min-height: 40px; display: inline-flex; align-items: center; }
+
+    /* GRID: force a comfortable 2-up; ignore a too-large saved --thumb (else 1 giant column / overflow). */
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px; padding: 10px 10px; }
+    .card .cb-wrap { top: 0; left: 0; padding: 8px; }
+    .card .cb-wrap input[type=checkbox] { width: 26px; height: 26px; }
+    .card .sbadge { top: 8px; left: 46px; }
+    .card .stars { padding: 6px 8px 8px; gap: 8px; }
+    .card .stars button { font-size: 20px; padding: 2px; }
+    .card .meta .date { font-size: 11px; }
+
+    /* FILTERS + BULK-BAR: full-width actions, tidy stacked bulk-bar, 44px touch targets. */
+    .filters .filter-actions { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 8px; }
+    .filters .filter-actions .btn { flex: 1 1 30%; min-height: 44px; justify-content: center; }
+    .bulk-bar { padding: 8px 12px; gap: 8px; }
+    .bulk-bar .bulk-grp { flex-wrap: wrap; }
+    .bulk-bar .bulk-grp + .bulk-grp:not(.bulk-view), .bulk-bar .bulk-actions { border-left: none; padding-left: 0; }
+    .bulk-bar .bulk-view { margin-left: 0; width: 100%; }
+    .bulk-bar .btn, .bulk-bar #preset-select { min-height: 44px; padding: 10px 14px; font-size: 14px; }
+    .bulk-bar .bulk-grp .btn { flex: 1 1 auto; }
+    .bulk-bar .actions-menu { left: 8px; right: 8px; min-width: 0; }
+    .bulk-tip { display: none; }
+
+    /* DRAWER + LIGHTBOX: full-width sheet, reachable centered model flyout, stacked selects,
+       lightbox arrows off the image, touch-sized controls. */
+    #gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left, #gen-drawer.dock-right { width: 100%; max-width: 100vw; }
+    #model-flyout, #gen-drawer.dock-left #model-flyout, #gen-drawer.dock-right #model-flyout,
+    #gen-drawer.dock-top #model-flyout, #gen-drawer.dock-bottom #model-flyout {
+      position: fixed; top: 50%; left: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%);
+      width: 94vw; max-width: 94vw; max-height: 82vh;
+      border: 1px solid var(--surface1); border-radius: 12px; box-shadow: 0 22px 60px rgba(0,0,0,.6); }
+    .gen-row { flex-wrap: wrap; } .gen-row > * { flex: 1 1 100%; }
+    .dock-ctl button { width: 34px; height: 34px; }
+    .gen-head .x { font-size: 28px; min-width: 40px; }
+    #lb-img, #lb-video { max-width: 100vw; max-height: 74vh; }
+    .lb-nav { top: auto; bottom: 12px; transform: none; min-width: 48px; min-height: 48px; padding: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 24px; }
+    .lb-prev { left: 12px; } .lb-next { right: 12px; }
+    .lb-bar { flex-wrap: wrap; padding: 8px 10px; }
+    #lb-caption { max-width: 100%; order: 3; flex-basis: 100%; font-size: 11px; }
+    .lb-actions .btn { min-height: 40px; padding: 8px 12px; }
+  }
   /* Tablet: keep the filter bar visible but let wide text inputs shrink so the
      row wraps tidily instead of running off-screen. */
   @media (min-width: 681px) and (max-width: 1024px) {
