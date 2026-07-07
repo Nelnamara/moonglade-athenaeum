@@ -3619,7 +3619,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .jt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 2px;flex:none;line-height:1;}
   .jt-x:hover{color:var(--red);}
   /* ---- Toasts: small, corner-stacked, reusable (job notices; achievements can adopt) ---- */
-  #mg-toasts{position:fixed;right:16px;bottom:16px;z-index:420;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;}
+  #mg-toasts{position:fixed;right:16px;top:64px;z-index:420;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;}
   .mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .28s cubic-bezier(.2,.9,.3,1.2);}
   .mg-toast.out{animation:mg-toast-out .3s ease forwards;}
   .mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);}
@@ -3631,7 +3631,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .mg-toast .mt-thumb{width:34px;height:34px;border-radius:6px;object-fit:cover;flex:none;}
   .mg-toast .mt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 1px;flex:none;line-height:1;}
   .mg-toast .mt-x:hover{color:var(--text);}
-  @keyframes mg-toast-in{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes mg-toast-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
   @keyframes mg-toast-out{to{opacity:0;transform:translateX(20px);}}
   @media (prefers-reduced-motion: reduce){ #jobs-fab.busy .jf-dot{animation:none;} .mg-toast,.mg-toast.out{animation:none;} }
   #ctx-menu{position:fixed;z-index:230;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:180px;padding:4px;}
