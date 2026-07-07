@@ -2251,8 +2251,12 @@ document.addEventListener('DOMContentLoaded', function() {
 <style>
   .ee-star{position:fixed;top:-40px;z-index:400;pointer-events:none;color:var(--lavender);text-shadow:0 0 14px rgba(182,146,230,.9),0 0 30px rgba(182,146,230,.5);animation:ee-fall linear forwards;}
   @keyframes ee-fall{to{transform:translateY(112vh) rotate(540deg);opacity:.05;}}
-  .ee-toast{position:fixed;left:50%;top:36%;transform:translate(-50%,-50%);z-index:401;background:var(--mantle);border:1px solid var(--lavender);border-radius:14px;padding:18px 32px;font-size:19px;color:var(--text);text-align:center;box-shadow:0 0 70px rgba(182,146,230,.55);pointer-events:none;animation:ee-toast 6s ease forwards;}
+  .ee-toast{position:fixed;left:50%;top:15%;transform:translate(-50%,-50%);z-index:402;background:var(--mantle);border:1px solid var(--lavender);border-radius:14px;padding:16px 30px;font-size:19px;color:var(--text);text-align:center;box-shadow:0 0 70px rgba(182,146,230,.55);pointer-events:none;animation:ee-toast 6s ease forwards;}
   @keyframes ee-toast{0%{opacity:0;transform:translate(-50%,-50%) scale(.85);}10%{opacity:1;transform:translate(-50%,-50%) scale(1);}82%{opacity:1;}100%{opacity:0;}}
+  .ee-scrim{position:fixed;inset:0;z-index:399;background:radial-gradient(circle at 50% 60%,rgba(6,5,14,.32),rgba(6,5,14,.84));pointer-events:none;animation:ee-scrim 6s ease forwards;}
+  @keyframes ee-scrim{0%{opacity:0;}10%{opacity:1;}82%{opacity:1;}100%{opacity:0;}}
+  .ee-nel{position:fixed;left:50%;bottom:0;transform:translateX(-50%);transform-origin:bottom center;z-index:400;max-height:80vh;max-width:94vw;pointer-events:none;filter:drop-shadow(0 10px 34px rgba(0,0,0,.55)) drop-shadow(0 0 30px rgba(182,146,230,.4));animation:ee-nel 6s cubic-bezier(.18,.9,.2,1.05) forwards;}
+  @keyframes ee-nel{0%{opacity:0;transform:translateX(-50%) translateY(30px) scale(.86);}12%{opacity:1;transform:translateX(-50%) translateY(0) scale(1.02);}18%{transform:translateX(-50%) translateY(0) scale(1);}84%{opacity:1;}100%{opacity:0;}}
 </style>
 <script>
 (function(){
@@ -2269,10 +2273,18 @@ document.addEventListener('DOMContentLoaded', function() {
       s.style.animationDuration=(2.2+Math.random()*2.6)+'s';
       s.style.animationDelay=(Math.random()*1.8)+'s';
       document.body.appendChild(s); }
+    var scrim=document.createElement('div'); scrim.className='ee-scrim'; document.body.appendChild(scrim);
+    var nel=document.createElement('img'); nel.className='ee-nel'; nel.src='/branding/ee_nelstarfall.png';
+    nel.onerror=function(){ this.remove(); };   // asset missing -> egg still runs, text-only
+    document.body.appendChild(nel);
     var t=document.createElement('div'); t.className='ee-toast';
     t.innerHTML='✺ Elune-adore, Nelnamara ✺<div style="font-size:12.5px;color:var(--subtext);margin-top:7px;">The Athenaeum casts Starfall. Moonfire spam remains a lifestyle.</div>';
     document.body.appendChild(t);
-    setTimeout(function(){ document.querySelectorAll('.ee-star,.ee-toast').forEach(function(n){n.remove();}); busy=false; }, 7000);
+    var cast,loop;   // real WoW Starfall sfx (local); silent if absent or autoplay-blocked
+    try{ cast=new Audio('/branding/ee_starfall_cast.ogg'); cast.volume=0.7; cast.play().catch(function(){}); }catch(e){}
+    try{ loop=new Audio('/branding/ee_starfall_loop.ogg'); loop.loop=true; loop.volume=0.35; loop.play().catch(function(){}); }catch(e){}
+    setTimeout(function(){ document.querySelectorAll('.ee-star,.ee-toast,.ee-nel,.ee-scrim').forEach(function(n){n.remove();});
+      try{ if(loop){loop.pause();} }catch(e){} try{ if(cast){cast.pause();} }catch(e){} busy=false; }, 7000);
   });
 })();
 </script>
