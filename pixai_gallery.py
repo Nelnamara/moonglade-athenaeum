@@ -3655,8 +3655,10 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-moment.go .am-badge{animation:am-pop .7s cubic-bezier(.18,.9,.2,1.15) .05s forwards;}
   .ach-moment.leg .am-badge{width:clamp(180px,28vw,300px);}
   @keyframes am-pop{0%{transform:scale(.5);opacity:0;}60%{transform:scale(1.1);opacity:1;}100%{transform:scale(1);opacity:1;}}
-  .am-nel{position:absolute;right:5%;bottom:0;max-height:min(46vh,340px);opacity:0;z-index:1;pointer-events:none;filter:drop-shadow(0 8px 24px rgba(0,0,0,.5));}
-  .ach-moment.go .am-nel{animation:am-nel .6s cubic-bezier(.2,.8,.25,1) .15s forwards;}
+  .am-nelwrap{position:absolute;right:4%;bottom:0;z-index:1;pointer-events:none;opacity:0;}
+  .am-nelwrap::before{content:"";position:absolute;left:50%;bottom:8%;width:128%;height:78%;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse at center,rgba(203,166,247,.55),rgba(226,181,61,.22) 42%,transparent 72%);filter:blur(16px);z-index:-1;}
+  .am-nel{max-height:min(46vh,340px);display:block;filter:drop-shadow(0 8px 22px rgba(0,0,0,.55)) brightness(1.13) contrast(1.06) saturate(1.08);-webkit-mask:radial-gradient(125% 100% at 50% 44%,#000 62%,transparent 93%);mask:radial-gradient(125% 100% at 50% 44%,#000 62%,transparent 93%);}
+  .ach-moment.go .am-nelwrap{animation:am-nel .6s cubic-bezier(.2,.8,.25,1) .15s forwards;}
   @keyframes am-nel{from{opacity:0;transform:translateY(26px) scale(.92);}to{opacity:1;transform:none;}}
   .am-eyebrow{font-size:12px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold);margin-top:16px;opacity:0;}
   .am-name{font-size:30px;font-weight:700;color:#fff;line-height:1.1;opacity:0;text-wrap:balance;}
@@ -3674,7 +3676,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-moment.t-legendary .am-tier{color:var(--gold);border-color:var(--gold);}
   .am-conf{position:absolute;top:-6%;width:7px;height:14px;border-radius:2px;z-index:1;pointer-events:none;animation:am-conffall linear forwards;}
   @keyframes am-conffall{to{transform:translateY(112vh) rotate(720deg);opacity:.55;}}
-  @media (prefers-reduced-motion: reduce){ .ach-moment *{animation:none!important;} .am-badge,.am-nel,.am-stage>*{opacity:1!important;transform:none!important;} }
+  @media (prefers-reduced-motion: reduce){ .ach-moment *{animation:none!important;} .am-badge,.am-nelwrap,.am-stage>*{opacity:1!important;transform:none!important;} }
 </style>
 <style>
   #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:240px;max-width:340px;max-height:300px;overflow-y:auto;padding:5px;}
@@ -3872,7 +3874,7 @@ var Ach = (function(){
       +'<div class="am-stage"><img class="am-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'
       +'<div class="am-eyebrow">Achievement Unlocked</div><div class="am-name">'+esc(a.name)+'</div>'
       +'<div class="am-desc">'+esc(a.desc)+'</div><div class="am-tier">'+esc(tier)+'</div></div>'
-      +'<img class="am-nel" src="/branding/mascots/present_'+tier+'.png" onerror="this.remove()">';
+      +'<div class="am-nelwrap"><img class="am-nel" src="/branding/mascots/present_'+tier+'.png" onerror="this.parentNode.remove()"></div>';
     document.body.appendChild(m);
     _stars(m, leg?46:(big?34:22)); if(big) _conf(m, leg?90:44); _chime(tier);
     void m.offsetWidth; m.classList.add('go');
