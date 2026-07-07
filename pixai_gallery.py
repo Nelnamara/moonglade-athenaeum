@@ -3069,6 +3069,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-check{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:12px;margin-top:8px;cursor:pointer;}
   .gen-cost{margin:12px 0 8px;padding:8px 10px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12.5px;color:var(--text);}
   .gen-cost.free{border-color:var(--emerald);color:var(--emerald);}
+  .gen-cost.warn{border-color:var(--red);color:var(--red);}
   .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
   .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
   .gen-ce{min-height:66px;white-space:pre-wrap;overflow-y:auto;max-height:180px;}
@@ -4807,7 +4808,9 @@ var Gen = (function(){
         var n=d.cost!=null?d.cost.toLocaleString():'?';
         if(d.free){ cost.className='gen-cost free';
           cost.textContent='\\ud83c\\udfab FREE \\u2014 '+(d.card_name||'a video card')+' covers this'+(d.cards?' ('+d.cards+' left)':'')+' \\u00b7 saves ~'+n+' credits'; }
-        else { cost.textContent='\\u2248 '+n+' credits'; }
+        else { var big=(p.video_model==='v4.0');   // v4.0 full is ~2.5x Lite (14k/s -> 210k for 15s)
+          cost.className='gen-cost'+(big?' warn':'');
+          cost.textContent=(big?'\\u26a0 V4.0 full \\u2014 ~2.5\\u00d7 Lite \\u00b7 ':'')+'\\u2248 '+n+' credits'; }
       }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
   }
   function addVideoRefs(refs){
