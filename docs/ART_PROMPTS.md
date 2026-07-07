@@ -154,3 +154,58 @@ for a clean key-out. Banner: all art in the LEFT third, no text anywhere.
 Cut the finished icon on flat green (AI "transparent" backgrounds are painted fakes — key the
 green out), drop to pixai_backup/branding/logo.png (512, transparent PNG) and banner.png; both go
 live on refresh, glow/glint/twinkle included.
+
+---
+
+## The generation worklist (2026-07-06) — copy-paste ready
+
+The interactive worklist artifact renders these. All cut-outs on flat **`#00FF00`**, no shadow.
+
+### The 11 achievement badges (256×256, circular, WoW-achievement look)
+Base each on this, swapping the **ring by tier** and the **[ICON]**:
+
+> A circular World-of-Warcraft-style achievement emblem, an ornate **{RING}** ring with a soft
+> glow, **{ICON}** centered inside on deep violet (#33236d), lavender highlights (#b692e6) and a
+> faint emerald inner glow (#4fc99a), polished and iconic, reads clearly at small size. Flat
+> pure-green #00FF00 background, no shadow, no text.
+
+**Ring by tier:** common → `weathered silver` · rare → `polished blue-steel` · epic →
+`ornate amethyst-and-gold` · legendary → `radiant royal gold`.
+
+| # | Achievement | Tier | Milestone | **{ICON}** |
+|---|---|---|---|---|
+| 1 | First Light | common | first image backed up | a slender new-moon crescent with the first dawning glow along its edge |
+| 2 | Archivist | rare | 1,000 images | an open ancient tome with faintly glowing lavender pages |
+| 3 | Hoardsmith | epic | 10,000 images | a small dragon coiled protectively around a hoard of glowing tomes and gems |
+| 4 | Loremaster | legendary | 25,000 images | a regal crown of moonlight and gold resting above an open book, radiant |
+| 5 | First Frame | common | first video | a single strip of film with one illuminated frame, a tiny crescent moon within it |
+| 6 | Moonweaver | rare | 10 videos | a crescent moon with silver threads woven across it like a loom |
+| 7 | Reel Director | epic | 50 videos | a film clapperboard crossed with a reel, a small moon on the clapper |
+| 8 | Curator | rare | 10 collections | neatly organized folio cards fanned in an arc, one tabbed with a crescent |
+| 9 | Menagerie | epic | 25 distinct models | a pair of ornate theatre masks framed by curling arcane motifs |
+| 10 | Gallery Opening | rare | publish 10 works | an ornate empty picture frame with a soft gallery spotlight, a crescent in the corner |
+| 11 | Tagsmith | epic | tag 500 pieces | a hanging label tag stamped with a crescent, a tiny smith's hammer beside it |
+
+### 7. Loom mark — clapperboard-meets-moon (256×256, on flat #00FF00)
+The `/loom` header shows it small beside "The Loom" text; the slot animates it, so a **bold clean
+silhouette** glints best. Pick one:
+
+**A — Clapper-Moon (most legible as "video")**
+> A single small emblem on a flat pure-green #00FF00 background, no text, no shadow. A film
+> clapperboard whose top clapper-bar is a slim crescent moon, clean bold geometry, deep violet and
+> silver-lavender with one emerald spark, minimal iconic silhouette, flat modern crest, reads
+> clearly at small size.
+
+**B — Reel-Moon**
+> A single emblem on flat pure-green #00FF00, no text, no shadow. A crescent moon cradled inside a
+> film reel, the reel's spokes forming a soft star, lavender and violet with a faint emerald glow,
+> clean bold silhouette, flat vector fantasy crest, iconic at small size.
+
+**C — The Woven Reel (ties to the "Loom" name)**
+> A single emblem on flat pure-green #00FF00, no text, no shadow. A short strip of film curving like
+> a woven thread on a loom, a crescent moon rising behind it, silver-lavender and deep violet with
+> one emerald mote, minimal and elegant, bold readable silhouette, flat crest style.
+
+**Sizing:** the Loom mark is **256×256** like every other mark — /loom reuses the gallery header, so
+it does **not** need its own giant banner. (If you ever want a full Loom page-banner, that's the
+1920×480 header-banner spec, themed to storyboard/film — but it's optional and not currently a slot.)
