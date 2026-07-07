@@ -594,6 +594,27 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
     assert seen["p"]["chat"]["mediaIds"] == ["9"]
 
 
+def test_generate_card_has_seed_field(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert 'id="gen-seed"' in html and "seed:(el('gen-seed')" in html   # UI + payload wire the seed
+
+
+def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch):
+    """/api/price mode=enhance builds panelplugin params (so cost can be shown), and the
+    Enhance click carries a spend guardrail since free cards don't cover these workflows."""
+    seen = {}
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli.post("/api/price", json={"mode": "enhance", "source": "55",
+                                 "workflow_id": "1794855217667308480"})
+    assert seen["p"]["model"] == "pixai-panelplugin"
+    assert str(seen["p"].get("workflowId")) == "1794855217667308480"
+    html = cli.get("/").get_data(as_text=True)
+    assert "free cards do not cover Enhance" in html    # the confirm guardrail
+
+
 def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     """The header balance surface exposes per-card breakdown + soonest expiry, claimable
     free credits, and the subscription cliff — the data the chip/badge/warnings render."""
