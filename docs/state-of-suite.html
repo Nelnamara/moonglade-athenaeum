@@ -221,6 +221,20 @@
 
 <div class="wrap">
 
+  <!-- UPDATE BANNER -->
+  <div style="margin-top:34px;background:var(--done-s);border:1px solid color-mix(in srgb,var(--done) 34%,var(--hairline));border-left:4px solid var(--done);border-radius:12px;padding:16px 20px;">
+    <div style="font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--done);font-weight:700;">Update · 2026-07-10 (later same day)</div>
+    <p style="margin:.5em 0 0;color:var(--subtext);font-size:14px;max-width:76ch;">
+      The <b style="color:var(--ink)">--sync</b> gap flagged in §2 / §4 is now <b style="color:var(--done)">closed</b> — the pipeline
+      builds any missing thumbnails and reconciles cloud-deletes in the same idempotent pass
+      (<code>pixai_gallery_backup.py</code> sync branch; <code>tests/test_sync.py</code>; documented in CLAUDE.md).
+      An <b style="color:var(--ink)">adversarial-verify pass caught and fixed a real bug before merge</b>: the reconcile guard
+      was <code>except PixAIError</code> — too narrow for the bare <code>requests</code> errors <code>gql()</code> re-raises, so a
+      network blip could have crashed the whole sync <em>after</em> a successful backup. Now a deliberately broad
+      <code>except Exception</code>. The lone unbuilt backlog item remains <b style="color:var(--ink)">Generation Flags</b>.
+    </p>
+  </div>
+
   <!-- THESIS -->
   <div class="thesis">
     <div class="kicker">The correction</div>

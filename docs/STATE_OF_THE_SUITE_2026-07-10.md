@@ -9,6 +9,14 @@
 - **Branch:** `loom-v2` · **Version:** `__version__ = "1.10.0"` · **HEAD:** `2673936` (Loom V2 Stage 2c)
 - **Base:** master `6834337` (branding). Loom V2 = 4 commits on top, all inside `loom/master-storyboard.jsx`.
 
+> **Update — 2026-07-10 (later same day):** the `--sync` gap called out in §2 and §4 is now **closed**.
+> The pipeline builds any missing gallery thumbnails and reconciles cloud-deletes in the same pass
+> (`pixai_gallery_backup.py` `--sync` branch; guarded by `tests/test_sync.py`; documented in CLAUDE.md →
+> "The one-shot sync (`--sync`)"). An **adversarial-verify pass caught and fixed a real bug before merge**:
+> the reconcile guard was `except PixAIError`, too narrow for the bare `requests` network/HTTP errors that
+> `gql()` re-raises, so a transient blip could have crashed the whole sync *after* a successful backup — now
+> a deliberately broad `except Exception`. The lone genuinely-unbuilt backlog item remains **Generation Flags**.
+
 ## Confidence markers used below
 - **[code]** — verified by reading the source this pass (file:line cited).
 - **[git]** — verified via commit history.
@@ -25,7 +33,7 @@ desktop GUI), deep bodies of the catalog/query internals, `moonglade_mcp.py`, `p
 
 ### Backup / catalog engine
 - **Core download + resume** keyed on `media_id` (last `_`-chunk), `.part`/zero-byte not "done". **[code]** `pixai_gallery_backup.py:568,839`
-- **`--sync` one-shot pipeline** — incremental `--update --full-meta` pull → `run_fix_models` → `run_backfill_full_meta`, idempotent. **[code]** `pixai_gallery_backup.py:6091` *(see §2 — thumbs+reconcile NOT folded in)*
+- **`--sync` one-shot pipeline** — `--update --full-meta` pull → `run_fix_models` → `run_backfill_full_meta` → `build_thumbnails` → `run_reconcile_deleted`, idempotent. **[code]** `pixai_gallery_backup.py:6091` *(thumbs + reconcile folded in 2026-07-10 — see update note up top)*
 - **`--reconcile-deleted`** — flags catalog rows whose task vanished from the live feed (`deleted_remote` col). **[code]** `pixai_gallery.py:374`
 - **`--organize` / `--undo-organize`** — rglob whole backup into `YYYY-MM/`, reversible via `organize_manifest.csv`. **[code]** argparse `:5761`
 - **Video backup** — `--sync-videos`, `--faststart-videos` (moov-atom to front for iOS), poster-thumb extraction. **[code]** `:2479,2718`
@@ -66,7 +74,7 @@ desktop GUI), deep bodies of the catalog/query internals, `moonglade_mcp.py`, `p
 
 | Item | What's done | What's missing |
 |---|---|---|
-| **`--sync` pipeline** | pull + full-meta + fix-models + backfill (metadata chain). **[code]** `:6091` | Does **not** fold in **thumbnail rebuild** or **`--reconcile-deleted`**. The backlog described "pull + full-meta + **thumbs + reconcile**" — so 2 of 4 pieces. Those two remain separate commands. |
+| **`--sync` pipeline** | ✅ **COMPLETE (2026-07-10)** — pull + full-meta + fix-models + backfill **+ thumbnails + reconcile**, one idempotent pass. **[code]** `:6091` | — (was 2 of 4 pieces when first written; thumbs + reconcile folded in later the same day). |
 | **Achievement mascot art** | Surface code-complete (badges, skins, pop, ART_PROMPTS). **[git]** | The mascot/badge **artwork** — owner's active work. |
 | **Loom V2 (dockable)** | Board/reel/selection, Cast/Legend/Footage panels, timeline preview, **Video** Generate tab all functional, share the classic engine. **[code]** `:340-657` | See §3 — the in-panel ref-gen decision. |
 
@@ -86,7 +94,7 @@ desktop GUI), deep bodies of the catalog/query internals, `moonglade_mcp.py`, `p
 
 ### Near-term (backlog remainder, correctly scoped)
 1. **Generation Flags (AI QA pass)** — **the one backlog item with ZERO code footprint.** Full-repo grep + `git log --all` for flag/QA/quality-pass patterns found nothing but the single naming line in `REFINEMENTS.md:86`. Never started. **Needs a spec** (what does an AI QA pass flag — anatomy/artifacts/NSFW/duplication? where does the verdict live?).
-2. **Finish `--sync`** — fold thumbnail rebuild + `--reconcile-deleted` into the one pass so "Sync" is truly one button.
+2. ~~**Finish `--sync`**~~ — ✅ **DONE 2026-07-10.** Thumbnail rebuild + `--reconcile-deleted` folded into the one pass (with an adversarial-verify pass that caught + fixed a too-narrow exception guard).
 3. **In-Loom ref-gen** (see §3 — needs the decision first, then build).
 
 ### Horizon epics (both await an explicit "go" — do NOT start speculatively)
