@@ -382,6 +382,41 @@ const V2_STYLES = `
  background:linear-gradient(135deg,transparent 46%,var(--subtext) 46%,var(--subtext) 58%,transparent 58%,transparent 72%,var(--subtext) 72%);opacity:.5;}
 .lv-rh:hover{opacity:1;}
 .lv-ph{padding:14px;color:var(--subtext);font:12.5px/1.5 system-ui,sans-serif;font-style:italic;}
+.lv-board{padding:8px;}
+.lv-act{margin-bottom:12px;}
+.lv-actname{font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);margin:2px 0 7px;}
+.lv-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(122px,1fr));gap:8px;}
+.lv-card{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:7px;cursor:pointer;}
+.lv-card:hover{border-color:var(--accent);}
+.lv-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
+.lv-code{font:700 9px/1 system-ui;color:var(--subtext);}
+.lv-ctitle{font:600 11px/1.2 system-ui;color:var(--text);margin:4px 0;min-height:26px;}
+.lv-cmeta{display:flex;gap:5px;align-items:center;flex-wrap:wrap;}
+.lv-mode{font:700 8px/1 system-ui;color:var(--accent);}
+.lv-dur{font-size:9px;color:var(--subtext);}
+.lv-st{font:700 8px/1 system-ui;text-transform:uppercase;padding:2px 5px;border-radius:4px;margin-left:auto;}
+.lv-st.done{color:var(--green);background:color-mix(in srgb,var(--green) 16%,transparent);}
+.lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
+.lv-st.todo{color:var(--subtext);background:var(--base);}
+.lv-tl{padding:9px;display:flex;flex-direction:column;gap:8px;height:100%;}
+.lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
+.lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
+.lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}
+.lv-seg.sel{outline:2px solid var(--accent);outline-offset:-2px;z-index:2;}
+.lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
+.lv-tlinfo{font-size:11px;color:var(--text);}
+.lv-dim{color:var(--subtext);font-style:italic;}
+.lv-gen{padding:10px;}
+.lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;}
+.lv-lab{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);display:block;margin:9px 0 5px;}
+.lv-chips{display:flex;gap:5px;flex-wrap:wrap;}
+.lv-chip{background:var(--surface1);border:1px solid var(--surface1);color:var(--subtext);border-radius:6px;padding:3px 9px;font:600 10px/1 system-ui;cursor:pointer;}
+.lv-chip.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
+.lv-ta{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:7px;padding:8px;color:var(--text);font:11px/1.4 system-ui;resize:vertical;min-height:60px;}
+.lv-ta:focus{outline:0;border-color:var(--accent);}
+.lv-go{width:100%;margin-top:11px;background:var(--accent);color:var(--base);border:0;border-radius:8px;padding:9px;font:700 12px/1 system-ui;cursor:pointer;}
+.lv-go:disabled{opacity:.6;cursor:default;}
+.lv-note2{font-size:9px;color:var(--subtext);font-style:italic;margin-top:8px;text-align:center;}
 `;
 function DockablePanel({ p, scale, onChange, onCollapse, children }) {
   const startDrag = (e) => {
@@ -412,29 +447,93 @@ function DockablePanel({ p, scale, onChange, onCollapse, children }) {
     </div>
   );
 }
-function LoomV2({ layout, setLayout, onClose }) {
+function LoomV2({ layout, setLayout, onClose, project, setCard, entries, durOf, scale, selShot, setSelShot, generateShot, genState }) {
   const wrapRef = useRef(null);
-  const [scale, setScale] = useState(1);
+  const [scaleV, setScaleV] = useState(1);
   useEffect(() => {
-    const fit = () => { if (wrapRef.current) setScale(Math.min(1, wrapRef.current.clientWidth / 1498)); };
+    const fit = () => { if (wrapRef.current) setScaleV(Math.min(1, wrapRef.current.clientWidth / 1498)); };
     fit(); window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit);
   }, []);
   const change = (np) => setLayout((L) => L.map((x) => (x.id === np.id ? np : x)));
   const collapse = (id) => setLayout((L) => L.map((x) => (x.id === id ? { ...x, collapsed: !x.collapsed } : x)));
+  const sel = entries.find((e) => e.c.id === selShot) || null;
+  const grouped = [];
+  entries.forEach((e) => { let g = grouped.find((x) => x.ai === e.ai); if (!g) { g = { ai: e.ai, name: e.a.name, items: [] }; grouped.push(g); } g.items.push(e); });
+
+  const board = (
+    <div className="lv-board">
+      {grouped.map((g) => (
+        <div key={g.ai} className="lv-act">
+          <div className="lv-actname">{g.name || "Act " + (g.ai + 1)}</div>
+          <div className="lv-cards">
+            {g.items.map((e) => {
+              const gs = genState[e.c.id];
+              const st = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
+              return (
+                <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
+                  <div className="lv-code">{e.code}</div>
+                  <div className="lv-ctitle">{e.c.title || "untitled"}</div>
+                  <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
+                    <span className={"lv-st " + st}>{gs && gs.msg ? gs.msg : st}</span></div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      {!entries.length && <div className="lv-ph">No shots yet — add them in the classic Loom for now (+ shot lands here in a later increment).</div>}
+    </div>
+  );
+  const timeline = (
+    <div className="lv-tl">
+      <div className="lv-reel">
+        {entries.map((x, i) => (<div key={i} className={"lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : "")}
+          style={{ width: `${(durOf(x.c) / scale) * 100}%` }} title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)} />))}
+        <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
+      </div>
+      <div className="lv-tlinfo">{sel
+        ? <span><b>{sel.code}</b> &middot; {sel.c.title || "untitled"} &middot; {sel.c.mode} &middot; {durOf(sel.c)}s</span>
+        : <span className="lv-dim">click a shot to select it — the whole workspace binds to it</span>}</div>
+    </div>
+  );
+  let gen;
+  if (!sel) gen = <div className="lv-ph">Select a shot on the board to edit &amp; generate it here.</div>;
+  else {
+    const gs = genState[sel.c.id];
+    const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error";
+    gen = (
+      <div className="lv-gen">
+        <div className="lv-genhead">&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</div>
+        <label className="lv-lab">Mode</label>
+        <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === sel.c.mode ? "on" : "")}
+          onClick={() => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, mode: m }))}>{m}</span>))}</div>
+        <label className="lv-lab">Prompt</label>
+        <textarea className="lv-ta" value={sel.c.prompt || ""}
+          onChange={(ev) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, prompt: ev.target.value }))} />
+        <label className="lv-lab">Duration</label>
+        <div className="lv-chips">{[5, 6, 10, 15].map((d) => (<span key={d} className={"lv-chip " + (d === sel.c.duration ? "on" : "")}
+          onClick={() => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, duration: d }))}>{d}s</span>))}</div>
+        <button className="lv-go" disabled={busy} onClick={() => generateShot(sel)}>{busy ? (gs.msg || "generating…") : "▶ Generate shot"}</button>
+        <div className="lv-note2">Image · Edit · Reference tabs + camera / lighting / refs land in the next increment.</div>
+      </div>
+    );
+  }
+  const content = (id) => id === "board" ? board : id === "timeline" ? timeline : id === "generate" ? gen : <div className="lv-ph">{V2_PH[id] || id}</div>;
+
   return (
     <div className="lv-overlay">
       <style>{V2_STYLES}</style>
       <div className="lv-top">
         <span className="lv-eyebrow">The Loom · V2 (preview)</span>
-        <span className="lv-note">Drag titles · resize the corner · collapse with the chevron · layout auto-saves</span>
+        <span className="lv-note">Click a shot → it binds to Generate. Drag / resize / collapse panels; layout auto-saves.</span>
         <button onClick={() => setLayout(V2_DEFAULT.map((d) => ({ ...d })))}>Reset layout</button>
         <button className="lv-close" onClick={onClose}>← Back to classic Loom</button>
       </div>
-      <div className="lv-scaler" ref={wrapRef} style={{ height: 820 * scale }}>
-        <div className="lv-canvas" style={{ transform: "scale(" + scale + ")" }}>
+      <div className="lv-scaler" ref={wrapRef} style={{ height: 820 * scaleV }}>
+        <div className="lv-canvas" style={{ transform: "scale(" + scaleV + ")" }}>
           {layout.map((p) => (
-            <DockablePanel key={p.id} p={p} scale={scale} onChange={change} onCollapse={collapse}>
-              <div className="lv-ph">{V2_PH[p.id] || p.id}</div>
+            <DockablePanel key={p.id} p={p} scale={scaleV} onChange={change} onCollapse={collapse}>
+              {content(p.id)}
             </DockablePanel>
           ))}
         </div>
@@ -464,6 +563,7 @@ export default function App() {
   const saveTimer = useRef(null);
   const castImported = useRef(false);
   const [v2, setV2] = useState(false);
+  const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
   const [panelLayout, setPanelLayout] = useState(() => V2_DEFAULT.map((d) => ({ ...d })));
   const layoutTimer = useRef(null);
   useEffect(() => { (async () => {
@@ -729,7 +829,9 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
-      {v2 && <LoomV2 layout={panelLayout} setLayout={setPanelLayout} onClose={() => setV2(false)} />}
+      {v2 && <LoomV2 layout={panelLayout} setLayout={setPanelLayout} onClose={() => setV2(false)}
+        project={project} setCard={setCard} entries={entries} durOf={durOf} scale={scale}
+        selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} genState={genState} />}
       {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
