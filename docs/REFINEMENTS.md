@@ -83,4 +83,10 @@ Shipped since 1.9.1:
 - Contests / achievements / skins surfaces
 - Fixes: batch under-capture (grid vs reals), catalog-stats thumbnail double-count, USER_ID auto-resolve in --sync-artworks, reduced-motion + corrupt-manifest hardening
 
-Next up (agreed backlog): sync-on-pull pipeline (one Sync = pull + full-meta + thumbs + reconcile), live-mirror watcher inside the server, Pixeltable semantic search prototype, Generation Flags (AI QA pass), Loom trim/preview/export (ffmpeg confirmed), banner picker + achievement unlocks.
+Backlog status (verified against code 2026-07-10 — see `docs/STATE_OF_THE_SUITE_2026-07-10.md`):
+- ✅ **Sync-on-pull pipeline** — `--sync` now runs pull + full-meta → fix-models → backfill → **thumbnails → reconcile** in one idempotent pass (`main()` sync branch).
+- ✅ **Live-mirror watcher inside the server** — auto-starts in `create_app` (`_watch_loop`); no separate CLI process.
+- ✅ **Pixeltable semantic search** — `/api/similar` + lightbox/right-click "Similar" shipped (the `pixeltable` backend is just an optional/uninstalled dep here).
+- ✅ **Loom trim/preview/export** — non-destructive trim + Play + ffmpeg `/api/loom/export` shipped.
+- ✅ **Banner picker + achievement unlocks** — branding + achievements/skins shipped; owner is iterating on the mascot/badge **art** now.
+- ⬜ **Generation Flags (AI QA pass)** — the lone unbuilt item; no code footprint yet, needs a spec (what it flags, where the verdict lives).

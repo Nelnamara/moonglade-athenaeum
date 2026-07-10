@@ -52,7 +52,7 @@ from pathlib import Path
 
 from pixai_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
                             save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
-                            media_id_of, find_files_for_media_id)
+                            media_id_of, find_files_for_media_id, build_thumbnails)
 
 
 def _ensure_db(out):
@@ -6090,11 +6090,12 @@ def main():
             return
         if getattr(args, "sync", False):
             # Sync = the "it should just happen" pipeline: incremental pull that
-            # arrives WITH metadata, then re-resolve any model ids that came back
-            # blank/numeric, then a targeted fill of anything still blank
-            # (run_backfill_full_meta already skips rows that have prompt_full).
-            # All three steps are idempotent/self-limiting, so re-running --sync
-            # with a clean catalog costs almost nothing extra.
+            # arrives WITH metadata, re-resolve any model ids that came back
+            # blank/numeric, fill anything still blank, rebuild any missing preview
+            # thumbnails, then reconcile rows deleted on the website. Every step is
+            # idempotent/self-limiting (backfill skips rows that already have
+            # prompt_full; build_thumbnails skips thumbs already on disk), so
+            # re-running --sync on a clean catalog costs almost nothing extra.
             args.update = True
             args.full_meta = True
             # run_download uses its `progress` PARAM (not args.progress), so hand it over
@@ -6105,6 +6106,25 @@ def main():
             run_fix_models(args)
             print("Sync: filling any rows still missing metadata...")
             run_backfill_full_meta(args)
+            print("Sync: building any missing preview thumbnails...")
+            thumb_dir = out / "gallery" / "thumbs"
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+            # build_thumbnails reports progress_cb(done, total, pct); our shared progress
+            # callback expects (done, total, new-count), so adapt -- forward only done/total
+            # (new defaults to 0) rather than mislabel the percentage as a "new items" count.
+            _prog = getattr(args, "progress", None)
+            build_thumbnails(load_catalog(db_path), out, thumb_dir,
+                             progress_cb=((lambda d, t, _pct: _prog(d, t)) if _prog else None))
+            # Reconcile is advisory (it only FLAGS cloud-deleted rows) and runs its own live
+            # feed scan, so a failure here must NOT discard the successful backup above. Catch
+            # BROADLY on purpose: that scan goes through gql(), which re-raises bare requests
+            # network/HTTP errors that are NOT PixAIError -- a narrow catch would let a
+            # transient blip crash the whole sync after everything else already succeeded.
+            print("Sync: reconciling rows deleted on PixAI...")
+            try:
+                run_reconcile_deleted(args)
+            except Exception as e:                       # noqa: BLE001 -- advisory step, never fatal
+                print("  reconcile skipped: {}".format(e))
             print("Sync complete.")
             return
         if args.backfill_meta:
