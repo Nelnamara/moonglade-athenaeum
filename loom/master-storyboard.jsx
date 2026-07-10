@@ -338,6 +338,111 @@ function seedProject() {
 }
 
 /* ============================ APP ============================ */
+// ─── Loom V2 (dockable layout) — STAGE 1: a non-breaking shell behind the "V2 layout"
+// toggle. Panels drag/resize/collapse; positions persist to store key V2_KEY. Panel
+// CONTENT is reparented from the classic UI in Stage 2. Layout = owner's canvas export.
+const V2_KEY = "storyboard:v2:layout";
+const V2_DEFAULT = [
+  { id: "timeline", title: "Timeline & preview", x: 0, y: 0, w: 1498, h: 271 },
+  { id: "footage", title: "Asset bin — footage", x: 5, y: 275, w: 286, h: 538 },
+  { id: "cast", title: "Cast & assets", x: 301, y: 276, w: 255, h: 284 },
+  { id: "legend", title: "Legend & notes", x: 301, y: 565, w: 256, h: 244 },
+  { id: "board", title: "Acts & shots", x: 562, y: 278, w: 628, h: 536 },
+  { id: "generate", title: "⚙ Generate — shot", x: 1198, y: 276, w: 294, h: 540 },
+];
+const V2_PH = {
+  timeline: "Timeline + live preview (full width). Collapses to just the scrubber.",
+  footage: "Footage bin — finished shots + quick-trim.",
+  cast: "Cast & assets pool — reusable @image / @video members.",
+  legend: "Legend & notes — status key + open questions (static reference).",
+  board: "Acts & shots — the storyboard. Click a shot to select it.",
+  generate: "Generate (selected shot) — Image · Edit · Reference · Video, plus camera / lighting / status.",
+};
+const V2_STYLES = `
+.lv-overlay{position:fixed;inset:0;z-index:400;background:var(--base);display:flex;flex-direction:column;}
+.lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
+.lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
+.lv-note{color:var(--subtext);font-size:12px;}
+.lv-top button{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+.lv-top .lv-close{margin-left:auto;}
+.lv-top button:hover{border-color:var(--accent);}
+.lv-scaler{flex:1;overflow:hidden;}
+.lv-canvas{position:relative;width:1498px;height:820px;transform-origin:top left;
+ background-image:radial-gradient(circle at 20px 20px,rgba(255,255,255,.03) 1px,transparent 1.4px);background-size:30px 30px;}
+.lv-panel{position:absolute;background:var(--surface0);border:1px solid var(--surface1);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 30px -14px rgba(0,0,0,.6);}
+.lv-bar{display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--surface1);cursor:grab;user-select:none;flex:0 0 auto;}
+.lv-bar:active{cursor:grabbing;}
+.lv-dots{width:12px;height:8px;background:radial-gradient(circle,var(--subtext) 1px,transparent 1.4px) 0 0/4px 4px;opacity:.55;flex:0 0 auto;}
+.lv-title{font:600 12px/1 system-ui,sans-serif;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-col{margin-left:auto;width:22px;height:20px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
+.lv-col:hover{color:var(--accent);}
+.lv-body{flex:1;overflow:auto;min-height:0;}
+.lv-panel.collapsed .lv-body{display:none;}
+.lv-rh{position:absolute;right:2px;bottom:2px;width:14px;height:14px;cursor:nwse-resize;z-index:3;
+ background:linear-gradient(135deg,transparent 46%,var(--subtext) 46%,var(--subtext) 58%,transparent 58%,transparent 72%,var(--subtext) 72%);opacity:.5;}
+.lv-rh:hover{opacity:1;}
+.lv-ph{padding:14px;color:var(--subtext);font:12.5px/1.5 system-ui,sans-serif;font-style:italic;}
+`;
+function DockablePanel({ p, scale, onChange, onCollapse, children }) {
+  const startDrag = (e) => {
+    if (e.target.closest("button")) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, ox = p.x, oy = p.y;
+    const mv = (ev) => onChange({ ...p, x: Math.max(0, Math.round(ox + (ev.clientX - sx) / scale)), y: Math.max(0, Math.round(oy + (ev.clientY - sy) / scale)) });
+    const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
+  };
+  const startResize = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const sx = e.clientX, sy = e.clientY, ow = p.w, oh = p.h;
+    const mv = (ev) => onChange({ ...p, w: Math.max(160, Math.round(ow + (ev.clientX - sx) / scale)), h: Math.max(80, Math.round(oh + (ev.clientY - sy) / scale)) });
+    const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
+  };
+  const h = p.collapsed ? (p.id === "timeline" ? 104 : 34) : p.h;
+  return (
+    <div className={"lv-panel" + (p.collapsed ? " collapsed" : "")} style={{ left: p.x, top: p.y, width: p.w, height: h }}>
+      <div className="lv-bar" onMouseDown={startDrag}>
+        <span className="lv-dots" />
+        <span className="lv-title">{p.title}</span>
+        <button className="lv-col" onClick={() => onCollapse(p.id)} title="collapse">{p.collapsed ? "▾" : "▴"}</button>
+      </div>
+      <div className="lv-body">{children}</div>
+      {!p.collapsed && <div className="lv-rh" onMouseDown={startResize} />}
+    </div>
+  );
+}
+function LoomV2({ layout, setLayout, onClose }) {
+  const wrapRef = useRef(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const fit = () => { if (wrapRef.current) setScale(Math.min(1, wrapRef.current.clientWidth / 1498)); };
+    fit(); window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit);
+  }, []);
+  const change = (np) => setLayout((L) => L.map((x) => (x.id === np.id ? np : x)));
+  const collapse = (id) => setLayout((L) => L.map((x) => (x.id === id ? { ...x, collapsed: !x.collapsed } : x)));
+  return (
+    <div className="lv-overlay">
+      <style>{V2_STYLES}</style>
+      <div className="lv-top">
+        <span className="lv-eyebrow">The Loom · V2 (preview)</span>
+        <span className="lv-note">Drag titles · resize the corner · collapse with the chevron · layout auto-saves</span>
+        <button onClick={() => setLayout(V2_DEFAULT.map((d) => ({ ...d })))}>Reset layout</button>
+        <button className="lv-close" onClick={onClose}>← Back to classic Loom</button>
+      </div>
+      <div className="lv-scaler" ref={wrapRef} style={{ height: 820 * scale }}>
+        <div className="lv-canvas" style={{ transform: "scale(" + scale + ")" }}>
+          {layout.map((p) => (
+            <DockablePanel key={p.id} p={p} scale={scale} onChange={change} onCollapse={collapse}>
+              <div className="lv-ph">{V2_PH[p.id] || p.id}</div>
+            </DockablePanel>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [project, setProject] = useState(null);
   const [thumbs, setThumbs] = useState({});
@@ -358,6 +463,18 @@ export default function App() {
   const openPick = useCallback((cb, kind) => { setPickKind(kind || "image"); setPickCb(() => cb); }, []);
   const saveTimer = useRef(null);
   const castImported = useRef(false);
+  const [v2, setV2] = useState(false);
+  const [panelLayout, setPanelLayout] = useState(() => V2_DEFAULT.map((d) => ({ ...d })));
+  const layoutTimer = useRef(null);
+  useEffect(() => { (async () => {
+    if (hasStore) { const raw = await sGet(V2_KEY); if (raw) { try { const L = JSON.parse(raw); if (Array.isArray(L) && L.length) setPanelLayout(L); } catch {} } }
+  })(); }, []);
+  useEffect(() => {
+    if (!hasStore) return;
+    clearTimeout(layoutTimer.current);
+    layoutTimer.current = setTimeout(() => { sSet(V2_KEY, JSON.stringify(panelLayout)); }, 500);
+    return () => clearTimeout(layoutTimer.current);
+  }, [panelLayout]);
 
   useEffect(() => {
     (async () => {
@@ -612,6 +729,7 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
+      {v2 && <LoomV2 layout={panelLayout} setLayout={setPanelLayout} onClose={() => setV2(false)} />}
       {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
@@ -653,6 +771,8 @@ export default function App() {
               title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
             <button className="sb-btn" onClick={exportCut} disabled={!anyDone}
               title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Export</button>
+            <button className="sb-btn ghost sm" onClick={() => setV2(true)}
+              title="Preview the new dockable V2 layout (non-destructive — your board is untouched)">&#9707; V2 layout</button>
           </div>
           <div className="sb-stat"><b>{done}/{entries.length}</b><span>shots done</span></div>
           <div className="sb-stat"><b style={{ color: over > 0 ? "var(--coral)" : "var(--ink)" }}>{fmt(total)}</b>
