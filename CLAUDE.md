@@ -273,10 +273,33 @@ The Flask gallery is a full creation suite. Everything below is **localhost-gate
 - **Community**: `--contests` + `/api/contests` (REST `/contest/list`); achievements
   + earnable skins (`/api/achievements`, `/api/skin`).
 
+## The one-shot sync (`--sync`) — completed 2026-07-10 (loom-v2, post-1.10.0)
+
+`--sync` is the "it should just happen" refresh — one command runs the whole chain, and every
+step is idempotent (re-running on a clean catalog costs almost nothing):
+
+1. incremental pull WITH metadata (sets `--update --full-meta`, calls `run_download`)
+2. re-resolve blank/numeric model names (`run_fix_models`)
+3. fill any rows still missing prompt/seed/model (`run_backfill_full_meta`)
+4. rebuild any missing gallery thumbnails (`build_thumbnails`, **skips thumbs already on disk**)
+5. flag rows deleted on the website (`run_reconcile_deleted`)
+
+Steps 4–5 were added 2026-07-10 (the pipeline previously stopped at step 3). The `build_thumbnails`
+progress callback is adapted at the call site because it reports `(done, total, pct)` while the
+shared progress cb expects `(done, total, new-count)`.
+
+> **Reconcile (step 5) is advisory and caught with a deliberately BROAD `except Exception` — do NOT
+> narrow it back to `except PixAIError`.** It runs its own live-feed scan through `gql()`, which
+> re-raises bare `requests` network/HTTP errors that are *not* `PixAIError`; a narrow catch would let
+> a transient network blip crash the entire sync **after** the backup already succeeded. Guarded by
+> `tests/test_sync.py` (chain order, flag-setting, and survival of BOTH `PixAIError` and
+> non-`PixAIError` reconcile failures). The bug was caught by an adversarial-verify pass before merge.
+
 ## Test suite
 
-375 pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
-over this number). Run with `python -m pytest`. All tests must pass before merging to master.
+440+ pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
+over this number). Run with `python -m pytest` (add `--ignore=tests/test_similar.py` where the
+optional `pixeltable` dep isn't installed). All tests must pass before merging to master.
 
 ---
 
@@ -285,6 +308,14 @@ over this number). Run with `python -m pytest`. All tests must pass before mergi
 - **Version:** `1.10.0` on `master`
 - **Branch strategy:** feature branches, merge to master with `--no-ff`, tag releases
 - **Owner:** Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev
+
+## Changelog & releases
+
+- **`CHANGELOG.md` (repo root) is the source of truth** — update its `[Unreleased]` section with
+  every notable change, and cut it into a dated `## [x.y.z]` block when a release is tagged.
+- Releases are **git tags** + **GitHub Releases**. History to know: Releases were published through
+  **v1.6.0**, then paused; **v1.8.0–v1.10.0 were tagged but not released** (their notes are
+  reconstructed in `CHANGELOG.md` and back-published from there). **There is no v1.7.x.**
 
 ---
 
@@ -300,6 +331,7 @@ python pixai_gallery_backup.py --update --workers 8       # incremental + higher
 python pixai_gallery_backup.py --workers 8 --page-size 500  # fast full backfill
 python pixai_gallery_backup.py --full-meta                # download + full prompt/seed/model
 python pixai_gallery_backup.py --backfill-full-meta       # fill existing rows
+python pixai_gallery_backup.py --sync                     # ONE-SHOT refresh: pull+full-meta → fix-models → backfill → thumbnails → reconcile-deleted (idempotent)
 python pixai_gallery_backup.py --organize --dry-run       # preview month-folder normalize
 python pixai_gallery_backup.py --organize                 # normalize into YYYY-MM/ (reversible; --organize-adv is an alias)
 python pixai_gallery_backup.py --catalog-stats            # summarize catalog.db
