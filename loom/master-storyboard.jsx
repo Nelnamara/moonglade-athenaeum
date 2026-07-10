@@ -449,6 +449,16 @@ const V2_STYLES = `
 .lv-err{padding:40px;text-align:center;}
 .lv-err p{color:var(--coral);}
 .lv-err pre{color:var(--subtext);font-size:11px;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;background:var(--base);padding:10px;border-radius:7px;}
+.lv-tlprev{flex:0 0 auto;margin-bottom:6px;}
+.lv-tabs{display:flex;gap:4px;margin-bottom:10px;}
+.lv-tab{flex:1;text-align:center;font:600 10px/1 system-ui;padding:6px 4px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lv-tab.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
+.lv-in{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:7px;padding:7px 8px;color:var(--text);font:11px/1.3 system-ui;}
+.lv-in:focus{outline:0;border-color:var(--accent);}
+.lv-mini{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;}
+.lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:2px 5px;cursor:pointer;}
+.lv-minichip:hover{border-color:var(--accent);color:var(--accent);}
+.lv-refline{font-size:10px;color:var(--subtext);margin:10px 0 4px;}
 `;
 class V2Boundary extends React.Component {
   constructor(props) { super(props); this.state = { err: null }; }
@@ -496,6 +506,7 @@ function DockablePanel({ p, scale, onChange, onCollapse, children }) {
 function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick }) {
   const wrapRef = useRef(null);
   const [scaleV, setScaleV] = useState(1);
+  const [tab, setTab] = useState("Video");
   useEffect(() => {
     const fit = () => { if (wrapRef.current) setScaleV(Math.min(1, wrapRef.current.clientWidth / 1498)); };
     fit(); window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit);
@@ -534,6 +545,8 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
   );
   const timeline = (
     <div className="lv-tl">
+      {sel && sel.c.resultMid && <div className="lv-tlprev"><ShotPreview mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
+        onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))} /></div>}
       <div className="lv-reel">
         {entries.map((x, i) => (<div key={i} className={"lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : "")}
           style={{ width: `${(durOf(x.c) / scale) * 100}%` }} title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)} />))}
@@ -549,20 +562,35 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
   else {
     const gs = genState[sel.c.id];
     const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error";
+    const patch = (fn) => setCard(sel.a.id, sel.c.id, fn);
+    const appendTo = (field, term) => patch((c) => ({ ...c, [field]: c[field] ? c[field] + ", " + term : term }));
+    let tabBody;
+    if (tab === "Video") tabBody = (
+      <div>
+        <label className="lv-lab">Mode</label>
+        <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === sel.c.mode ? "on" : "")} onClick={() => patch((c) => ({ ...c, mode: m }))}>{m}</span>))}</div>
+        <label className="lv-lab">Continuity</label>
+        <div className="lv-chips">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-chip " + (k === (sel.c.connect || "new") ? "on" : "")} title={CONNECT[k].hint} onClick={() => patch((c) => ({ ...c, connect: k }))}>{CONNECT[k].label}</span>))}</div>
+        <label className="lv-lab">Prompt</label>
+        <textarea className="lv-ta" value={sel.c.prompt || ""} onChange={(ev) => patch((c) => ({ ...c, prompt: ev.target.value }))} />
+        <label className="lv-lab">Duration</label>
+        <div className="lv-chips">{[5, 6, 10, 15].map((d) => (<span key={d} className={"lv-chip " + (d === sel.c.duration ? "on" : "")} onClick={() => patch((c) => ({ ...c, duration: d }))}>{d}s</span>))}</div>
+        <label className="lv-lab">Camera</label>
+        <input className="lv-in" value={sel.c.camera || ""} placeholder="e.g. slow push in, shallow DoF" onChange={(ev) => patch((c) => ({ ...c, camera: ev.target.value }))} />
+        <div className="lv-mini">{CAM_PALETTE["Movement"].slice(0, 8).map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("camera", t)}>+ {t}</span>))}</div>
+        <label className="lv-lab">Lighting</label>
+        <input className="lv-in" value={sel.c.lighting || ""} placeholder="e.g. moonlit, soft haze" onChange={(ev) => patch((c) => ({ ...c, lighting: ev.target.value }))} />
+        <div className="lv-mini">{LIGHTING_PALETTE.slice(0, 8).map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("lighting", t)}>+ {t}</span>))}</div>
+        <div className="lv-refline">{(sel.c.cast || []).length} cast &middot; {(sel.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast panel)</span></div>
+        <button className="lv-go" disabled={busy} onClick={() => generateShot(sel)}>{busy ? (gs.msg || "generating…") : "▶ Generate shot"}</button>
+      </div>
+    );
+    else tabBody = <div className="lv-ph">The <b>{tab}</b> tab will generate / edit reference frames for this shot — wiring the in‑Loom ref‑gen is the next decision we flagged. For now, use the <b>Video</b> tab to render the shot.</div>;
     gen = (
       <div className="lv-gen">
         <div className="lv-genhead">&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</div>
-        <label className="lv-lab">Mode</label>
-        <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === sel.c.mode ? "on" : "")}
-          onClick={() => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, mode: m }))}>{m}</span>))}</div>
-        <label className="lv-lab">Prompt</label>
-        <textarea className="lv-ta" value={sel.c.prompt || ""}
-          onChange={(ev) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, prompt: ev.target.value }))} />
-        <label className="lv-lab">Duration</label>
-        <div className="lv-chips">{[5, 6, 10, 15].map((d) => (<span key={d} className={"lv-chip " + (d === sel.c.duration ? "on" : "")}
-          onClick={() => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, duration: d }))}>{d}s</span>))}</div>
-        <button className="lv-go" disabled={busy} onClick={() => generateShot(sel)}>{busy ? (gs.msg || "generating…") : "▶ Generate shot"}</button>
-        <div className="lv-note2">Image · Edit · Reference tabs + camera / lighting / refs land in the next increment.</div>
+        <div className="lv-tabs">{["Image", "Edit", "Reference", "Video"].map((t) => (<span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
+        {tabBody}
       </div>
     );
   }
