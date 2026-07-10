@@ -417,7 +417,53 @@ const V2_STYLES = `
 .lv-go{width:100%;margin-top:11px;background:var(--accent);color:var(--base);border:0;border-radius:8px;padding:9px;font:700 12px/1 system-ui;cursor:pointer;}
 .lv-go:disabled{opacity:.6;cursor:default;}
 .lv-note2{font-size:9px;color:var(--subtext);font-style:italic;margin-top:8px;text-align:center;}
+.lv-cframe{height:48px;border-radius:5px;overflow:hidden;background:var(--base);border:1px solid var(--surface1);display:flex;align-items:center;justify-content:center;margin-bottom:5px;}
+.lv-cframe img{width:100%;height:100%;object-fit:cover;}
+.lv-cframeph{font:700 9px/1 system-ui;color:var(--subtext);}
+.lv-cast{padding:8px;}
+.lv-castrow-h{font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:8px;}
+.lv-castitem{display:flex;gap:8px;align-items:center;padding:5px;border-radius:7px;border:1px solid transparent;cursor:pointer;}
+.lv-castitem:hover{background:var(--surface1);}
+.lv-castitem.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);}
+.lv-castitem img{width:34px;height:34px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
+.lv-castph{width:34px;height:34px;border-radius:6px;background:var(--surface1);flex:0 0 auto;}
+.lv-castmeta b{font:700 10px/1 ui-monospace,monospace;color:var(--accent);display:block;}
+.lv-castmeta span{font-size:10px;color:var(--subtext);}
+.lv-addcast{margin-top:8px;width:100%;background:var(--surface1);border:1px dashed var(--surface1);color:var(--subtext);border-radius:7px;padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
+.lv-addcast:hover{border-color:var(--accent);color:var(--accent);}
+.lv-legend{padding:9px;}
+.lv-key{display:flex;gap:12px;margin-bottom:10px;font-size:10px;color:var(--subtext);}
+.lv-kk{display:flex;align-items:center;gap:4px;}
+.lv-sw{width:9px;height:9px;border-radius:2px;display:inline-block;}
+.lv-sw.done{background:var(--green);}.lv-sw.wip{background:var(--amber);}.lv-sw.todo{background:var(--surface1);}
+.lv-lg{margin-bottom:9px;}
+.lv-lgt{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:5px;}
+.lv-lgchips{display:flex;flex-wrap:wrap;gap:4px;}
+.lv-lgchip{font-size:9.5px;color:var(--subtext);background:var(--surface1);border-radius:5px;padding:2px 6px;}
+.lv-footage{padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;align-content:start;}
+.lv-fclip{border-radius:7px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
+.lv-fclip.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
+.lv-fclip img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;}
+.lv-fmeta{display:flex;justify-content:space-between;padding:3px 5px;font-size:9px;}
+.lv-fmeta b{color:var(--accent);}.lv-fmeta span{color:var(--subtext);}
+.lv-err{padding:40px;text-align:center;}
+.lv-err p{color:var(--coral);}
+.lv-err pre{color:var(--subtext);font-size:11px;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;background:var(--base);padding:10px;border-radius:7px;}
 `;
+class V2Boundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(e) { return { err: e }; }
+  render() {
+    if (this.state.err) return (
+      <div className="lv-overlay"><div className="lv-err">
+        <p>The V2 layout hit an error — your classic Loom is completely safe.</p>
+        <pre>{String((this.state.err && this.state.err.stack) || this.state.err)}</pre>
+        <button className="lv-close" onClick={this.props.onClose}>← Back to classic Loom</button>
+      </div></div>
+    );
+    return this.props.children;
+  }
+}
 function DockablePanel({ p, scale, onChange, onCollapse, children }) {
   const startDrag = (e) => {
     if (e.target.closest("button")) return;
@@ -447,7 +493,7 @@ function DockablePanel({ p, scale, onChange, onCollapse, children }) {
     </div>
   );
 }
-function LoomV2({ layout, setLayout, onClose, project, setCard, entries, durOf, scale, selShot, setSelShot, generateShot, genState }) {
+function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick }) {
   const wrapRef = useRef(null);
   const [scaleV, setScaleV] = useState(1);
   useEffect(() => {
@@ -457,6 +503,7 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, entries, durOf, 
   const change = (np) => setLayout((L) => L.map((x) => (x.id === np.id ? np : x)));
   const collapse = (id) => setLayout((L) => L.map((x) => (x.id === id ? { ...x, collapsed: !x.collapsed } : x)));
   const sel = entries.find((e) => e.c.id === selShot) || null;
+  const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   const grouped = [];
   entries.forEach((e) => { let g = grouped.find((x) => x.ai === e.ai); if (!g) { g = { ai: e.ai, name: e.a.name, items: [] }; grouped.push(g); } g.items.push(e); });
 
@@ -471,6 +518,7 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, entries, durOf, 
               const st = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
               return (
                 <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
+                  <div className="lv-cframe">{(() => { const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null); return s ? <img src={s} alt="" /> : <span className="lv-cframeph">{e.c.mode}</span>; })()}</div>
                   <div className="lv-code">{e.code}</div>
                   <div className="lv-ctitle">{e.c.title || "untitled"}</div>
                   <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
@@ -518,7 +566,45 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, entries, durOf, 
       </div>
     );
   }
-  const content = (id) => id === "board" ? board : id === "timeline" ? timeline : id === "generate" ? gen : <div className="lv-ph">{V2_PH[id] || id}</div>;
+  const castPanel = (
+    <div className="lv-cast">
+      <div className="lv-castrow-h">Cast &amp; assets{sel ? <span className="lv-dim"> — click to toggle into {sel.code}</span> : null}</div>
+      {(project.assets || []).map((as) => {
+        const inShot = sel && (sel.c.cast || []).includes(as.id);
+        const src = frameSrc(as);
+        return (
+          <div key={as.id} className={"lv-castitem " + (inShot ? "on" : "")}
+            onClick={() => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...(c.cast || []), as.id] }))}>
+            {src ? <img src={src} alt="" /> : <span className="lv-castph" />}
+            <div className="lv-castmeta"><b>{as.tag}</b><span>{as.name || as.kind}</span></div>
+          </div>
+        );
+      })}
+      {!(project.assets || []).length && <div className="lv-ph">No cast yet — add one below.</div>}
+      <button className="lv-addcast" onClick={() => openPick((mid) => setAssets((a) => { const base = a.reduce((mx, x) => { const m = /@image(\d+)/.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0); return [...a, { id: uid(), name: "", kind: "image", tag: "@image" + (base + 1), thumbId: "", source: "", mediaId: mid, lock: false }]; }), "image")}>+ add from gallery</button>
+    </div>
+  );
+  const legendPanel = (
+    <div className="lv-legend">
+      <div className="lv-key"><span className="lv-kk"><i className="lv-sw done" />done</span><span className="lv-kk"><i className="lv-sw wip" />rendering</span><span className="lv-kk"><i className="lv-sw todo" />draft</span></div>
+      {Object.keys(CAM_PALETTE).map((k) => (<div key={k} className="lv-lg"><div className="lv-lgt">{k}</div><div className="lv-lgchips">{CAM_PALETTE[k].map((t) => (<span key={t} className="lv-lgchip">{t}</span>))}</div></div>))}
+      <div className="lv-lg"><div className="lv-lgt">Lighting</div><div className="lv-lgchips">{LIGHTING_PALETTE.map((t) => (<span key={t} className="lv-lgchip">{t}</span>))}</div></div>
+      <div className="lv-lg"><div className="lv-lgt">Transitions</div><div className="lv-lgchips">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-lgchip">{t}</span>))}</div></div>
+      <div className="lv-lg"><div className="lv-lgt">Audio</div><div className="lv-lgchips">{AUDIO_PALETTE.map((t) => (<span key={t} className="lv-lgchip">{t}</span>))}</div></div>
+      <div className="lv-note2">Reference vocabulary for prompts. Editing a shot's camera / lighting lives in Generate.</div>
+    </div>
+  );
+  const finished = entries.filter((e) => e.c.resultMid);
+  const footagePanel = finished.length
+    ? <div className="lv-footage">{finished.map((e) => (
+        <div key={e.c.id} className={"lv-fclip " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
+          <img src={"/thumbs/" + e.c.resultMid + ".jpg"} alt="" />
+          <div className="lv-fmeta"><b>{e.code}</b><span>{durOf(e.c)}s</span></div>
+        </div>))}</div>
+    : <div className="lv-ph">No rendered shots yet — generate one and it lands here.</div>;
+  const content = (id) => id === "board" ? board : id === "timeline" ? timeline : id === "generate" ? gen
+    : id === "cast" ? castPanel : id === "legend" ? legendPanel : id === "footage" ? footagePanel
+    : <div className="lv-ph">{V2_PH[id] || id}</div>;
 
   return (
     <div className="lv-overlay">
@@ -829,9 +915,10 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
-      {v2 && <LoomV2 layout={panelLayout} setLayout={setPanelLayout} onClose={() => setV2(false)}
-        project={project} setCard={setCard} entries={entries} durOf={durOf} scale={scale}
-        selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} genState={genState} />}
+      {v2 && <V2Boundary onClose={() => setV2(false)}><LoomV2 layout={panelLayout} setLayout={setPanelLayout} onClose={() => setV2(false)}
+        project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
+        selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} genState={genState}
+        thumbs={thumbs} openPick={openPick} /></V2Boundary>}
       {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
