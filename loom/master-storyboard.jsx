@@ -59,6 +59,7 @@ const STYLES = `
 .sb-projx{background:transparent;border:none;color:var(--ink3);cursor:pointer;padding:0 8px;font-size:11px;border-radius:7px}
 .sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
 .sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
+.sb-projveil{position:fixed;inset:0;z-index:59}
 .sb-stat{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
 .sb-stat b{font-family:ui-monospace,monospace;font-size:15px}
 .sb-stat span{font-size:10px;color:var(--ink3);letter-spacing:.08em;text-transform:uppercase}
@@ -539,7 +540,38 @@ function DockablePanel({ p, scale, onChange, onCollapse, children }) {
     </div>
   );
 }
-function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick, genImgState, imgModel, setImgModel, genImage, routeImg }) {
+// Shared storyboard switcher — used in BOTH the classic header and the V2 header.
+// All project state/actions arrive bundled as `api` (built once in App).
+function ProjectSwitcher({ api }) {
+  const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
+  return (
+    <div className="sb-projwrap">
+      <button className="sb-projbtn" onClick={() => { setProjMenu((v) => !v); readProjList(); }}
+        title="Switch, create, or manage storyboards" aria-label="Storyboards">&#9662;</button>
+      {projMenu && <div className="sb-projveil" onClick={() => setProjMenu(false)} />}
+      {projMenu && (
+        <div className="sb-projpop">
+          <div className="sb-projpoph">Storyboards</div>
+          <div className="sb-projlist">
+            {projList.map((pr) => (
+              <div key={pr.id} className={"sb-projitem" + (pr.id === activeId ? " on" : "")}>
+                <button className="sb-projopen" onClick={() => openProject(pr.id)} title="Open this storyboard">
+                  <b>{pr.name || "Untitled"}</b><span>{pr.shots} shot{pr.shots === 1 ? "" : "s"}</span></button>
+                <button className="sb-projx" title="Delete" onClick={() => deleteProject(pr.id)}>&#10005;</button>
+              </div>
+            ))}
+          </div>
+          <div className="sb-projacts">
+            <button className="sb-btn sm" onClick={newProject}>+ New</button>
+            <button className="sb-btn sm ghost" onClick={duplicateProject}>&#10697; Duplicate</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick, genImgState, imgModel, setImgModel, genImage, routeImg, projectApi }) {
   const wrapRef = useRef(null);
   const [scaleV, setScaleV] = useState(1);
   const [tab, setTab] = useState("Video");
@@ -715,6 +747,7 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
       <div className="lv-top">
         <span className="lv-eyebrow">The Loom · V2 (preview)</span>
         <span className="lv-note">Click a shot → it binds to Generate. Drag / resize / collapse panels; layout auto-saves.</span>
+        <ProjectSwitcher api={projectApi} />
         <button onClick={() => setLayout(V2_DEFAULT.map((d) => ({ ...d })))}>Reset layout</button>
         <button className="lv-close" onClick={onClose}>← Back to classic Loom</button>
       </div>
@@ -834,11 +867,21 @@ export default function App() {
     if (list.length <= 1) { window.alert("This is your only storyboard — make another before deleting this one."); return; }
     const tgt = list.find((x) => x.id === id);
     if (!window.confirm(`Delete "${(tgt && tgt.name) || "this storyboard"}"? This can't be undone.`)) return;
-    await sDel(PPRE + id);
-    if (id === activeId) { const next = list.find((x) => x.id !== id); if (next) await openProject(next.id); }
-    else readProjList();
+    if (id === activeId) {
+      // Switch to a survivor WITHOUT flushing the doomed project first — openProject()'s
+      // flushSave(activeId) would re-create the very project we're deleting.
+      const next = list.find((x) => x.id !== id);
+      let p = null; try { const raw = await sGet(PPRE + next.id); if (raw) p = JSON.parse(raw); } catch {}
+      await sDel(PPRE + id);
+      await sSet(ACTIVE_KEY, next.id);
+      setActiveId(next.id); setProject(p || seedProject()); setSelShot(null);
+    } else {
+      await sDel(PPRE + id);
+    }
+    await readProjList();
     setProjMenu(false);
-  }, [activeId, readProjList, openProject]);
+  }, [activeId, readProjList]);
+  const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
 
   // Gallery -> cast: /loom?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
   // action) adds those images as reusable @image cast members, once, then clears the URL.
@@ -1118,7 +1161,8 @@ export default function App() {
         project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
         selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} genState={genState}
         thumbs={thumbs} openPick={openPick}
-        genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg} /></V2Boundary>}
+        genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg}
+        projectApi={projectApi} /></V2Boundary>}
       {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
@@ -1153,28 +1197,7 @@ export default function App() {
               style={{ textDecoration: "none", flexShrink: 0 }}>← Gallery</a>
             <h1 className="sb-disp"><span className="sb-clap">▰</span> The Loom</h1>
             <input className="sb-projname" value={project.name} onChange={(e) => setProject((p) => ({ ...p, name: e.target.value }))} aria-label="Project name" />
-            <div className="sb-projwrap">
-              <button className="sb-projbtn" onClick={() => { setProjMenu((v) => !v); readProjList(); }}
-                title="Switch, create, or manage storyboards" aria-label="Storyboards">&#9662;</button>
-              {projMenu && (
-                <div className="sb-projpop">
-                  <div className="sb-projpoph">Storyboards</div>
-                  <div className="sb-projlist">
-                    {projList.map((pr) => (
-                      <div key={pr.id} className={"sb-projitem" + (pr.id === activeId ? " on" : "")}>
-                        <button className="sb-projopen" onClick={() => openProject(pr.id)} title="Open this storyboard">
-                          <b>{pr.name || "Untitled"}</b><span>{pr.shots} shot{pr.shots === 1 ? "" : "s"}</span></button>
-                        <button className="sb-projx" title="Delete" onClick={() => deleteProject(pr.id)}>&#10005;</button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="sb-projacts">
-                    <button className="sb-btn sm" onClick={newProject}>+ New</button>
-                    <button className="sb-btn sm ghost" onClick={duplicateProject}>&#10697; Duplicate</button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <ProjectSwitcher api={projectApi} />
             <button className="sb-btn" onClick={batchGenerate} disabled={batching || !entries.length}
               title="Generate every shot that isn't done yet, one after another">
               {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
