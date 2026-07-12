@@ -2641,29 +2641,19 @@ def _ffmpeg_path(_cache=[]):
 
 
 def video_poster_thumb(video_path, thumb_path):
-    """Extract the first frame of a video via ffmpeg and write it as the gallery
-    thumbnail. OPTIONAL: returns False (no-op) if ffmpeg isn't on PATH, so videos
-    just fall back to the placeholder + play badge. Used for imported videos and
-    as a fallback for i2v videos with no still-frame poster."""
-    ff = _ffmpeg_path()
-    if not ff:
+    """Extract a frame of a video via ffmpeg and write it as the gallery thumbnail.
+    OPTIONAL: returns False (no-op) if ffmpeg isn't on PATH, so videos just fall
+    back to the placeholder + play badge. Used for imported videos and as a
+    fallback for i2v videos with no still-frame poster.
+
+    Thin delegate: the ONE ffmpeg-extract implementation lives in
+    pixai_gallery.make_video_thumbnail (which build_thumbnails' poster-less
+    fallback also uses) -- two copies of this wheel WILL drift. The `_ffmpeg_path`
+    guard stays here because import-local and sync-videos gate on it."""
+    if not _ffmpeg_path():
         return False
-    import subprocess
-    import tempfile
-    from pixai_gallery import make_thumbnail
-    tmp = Path(tempfile.gettempdir()) / ("poster_{}.png".format(Path(thumb_path).stem))
-    try:
-        subprocess.run([ff, "-y", "-ss", "0.5", "-i", str(video_path),
-                        "-frames:v", "1", str(tmp)],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
-    except Exception:                                # noqa: BLE001
-        return False
-    ok = tmp.exists() and tmp.stat().st_size > 0 and make_thumbnail(tmp, Path(thumb_path))
-    try:
-        tmp.unlink()
-    except OSError:
-        pass
-    return bool(ok)
+    from pixai_gallery import make_video_thumbnail
+    return make_video_thumbnail(video_path, thumb_path)
 
 
 def _mp4_is_faststart(path):
