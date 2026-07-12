@@ -550,6 +550,8 @@ function friendlyGenErr(raw) {
   const s = String(raw || "");
   if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
     return "Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
+  if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
+    return "PixAI's content filter blocked this generation — that's decided on PixAI's side, not in the Loom.";
   return s || "generation failed";
 }
 
@@ -1116,7 +1118,7 @@ export default function App() {
         // capture the clip's REAL length so the reel reflects what was rendered, not planned
         setCardStatus(cardId, { status: "done", resultMid: mid,
           ...(d.duration ? { actualDur: d.duration } : {}) }); }
-      else if (d.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "failed") } }));
+      else if (d.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: friendlyGenErr(d.error || d.status || "failed") } }));
       else setTimeout(tick, 4000);
     }).catch(() => setTimeout(tick, 5000));
     setTimeout(tick, 2500);
@@ -1126,7 +1128,7 @@ export default function App() {
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
         setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } })); }
-      else if (d.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "failed") } }));
+      else if (d.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: friendlyGenErr(d.error || d.status || "failed") } }));
       else setTimeout(tick, 4000);
     }).catch(() => setTimeout(tick, 5000));
     setTimeout(tick, 2500);
@@ -1164,7 +1166,7 @@ export default function App() {
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
         if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
           setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } })); }
-        else if (d.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "failed") } }));
+        else if (d.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: friendlyGenErr(d.error || d.status || "failed") } }));
         else setTimeout(tick, 4000);
       }).catch(() => setTimeout(tick, 5000));
       setTimeout(tick, 2500);
