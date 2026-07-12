@@ -48,6 +48,20 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
   (trophy in the well). Feat tier inside the toast = gunmetal band/pill + ruby glow + ruby inner
   rim on the cap.
 
+### Fixed
+- **Poster-less videos finally get thumbnails** — when PixAI supplied no poster frame, a video's
+  gallery tile stayed blank forever. `build_thumbnails` now includes videos whose thumb is missing
+  and extracts an early frame locally via ffmpeg (`make_video_thumbnail`, fail-soft, same
+  Pillow pipeline as image thumbs so quality stays uniform). Existing video posters are never
+  overwritten (they came from the network and can't be regenerated). `--sync`'s thumbnail step
+  picks these up automatically.
+
+### Added
+- **`--rebuild-thumbs`** (+ Panel job "Rebuild ALL thumbnails") — re-renders every image
+  thumbnail from its original at today's size/quality settings (kills years of quality drift),
+  sweeps orphaned thumbs whose media left the catalog, and ffmpeg-extracts posters for
+  poster-less videos. Overwrites in place, so the gallery never goes blank mid-run.
+
 ### Changed
 - **Feat tier restyle: gunmetal + ruby** — the feat tier's pink is gone; feats now wear a
   **gunmetal band** (`#8a93a2`) with a **ruby glow + ruby inner rim** (`#e0355e`) across the panel

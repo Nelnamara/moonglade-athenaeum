@@ -2178,11 +2178,54 @@ def make_thumbnail(img_path, thumb_path):
         return False
 
 
+def make_video_thumbnail(video_path, thumb_path):
+    """Poster fallback for videos PixAI gave no poster frame: extract an early
+    frame via ffmpeg (already a dependency for Loom export), then run it through
+    the SAME Pillow thumbnail path as images so size/quality stay uniform.
+    Returns False (never raises) when ffmpeg is missing or the extract fails."""
+    import shutil as _sh
+    import subprocess
+    import tempfile
+    if Image is None or not _sh.which("ffmpeg"):
+        return False
+    tmp = None
+    try:
+        fd, tmp = tempfile.mkstemp(suffix=".jpg")
+        os.close(fd)
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5",
+             "-i", str(video_path), "-frames:v", "1", tmp],
+            capture_output=True, timeout=60)
+        if r.returncode != 0 or not os.path.getsize(tmp):
+            # clips shorter than the seek point: take the literal first frame
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error",
+                 "-i", str(video_path), "-frames:v", "1", tmp],
+                capture_output=True, timeout=60)
+        if r.returncode != 0 or not os.path.getsize(tmp):
+            return False
+        return make_thumbnail(Path(tmp), thumb_path)
+    except Exception:
+        return False
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
 def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8):
     """Generate JPEG thumbnails for rows that have a file. CPU-bound (Pillow),
     so a thread pool gives a real multi-core speedup (Pillow releases the GIL
     during decode/encode). workers<=1 runs serially. Each worker writes a distinct
-    thumb file; progress is reported on the calling thread."""
+    thumb file; progress is reported on the calling thread.
+
+    Videos are included ONLY when their thumb is missing (the collected PixAI
+    poster made it already when one existed): a poster-less video gets a local
+    ffmpeg frame-extract instead of staying blank forever. `force` deliberately
+    does NOT overwrite an existing video thumb -- the poster came from the
+    network and can't be regenerated from the local file."""
     if Image is None:
         print("Warning: Pillow not installed -- thumbnails will not be generated.")
         return
@@ -2190,17 +2233,24 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     done = 0
     work = []
     for row in rows:
-        if not row.get("filename") or row.get("is_video") == "1":
-            continue  # videos have no still of their own; poster_media_id covers it
+        if not row.get("filename"):
+            continue
+        is_vid = row.get("is_video") == "1"
         total += 1
         thumb_path = thumb_dir / "{}.jpg".format(row["media_id"])
-        if not force and thumb_path.exists():
+        if thumb_path.exists() and (is_vid or not force):
             done += 1
             continue
-        work.append((row["media_id"], thumb_path, row.get("filename")))
+        work.append((row["media_id"], thumb_path, row.get("filename"), is_vid))
 
     def _one(item):
-        mid, thumb_path, filename = item
+        mid, thumb_path, filename, is_vid = item
+        if is_vid:
+            vp = Path(out_dir) / (filename or "")
+            if not vp.exists():
+                m = find_files_for_media_id(Path(out_dir), mid)
+                vp = m[0] if m else None
+            return bool(vp and make_video_thumbnail(vp, thumb_path))
         img_path = find_image_file(out_dir, mid, filename)
         return bool(img_path and make_thumbnail(img_path, thumb_path))
 
@@ -2459,6 +2509,9 @@ def create_app(out_dir: Path):
         # --- destructive: require confirm=true ---
         "organize":      {"args": ["--organize"], "label": "Organize into month folders", "destructive": True},
         "dedup-apply":   {"args": ["--dedup", "--apply"], "label": "Dedup — quarantine dupes to _duplicates/", "destructive": True},
+        "rebuild-thumbs": {"args": ["--rebuild-thumbs"],
+                           "label": "Rebuild ALL thumbnails — uniform quality + video posters",
+                           "destructive": True},
     }
 
     def _panel_reader(proc):
