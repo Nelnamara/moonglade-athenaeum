@@ -53,6 +53,12 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
   **gunmetal band** (`#8a93a2`) with a **ruby glow + ruby inner rim** (`#e0355e`) across the panel
   cards, section header, tier pill, unlock moment (ruby-tinted scrim, ruby/gunmetal confetti), and
   a new feat chime. New `--gunmetal` / `--ruby` design tokens.
+- **Achievement quick-wins batch** — drop-in **SFX** (`branding/sfx/ach_<tier>.ogg` plays if
+  present, synth chime otherwise) · legendary/feat **fanfare restored** (screen-level star rain +
+  confetti, gold vs ruby-gunmetal) · **adaptive mascot seating** (each chibi's opaque artwork is
+  measured and seated so ~75% rises above the toast band regardless of source-image padding) ·
+  **reward ribbon** on unlock toasts (🎁 skin / ⚑ banner) · **Skins moved to the Control Panel**
+  beside Branding (swatch grid, click-to-apply; the achievements modal links there).
 - **The Loom V2** — a dockable-panel storyboard workspace (Acts & Shots board, runtime reel,
   Cast / Legend / Footage panels, timeline preview, and per-shot Generate tabs with
   continuity / camera / lighting), behind a **non-breaking "V2 layout" toggle** wrapped in an error
