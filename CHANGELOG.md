@@ -20,8 +20,11 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
 - **The Loom V2** — a dockable-panel storyboard workspace (Acts & Shots board, runtime reel,
   Cast / Legend / Footage panels, timeline preview, and per-shot Generate tabs with
   continuity / camera / lighting), behind a **non-breaking "V2 layout" toggle** wrapped in an error
-  boundary that falls back to the classic Loom. The **Video** generate tab is live; the
-  Image/Edit/Reference tabs are placeholders pending the in-Loom ref-gen decision.
+  boundary that falls back to the classic Loom. The **Video** and **Image** generate tabs are
+  live — the Image tab generates a reference still for the selected shot (model picker +
+  shot-seeded prompt over `/api/generate`, free-card aware) and **routes the result into the
+  shot's open/close frame or cast**, so an in-Loom gen directly feeds the video render. Edit /
+  Reference tabs still pending.
 - **Achievements art & moments** — 11 achievement-badge prompts + the Loom mark, a
   mascot-per-state activity tracker, a rarity-scaled "Nel presents" unlock pop with real badge art,
   a spinning-Nel generation loader, and a Konami-code Starfall easter egg.

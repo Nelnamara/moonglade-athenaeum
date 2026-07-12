@@ -459,6 +459,23 @@ const V2_STYLES = `
 .lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:2px 5px;cursor:pointer;}
 .lv-minichip:hover{border-color:var(--accent);color:var(--accent);}
 .lv-refline{font-size:10px;color:var(--subtext);margin:10px 0 4px;}
+.lv-modelrow{display:flex;gap:6px;align-items:center;margin-bottom:4px;}
+.lv-modelsel{font-size:11px;color:var(--accent);max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 0 auto;}
+.lv-modelres{max-height:150px;overflow:auto;border:1px solid var(--surface1);border-radius:7px;margin-bottom:6px;}
+.lv-modelopt{display:flex;gap:7px;align-items:center;padding:5px 7px;cursor:pointer;font-size:11px;}
+.lv-modelopt:hover{background:var(--surface1);}
+.lv-modelopt img{width:26px;height:26px;object-fit:cover;border-radius:4px;flex:0 0 auto;}
+.lv-modelopt .lv-mt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
+.lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
+.lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
+.lv-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:8px;padding:8px;}
+.lv-imgresult>img{width:100%;border-radius:6px;display:block;}
+.lv-route{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:8px;}
+.lv-routebtn{font:600 10px/1 system-ui;padding:5px 9px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lv-routebtn:hover{border-color:var(--accent);color:var(--accent);}
+.lv-routebtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent);color:var(--accent);}
+.lv-ok2{font-size:10px;color:var(--accent);margin-top:6px;}
 `;
 class V2Boundary extends React.Component {
   constructor(props) { super(props); this.state = { err: null }; }
@@ -503,10 +520,12 @@ function DockablePanel({ p, scale, onChange, onCollapse, children }) {
     </div>
   );
 }
-function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick }) {
+function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick, genImgState, imgModel, setImgModel, genImage, routeImg }) {
   const wrapRef = useRef(null);
   const [scaleV, setScaleV] = useState(1);
   const [tab, setTab] = useState("Video");
+  const [mq, setMq] = useState("");        // image-model search query
+  const [mres, setMres] = useState([]);    // image-model search results
   useEffect(() => {
     const fit = () => { if (wrapRef.current) setScaleV(Math.min(1, wrapRef.current.clientWidth / 1498)); };
     fit(); window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit);
@@ -585,7 +604,44 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
         <button className="lv-go" disabled={busy} onClick={() => generateShot(sel)}>{busy ? (gs.msg || "generating…") : "▶ Generate shot"}</button>
       </div>
     );
-    else tabBody = <div className="lv-ph">The <b>{tab}</b> tab will generate / edit reference frames for this shot — wiring the in‑Loom ref‑gen is the next decision we flagged. For now, use the <b>Video</b> tab to render the shot.</div>;
+    else if (tab === "Image") {
+      const gi = genImgState[sel.c.id] || {};
+      const busyI = gi.phase === "submitting" || gi.phase === "running";
+      const searchModels = () => fetch("/api/model-search?size=8&q=" + encodeURIComponent(mq)).then((r) => r.json()).then((d) => setMres(d.results || [])).catch(() => setMres([]));
+      tabBody = (
+        <div>
+          <label className="lv-lab">Model</label>
+          <div className="lv-modelrow">
+            <span className="lv-modelsel">{imgModel ? imgModel.title : "— none —"}</span>
+            <input className="lv-in" placeholder="search models · Enter" value={mq}
+              onChange={(e) => setMq(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") searchModels(); }} />
+          </div>
+          {mres.length > 0 && (
+            <div className="lv-modelres">{mres.map((m) => (
+              <div key={m.model_id} className="lv-modelopt" onClick={() => { setImgModel({ model_id: m.model_id, title: m.title }); setMres([]); setMq(""); }}>
+                {(m.preview_url || m.cover_url) ? <img src={m.preview_url || m.cover_url} alt="" /> : null}
+                <span className="lv-mt">{m.title}</span><span className="lv-dim">{m.base_model || ""}</span>
+              </div>))}</div>)}
+          <label className="lv-lab">Image prompt</label>
+          <textarea className="lv-ta" value={sel.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
+            onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
+          <button className="lv-mini2" onClick={() => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, (c.openFrame && c.openFrame.desc) || "", c.lighting || ""].filter(Boolean).join(", ") }))}>&#8615; seed from shot description</button>
+          <button className="lv-go" disabled={busyI} onClick={() => genImage(sel)}>{busyI ? (gi.msg || "generating…") : "✦ Generate reference image"}</button>
+          {gi.phase === "error" && <div className="lv-gerr">{gi.msg}</div>}
+          {gi.mid && (
+            <div className="lv-imgresult">
+              <img src={"/thumbs/" + gi.mid + ".jpg"} alt="result" />
+              <div className="lv-route"><span className="lv-dim">route &#8594;</span>
+                <button className={"lv-routebtn" + (gi.routed === "open" ? " on" : "")} onClick={() => routeImg(sel, "open")}>open frame</button>
+                <button className={"lv-routebtn" + (gi.routed === "close" ? " on" : "")} onClick={() => routeImg(sel, "close")}>close frame</button>
+                <button className={"lv-routebtn" + (gi.routed === "cast" ? " on" : "")} onClick={() => routeImg(sel, "cast")}>cast</button>
+              </div>
+              {gi.routed && <div className="lv-ok2">&#10003; sent to {gi.routed} &middot; it now feeds this shot's video gen</div>}
+            </div>)}
+        </div>
+      );
+    }
+    else tabBody = <div className="lv-ph">The <b>{tab}</b> tab is next on the bench. For now: <b>Image</b> generates a reference frame, <b>Video</b> renders the shot.</div>;
     gen = (
       <div className="lv-gen">
         <div className="lv-genhead">&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</div>
@@ -661,6 +717,8 @@ export default function App() {
   const [thumbs, setThumbs] = useState({});
   const [open, setOpen] = useState({});
   const [busy, setBusy] = useState(false);
+  const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
+  const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
   const [showHelp, setShowHelp] = useState(false);
   const [showGuide, setShowGuide] = useState(() => {
     try { return !localStorage.getItem("loom_guide_seen"); } catch (e) { return true; } });
@@ -866,6 +924,40 @@ export default function App() {
     }).catch(() => setTimeout(tick, 5000));
     setTimeout(tick, 2500);
   };
+  // ---- In-Loom reference-image gen: reuse /api/generate (image), poll, then route the result into the shot ----
+  const pollImg = (cardId, tid) => {
+    const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
+      if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
+        setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } })); }
+      else if (d.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error || "failed" } }));
+      else setTimeout(tick, 4000);
+    }).catch(() => setTimeout(tick, 5000));
+    setTimeout(tick, 2500);
+  };
+  const genImage = async (entry) => {
+    const c = entry.c;
+    const prompt = (c.imgPrompt || "").trim();
+    if (!imgModel) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "pick a model first" } })); return; }
+    if (!prompt) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter an image prompt" } })); return; }
+    if (!window.confirm(`Generate a reference image for ${c.title || "this shot"}?\n\nA matching free card auto-applies; otherwise it spends credits.`)) return;
+    setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
+    try {
+      const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_id: imgModel.model_id, prompt }) });
+      const d = await r.json();
+      if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error || "submit failed" } })); return; }
+      setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating…" } }));
+      pollImg(c.id, d.task_id);
+    } catch { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
+  };
+  const routeImg = (entry, target) => {
+    const c = entry.c; const gs = genImgState[c.id]; if (!gs || !gs.mid) return;
+    const mid = gs.mid;
+    if (target === "open") setCard(entry.a.id, c.id, (x) => ({ ...x, openFrame: { ...x.openFrame, mediaId: mid, thumbId: "", source: "", desc: x.openFrame.desc || "generated in Loom" } }));
+    else if (target === "close") setCard(entry.a.id, c.id, (x) => ({ ...x, closeFrame: { ...x.closeFrame, mediaId: mid, thumbId: "", source: "", desc: x.closeFrame.desc || "generated in Loom" } }));
+    else if (target === "cast") setAssets((a) => { const base = a.reduce((mx, x) => { const m = /@image(\d+)/.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0); return [...a, { id: uid(), name: c.title || "", kind: "image", tag: "@image" + (base + 1), thumbId: "", source: "", mediaId: mid, lock: false }]; });
+    setGenImgState((s) => ({ ...s, [c.id]: { ...s[c.id], routed: target } }));
+  };
   const download = (text, name, type) => { const url = URL.createObjectURL(new Blob([text], { type }));
     const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
   const exportAll = () => { let out = `${project.name}\nRuntime target ${fmt(project.target)}\n`;
@@ -946,7 +1038,8 @@ export default function App() {
       {v2 && <V2Boundary onClose={() => setV2(false)}><LoomV2 layout={panelLayout} setLayout={setPanelLayout} onClose={() => setV2(false)}
         project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
         selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} genState={genState}
-        thumbs={thumbs} openPick={openPick} /></V2Boundary>}
+        thumbs={thumbs} openPick={openPick}
+        genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg} /></V2Boundary>}
       {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
