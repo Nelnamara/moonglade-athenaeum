@@ -1104,7 +1104,7 @@ export default function App() {
     try {
       const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: p.mode, prompt: p.prompt, images: p.images,
-          video_refs: p.video_refs, duration: p.duration }) });
+          video_refs: p.video_refs, duration: p.duration, origin: "loom-shot" }) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       pollShot(c.id, d.task_id);

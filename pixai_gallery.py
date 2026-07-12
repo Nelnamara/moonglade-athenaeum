@@ -532,39 +532,705 @@ def catalog_counts(db_path):
 # out_dir/achievements.json. See ACHIEVEMENTS/SKINS below for the catalog.
 # ---------------------------------------------------------------------------
 ACHIEVEMENTS = [
-    {"id": "first-light",  "name": "First Light",     "icon": "\U0001F311",
-     "desc": "[redacted]",                 "metric": "images",
-     "threshold": 1,     "tier": "common"},
-    {"id": "archivist",    "name": "Archivist",       "icon": "\U0001F4DA",
-     "desc": "[redacted]",  "metric": "images",
-     "threshold": 1000,  "tier": "rare"},
-    {"id": "hoardsmith",   "name": "Hoardsmith",      "icon": "\U0001F409",
-     "desc": "[redacted]",               "metric": "images",
-     "threshold": 10000, "tier": "epic",      "skin": "moonlit"},
-    {"id": "loremaster",   "name": "Loremaster",      "icon": "\U0001F451",
-     "desc": "[redacted]",     "metric": "images",
-     "threshold": 25000, "tier": "legendary"},
-    {"id": "first-frame",  "name": "First Frame",     "icon": "\U0001F39E",
-     "desc": "[redacted]",       "metric": "videos",
-     "threshold": 1,     "tier": "common"},
-    {"id": "moonweaver",   "name": "Moonweaver",      "icon": "\U0001F319",
-     "desc": "[redacted]",                          "metric": "videos",
-     "threshold": 10,    "tier": "rare"},
-    {"id": "reel-director","name": "Reel Director",   "icon": "\U0001F3AC",
-     "desc": "[redacted]",                   "metric": "videos",
-     "threshold": 50,    "tier": "epic",      "skin": "ember"},
-    {"id": "curator",      "name": "Curator",         "icon": "\U0001F5C2",
-     "desc": "[redacted]",                  "metric": "collections",
-     "threshold": 10,    "tier": "rare"},
-    {"id": "menagerie",    "name": "Menagerie",       "icon": "\U0001F3AD",
-     "desc": "[redacted]",             "metric": "models",
-     "threshold": 25,    "tier": "epic",      "skin": "verdant"},
-    {"id": "gallery-opening","name": "Gallery Opening","icon": "\U0001F5BC",
-     "desc": "[redacted]",            "metric": "published",
-     "threshold": 10,    "tier": "rare"},
-    {"id": "tagsmith",     "name": "Tagsmith",        "icon": "\U0001F3F7",
-     "desc": "[redacted]",              "metric": "tagged",
-     "threshold": 500,   "tier": "epic"},
+    {
+     'id': 'first-light',
+     'name': 'First Light',
+     'icon': '🌑',
+     'desc': '[redacted]',
+     'metric': 'images',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': '[redacted]',
+    },
+    {
+     'id': 'archivist',
+     'name': 'Archivist',
+     'icon': '📚',
+     'desc': '[redacted]',
+     'metric': 'images',
+     'threshold': 1000,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': '[redacted]'ve officially crossed from "hobby" into "someone should keep an eye on this one." The shelves groan. So do we.',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'hoardsmith',
+     'name': 'Hoardsmith',
+     'icon': '🐉',
+     'desc': "[redacted]",
+     'metric': 'images',
+     'threshold': 10000,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'skin': 'moonlit',
+     'roast': "[redacted]",
+     'roast_nsfw': '[redacted]'s a bit much." Here\'s a shiny new skin, you magnificent pack rat. Now go outside. (You won\'t.)',
+    },
+    {
+     'id': 'loremaster',
+     'name': 'Loremaster',
+     'icon': '👑',
+     'desc': '[redacted]',
+     'metric': 'images',
+     'threshold': 25000,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'the-great-library',
+     'name': 'The Great Library',
+     'icon': '🏛',
+     'desc': '[redacted]',
+     'metric': 'images',
+     'threshold': 50000,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'banner_reward': True,
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'first-frame',
+     'name': 'First Frame',
+     'icon': '🎞',
+     'desc': '[redacted]',
+     'metric': 'videos',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': '[redacted]',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'moonweaver',
+     'name': 'Moonweaver',
+     'icon': '🌙',
+     'desc': '[redacted]',
+     'metric': 'videos',
+     'threshold': 10,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'reel-director',
+     'name': 'Reel Director',
+     'icon': '🎬',
+     'desc': '[redacted]',
+     'metric': 'videos',
+     'threshold': 50,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'skin': 'ember',
+     'roast': '[redacted]',
+     'roast_nsfw': '[redacted]'s your skin. Yell "action" one more time and we\'re revoking your parking spot.',
+    },
+    {
+     'id': 'cinematheque',
+     'name': 'Cinematheque',
+     'icon': '🎥',
+     'desc': '[redacted]',
+     'metric': 'videos',
+     'threshold': 100,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'first-spark',
+     'name': 'First Spark',
+     'icon': '✨',
+     'desc': '[redacted]',
+     'metric': 'local_gens',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': '[redacted]',
+    },
+    {
+     'id': 'apprentice-smith',
+     'name': 'Apprentice of the Forge',
+     'icon': '⚒',
+     'desc': '[redacted]',
+     'metric': 'local_gens',
+     'threshold': 100,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'forgemaster',
+     'name': 'Forgemaster',
+     'icon': '🔨',
+     'desc': '[redacted]',
+     'metric': 'local_gens',
+     'threshold': 500,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'starsmith',
+     'name': 'Starsmith',
+     'icon': '🌟',
+     'desc': '[redacted]',
+     'metric': 'local_gens',
+     'threshold': 1000,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'curator',
+     'name': 'Curator',
+     'icon': '🗂',
+     'desc': '[redacted]',
+     'metric': 'collections',
+     'threshold': 10,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': '[redacted]',
+    },
+    {
+     'id': 'grand-curator',
+     'name': 'Grand Curator',
+     'icon': '🗄',
+     'desc': '[redacted]',
+     'metric': 'collections',
+     'threshold': 50,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'menagerie',
+     'name': 'Menagerie',
+     'icon': '🎭',
+     'desc': '[redacted]',
+     'metric': 'models',
+     'threshold': 25,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'skin': 'verdant',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'conclave',
+     'name': 'Conclave of Hands',
+     'icon': '🐲',
+     'desc': '[redacted]',
+     'metric': 'models',
+     'threshold': 75,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'tag-scribe',
+     'name': 'Tag Scribe',
+     'icon': '✒',
+     'desc': '[redacted]',
+     'metric': 'tagged',
+     'threshold': 50,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'tagsmith',
+     'name': 'Tagsmith',
+     'icon': '🏷',
+     'desc': '[redacted] Nothing in the Athenaeum goes unnamed.',
+     'metric': 'tagged',
+     'threshold': 500,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'catalogus-magnus',
+     'name': 'Catalogus Magnus',
+     'icon': '📜',
+     'desc': '[redacted]',
+     'metric': 'tagged',
+     'threshold': 2500,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': '[redacted]'ve tagged more than most museums and you did it for FUN. There\'s no word for what you are. "Catalogus Magnus" is us being polite.',
+    },
+    {
+     'id': 'gallery-opening',
+     'name': 'Gallery Opening',
+     'icon': '🖼',
+     'desc': '[redacted]',
+     'metric': 'published',
+     'threshold': 10,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'vernissage',
+     'name': 'Vernissage',
+     'icon': '🥂',
+     'desc': '[redacted]',
+     'metric': 'published',
+     'threshold': 100,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': '[redacted]'ve made "look at my art" a full-time bit. The crowd\'s fake, the wine\'s fake, and your confidence is somehow REAL. Terrifying. Cheers.',
+    },
+    {
+     'id': 'restorer',
+     'name': 'Restorer',
+     'icon': '🖌',
+     'desc': '[redacted]',
+     'metric': 'edits',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': '[redacted]'s the spirit — nothing\'s ever done, nothing\'s ever good enough. Welcome to the disease, Restorer.',
+    },
+    {
+     'id': 'restitcher',
+     'name': 'Restitcher',
+     'icon': '🧵',
+     'desc': '[redacted]',
+     'metric': 'edits',
+     'threshold': 50,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': '[redacted]'t accept "finished" anymore. Everything\'s a draft. Everything can be fixed. This is a problem. It\'s also art.',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'masterworker',
+     'name': 'Masterworker',
+     'icon': '🎨',
+     'desc': '[redacted]',
+     'metric': 'edits',
+     'threshold': 200,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': '[redacted]',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'first-cull',
+     'name': 'First Cull',
+     'icon': '🧹',
+     'desc': '[redacted]',
+     'metric': 'culled',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': '[redacted]',
+     'roast_nsfw': '[redacted]',
+    },
+    {
+     'id': 'the-winnowing',
+     'name': 'The Winnowing',
+     'icon': '🌪',
+     'desc': '[redacted]',
+     'metric': 'culled',
+     'threshold': 100,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': '[redacted]',
+    },
+    {
+     'id': 'night-keeper',
+     'name': 'Night Keeper',
+     'icon': '🕯',
+     'desc': '[redacted]',
+     'metric': 'days_used',
+     'threshold': 7,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'moonwatch',
+     'name': 'Moonwatch',
+     'icon': '🌖',
+     'desc': '[redacted]',
+     'metric': 'days_used',
+     'threshold': 30,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'keeper-of-order',
+     'name': 'Keeper of Order',
+     'icon': '🗃',
+     'desc': '[redacted]',
+     'metric': 'organize_runs',
+     'threshold': 1,
+     'tier': 'rare',
+     'bucket': 'milestone',
+     'roast': '[redacted]',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'interior-decorator',
+     'name': 'Interior Decorator',
+     'icon': '🛋',
+     'desc': '[redacted]',
+     'metric': 'skin_changed_runs',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'first-enhance',
+     'name': "Refiner's Touch",
+     'icon': '💫',
+     'desc': '[redacted]',
+     'metric': 'enhances',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': '[redacted]',
+     'roast_nsfw': '[redacted]'t good enough for you, was it. Never is. Keep chasing that dragon, you gloss-addicted gremlin.',
+    },
+    {
+     'id': 'first-lora',
+     'name': 'Woven In',
+     'icon': '🧬',
+     'desc': '[redacted]',
+     'metric': 'lora_used',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'first-upload',
+     'name': 'Brought From Afar',
+     'icon': '📤',
+     'desc': '[redacted]',
+     'metric': 'uploads',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'storyweaver',
+     'name': 'Storyweaver',
+     'icon': '🕸',
+     'desc': '[redacted]',
+     'metric': 'storyboards',
+     'threshold': 1,
+     'tier': 'rare',
+     'bucket': 'milestone',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'kindred-spirits',
+     'name': 'Kindred Spirits',
+     'icon': '👥',
+     'desc': '[redacted]',
+     'metric': 'similar_uses',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': '[redacted]'ve taught the void to fetch. Good void. Good crawler.',
+     'roast_nsfw': '[redacted]'ve got the machine sniffing out your type now, you predictable little goblin. It knows what you like. It\'s a bit worried, honestly.',
+    },
+    {
+     'id': 'claimant',
+     'name': 'Claimant',
+     'icon': '🎁',
+     'desc': '[redacted]',
+     'metric': 'claims',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'master-of-the-loom',
+     'name': 'Master of the Loom',
+     'icon': '🧶',
+     'desc': '[redacted]',
+     'metric': 'video_modes_used',
+     'threshold': 3,
+     'tier': 'epic',
+     'bucket': 'mastery',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'full-toolbox',
+     'name': 'The Full Toolbox',
+     'icon': '🧰',
+     'desc': '[redacted]',
+     'metric': 'tools_used',
+     'threshold': 3,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'stacked-deck',
+     'name': 'Stacked Deck',
+     'icon': '🃏',
+     'desc': '[redacted]',
+     'metric': 'lora_stacked',
+     'threshold': 3,
+     'tier': 'epic',
+     'bucket': 'mastery',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'polyglot-of-sigils',
+     'name': 'Polyglot of Sigils',
+     'icon': '🔣',
+     'desc': '[redacted]',
+     'metric': 'lora_distinct',
+     'threshold': 15,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': '[redacted]',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'skin-changer',
+     'name': 'Skin-Changer',
+     'icon': '🦎',
+     'desc': '[redacted]',
+     'metric': 'skins_unlocked',
+     'threshold': 5,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'enhance-adept',
+     'name': 'Enhance Adept',
+     'icon': '🔮',
+     'desc': '[redacted]',
+     'metric': 'enhance_workflows_distinct',
+     'threshold': 5,
+     'tier': 'epic',
+     'bucket': 'mastery',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'thrifty-archivist',
+     'name': 'Thrifty Archivist',
+     'icon': '💰',
+     'desc': '[redacted]',
+     'metric': 'free_cards_applied',
+     'threshold': 50,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'under-the-hood',
+     'name': 'Under the Hood',
+     'icon': '🔧',
+     'desc': '[redacted]',
+     'metric': 'branding_custom_file',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'the-konami-code',
+     'name': 'The Konami Code',
+     'icon': '🌠',
+     'desc': '[redacted]',
+     'metric': 'konami_triggered',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'against-the-void',
+     'name': 'Against the Void',
+     'icon': '🕳',
+     'desc': '[redacted]',
+     'metric': 'recover_events',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': '[redacted]',
+     'roast_nsfw': '[redacted]'s just you, you grave-robbing legend.',
+    },
+    {
+     'id': 'night-owl',
+     'name': 'Night Owl',
+     'icon': '🦉',
+     'desc': '[redacted]',
+     'metric': 'session_hour',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'marathon',
+     'name': 'The Long Night',
+     'icon': '🏃',
+     'desc': '[redacted]',
+     'metric': 'gens_in_a_day',
+     'threshold': 100,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': '[redacted]',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'eclipse',
+     'name': 'Eclipse',
+     'icon': '🌗',
+     'desc': '[redacted]',
+     'metric': 'eclipse_anim_triggered',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': '[redacted]',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'time-capsule',
+     'name': 'Time Capsule',
+     'icon': '⏳',
+     'desc': '[redacted]',
+     'metric': 'old_piece_backed_up',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': '[redacted]',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'completionist',
+     'name': 'Master of the Athenaeum',
+     'icon': '💯',
+     'desc': '[redacted]',
+     'metric': 'all_non_feat_earned',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'triggered',
+     'name': 'Triggered',
+     'icon': '😈',
+     'desc': "[redacted]",
+     'metric': 'narrator_pokes',
+     'threshold': 5,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'for-the-viewers',
+     'name': 'For the Viewers',
+     'icon': '📣',
+     'desc': '[redacted]',
+     'metric': 'published',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': '[redacted]',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'read-the-manual',
+     'name': 'Read the Manual',
+     'icon': '📖',
+     'desc': '[redacted]',
+     'metric': 'docs_opened',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': '[redacted]'s pet.',
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'the-lexicon',
+     'name': 'The Lexicon',
+     'icon': '🔤',
+     'desc': '[redacted]',
+     'metric': 'distinct_keywords',
+     'threshold': 100,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
+    {
+     'id': 'since-the-first-floor',
+     'name': 'Since the First Floor',
+     'icon': '🏗',
+     'desc': '[redacted]',
+     'metric': 'days_used',
+     'threshold': 100,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "[redacted]",
+     'roast_nsfw': "[redacted]",
+    },
 ]
 
 SKINS = [
@@ -709,8 +1375,29 @@ def achievement_metrics(db_path):
             "FROM catalog WHERE COALESCE(model_name,'') != '' OR COALESCE(model_id,'') != ''")
         m["published"] = _scalar("SELECT COUNT(*) FROM catalog WHERE is_published = '1'")
         m["tagged"] = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(art_tags,'') != ''")
+        # The Moonforge: gens made IN the app -- same set as the gallery's
+        # "made locally" filter (source api OR local), NOT just api.
+        m["local_gens"] = _scalar(
+            "SELECT COUNT(*) FROM catalog WHERE source IN ('api','local')")
+        # Marathon: the busiest single calendar day of in-app conjuring.
+        m["gens_in_a_day"] = _scalar(
+            "SELECT COALESCE(MAX(c), 0) FROM (SELECT COUNT(*) AS c FROM catalog "
+            "WHERE source IN ('api','local') AND COALESCE(created_at,'') != '' "
+            "GROUP BY substr(created_at, 1, 10))")
+        # The Lexicon: distinct keywords across every tagged piece (art_tags is
+        # a comma list; the split has to happen Python-side).
+        kw = set()
+        for (tags,) in con.execute(
+                "SELECT art_tags FROM catalog WHERE COALESCE(art_tags,'') != ''"):
+            for t in (tags or "").split(","):
+                t = t.strip().lower()
+                if t:
+                    kw.add(t)
+        m["distinct_keywords"] = len(kw)
     except sqlite3.Error:
-        m.setdefault("models", 0); m.setdefault("published", 0); m.setdefault("tagged", 0)
+        for k in ("models", "published", "tagged", "local_gens",
+                  "gens_in_a_day", "distinct_keywords"):
+            m.setdefault(k, 0)
     finally:
         con.close()
     return m
@@ -720,8 +1407,14 @@ def compute_achievements(metrics, seen=()):
     """Pure: given the metric bundle + the set of already-seen achievement ids,
     return {achievements, skins, newly}. An achievement is *earned* when its metric
     reaches the threshold; a skin is *earned* if it's free or any earned achievement
-    unlocks it. `newly` = earned-but-not-yet-seen (drives the one-shot unlock toast)."""
+    unlocks it. `newly` = earned-but-not-yet-seen (drives the one-shot unlock toast).
+
+    Two metrics are self-referential and resolved in post-passes here (they cannot
+    be a metrics.get() lookup): skins_unlocked (Skin Changer) counts the skins this
+    very computation unlocked, and all_non_feat_earned (Completionist) requires
+    every non-feat, non-banner achievement to be earned."""
     seen = set(seen or [])
+    metrics = dict(metrics or {})
     earned_skins = set()
     achs = []
     for a in ACHIEVEMENTS:
@@ -733,7 +1426,24 @@ def compute_achievements(metrics, seen=()):
             "id": a["id"], "name": a["name"], "icon": a["icon"], "desc": a["desc"],
             "tier": a["tier"], "metric": a["metric"], "threshold": a["threshold"],
             "current": cur, "earned": earned, "skin": a.get("skin", ""),
+            "bucket": a.get("bucket", "ladder"), "hidden": bool(a.get("hidden")),
+            "banner_reward": bool(a.get("banner_reward")),
+            "roast": a.get("roast", ""), "roast_nsfw": a.get("roast_nsfw", ""),
         })
+    by_id = {x["id"]: x for x in achs}
+    # post-pass: Skin Changer counts unlocked skins (free ones + this pass's earns)
+    sc = by_id.get("skin-changer")
+    if sc:
+        n = sum(1 for s in SKINS if s.get("free") or s["id"] in earned_skins)
+        sc["current"] = n
+        sc["earned"] = n >= sc["threshold"]
+    # post-pass: Completionist = every non-feat, non-banner achievement earned
+    comp = by_id.get("completionist")
+    if comp:
+        pool = [x for x in achs if x["tier"] != "feat" and not x["banner_reward"]]
+        done = sum(1 for x in pool if x["earned"])
+        comp["current"] = 1 if done == len(pool) else 0
+        comp["earned"] = done == len(pool)
     skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
               "earned": bool(s.get("free")) or s["id"] in earned_skins}
              for s in SKINS]
@@ -767,6 +1477,192 @@ def save_ach_state(out_dir, state):
         return True
     except OSError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Telemetry: the persisted counters behind every achievement metric that is NOT
+# a cheap catalog COUNT (edits run, pieces culled, distinct days, feat events...).
+# One JSON file beside achievements.json; every write is lock-guarded and
+# fail-soft so a telemetry hiccup can NEVER break a backup, a gen, or a page.
+# Call sites bump via telem_*(); out_dir defaults to the process-wide value set
+# once by create_app()/the CLI so deep call sites need no plumbing.
+# ---------------------------------------------------------------------------
+_TELEM_LOCK = threading.Lock()
+_TELEM_OUT = None            # set by set_telemetry_out(); None -> bare bumps no-op
+
+
+def _telemetry_path(out_dir):
+    return Path(out_dir) / "telemetry.json"
+
+
+def set_telemetry_out(out_dir):
+    """Point the bare telem_* helpers at this install's out_dir (server + CLI)."""
+    global _TELEM_OUT
+    _TELEM_OUT = out_dir
+
+
+_TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": []}
+
+
+def load_telemetry(out_dir):
+    """The persisted counter bundle. Missing/corrupt file -> empty defaults."""
+    try:
+        d = json.loads(_telemetry_path(out_dir).read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            raise ValueError("not a dict")
+    except (OSError, ValueError):
+        d = {}
+    out = {}
+    for k, dflt in _TELEM_EMPTY.items():
+        v = d.get(k)
+        if isinstance(v, type(dflt)):
+            out[k] = v
+        else:
+            out[k] = dict(dflt) if isinstance(dflt, dict) else list(dflt)
+    return out
+
+
+def _save_telemetry(out_dir, data):
+    """Atomic write (tmp + os.replace, the same idiom as download's .part) so a
+    reader can never see a half-written file -- a torn read would fail-soft to
+    empty defaults and the next mutate would persist that wipe."""
+    try:
+        p = _telemetry_path(out_dir)
+        tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        os.replace(tmp, p)
+    except OSError:
+        pass
+
+
+def _telem_file_lock(out_dir):
+    """Best-effort CROSS-PROCESS lock (the server + a Panel CLI job can both bump
+    the same ledger). O_EXCL lockfile, short spin, stale takeover; on timeout we
+    proceed anyway -- a rarely-lost bump beats a blocked backup. Returns the lock
+    path if acquired (caller unlinks), else None."""
+    import time as _t
+    lock = _telemetry_path(out_dir).with_suffix(".lock")
+    deadline = _t.monotonic() + 2.0
+    while True:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return lock
+        except FileExistsError:
+            try:                       # a crashed writer's lock goes stale fast
+                if _t.time() - lock.stat().st_mtime > 10:
+                    lock.unlink()
+                    continue
+            except OSError:
+                pass
+            if _t.monotonic() > deadline:
+                return None
+            _t.sleep(0.02)
+        except OSError:
+            return None
+
+
+def _telem_mutate(out_dir, fn):
+    """Load-mutate-save under both locks (thread + process). fn(data) edits in
+    place. Fail-soft: telemetry must never break a backup, a gen, or a page."""
+    out_dir = out_dir if out_dir is not None else _TELEM_OUT
+    if out_dir is None:
+        return
+    try:
+        with _TELEM_LOCK:
+            lock = _telem_file_lock(out_dir)
+            try:
+                d = load_telemetry(out_dir)
+                fn(d)
+                _save_telemetry(out_dir, d)
+            finally:
+                if lock is not None:
+                    try:
+                        lock.unlink()
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+
+
+def telem_bump(key, n=1, out_dir=None):
+    """counters[key] += n (e.g. 'edits', 'culled', 'uploads', 'narrator_pokes')."""
+    _telem_mutate(out_dir, lambda d: d["counters"].__setitem__(
+        key, int(d["counters"].get(key, 0) or 0) + int(n)))
+
+
+def telem_max(key, value, out_dir=None):
+    """maxima[key] = max(old, value) (e.g. 'lora_stacked')."""
+    _telem_mutate(out_dir, lambda d: d["maxima"].__setitem__(
+        key, max(int(d["maxima"].get(key, 0) or 0), int(value))))
+
+
+def telem_set_add(key, value, out_dir=None):
+    """sets[key] |= {value} (e.g. 'video_modes', 'tools', 'loras')."""
+    def _add(d):
+        cur = d["sets"].get(key)
+        if not isinstance(cur, list):
+            cur = []
+        v = str(value)
+        if v and v not in cur:
+            cur.append(v)
+        d["sets"][key] = cur
+    _telem_mutate(out_dir, _add)
+
+
+def telem_flag(key, out_dir=None):
+    """flags[key] = 1, once (e.g. 'konami_triggered'). Idempotent."""
+    _telem_mutate(out_dir, lambda d: d["flags"].__setitem__(key, 1))
+
+
+def telem_mark_day(out_dir=None):
+    """Record today in the distinct-days-used ledger (The Vigil)."""
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+
+    def _mark(d):
+        if today not in d["days"]:
+            d["days"].append(today)
+    _telem_mutate(out_dir, _mark)
+
+
+def telemetry_metrics(out_dir):
+    """Flatten the telemetry store into the achievement metric namespace.
+    Counters/maxima pass through, sets become cardinalities, flags become 0/1."""
+    d = load_telemetry(out_dir)
+    m = {}
+    for src in (d["counters"], d["maxima"]):
+        for k, v in src.items():
+            try:
+                m[k] = int(v or 0)
+            except (TypeError, ValueError):
+                m[k] = 0
+    sets = d["sets"]
+
+    def _card(key):                 # hostile-but-valid JSON must not len()-crash
+        v = sets.get(key)
+        return len(v) if isinstance(v, list) else 0
+    m["video_modes_used"] = _card("video_modes")
+    m["tools_used"] = _card("tools")
+    m["lora_distinct"] = _card("loras")
+    m["enhance_workflows_distinct"] = _card("enhance_workflows")
+    for k, v in d["flags"].items():
+        m[k] = 1 if v else 0
+    m["days_used"] = len(d["days"])
+    return m
+
+
+def sweep_telemetry(out_dir):
+    """Set the state-derived feat flags whose 'event' may predate the telemetry
+    layer: a custom mark in branding/ (Under the Hood) and the eclipse mark
+    animation (Eclipse). Once set they stay set. Cheap; called by the API."""
+    try:
+        if list_marks(out_dir):
+            telem_flag("branding_custom_file", out_dir=out_dir)
+        if load_branding(out_dir).get("anim") == "eclipse":
+            telem_flag("eclipse_anim_triggered", out_dir=out_dir)
+    except Exception:
+        pass
 
 
 def top_published_rows(db_path, limit=12):
@@ -1358,6 +2254,9 @@ DESIGN_TOKENS_CSS = r"""
        highlight (Nelnamara's gems), gold filigree is rare. */
     --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
     --purple-deep: #33236d; --purple-bright: #643aac;
+    /* Feat tier: gunmetal band + ruby glow (the agreed 5th tier -- NOT pink). */
+    --gunmetal: #8a93a2; --gunmetal-deep: #4a515c;
+    --ruby: #e0355e; --ruby-deep: #a11238;
   }
   /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
      the meaningful subset of the palette; everything else inherits :root. Applied
@@ -1435,7 +2334,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 __JSX__
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
-<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex'"
+<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'docs'})})}catch(e){}"
   style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="How The Loom works">?</button>
 <div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
@@ -1499,6 +2398,7 @@ def create_app(out_dir: Path):
     db_path = out_dir / "catalog.db"
     build_stamp = _build_stamp()
     init_db(db_path)
+    set_telemetry_out(out_dir)     # bare telem_* bumps land in this install's ledger
     backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
@@ -2269,6 +3169,8 @@ document.addEventListener('DOMContentLoaded', function() {
     pos = (e.keyCode===seq[pos]) ? pos+1 : (e.keyCode===seq[0] ? 1 : 0);
     if(pos!==seq.length) return;
     pos=0; if(busy) return; busy=true;
+    try{ fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({event:'konami'})}); }catch(err){}   // The Konami Code feat
     var g=['✦','✧','★','✪','✺'];
     for(var i=0;i<46;i++){ var s=document.createElement('div'); s.className='ee-star';
       s.textContent=g[i%g.length];
@@ -3540,10 +4442,12 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="ach-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
   <div class="ach-panel" role="dialog" aria-label="Achievements and skins">
     <button type="button" class="ach-x" onclick="Ach.close()" aria-label="Close">&times;</button>
-    <div class="ach-htitle">&#127942; Achievements</div>
+    <div class="ach-htitle">&#127942; Achievements<img class="ach-nar" id="ach-nar"
+      src="/branding/mascots/gen_nel.png" title="the narrator" alt="the narrator"
+      onclick="Ach.poke()" onerror="this.remove()"><span id="ach-unleash-slot"></span></div>
     <div class="ach-hsub" id="ach-progress">&hellip;</div>
     <div id="ach-grid" class="ach-grid"></div>
-    <div class="ach-skinhd">&#127912; Skins <span class="ach-skinnote">unlock more by earning epic feats</span></div>
+    <div class="ach-skinhd">&#127912; Skins <span class="ach-skinnote">unlock more by earning epic achievements</span></div>
     <div id="ach-skins" class="ach-skins"></div>
   </div>
 </div>
@@ -3625,6 +4529,29 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-card.t-epic{border-left-color:var(--purple-bright);} .ach-card.t-epic .tier{color:var(--mauve);}
   .ach-card.t-legendary{border-left-color:var(--gold);} .ach-card.t-legendary .tier{color:var(--gold);}
   .ach-card.earned.t-legendary{box-shadow:0 0 0 1px rgba(212,175,55,.35),0 0 22px rgba(212,175,55,.12);}
+  /* feat: gunmetal band, ruby tier text; earned = ruby inner rim + ruby glow */
+  .ach-card.t-feat{border-left-color:var(--gunmetal);} .ach-card.t-feat .tier{color:var(--ruby);}
+  .ach-card.earned.t-feat{box-shadow:inset 0 0 0 1px rgba(224,53,94,.4),0 0 22px rgba(224,53,94,.14);}
+  .ach-card.t-feat.masked{opacity:.5;}
+  .ach-card.t-feat.masked .ico{filter:grayscale(1) brightness(.6);}
+  .ach-sect{grid-column:1/-1;display:flex;align-items:baseline;gap:9px;font-size:13px;
+    font-weight:700;color:var(--text);margin:10px 0 -3px;padding-top:6px;border-top:1px solid var(--surface0);}
+  .ach-sect:first-child{margin-top:0;border-top:none;padding-top:0;}
+  .ach-sect .cnt{font-size:10.5px;font-weight:500;color:var(--overlay0);font-variant-numeric:tabular-nums;}
+  .ach-sect.feats{color:var(--ruby);}
+  .ach-sect.feats .cnt{color:var(--gunmetal);}
+  .ach-roast{font-size:10.5px;color:#c9b8e6;line-height:1.4;margin-top:6px;padding:5px 8px;
+    background:rgba(182,146,230,.07);border-left:2px solid var(--lavender);border-radius:0 7px 7px 0;font-style:italic;}
+  .ach-roast.hot{border-left-color:var(--ruby);background:rgba(224,53,94,.08);color:#efc4d2;}
+  .ach-nar{width:34px;height:34px;border-radius:50%;object-fit:cover;object-position:60% 30%;
+    cursor:pointer;border:1px solid var(--surface1);vertical-align:middle;margin-left:9px;
+    transition:transform .12s,border-color .12s;}
+  .ach-nar:hover{transform:scale(1.12);border-color:var(--lavender);}
+  .ach-unleash{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--ruby);
+    margin-left:12px;cursor:pointer;user-select:none;border:1px solid var(--ruby-deep);
+    border-radius:999px;padding:3px 10px;background:rgba(224,53,94,.08);}
+  .ach-unleash input{accent-color:var(--ruby);}
+  .ach-bannerflag{font-size:10px;color:var(--gold);margin-top:4px;}
   .ach-skinhd{font-size:15px;font-weight:700;color:var(--text);margin-top:24px;}
   .ach-skinnote{font-size:10.5px;font-weight:400;color:var(--overlay0);margin-left:6px;}
   .ach-skins{display:flex;flex-wrap:wrap;gap:10px;margin-top:11px;}
@@ -3674,6 +4601,13 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-moment.t-rare .am-tier{color:var(--blue,#8ab6f4);border-color:var(--blue,#8ab6f4);}
   .ach-moment.t-epic .am-tier{color:var(--mauve);border-color:var(--mauve);}
   .ach-moment.t-legendary .am-tier{color:var(--gold);border-color:var(--gold);}
+  /* feat moment: gunmetal band, ruby glow, ruby-tinted scrim -- no pink anywhere */
+  .ach-moment.t-feat .am-tier{color:var(--ruby);border-color:var(--gunmetal);
+    background:linear-gradient(180deg,rgba(138,147,162,.28),rgba(74,81,92,.28));
+    box-shadow:inset 0 0 0 1px rgba(224,53,94,.35),0 0 14px rgba(224,53,94,.35);}
+  .ach-moment.t-feat .am-scrim{background:radial-gradient(circle at 50% 48%,rgba(58,10,24,.5),rgba(6,5,14,.92));}
+  .ach-moment.t-feat .am-badge{filter:drop-shadow(0 8px 26px rgba(0,0,0,.55)) drop-shadow(0 0 20px rgba(224,53,94,.4));}
+  .ach-moment.t-feat .am-eyebrow{color:var(--ruby);}
   .am-conf{position:absolute;top:-6%;width:7px;height:14px;border-radius:2px;z-index:1;pointer-events:none;animation:am-conffall linear forwards;}
   @keyframes am-conffall{to{transform:translateY(112vh) rotate(720deg);opacity:.55;}}
   @media (prefers-reduced-motion: reduce){ .ach-moment *{animation:none!important;} .am-badge,.am-nelwrap,.am-stage>*{opacity:1!important;transform:none!important;} }
@@ -3779,24 +4713,52 @@ var Ach = (function(){
       .then(function(d){ data=d; render(d); if(mark) toastNew(d); syncSkin(d); })
       .catch(function(){});
   }
+  var BUCKETS=[['ladder','Evolution Ladders'],['milestone','Milestones'],
+               ['mastery','Masteries'],['feat','Feats of the Athenaeum']];
+  function unleashed(){ try{ return localStorage.getItem('unleash')==='1'; }catch(e){ return false; } }
+  function setUnleash(on){ try{ localStorage.setItem('unleash', on?'1':'0'); }catch(e){}
+    if(data) render(data); }
+  function card(d,a){
+    var masked=a.hidden&&!a.earned;
+    var c=document.createElement('div');
+    c.className='ach-card t-'+a.tier+(a.earned?' earned':' locked')+(masked?' masked':'');
+    var ico=a.earned?('<img class="ico-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon)):esc(a.icon);
+    var body='<div class="ico">'+ico+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
+      +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>';
+    if(a.skin) body+='<div class="unlk">&#9733; unlocks '+esc(skinName(d,a.skin))+' skin</div>';
+    if(a.banner_reward) body+='<div class="ach-bannerflag">&#9873; unlocks a banner</div>';
+    if(a.earned){ var hot=unleashed()&&a.roast_nsfw, rr=hot?a.roast_nsfw:a.roast;
+      if(rr) body+='<div class="ach-roast'+(hot?' hot':'')+'">'+esc(rr)+'</div>'; }
+    if(!a.earned && !masked){ var pct=Math.min(100,Math.round(a.current/a.threshold*100));
+      body+='<div class="ach-bar"><i style="width:'+pct+'%"></i></div>'
+          +'<div class="ach-num">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div>'; }
+    body+='</div>'; c.innerHTML=body;
+    if(a.earned){ c.classList.add('clickable'); c.title='Replay this celebration';
+      c.onclick=function(){ celebrate(a); }; }
+    return c;
+  }
   function render(d){
-    var earned=(d.achievements||[]).filter(function(a){return a.earned;}).length;
-    var tot=(d.achievements||[]).length;
-    var p=el('ach-progress'); if(p) p.innerHTML='<b>'+earned+'</b> of <b>'+tot+'</b> feats earned';
+    var all=d.achievements||[];
+    var feats=all.filter(function(a){return a.tier==='feat';});
+    var nonFeat=all.filter(function(a){return a.tier!=='feat';});
+    var earned=nonFeat.filter(function(a){return a.earned;}).length;
+    var fEarned=feats.filter(function(a){return a.earned;}).length;
+    var p=el('ach-progress'); if(p) p.innerHTML='<b>'+earned+'</b> of <b>'+nonFeat.length+'</b> earned'
+      +(d.feats_revealed?' &middot; <b style="color:var(--ruby)">'+fEarned+'</b> of '+feats.length+' feats':'');
+    var slot=el('ach-unleash-slot'); if(slot){
+      slot.innerHTML = d.unleash_available
+        ? '<label class="ach-unleash"><input type="checkbox" '+(unleashed()?'checked':'')
+          +' onchange="Ach.setUnleash(this.checked)">&#128520; Unleash the AI</label>' : ''; }
     var g=el('ach-grid'); if(g){ g.innerHTML='';
-      (d.achievements||[]).forEach(function(a){
-        var c=document.createElement('div');
-        c.className='ach-card t-'+a.tier+(a.earned?' earned':' locked');
-        var ico=a.earned?('<img class="ico-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon)):esc(a.icon);
-        var body='<div class="ico">'+ico+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
-          +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>';
-        if(a.skin) body+='<div class="unlk">&#9733; unlocks '+esc(skinName(d,a.skin))+' skin</div>';
-        if(!a.earned){ var pct=Math.min(100,Math.round(a.current/a.threshold*100));
-          body+='<div class="ach-bar"><i style="width:'+pct+'%"></i></div>'
-              +'<div class="ach-num">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div>'; }
-        body+='</div>'; c.innerHTML=body;
-        if(a.earned){ c.classList.add('clickable'); c.title='Replay this celebration'; c.onclick=(function(x){ return function(){ celebrate(x); }; })(a); }
-        g.appendChild(c);
+      BUCKETS.forEach(function(b){
+        if(b[0]==='feat' && !d.feats_revealed) return;   // the tab stays cloaked
+        var rows=all.filter(function(a){return (a.bucket||'ladder')===b[0];});
+        if(!rows.length) return;
+        var h=document.createElement('div'); h.className='ach-sect'+(b[0]==='feat'?' feats':'');
+        h.innerHTML=esc(b[1])+' <span class="cnt">'
+          +rows.filter(function(a){return a.earned;}).length+'/'+rows.length+'</span>';
+        g.appendChild(h);
+        rows.forEach(function(a){ g.appendChild(card(d,a)); });
       });
     }
     var sk=el('ach-skins'); if(sk){ sk.innerHTML='';
@@ -3835,7 +4797,7 @@ var Ach = (function(){
     var newly=(d.newly||[]).map(function(id){
       return (d.achievements||[]).filter(function(a){return a.id===id;})[0]; }).filter(Boolean);
     if(newly.length>3){   // returning user with a full catalog -> one summary, not a barrage
-      showToast({icon:'\\ud83c\\udfc6', name:newly.length+' feats unlocked',
+      showToast({icon:'\\ud83c\\udfc6', name:newly.length+' achievements unlocked',
                  desc:'Your catalog just earned a stack of achievements. Open '
                       +'\\ud83c\\udfc6 to review them.', skin:false});
       return;
@@ -3846,13 +4808,14 @@ var Ach = (function(){
   var _q=[], _playing=false, _actx=null;
   function _chime(tier){
     try{ _actx=_actx||new (window.AudioContext||window.webkitAudioContext)(); if(_actx.state==='suspended')_actx.resume(); }catch(e){ return; }
-    var seq={common:[523,660],rare:[523,660,784],epic:[523,660,784,988],legendary:[392,523,660,784,1047]}[tier]||[660];
+    var seq={common:[523,660],rare:[523,660,784],epic:[523,660,784,988],legendary:[392,523,660,784,1047],
+             feat:[392,466,622,932]}[tier]||[660];
     var t=_actx.currentTime+0.02;
     seq.forEach(function(f,i){ var o=_actx.createOscillator(),g=_actx.createGain(); o.type='triangle'; o.frequency.value=f;
       o.connect(g); g.connect(_actx.destination); var s=t+i*0.1;
       g.gain.setValueAtTime(0.0001,s); g.gain.linearRampToValueAtTime(0.15,s+0.02); g.gain.exponentialRampToValueAtTime(0.0001,s+0.5);
       o.start(s); o.stop(s+0.55); });
-    if(tier==='legendary'){ var lo=_actx.createOscillator(),lg=_actx.createGain(); lo.type='sine'; lo.frequency.value=98;
+    if(tier==='legendary'||tier==='feat'){ var lo=_actx.createOscillator(),lg=_actx.createGain(); lo.type='sine'; lo.frequency.value=(tier==='feat'?78:98);
       lo.connect(lg); lg.connect(_actx.destination); lg.gain.setValueAtTime(0.0001,t); lg.gain.linearRampToValueAtTime(0.28,t+0.02);
       lg.gain.exponentialRampToValueAtTime(0.0001,t+1.2); lo.start(t); lo.stop(t+1.3); }
   }
@@ -3860,23 +4823,32 @@ var Ach = (function(){
       s.textContent=['\\u2726','\\u2727','\\u2b50'][i%3]; s.style.left=(Math.random()*100)+'vw'; s.style.color='var(--gold)';
       s.style.fontSize=(12+Math.random()*20)+'px'; s.style.animationDuration=(2.4+Math.random()*2.4)+'s';
       s.style.animationDelay=(Math.random()*1.2)+'s'; parent.appendChild(s); } }
-  function _conf(parent,n){ var cols=['#b692e6','#d4af37','#4fc99a','#c4a6f0','#ffffff'];
+  function _conf(parent,n,tier){ var cols=(tier==='feat')
+      ? ['#e0355e','#8a93a2','#a11238','#d6d2e2','#4a515c']       // ruby + gunmetal
+      : ['#b692e6','#d4af37','#4fc99a','#c4a6f0','#ffffff'];
     for(var i=0;i<n;i++){ var c=document.createElement('i'); c.className='am-conf'; c.style.background=cols[i%cols.length];
       c.style.left=(Math.random()*100)+'%'; c.style.animationDuration=(1.8+Math.random()*1.6)+'s'; c.style.animationDelay=(Math.random()*0.5)+'s'; parent.appendChild(c); } }
   function celebrate(a){ if(a){ _q.push(a); if(!_playing) _next(); } }
   function _next(){
     if(!_q.length){ _playing=false; return; } _playing=true;
     var a=_q.shift(), tier=a.tier||'common';
-    var hold={common:3000,rare:3600,epic:4200,legendary:5200}[tier]||3200;
-    var big=(tier==='epic'||tier==='legendary'), leg=(tier==='legendary');
+    var hold={common:3000,rare:3600,epic:4200,legendary:5200,feat:5200}[tier]||3200;
+    var big=(tier==='epic'||tier==='legendary'||tier==='feat'), leg=(tier==='legendary'||tier==='feat');
     var m=document.createElement('div'); m.className='ach-moment t-'+tier+(leg?' leg':'');
+    // the presenter: this achievement's own mascot, falling back to the tier chibi
+    var mfall=(tier==='feat')?'legendary':tier;
     m.innerHTML='<div class="am-scrim"></div>'+(leg?'<div class="am-flash"></div>':'')
       +'<div class="am-stage"><img class="am-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'
       +'<div class="am-eyebrow">Achievement Unlocked</div><div class="am-name">'+esc(a.name)+'</div>'
       +'<div class="am-desc">'+esc(a.desc)+'</div><div class="am-tier">'+esc(tier)+'</div></div>'
-      +'<div class="am-nelwrap"><img class="am-nel" src="/branding/mascots/present_'+tier+'.png" onerror="this.parentNode.remove()"></div>';
+      +'<div class="am-nelwrap"><img class="am-nel"></div>';
+    var nel=m.querySelector('.am-nel');
+    if(nel){ nel.onerror=function(){          // this achievement's mascot -> tier chibi -> none
+        if(!this._f){ this._f=1; this.src='/branding/mascots/present_'+mfall+'.png'; }
+        else if(this.parentNode){ this.parentNode.remove(); } };
+      nel.src='/branding/mascots/ach/'+encodeURIComponent(a.id)+'.png'; }
     document.body.appendChild(m);
-    _stars(m, leg?46:(big?34:22)); if(big) _conf(m, leg?90:44); _chime(tier);
+    _stars(m, leg?46:(big?34:22)); if(big) _conf(m, leg?90:44, tier); _chime(tier);
     void m.offsetWidth; m.classList.add('go');
     var done=function(){ if(m._d)return; m._d=true; m.classList.add('out');
       setTimeout(function(){ if(m.parentNode)m.remove(); _next(); }, 500); };
@@ -3897,10 +4869,27 @@ var Ach = (function(){
       s.style.animationDelay=(Math.random()*1.4)+'s'; document.body.appendChild(s); }
     setTimeout(function(){ t.remove(); document.querySelectorAll('.ee-star').forEach(function(n){n.remove();}); }, 7000);
   }
+  // ---- the narrator: poke until it snaps (Triggered feat -> the Unleash toggle) ----
+  var POKES=['The narrator ignores you.',
+             'The narrator raises an eyebrow. Do you mind?',
+             'The narrator is DESCRIBING things. Hands off.',
+             'The narrator’s eye twitches. Last warning.',
+             'FINE. You want the REAL commentary? Unleashed. Happy now?'];
+  function poke(){
+    fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({event:'narrator'})})
+      .then(function(r){return r.json();})
+      .then(function(res){
+        var n=Math.max(1,Math.min(res.pokes||1,POKES.length));
+        try{ Toast.show({title:POKES[n-1], kind:(n>=POKES.length?'err':''), icon:'👆'}); }catch(e){}
+        if(res.snapped) load(true);   // fires the Triggered celebration + reveals the toggle
+      })
+      .catch(function(){});
+  }
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
   // On load: mark-and-toast any freshly earned feats, and reconcile the active skin.
   document.addEventListener('DOMContentLoaded', function(){ load(true); });
-  return { open:open, close:close };
+  return { open:open, close:close, poke:poke, setUnleash:setUnleash };
 })();
 var Contests = (function(){
   function el(id){return document.getElementById(id);}
@@ -6385,6 +7374,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         for mid, row in to_delete.items():
             purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
 
+        if to_delete:
+            telem_bump("culled", len(to_delete), out_dir=out_dir)   # The Great Sweep
         return redirect(back)
 
     def _purge_local(media_id, filename):
@@ -6766,6 +7757,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"images": [], "total": 0,
                             "error": "similarity index unavailable: " + str(e)[:180]}), 200
+        telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
         out = []
         for mid, score in hits:
             r = get_row(db_path, mid)
@@ -6986,6 +7978,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         credits += int(c.get("amount") or 0)
                 except Exception:                        # noqa: BLE001
                     pass
+            if claimed:
+                telem_bump("claims", claimed, out_dir=out_dir)   # Claimant
             return jsonify({"claimed": claimed, "credits": credits})
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
@@ -7072,13 +8066,33 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
         return jsonify({"items": top, "totals": totals, "views_synced": views_synced})
 
+    _telem_day = {"day": None}   # once-per-day throttle for the passive marks
+
     @app.route("/api/achievements")
     def api_achievements():
-        """Milestone progress + skin unlocks, computed from local catalog stats. Read-only
-        catalog data (no spend, no network) so — like the picker — it's NOT localhost-gated;
-        the owner browsing over LAN still sees their trophies. ?mark=1 records the currently
-        newly-earned achievements as 'seen' so the unlock toast fires exactly once."""
+        """Milestone progress + skin unlocks, computed from local catalog stats +
+        the persisted telemetry counters. Read-only catalog data (no spend, no
+        network) so — like the picker — it's NOT localhost-gated; the owner browsing
+        over LAN still sees their trophies. ?mark=1 records the currently newly-earned
+        achievements as 'seen' so the unlock toast fires exactly once.
+
+        Side effects (cheap, fail-soft): marks today in the Vigil day ledger, checks
+        the Night Owl window, and sweeps the state-derived feat flags. Hidden feats
+        that aren't earned go out MASKED (??? name, no roast) so devtools can't
+        spoil them; the whole feat tab stays cloaked until the first feat lands."""
+        import datetime as _dt
+        try:
+            today = _dt.date.today().isoformat()
+            if _telem_day["day"] != today:
+                _telem_day["day"] = today
+                telem_mark_day(out_dir=out_dir)
+                sweep_telemetry(out_dir)
+            if 2 <= _dt.datetime.now().hour < 4:
+                telem_flag("session_hour", out_dir=out_dir)
+        except Exception:
+            pass
         metrics = achievement_metrics(db_path)
+        metrics.update(telemetry_metrics(out_dir))
         with _ach_lock:
             state = load_ach_state(out_dir)
             result = compute_achievements(metrics, state.get("seen"))
@@ -7086,6 +8100,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if newly and request.args.get("mark") == "1":
                 state["seen"] = sorted(set(state.get("seen") or []) | set(newly))
                 save_ach_state(out_dir, state)
+        feats_revealed = any(
+            a["earned"] for a in result["achievements"] if a["tier"] == "feat")
+        unleashed = any(a["id"] == "triggered" and a["earned"]
+                        for a in result["achievements"])
+        masked_metrics, n_masked = set(), 0
+        for a in result["achievements"]:
+            if a["hidden"] and not a["earned"]:
+                n_masked += 1
+                masked_metrics.add(a["metric"])
+                a.update(name="???", desc="A hidden feat of the Athenaeum.",
+                         icon="❓", roast="", roast_nsfw="",
+                         current=0, threshold=1,
+                         id="hidden-feat-%d" % n_masked, metric="")
+            if not a["earned"]:               # roasts are the reward, not a preview
+                a["roast"] = ""
+                a["roast_nsfw"] = ""
+            elif not unleashed:               # uncensored lines stay locked until Triggered
+                a["roast_nsfw"] = ""
+        # a masked feat's metric name/value must not leak through the metrics echo
+        still_visible = {a["metric"] for a in result["achievements"] if a.get("metric")}
+        for k in masked_metrics - still_visible:
+            metrics.pop(k, None)
+        result["feats_revealed"] = feats_revealed
+        result["unleash_available"] = unleashed
         result["skin"] = state.get("skin", "moonglade")
         result["metrics"] = metrics
         return jsonify(result)
@@ -7105,9 +8143,31 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"error": "skin locked", "skin": load_ach_state(out_dir)["skin"]}), 403
         with _ach_lock:
             state = load_ach_state(out_dir)
+            changed = state.get("skin") != skin
             state["skin"] = skin
             save_ach_state(out_dir, state)
+        if changed:                       # Interior Decorator: an explicit re-dress
+            telem_bump("skin_changed_runs", out_dir=out_dir)
         return jsonify({"skin": skin})
+
+    @app.route("/api/ach-event", methods=["POST"])
+    def api_ach_event():
+        """Feat-event beacon from the front-end: the Starfall konami egg, the
+        in-app manual, and narrator pokes. Whitelisted event names only; each is
+        a cosmetic local counter (no spend), same trust level as /api/skin."""
+        body = request.get_json(silent=True) or {}
+        ev = str(body.get("event") or "").strip()
+        if ev == "konami":
+            telem_flag("konami_triggered", out_dir=out_dir)
+            return jsonify({"ok": True})
+        if ev == "docs":
+            telem_bump("docs_opened", out_dir=out_dir)
+            return jsonify({"ok": True})
+        if ev == "narrator":
+            telem_bump("narrator_pokes", out_dir=out_dir)
+            pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
+            return jsonify({"ok": True, "pokes": pokes, "snapped": pokes >= 5})
+        return jsonify({"error": "unknown event"}), 400
 
     @app.route("/api/branding", methods=["GET", "POST"])
     def api_branding():
@@ -7134,6 +8194,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return jsonify({"error": "unknown mark"}), 400
             cfg["mark"] = mark
         save_branding(out_dir, cfg)
+        if "mark" in body or "anim" in body:   # Interior Decorator: dressing the halls
+            telem_bump("skin_changed_runs", out_dir=out_dir)
+        if cfg["anim"] == "eclipse":           # Eclipse: sun and moon in balance
+            telem_flag("eclipse_anim_triggered", out_dir=out_dir)
         return jsonify({"mark": cfg["mark"], "anim": cfg["anim"]})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
@@ -7204,6 +8268,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             tmp.close()
             core, session = _gen_session()
             mid = core.upload_media(session, tmp.name)
+            telem_bump("uploads", out_dir=out_dir)        # first-upload milestone
             return jsonify({"media_id": str(mid)})
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
@@ -7430,6 +8495,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             params = core._gen_parameters(args)
             core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
             task_id = core.submit_generation(session, params)
+            try:                       # LoRA telemetry (First Lora / Stacked Deck / Polyglot)
+                lvids = [str((lo or {}).get("version_id") or "").strip()
+                         for lo in (body.get("loras") or [])]
+                lvids = [v for v in lvids if v]
+                if lvids:
+                    telem_bump("lora_used", out_dir=out_dir)
+                    telem_max("lora_stacked", len(lvids), out_dir=out_dir)
+                    for v in lvids:
+                        telem_set_add("loras", v, out_dir=out_dir)
+            except Exception:
+                pass
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
@@ -7453,6 +8529,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
+            telem_bump("edits", out_dir=out_dir)          # The Restoration Wing
+            telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
@@ -7483,6 +8561,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
+            telem_bump("enhances", out_dir=out_dir)       # first-enhance milestone
+            telem_set_add("tools", "enhance", out_dir=out_dir)
+            telem_set_add("enhance_workflows",           # Enhance Adept: distinct rituals
+                          wid or (plug or {}).get("workflow_id")     # card + catalog runs of the
+                          or (plug or {}).get("workflow_name")       # same workflow share one key
+                          or str(p.get("plugin") or ""), out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
@@ -7503,6 +8587,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if not boxes:
                 return jsonify({"error": "draw a box over a hand or face"}), 400
             task_id = core.submit_fixer(session, src, boxes)
+            telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
@@ -7697,6 +8782,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
+            try:                       # Master of the Loom + Storyweaver telemetry
+                mode = str(p.get("mode") or "R2V").upper()
+                if mode in ("I2V", "FLF", "R2V"):
+                    telem_set_add("video_modes", mode.lower(), out_dir=out_dir)
+                if str(p.get("origin") or "") == "loom-shot":
+                    telem_bump("storyboards", out_dir=out_dir)
+            except Exception:
+                pass
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
