@@ -4447,8 +4447,8 @@ document.addEventListener('DOMContentLoaded', function(){
       onclick="Ach.poke()" onerror="this.remove()"><span id="ach-unleash-slot"></span></div>
     <div class="ach-hsub" id="ach-progress">&hellip;</div>
     <div id="ach-grid" class="ach-grid"></div>
-    <div class="ach-skinhd">&#127912; Skins <span class="ach-skinnote">unlock more by earning epic achievements</span></div>
-    <div id="ach-skins" class="ach-skins"></div>
+    <div class="ach-skinhd">&#127912; Skins <span class="ach-skinnote">now live in the
+      <a href="/panel" style="color:var(--lavender);">Control Panel</a> beside Branding &middot; unlock more by earning epic achievements</span></div>
   </div>
 </div>
 <div id="contest-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Contests.close()">
@@ -4643,6 +4643,12 @@ document.addEventListener('DOMContentLoaded', function(){
     background:linear-gradient(100deg,transparent,rgba(255,255,255,.75),transparent);transform:skewX(-18deg);}
   .ach-m2 .tw.go .tier-pill::after{animation:m2sheen 2.6s ease-in-out 1.6s infinite;}
   @keyframes m2sheen{0%{left:-60%;}30%{left:130%;}100%{left:130%;}}
+  .ach-m2 .rwd{display:inline-block;margin:8px 0 0 8px;font-size:11px;color:var(--gold);
+    border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:7px;padding:3px 9px;opacity:0;}
+  .ach-m2 .tw.go .rwd{animation:m2fade .4s ease 1.34s forwards;}
+  .m2-conf{position:fixed;top:-3vh;width:7px;height:14px;border-radius:2px;z-index:431;
+    pointer-events:none;animation:m2conffall linear forwards;}
+  @keyframes m2conffall{to{transform:translateY(112vh) rotate(720deg);opacity:.5;}}
   .ach-m2 .flash{position:absolute;inset:0;border-radius:16px;pointer-events:none;opacity:0;
     background:radial-gradient(circle at 74% -4%,rgba(255,242,206,.9),transparent 58%);}
   .ach-m2 .t-feat .flash{background:radial-gradient(circle at 74% -4%,rgba(255,214,226,.9),transparent 58%);}
@@ -4844,8 +4850,19 @@ var Ach = (function(){
     newly.forEach(function(a){ celebrate(a); });   // real unlocks get the mid-screen moment (queued)
   }
   // ---- the mid-screen achievement MOMENT: Nel presents the badge, flair scales with rarity ----
-  var _q=[], _playing=false, _actx=null;
+  var _q=[], _playing=false, _actx=null, _sfx={};
+  /* Real SFX first: branding/sfx/ach_<tier>.ogg (drop a file in, it just works);
+     missing/blocked file falls back to the synth chime. Result cached per tier. */
   function _chime(tier){
+    var key=tier||'common';
+    if(_sfx[key]===0){ _synth(tier); return; }
+    try{
+      var au=new Audio('/branding/sfx/ach_'+key+'.ogg'); au.volume=0.7;
+      au.play().then(function(){ _sfx[key]=1; })
+               .catch(function(){ _sfx[key]=0; _synth(tier); });
+    }catch(e){ _sfx[key]=0; _synth(tier); }
+  }
+  function _synth(tier){
     try{ _actx=_actx||new (window.AudioContext||window.webkitAudioContext)(); if(_actx.state==='suspended')_actx.resume(); }catch(e){ return; }
     var seq={common:[523,660],rare:[523,660,784],epic:[523,660,784,988],legendary:[392,523,660,784,1047],
              feat:[392,466,622,932]}[tier]||[660];
@@ -4868,12 +4885,16 @@ var Ach = (function(){
     var tw=document.createElement('div'); tw.className='tw t-'+tier;
     var line=(opts.line!=null)?opts.line
       :((unleashed()&&a.roast_nsfw)?a.roast_nsfw:(a.roast||a.desc||''));
+    var rwd='';                                  // reward ribbon (emoji for now)
+    if(a.skin) rwd='🎁 Unlocks skin: '+skinName(data||{skins:[]}, a.skin);
+    else if(a.banner_reward) rwd='⚑ Unlocks a banner';
     tw.innerHTML='<div class="mglow"></div>'
       +'<div class="toast"><div class="cap"></div>'
       +'<div class="tbody"><div class="u">'+esc(opts.eyebrow||'New Achievement')+'</div>'
       +'<div class="n">'+esc(a.name)+'</div>'
       +'<div class="r">'+esc(line)+'</div>'
       +(opts.pill===false?'':'<span class="tier-pill">'+esc(tier)+'</span>')
+      +(rwd?'<span class="rwd">'+esc(rwd)+'</span>':'')
       +'</div><div class="flash"></div></div>';
     stage.appendChild(tw); m.appendChild(stage);
     var cap=tw.querySelector('.cap');
@@ -4895,10 +4916,44 @@ var Ach = (function(){
       nel.onerror=function(){                      // own mascot -> tier chibi -> none
         if(!this._f){ this._f=1; this.src='/branding/mascots/present_'+mfall+'.png'; }
         else { this.remove(); } };
+      nel.onload=function(){ try{ _seatMascot(this); }catch(e){} };
       nel.src='/branding/mascots/ach/'+encodeURIComponent(a.id)+'.png';
       tw.insertBefore(nel, tw.querySelector('.toast'));
     }
     return {m:m, tw:tw};
+  }
+  /* Adaptive seating: whatever padding the source image carries, seat the mascot so
+     ~75% of its OPAQUE artwork rises above the toast band. Reads the alpha bounding
+     box off a small canvas sample; any failure leaves the CSS defaults. */
+  function _seatMascot(img){
+    var W=48, H=64, c=document.createElement('canvas'); c.width=W; c.height=H;
+    var x=c.getContext('2d'); x.drawImage(img,0,0,W,H);
+    var d=x.getImageData(0,0,W,H).data, top=-1, bot=-1, r, q;
+    for(r=0;r<H&&top<0;r++){ for(q=3;q<W*4;q+=16){ if(d[r*W*4+q]>24){ top=r; break; } } }
+    for(r=H-1;r>=0&&bot<0;r--){ for(q=3;q<W*4;q+=16){ if(d[r*W*4+q]>24){ bot=r; break; } } }
+    if(top<0||bot<=top) return;
+    var opFrac=(bot-top+1)/H, topFrac=top/H;
+    var BAND=158, TARGET=150;                      // ~150px of visible character
+    var h=Math.max(140, Math.min(260, TARGET/opFrac));
+    img.style.height=h+'px';
+    img.style.top=(BAND - h*topFrac - 0.75*(h*opFrac)).toFixed(1)+'px';
+  }
+  /* Legendary + feat fanfare: the ROOM blows up around the toast (screen-level
+     star rain + confetti, tier-colored) -- the flair the old moment had. */
+  function _fanfare(m, tier){
+    var glyphs=['\\u2726','\\u2727','\\u2b50'], i, s, cn;
+    for(i=0;i<46;i++){ s=document.createElement('div'); s.className='ee-star';
+      s.textContent=glyphs[i%3]; s.style.left=(Math.random()*100)+'vw';
+      s.style.color=(tier==='feat')?'var(--ruby)':'var(--gold)';
+      s.style.fontSize=(12+Math.random()*22)+'px';
+      s.style.animationDuration=(2.4+Math.random()*2.4)+'s';
+      s.style.animationDelay=(Math.random()*1.4)+'s'; m.appendChild(s); }
+    var cols=(tier==='feat')?['#e0355e','#8a93a2','#a11238','#d6d2e2','#4a515c']
+                            :['#b692e6','#d4af37','#4fc99a','#c4a6f0','#ffffff'];
+    for(i=0;i<80;i++){ cn=document.createElement('i'); cn.className='m2-conf';
+      cn.style.background=cols[i%cols.length]; cn.style.left=(Math.random()*100)+'vw';
+      cn.style.animationDuration=(1.8+Math.random()*1.8)+'s';
+      cn.style.animationDelay=(0.2+Math.random()*0.9)+'s'; m.appendChild(cn); }
   }
   function _play(built, hold, after){
     var m=built.m, tw=built.tw;
@@ -4915,7 +4970,9 @@ var Ach = (function(){
     var a=_q.shift(), tier=a.tier||'common';
     var hold={common:4200,rare:4800,epic:5400,legendary:6400,feat:6400}[tier]||4600;
     _chime(tier);
-    _play(_mkMoment(a,{}), hold, _next);
+    var built=_mkMoment(a,{});
+    if(tier==='legendary'||tier==='feat') _fanfare(built.m, tier);
+    _play(built, hold, _next);
   }
   function showToast(a){    // the >3-unlock SUMMARY, in the same toast-v2 frame
     _play(_mkMoment({name:a.name, tier:'legendary', icon:a.icon||'🏆', id:''},
@@ -6759,6 +6816,13 @@ function savePrompt() {
   </div>
 
   <div class="p-sec">
+    <h2>&#127912; Skins</h2>
+    <div class="p-note">Cosmetic palette swaps for the whole suite (moved here from the achievements panel &mdash; cosmetics live together). Unlock more by earning epic achievements in the gallery (&#127942;).</div>
+    <div id="skin-grid" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;"></div>
+    <span id="skin-status" style="font-size:12.5px;color:var(--subtext);"></span>
+  </div>
+
+  <div class="p-sec">
     <h2>Server</h2>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button class="jobbtn" style="flex:0 0 auto;min-width:0;" id="btn-restart"
@@ -6970,6 +7034,45 @@ function setLauncher(){
       el('brand-status').innerHTML='<span style="color:var(--emerald)">\\u2713 Desktop shortcut updated (F5 the Desktop if the icon looks stale)</span>';
     }).catch(function(){ el('brand-status').textContent='\\u26a0 network error'; });
 }
+// --- Skins: cosmetic palettes (moved here from the achievements panel) ---
+var SKIN_SW={ moonglade:['#0c0a1c','#b692e6','#4fc99a','#d4af37'],
+              nightfallen:['#0a0713','#a678f0','#7f6fe0','#d9b3ff'],
+              moonlit:['#0b1018','#8fb8e8','#68d5e0','#cfe1f5'],
+              ember:['#160c0c','#e8935f','#e0a94b','#ffcf7a'],
+              verdant:['#0a1410','#5fd39a','#4fc99a','#c8e6a8'] };
+function loadSkins(){
+  fetch('/api/achievements').then(function(r){return r.json();}).then(function(d){
+    var g=el('skin-grid'); if(!g) return; g.innerHTML='';
+    (d.skins||[]).forEach(function(s){
+      var active=(s.id===d.skin);
+      var c=document.createElement('div');
+      c.style.cssText='width:150px;border:1px solid '+(active?'var(--accent)':'var(--surface1)')
+        +';border-radius:11px;padding:9px;background:var(--surface0);'
+        +(s.earned?'cursor:pointer;':'opacity:.5;');
+      var sw=(SKIN_SW[s.id]||SKIN_SW.moonglade).map(function(h){
+        return '<i style="flex:1;background:'+h+'"></i>'; }).join('');
+      c.innerHTML='<div style="height:30px;border-radius:7px;display:flex;overflow:hidden;margin-bottom:7px;">'+sw+'</div>'
+        +'<div style="font-size:12px;font-weight:600;color:var(--text);">'+escH(s.name)
+        +(active?' <span style="color:var(--accent)">\\u2713</span>':'')+'</div>'
+        +'<div style="font-size:10px;color:var(--subtext);margin-top:2px;">'+escH(s.desc)+'</div>'
+        +(s.earned?'':'<div style="font-size:10px;color:var(--overlay0);margin-top:3px;">\\ud83d\\udd12 locked</div>');
+      if(s.earned) c.onclick=function(){ pickSkin(s.id); };
+      g.appendChild(c);
+    });
+  }).catch(function(){});
+}
+function pickSkin(id){
+  fetch('/api/skin',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({skin:id})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ el('skin-status').textContent='\\u26a0 '+d.error; return; }
+      try{ localStorage.setItem('skin', d.skin||'moonglade'); }catch(e){}
+      if(d.skin && d.skin!=='moonglade') document.documentElement.setAttribute('data-skin', d.skin);
+      else document.documentElement.removeAttribute('data-skin');
+      el('skin-status').innerHTML='<span style="color:var(--emerald)">\\u2713 skin applied suite-wide</span>';
+      loadSkins();
+    }).catch(function(){ el('skin-status').textContent='\\u26a0 network error'; });
+}
 // --- Server control (Homebridge-style stop / restart from the browser) ---
 function _srvOverlay(msg, sub){ el('srv-msg').textContent=msg; el('srv-sub').textContent=sub||''; el('srv-overlay').classList.add('on'); }
 function stopServer(){
@@ -7001,7 +7104,7 @@ function _watchServer(comeBack){
     if(tries>50){ clearInterval(iv); el('srv-msg').textContent=comeBack?'Still restarting\\u2026 give it a moment, then refresh.':'Server stopped.'; el('srv-spin').style.display='none'; }
   }, 800);
 }
-renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadWatchStatus();
+renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadSkins(); loadWatchStatus();
 setInterval(loadWatchStatus, 8000);
 // if a job was already running when the page loaded, resume polling
 fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });

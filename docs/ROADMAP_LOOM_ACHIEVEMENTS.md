@@ -103,7 +103,7 @@ The ref-gen question is resolved as **Option A + bridge** (supersedes the open d
 2. Reward notice ON the toast (mini ribbon/sub-toast: "unlocks <skin>/banner") + rewards shown in the right rail on replay (speech bubble from the mascot presence).
 3. "Earned rewards" as its own display — shape TBD with the redesign.
 
-**Quick wins independent of screenshots (pending owner go):** B2 sfx loader · B6 fanfare restore · B4 adaptive mascot seating · C1 skins→Panel · C2 toast reward ribbon.
+**✅ Quick wins SHIPPED (2026-07-12, owner-green-lit):** B2 sfx loader (drop `branding/sfx/ach_<tier>.ogg` → plays; missing → synth chime) · B6 fanfare restored (screen-level stars+confetti for legendary gold / feat ruby-gunmetal) · B4 adaptive mascot seating (alpha-bbox measured per image, ~75% of the character above the band) · C1 skins→Control Panel card beside Branding (ach modal now links there) · C2 toast reward ribbon (🎁 skin / ⚑ banner, emoji pending owner art). Browser-verified on isolated real data; 459 tests green. **Feat obscurity DECIDED: mystery tiles under owner-made art (design pending). Panel direction leaning MAXIMIZED OVERLAY (modal fluidity + page real estate) — final with screenshots.**
 
 ---
 
