@@ -2195,7 +2195,7 @@ def make_video_thumbnail(video_path, thumb_path):
         r = subprocess.run(
             ["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5",
              "-i", str(video_path), "-frames:v", "1", tmp],
-            capture_output=True, timeout=60)
+            capture_output=True, timeout=90)
         if r.returncode != 0 or not os.path.getsize(tmp):
             # clips shorter than the seek point: take the literal first frame
             r = subprocess.run(
