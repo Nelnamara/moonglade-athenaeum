@@ -5745,9 +5745,47 @@ def run_download(args, progress=None):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def run_rebuild_thumbs(args):
+    """--rebuild-thumbs: one uniform thumbnail pass over the whole catalog.
+    Images are re-rendered from their originals at today's size/quality settings
+    (OVERWRITTEN in place, so the gallery never goes blank mid-run -- this is
+    what kills years of quality drift), poster-less videos get a local ffmpeg
+    frame extract, and thumbs whose media left the catalog are swept."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    from pixai_gallery import build_thumbnails, load_catalog
+    thumb_dir = out / "gallery" / "thumbs"
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    rows = load_catalog(db_path)
+    known = {r.get("media_id") for r in rows if r.get("media_id")}
+    swept = 0
+    for f in thumb_dir.glob("*.jpg"):
+        if f.stem not in known:
+            try:
+                f.unlink()
+                swept += 1
+            except OSError:
+                pass
+    if swept:
+        print("Swept {:,} orphaned thumbnails (media no longer in the catalog).".format(swept))
+    print("Rebuilding thumbnails for {:,} catalog rows (images overwritten in place; "
+          "poster-less videos get an ffmpeg frame; existing video posters kept)...".format(len(rows)))
+    _prog = getattr(args, "progress", None)
+    build_thumbnails(rows, out, thumb_dir, force=True,
+                     progress_cb=((lambda d, t, _p: _prog(d, t)) if _prog else None),
+                     workers=max(1, int(getattr(args, "workers", 4) or 4)))
+    print("\nThumbnail rebuild complete.")
+    return {"swept": swept, "rows": len(rows)}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Back up your own PixAI gallery.")
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
+    ap.add_argument("--rebuild-thumbs", action="store_true",
+                    help="regenerate EVERY image thumbnail at the current size/quality "
+                         "settings (fixes quality drift across eras), extract posters for "
+                         "poster-less videos via ffmpeg, and sweep orphaned thumbs. "
+                         "Overwrites in place -- the gallery never goes blank.")
     ap.add_argument("--sync", action="store_true",
                     help="One-shot sync: incremental pull WITH full metadata "
                          "(equivalent to --update --full-meta), then re-resolve any "
@@ -6152,6 +6190,9 @@ def main():
             return
         if args.verify_dupes:
             cmd_verify_dupes(args, out)
+            return
+        if getattr(args, "rebuild_thumbs", False):
+            run_rebuild_thumbs(args)
             return
         if getattr(args, "sync", False):
             # Sync = the "it should just happen" pipeline: incremental pull that
