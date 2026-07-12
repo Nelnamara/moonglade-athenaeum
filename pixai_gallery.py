@@ -4966,11 +4966,15 @@ var Ach = (function(){
     if(opts.mascot!==false){                       // the mascot leaps from the TOP edge
       var mfall=(tier==='feat')?'legendary':tier;
       var nel=document.createElement('img'); nel.className='mascot';
-      nel.onerror=function(){                      // own mascot -> tier chibi -> none
-        if(!this._f){ this._f=1; this.src='/branding/mascots/present_'+mfall+'.png'; }
-        else { this.remove(); } };
+      // ANIMATED mascot first (drop <id>.webp beside the stills and it just moves),
+      // then the still, then the tier chibi, then none. All fail-soft 404 hops.
+      var chain=['/branding/mascots/ach/'+encodeURIComponent(a.id)+'.webp',
+                 '/branding/mascots/ach/'+encodeURIComponent(a.id)+'.png',
+                 '/branding/mascots/present_'+mfall+'.png'];
+      var ci=0;
+      nel.onerror=function(){ ci++; if(ci<chain.length){ this.src=chain[ci]; } else { this.remove(); } };
       nel.onload=function(){ try{ _seatMascot(this); }catch(e){} };
-      nel.src='/branding/mascots/ach/'+encodeURIComponent(a.id)+'.png';
+      nel.src=chain[0];
       tw.insertBefore(nel, tw.querySelector('.toast'));
     }
     return {m:m, tw:tw};
