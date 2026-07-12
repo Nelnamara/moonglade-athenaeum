@@ -38,7 +38,9 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
 - **Loom Generate: inline balance + friendly errors** — the Generate panel shows your live credit +
   card balance (`/api/account`) with a "+N claimable" hint, and gen failures now map the raw PixAI
   GraphQL error (e.g. `INSUFFICIENT_BALANCE`) to a human message ("out of balance — claim daily
-  rewards or pick a card-covered model") instead of dumping the raw payload.
+  rewards or pick a card-covered model") instead of dumping the raw payload. Task-level failures
+  now surface PixAI's own reason (the endpoint returns it as `status`, which the poll previously
+  dropped) — content-moderation blocks read as a clear message instead of a bare "failed".
 - **Achievements art & moments** — 11 achievement-badge prompts + the Loom mark, a
   mascot-per-state activity tracker, a rarity-scaled "Nel presents" unlock pop with real badge art,
   a spinning-Nel generation loader, and a Konami-code Starfall easter egg.
