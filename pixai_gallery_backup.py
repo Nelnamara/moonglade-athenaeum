@@ -1722,6 +1722,13 @@ def cmd_dedup(args, out, db_path):
             moved, quarantine_root.relative_to(out.parent) if out.parent else quarantine_root,
             failed))
 
+    if moved or removed:
+        try:      # The Great Sweep: cumulative pieces removed via --dedup
+            from pixai_gallery import telem_bump
+            telem_bump("culled", moved + removed, out_dir=out)
+        except Exception:
+            pass
+
     if have_catalog:
         n = reconcile_catalog_with_disk(out, db_path)
         print("Reconciled catalog: updated {:,} filename/batch entries to match disk.".format(n))
@@ -2066,6 +2073,11 @@ def cmd_organize(args, out, img_dir, db_path):
     if embedded:
         print("Embedded metadata into {:,} images.".format(embedded))
     print("Reversible manifest: {}  (run --undo-organize to revert)".format(manifest_path))
+    try:      # Keeper of Order: a real (non-dry-run) organize completed
+        from pixai_gallery import telem_bump
+        telem_bump("organize_runs", out_dir=out)
+    except Exception:
+        pass
 
 
 def cmd_undo_organize(args, out):
@@ -3463,6 +3475,7 @@ def run_generate(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
 
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
                           interval=3, label="generate", fail_noun="generation")
@@ -3536,6 +3549,12 @@ def run_generate(args):
 
     if rows:
         save_catalog(db_path, rows)
+        if existing_task:
+            try:      # Against the Void: a stranded task pulled back by id
+                from pixai_gallery import telem_bump
+                telem_bump("recover_events", out_dir=out)
+            except Exception:
+                pass
     print("Generated + cataloged {} image(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
@@ -3691,6 +3710,17 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     return saved
 
 
+def _bump_card_use(params):
+    """Thrifty Archivist: count the free card only once its task ACTUALLY submitted
+    (a card attached to a rejected submit was never spent). Fail-soft no-op."""
+    if isinstance(params, dict) and params.get("kaisuukenId"):
+        try:
+            from pixai_gallery import telem_bump
+            telem_bump("free_cards_applied")
+        except Exception:
+            pass
+
+
 def submit_generation(session, params):
     """Submit a createGenerationTask and return the task id immediately -- no wait, no
     download. The card (if any) must already be attached to `params`. Raises on no id."""
@@ -3698,6 +3728,7 @@ def submit_generation(session, params):
     task_id = (created.get("createGenerationTask") or {}).get("id")
     if not task_id:
         raise PixAIError("no task id returned: " + json.dumps(created)[:200])
+    _bump_card_use(params)
     return str(task_id)
 
 
@@ -3821,6 +3852,7 @@ def run_generate_video(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600),
                           interval=5, label="video", fail_noun="video generation")
 
@@ -3913,6 +3945,7 @@ def run_reference_video(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600), interval=5,
                           label="reference video", fail_noun="reference video generation")
 
@@ -3990,6 +4023,7 @@ def run_enhance(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300), interval=3,
                           label="enhance", fail_noun="enhance")
 
@@ -4080,6 +4114,7 @@ def run_edit_image(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
                           interval=3, label="edit", fail_noun="edit")
 
@@ -4833,6 +4868,12 @@ def run_claims(args):
             claimed += 1
         except PixAIError as e:
             print("Failed to claim {}: {}".format(r["id"], str(e)[:150]))
+    if claimed:
+        try:      # Claimant: the Void pays a small stipend
+            from pixai_gallery import telem_bump
+            telem_bump("claims", claimed)
+        except Exception:
+            pass
     return {"claimed": claimed}
 
 
@@ -5219,6 +5260,22 @@ def run_backfill_full_meta(args):
     print("Done. Fetched {:,} tasks, {:,} failed, catalog updated.".format(fetched, failed))
 
 
+def _check_time_capsule(created_at, out_dir):
+    """Time Capsule feat: a NEWLY-downloaded piece created >2 years ago. Fires
+    only on the download event, never on a full-catalog rescan (old rows already
+    on disk must not earn it). Fail-soft; never slows the download loop."""
+    try:
+        from datetime import datetime
+        s = str(created_at or "")[:19]
+        if not s:
+            return
+        if (datetime.now() - datetime.fromisoformat(s)).days > 730:
+            from pixai_gallery import telem_flag
+            telem_flag("old_piece_backed_up", out_dir=out_dir)
+    except Exception:
+        pass
+
+
 def run_download(args, progress=None):
     """Run the full paginated download + catalog loop.
 
@@ -5453,6 +5510,8 @@ def run_download(args, progress=None):
                                     filename=path.name if path else "", url=url, w=w, h=h))
                                 if path and status in ("ok", "skip"):
                                     on_disk_by_mid[mid] = path
+                                if status == "ok":
+                                    _check_time_capsule(meta.get("created_at"), out)
                             written.add(mid)
                             _tick()
 
@@ -5593,6 +5652,7 @@ def run_download(args, progress=None):
                         on_disk_by_mid[mid] = path  # keep index current within the run
                         batch_results.append((idx, mid, path, info))
                     if status == "ok":
+                        _check_time_capsule(meta.get("created_at"), out)
                         time.sleep(args.delay)
 
             # Upsert this page's rows so progress is durable even on interrupt.
@@ -6004,6 +6064,11 @@ def main():
     img_dir = out / "images"
     db_path  = out / "catalog.db"
     csv_path = out / "catalog.csv"
+    try:      # achievement telemetry: bare telem_* bumps land in this install's ledger
+        from pixai_gallery import set_telemetry_out
+        set_telemetry_out(out)
+    except Exception:
+        pass
 
     try:
         if getattr(args, "delete_task", None):

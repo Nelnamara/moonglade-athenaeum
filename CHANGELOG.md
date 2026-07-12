@@ -17,6 +17,35 @@ git tags. Full prose notes for tagged versions live on
 _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the full list._
 
 ### Added
+- **The full 57-achievement roster is live** — the achievement system grew from 11 to all **57**
+  designed achievements (29 ladder rungs across 10 tracks · 9 milestones · 8 masteries · 11 hidden
+  **feats**), generated verbatim from the canonical `docs/achievements_roster_57.json` with every
+  achievement carrying its `roast` (and an unlockable uncensored variant). The panel groups them
+  into **Evolution Ladders / Milestones / Masteries / Feats of the Athenaeum** sections; earned
+  cards show their roast; **The Great Library** is flagged as a banner reward.
+- **The telemetry layer** — the persisted counters behind every non-catalog metric
+  (`out_dir/telemetry.json`: counters / maxima / sets / flags / distinct-days, lock-guarded and
+  fail-soft everywhere). ~15 call sites now report in: edits, enhances (+ distinct workflows),
+  fixes, uploads, LoRA use (first / stacked / distinct), video modes, Loom shots, "more like this",
+  claims, skin + branding changes, `--organize`, `--dedup` culls, `--task-id` recoveries, free-card
+  applies, day-of-use tracking, and new catalog SQL for `local_gens` / `gens_in_a_day` /
+  `distinct_keywords`. Feat events ride a new `/api/ach-event` beacon (Konami egg, the in-Loom
+  manual, narrator pokes) plus state sweeps (custom branding, the eclipse animation) and a
+  new-download **Time Capsule** check.
+- **Hidden feats + the narrator** — feats serve masked (`???`) until earned and the whole feats
+  section stays cloaked until the first one lands; **poke the narrator** (the chibi in the
+  Achievements header) until it snaps to earn *Triggered* and reveal the **Unleash the AI**
+  toggle that swaps every roast to its uncensored variant.
+- **Per-achievement badge + mascot art** — the 57 voted badges/mascots are served from
+  `branding/badges/<id>.png` and `branding/mascots/ach/<id>.png`; the unlock moment now presents
+  with **that achievement's own mascot** (falling back to the tier chibi), and the celebration
+  queue/summary-toast handles the first-load burst.
+
+### Changed
+- **Feat tier restyle: gunmetal + ruby** — the feat tier's pink is gone; feats now wear a
+  **gunmetal band** (`#8a93a2`) with a **ruby glow + ruby inner rim** (`#e0355e`) across the panel
+  cards, section header, tier pill, unlock moment (ruby-tinted scrim, ruby/gunmetal confetti), and
+  a new feat chime. New `--gunmetal` / `--ruby` design tokens.
 - **The Loom V2** — a dockable-panel storyboard workspace (Acts & Shots board, runtime reel,
   Cast / Legend / Footage panels, timeline preview, and per-shot Generate tabs with
   continuity / camera / lighting), behind a **non-breaking "V2 layout" toggle** wrapped in an error
