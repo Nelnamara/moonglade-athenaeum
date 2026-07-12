@@ -78,6 +78,35 @@ The ref-gen question is resolved as **Option A + bridge** (supersedes the open d
 
 ---
 
+## 2b. Achievements PHASE 2 — "the Trophy Hall" design pass (owner notes 2026-07-12 · NOTATED, not started)
+
+**Gate: owner is capturing WoW (+ other games') achievement-window screenshots as the design reference. The panel redesign builds AFTER those land. Design sources will be named per the checkpoint protocol.**
+
+**A. The panel → likely a dedicated PAGE (`/achievements`, "the Trophy Hall"; header pill hue `b-ach` already exists):**
+1. Wider layout; tiles become **mini-toasts** (same design language as the shipped toast v2: cap + band + body).
+2. **Right rail**: detail/tooltip pane + a mascot presence + rewards display (ties to C2/C3); room for future ideas.
+3. **Banner header** for the panel (the 201-banner pool; possibly where banner rewards display).
+4. **Feats more mysterious** — owner wants them NOT visible unless earned. Two modes on the table: (a) truly hidden (server omits; section shows count only), (b) mystery tiles obscured by owner-made mascot art. OWNER CALL with screenshots.
+5. **Collapsible category sections.**
+6. Page vs panel vs sliding drawer: leaning PAGE (57 tiles + rail + banner outgrow a modal; celebrations stay global). Final call after screenshots.
+
+**B. Toast refinements:**
+1. Badge bigger / "grows as it hits its home marker" — owner articulating the idea separately. AWAITING.
+2. **Real SFX** replacing the synth chimes — build a drop-in `branding/sfx/` loader (per-tier ogg, fail-soft to synth). Sources: Kenney (CC0), Sonniss GDC, freesound CC0, OpenGameArt; Pinokio lane = Stable Audio Open (local SFX gen) to scout on request. Owner has 1–2 WoW sounds (their call, local app).
+3. Legendary/Feat need MORE: ornate 9-slice frame art (owner-generated — SAME tech as the parked cast-bar frames), god-rays/vignette/particles.
+4. Mascot pop height: make seating ADAPTIVE per image (read natural size, seat ~75% above the toast band) instead of the global 158px headroom.
+5. Animated chibis: use **animated WebP or APNG** (NOT gif — 1-bit alpha ruins keyed edges); drop-in compatible with the current `<img>` slots, zero code change.
+6. **REGRESSION to fix:** the mockup-verbatim port dropped the screen-wide fanfare — restore stars + confetti at screen level for legendary + feat ("make the screen blow up a bit").
+
+**C. Rewards & skins:**
+1. Skins move out of the panel bottom → **Control Panel beside Branding** (cosmetics live together).
+2. Reward notice ON the toast (mini ribbon/sub-toast: "unlocks <skin>/banner") + rewards shown in the right rail on replay (speech bubble from the mascot presence).
+3. "Earned rewards" as its own display — shape TBD with the redesign.
+
+**Quick wins independent of screenshots (pending owner go):** B2 sfx loader · B6 fanfare restore · B4 adaptive mascot seating · C1 skins→Panel · C2 toast reward ribbon.
+
+---
+
 ## 3. Achievement ART — the STYLE ANCHOR + reconciled picks
 
 ### 3a. THE STYLE ANCHOR (the fix for the off-brand briefs)
