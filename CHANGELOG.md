@@ -23,8 +23,12 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
   boundary that falls back to the classic Loom. The **Video** and **Image** generate tabs are
   live — the Image tab generates a reference still for the selected shot (model picker +
   shot-seeded prompt over `/api/generate`, free-card aware) and **routes the result into the
-  shot's open/close frame or cast**, so an in-Loom gen directly feeds the video render. Edit /
-  Reference tabs still pending.
+  shot's open/close frame or cast**, so an in-Loom gen directly feeds the video render.
+- **Loom Generate: Edit + Reference tabs** — all four Generate tabs are now live. **Edit**
+  instruct-edits the shot's open frame (`/api/edit`, Edit Pro) and **Reference** composes a new
+  still from the cast's `@image` members (Reference Pro, up to 10 refs); both poll and **route the
+  result into the shot** exactly like the Image tab, share the balance line + friendly errors, and
+  ride a shared `runGen`/`routeGen` so the proven Image path stays untouched.
 - **Multiple storyboards in the Loom** — the Loom is no longer single-project. Each storyboard
   is saved under its own key in the existing server-side store (`storyboard:v2:proj:<id>`), with
   a **switcher in both the classic and V2 headers** (New · Open · Duplicate · Delete,

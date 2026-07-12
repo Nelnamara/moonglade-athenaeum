@@ -491,6 +491,9 @@ const V2_STYLES = `
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
+.lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
+.lv-refstrip{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 2px}
+.lv-refstrip img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--surface1)}
 .lv-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:8px;padding:8px;}
 .lv-imgresult>img{width:100%;border-radius:6px;display:block;}
 .lv-route{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:8px;}
@@ -581,7 +584,7 @@ function ProjectSwitcher({ api }) {
   );
 }
 
-function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick, genImgState, imgModel, setImgModel, genImage, routeImg, projectApi }) {
+function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
   const wrapRef = useRef(null);
   const [scaleV, setScaleV] = useState(1);
   const [tab, setTab] = useState("Video");
@@ -704,7 +707,61 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
         </div>
       );
     }
-    else tabBody = <div className="lv-ph">The <b>{tab}</b> tab is next on the bench. For now: <b>Image</b> generates a reference frame, <b>Video</b> renders the shot.</div>;
+    else if (tab === "Edit") {
+      const ge = genEditState[sel.c.id] || {};
+      const busyE = ge.phase === "submitting" || ge.phase === "running";
+      const src = sel.c.openFrame && sel.c.openFrame.mediaId;
+      tabBody = (
+        <div>
+          <label className="lv-lab">Source — this shot's open frame</label>
+          {src ? <img className="lv-editsrc" src={"/thumbs/" + src + ".jpg"} alt="source" />
+               : <div className="lv-ph">No open-frame image yet — route one from the <b>Image</b> tab, or pick it into the open frame.</div>}
+          <label className="lv-lab">Edit instruction</label>
+          <textarea className="lv-ta" value={sel.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
+            onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
+          <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(sel)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
+          {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
+          {ge.mid && (
+            <div className="lv-imgresult">
+              <img src={"/thumbs/" + ge.mid + ".jpg"} alt="result" />
+              <div className="lv-route"><span className="lv-dim">route &#8594;</span>
+                <button className={"lv-routebtn" + (ge.routed === "open" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, sel, "open")}>open frame</button>
+                <button className={"lv-routebtn" + (ge.routed === "close" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, sel, "close")}>close frame</button>
+                <button className={"lv-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, sel, "cast")}>cast</button>
+              </div>
+              {ge.routed && <div className="lv-ok2">&#10003; sent to {ge.routed}</div>}
+            </div>)}
+        </div>
+      );
+    }
+    else if (tab === "Reference") {
+      const gr = genRefState[sel.c.id] || {};
+      const busyR = gr.phase === "submitting" || gr.phase === "running";
+      const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId);
+      tabBody = (
+        <div>
+          <label className="lv-lab">References — cast @image members ({refs.length})</label>
+          {refs.length ? <div className="lv-refstrip">{refs.map((a) => (<img key={a.id} src={"/thumbs/" + a.mediaId + ".jpg"} title={a.tag} alt="" />))}</div>
+                       : <div className="lv-ph">No cast @image references with a gallery image yet — add some in <b>Cast &amp; assets</b>.</div>}
+          <label className="lv-lab">Prompt</label>
+          <textarea className="lv-ta" value={sel.c.refPrompt || ""} placeholder="compose a new still from the references…"
+            onChange={(ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))} />
+          <button className="lv-go" disabled={busyR || !refs.length} onClick={() => genRef(sel)}>{busyR ? (gr.msg || "generating…") : "✦ Generate from references"}</button>
+          {gr.phase === "error" && <div className="lv-gerr">{gr.msg}</div>}
+          {gr.mid && (
+            <div className="lv-imgresult">
+              <img src={"/thumbs/" + gr.mid + ".jpg"} alt="result" />
+              <div className="lv-route"><span className="lv-dim">route &#8594;</span>
+                <button className={"lv-routebtn" + (gr.routed === "open" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, sel, "open")}>open frame</button>
+                <button className={"lv-routebtn" + (gr.routed === "close" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, sel, "close")}>close frame</button>
+                <button className={"lv-routebtn" + (gr.routed === "cast" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, sel, "cast")}>cast</button>
+              </div>
+              {gr.routed && <div className="lv-ok2">&#10003; sent to {gr.routed}</div>}
+            </div>)}
+        </div>
+      );
+    }
+    else tabBody = <div className="lv-ph">The <b>{tab}</b> tab renders the shot on PixAI.</div>;
     gen = (
       <div className="lv-gen">
         <div className="lv-genhead">&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</div>
@@ -787,6 +844,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
   const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
+  const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
+  const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
   const [showHelp, setShowHelp] = useState(false);
   const [showGuide, setShowGuide] = useState(() => {
     try { return !localStorage.getItem("loom_guide_seen"); } catch (e) { return true; } });
@@ -1096,6 +1155,54 @@ export default function App() {
     else if (target === "cast") setAssets((a) => { const base = a.reduce((mx, x) => { const m = /@image(\d+)/.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0); return [...a, { id: uid(), name: c.title || "", kind: "image", tag: "@image" + (base + 1), thumbId: "", source: "", mediaId: mid, lock: false }]; });
     setGenImgState((s) => ({ ...s, [c.id]: { ...s[c.id], routed: target } }));
   };
+  // Generic gen runner for the Edit/Reference tabs — submit -> poll -> stash -> route.
+  // Parameterized on the state setter so the proven Image path above stays untouched.
+  const runGen = async (setState, cardId, endpoint, body, confirmMsg) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
+    const poll = (tid) => {
+      const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
+        if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
+          setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } })); }
+        else if (d.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "failed") } }));
+        else setTimeout(tick, 4000);
+      }).catch(() => setTimeout(tick, 5000));
+      setTimeout(tick, 2500);
+    };
+    try {
+      const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (d.error || !d.task_id) { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
+      setState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Generating…" } }));
+      poll(d.task_id);
+    } catch { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: "network error" } })); }
+  };
+  const routeGen = (state, setState, entry, target) => {
+    const c = entry.c; const gs = state[c.id]; if (!gs || !gs.mid) return;
+    const mid = gs.mid;
+    if (target === "open") setCard(entry.a.id, c.id, (x) => ({ ...x, openFrame: { ...x.openFrame, mediaId: mid, thumbId: "", source: "", desc: x.openFrame.desc || "generated in Loom" } }));
+    else if (target === "close") setCard(entry.a.id, c.id, (x) => ({ ...x, closeFrame: { ...x.closeFrame, mediaId: mid, thumbId: "", source: "", desc: x.closeFrame.desc || "generated in Loom" } }));
+    else if (target === "cast") setAssets((a) => { const base = a.reduce((mx, x) => { const m = /@image(\d+)/.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0); return [...a, { id: uid(), name: c.title || "", kind: "image", tag: "@image" + (base + 1), thumbId: "", source: "", mediaId: mid, lock: false }]; });
+    setState((s) => ({ ...s, [c.id]: { ...s[c.id], routed: target } }));
+  };
+  const genEdit = (entry) => {
+    const c = entry.c;
+    const src = c.openFrame && c.openFrame.mediaId;
+    const instruction = (c.editPrompt || "").trim();
+    if (!src) { setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "the open frame needs a gallery image first (route one from the Image tab, or pick it into the frame)" } })); return; }
+    if (!instruction) { setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "describe the edit" } })); return; }
+    runGen(setGenEditState, c.id, "/api/edit", { source: src, instruction, edit_model: "edit-pro" },
+      `Edit the open frame of ${c.title || "this shot"}?\n\nAn Edit-Pro card auto-applies; otherwise it spends credits.`);
+  };
+  const genRef = (entry) => {
+    const c = entry.c;
+    const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId).map((a) => a.mediaId);
+    const prompt = (c.refPrompt || "").trim();
+    if (!refs.length) { setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "add cast @image references (with gallery images) first" } })); return; }
+    if (!prompt) { setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter a prompt" } })); return; }
+    runGen(setGenRefState, c.id, "/api/edit", { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" },
+      `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?\n\nA Reference-Pro card auto-applies; otherwise it spends credits.`);
+  };
   const download = (text, name, type) => { const url = URL.createObjectURL(new Blob([text], { type }));
     const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
   const exportAll = () => { let out = `${project.name}\nRuntime target ${fmt(project.target)}\n`;
@@ -1178,6 +1285,7 @@ export default function App() {
         selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} genState={genState}
         thumbs={thumbs} openPick={openPick}
         genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg}
+        genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
         projectApi={projectApi} /></V2Boundary>}
       {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
       {exp && (
