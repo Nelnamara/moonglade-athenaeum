@@ -31,6 +31,10 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
   close-on-outside-click; Rename via the name field) and an active-project pointer. Your existing project is **migrated in automatically** as the first
   storyboard on load; the legacy single-key project is preserved untouched as a backup. Verified
   end-to-end on a copy of real store data (migrate → new → switch, content intact).
+- **Loom Generate: inline balance + friendly errors** — the Generate panel shows your live credit +
+  card balance (`/api/account`) with a "+N claimable" hint, and gen failures now map the raw PixAI
+  GraphQL error (e.g. `INSUFFICIENT_BALANCE`) to a human message ("out of balance — claim daily
+  rewards or pick a card-covered model") instead of dumping the raw payload.
 - **Achievements art & moments** — 11 achievement-badge prompts + the Loom mark, a
   mascot-per-state activity tracker, a rarity-scaled "Nel presents" unlock pop with real badge art,
   a spinning-Nel generation loader, and a Konami-code Starfall easter egg.
