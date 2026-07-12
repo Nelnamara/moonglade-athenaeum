@@ -76,6 +76,8 @@ Snapshot artifact of this map: see ledger entry ⬥ below. Descriptions best-eff
 ### Living tools & references (still useful to open)
 | Artifact | Purpose |
 |---|---|
+| [Moonglade — Art Worklist](https://claude.ai/code/artifact/13712183-1824-4f14-b9aa-9d9cc03fc20b) | The active find/generate art run (2026-07-12): 9 badge gaps w/ recorded picks + thumbnails, mystery-tile starters, 9-slice frame prompts (legendary/feat), SFX list |
+| [Doc Map & Artifact Ledger](https://claude.ai/code/artifact/6e855faa-caa1-41f5-9214-d63aec1bae52) | Browsable snapshot of this file |
 | [Moonglade Roster Board](https://claude.ai/code/artifact/31d6c68a-bd54-4824-886f-9017c6012912) | The 57-achievement 3-lane voting board (votes complete; the reference board) |
 | [ledger](https://claude.ai/code/artifact/d1ee39a1-db65-487b-a6ef-067ea6d1392d) | Per-achievement mascot+badge session ledger |
 | [Moonglade — Final Select](https://claude.ai/code/artifact/e7253fbf-98c7-40a9-9503-fa750ae7904c) | Final badge compare/select panel |
