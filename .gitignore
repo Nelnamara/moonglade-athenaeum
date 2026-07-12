@@ -43,3 +43,8 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ---- Stray artifact: a root file literally named HEAD (born from a `> HEAD` shell
+# redirect; content is just "OUTPUT"). Anchored to root so it never shadows .git/HEAD
+# or subdir HEADs. This neutralizes it no matter which machine regenerates it. ----
+/HEAD
