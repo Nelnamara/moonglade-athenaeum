@@ -489,6 +489,8 @@ const V2_STYLES = `
 .lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
+.lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
+.lv-balclaim{color:var(--accent);}
 .lv-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:8px;padding:8px;}
 .lv-imgresult>img{width:100%;border-radius:6px;display:block;}
 .lv-route{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:8px;}
@@ -540,6 +542,14 @@ function DockablePanel({ p, scale, onChange, onCollapse, children }) {
     </div>
   );
 }
+// Turn a raw gen error (esp. PixAI's GraphQL "insufficient balance") into a human message.
+function friendlyGenErr(raw) {
+  const s = String(raw || "");
+  if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
+    return "Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
+  return s || "generation failed";
+}
+
 // Shared storyboard switcher — used in BOTH the classic header and the V2 header.
 // All project state/actions arrive bundled as `api` (built once in App).
 function ProjectSwitcher({ api }) {
@@ -577,6 +587,8 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
   const [tab, setTab] = useState("Video");
   const [mq, setMq] = useState("");        // image-model search query
   const [mres, setMres] = useState([]);    // image-model search results
+  const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
+  useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
   useEffect(() => {
     const fit = () => { if (wrapRef.current) setScaleV(Math.min(1, wrapRef.current.clientWidth / 1498)); };
     fit(); window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit);
@@ -697,6 +709,10 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
       <div className="lv-gen">
         <div className="lv-genhead">&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</div>
         <div className="lv-tabs">{["Image", "Edit", "Reference", "Video"].map((t) => (<span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
+        {acct && (
+          <div className="lv-bal">&#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
+            {acct.claim_credits ? <span className="lv-balclaim"> &middot; +{acct.claim_credits} claimable</span> : null}</div>
+        )}
         {tabBody}
       </div>
     );
@@ -1029,7 +1045,7 @@ export default function App() {
         body: JSON.stringify({ mode: p.mode, prompt: p.prompt, images: p.images,
           video_refs: p.video_refs, duration: p.duration }) });
       const d = await r.json();
-      if (d.error || !d.task_id) { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error || "submit failed" } })); return; }
+      if (d.error || !d.task_id) { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       pollShot(c.id, d.task_id);
     } catch { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
   };
@@ -1041,7 +1057,7 @@ export default function App() {
         // capture the clip's REAL length so the reel reflects what was rendered, not planned
         setCardStatus(cardId, { status: "done", resultMid: mid,
           ...(d.duration ? { actualDur: d.duration } : {}) }); }
-      else if (d.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error || "failed" } }));
+      else if (d.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "failed") } }));
       else setTimeout(tick, 4000);
     }).catch(() => setTimeout(tick, 5000));
     setTimeout(tick, 2500);
@@ -1051,7 +1067,7 @@ export default function App() {
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
         setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } })); }
-      else if (d.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error || "failed" } }));
+      else if (d.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "failed") } }));
       else setTimeout(tick, 4000);
     }).catch(() => setTimeout(tick, 5000));
     setTimeout(tick, 2500);
@@ -1067,7 +1083,7 @@ export default function App() {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model_id: imgModel.model_id, prompt }) });
       const d = await r.json();
-      if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error || "submit failed" } })); return; }
+      if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating…" } }));
       pollImg(c.id, d.task_id);
     } catch { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
