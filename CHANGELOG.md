@@ -27,8 +27,8 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
   Reference tabs still pending.
 - **Multiple storyboards in the Loom** — the Loom is no longer single-project. Each storyboard
   is saved under its own key in the existing server-side store (`storyboard:v2:proj:<id>`), with
-  a header **switcher** (New · Open · Duplicate · Delete; Rename via the name field) and an
-  active-project pointer. Your existing project is **migrated in automatically** as the first
+  a **switcher in both the classic and V2 headers** (New · Open · Duplicate · Delete,
+  close-on-outside-click; Rename via the name field) and an active-project pointer. Your existing project is **migrated in automatically** as the first
   storyboard on load; the legacy single-key project is preserved untouched as a backup. Verified
   end-to-end on a copy of real store data (migrate → new → switch, content intact).
 - **Achievements art & moments** — 11 achievement-badge prompts + the Loom mark, a
