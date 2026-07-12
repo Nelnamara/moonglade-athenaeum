@@ -82,6 +82,8 @@ The ref-gen question is resolved as **Option A + bridge** (supersedes the open d
 
 **Gate: owner is capturing WoW (+ other games') achievement-window screenshots as the design reference. The panel redesign builds AFTER those land. Design sources will be named per the checkpoint protocol.**
 
+**A0. PREREQUISITE — badge serving cache:** the 57 badge masters total **321 MB** (2000² PNGs, vernissage alone 8.4 MB) served raw into 46px cards; a 57-tile Trophy Hall would pull all of it. Build a branding thumb cache (server auto-generates ~256px copies, masters stay the source of truth) BEFORE the Hall renders all 57. Also on record: 4 badge masters are sub-2000² (eclipse 416² · gallery-opening 597×504 · first-cull 1024² · starsmith 1024²) — owner may re-export for uniformity, not blocking; mascots/ach are native chibi-cutout sizes (~400–600px), fine at toast display sizes.
+
 **A. The panel → likely a dedicated PAGE (`/achievements`, "the Trophy Hall"; header pill hue `b-ach` already exists):**
 1. Wider layout; tiles become **mini-toasts** (same design language as the shipped toast v2: cap + band + body).
 2. **Right rail**: detail/tooltip pane + a mascot presence + rewards display (ties to C2/C3); room for future ideas.
