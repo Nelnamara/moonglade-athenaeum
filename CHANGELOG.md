@@ -40,6 +40,13 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
   `branding/badges/<id>.png` and `branding/mascots/ach/<id>.png`; the unlock moment now presents
   with **that achievement's own mascot** (falling back to the tier chibi), and the celebration
   queue/summary-toast handles the first-load burst.
+- **The unlock moment IS the locked toast v2 design** (artifact `335ef4e7`): the badge medallion
+  **sweeps right-to-left into a cap** with a ring pulse and glow-ding, the **mascot leaps from the
+  toast's top edge** over a tier glow, "New Achievement" eyebrow, the **roast rides a read-along
+  shimmer**, and a metallic rarity pill with a sheen — rarity-scaled hold + flash for
+  legendary/feat, click to dismiss, queued for bursts. The >3-unlock summary uses the same frame
+  (trophy in the well). Feat tier inside the toast = gunmetal band/pill + ruby glow + ruby inner
+  rim on the cap.
 
 ### Changed
 - **Feat tier restyle: gunmetal + ruby** — the feat tier's pink is gone; feats now wear a
