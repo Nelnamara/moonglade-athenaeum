@@ -34,6 +34,21 @@ mass commit. Follow this protocol:
    other machine, and that's correct. Don't recreate, commit, or complain about their absence.
 6. **Commits: no `Co-Authored-By: Claude` trailer** (standing preference).
 
+## Session checkpoint protocol (anti-compaction drift) — owner-agreed
+
+Long sessions get compacted; summaries lose design intent. Standing rule:
+
+1. **Checkpoint** after every shipped increment (and before starting any new build): update
+   the active roadmap doc (`docs/ROADMAP_LOOM_ACHIEVEMENTS.md` while it's current) +
+   `CHANGELOG.md [Unreleased]` + memory with what shipped, what's in flight, the decided
+   NEXT STEPS, and the locked design artifacts by id.
+2. **After any compaction**, the FIRST act is to re-read the roadmap doc and re-open every
+   artifact/doc the next task depends on — never build from the conversation summary alone.
+   Say what was re-read before proceeding.
+3. **Flair/user-visible features** name their locked design source (artifact id / doc
+   section) in the plan, and verification includes a "does it match what was decided" pass.
+   A "locked" marker in a doc is a deliverable, not background.
+
 ## Architecture / request flow
 
 1. **Listing query is an Apollo persisted query (GET).** The site sends `operationName` + a `sha256Hash`; the query body lives on PixAI's server. Constants (`OPERATION_NAME`, `PERSISTED_QUERY_HASH`, `U3T`, `USER_ID`) are captured from the browser and stored in git-ignored `config.json`.
