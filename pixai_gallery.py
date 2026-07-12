@@ -4569,48 +4569,87 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-toast .at-n{font-size:19px;font-weight:700;color:var(--text);margin-top:3px;}
   .ach-toast .at-n .ai{margin-right:7px;}
   .ach-toast .at-d{font-size:11.5px;color:var(--subtext);margin-top:4px;}
-  /* ---- the mid-screen achievement MOMENT (Nel presents; rarity-scaled) ---- */
-  .ach-moment{position:fixed;inset:0;z-index:430;display:flex;align-items:center;justify-content:center;}
-  .am-scrim{position:absolute;inset:0;background:radial-gradient(circle at 50% 48%,rgba(6,5,14,.45),rgba(6,5,14,.86));opacity:0;transition:opacity .4s;}
-  .ach-moment.go .am-scrim{opacity:1;}
-  .ach-moment.t-legendary .am-scrim{background:radial-gradient(circle at 50% 48%,rgba(40,28,6,.4),rgba(6,5,14,.92));}
-  .am-flash{position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 46%,rgba(255,241,205,.9),transparent 55%);}
-  .ach-moment.go .am-flash{animation:am-flash .8s ease-out;}
-  @keyframes am-flash{0%{opacity:0;transform:scale(.5);}16%{opacity:.9;}100%{opacity:0;transform:scale(1.5);}}
-  .am-stage{position:relative;z-index:2;text-align:center;display:flex;flex-direction:column;align-items:center;pointer-events:none;}
-  .am-badge{width:clamp(140px,22vw,220px);height:auto;transform:scale(.5);opacity:0;filter:drop-shadow(0 8px 26px rgba(0,0,0,.55));}
-  .ach-moment.go .am-badge{animation:am-pop .7s cubic-bezier(.18,.9,.2,1.15) .05s forwards;}
-  .ach-moment.leg .am-badge{width:clamp(180px,28vw,300px);}
-  @keyframes am-pop{0%{transform:scale(.5);opacity:0;}60%{transform:scale(1.1);opacity:1;}100%{transform:scale(1);opacity:1;}}
-  .am-nelwrap{position:absolute;right:4%;bottom:0;z-index:1;pointer-events:none;opacity:0;}
-  .am-nelwrap::before{content:"";position:absolute;left:50%;bottom:8%;width:128%;height:78%;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse at center,rgba(203,166,247,.55),rgba(226,181,61,.22) 42%,transparent 72%);filter:blur(16px);z-index:-1;}
-  .am-nel{max-height:min(46vh,340px);display:block;border:0;outline:0;background:none;filter:drop-shadow(0 8px 22px rgba(0,0,0,.55)) brightness(1.1) contrast(1.04);}
-  .ach-moment.go .am-nelwrap{animation:am-nel .6s cubic-bezier(.2,.8,.25,1) .15s forwards;}
-  @keyframes am-nel{from{opacity:0;transform:translateY(26px) scale(.92);}to{opacity:1;transform:none;}}
-  .am-eyebrow{font-size:12px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold);margin-top:16px;opacity:0;}
-  .am-name{font-size:30px;font-weight:700;color:#fff;line-height:1.1;opacity:0;text-wrap:balance;}
-  .am-desc{color:var(--subtext);font-size:14px;margin-top:5px;opacity:0;max-width:34ch;}
-  .am-tier{margin-top:10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;border:1px solid;border-radius:999px;padding:2px 11px;opacity:0;}
-  .ach-moment.go .am-eyebrow{animation:am-fade .5s ease .5s forwards;}
-  .ach-moment.go .am-name{animation:am-fade .5s ease .6s forwards;}
-  .ach-moment.go .am-desc{animation:am-fade .5s ease .72s forwards;}
-  .ach-moment.go .am-tier{animation:am-fade .5s ease .84s forwards;}
-  @keyframes am-fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
-  .ach-moment.out{opacity:0;transition:opacity .5s;}
-  .ach-moment.t-common .am-tier{color:#8fb3d9;border-color:#8fb3d9;}
-  .ach-moment.t-rare .am-tier{color:var(--blue,#8ab6f4);border-color:var(--blue,#8ab6f4);}
-  .ach-moment.t-epic .am-tier{color:var(--mauve);border-color:var(--mauve);}
-  .ach-moment.t-legendary .am-tier{color:var(--gold);border-color:var(--gold);}
-  /* feat moment: gunmetal band, ruby glow, ruby-tinted scrim -- no pink anywhere */
-  .ach-moment.t-feat .am-tier{color:var(--ruby);border-color:var(--gunmetal);
-    background:linear-gradient(180deg,rgba(138,147,162,.28),rgba(74,81,92,.28));
-    box-shadow:inset 0 0 0 1px rgba(224,53,94,.35),0 0 14px rgba(224,53,94,.35);}
-  .ach-moment.t-feat .am-scrim{background:radial-gradient(circle at 50% 48%,rgba(58,10,24,.5),rgba(6,5,14,.92));}
-  .ach-moment.t-feat .am-badge{filter:drop-shadow(0 8px 26px rgba(0,0,0,.55)) drop-shadow(0 0 20px rgba(224,53,94,.4));}
-  .ach-moment.t-feat .am-eyebrow{color:var(--ruby);}
-  .am-conf{position:absolute;top:-6%;width:7px;height:14px;border-radius:2px;z-index:1;pointer-events:none;animation:am-conffall linear forwards;}
-  @keyframes am-conffall{to{transform:translateY(112vh) rotate(720deg);opacity:.55;}}
-  @media (prefers-reduced-motion: reduce){ .ach-moment *{animation:none!important;} .am-badge,.am-nelwrap,.am-stage>*{opacity:1!important;transform:none!important;} }
+  /* ---- the achievement MOMENT: toast v2 (the LOCKED design, artifact 335ef4e7) --
+     badge medallion sweeps R->L into a cap, mascot leaps from the TOP edge,
+     "New Achievement" eyebrow, roast read-along shimmer, metallic rarity pill. ---- */
+  .ach-m2{position:fixed;inset:0;z-index:430;display:flex;align-items:center;justify-content:center;
+    background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;}
+  .ach-m2.go{opacity:1;}
+  .ach-m2.out{opacity:0;transition:opacity .5s;}
+  .ach-m2 .tstage{width:min(680px,94vw);}
+  .ach-m2 .tw{position:relative;padding-top:158px;cursor:pointer;}
+  .ach-m2 .t-common{--tc:#9fbad6;--tcl:#dbe8f5;--tcd:#5f7c9e;}
+  .ach-m2 .t-rare{--tc:#7fb0f4;--tcl:#d2e4ff;--tcd:#4a72b8;}
+  .ach-m2 .t-epic{--tc:#c69cff;--tcl:#ead9ff;--tcd:#8a5cc4;}
+  .ach-m2 .t-legendary{--tc:#e8cb7c;--tcl:#fff4d1;--tcd:#b3924a;}
+  /* feat = ruby glow driving --tc; the BAND + PILL go gunmetal below (no pink) */
+  .ach-m2 .t-feat{--tc:var(--ruby,#e0355e);--tcl:#f6b8c9;--tcd:var(--ruby-deep,#a11238);}
+  .ach-m2 .mglow{position:absolute;top:6px;right:0;width:250px;height:190px;z-index:1;pointer-events:none;
+    background:radial-gradient(ellipse at 60% 55%,var(--tc),transparent 66%);filter:blur(22px);opacity:0;}
+  .ach-m2 .tw.go .mglow{animation:m2gfade .7s ease 1.3s forwards;}
+  @keyframes m2gfade{to{opacity:.55;}}
+  .ach-m2 .mascot{position:absolute;top:0;right:26px;height:206px;z-index:2;transform-origin:bottom center;
+    filter:drop-shadow(0 12px 16px rgba(0,0,0,.55));opacity:0;transform:translateY(96px) scale(.9);}
+  .ach-m2 .tw.go .mascot{animation:m2pop .66s cubic-bezier(.16,.86,.28,1.32) 1.32s forwards;}
+  @keyframes m2pop{0%{opacity:0;transform:translateY(96px) scale(.9);}62%{opacity:1;transform:translateY(-10px) scale(1.03);}100%{opacity:1;transform:translateY(0) scale(1);}}
+  .ach-m2 .toast{position:relative;z-index:3;background:linear-gradient(180deg,rgba(42,36,63,.94),rgba(24,21,38,.97));
+    backdrop-filter:blur(8px);border:1px solid #37314f;border-radius:16px;padding:17px 20px 16px;
+    display:flex;gap:16px;align-items:center;box-shadow:0 24px 54px -18px rgba(0,0,0,.72);
+    opacity:0;transform:translateY(14px);}
+  .ach-m2 .tw.go .toast{animation:m2rise .5s ease forwards;}
+  @keyframes m2rise{to{opacity:1;transform:none;}}
+  .ach-m2 .toast::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;border-radius:16px 16px 0 0;
+    background:linear-gradient(90deg,transparent,var(--tc) 22%,var(--tcl) 50%,var(--tc) 78%,transparent);
+    box-shadow:0 0 20px 2px var(--tc);opacity:.95;}
+  /* feat band: GUNMETAL metal, still glowing ruby */
+  .ach-m2 .t-feat .toast::before{background:linear-gradient(90deg,transparent,var(--gunmetal,#8a93a2) 22%,#c7ccd6 50%,var(--gunmetal,#8a93a2) 78%,transparent);}
+  .ach-m2 .cap{position:relative;flex:0 0 auto;width:118px;align-self:stretch;display:flex;align-items:center;justify-content:center;
+    margin:-17px 16px -16px -20px;border-radius:16px 0 0 16px;border-right:1px solid rgba(255,255,255,.09);
+    background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(0,0,0,.14));box-shadow:inset 0 0 30px -6px var(--tc);}
+  /* feat cap: ruby INNER RIM on the medallion well */
+  .ach-m2 .t-feat .cap{box-shadow:inset 0 0 30px -6px var(--tc),inset 0 0 0 1px rgba(224,53,94,.4);}
+  .ach-m2 .badge{width:100px;height:100px;object-fit:contain;filter:drop-shadow(0 5px 12px rgba(0,0,0,.5));
+    opacity:0;transform:translateX(255px) scale(.82);}
+  .ach-m2 .badge.emoji{display:flex;align-items:center;justify-content:center;font-size:64px;line-height:1;}
+  .ach-m2 .tw.go .badge{animation:m2sweep .62s cubic-bezier(.15,.82,.28,1.24) .15s forwards, m2bding .5s ease .74s;}
+  @keyframes m2sweep{0%{opacity:0;transform:translateX(255px) scale(.82);}70%{opacity:1;transform:translateX(-11px) scale(1.06);}100%{opacity:1;transform:translateX(0) scale(1);}}
+  @keyframes m2bding{0%{filter:drop-shadow(0 5px 12px rgba(0,0,0,.5)) brightness(1);}
+    26%{filter:drop-shadow(0 0 14px var(--tc)) brightness(1.65);}100%{filter:drop-shadow(0 5px 12px rgba(0,0,0,.5)) brightness(1);}}
+  .ach-m2 .ring{position:absolute;width:96px;height:96px;border-radius:50%;border:3px solid var(--tc);opacity:0;transform:scale(.4);pointer-events:none;}
+  .ach-m2 .tw.go .ring{animation:m2ring .6s ease-out .76s;}
+  @keyframes m2ring{0%{opacity:0;transform:scale(.4);}22%{opacity:.85;}100%{opacity:0;transform:scale(1.75);}}
+  .ach-m2 .tbody{min-width:0;flex:1;}
+  .ach-m2 .tbody .u{font:700 10px/1 sans-serif;letter-spacing:.22em;text-transform:uppercase;color:var(--tc);opacity:0;}
+  .ach-m2 .tw.go .tbody .u{animation:m2fade .4s ease .86s forwards;}
+  .ach-m2 .tbody .n{font:700 22px/1.08 Georgia,serif;margin:3px 0 5px;opacity:0;color:var(--text);}
+  .ach-m2 .tw.go .tbody .n{animation:m2fade .42s ease .98s forwards;}
+  .ach-m2 .tbody .r{font-size:13px;line-height:1.5;font-style:italic;opacity:0;margin-top:1px;
+    background:linear-gradient(90deg,#b3a2dc 0%,#b3a2dc 43%,#efe6ff 50%,#b3a2dc 57%,#b3a2dc 100%);
+    background-size:235% 100%;background-position:118% 0;
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
+    filter:drop-shadow(0 0 5px rgba(198,180,255,.22));}
+  .ach-m2 .tw.go .tbody .r{animation:m2fade .46s ease 1.1s forwards, m2readalong 4.8s ease-in-out 1.6s infinite;}
+  @keyframes m2readalong{0%{background-position:118% 0;}52%{background-position:-18% 0;}100%{background-position:-18% 0;}}
+  @keyframes m2fade{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:none;}}
+  .ach-m2 .tier-pill{position:relative;display:inline-block;margin-top:8px;font:800 9px/1 sans-serif;letter-spacing:.09em;text-transform:uppercase;
+    color:#241c10;padding:3px 11px;border-radius:999px;overflow:hidden;
+    background:linear-gradient(180deg,var(--tcl),var(--tc) 46%,var(--tcd));border:1px solid var(--tcl);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 11px -1px var(--tc);text-shadow:0 1px 0 rgba(255,255,255,.35);opacity:0;}
+  /* feat pill: gunmetal METAL, ruby glow around it */
+  .ach-m2 .t-feat .tier-pill{background:linear-gradient(180deg,#c7ccd6,var(--gunmetal,#8a93a2) 46%,var(--gunmetal-deep,#4a515c));
+    border-color:#c7ccd6;color:#171a20;box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 11px -1px var(--tc);}
+  .ach-m2 .tw.go .tier-pill{animation:m2fade .4s ease 1.22s forwards;}
+  .ach-m2 .tier-pill::after{content:"";position:absolute;top:0;left:-60%;width:45%;height:100%;
+    background:linear-gradient(100deg,transparent,rgba(255,255,255,.75),transparent);transform:skewX(-18deg);}
+  .ach-m2 .tw.go .tier-pill::after{animation:m2sheen 2.6s ease-in-out 1.6s infinite;}
+  @keyframes m2sheen{0%{left:-60%;}30%{left:130%;}100%{left:130%;}}
+  .ach-m2 .flash{position:absolute;inset:0;border-radius:16px;pointer-events:none;opacity:0;
+    background:radial-gradient(circle at 74% -4%,rgba(255,242,206,.9),transparent 58%);}
+  .ach-m2 .t-feat .flash{background:radial-gradient(circle at 74% -4%,rgba(255,214,226,.9),transparent 58%);}
+  .ach-m2 .tw.go.t-legendary .flash,.ach-m2 .tw.go.t-feat .flash{animation:m2flash .9s ease-out 1.3s;}
+  @keyframes m2flash{0%{opacity:0;}20%{opacity:.92;}100%{opacity:0;}}
+  @media (prefers-reduced-motion: reduce){ .ach-m2 *{animation:none!important;}
+    .ach-m2 .toast,.ach-m2 .badge,.ach-m2 .mascot,.ach-m2 .mglow,.ach-m2 .tbody .u,.ach-m2 .tbody .n,.ach-m2 .tbody .r,.ach-m2 .tier-pill{opacity:1!important;transform:none!important;} }
 </style>
 <style>
   #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:240px;max-width:340px;max-height:300px;overflow-y:auto;padding:5px;}
@@ -4819,55 +4858,70 @@ var Ach = (function(){
       lo.connect(lg); lg.connect(_actx.destination); lg.gain.setValueAtTime(0.0001,t); lg.gain.linearRampToValueAtTime(0.28,t+0.02);
       lg.gain.exponentialRampToValueAtTime(0.0001,t+1.2); lo.start(t); lo.stop(t+1.3); }
   }
-  function _stars(parent,n){ for(var i=0;i<n;i++){ var s=document.createElement('div'); s.className='ee-star';
-      s.textContent=['\\u2726','\\u2727','\\u2b50'][i%3]; s.style.left=(Math.random()*100)+'vw'; s.style.color='var(--gold)';
-      s.style.fontSize=(12+Math.random()*20)+'px'; s.style.animationDuration=(2.4+Math.random()*2.4)+'s';
-      s.style.animationDelay=(Math.random()*1.2)+'s'; parent.appendChild(s); } }
-  function _conf(parent,n,tier){ var cols=(tier==='feat')
-      ? ['#e0355e','#8a93a2','#a11238','#d6d2e2','#4a515c']       // ruby + gunmetal
-      : ['#b692e6','#d4af37','#4fc99a','#c4a6f0','#ffffff'];
-    for(var i=0;i<n;i++){ var c=document.createElement('i'); c.className='am-conf'; c.style.background=cols[i%cols.length];
-      c.style.left=(Math.random()*100)+'%'; c.style.animationDuration=(1.8+Math.random()*1.6)+'s'; c.style.animationDelay=(Math.random()*0.5)+'s'; parent.appendChild(c); } }
+  /* Build one toast-v2 moment (the locked 335ef4e7 design). opts: eyebrow, line,
+     pill:false, badge:false (emoji instead), mascot:false. */
+  function _mkMoment(a, opts){
+    opts=opts||{};
+    var tier=a.tier||'common';
+    var m=document.createElement('div'); m.className='ach-m2';
+    var stage=document.createElement('div'); stage.className='tstage';
+    var tw=document.createElement('div'); tw.className='tw t-'+tier;
+    var line=(opts.line!=null)?opts.line
+      :((unleashed()&&a.roast_nsfw)?a.roast_nsfw:(a.roast||a.desc||''));
+    tw.innerHTML='<div class="mglow"></div>'
+      +'<div class="toast"><div class="cap"></div>'
+      +'<div class="tbody"><div class="u">'+esc(opts.eyebrow||'New Achievement')+'</div>'
+      +'<div class="n">'+esc(a.name)+'</div>'
+      +'<div class="r">'+esc(line)+'</div>'
+      +(opts.pill===false?'':'<span class="tier-pill">'+esc(tier)+'</span>')
+      +'</div><div class="flash"></div></div>';
+    stage.appendChild(tw); m.appendChild(stage);
+    var cap=tw.querySelector('.cap');
+    if(opts.badge===false){                       // summary: trophy in the well
+      var e2=document.createElement('div'); e2.className='badge emoji';
+      e2.textContent=a.icon||'🏆'; cap.appendChild(e2);
+    } else {                                       // the medallion sweeps R->L into the cap
+      var b=document.createElement('img'); b.className='badge';
+      b.onerror=function(){ var e=document.createElement('div'); e.className='badge emoji';
+        e.textContent=a.icon||'🏆';
+        if(this.parentNode){ this.parentNode.replaceChild(e,this); } };
+      b.src='/branding/badges/'+encodeURIComponent(a.id)+'.png';
+      cap.appendChild(b);
+      var ring=document.createElement('div'); ring.className='ring'; cap.appendChild(ring);
+    }
+    if(opts.mascot!==false){                       // the mascot leaps from the TOP edge
+      var mfall=(tier==='feat')?'legendary':tier;
+      var nel=document.createElement('img'); nel.className='mascot';
+      nel.onerror=function(){                      // own mascot -> tier chibi -> none
+        if(!this._f){ this._f=1; this.src='/branding/mascots/present_'+mfall+'.png'; }
+        else { this.remove(); } };
+      nel.src='/branding/mascots/ach/'+encodeURIComponent(a.id)+'.png';
+      tw.insertBefore(nel, tw.querySelector('.toast'));
+    }
+    return {m:m, tw:tw};
+  }
+  function _play(built, hold, after){
+    var m=built.m, tw=built.tw;
+    document.body.appendChild(m);
+    void m.offsetWidth; m.classList.add('go'); tw.classList.add('go');
+    var done=function(){ if(m._d)return; m._d=true; m.classList.add('out');
+      setTimeout(function(){ if(m.parentNode)m.remove(); if(after)after(); }, 500); };
+    m._t=setTimeout(done, hold);
+    m.addEventListener('click', function(){ clearTimeout(m._t); done(); });
+  }
   function celebrate(a){ if(a){ _q.push(a); if(!_playing) _next(); } }
   function _next(){
     if(!_q.length){ _playing=false; return; } _playing=true;
     var a=_q.shift(), tier=a.tier||'common';
-    var hold={common:3000,rare:3600,epic:4200,legendary:5200,feat:5200}[tier]||3200;
-    var big=(tier==='epic'||tier==='legendary'||tier==='feat'), leg=(tier==='legendary'||tier==='feat');
-    var m=document.createElement('div'); m.className='ach-moment t-'+tier+(leg?' leg':'');
-    // the presenter: this achievement's own mascot, falling back to the tier chibi
-    var mfall=(tier==='feat')?'legendary':tier;
-    m.innerHTML='<div class="am-scrim"></div>'+(leg?'<div class="am-flash"></div>':'')
-      +'<div class="am-stage"><img class="am-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'
-      +'<div class="am-eyebrow">Achievement Unlocked</div><div class="am-name">'+esc(a.name)+'</div>'
-      +'<div class="am-desc">'+esc(a.desc)+'</div><div class="am-tier">'+esc(tier)+'</div></div>'
-      +'<div class="am-nelwrap"><img class="am-nel"></div>';
-    var nel=m.querySelector('.am-nel');
-    if(nel){ nel.onerror=function(){          // this achievement's mascot -> tier chibi -> none
-        if(!this._f){ this._f=1; this.src='/branding/mascots/present_'+mfall+'.png'; }
-        else if(this.parentNode){ this.parentNode.remove(); } };
-      nel.src='/branding/mascots/ach/'+encodeURIComponent(a.id)+'.png'; }
-    document.body.appendChild(m);
-    _stars(m, leg?46:(big?34:22)); if(big) _conf(m, leg?90:44, tier); _chime(tier);
-    void m.offsetWidth; m.classList.add('go');
-    var done=function(){ if(m._d)return; m._d=true; m.classList.add('out');
-      setTimeout(function(){ if(m.parentNode)m.remove(); _next(); }, 500); };
-    m._t=setTimeout(done, hold);
-    m.addEventListener('click', function(){ clearTimeout(m._t); done(); });
+    var hold={common:4200,rare:4800,epic:5400,legendary:6400,feat:6400}[tier]||4600;
+    _chime(tier);
+    _play(_mkMoment(a,{}), hold, _next);
   }
-  function showToast(a){
-    var t=document.createElement('div'); t.className='ach-toast';
-    t.innerHTML='<div class="at-k">Achievement unlocked</div>'
-      +'<div class="at-n"><span class="ai">'+esc(a.icon)+'</span>'+esc(a.name)+'</div>'
-      +'<div class="at-d">'+esc(a.desc)+(a.skin?' &mdash; a new skin awaits.':'')+'</div>';
-    document.body.appendChild(t);
-    for(var i=0;i<26;i++){ var s=document.createElement('div'); s.className='ee-star';
-      s.textContent=['\\u2726','\\u2727','\\u2b50'][i%3];
-      s.style.left=(Math.random()*100)+'vw'; s.style.color='var(--gold)';
-      s.style.fontSize=(12+Math.random()*20)+'px';
-      s.style.animationDuration=(2.4+Math.random()*2.4)+'s';
-      s.style.animationDelay=(Math.random()*1.4)+'s'; document.body.appendChild(s); }
-    setTimeout(function(){ t.remove(); document.querySelectorAll('.ee-star').forEach(function(n){n.remove();}); }, 7000);
+  function showToast(a){    // the >3-unlock SUMMARY, in the same toast-v2 frame
+    _play(_mkMoment({name:a.name, tier:'legendary', icon:a.icon||'🏆', id:''},
+                    {badge:false, mascot:false, pill:false,
+                     eyebrow:'Achievement Unlocked', line:a.desc||''}),
+          6500, null);
   }
   // ---- the narrator: poke until it snaps (Triggered feat -> the Unleash toggle) ----
   var POKES=['The narrator ignores you.',
