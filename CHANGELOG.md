@@ -25,6 +25,12 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
   shot-seeded prompt over `/api/generate`, free-card aware) and **routes the result into the
   shot's open/close frame or cast**, so an in-Loom gen directly feeds the video render. Edit /
   Reference tabs still pending.
+- **Multiple storyboards in the Loom** — the Loom is no longer single-project. Each storyboard
+  is saved under its own key in the existing server-side store (`storyboard:v2:proj:<id>`), with
+  a header **switcher** (New · Open · Duplicate · Delete; Rename via the name field) and an
+  active-project pointer. Your existing project is **migrated in automatically** as the first
+  storyboard on load; the legacy single-key project is preserved untouched as a backup. Verified
+  end-to-end on a copy of real store data (migrate → new → switch, content intact).
 - **Achievements art & moments** — 11 achievement-badge prompts + the Loom mark, a
   mascot-per-state activity tracker, a rarity-scaled "Nel presents" unlock pop with real badge art,
   a spinning-Nel generation loader, and a Konami-code Starfall easter egg.

@@ -43,6 +43,22 @@ const STYLES = `
   font:inherit;font-size:14px;padding:2px 4px;min-width:60px;max-width:300px;flex:1 1 auto}
 .sb-projname:hover{border-bottom-color:var(--line2)}
 .sb-projname:focus{outline:none;border-bottom-color:var(--amber);color:var(--ink)}
+.sb-projwrap{position:relative;display:inline-flex}
+.sb-projbtn{background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--ink3);cursor:pointer;font-size:11px;line-height:1;padding:3px 6px;margin-left:2px}
+.sb-projbtn:hover{color:var(--ink);border-color:var(--line2)}
+.sb-projpop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;min-width:240px;max-width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.5);padding:8px;display:flex;flex-direction:column;gap:6px}
+.sb-projpoph{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);padding:2px 4px}
+.sb-projlist{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow:auto}
+.sb-projitem{display:flex;align-items:stretch;gap:4px;border-radius:7px}
+.sb-projitem.on{background:rgba(255,255,255,.06)}
+.sb-projopen{flex:1 1 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;background:transparent;border:none;cursor:pointer;text-align:left;padding:6px 8px;border-radius:7px;color:var(--ink)}
+.sb-projopen:hover{background:rgba(255,255,255,.05)}
+.sb-projopen b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px}
+.sb-projopen span{font-size:10px;color:var(--ink3)}
+.sb-projitem.on .sb-projopen b{color:var(--amber)}
+.sb-projx{background:transparent;border:none;color:var(--ink3);cursor:pointer;padding:0 8px;font-size:11px;border-radius:7px}
+.sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
+.sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
 .sb-stat{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
 .sb-stat b{font-family:ui-monospace,monospace;font-size:15px}
 .sb-stat span{font-size:10px;color:var(--ink3);letter-spacing:.08em;text-transform:uppercase}
@@ -278,11 +294,14 @@ const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
 
 /* ---------- storage ---------- */
 const hasStore = typeof window !== "undefined" && window.storage;
-const PKEY = "storyboard:v2:project";
+const PKEY = "storyboard:v2:project";        // legacy single-project key — migrated into PPRE on first load
+const PPRE = "storyboard:v2:proj:";          // one KV key per saved storyboard: PPRE + id
+const ACTIVE_KEY = "storyboard:v2:active";   // id of the storyboard currently open
 const TPRE = "storyboard:v2:thumb:";
 async function sGet(k) { try { const r = await window.storage.get(k); return r ? r.value : null; } catch { return null; } }
 async function sSet(k, v) { try { await window.storage.set(k, v, false); } catch (e) { console.error(e); } }
 async function sList(p) { try { const r = await window.storage.list(p, false); if (!r) return []; return (r.keys || []).map((k) => (typeof k === "string" ? k : k.key)); } catch { return []; } }
+async function sDel(k) { try { await window.storage.delete(k); } catch (e) { console.error(e); } }
 
 function fileToThumb(file, maxDim = 480, q = 0.72) {
   return new Promise((res, rej) => {
@@ -736,6 +755,9 @@ export default function App() {
   const castImported = useRef(false);
   const [v2, setV2] = useState(false);
   const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
+  const [activeId, setActiveId] = useState(null);   // id of the open storyboard (multi-project store)
+  const [projList, setProjList] = useState([]);     // [{id,name,shots}] for the switcher
+  const [projMenu, setProjMenu] = useState(false);  // switcher dropdown open?
   const [panelLayout, setPanelLayout] = useState(() => V2_DEFAULT.map((d) => ({ ...d })));
   const layoutTimer = useRef(null);
   useEffect(() => { (async () => {
@@ -748,18 +770,75 @@ export default function App() {
     return () => clearTimeout(layoutTimer.current);
   }, [panelLayout]);
 
+  // ---- Multi-project store: each storyboard lives at PPRE+id; ACTIVE_KEY names the open one.
+  //      The legacy single project (PKEY) is migrated in as the first storyboard on first load. ----
+  const readProjList = useCallback(async () => {
+    if (!hasStore) return [];
+    const keys = await sList(PPRE); const out = [];
+    for (const k of keys) {
+      try { const raw = await sGet(k); if (!raw) continue; const pr = JSON.parse(raw);
+        const shots = (pr.acts || []).reduce((n, a) => n + ((a.cards || []).length), 0);
+        out.push({ id: k.slice(PPRE.length), name: pr.name || "Untitled", shots });
+      } catch {}
+    }
+    out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    setProjList(out); return out;
+  }, []);
+  const flushSave = useCallback(async (id, p) => { if (hasStore && id && p) await sSet(PPRE + id, JSON.stringify(p)); }, []);
+
   useEffect(() => {
     (async () => {
-      let p = null;
-      if (hasStore) { const raw = await sGet(PKEY); if (raw) { try { p = JSON.parse(raw); } catch {} } }
-      setProject(p || seedProject());
-      if (hasStore) {
-        const keys = await sList(TPRE); const map = {};
-        for (const k of keys) { const v = await sGet(k); if (v) map[k.slice(TPRE.length)] = v; }
-        setThumbs(map);
+      if (!hasStore) { setProject(seedProject()); return; }
+      let keys = await sList(PPRE);
+      if (!keys.length) {                                  // one-time migration of the legacy single project
+        const legacy = await sGet(PKEY);
+        const id = uid();
+        await sSet(PPRE + id, legacy || JSON.stringify(seedProject()));
+        await sSet(ACTIVE_KEY, id);
+        keys = [PPRE + id];
       }
+      let aid = await sGet(ACTIVE_KEY);
+      if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+      let p = null; try { const raw = await sGet(PPRE + aid); if (raw) p = JSON.parse(raw); } catch {}
+      if (!p) { p = seedProject(); await sSet(PPRE + aid, JSON.stringify(p)); }
+      setActiveId(aid); setProject(p);
+      const tkeys = await sList(TPRE); const map = {};
+      for (const k of tkeys) { const v = await sGet(k); if (v) map[k.slice(TPRE.length)] = v; }
+      setThumbs(map);
+      readProjList();
     })();
   }, []);
+
+  const openProject = useCallback(async (id) => {
+    if (!id || id === activeId) { setProjMenu(false); return; }
+    await flushSave(activeId, project);
+    let p = null; try { const raw = await sGet(PPRE + id); if (raw) p = JSON.parse(raw); } catch {}
+    if (!p) return;
+    await sSet(ACTIVE_KEY, id);
+    setActiveId(id); setProject(p); setSelShot(null); setProjMenu(false);
+  }, [activeId, project, flushSave]);
+  const newProject = useCallback(async () => {
+    await flushSave(activeId, project);
+    const id = uid(); const p = seedProject(); p.name = "New storyboard";
+    await sSet(PPRE + id, JSON.stringify(p)); await sSet(ACTIVE_KEY, id);
+    setActiveId(id); setProject(p); setSelShot(null); setProjMenu(false); readProjList();
+  }, [activeId, project, flushSave, readProjList]);
+  const duplicateProject = useCallback(async () => {
+    await flushSave(activeId, project);
+    const id = uid(); const p = { ...project, name: (project.name || "Untitled") + " copy" };
+    await sSet(PPRE + id, JSON.stringify(p)); await sSet(ACTIVE_KEY, id);
+    setActiveId(id); setProject(p); setProjMenu(false); readProjList();
+  }, [activeId, project, flushSave, readProjList]);
+  const deleteProject = useCallback(async (id) => {
+    const list = await readProjList();
+    if (list.length <= 1) { window.alert("This is your only storyboard — make another before deleting this one."); return; }
+    const tgt = list.find((x) => x.id === id);
+    if (!window.confirm(`Delete "${(tgt && tgt.name) || "this storyboard"}"? This can't be undone.`)) return;
+    await sDel(PPRE + id);
+    if (id === activeId) { const next = list.find((x) => x.id !== id); if (next) await openProject(next.id); }
+    else readProjList();
+    setProjMenu(false);
+  }, [activeId, readProjList, openProject]);
 
   // Gallery -> cast: /loom?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
   // action) adds those images as reusable @image cast members, once, then clears the URL.
@@ -779,11 +858,11 @@ export default function App() {
   }, [project]);
 
   useEffect(() => {
-    if (!project || !hasStore) return;
+    if (!project || !hasStore || !activeId) return;
     setBusy(true); clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => { await sSet(PKEY, JSON.stringify(project)); setBusy(false); }, 600);
+    saveTimer.current = setTimeout(async () => { await sSet(PPRE + activeId, JSON.stringify(project)); setBusy(false); }, 600);
     return () => clearTimeout(saveTimer.current);
-  }, [project]);
+  }, [project, activeId]);
 
   const storeThumb = useCallback(async (file) => {
     const data = await fileToThumb(file); const id = uid();
@@ -1074,6 +1153,28 @@ export default function App() {
               style={{ textDecoration: "none", flexShrink: 0 }}>← Gallery</a>
             <h1 className="sb-disp"><span className="sb-clap">▰</span> The Loom</h1>
             <input className="sb-projname" value={project.name} onChange={(e) => setProject((p) => ({ ...p, name: e.target.value }))} aria-label="Project name" />
+            <div className="sb-projwrap">
+              <button className="sb-projbtn" onClick={() => { setProjMenu((v) => !v); readProjList(); }}
+                title="Switch, create, or manage storyboards" aria-label="Storyboards">&#9662;</button>
+              {projMenu && (
+                <div className="sb-projpop">
+                  <div className="sb-projpoph">Storyboards</div>
+                  <div className="sb-projlist">
+                    {projList.map((pr) => (
+                      <div key={pr.id} className={"sb-projitem" + (pr.id === activeId ? " on" : "")}>
+                        <button className="sb-projopen" onClick={() => openProject(pr.id)} title="Open this storyboard">
+                          <b>{pr.name || "Untitled"}</b><span>{pr.shots} shot{pr.shots === 1 ? "" : "s"}</span></button>
+                        <button className="sb-projx" title="Delete" onClick={() => deleteProject(pr.id)}>&#10005;</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="sb-projacts">
+                    <button className="sb-btn sm" onClick={newProject}>+ New</button>
+                    <button className="sb-btn sm ghost" onClick={duplicateProject}>&#10697; Duplicate</button>
+                  </div>
+                </div>
+              )}
+            </div>
             <button className="sb-btn" onClick={batchGenerate} disabled={batching || !entries.length}
               title="Generate every shot that isn't done yet, one after another">
               {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
