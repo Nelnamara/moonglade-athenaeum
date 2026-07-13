@@ -849,6 +849,19 @@ export default function App() {
   const [importOpen, setImportOpen] = useState(false);  // import-collection dialog
   const [batching, setBatching] = useState(false);
   const openPick = useCallback((cb, kind) => { setPickKind(kind || "image"); setPickCb(() => cb); }, []);
+  // Bridge the shared <mg-gallery-picker> web component to React (mirrors bindPicker):
+  // pickCb doesn't change while the picker is mounted (only open->close via setPickCb),
+  // so the closure captured on mount stays correct for the whole picking session.
+  const bindGalleryPicker = useCallback((el) => {
+    if (el && !el._mgBound) {
+      el._mgBound = true;
+      el.addEventListener("mg-pick", (e) => {
+        const cb = pickCb; setPickCb(null);
+        if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video);
+      });
+      el.addEventListener("mg-close", () => setPickCb(null));
+    }
+  }, [pickCb]);
   const saveTimer = useRef(null);
   const castImported = useRef(false);
   const [v2, setV2] = useState(false);
@@ -1300,8 +1313,7 @@ export default function App() {
             </>}
           </div>
         </div>)}
-      {pickCb && <GalleryPick defaultType={pickKind} onClose={() => setPickCb(null)}
-        onPick={(mid, thumb, isVideo) => { const cb = pickCb; setPickCb(null); cb(mid, thumb, isVideo); }} />}
+      {pickCb && <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind}></mg-gallery-picker>}
       {importOpen && <ImportCollection onClose={() => setImportOpen(false)} onImport={importCollection} />}
 
       <header className="sb-top">
@@ -1641,87 +1653,10 @@ function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpe
 }
 
 /* ===================== EDITOR ===================== */
-/* Pick-from-your-gallery, the good one: collection / type (image·video) / rating /
-   sort filters, all served by /api/gallery-images (SQL-filtered, so video paging
-   is correct). Picking a media_id references it directly at generate time -- no
-   re-upload. defaultType presets the type toggle for the calling context. */
-function GalleryPick({ onPick, onClose, defaultType }) {
-  // Browse/filter/page/scroll logic now lives in PickerCore (shared with the gallery's
-  // own Picker) -- this component keeps its own JSX/CSS and just drives the core.
-  const [q, setQ] = useState("");
-  const [imgs, setImgs] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [coll, setColl] = useState("");
-  const [type, setType] = useState(defaultType === "video" ? "video" : defaultType === "all" ? "" : "image");
-  const [rating, setRating] = useState(0);
-  const [sort, setSort] = useState("newest");
-  const [colls, setColls] = useState([]);
-  const coreRef = useRef(null);
-  const gridRef = useRef(null);
-  if (!coreRef.current) {
-    coreRef.current = PickerCore.create({
-      defaultFilters: { type, collection: coll, rating_min: rating, sort },
-      onResults: (im, meta) => {
-        setImgs((old) => (meta.append ? [...old, ...im] : im));
-        setTotal(meta.total);
-      },
-      onCollections: setColls,
-    });
-  }
-  useEffect(() => { coreRef.current.fetchCollections(); return () => coreRef.current.destroy(); }, []);   // eslint-disable-line
-  // Single combined debounce over every filter (q included) -- same 160ms + same
-  // "any of these changing restarts the timer" shape as before the refactor.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      coreRef.current.setFilters({ q, collection: coll, type, rating_min: rating, sort });
-    }, 160);
-    return () => clearTimeout(t);
-  }, [q, coll, type, rating, sort]);   // eslint-disable-line
-  // Auto-pull extra pages if the grid doesn't yet overflow -- closes a real gap the
-  // gallery's own Picker already guarded against (a narrow/tall Loom viewport could
-  // leave `more` stuck unreachable with no scrollbar to ever trigger infinite scroll).
-  useEffect(() => { if (gridRef.current) coreRef.current.maybeFillPage(gridRef.current); }, [imgs]);
-  useEffect(() => { const k = (e) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
-  const onScroll = (e) => coreRef.current.onScroll(e.currentTarget, 280);
-  return (
-    <div className="sb-pick-ov" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="sb-pick-box">
-        <div className="sb-pick-head">
-          <span className="sb-pick-t">Pick from your gallery</span>
-          <input className="sb-in" style={{ flex: 1, minWidth: 140 }} placeholder="Search your images…" value={q} autoFocus
-            onChange={(e) => setQ(e.target.value)} />
-          <button className="sb-pick-x" onClick={onClose} title="Close (Esc)">&#215;</button>
-        </div>
-        <div className="sb-pick-filters">
-          <select value={coll} onChange={(e) => setColl(e.target.value)} title="Collection">
-            <option value="">All collections</option>
-            {colls.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select value={type} onChange={(e) => setType(e.target.value)} title="Media type">
-            <option value="">Image + video</option><option value="image">Images</option><option value="video">Videos</option>
-          </select>
-          <select value={rating} onChange={(e) => setRating(+e.target.value)} title="Minimum rating">
-            <option value="0">Any rating</option><option value="3">3&#9733;+</option><option value="4">4&#9733;+</option><option value="5">5&#9733;</option>
-          </select>
-          <select value={sort} onChange={(e) => setSort(e.target.value)} title="Sort">
-            <option value="newest">Newest</option><option value="oldest">Oldest</option>
-          </select>
-          <span className="sb-pick-count">{(total || 0).toLocaleString()}</span>
-        </div>
-        <div className="sb-pick-grid" ref={gridRef} onScroll={onScroll}>
-          {imgs.map((m) => (
-            <div key={m.media_id} className="sb-pick-cell" title={m.prompt}
-              onClick={() => onPick(m.media_id, m.thumb, m.is_video === "1")}>
-              <img src={m.thumb} loading="lazy" decoding="async" alt="" />
-              {m.is_video === "1" && <span className="sb-pick-vid">&#9654;</span>}
-            </div>))}
-          {!imgs.length && <div className="sb-pick-empty">No matches for these filters.</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
+/* The gallery picker used to be a self-contained component (GalleryPick) here; it's now
+   the shared <mg-gallery-picker> web component (static/mg-gallery-picker.js, mounted via
+   bindGalleryPicker above) -- same PickerCore underneath, one renderer instead of two.
+   .sb-pick-* CSS below is still used by the Export dialog and ImportCollection. */
 
 /* Import-a-collection dialog: choose a gallery collection, pull its images in as
    reusable @image references (media_id kept -> free at generate). Reuses the same

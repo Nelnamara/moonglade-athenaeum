@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>&lt;mg-gallery-picker&gt; — standalone verification</title>
+<style>
+  :root{
+    --base:#0c0a1c; --mantle:#131024; --surface0:#211f3a; --surface1:#3a3460;
+    --overlay0:#6a6088; --text:#d6d2e2; --subtext:#9a93ab; --accent:#b692e6;
+  }
+  body{background:var(--base);color:var(--text);font:14px/1.5 system-ui,sans-serif;
+    margin:0;padding:26px;max-width:640px;}
+  h1{font-size:18px;margin:0 0 4px;}
+  p{color:var(--subtext);font-size:13px;}
+  code{background:var(--surface0);border:1px solid var(--surface1);border-radius:5px;padding:1px 6px;}
+  .row{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;}
+  button{background:var(--surface0);border:1px solid var(--surface1);color:var(--text);
+    border-radius:8px;padding:9px 14px;font:600 13px system-ui;cursor:pointer;}
+  button:hover{border-color:var(--accent);}
+  #out{margin-top:14px;font-family:ui-monospace,monospace;font-size:13px;color:var(--accent);
+    background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:10px 12px;
+    white-space:pre-wrap;}
+  ol{color:var(--subtext);font-size:13px;padding-left:20px;}
+</style>
+</head>
+<body>
+  <h1>&lt;mg-gallery-picker&gt; — standalone verification</h1>
+  <p>Second shared web component (Option-A cohesion, step 2). Serve the gallery, then open this at
+  <code>/static/mg-gallery-picker.html</code>. It mounts/unmounts on click (the same pattern the Loom
+  uses), calling <code>/api/gallery-images</code> + <code>/api/collections</code> via the already-shared
+  <code>PickerCore</code>.</p>
+
+  <div class="row">
+    <button id="btnPlain">Open (Loom parity — image only, no extras)</button>
+    <button id="btnFull">Open (all optional features on)</button>
+  </div>
+  <div id="out">picked: (none)</div>
+
+  <ol>
+    <li>Modal should open centered, autofocus the search box, and browse-on-open (no query needed).</li>
+    <li>Collection/rating/sort filters should work; typing should filter after a short pause.</li>
+    <li>Escape, the ✕, or clicking the dark backdrop should close it (fires <code>mg-close</code>).</li>
+    <li>Clicking an image tile fires <code>mg-pick</code> and closes it — check the line below updates.</li>
+    <li>"all optional features" adds Type + Source dropdowns, an Upload button, and a copy-prompt checkbox.</li>
+  </ol>
+
+  <script src="/static/picker-core.js"></script>
+  <script src="/static/mg-gallery-picker.js"></script>
+  <script>
+    function openPicker(extra) {
+      var el = document.createElement('mg-gallery-picker');
+      el.setAttribute('default-type', 'image');
+      if (extra) { el.setAttribute('show-type', ''); el.setAttribute('show-source', '');
+        el.setAttribute('show-upload', ''); el.setAttribute('show-copy-prompt', ''); }
+      el.addEventListener('mg-pick', function (e) {
+        document.getElementById('out').textContent = 'picked: ' + JSON.stringify(e.detail, null, 1);
+        el.remove();
+      });
+      el.addEventListener('mg-close', function () { el.remove(); });
+      document.body.appendChild(el);
+    }
+    document.getElementById('btnPlain').addEventListener('click', function () { openPicker(false); });
+    document.getElementById('btnFull').addEventListener('click', function () { openPicker(true); });
+  </script>
+</body>
+</html>
