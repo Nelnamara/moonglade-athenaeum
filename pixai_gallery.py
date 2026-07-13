@@ -4555,16 +4555,30 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="jobs-tray" aria-label="Job activity"></div>
 <div id="mg-toasts" aria-live="polite"></div>
 <div id="snip-menu"></div>
-<div id="ach-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
-  <div class="ach-panel" role="dialog" aria-label="Achievements and skins">
-    <button type="button" class="ach-x" onclick="Ach.close()" aria-label="Close">&times;</button>
-    <div class="ach-htitle">&#127942; Achievements<img class="ach-nar" id="ach-nar"
-      src="/branding/mascots/gen_nel.png" title="the narrator" alt="the narrator"
-      onclick="Ach.poke()" onerror="this.remove()"><span id="ach-unleash-slot"></span></div>
-    <div class="ach-hsub" id="ach-progress">&hellip;</div>
-    <div id="ach-grid" class="ach-grid"></div>
-    <div class="ach-skinhd">&#127912; Skins <span class="ach-skinnote">now live in the
-      <a href="/panel" style="color:var(--lavender);">Control Panel</a> beside Branding &middot; unlock more by earning epic achievements</span></div>
+<div id="ach-modal" class="ach-modal ach-hall" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
+  <div class="ach-panel" role="dialog" aria-label="Trophy Hall">
+    <div class="hall-head">
+      <div class="hall-title">&#127942; <b>Trophy Hall</b>
+        <img class="ach-nar" id="ach-nar" src="/branding/mascots/gen_nel.png" title="the narrator"
+          alt="the narrator" onclick="Ach.poke()" onerror="this.remove()"><span id="ach-unleash-slot"></span></div>
+      <div class="hall-score" id="ach-progress">&hellip;</div>
+      <input id="ach-search" class="hall-search" type="search" placeholder="Search&hellip;"
+        oninput="Ach.search(this.value)" aria-label="Search achievements">
+      <button type="button" class="ach-x" onclick="Ach.close()" aria-label="Close">&times;</button>
+    </div>
+    <div class="hall-tabs" id="ach-tabs">
+      <button type="button" class="htab on" data-tab="summary" onclick="Ach.tab('summary')">Summary</button>
+      <button type="button" class="htab" data-tab="all" onclick="Ach.tab('all')">All</button>
+      <button type="button" class="htab" data-tab="stats" onclick="Ach.tab('stats')">Statistics</button>
+    </div>
+    <div class="hall-body">
+      <div class="hall-main" id="ach-main">
+        <div id="ach-summary" class="hall-view"></div>
+        <div id="ach-grid" class="ach-grid hall-view" style="display:none"></div>
+        <div id="ach-stats" class="hall-view" style="display:none"></div>
+      </div>
+      <aside class="hall-rail" id="ach-rail"></aside>
+    </div>
   </div>
 </div>
 <div id="contest-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Contests.close()">
@@ -4667,6 +4681,84 @@ document.addEventListener('DOMContentLoaded', function(){
     margin-left:12px;cursor:pointer;user-select:none;border:1px solid var(--ruby-deep);
     border-radius:999px;padding:3px 10px;background:rgba(224,53,94,.08);}
   .ach-unleash input{accent-color:var(--ruby);}
+  /* ===================== TROPHY HALL — maximized overlay ===================== */
+  .ach-hall.open{align-items:center;padding:3vh 3vw;}
+  .ach-hall .ach-panel{width:96vw;max-width:1400px;height:94vh;max-height:960px;padding:0;
+    display:flex;flex-direction:column;overflow:hidden;transform-origin:top right;
+    animation:hall-in .28s cubic-bezier(.16,.84,.34,1.06);}
+  @keyframes hall-in{from{opacity:0;transform:scale(.93) translateY(-12px);}to{opacity:1;transform:none;}}
+  @media (prefers-reduced-motion: reduce){ .ach-hall .ach-panel{animation:none;} }
+  .ach-hall .ach-x{position:static;font-size:24px;flex:none;}
+  .hall-head{display:flex;align-items:center;gap:15px;padding:14px 20px;flex:none;
+    border-bottom:1px solid var(--surface1);background:linear-gradient(180deg,var(--surface0),transparent);}
+  .hall-title{font-size:20px;font-weight:700;color:var(--text);display:flex;align-items:center;white-space:nowrap;}
+  .hall-score{font-size:12.5px;color:var(--subtext);white-space:nowrap;}
+  .hall-score b{color:var(--lavender);font-variant-numeric:tabular-nums;}
+  .hall-search{margin-left:auto;background:var(--base);border:1px solid var(--surface1);border-radius:999px;
+    color:var(--text);font-size:12.5px;padding:7px 14px;width:200px;max-width:32vw;outline:none;}
+  .hall-search:focus{border-color:var(--lavender);}
+  .hall-tabs{display:flex;gap:4px;padding:8px 20px 0;border-bottom:1px solid var(--surface1);flex:none;}
+  .htab{background:none;border:none;color:var(--subtext);font-size:13px;font-weight:600;cursor:pointer;
+    padding:8px 14px;border-radius:8px 8px 0 0;border-bottom:2px solid transparent;}
+  .htab:hover{color:var(--text);}
+  .htab.on{color:var(--lavender);border-bottom-color:var(--lavender);background:rgba(182,146,230,.06);}
+  .hall-body{flex:1;display:grid;grid-template-columns:1fr 290px;min-height:0;}
+  .hall-main{overflow-y:auto;padding:18px 20px 28px;min-width:0;}
+  .hall-rail{overflow-y:auto;border-left:1px solid var(--surface1);background:rgba(0,0,0,.14);
+    padding:16px 15px 22px;display:flex;flex-direction:column;gap:18px;}
+  .ach-hall .ach-grid{margin-top:0;}
+  .hall-sec-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--overlay0);margin:0 0 11px;}
+  .hall-block{margin-bottom:26px;}
+  .hall-recent{display:flex;flex-direction:column;gap:8px;}
+  .hall-recent .rrow{display:flex;align-items:center;gap:11px;background:var(--surface0);border:1px solid var(--surface1);
+    border-left-width:3px;border-radius:10px;padding:9px 12px;}
+  .hall-recent .rrow img{width:38px;height:38px;object-fit:contain;flex:none;}
+  .hall-recent .rrow .rt{flex:1;min-width:0;}
+  .hall-recent .rrow .rn{font-size:13px;font-weight:650;color:var(--text);}
+  .hall-recent .rrow .rd{font-size:10.5px;color:var(--overlay0);margin-top:1px;}
+  .hall-recent .rrow .rp{font-size:11px;font-weight:700;color:var(--gold);font-variant-numeric:tabular-nums;flex:none;}
+  .hall-prog{display:flex;flex-direction:column;gap:11px;}
+  .prow{display:flex;align-items:center;gap:11px;font-size:12px;}
+  .prow .pl{width:132px;color:var(--subtext);flex:none;}
+  .prow .pbar{flex:1;height:8px;border-radius:5px;background:var(--surface1);overflow:hidden;}
+  .prow .pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--lavender),var(--emerald,#4fc99a));border-radius:5px;}
+  .prow .pv{width:66px;text-align:right;color:var(--overlay0);font-variant-numeric:tabular-nums;flex:none;}
+  .rail-h{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--overlay0);margin:0 0 9px;}
+  .rail-nav{display:flex;flex-direction:column;gap:2px;}
+  .rail-nav a{font-size:12.5px;color:var(--subtext);text-decoration:none;padding:6px 9px;border-radius:7px;display:flex;justify-content:space-between;cursor:pointer;}
+  .rail-nav a:hover{background:var(--surface0);color:var(--text);}
+  .rail-nav a .c{color:var(--overlay0);font-variant-numeric:tabular-nums;}
+  .rail-mascot{text-align:center;}
+  .rail-mascot img{width:118px;max-width:68%;filter:drop-shadow(0 6px 14px rgba(0,0,0,.5));}
+  .rail-mascot .bubble{font-size:11.5px;font-style:italic;color:var(--subtext);background:var(--surface0);
+    border:1px solid var(--surface1);border-radius:10px;padding:7px 11px;margin-top:4px;line-height:1.4;}
+  .rail-reach .rc{display:flex;align-items:center;gap:9px;margin-bottom:10px;}
+  .rail-reach .rc .ri{width:30px;height:30px;flex:none;display:flex;align-items:center;justify-content:center;font-size:17px;position:relative;filter:grayscale(1) brightness(.85);}
+  .rail-reach .rc .ri img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
+  .rail-reach .rc .rb{flex:1;min-width:0;}
+  .rail-reach .rc .rbn{font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .rail-reach .rc .rbar{height:5px;border-radius:3px;background:var(--surface1);margin-top:4px;overflow:hidden;}
+  .rail-reach .rc .rbar i{display:block;height:100%;background:var(--emerald,#4fc99a);}
+  .rail-reach .rc .rbp{font-size:9.5px;color:var(--overlay0);margin-top:2px;font-variant-numeric:tabular-nums;}
+  .rail-rewards{display:flex;flex-wrap:wrap;gap:7px;}
+  .rail-rewards .chip{font-size:11px;color:var(--gold);border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:999px;padding:4px 10px;}
+  .rail-foot{font-size:10.5px;color:var(--overlay0);line-height:1.5;border-top:1px solid var(--surface1);padding-top:12px;margin-top:auto;}
+  .rail-foot a{color:var(--lavender);}
+  .hall-stats{columns:2;column-gap:26px;}
+  .hall-stat{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--surface0);break-inside:avoid;}
+  .hall-stat .sl{color:var(--subtext);} .hall-stat .sv{color:var(--text);font-weight:650;font-variant-numeric:tabular-nums;}
+  .ach-hall .ach-sect{cursor:pointer;user-select:none;}
+  .ach-hall .ach-sect .chev{margin-left:auto;color:var(--overlay0);font-size:11px;transition:transform .15s;}
+  .ach-hall .ach-sect.collapsed .chev{transform:rotate(-90deg);}
+  .hall-empty{color:var(--overlay0);font-size:12px;font-style:italic;padding:8px 0;}
+  @media(max-width:860px){
+    .ach-hall.open{padding:0;}
+    .ach-hall .ach-panel{width:100vw;height:100vh;max-height:none;border-radius:0;}
+    .hall-body{grid-template-columns:1fr;}
+    .hall-rail{border-left:none;border-top:1px solid var(--surface1);}
+    .hall-search{width:120px;}
+    .hall-stats{columns:1;}
+  }
   .ach-bannerflag{font-size:10px;color:var(--gold);margin-top:4px;}
   .ach-skinhd{font-size:15px;font-weight:700;color:var(--text);margin-top:24px;}
   .ach-skinnote{font-size:10.5px;font-weight:400;color:var(--overlay0);margin-left:6px;}
@@ -4900,7 +4992,8 @@ var Ach = (function(){
     var masked=a.hidden&&!a.earned;
     var c=document.createElement('div');
     c.className='ach-card t-'+a.tier+(a.earned?' earned':' locked')+(masked?' masked':'');
-    var ico=a.earned?('<img class="ico-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon)):esc(a.icon);
+    c.setAttribute('data-q',(a.name+' '+a.desc+' '+a.tier).toLowerCase());
+    var ico=a.earned?('<img class="ico-badge" src="/badge-thumb/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon)):esc(a.icon);
     var body='<div class="ico">'+ico+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
       +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>'
       +(a.points?'<span class="ach-pts">'+a.points+' pts</span>':'');
@@ -4916,6 +5009,21 @@ var Ach = (function(){
       c.onclick=function(){ celebrate(a); }; }
     return c;
   }
+  var _cur='summary';
+  function tab(name){
+    _cur=name;
+    var map={summary:'ach-summary',all:'ach-grid',stats:'ach-stats'};
+    Object.keys(map).forEach(function(t){ var v=el(map[t]); if(v) v.style.display=(t===name)?'':'none'; });
+    var tabs=el('ach-tabs'); if(tabs) tabs.querySelectorAll('.htab').forEach(function(b){
+      b.classList.toggle('on', b.getAttribute('data-tab')===name); });
+  }
+  function jump(bucket){ tab('all'); var s=el('sect-'+bucket); if(s) s.scrollIntoView({behavior:'smooth',block:'start'}); }
+  function search(q){
+    q=(q||'').trim().toLowerCase(); if(q) tab('all');
+    var g=el('ach-grid'); if(!g) return;
+    g.querySelectorAll('.ach-card').forEach(function(cd){
+      var hay=cd.getAttribute('data-q')||''; cd.style.display=(!q||hay.indexOf(q)>=0)?'':'none'; });
+  }
   function render(d){
     var all=d.achievements||[];
     var feats=all.filter(function(a){return a.tier==='feat';});
@@ -4929,32 +5037,85 @@ var Ach = (function(){
       slot.innerHTML = d.unleash_available
         ? '<label class="ach-unleash"><input type="checkbox" '+(unleashed()?'checked':'')
           +' onchange="Ach.setUnleash(this.checked)">&#128520; Unleash the AI</label>' : ''; }
-    var g=el('ach-grid'); if(g){ g.innerHTML='';
-      BUCKETS.forEach(function(b){
-        if(b[0]==='feat' && !d.feats_revealed) return;   // the tab stays cloaked
-        var rows=all.filter(function(a){return (a.bucket||'ladder')===b[0];});
-        if(!rows.length) return;
-        var h=document.createElement('div'); h.className='ach-sect'+(b[0]==='feat'?' feats':'');
-        h.innerHTML=esc(b[1])+' <span class="cnt">'
-          +rows.filter(function(a){return a.earned;}).length+'/'+rows.length+'</span>';
-        g.appendChild(h);
-        rows.forEach(function(a){ g.appendChild(card(d,a)); });
-      });
-    }
-    var sk=el('ach-skins'); if(sk){ sk.innerHTML='';
-      (d.skins||[]).forEach(function(s){
-        var active=(s.id===d.skin);
-        var c=document.createElement('div');
-        c.className='ach-skin'+(active?' active':'')+(s.earned?'':' locked');
-        var sw=(SKIN_SW[s.id]||SKIN_SW.moonglade).map(function(h){return '<i style="background:'+h+'"></i>';}).join('');
-        c.innerHTML='<div class="sw">'+sw+'</div><div class="snm">'+esc(s.name)
-          +(active?' <span style="color:var(--accent)">&#10003;</span>':'')+'</div>'
-          +'<div class="sds">'+esc(s.desc)+'</div>'
-          +(s.earned?'':'<div class="slock">&#128274; locked</div>');
-        if(s.earned) c.onclick=function(){ pick(s.id); };
-        sk.appendChild(c);
-      });
-    }
+    renderSummary(d); renderGrid(d); renderStats(d); renderRail(d);
+    tab(_cur);
+  }
+  function renderGrid(d){
+    var all=d.achievements||[]; var g=el('ach-grid'); if(!g) return; g.innerHTML='';
+    BUCKETS.forEach(function(b){
+      if(b[0]==='feat' && !d.feats_revealed) return;                       // the feats stay cloaked
+      var rows=all.filter(function(a){return (a.bucket||'ladder')===b[0];});
+      if(!rows.length) return;
+      var h=document.createElement('div'); h.className='ach-sect'+(b[0]==='feat'?' feats':''); h.id='sect-'+b[0];
+      h.innerHTML=esc(b[1])+' <span class="cnt">'+rows.filter(function(a){return a.earned;}).length
+        +'/'+rows.length+'</span><span class="chev">&#9660;</span>';
+      h.onclick=function(){ h.classList.toggle('collapsed'); var hide=h.classList.contains('collapsed');
+        g.querySelectorAll('.card-'+b[0]).forEach(function(cd){ cd.style.display=hide?'none':''; }); };
+      g.appendChild(h);
+      rows.forEach(function(a){ var cd=card(d,a); cd.classList.add('card-'+b[0]); g.appendChild(cd); });
+    });
+  }
+  function renderSummary(d){
+    var host=el('ach-summary'); if(!host) return; var all=d.achievements||[]; var ea=d.earned_at||{};
+    var recent=all.filter(function(a){return a.earned && ea[a.id];})
+      .sort(function(x,y){return (ea[y.id]||'').localeCompare(ea[x.id]||'');}).slice(0,6);
+    var h='<div class="hall-block"><div class="hall-sec-h">Recent Achievements</div>';
+    if(recent.length){ h+='<div class="hall-recent">';
+      recent.forEach(function(a){ h+='<div class="rrow t-'+a.tier+'"><img src="/badge-thumb/'+esc(a.id)+'.png" onerror="this.remove()">'
+        +'<div class="rt"><div class="rn">'+esc(a.name)+'</div><div class="rd">'+esc(ea[a.id])+'</div></div>'
+        +(a.points?'<div class="rp">+'+a.points+'</div>':'')+'</div>'; });
+      h+='</div>';
+    } else { h+='<div class="hall-empty">Nothing yet &mdash; go make something.</div>'; }
+    h+='</div><div class="hall-block"><div class="hall-sec-h">Progress Overview</div><div class="hall-prog">';
+    function bar(label,e,t){ var pct=t?Math.round(e/t*100):0;
+      return '<div class="prow"><div class="pl">'+esc(label)+'</div><div class="pbar"><i style="width:'+pct+'%"></i></div><div class="pv">'+e+' / '+t+'</div></div>'; }
+    h+=bar('Overall', all.filter(function(a){return a.tier!=='feat'&&a.earned;}).length, all.filter(function(a){return a.tier!=='feat';}).length);
+    BUCKETS.forEach(function(b){
+      if(b[0]==='feat' && !d.feats_revealed) return;
+      var rows=all.filter(function(a){return (a.bucket||'ladder')===b[0];});
+      if(rows.length) h+=bar(b[1], rows.filter(function(a){return a.earned;}).length, rows.length);
+    });
+    h+='</div></div>'; host.innerHTML=h;
+  }
+  var STAT_LABELS={images:'Images archived',videos:'Videos',collections:'Collections',models:'Models used',
+    published:'Published works',tagged:'Tagged pieces',local_gens:'Local generations',gens_in_a_day:'Best day (generations)',
+    distinct_keywords:'Distinct keywords',edits:'Edits',enhances:'Enhances',uploads:'Uploads',culled:'Culled',
+    days_used:'Days visited',lora_used:'LoRA uses',lora_distinct:'Distinct LoRAs',storyboards:'Loom shots',
+    similar_uses:'More-like-this uses',claims:'Rewards claimed',free_cards_applied:'Free cards used'};
+  function renderStats(d){
+    var host=el('ach-stats'); if(!host) return; var m=d.metrics||{};
+    var keys=Object.keys(STAT_LABELS).filter(function(k){return (k in m) && m[k];});
+    if(!keys.length){ host.innerHTML='<div class="hall-empty">No stats yet.</div>'; return; }
+    var h='<div class="hall-stats">';
+    keys.forEach(function(k){ h+='<div class="hall-stat"><span class="sl">'+esc(STAT_LABELS[k])+'</span><span class="sv">'+fmt(m[k])+'</span></div>'; });
+    host.innerHTML=h+'</div>';
+  }
+  function renderRail(d){
+    var host=el('ach-rail'); if(!host) return; var all=d.achievements||[]; var h='';
+    h+='<div><div class="rail-h">Categories</div><div class="rail-nav">';
+    BUCKETS.forEach(function(b){
+      if(b[0]==='feat' && !d.feats_revealed) return;
+      var rows=all.filter(function(a){return (a.bucket||'ladder')===b[0];});
+      if(!rows.length) return;
+      h+='<a data-jump="'+b[0]+'">'+esc(b[1])+'<span class="c">'+rows.filter(function(a){return a.earned;}).length+'/'+rows.length+'</span></a>';
+    });
+    h+='</div></div>';
+    var reach=all.filter(function(a){return !a.earned && !a.hidden && a.threshold>0;})
+      .map(function(a){ return {a:a,pct:Math.min(99,Math.round(a.current/a.threshold*100))}; })
+      .sort(function(x,y){return y.pct-x.pct;}).slice(0,3);
+    h+='<div><div class="rail-h">Within Reach</div><div class="rail-reach">';
+    if(reach.length){ reach.forEach(function(r){ var a=r.a;
+      h+='<div class="rc"><div class="ri">'+esc(a.icon)+'</div><div class="rb"><div class="rbn">'+esc(a.name)+'</div>'
+        +'<div class="rbar"><i style="width:'+r.pct+'%"></i></div><div class="rbp">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div></div></div>'; });
+    } else { h+='<div class="hall-empty">All caught up.</div>'; }
+    h+='</div></div>';
+    var rewards=(d.skins||[]).filter(function(s){return s.earned && !s.free;});
+    if(rewards.length){ h+='<div><div class="rail-h">Rewards Earned</div><div class="rail-rewards">';
+      rewards.forEach(function(s){ h+='<span class="chip">&#127912; '+esc(s.name)+'</span>'; }); h+='</div></div>'; }
+    h+='<div class="rail-mascot"><img src="/branding/mascots/gen_nel.png" onerror="this.remove()"><div class="bubble">Keep going. The Void will not archive itself.</div></div>';
+    h+='<div class="rail-foot">Skins live in the <a href="/panel">Control Panel</a> now &middot; earn epics to unlock more.</div>';
+    host.innerHTML=h;
+    host.querySelectorAll('[data-jump]').forEach(function(el2){ el2.onclick=function(){ jump(el2.getAttribute('data-jump')); }; });
   }
   function skinName(d,id){ var s=(d.skins||[]).filter(function(x){return x.id===id;})[0]; return s?s.name:id; }
   function pick(id){
@@ -5143,7 +5304,7 @@ var Ach = (function(){
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
   // On load: mark-and-toast any freshly earned feats, and reconcile the active skin.
   document.addEventListener('DOMContentLoaded', function(){ load(true); });
-  return { open:open, close:close, poke:poke, setUnleash:setUnleash };
+  return { open:open, close:close, poke:poke, setUnleash:setUnleash, tab:tab, search:search };
 })();
 var Contests = (function(){
   function el(id){return document.getElementById(id);}
