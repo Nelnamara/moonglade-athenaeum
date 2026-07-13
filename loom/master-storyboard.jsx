@@ -479,13 +479,6 @@ const V2_STYLES = `
 .lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:2px 5px;cursor:pointer;}
 .lv-minichip:hover{border-color:var(--accent);color:var(--accent);}
 .lv-refline{font-size:10px;color:var(--subtext);margin:10px 0 4px;}
-.lv-modelrow{display:flex;gap:6px;align-items:center;margin-bottom:4px;}
-.lv-modelsel{font-size:11px;color:var(--accent);max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 0 auto;}
-.lv-modelres{max-height:150px;overflow:auto;border:1px solid var(--surface1);border-radius:7px;margin-bottom:6px;}
-.lv-modelopt{display:flex;gap:7px;align-items:center;padding:5px 7px;cursor:pointer;font-size:11px;}
-.lv-modelopt:hover{background:var(--surface1);}
-.lv-modelopt img{width:26px;height:26px;object-fit:cover;border-radius:4px;flex:0 0 auto;}
-.lv-modelopt .lv-mt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}

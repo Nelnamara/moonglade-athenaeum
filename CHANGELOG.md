@@ -15,6 +15,13 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **First shared web component — `<mg-model-picker>`** (the Option-A cohesion pilot from
+  `docs/SUITE_ARCHITECTURE_AUDIT.md`): a framework-neutral custom element (search + rich cover cards +
+  hover preview; emits a `mg-pick` event) loaded as a plain global like `picker-core.js` — **no build
+  step** — styled off the shared design tokens. The **Loom's Image tab** now mounts it (replacing a thin
+  type-in model search), so the Loom and gallery move toward **one picker instead of two**. Standalone
+  harness at `/static/mg-model-picker.html`. Owner-verified live. (Gallery adoption of the shared element
+  is a later step.)
 - **Per-criteria checklists on set masteries** — the Trophy Hall now shows *which* criterion is
   outstanding (✓/○) on the two closed-universe set achievements — **Full Toolbox** (edit / enhance /
   fix) and **Master of the Loom** (i2v / flf / r2v) — instead of a bare `2/3`. Open-ended
