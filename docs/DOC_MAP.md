@@ -26,6 +26,7 @@
 | `DOC_MAP.md` | This file | Active |
 | `CURATION_STANDARD.md` | ⭐ **House baseline for selection/vote artifacts** (owner-approved 2026-07-12): 10 non-negotiables, pick/rank/view/note model, build discipline | **Active standard** |
 | `curation_reference_builder.py` | Reference implementation of the Curation Standard — clone for any vote artifact (swap input/classify/picks, keep the rest) | Reference |
+| `ART_PICKS.md` | Owner's achievement-flair selections (2026-07-12) from the Curation Workspace — feat/bar decided, LEG needs edits, CLAIM open, + repurpose ideas | **Active (provisional picks)** |
 | `LOOM.md` | The Loom user manual | Active |
 | `MODEL_DECK.md` | 25-entry verified model research deck (badge/lifelike/local lanes) | Reference |
 | `ART_PROMPTS.md` | House badge style anchor (tiered-ring template, locked hexes) + brand prompt bank | Reference |
