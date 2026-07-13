@@ -50,6 +50,20 @@ bars, BAR9 is the pilot** (agreed).
    (owner has more).
 5. **Two redemption states** — a gift box (CLAIM122) for one, OTHER1 as a card-specific variant.
 
+## Alpha-tag pass (owner, 2026-07-13) — `Downloads\Alpha Tags 7.13`
+
+13 files, all clean cutouts: **BAR1–9** (the casting bars, keyed, 5250×3500), **FEAT13** +
+**FEAT_LateEntry** (new feat frames), **LEG6 / LEG7** (flipped + alpha, gold+emerald). Confirmed
+map: **BAR9 = moon-phase gauge (pilot)** · **BAR8 = galaxy-swirl (the "flip → toast" one)** ·
+BAR6/7 = square end-windows (spinning-Nel candidates).
+
+**Still lacking alpha among the picks (not in the folder):** `CLAIM16` (a gallery gem in the
+final-10 — flat) and `FEAT18` (feat fallback, green-screen). FEAT18 is likely superseded by
+FEAT13 / FEAT_LateEntry; the main feat pick **FEAT12 already has alpha**.
+
+**Final-push picker:** artifact `e3175c08` — final-10 CLAIM + the new alpha frames/bars scored
+against the prior picks, high-res. This closes the selection.
+
 ## ⏳ Open / next
 
 - **CLAIM top-3 is unresolved** — needs a focused narrowing pass (owner: "tough one").
