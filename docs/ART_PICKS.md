@@ -10,10 +10,10 @@
 
 | Slot | State | Winner(s) |
 |---|---|---|
-| **Feat frame** | 🟡 3-way in-action | **FEAT13** vs **FEAT_LateEntry** vs **FEAT12** — head-to-head in artifact `b45a39a3` |
+| **Feat frame** | ✅ **DECIDED** | **FEAT13** (ruby thorns) — the showstopper |
 | **Progress-bar pilot** | ✅ decided | **BAR9** (moon-phase gauge); BAR6 = 2nd trial |
 | **Mystery tiles** | ✅ aligned | square: SecretFeatSquareAlpha (MYS8) · wides → section banner |
-| **Legendary frame** | 🟡 2 finalists in-action | **LEG6** (gold+emerald) vs **LEG4** (radiant gold); BAR4 = wide-plaque experiment |
+| **Legendary frame** | ✅ **DECIDED** | **LEG6** (gold+emerald = house palette); BAR4 parked as a future test |
 | **Claim icon** | 🟡 5 finalists in-action | CLAIM1/2/3/8/9 in the credit chip; CLAIM7 = redeem — awaiting final pick |
 | **Other repurposes** | 💡 ideas | OTHER1 → card-specific redemption · OTHER15 → reserve badge (Krea2) |
 
@@ -100,11 +100,11 @@ Emerged from the "in action" review — owner course-corrected the surface, then
 4. **CLAIM7 gift box → the toast reward ribbon** (`🎁 Unlocks skin / ⚑ banner`) is its confirmed home.
 
 **Finalists in action (all 6 wrapping the identical toast):** artifact `3655423e`.
-- **Legendary:** LEG6 (gold+emerald) · LEG4 (gold+pearl) · BAR4 (silver celestial, candidate).
-  Owner leaning **LEG6**; tempted to **edit BAR4** to hug the toast — proposed direction: the
-  built-in **left gem window becomes the badge holder** (hugs naturally, uses the frame's own feature).
-- **Feat:** FEAT13 (ruby thorns) · FEAT_LateEntry (gunmetal+ruby crown) · FEAT12 (ruby+violet smoke).
-  Owner loves **all three** — undecided.
+- **Legendary → ✅ LEG6 WINS** (gold+emerald = the house palette). LEG4 + BAR4 set aside.
+  **BAR4 parked as a future test** — the edit to try: its built-in **left gem window becomes the
+  badge holder** (hugs the toast naturally, uses the frame's own feature). Not now.
+- **Feat → ✅ FEAT13 WINS** (ruby thorns — the showstopper; feats are 0-point pure bragging rights,
+  so the most dramatic frame fits). FEAT_LateEntry + FEAT12 set aside.
 
 Earlier "big artifact" (finalists in context, pre-course-correction): `b45a39a3`.
 
