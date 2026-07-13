@@ -69,7 +69,7 @@ Constraints: separate optional install (NOT bundled — heavy deps + weights); r
 
 ## Working agreement
 
-Owner will spend days note-taking on layout/function once features are in place — build features cheap-to-rearrange (flat CSS, no framework), expect furniture to move.
+Owner will spend days note-taking on layout/function once features are in place — build features cheap-to-rearrange (flat CSS; the real constraint is **no build step / framework-neutral** shared widgets, NOT "no framework" — the Loom is deliberately React), expect furniture to move. *(Clarified 2026-07-13 per `docs/SUITE_ARCHITECTURE_AUDIT.md`; the earlier "no framework" wording was never an enforced rule.)*
 
 ## v1.10.0 (2026-07-05) — consolidation release
 
