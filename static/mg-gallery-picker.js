@@ -117,6 +117,13 @@
         onError: function () { if (self._grid) self._grid.style.opacity = '1'; },
       });
       this._core.fetchCollections();
+      // PickerCore.create() does NOT auto-load (by design -- see picker-core.js) -- the
+      // original callers each triggered their own first search (the vanilla Picker's
+      // open() calls setFilters() directly; GalleryPick's mount-time useEffect scheduled
+      // one via its debounce). Do it immediately (not through _schedule()'s debounce) so
+      // browse-on-open paints right away instead of waiting 160ms for nothing to change.
+      this._core.setFilters({ q: this._q, collection: this._collection, type: this._type,
+                              source: this._source, rating_min: this._rating, sort: this._sort });
 
       this._q_el.addEventListener('input', function () { self._q = self._q_el.value; self._schedule(); });
       [this._collEl, this._typeEl, this._sourceEl, this._ratingEl, this._sortEl].forEach(function (el) {
