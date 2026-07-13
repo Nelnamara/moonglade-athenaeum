@@ -4709,6 +4709,17 @@ document.addEventListener('DOMContentLoaded', function(){
   @keyframes m2flash{0%{opacity:0;}20%{opacity:.92;}100%{opacity:0;}}
   @media (prefers-reduced-motion: reduce){ .ach-m2 *{animation:none!important;}
     .ach-m2 .toast,.ach-m2 .badge,.ach-m2 .mascot,.ach-m2 .mglow,.ach-m2 .tbody .u,.ach-m2 .tbody .n,.ach-m2 .tbody .r,.ach-m2 .tier-pill{opacity:1!important;transform:none!important;} }
+  /* ---- tier flair frame: 9-slice border-image WRAPS the toast (legendary + feat only) ---- */
+  .ach-m2 .tframe{position:relative;z-index:3;}
+  .ach-m2 .t-legendary .tframe,.ach-m2 .t-feat .tframe{border-style:solid;border-image-repeat:stretch;opacity:0;transform:translateY(14px);}
+  .ach-m2 .tw.go.t-legendary .tframe,.ach-m2 .tw.go.t-feat .tframe{animation:m2rise .5s ease forwards;}
+  .ach-m2 .t-legendary .tframe{border-width:46px 44px;border-image-source:url(/branding/frames/legendary.png);border-image-slice:16.8% 13.3% 16.8% 13%;border-image-outset:6px;}
+  .ach-m2 .t-feat .tframe{border-width:46px 38px;border-image-source:url(/branding/frames/feat.png);border-image-slice:15.8% 10.3% 16.8% 10%;border-image-outset:6px;}
+  /* frame carries the edge + entrance: drop the toast's own border/shadow, keep it static-visible inside */
+  .ach-m2 .t-legendary .tframe .toast,.ach-m2 .t-feat .tframe .toast{border-color:transparent;box-shadow:none;opacity:1;transform:none;animation:none;}
+  /* CLAIM7 gift box in the reward ribbon (replaces the old emoji) */
+  .ach-m2 .rwd .giftbox{height:15px;width:15px;object-fit:contain;vertical-align:-3px;margin-right:5px;}
+  @media (prefers-reduced-motion: reduce){ .ach-m2 .tframe{opacity:1!important;transform:none!important;} }
 </style>
 <style>
   #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:240px;max-width:340px;max-height:300px;overflow-y:auto;padding:5px;}
@@ -4938,17 +4949,20 @@ var Ach = (function(){
     var tw=document.createElement('div'); tw.className='tw t-'+tier;
     var line=(opts.line!=null)?opts.line
       :((unleashed()&&a.roast_nsfw)?a.roast_nsfw:(a.roast||a.desc||''));
-    var rwd='';                                  // reward ribbon (emoji for now)
-    if(a.skin) rwd='🎁 Unlocks skin: '+skinName(data||{skins:[]}, a.skin);
-    else if(a.banner_reward) rwd='⚑ Unlocks a banner';
-    tw.innerHTML='<div class="mglow"></div>'
-      +'<div class="toast"><div class="cap"></div>'
+    var rwd='';                                  // reward ribbon (gift box + text)
+    if(a.skin) rwd='Unlocks skin: '+skinName(data||{skins:[]}, a.skin);
+    else if(a.banner_reward) rwd='Unlocks a banner';
+    // tier flair frame (9-slice border-image) wraps the toast for the top tiers only;
+    // add epic:1 to frame epic too. Summary toasts (opts.badge===false) never get a frame.
+    var framed=(!!({legendary:1,feat:1}[tier]))&&opts.badge!==false;
+    var toastHTML='<div class="toast"><div class="cap"></div>'
       +'<div class="tbody"><div class="u">'+esc(opts.eyebrow||'New Achievement')+'</div>'
       +'<div class="n">'+esc(a.name)+'</div>'
       +'<div class="r">'+esc(line)+'</div>'
       +(opts.pill===false?'':'<span class="tier-pill">'+esc(tier)+'</span>')
-      +(rwd?'<span class="rwd">'+esc(rwd)+'</span>':'')
+      +(rwd?'<span class="rwd"><img class="giftbox" src="/branding/rewards/gift.png" onerror="this.remove()">'+esc(rwd)+'</span>':'')
       +'</div><div class="flash"></div></div>';
+    tw.innerHTML='<div class="mglow"></div>'+(framed?'<div class="tframe">'+toastHTML+'</div>':toastHTML);
     stage.appendChild(tw); m.appendChild(stage);
     var cap=tw.querySelector('.cap');
     if(opts.badge===false){                       // summary: trophy in the well
@@ -4975,7 +4989,7 @@ var Ach = (function(){
       nel.onerror=function(){ ci++; if(ci<chain.length){ this.src=chain[ci]; } else { this.remove(); } };
       nel.onload=function(){ try{ _seatMascot(this); }catch(e){} };
       nel.src=chain[0];
-      tw.insertBefore(nel, tw.querySelector('.toast'));
+      tw.insertBefore(nel, tw.querySelector('.tframe')||tw.querySelector('.toast'));
     }
     return {m:m, tw:tw};
   }

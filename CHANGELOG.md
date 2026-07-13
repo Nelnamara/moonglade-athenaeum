@@ -17,6 +17,11 @@ git tags. Full prose notes for tagged versions live on
 _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the full list._
 
 ### Added
+- **Tier flair frames on the unlock toast** — legendary + feat achievements now fire their unlock
+  moment wrapped in an ornate **9-slice `border-image` frame** (LEG6 gold+emerald / FEAT13 ruby)
+  that grows with the toast so the roast never overflows; common/rare/epic stay clean chrome (epic
+  is a one-line flip). The reward ribbon's placeholder emoji is replaced by the **gift-box icon**.
+  Frame + gift assets are machine-local in `branding/frames/` + `branding/rewards/`.
 - **The full 57-achievement roster is live** — the achievement system grew from 11 to all **57**
   designed achievements (29 ladder rungs across 10 tracks · 9 milestones · 8 masteries · 11 hidden
   **feats**), generated verbatim from the canonical `docs/achievements_roster_57.json` with every
