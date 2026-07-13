@@ -24,6 +24,8 @@
 | `ROADMAP.md` | Far-horizon epics only (the Foundry, Provider Deck) | Active, rarely touched |
 | `achievements_roster_57.json` | Canonical 57-achievement roster (names/tiers/triggers/roasts) — code generates from this. NOTE: three threshold fields are stale (code corrected marathon→100, read-the-manual→1, triggered→5 per trigger text) | **Canonical data** |
 | `DOC_MAP.md` | This file | Active |
+| `CURATION_STANDARD.md` | ⭐ **House baseline for selection/vote artifacts** (owner-approved 2026-07-12): 10 non-negotiables, pick/rank/view/note model, build discipline | **Active standard** |
+| `curation_reference_builder.py` | Reference implementation of the Curation Standard — clone for any vote artifact (swap input/classify/picks, keep the rest) | Reference |
 | `LOOM.md` | The Loom user manual | Active |
 | `MODEL_DECK.md` | 25-entry verified model research deck (badge/lifelike/local lanes) | Reference |
 | `ART_PROMPTS.md` | House badge style anchor (tiered-ring template, locked hexes) + brand prompt bank | Reference |
@@ -76,6 +78,8 @@ Snapshot artifact of this map: see ledger entry ⬥ below. Descriptions best-eff
 ### Living tools & references (still useful to open)
 | Artifact | Purpose |
 |---|---|
+| [The Curation Standard](https://claude.ai/code/artifact/6d6b9d2d-281e-4fd5-b1dc-7a11c599950e) | ⭐ The browsable house standard for vote/selection artifacts (mirrors `docs/CURATION_STANDARD.md`) |
+| [Curation Workspace](https://claude.ai/code/artifact/ef9f5853-5c8f-40eb-87f2-8cf123f0b6ef) | The live reference example — 227 art candidates, lightbox + pick + rank + tray + export |
 | [Moonglade — Art Worklist](https://claude.ai/code/artifact/13712183-1824-4f14-b9aa-9d9cc03fc20b) | The active find/generate art run (2026-07-12): 9 badge gaps w/ recorded picks + thumbnails, mystery-tile starters, 9-slice frame prompts (legendary/feat), SFX list |
 | [Art Haul — 2026-07-12](https://claude.ai/code/artifact/f80347bf-8c54-4bd1-8435-003ce276481b) | First-pass parse of the frame/icon/mystery-tile production run (155 files); superseded by the Selection picker below for actual choosing |
 | [Selection v3 — Claim Icons, Frames, Mystery Tiles](https://claude.ai/code/artifact/812e82b4-ace3-43af-aba8-cc2de8c065ec) | **Current** — interactive 5-star ranked picker (CLAIM/LEG/FEAT/MYS ids), notes fields, Claude's grounded technical+thematic picks per section. Supersedes v2 (4c973a91, wrong category split + wrong mystery-tile treatment) |
