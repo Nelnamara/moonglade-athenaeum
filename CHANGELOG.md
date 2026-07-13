@@ -22,6 +22,12 @@ _On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the fu
   that grows with the toast so the roast never overflows; common/rare/epic stay clean chrome (epic
   is a one-line flip). The reward ribbon's placeholder emoji is replaced by the **gift-box icon**.
   Frame + gift assets are machine-local in `branding/frames/` + `branding/rewards/`.
+- **Achievement points** — every achievement carries a **rung-scaled score** (`tier base +
+  5×(rung−1)`; common 5 / rare 10 / epic 25 / legendary 50; **feats 0**, so the total never hints
+  at a hidden feat). Points show on the unlock toast, on each grid tile, and as a Warband-style
+  running total in the panel header. Rung is *derived* from the roster (ladder families grouped by
+  metric, ordered by threshold), reproducing the Archive ladder exactly (5 / 15 / 35 / 65 / 70);
+  **960 points possible**.
 - **The full 57-achievement roster is live** — the achievement system grew from 11 to all **57**
   designed achievements (29 ladder rungs across 10 tracks · 9 milestones · 8 masteries · 11 hidden
   **feats**), generated verbatim from the canonical `docs/achievements_roster_57.json` with every

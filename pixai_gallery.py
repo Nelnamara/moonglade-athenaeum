@@ -1403,6 +1403,39 @@ def achievement_metrics(db_path):
     return m
 
 
+_TIER_POINTS = {"common": 5, "rare": 10, "epic": 25, "legendary": 50, "feat": 0}
+
+
+def _build_ach_rung(roster):
+    """Rung = the ordinal step within a ladder family. A ladder family = the
+    bucket=='ladder' achievements that share a metric, ordered by threshold;
+    non-ladder (milestone/mastery) achievements are rung 1. Derived (not a
+    hand-kept field) so it reproduces the owner's Archive ladder exactly
+    (5/15/35/65/70). Shared metrics stay safe: milestone/feat entries that reuse
+    a metric are NOT bucket=='ladder', so they never join the family."""
+    fam = {}
+    for a in roster:
+        if a.get("bucket") == "ladder":
+            fam.setdefault(a["metric"], []).append(a)
+    rung = {}
+    for members in fam.values():
+        for i, a in enumerate(sorted(members, key=lambda x: x["threshold"]), 1):
+            rung[a["id"]] = i
+    return rung
+
+
+_ACH_RUNG = _build_ach_rung(ACHIEVEMENTS)
+
+
+def achievement_points(a):
+    """Rung-scaled score for one achievement: tier base + 5*(rung-1). Feats score
+    0 by design (pure bragging-rights flair), so the points total never reveals a
+    hidden feat."""
+    if a.get("tier") == "feat":
+        return 0
+    return _TIER_POINTS.get(a.get("tier"), 0) + 5 * (_ACH_RUNG.get(a["id"], 1) - 1)
+
+
 def compute_achievements(metrics, seen=()):
     """Pure: given the metric bundle + the set of already-seen achievement ids,
     return {achievements, skins, newly}. An achievement is *earned* when its metric
@@ -1427,7 +1460,7 @@ def compute_achievements(metrics, seen=()):
             "tier": a["tier"], "metric": a["metric"], "threshold": a["threshold"],
             "current": cur, "earned": earned, "skin": a.get("skin", ""),
             "bucket": a.get("bucket", "ladder"), "hidden": bool(a.get("hidden")),
-            "banner_reward": bool(a.get("banner_reward")),
+            "banner_reward": bool(a.get("banner_reward")), "points": achievement_points(a),
             "roast": a.get("roast", ""), "roast_nsfw": a.get("roast_nsfw", ""),
         })
     by_id = {x["id"]: x for x in achs}
@@ -1448,7 +1481,10 @@ def compute_achievements(metrics, seen=()):
               "earned": bool(s.get("free")) or s["id"] in earned_skins}
              for s in SKINS]
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
-    return {"achievements": achs, "skins": skins, "newly": newly}
+    earned_points = sum(x["points"] for x in achs if x["earned"])
+    possible_points = sum(x["points"] for x in achs)
+    return {"achievements": achs, "skins": skins, "newly": newly,
+            "earned_points": earned_points, "possible_points": possible_points}
 
 
 def _ach_state_path(out_dir):
@@ -4719,6 +4755,12 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-m2 .t-legendary .tframe .toast,.ach-m2 .t-feat .tframe .toast{border-color:transparent;box-shadow:none;opacity:1;transform:none;animation:none;}
   /* CLAIM7 gift box in the reward ribbon (replaces the old emoji) */
   .ach-m2 .rwd .giftbox{height:15px;width:15px;object-fit:contain;vertical-align:-3px;margin-right:5px;}
+  /* rung-scaled points chip on the toast (next to the tier pill; feats score 0 -> no chip) */
+  .ach-m2 .pts-pill{display:inline-block;margin:8px 0 0 8px;font:800 9px/1 sans-serif;letter-spacing:.06em;color:var(--gold,#e0c268);border:1px solid #6b5330;background:rgba(230,200,120,.12);border-radius:999px;padding:3px 9px;vertical-align:middle;opacity:0;}
+  .ach-m2 .tw.go .pts-pill{animation:m2fade .4s ease 1.26s forwards;}
+  @media (prefers-reduced-motion: reduce){ .ach-m2 .pts-pill{opacity:1!important;} }
+  /* points chip on the achievement-grid tile */
+  .ach-card .ach-pts{display:inline-block;margin-left:6px;font:700 10px/1 sans-serif;color:var(--gold,#e0c268);border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:6px;padding:2px 6px;vertical-align:middle;}
   @media (prefers-reduced-motion: reduce){ .ach-m2 .tframe{opacity:1!important;transform:none!important;} }
 </style>
 <style>
@@ -4833,7 +4875,8 @@ var Ach = (function(){
     c.className='ach-card t-'+a.tier+(a.earned?' earned':' locked')+(masked?' masked':'');
     var ico=a.earned?('<img class="ico-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon)):esc(a.icon);
     var body='<div class="ico">'+ico+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
-      +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>';
+      +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>'
+      +(a.points?'<span class="ach-pts">'+a.points+' pts</span>':'');
     if(a.skin) body+='<div class="unlk">&#9733; unlocks '+esc(skinName(d,a.skin))+' skin</div>';
     if(a.banner_reward) body+='<div class="ach-bannerflag">&#9873; unlocks a banner</div>';
     if(a.earned){ var hot=unleashed()&&a.roast_nsfw, rr=hot?a.roast_nsfw:a.roast;
@@ -4853,7 +4896,8 @@ var Ach = (function(){
     var earned=nonFeat.filter(function(a){return a.earned;}).length;
     var fEarned=feats.filter(function(a){return a.earned;}).length;
     var p=el('ach-progress'); if(p) p.innerHTML='<b>'+earned+'</b> of <b>'+nonFeat.length+'</b> earned'
-      +(d.feats_revealed?' &middot; <b style="color:var(--ruby)">'+fEarned+'</b> of '+feats.length+' feats':'');
+      +(d.feats_revealed?' &middot; <b style="color:var(--ruby)">'+fEarned+'</b> of '+feats.length+' feats':'')
+      +' &middot; <b style="color:var(--gold)">'+fmt(d.earned_points||0)+'</b> / '+fmt(d.possible_points||0)+' pts';
     var slot=el('ach-unleash-slot'); if(slot){
       slot.innerHTML = d.unleash_available
         ? '<label class="ach-unleash"><input type="checkbox" '+(unleashed()?'checked':'')
@@ -4960,6 +5004,7 @@ var Ach = (function(){
       +'<div class="n">'+esc(a.name)+'</div>'
       +'<div class="r">'+esc(line)+'</div>'
       +(opts.pill===false?'':'<span class="tier-pill">'+esc(tier)+'</span>')
+      +((a.points&&opts.pill!==false)?'<span class="pts-pill">+'+a.points+'</span>':'')
       +(rwd?'<span class="rwd"><img class="giftbox" src="/branding/rewards/gift.png" onerror="this.remove()">'+esc(rwd)+'</span>':'')
       +'</div><div class="flash"></div></div>';
     tw.innerHTML='<div class="mglow"></div>'+(framed?'<div class="tframe">'+toastHTML+'</div>':toastHTML);
@@ -8339,7 +8384,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 masked_metrics.add(a["metric"])
                 a.update(name="???", desc="A hidden feat of the Athenaeum.",
                          icon="❓", roast="", roast_nsfw="",
-                         current=0, threshold=1,
+                         current=0, threshold=1, points=0,
                          id="hidden-feat-%d" % n_masked, metric="")
             if not a["earned"]:               # roasts are the reward, not a preview
                 a["roast"] = ""
