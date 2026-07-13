@@ -14,9 +14,26 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
-_On `loom-v2`, past the `v1.10.0` tag. Headline work; see git history for the full list._
+_Nothing yet._
+
+## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
+
+_On `loom-v2`, past the `v1.10.0` tag. The 57-achievement system plus its flair layer (toast frames,
+gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` remains unmerged to
+`master`; this tag sits on `loom-v2`. See git history for the full list._
 
 ### Added
+- **The Trophy Hall** — the achievement window is now a **maximized full-screen overlay** (not a
+  separate page): the existing modal grows to fill the screen — banner header, **Summary / All /
+  Statistics** tabs, a **Summary landing** (Recent Achievements from earn-dates + Progress Overview
+  bars), the bucket grid as collapsible tile sections, live **search**, and a **right rail**
+  (category nav · Within Reach · Rewards Earned · mascot alcove). Instant open, gallery stays behind
+  it, ESC out, animates from the 🏆 button; scoped so the contest/art modals are untouched; mobile
+  stacks the rail under the grid.
+- **Earn-date persistence + badge thumb-cache** (Hall infra) — `achievements.json` records
+  `earned_at` per achievement (backfills existing earns; never leaks a hidden feat's date), and the
+  57 badge masters (~300 MB) are served as lazy ~256 px thumbs via `/badge-thumb/<id>.png` so a
+  full Hall doesn't pull the masters.
 - **Tier flair frames on the unlock toast** — legendary + feat achievements now fire their unlock
   moment wrapped in an ornate **9-slice `border-image` frame** (LEG6 gold+emerald / FEAT13 ruby)
   that grows with the toast so the roast never overflows; common/rare/epic stay clean chrome (epic

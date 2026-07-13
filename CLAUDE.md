@@ -310,6 +310,37 @@ shared progress cb expects `(done, total, new-count)`.
 > `tests/test_sync.py` (chain order, flag-setting, and survival of BOTH `PixAIError` and
 > non-`PixAIError` reconcile failures). The bug was caught by an adversarial-verify pass before merge.
 
+## Achievements & the Trophy Hall (v1.11.0, on `loom-v2`)
+
+The 57-achievement system (roster, telemetry, hidden feats, the toast-v2 `.ach-m2` moment) shipped
+earlier (`440ecdf`); **v1.11.0 adds the flair layer + the Trophy Hall.**
+
+- **Tier flair frames** wrap the unlock toast for **legendary + feat only** — tier-gated in
+  `_mkMoment` via `framed={legendary:1,feat:1}` (add `epic:1` to include epic; summaries never
+  framed). A `.tframe` wrapper carries a 9-slice `border-image` (`branding/frames/legendary.png`
+  = LEG6, `feat.png` = FEAT13) that **grows with the toast** so the roast never overflows. The
+  reward ribbon shows the **CLAIM7 gift box** (`branding/rewards/gift.png`) instead of the emoji.
+- **Points economy** — `_TIER_POINTS` + a *derived* `_ACH_RUNG` (ladder families = `bucket=='ladder'`
+  grouped by metric, ordered by threshold; non-ladder = rung 1) drive `achievement_points()` =
+  `tier base + 5*(rung-1)`; **feats score 0** so the total never hints at a hidden feat.
+  `compute_achievements` emits per-ach `points` + `earned_points`/`possible_points` (summed AFTER the
+  skin-changer/completionist post-passes). 960 possible; the Archive ladder is 5/15/35/65/70. Shown
+  on the toast (gold `+N` chip), tiles, and a Warband-style header total.
+- **The Trophy Hall** — the achievement window is a **maximized overlay, NOT a page/route**: the
+  existing `#ach-modal` grows to full-screen (instant open, gallery behind, ESC, animates from the
+  🏆 button). All Hall CSS is scoped to `.ach-hall` so the contest/art modals that share `.ach-panel`
+  are untouched. Layout: header (title · narrator · points total · search · close) → tabs
+  (Summary | All | Statistics) → body (main grid + right rail). Summary = Recent Achievements (from
+  `earned_at`) + Progress Overview bars. Rail = category nav (jump-to-section) · Within Reach
+  (3 closest w/ mini bars) · Rewards Earned chips · mascot alcove. Search filters tiles; sections
+  collapse; masked feats keep the cloaked mystery-tile look; mobile stacks the rail under the grid.
+- **Supporting infra**: **earn-date persistence** (`achievements.json` `earned_at:{id:iso}`; stamped
+  on `/api/achievements?mark=1`, backfills existing earns, only earned ids → no hidden-feat leak) and
+  a **badge thumb-cache** (`_badge_thumb()` → `/badge-thumb/<id>.png`, lazy ~256 px copies to
+  `branding/_thumbs`, mtime self-heal + master fallback) so a 57-tile Hall doesn't pull ~300 MB.
+- **Deferred polish** (non-blocking): per-*tile* ornate frames (the toast has them; tiles use the
+  tier band + glow), per-criteria checklists on set achievements, owner-made mystery-tile art.
+
 ## Test suite
 
 440+ pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
@@ -320,7 +351,9 @@ optional `pixeltable` dep isn't installed). All tests must pass before merging t
 
 ## Current state
 
-- **Version:** `1.10.0` on `master`
+- **Version:** `1.11.0` on `loom-v2` (achievements flair + Trophy Hall). NOTE: `loom-v2` is still
+  unmerged to `master` — it carries the whole Loom V2 set *plus* achievements; the `v1.11.0` tag sits
+  on `loom-v2`. Merging `loom-v2` → `master` is a separate owner call. `master` is still at `1.10.0`.
 - **Branch strategy:** feature branches, merge to master with `--no-ff`, tag releases
 - **Owner:** Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev
 
