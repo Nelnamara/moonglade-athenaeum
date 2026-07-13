@@ -83,9 +83,19 @@ The ref-gen question is resolved as **Option A + bridge** (supersedes the open d
 
 ---
 
-## 2b. Achievements PHASE 2 — "the Trophy Hall" design pass (owner notes 2026-07-12 · NOTATED, not started)
+## 2b. Achievements PHASE 2 — "the Trophy Hall" (✅ SHIPPED 2026-07-13, v1.11.0, `loom-v2`)
 
-**Gate: owner is capturing WoW (+ other games') achievement-window screenshots as the design reference. The panel redesign builds AFTER those land. Design sources will be named per the checkpoint protocol.**
+**✅ SHIPPED (commits `8836086` backend foundation + `911b2ef` Hall, 466 tests green):** the achievement
+window is now a **maximized full-screen overlay** (grew `#ach-modal`, scoped to `.ach-hall`; NOT a
+page) — banner header + points total + search, **Summary / All / Statistics** tabs, a Summary landing
+(Recent Achievements from `earned_at` + Progress Overview bars), the bucket grid as collapsible tile
+sections (via the `/badge-thumb` cache), a right rail (category nav · Within Reach · Rewards Earned ·
+mascot alcove), and mobile stacking. Backend: earn-date persistence + badge thumb-cache (A0). Runtime-
+verified (mock payload) across every render path. **Owner's WoW screenshots now tune the INTERIOR only.**
+**Deferred polish:** per-*tile* ornate frames (toast has them), per-criteria checklists on set
+achievements, owner-made mystery-tile art (masked feats currently reuse the cloaked-card look).
+
+_Original design notes (now realized) below for reference:_
 
 **A0. PREREQUISITE — badge serving cache:** the 57 badge masters total **321 MB** (2000² PNGs, vernissage alone 8.4 MB) served raw into 46px cards; a 57-tile Trophy Hall would pull all of it. Build a branding thumb cache (server auto-generates ~256px copies, masters stay the source of truth) BEFORE the Hall renders all 57. Also on record: 4 badge masters are sub-2000² (eclipse 416² · gallery-opening 597×504 · first-cull 1024² · starsmith 1024²) — owner may re-export for uniformity, not blocking; mascots/ach are native chibi-cutout sizes (~400–600px), fine at toast display sizes.
 
