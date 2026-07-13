@@ -34,15 +34,16 @@ The 5-agent front-end cohesion audit ran → `docs/SUITE_ARCHITECTURE_AUDIT.md`.
 - **"No framework" note clarified:** the real, confirmed value is **no build step / framework-neutral shared
   widgets**, NOT "no framework" (the Loom is React by design). `REFINEMENTS.md:72` reworded; stop citing it as a rule.
 
-**⏳ PILOT IN FLIGHT (2026-07-13) — `<mg-model-picker>` (Option A step 1 = D):** framework-neutral custom
-element in `static/mg-model-picker.js` (search + rich cards + hover preview; emits a `mg-pick` CustomEvent),
-loaded as a plain global like `picker-core.js`, styled off the shared `DESIGN_TOKENS_CSS`, owning its own
-preview (dissolves the singleton-`#model-preview` problem). Standalone `static/mg-model-picker.html` harness
-for **isolated** verification. First adoption = the **Loom V2 Image tab** (React↔element bridge via a `ref`
-callback listening for `mg-pick`), replacing the thin type-in search → delivers **D**. **NOT machine-verifiable
-in this session (no node / no browser) → NEEDS OWNER LIVE QA on the D: server**, same as the gen-bridge was.
-Gallery adoption (replacing the working `#model-flyout`) is a LATER, live-QA'd step — untouched here. Save/load
-crash-safe fix shipped separately (`1710f04`).
+**✅ PILOT SHIPPED + VERIFIED LIVE (2026-07-13) — `<mg-model-picker>` (Option A step 1 = D):** framework-neutral
+custom element in `static/mg-model-picker.js` (search + rich cards + hover preview; emits a `mg-pick` CustomEvent),
+loaded as a plain global like `picker-core.js`, styled off the shared `DESIGN_TOKENS_CSS`, owning its own preview
+(dissolves the singleton-`#model-preview` problem). Standalone `static/mg-model-picker.html` harness for isolated
+verification. First adoption = the **Loom V2 Image tab** (React↔element bridge via a `ref` callback listening for
+`mg-pick`), replacing the thin type-in search → **delivers D**. **Owner-verified live 2026-07-13** — both the
+standalone harness AND the Loom Image tab render the rich cards + hover preview and pick correctly (`c24837c` +
+CSS/CHANGELOG cleanup). Gallery adoption (replacing the working `#model-flyout`) is the LATER, live-QA'd step.
+**NEXT shared widget = `<mg-gallery-picker>`** (fold the duplicated gallery `.pick-cell` / Loom `.sb-pick-cell`
+chrome over the shared `PickerCore` into one element). Save/load crash-safe fix shipped separately (`1710f04`).
 
 ---
 
