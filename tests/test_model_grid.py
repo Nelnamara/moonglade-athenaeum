@@ -26,7 +26,7 @@ def test_model_search_rest_shapes_rows(monkeypatch):
     assert out["has_more"] is True and len(out["results"]) == 2
     a, b = out["results"]
     assert a["title"] == "Tsubaki.2" and a["model_id"] == "1982880136609467518"
-    assert a["liked_count"] == 10151 and a["preview_url"] == "https://cdn/thumb/x"
+    assert a["liked_count"] == 10151 and a["preview_url"] == "https://cdn/pub/x"   # full-res preferred (poor thumbnailUrl quality)
     assert b["should_blur"] is True and b["preview_url"] == "https://cdn/pub/y"   # falls back to publicUrl
 
 
