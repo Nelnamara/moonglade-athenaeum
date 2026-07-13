@@ -5,6 +5,7 @@ local + fail-soft -- a telemetry hiccup must never break a page or a backup."""
 import json
 
 import datetime as _dt
+from pathlib import Path
 from unittest import mock
 
 import pixai_gallery as g
@@ -133,6 +134,8 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     fl = [a for a in d["achievements"] if a["id"] == "first-light"][0]
     assert fl["earned"] and fl["roast"] and fl["roast_nsfw"] == ""
     assert d["unleash_available"] is False
+    # the day visit was marked (The Vigil)
+    assert g.telemetry_metrics(out)["days_used"] == 1
 
 
 def test_points_rung_scaled_feats_zero_and_aggregates():
@@ -161,8 +164,30 @@ def test_api_masked_feats_leak_no_points(tmp_path):
     assert "earned_points" in d and "possible_points" in d
     masked = [a for a in d["achievements"] if a["name"] == "???"]
     assert masked and all(a["points"] == 0 for a in masked)
-    # the day visit was marked (The Vigil)
-    assert g.telemetry_metrics(out)["days_used"] == 1
+
+
+def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
+    cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                       created_at="2025-01-01T00:00:00")])
+    with mock.patch("datetime.datetime", _FixedNoon):
+        d = cli.get("/api/achievements?mark=1").get_json()
+    assert "earned_at" in d
+    earned_ids = {a["id"] for a in d["achievements"] if a["earned"]}
+    assert earned_ids and all(i in d["earned_at"] for i in earned_ids)   # every earned gets a date
+    masked = [a for a in d["achievements"] if a["name"] == "???"]        # hidden feats never leak a date
+    assert all(a["id"] not in d["earned_at"] for a in masked)
+    st = g.load_ach_state(out)                                           # persisted to disk
+    assert st["earned_at"] and all(i in st["earned_at"] for i in earned_ids)
+
+
+def test_badge_thumb_cache(tmp_path):
+    from PIL import Image
+    bdir = tmp_path / "branding" / "badges"; bdir.mkdir(parents=True)
+    Image.new("RGBA", (2000, 2000), (10, 20, 30, 255)).save(bdir / "loremaster.png")
+    p = g._badge_thumb(tmp_path, "loremaster", size=256)
+    assert p and Path(p).exists() and max(Image.open(p).size) <= 256
+    assert g._badge_thumb(tmp_path, "loremaster") == p     # cached copy reused
+    assert g._badge_thumb(tmp_path, "does-not-exist") is None
 
 
 def test_api_ach_event_beacon(tmp_path):
