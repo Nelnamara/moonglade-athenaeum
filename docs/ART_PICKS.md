@@ -10,11 +10,11 @@
 
 | Slot | State | Winner(s) |
 |---|---|---|
-| **Feat frame** | ✅ decided | **FEAT12** primary · FEAT18 fallback |
-| **Progress-bar pilot** | ✅ decided | **BAR9** (moon-phase gauge) |
+| **Feat frame** | 🟡 3-way in-action | **FEAT13** vs **FEAT_LateEntry** vs **FEAT12** — head-to-head in artifact `b45a39a3` |
+| **Progress-bar pilot** | ✅ decided | **BAR9** (moon-phase gauge); BAR6 = 2nd trial |
 | **Mystery tiles** | ✅ aligned | square: SecretFeatSquareAlpha (MYS8) · wides → section banner |
-| **Legendary frame** | 🟡 top picks, need edits | **LEG6 / LEG7** (must be flipped + alpha-tagged; owner may have a fallback) |
-| **Claim icon** | 🔴 OPEN — "a tough one" | shortlisted ~10, no top-3 yet |
+| **Legendary frame** | 🟡 2 finalists in-action | **LEG6** (gold+emerald) vs **LEG4** (radiant gold); BAR4 = wide-plaque experiment |
+| **Claim icon** | 🟡 5 finalists in-action | CLAIM1/2/3/8/9 in the credit chip; CLAIM7 = redeem — awaiting final pick |
 | **Other repurposes** | 💡 ideas | OTHER1 → card-specific redemption · OTHER15 → reserve badge (Krea2) |
 
 ## The picks (verbatim from export)
@@ -57,12 +57,32 @@ bars, BAR9 is the pilot** (agreed).
 map: **BAR9 = moon-phase gauge (pilot)** · **BAR8 = galaxy-swirl (the "flip → toast" one)** ·
 BAR6/7 = square end-windows (spinning-Nel candidates).
 
-**Still lacking alpha among the picks (not in the folder):** `CLAIM16` (a gallery gem in the
-final-10 — flat) and `FEAT18` (feat fallback, green-screen). FEAT18 is likely superseded by
-FEAT13 / FEAT_LateEntry; the main feat pick **FEAT12 already has alpha**.
+**Alpha gaps — now CLOSED:** `CLAIM16` (the flat gallery gem) was re-keyed as **`CLAIM3.png`**
+(2000x2000, alpha OK) in the 7.13 folder — it's now one of the 5 CLAIM finalists. `FEAT18`
+(feat fallback) stays un-keyed but is superseded by FEAT13 / FEAT_LateEntry; **FEAT12 has alpha**.
+All finalists across every slot are keyed.
 
 **Final-push picker:** artifact `e3175c08` — final-10 CLAIM + the new alpha frames/bars scored
 against the prior picks, high-res. This closes the selection.
+
+## Finalists + "in action" showcase (2026-07-13) — artifact `b45a39a3`
+
+Owner narrowed each slot to finalists and asked to see them **in context** (not on a grid).
+Built the big showcase artifact — frames wrap a real unlock, bars fill live, claim icons in
+the header chip. Frame openings are auto-detected from each PNG's alpha; bar tracks hand-set.
+
+| Slot | Finalists shown in action | Awaiting |
+|---|---|---|
+| **CLAIM** (daily) | CLAIM1 (amethyst cluster) · CLAIM2 · **CLAIM3** (gallery gem, now alpha'd) · CLAIM8 · CLAIM9 — each in the credit chip @ real size + big | **owner's final pick** |
+| **CLAIM** (redeem) | CLAIM7 = card/gift redemption, shown as its button | confirm |
+| **LEG** | LEG6 (gold+emerald, new) vs LEG4 (radiant royal gold) — head to head wrapping Loremaster | **pick 1 of 2** |
+| **LEG (experiment)** | BAR4 as a wide "plaque" legendary frame — owner's idea, shown in that role | judge fit |
+| **FEAT** | FEAT13 (ornate ruby) vs FEAT_LateEntry (gunmetal signet) vs FEAT12 (prior main) wrapping Under-the-Hood | **pick 1 of 3** |
+| **BAR (progress)** | BAR9 moon-phase gauge (pilot) + BAR6 teal — both filling live | confirm pilot / build order |
+| **BAR8 brainstorm** | **Finding: BAR8 is a SOLID nebula panel, not hollow** — shines as a charge bar (dark-veil the unfilled end) or a status/notice/section banner, NOT a see-through frame | direction |
+
+BAR6/BAR9 are hollow (fill sits behind, shows through); BAR8's interior is opaque art (probed).
+CLAIM3 alpha gap from the 7.13 audit is now **closed** (`CLAIM3.png`, 2000x2000, alpha OK).
 
 ## ⏳ Open / next
 
