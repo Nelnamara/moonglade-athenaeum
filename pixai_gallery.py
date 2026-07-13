@@ -1436,7 +1436,32 @@ def achievement_points(a):
     return _TIER_POINTS.get(a.get("tier"), 0) + 5 * (_ACH_RUNG.get(a["id"], 1) - 1)
 
 
-def compute_achievements(metrics, seen=()):
+# Closed-universe set achievements -> a per-criterion checklist (WHICH members are done),
+# not just an N/M count. Maps achievement id -> (telemetry set key, ordered
+# [(member, label)] universe). ONLY closed sets belong here; open-ended distinct-counts
+# (loras, enhance_workflows) have no finite universe and stay count-only. `video_modes`
+# tracks only i2v/flf/r2v (V2V is deliberately not counted -- see the loom/generate bump).
+_ACH_CRITERIA = {
+    "full-toolbox":       ("tools",       [("edit", "Edit"), ("enhance", "Enhance"), ("fix", "Fix")]),
+    "master-of-the-loom": ("video_modes", [("i2v", "Image (I2V)"), ("flf", "First→Last (FLF)"),
+                                           ("r2v", "Reference (R2V)")]),
+}
+
+
+def achievement_criteria(sets):
+    """For each closed-universe set achievement, which of its criteria are met. `sets` =
+    telemetry.json's 'sets' block (id -> list of members). Returns
+    {achievement_id: [{"key","label","done"}, ...]}. Pure + fail-soft: a missing or
+    non-list set reads as 'nothing done' rather than raising."""
+    out = {}
+    for aid, (set_key, universe) in _ACH_CRITERIA.items():
+        have = sets.get(set_key) if isinstance(sets, dict) else None
+        have = set(have) if isinstance(have, list) else set()
+        out[aid] = [{"key": k, "label": lbl, "done": k in have} for k, lbl in universe]
+    return out
+
+
+def compute_achievements(metrics, seen=(), sets=None):
     """Pure: given the metric bundle + the set of already-seen achievement ids,
     return {achievements, skins, newly}. An achievement is *earned* when its metric
     reaches the threshold; a skin is *earned* if it's free or any earned achievement
@@ -1448,6 +1473,9 @@ def compute_achievements(metrics, seen=()):
     every non-feat, non-banner achievement to be earned."""
     seen = set(seen or [])
     metrics = dict(metrics or {})
+    # per-criterion checklists for the closed-universe set achievements (only when the
+    # caller supplies the raw telemetry sets; tests that pass metrics-only skip it)
+    crit = achievement_criteria(sets) if sets is not None else {}
     earned_skins = set()
     achs = []
     for a in ACHIEVEMENTS:
@@ -1455,14 +1483,17 @@ def compute_achievements(metrics, seen=()):
         earned = cur >= a["threshold"]
         if earned and a.get("skin"):
             earned_skins.add(a["skin"])
-        achs.append({
+        entry = {
             "id": a["id"], "name": a["name"], "icon": a["icon"], "desc": a["desc"],
             "tier": a["tier"], "metric": a["metric"], "threshold": a["threshold"],
             "current": cur, "earned": earned, "skin": a.get("skin", ""),
             "bucket": a.get("bucket", "ladder"), "hidden": bool(a.get("hidden")),
             "banner_reward": bool(a.get("banner_reward")), "points": achievement_points(a),
             "roast": a.get("roast", ""), "roast_nsfw": a.get("roast_nsfw", ""),
-        })
+        }
+        if a["id"] in crit:
+            entry["criteria"] = crit[a["id"]]
+        achs.append(entry)
     by_id = {x["id"]: x for x in achs}
     # post-pass: Skin Changer counts unlocked skins (free ones + this pass's earns)
     sc = by_id.get("skin-changer")
@@ -4654,6 +4685,9 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-bar{height:5px;border-radius:3px;background:var(--surface1);margin-top:6px;overflow:hidden;}
   .ach-bar i{display:block;height:100%;background:var(--accent);border-radius:3px;}
   .ach-bar+.ach-num{font-size:9.5px;color:var(--overlay0);margin-top:2px;font-variant-numeric:tabular-nums;}
+  .ach-crit{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:7px;}
+  .ach-crit span{font-size:10px;color:var(--overlay0);display:inline-flex;align-items:center;gap:3px;white-space:nowrap;}
+  .ach-crit span.on{color:var(--green,#7ee0a8);font-weight:600;}
   .ach-card.t-common{border-left-color:#8a8298;} .ach-card.t-common .tier{color:#a9a1b8;}
   .ach-card.t-rare{border-left-color:var(--blue);} .ach-card.t-rare .tier{color:var(--blue);}
   .ach-card.t-epic{border-left-color:var(--purple-bright);} .ach-card.t-epic .tier{color:var(--mauve);}
@@ -4997,6 +5031,8 @@ var Ach = (function(){
     var body='<div class="ico">'+ico+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
       +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>'
       +(a.points?'<span class="ach-pts">'+a.points+' pts</span>':'');
+    if(a.criteria&&a.criteria.length){ body+='<div class="ach-crit">'+a.criteria.map(function(x){
+      return '<span class="'+(x.done?'on':'')+'">'+(x.done?'&#10003;':'&#9675;')+' '+esc(x.label)+'</span>'; }).join('')+'</div>'; }
     if(a.skin) body+='<div class="unlk">&#9733; unlocks '+esc(skinName(d,a.skin))+' skin</div>';
     if(a.banner_reward) body+='<div class="ach-bannerflag">&#9873; unlocks a banner</div>';
     if(a.earned){ var hot=unleashed()&&a.roast_nsfw, rr=hot?a.roast_nsfw:a.roast;
@@ -8571,7 +8607,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         metrics.update(telemetry_metrics(out_dir))
         with _ach_lock:
             state = load_ach_state(out_dir)
-            result = compute_achievements(metrics, state.get("seen"))
+            result = compute_achievements(metrics, state.get("seen"),
+                                          sets=load_telemetry(out_dir).get("sets", {}))
             newly = result["newly"]
             if request.args.get("mark") == "1":
                 today = _dt.date.today().isoformat()

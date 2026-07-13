@@ -245,3 +245,43 @@ def test_time_capsule_only_fires_on_old_insert(tmp_path):
     core._check_time_capsule("2099-01-01T00:00:00", tmp_path)   # young: no fire
     core._check_time_capsule("", tmp_path)                       # blank: no crash
     assert g.telemetry_metrics(tmp_path).get("old_piece_backed_up", 0) == 0
+
+
+# ---- per-criterion checklists (closed-universe set masteries) ----------------
+
+def test_achievement_criteria_pure():
+    from pixai_gallery import achievement_criteria
+    c = achievement_criteria({"tools": ["edit", "fix"], "video_modes": ["i2v"]})
+    assert {x["key"]: x["done"] for x in c["full-toolbox"]} == {
+        "edit": True, "enhance": False, "fix": True}
+    assert {x["key"]: x["done"] for x in c["master-of-the-loom"]} == {
+        "i2v": True, "flf": False, "r2v": False}
+    # a missing set + a hostile non-list set both read as nothing-done, never raise
+    assert all(not x["done"] for x in achievement_criteria({"tools": 7})["full-toolbox"])
+    assert all(not x["done"] for x in achievement_criteria({})["master-of-the-loom"])
+    # labels are carried for the UI, order preserved
+    assert [x["label"] for x in c["full-toolbox"]] == ["Edit", "Enhance", "Fix"]
+
+
+def test_compute_attaches_criteria_only_with_sets():
+    from pixai_gallery import compute_achievements
+    r = compute_achievements({"tools_used": 2}, sets={"tools": ["edit", "enhance"]})
+    by = {a["id"]: a for a in r["achievements"]}
+    assert {x["key"]: x["done"] for x in by["full-toolbox"]["criteria"]} == {
+        "edit": True, "enhance": True, "fix": False}
+    # a non-checklist achievement never grows the key
+    assert "criteria" not in by["first-light"]
+    # back-compat: metrics-only callers (no sets) get no criteria anywhere
+    assert all("criteria" not in a for a in compute_achievements({"tools_used": 3})["achievements"])
+
+
+def test_api_criteria_on_set_masteries(tmp_path):
+    g.telem_set_add("tools", "edit", out_dir=tmp_path)
+    g.telem_set_add("tools", "fix", out_dir=tmp_path)
+    cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                       created_at="2025-01-01T00:00:00")])
+    with mock.patch("datetime.datetime", _FixedNoon):
+        d = cli.get("/api/achievements").get_json()
+    ft = [a for a in d["achievements"] if a["id"] == "full-toolbox"][0]
+    assert {x["key"]: x["done"] for x in ft["criteria"]} == {
+        "edit": True, "enhance": False, "fix": True}
