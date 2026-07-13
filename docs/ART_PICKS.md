@@ -84,6 +84,30 @@ the header chip. Frame openings are auto-detected from each PNG's alpha; bar tra
 BAR6/BAR9 are hollow (fill sits behind, shows through); BAR8's interior is opaque art (probed).
 CLAIM3 alpha gap from the 7.13 audit is now **closed** (`CLAIM3.png`, 2000x2000, alpha OK).
 
+## Decisions locked (2026-07-13)
+
+Emerged from the "in action" review — owner course-corrected the surface, then locked intent:
+
+1. **Frames wrap the TOAST, 9-sliced** (WoW-style: corners fixed, edges stretch; the frame grows
+   to the content so text never overflows). NOT the achievement-page cards — that was a wrong turn.
+   Proven in artifact `3655423e`. The real toast markup is `.ach-m2` (locked `335ef4e7`).
+2. **Tier-gated flair — legendary + feat ONLY** get the custom frame + custom toast, on BOTH the
+   toast moment AND the page tile. Common/rare/epic stay clean chrome. *"WoW-like, our own flavor —
+   always the real intent."* (⚠ confirm whether **epic** joins the framed tier or stays plain.)
+3. **Point values come to the toasts + cards.** Economy already locked (`points = tier base +
+   5×(rung−1)`; bases 5/10/25/50; **feats = 0** → feats show no points, reinforcing them as pure
+   bragging-rights flair). Currently planning — to wire into the toast + card.
+4. **CLAIM7 gift box → the toast reward ribbon** (`🎁 Unlocks skin / ⚑ banner`) is its confirmed home.
+
+**Finalists in action (all 6 wrapping the identical toast):** artifact `3655423e`.
+- **Legendary:** LEG6 (gold+emerald) · LEG4 (gold+pearl) · BAR4 (silver celestial, candidate).
+  Owner leaning **LEG6**; tempted to **edit BAR4** to hug the toast — proposed direction: the
+  built-in **left gem window becomes the badge holder** (hugs naturally, uses the frame's own feature).
+- **Feat:** FEAT13 (ruby thorns) · FEAT_LateEntry (gunmetal+ruby crown) · FEAT12 (ruby+violet smoke).
+  Owner loves **all three** — undecided.
+
+Earlier "big artifact" (finalists in context, pre-course-correction): `b45a39a3`.
+
 ## ⏳ Open / next
 
 - **CLAIM top-3 is unresolved** — needs a focused narrowing pass (owner: "tough one").
