@@ -92,8 +92,21 @@ page) — banner header + points total + search, **Summary / All / Statistics** 
 sections (via the `/badge-thumb` cache), a right rail (category nav · Within Reach · Rewards Earned ·
 mascot alcove), and mobile stacking. Backend: earn-date persistence + badge thumb-cache (A0). Runtime-
 verified (mock payload) across every render path. **Owner's WoW screenshots now tune the INTERIOR only.**
-**Deferred polish:** per-*tile* ornate frames (toast has them), per-criteria checklists on set
-achievements, owner-made mystery-tile art (masked feats currently reuse the cloaked-card look).
+**Deferred polish:** per-*tile* ornate frames (toast has them), ~~per-criteria checklists on set
+achievements~~ (⏳ IN FLIGHT 2026-07-13, see below), owner-made mystery-tile art (masked feats reuse the cloaked-card look).
+
+**⏳ IN FLIGHT (2026-07-13, this session) — quick wins A + B:**
+- **A · per-criteria checklists (set masteries):** the two CLOSED-universe set masteries — **Full Toolbox**
+  (`tools` = edit/enhance/fix) and **Master of the Loom** (`video_modes` = i2v/flf/r2v; V2V is NOT tracked) —
+  get a ✓/○ checklist on their Hall tiles so you see WHICH criterion is missing, not just `2/3`. Open-ended
+  sets (loras, enhance_workflows) stay count-only. Impl: pure `achievement_criteria(sets)` + `_ACH_CRITERIA`
+  map → threaded into `compute_achievements(…, sets=)` → rendered in `card()`; unit-tested.
+- **B · roster threshold reconcile:** aligned the 3 stale thresholds in `achievements_roster_57.json`
+  (marathon 1→100, triggered 0→5, read-the-manual 0→1) to shipped code; cleared the `DOC_MAP` stale note.
+- **C · epic frames: DEFERRED — owner deciding art style.** Wants epic to read "deep-purple WoW epic /
+  tier-gear," leaning **Nelnamara's Dreamwalker (feathers) + Balance-Druid Moonfire flair**, WITHOUT
+  out-shouting legendary-gold / feat-ruby. Suggestions delivered this session; art TBD.
+- **D · Loom picker cohesion:** to discuss next (owner-flagged §1 refinement).
 
 _Original design notes (now realized) below for reference:_
 
