@@ -4,8 +4,20 @@ hidden-feat masking on /api/achievements, and the /api/ach-event beacon. All
 local + fail-soft -- a telemetry hiccup must never break a page or a backup."""
 import json
 
+import datetime as _dt
+from unittest import mock
+
 import pixai_gallery as g
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+
+
+class _FixedNoon(_dt.datetime):
+    """Freeze the wall clock at noon so /api/achievements never flags the 2-4am
+    Night Owl feat (session_hour) mid-test. That real-time side effect made the
+    hidden-feat masking assertions flaky whenever the suite ran overnight."""
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2025, 6, 15, 12, 0, 0)
 
 
 def _row(**kw):
@@ -103,7 +115,8 @@ def _client(tmp_path, rows):
 def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    d = cli.get("/api/achievements").get_json()
+    with mock.patch("datetime.datetime", _FixedNoon):   # never trip Night Owl mid-test
+        d = cli.get("/api/achievements").get_json()
     assert len(d["achievements"]) == 57
     hidden = [a for a in d["achievements"] if a["tier"] == "feat" and not a["earned"]]
     assert hidden and all(a["name"] == "???" for a in hidden)
