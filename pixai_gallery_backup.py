@@ -1139,7 +1139,11 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
             "model_id": str(m.get("id") or ""),
             "liked_count": int(m.get("likedCount") or 0),
             "should_blur": bool(flag.get("shouldBlur")),
-            "preview_url": med.get("thumbnailUrl") or med.get("publicUrl") or "",
+            # publicUrl preferred (matches cover_url below): PixAI's own thumbnailUrl is a
+            # small, often blurry auto-thumb -- fine as a last-resort fallback, poor as the
+            # grid card's main image. loading="lazy" on the <img> bounds the cost to what's
+            # actually on screen.
+            "preview_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
             "has_version": bool(m.get("hasLatestAvailableVersion")),
             # Rich surface for the preview pop-out card.
             "description": (m.get("modelDescription") or "")[:600],
