@@ -2464,6 +2464,7 @@ body { background: var(--base); margin: 0; }
 <script src="/loom/vendor/babel.min.js"></script>
 <script src="/static/picker-core.js"></script>
 <script src="/static/mg-model-picker.js"></script>
+<script src="/static/mg-gallery-picker.js"></script>
 </head><body>
 <div id="root"></div>
 <script>
