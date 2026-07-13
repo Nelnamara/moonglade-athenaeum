@@ -590,14 +590,20 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
   const wrapRef = useRef(null);
   const [scaleV, setScaleV] = useState(1);
   const [tab, setTab] = useState("Video");
-  const [mq, setMq] = useState("");        // image-model search query
-  const [mres, setMres] = useState([]);    // image-model search results
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
   useEffect(() => {
     const fit = () => { if (wrapRef.current) setScaleV(Math.min(1, wrapRef.current.clientWidth / 1498)); };
     fit(); window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit);
   }, []);
+  // Bridge the shared <mg-model-picker> web component to React: a ref callback (React
+  // doesn't route custom events through JSX props) that binds the 'mg-pick' listener once.
+  const bindPicker = useCallback((el) => {
+    if (el && !el._mgBound) {
+      el._mgBound = true;
+      el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
+    }
+  }, [setImgModel]);
   const change = (np) => setLayout((L) => L.map((x) => (x.id === np.id ? np : x)));
   const collapse = (id) => setLayout((L) => L.map((x) => (x.id === id ? { ...x, collapsed: !x.collapsed } : x)));
   const sel = entries.find((e) => e.c.id === selShot) || null;
@@ -675,21 +681,10 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
     else if (tab === "Image") {
       const gi = genImgState[sel.c.id] || {};
       const busyI = gi.phase === "submitting" || gi.phase === "running";
-      const searchModels = () => fetch("/api/model-search?size=8&q=" + encodeURIComponent(mq)).then((r) => r.json()).then((d) => setMres(d.results || [])).catch(() => setMres([]));
       tabBody = (
         <div>
-          <label className="lv-lab">Model</label>
-          <div className="lv-modelrow">
-            <span className="lv-modelsel">{imgModel ? imgModel.title : "— none —"}</span>
-            <input className="lv-in" placeholder="search models · Enter" value={mq}
-              onChange={(e) => setMq(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") searchModels(); }} />
-          </div>
-          {mres.length > 0 && (
-            <div className="lv-modelres">{mres.map((m) => (
-              <div key={m.model_id} className="lv-modelopt" onClick={() => { setImgModel({ model_id: m.model_id, title: m.title }); setMres([]); setMq(""); }}>
-                {(m.preview_url || m.cover_url) ? <img src={m.preview_url || m.cover_url} alt="" /> : null}
-                <span className="lv-mt">{m.title}</span><span className="lv-dim">{m.base_model || ""}</span>
-              </div>))}</div>)}
+          <label className="lv-lab">Model {imgModel ? <span className="lv-dim">· {imgModel.title}</span> : null}</label>
+          <mg-model-picker ref={bindPicker} kind="base"></mg-model-picker>
           <label className="lv-lab">Image prompt</label>
           <textarea className="lv-ta" value={sel.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
