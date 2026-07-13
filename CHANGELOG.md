@@ -22,6 +22,12 @@ git tags. Full prose notes for tagged versions live on
   threaded through `compute_achievements(…, sets=)` and rendered in the Hall tile; unit-tested.
 
 ### Fixed
+- **Loom save/load is now crash-safe** — every storyboard used to live in one `store.json` rewritten
+  *non-atomically* on each edit, so a crash mid-save could corrupt **every** board at once. Each
+  storyboard (and every `window.storage` key) is now its own file written atomically (tmp +
+  `os.replace`); the legacy `store.json` migrates into per-key files on first touch and is preserved as
+  `store.json.migrated`. The `/api/loom/*` contract is unchanged, so the React app needs no change.
+  (Thumbnails-out-of-document + import-creates-new-project are follow-ups per `SUITE_ARCHITECTURE_AUDIT.md` §7.)
 - **Canonical roster thresholds reconciled to shipped code** — `docs/achievements_roster_57.json`
   carried three stale thresholds (marathon 1→100, triggered 0→5, read-the-manual 0→1); aligned to
   what the code enforces so the canonical roster stops disagreeing with behavior.
