@@ -60,10 +60,12 @@ def test_achievement_metrics_counts(tmp_path):
 # ---- persisted state --------------------------------------------------------
 
 def test_state_roundtrip_and_soft_fail(tmp_path):
-    assert g.load_ach_state(tmp_path) == {"seen": [], "skin": "moonglade"}
-    g.save_ach_state(tmp_path, {"seen": ["a", "a", "b"], "skin": "ember"})
+    assert g.load_ach_state(tmp_path) == {"seen": [], "skin": "moonglade", "earned_at": {}}
+    g.save_ach_state(tmp_path, {"seen": ["a", "a", "b"], "skin": "ember",
+                                "earned_at": {"a": "2026-07-13"}})
     st = g.load_ach_state(tmp_path)
     assert st["seen"] == ["a", "b"] and st["skin"] == "ember"      # deduped + sorted
+    assert st["earned_at"] == {"a": "2026-07-13"}                  # earn-dates round-trip
     # an unknown skin id falls back to the default on read
     g.save_ach_state(tmp_path, {"seen": [], "skin": "not-a-skin"})
     assert g.load_ach_state(tmp_path)["skin"] == "moonglade"

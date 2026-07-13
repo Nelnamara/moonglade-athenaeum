@@ -1492,27 +1492,54 @@ def _ach_state_path(out_dir):
 
 
 def load_ach_state(out_dir):
-    """Persisted cosmetic state: {seen:[ids already toasted], skin:'active id'}.
-    Fails soft to an empty default so a missing/corrupt file never breaks a page."""
+    """Persisted cosmetic state: {seen:[ids already toasted], skin:'active id',
+    earned_at:{id: iso-date}}. Fails soft to an empty default so a missing/corrupt
+    file never breaks a page."""
     try:
         d = json.loads(_ach_state_path(out_dir).read_text(encoding="utf-8"))
         seen = [s for s in (d.get("seen") or []) if isinstance(s, str)]
         skin = d.get("skin") if d.get("skin") in _SKIN_IDS else "moonglade"
-        return {"seen": seen, "skin": skin}
+        earned_at = {k: v for k, v in (d.get("earned_at") or {}).items()
+                     if isinstance(k, str) and isinstance(v, str)}
+        return {"seen": seen, "skin": skin, "earned_at": earned_at}
     except (OSError, ValueError):
-        return {"seen": [], "skin": "moonglade"}
+        return {"seen": [], "skin": "moonglade", "earned_at": {}}
 
 
 def save_ach_state(out_dir, state):
-    """Persist {seen, skin} atomically-ish. Best-effort; swallows write errors."""
+    """Persist {seen, skin, earned_at} atomically-ish. Best-effort; swallows write errors."""
     try:
         _ach_state_path(out_dir).write_text(
             json.dumps({"seen": sorted(set(state.get("seen") or [])),
-                        "skin": state.get("skin", "moonglade")}, indent=2),
+                        "skin": state.get("skin", "moonglade"),
+                        "earned_at": state.get("earned_at") or {}}, indent=2),
             encoding="utf-8")
         return True
     except OSError:
         return False
+
+
+def _badge_thumb(out_dir, aid, size=256):
+    """Lazily cache a ~size px copy of a badge master and return its Path. The 57
+    badge masters are 2000px (~300 MB total); the Trophy Hall renders these thumbs so
+    a full open doesn't pull the masters. Masters stay the source of truth; the cache
+    self-heals when a master is re-cut (mtime check). Falls back to the master on any
+    trouble, so a tile always resolves to *something*."""
+    src = Path(out_dir) / "branding" / "badges" / (aid + ".png")
+    if not src.is_file():
+        return None
+    dst = Path(out_dir) / "branding" / "_thumbs" / (aid + ".png")
+    try:
+        if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+            return dst
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        from PIL import Image
+        im = Image.open(src)
+        im.thumbnail((size, size))
+        im.save(dst)
+        return dst
+    except Exception:
+        return src
 
 
 # ---------------------------------------------------------------------------
@@ -8064,6 +8091,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
         return resp
 
+    @app.route("/badge-thumb/<aid>.png")
+    def badge_thumb(aid):
+        """Cached ~256px badge for the Trophy Hall tiles (masters stay the source of
+        truth). Lazily generated on first hit; path-safe (no slashes via <aid>)."""
+        from flask import send_from_directory, abort
+        if not aid or "/" in aid or "\\" in aid or ".." in aid:
+            abort(404)
+        p = _badge_thumb(out_dir, aid)
+        if not p or not Path(p).is_file():
+            abort(404)
+        p = Path(p)
+        resp = send_from_directory(str(p.parent), p.name)
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+
     @app.route("/contact-sheet")
     def contact_sheet():
         """Print-ready views for physical output. ?format=letter (grid, default) |
@@ -8370,9 +8412,19 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             state = load_ach_state(out_dir)
             result = compute_achievements(metrics, state.get("seen"))
             newly = result["newly"]
-            if newly and request.args.get("mark") == "1":
-                state["seen"] = sorted(set(state.get("seen") or []) | set(newly))
+            if request.args.get("mark") == "1":
+                today = _dt.date.today().isoformat()
+                ea = dict(state.get("earned_at") or {})
+                # stamp every currently-earned achievement not yet dated: backfills the
+                # pre-existing earns as "recognized today", records new ones going forward
+                for a in result["achievements"]:
+                    if a["earned"] and a["id"] not in ea:
+                        ea[a["id"]] = today
+                state["earned_at"] = ea
+                if newly:
+                    state["seen"] = sorted(set(state.get("seen") or []) | set(newly))
                 save_ach_state(out_dir, state)
+            earned_at = state.get("earned_at") or {}
         feats_revealed = any(
             a["earned"] for a in result["achievements"] if a["tier"] == "feat")
         unleashed = any(a["id"] == "triggered" and a["earned"]
@@ -8398,6 +8450,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         result["feats_revealed"] = feats_revealed
         result["unleash_available"] = unleashed
         result["skin"] = state.get("skin", "moonglade")
+        result["earned_at"] = earned_at   # {id: iso-date}; only earned ids -> no hidden-feat leak
         result["metrics"] = metrics
         return jsonify(result)
 
