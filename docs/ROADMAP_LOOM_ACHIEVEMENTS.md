@@ -42,7 +42,7 @@ verification. First adoption = the **Loom V2 Image tab** (React↔element bridge
 `mg-pick`), replacing the thin type-in search → **delivers D**. **Owner-verified live 2026-07-13** — both the
 standalone harness AND the Loom Image tab render the rich cards + hover preview and pick correctly (`c24837c` +
 CSS/CHANGELOG cleanup). Gallery adoption (replacing the working `#model-flyout`) is the LATER, live-QA'd step.
-**⏳ STEP 2 IN FLIGHT (2026-07-13) — `<mg-gallery-picker>`:** `static/mg-gallery-picker.js`, a full
+**✅ STEP 2 VERIFIED LIVE (2026-07-13) — `<mg-gallery-picker>`:** `static/mg-gallery-picker.js`, a full
 "pick an image" modal wrapping the already-shared `PickerCore` (mount-to-open / unmount-to-close, same
 idiom as the Loom's `pickCb` pattern it replaces). Optional attrs (`show-type`/`show-source`/
 `show-upload`/`show-copy-prompt`) all OFF by default — the Loom's FIRST adoption is a byte-for-byte
@@ -50,10 +50,15 @@ behavior match of the retired `GalleryPick` component (no scope creep), which is
 (`.sb-pick-*` CSS kept — still used by the Export dialog + ImportCollection). Bridged via
 `bindGalleryPicker` (mirrors `bindPicker`); wired at the ONE `pickCb &&` mount point used app-wide
 (Cast add-from-gallery, both FrameSlots, etc.) so every picker call site upgrades at once. Standalone
-harness `static/mg-gallery-picker.html` (two buttons: Loom-parity vs all-features-on). **NOT
-machine-verifiable in this session → NEEDS OWNER LIVE QA** (same loop as the model picker: harness first,
-then a few real picker call sites in the Loom — Cast "+ add from gallery", a FrameSlot "▤").
-**NEXT after this = `<mg-cost-badge>`.** Save/load crash-safe fix shipped separately (`1710f04`).
+harness `static/mg-gallery-picker.html` (two buttons: Loom-parity vs all-features-on).
+**Verified 2026-07-13 evening** (a real Loom + catalog, headless-browser QA since the owner's own
+session was time-budgeted): the empty-open bug (`1a83d51`) holds fixed — Cast "Pick from the gallery"
+opens, browses-on-open, filters (confirmed `type=video` against 5 real video rows: correct request,
+correct render, correct `mg-pick` payload, clean unmount), and closes with zero console errors. The
+other call sites (both FrameSlots) share the exact same `pickCb`/`bindGalleryPicker` mount — one JSX
+conditional, no per-caller logic — so they're the same verified path, not a separate one.
+**NEXT after this = `<mg-cost-badge>`.** Save/load crash-safe fix shipped separately (`1710f04`,
+re-verified: migration + atomic per-key writes both confirmed live + 5 dedicated tests green).
 
 ---
 
