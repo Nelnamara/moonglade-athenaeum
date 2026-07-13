@@ -133,6 +133,34 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     fl = [a for a in d["achievements"] if a["id"] == "first-light"][0]
     assert fl["earned"] and fl["roast"] and fl["roast_nsfw"] == ""
     assert d["unleash_available"] is False
+
+
+def test_points_rung_scaled_feats_zero_and_aggregates():
+    from pixai_gallery import compute_achievements, achievement_points, ACHIEVEMENTS
+    by_id = {a["id"]: a for a in ACHIEVEMENTS}
+    # the Archive (images) ladder reproduces the owner's locked example exactly
+    seq = ["first-light", "archivist", "hoardsmith", "loremaster", "the-great-library"]
+    assert [achievement_points(by_id[i]) for i in seq] == [5, 15, 35, 65, 70]
+    # every feat scores 0 (pure flair; keeps the points total from hinting at hidden feats)
+    assert all(achievement_points(a) == 0 for a in ACHIEVEMENTS if a["tier"] == "feat")
+    # a single-step milestone/mastery = flat tier base (rung 1)
+    assert achievement_points(by_id["master-of-the-loom"]) == 25   # epic
+    assert achievement_points(by_id["keeper-of-order"]) == 10       # rare
+    # compute emits per-achievement points + self-consistent aggregates
+    r = compute_achievements({}, seen=())
+    assert all("points" in a for a in r["achievements"])
+    assert r["possible_points"] == sum(achievement_points(a) for a in ACHIEVEMENTS) == 960
+    assert r["earned_points"] == sum(a["points"] for a in r["achievements"] if a["earned"])
+
+
+def test_api_masked_feats_leak_no_points(tmp_path):
+    cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                       created_at="2025-01-01T00:00:00")])
+    with mock.patch("datetime.datetime", _FixedNoon):
+        d = cli.get("/api/achievements").get_json()
+    assert "earned_points" in d and "possible_points" in d
+    masked = [a for a in d["achievements"] if a["name"] == "???"]
+    assert masked and all(a["points"] == 0 for a in masked)
     # the day visit was marked (The Vigil)
     assert g.telemetry_metrics(out)["days_used"] == 1
 
