@@ -42,8 +42,18 @@ verification. First adoption = the **Loom V2 Image tab** (React↔element bridge
 `mg-pick`), replacing the thin type-in search → **delivers D**. **Owner-verified live 2026-07-13** — both the
 standalone harness AND the Loom Image tab render the rich cards + hover preview and pick correctly (`c24837c` +
 CSS/CHANGELOG cleanup). Gallery adoption (replacing the working `#model-flyout`) is the LATER, live-QA'd step.
-**NEXT shared widget = `<mg-gallery-picker>`** (fold the duplicated gallery `.pick-cell` / Loom `.sb-pick-cell`
-chrome over the shared `PickerCore` into one element). Save/load crash-safe fix shipped separately (`1710f04`).
+**⏳ STEP 2 IN FLIGHT (2026-07-13) — `<mg-gallery-picker>`:** `static/mg-gallery-picker.js`, a full
+"pick an image" modal wrapping the already-shared `PickerCore` (mount-to-open / unmount-to-close, same
+idiom as the Loom's `pickCb` pattern it replaces). Optional attrs (`show-type`/`show-source`/
+`show-upload`/`show-copy-prompt`) all OFF by default — the Loom's FIRST adoption is a byte-for-byte
+behavior match of the retired `GalleryPick` component (no scope creep), which is now fully removed
+(`.sb-pick-*` CSS kept — still used by the Export dialog + ImportCollection). Bridged via
+`bindGalleryPicker` (mirrors `bindPicker`); wired at the ONE `pickCb &&` mount point used app-wide
+(Cast add-from-gallery, both FrameSlots, etc.) so every picker call site upgrades at once. Standalone
+harness `static/mg-gallery-picker.html` (two buttons: Loom-parity vs all-features-on). **NOT
+machine-verifiable in this session → NEEDS OWNER LIVE QA** (same loop as the model picker: harness first,
+then a few real picker call sites in the Loom — Cast "+ add from gallery", a FrameSlot "▤").
+**NEXT after this = `<mg-cost-badge>`.** Save/load crash-safe fix shipped separately (`1710f04`).
 
 ---
 
