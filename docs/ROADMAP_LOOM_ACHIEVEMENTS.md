@@ -15,6 +15,27 @@
 
 ---
 
+## 0.5 · Suite architecture decisions (OWNER-LOCKED 2026-07-13) — see `docs/SUITE_ARCHITECTURE_AUDIT.md`
+
+The 5-agent front-end cohesion audit ran → `docs/SUITE_ARCHITECTURE_AUDIT.md`. Owner calls:
+- **Front-end direction = OPTION A (web components), all the way.** Promote the duplicated widgets to
+  framework-neutral custom elements (gallery-owned, no build step, loaded like `picker-core.js`); both the
+  vanilla gallery and the React Loom mount them, natures unchanged. **Pilot = `<mg-model-picker>`** (the
+  model/LoRA flyout + hover card) — which also delivers **D** (upgrades the Loom's Image-tab picker for free).
+  Migration order in audit §6.
+- **Loom save/load fix = DO FIRST (data-safety, independent of the web-component work).** The whole store is
+  one non-atomically-written `store.json` (`_loom_save` `pixai_gallery.py:9137-9139`) → a crash mid-save can
+  corrupt every board. Rework to **file-per-project + atomic `os.replace`** (idiom already at line 1620);
+  thumbnails-as-media_id + import-creates-new-project as follow-ups. **Ships first.**
+- **PySide6 GUI = phase out, surgically.** Owner has been slimming it as the web side grew; plan is to shrink
+  it to **pure dev-tool status** and strip the redundant spend surfaces (Generate/Video/Edit clones — strictly
+  worse, no cost/free-card safety). NOT a wholesale delete yet. Excluded from the cohesion migration. (Full
+  deprecation later requires repointing the `Moonglade Athenaeum.pyw` launcher.)
+- **"No framework" note clarified:** the real, confirmed value is **no build step / framework-neutral shared
+  widgets**, NOT "no framework" (the Loom is React by design). `REFINEMENTS.md:72` reworded; stop citing it as a rule.
+
+---
+
 ## 1. Loom V2 — built, working, one decision from mergeable
 
 **State (git + transpile verified):** branch `loom-v2`, **6 commits ahead of master, unmerged**, transpiles clean. A **non-breaking opt-in overlay** behind a "V2 layout" toggle; classic waterfall Loom is default and untouched. All V2 code in `loom/master-storyboard.jsx`.
