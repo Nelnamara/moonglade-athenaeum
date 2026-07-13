@@ -9117,26 +9117,57 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"error": str(e)[:300]}), 200
 
     # --- The Loom (Seedance storyboard) -------------------------------------
+    # Storage is a small key->value store the Loom's window.storage shim reads via
+    # /api/loom/*. Each key is now its OWN file, written atomically (tmp + os.replace,
+    # the _save_telemetry idiom), so a crash mid-save corrupts at most the single key
+    # being written -- one torn project can never take down every other storyboard.
+    # The legacy single store.json (all boards + inline thumbs in one non-atomic write)
+    # is migrated into per-key files on first touch and preserved as store.json.migrated.
     _loom_lock = threading.Lock()
 
-    def _loom_store():
-        d = out_dir / "loom"
+    def _loom_kv_dir():
+        d = out_dir / "loom" / "kv"
         d.mkdir(parents=True, exist_ok=True)
-        return d / "store.json"
+        return d
 
-    def _loom_load():
-        p = _loom_store()
-        if p.exists():
-            try:
-                import json as _j
-                return _j.loads(p.read_text(encoding="utf-8"))
-            except (ValueError, OSError):
-                return {}
-        return {}
+    def _loom_kv_path(key):
+        from urllib.parse import quote
+        return _loom_kv_dir() / (quote(str(key), safe="") + ".json")
 
-    def _loom_save(data):
-        import json as _j
-        _loom_store().write_text(_j.dumps(data), encoding="utf-8")
+    def _loom_kv_write(key, value):
+        """Atomically persist one key's value (tmp + os.replace)."""
+        p = _loom_kv_path(key)
+        tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+        tmp.write_text(json.dumps(value), encoding="utf-8")
+        os.replace(tmp, p)
+
+    def _loom_kv_read(key):
+        try:
+            return json.loads(_loom_kv_path(key).read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            return None
+
+    def _loom_migrate():
+        """One-time split of the legacy single store.json into per-key files. Idempotent
+        + crash-safe: re-runs from the intact store.json until the final rename lands (a
+        partial migration can't lose keys), then no-ops once store.json is gone."""
+        legacy = out_dir / "loom" / "store.json"
+        if not legacy.exists():
+            return
+        try:
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            data = None
+        if isinstance(data, dict):
+            for k, v in data.items():
+                try:
+                    _loom_kv_write(k, v)
+                except OSError:
+                    return                      # leave store.json for the next touch to retry
+        try:
+            legacy.replace(legacy.with_name("store.json.migrated"))
+        except OSError:
+            pass
 
     @app.route("/loom/vendor/<path:fname>")
     def loom_vendor(fname):
@@ -9176,7 +9207,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if not _is_local_request():
             return jsonify({"value": None}), 403
         with _loom_lock:
-            return jsonify({"value": _loom_load().get(request.args.get("key") or "")})
+            _loom_migrate()
+            return jsonify({"value": _loom_kv_read(request.args.get("key") or "")})
 
     @app.route("/api/loom/set", methods=["POST"])
     def loom_set():
@@ -9187,19 +9219,23 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if not k:
             return jsonify({"ok": False}), 400
         with _loom_lock:
-            data = _loom_load()
-            data[k] = p.get("value")
-            _loom_save(data)
+            _loom_migrate()
+            try:
+                _loom_kv_write(k, p.get("value"))
+            except OSError as e:
+                return jsonify({"ok": False, "error": str(e)[:120]}), 500
         return jsonify({"ok": True})
 
     @app.route("/api/loom/list")
     def loom_list():
         if not _is_local_request():
             return jsonify({"keys": []}), 403
+        from urllib.parse import unquote
         pre = request.args.get("prefix") or ""
         with _loom_lock:
-            keys = [k for k in _loom_load().keys() if k.startswith(pre)]
-        return jsonify({"keys": keys})
+            _loom_migrate()
+            keys = [unquote(f.stem) for f in _loom_kv_dir().glob("*.json")]
+        return jsonify({"keys": [k for k in keys if k.startswith(pre)]})
 
     @app.route("/api/loom/delete", methods=["POST"])
     def loom_delete():
@@ -9207,10 +9243,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"ok": False}), 403
         k = (request.get_json(silent=True) or {}).get("key")
         with _loom_lock:
-            data = _loom_load()
-            if k in data:
-                del data[k]
-                _loom_save(data)
+            _loom_migrate()
+            if k:
+                try:
+                    _loom_kv_path(k).unlink()
+                except OSError:
+                    pass
         return jsonify({"ok": True})
 
     @app.route("/api/loom/handoff", methods=["POST"])
