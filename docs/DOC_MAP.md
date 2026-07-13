@@ -22,7 +22,7 @@
 | `ROADMAP_LOOM_ACHIEVEMENTS.md` | ⭐ **THE active roadmap** — source of truth for the current threads (Loom V2.1 · Achievements). Checkpointed after every increment; re-read after every compaction | **Active** |
 | `REFINEMENTS.md` | Near-term tracker: small web-suite fixes/polish | Active |
 | `ROADMAP.md` | Far-horizon epics only (the Foundry, Provider Deck) | Active, rarely touched |
-| `achievements_roster_57.json` | Canonical 57-achievement roster (names/tiers/triggers/roasts) — code generates from this. NOTE: three threshold fields are stale (code corrected marathon→100, read-the-manual→1, triggered→5 per trigger text) | **Canonical data** |
+| `achievements_roster_57.json` | Canonical 57-achievement roster (names/tiers/triggers/roasts) — code generates from this. Thresholds reconciled to shipped code 2026-07-13 (marathon 100 · read-the-manual 1 · triggered 5) | **Canonical data** |
 | `DOC_MAP.md` | This file | Active |
 | `CURATION_STANDARD.md` | ⭐ **House baseline for selection/vote artifacts** (owner-approved 2026-07-12): 10 non-negotiables, pick/rank/view/note model, build discipline | **Active standard** |
 | `curation_reference_builder.py` | Reference implementation of the Curation Standard — clone for any vote artifact (swap input/classify/picks, keep the rest) | Reference |

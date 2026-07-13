@@ -14,7 +14,17 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **Per-criteria checklists on set masteries** — the Trophy Hall now shows *which* criterion is
+  outstanding (✓/○) on the two closed-universe set achievements — **Full Toolbox** (edit / enhance /
+  fix) and **Master of the Loom** (i2v / flf / r2v) — instead of a bare `2/3`. Open-ended
+  distinct-counts (LoRAs, enhance workflows) stay count-only. Pure `achievement_criteria(sets)`
+  threaded through `compute_achievements(…, sets=)` and rendered in the Hall tile; unit-tested.
+
+### Fixed
+- **Canonical roster thresholds reconciled to shipped code** — `docs/achievements_roster_57.json`
+  carried three stale thresholds (marathon 1→100, triggered 0→5, read-the-manual 0→1); aligned to
+  what the code enforces so the canonical roster stops disagreeing with behavior.
 
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 
