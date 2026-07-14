@@ -164,16 +164,16 @@ verified (mock payload) across every render path. **Owner's WoW screenshots now 
 **Deferred polish:** per-*tile* ornate frames (toast has them), ~~per-criteria checklists on set
 achievements~~ (⏳ IN FLIGHT 2026-07-13, see below), owner-made mystery-tile art (masked feats reuse the cloaked-card look).
 
-**🎨 Layout mockup tool (2026-07-14) — owner is hand-arranging the Hall's regions.** Owner wants to
-propose their own spatial layout rather than have it dictated from the shipped defaults. Built a
-standalone drag+resize mockup artifact (7 blocks: header, tabs, main grid, category nav, within-reach,
-rewards-earned, mascot alcove — matches the shipped default positions as the starting point) on a
-1400×820 canvas with a 16px grid (same convention as the Loom's snap-to-grid), live x/y/w/h readouts,
-and a copy-JSON export so the owner's final arrangement comes back as exact numbers, not a screenshot
-to eyeball. **Owner sent a first revision (2026-07-14)** widening the rewards-earned lane to full grid
-width (1008px, room for real text labels like "Unlocks skin: Ember") and moving it below the grid
-instead of a cramped vertical sliver — confirmed there's still comfortable room for full 680px toast-width
-cards in the main grid column at that size. **Still awaiting a final locked arrangement.**
+**🎨 Layout — LOCKED (2026-07-14).** Owner hand-arranged the Hall's regions via a standalone drag+resize
+mockup artifact (7 blocks: header, tabs, main grid, category nav, within-reach, rewards-earned, mascot
+alcove; 1400×820 canvas, 16px grid, live x/y/w/h readouts, copy-JSON export). Final arrangement: header
+`0,0,1400,128` · tabs `0,128,1008,48` · grid `0,176,1008,528` (confirmed room for full 680px toast-width
+cards) · rewards `0,704,1008,112` (widened to full grid width so real text labels like "Unlocks skin:
+Ember" fit — the original narrow vertical-sliver version couldn't) · catnav `1024,144,368,128` · mascot
+`1024,288,368,336` · within-reach `1024,640,368,176`. Cosmetic-only nit, not blocking: grid/rewards sit
+flush (0px gap) where everything else uses 16px — a one-line nudge whenever convenient, not a redo.
+**What's left before building is content-level, not spatial:** reward-chip wording, grid tile density,
+mascot art placement — no more layout back-and-forth expected.
 
 **🎨 Ladder-family display — LOCKED (2026-07-14), not built:** a straight list of every rung breaks
 badly once toast-styled cards land in the grid. Locked direction: a **horizontal depth-carousel** per
