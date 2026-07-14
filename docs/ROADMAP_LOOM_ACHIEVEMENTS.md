@@ -175,18 +175,21 @@ width (1008px, room for real text labels like "Unlocks skin: Ember") and moving 
 instead of a cramped vertical sliver — confirmed there's still comfortable room for full 680px toast-width
 cards in the main grid column at that size. **Still awaiting a final locked arrangement.**
 
-**🎨 Ladder-family display — DECIDED (2026-07-14), not built:** a straight list of every rung breaks
-badly once toast-styled cards land in the grid (the Archive ladder alone is 5 rungs; some families run
-longer). Locked direction: a **horizontal depth-carousel** per ladder family, current/next-unearned rung
-centered + full-size + full-color, earned rungs recede to the left and locked ones recede to the right,
-each step smaller + more desaturated by `distance = index - currentIndex`
-(`scale: max(.55, 1-|d|*.15)`, `opacity: max(.4, 1-|d|*.18)`, `filter: grayscale(min(1,|d|*.3))`).
-**Grayscale, NOT blur** — owner's call after comparing: blur destroys medallion legibility at these small
-icon sizes (fine for photos, bad for small badges you still need to identify at a glance), grayscale
-keeps the shape readable while still reading as "not the current focus," and is cheaper to render.
-Static/computed-at-render (no JS animation needed) unless a ladder is long enough to need drag-scroll —
-open question: check the longest ladder family's rung count before deciding whether to clip history or
-make the row draggable.
+**🎨 Ladder-family display — LOCKED (2026-07-14), not built:** a straight list of every rung breaks
+badly once toast-styled cards land in the grid. Locked direction: a **horizontal depth-carousel** per
+ladder family, current/next-unearned rung centered + full-size + full-color, earned rungs recede to the
+left and locked ones recede to the right, each step smaller + more desaturated by
+`distance = index - currentIndex` (`scale: max(.55, 1-|d|*.15)`, `opacity: max(.4, 1-|d|*.18)`,
+`filter: grayscale(min(1,|d|*.3))`). **Grayscale, NOT blur** — owner's call after comparing: blur
+destroys medallion legibility at these small icon sizes (fine for photos, bad for small badges you
+still need to identify at a glance), grayscale keeps the shape readable while still reading as "not
+the current focus," and is cheaper to render. **Plus a spotlight glow** on the centered/current rung —
+a soft light halo blooming from behind it (radial gradient / glow, not just size+color) so it reads as
+genuinely illuminated, not just "bigger." **No scroll/drag needed, confirmed against the real roster:**
+longest ladder family is The Archive at 5 rungs (First Light → Archivist → Hoardsmith → Loremaster →
+The Great Library); everything else is 2–4. All rungs always fit at full size in any reasonable panel
+width — the overflow/clip/drag question from the first pass at this design is moot, not deferred.
+Static/computed-at-render, no JS animation needed.
 
 **⏳ IN FLIGHT (2026-07-13, this session) — quick wins A + B:**
 - **A · per-criteria checklists (set masteries):** the two CLOSED-universe set masteries — **Full Toolbox**
