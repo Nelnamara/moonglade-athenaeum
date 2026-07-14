@@ -4709,6 +4709,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-card.earned:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.35);}
   .ach-card .ico{position:relative;width:46px;height:46px;font-size:27px;line-height:1;filter:grayscale(1) brightness(.8);flex-shrink:0;display:flex;align-items:center;justify-content:center;}
   .ach-card.earned .ico{filter:none;}
+  .ach-card.masked .ico{border-radius:8px;overflow:hidden;}
   .ach-card .ico .ico-badge{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
   .ach-card.clickable{cursor:pointer;}
   .ach-card .nm{font-size:13.5px;font-weight:650;color:var(--text);}
@@ -4730,7 +4731,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .ach-card.t-feat{border-left-color:var(--gunmetal);} .ach-card.t-feat .tier{color:var(--ruby);}
   .ach-card.earned.t-feat{box-shadow:inset 0 0 0 1px rgba(224,53,94,.4),0 0 22px rgba(224,53,94,.14);}
   .ach-card.t-feat.masked{opacity:.5;}
-  .ach-card.t-feat.masked .ico{filter:grayscale(1) brightness(.6);}
+  .ach-card.t-feat.masked .ico{filter:none;}
   .ach-sect{grid-column:1/-1;display:flex;align-items:baseline;gap:9px;font-size:13px;
     font-weight:700;color:var(--text);margin:10px 0 -3px;padding-top:6px;border-top:1px solid var(--surface0);}
   .ach-sect:first-child{margin-top:0;border-top:none;padding-top:0;}
@@ -5061,7 +5062,9 @@ var Ach = (function(){
     var c=document.createElement('div');
     c.className='ach-card t-'+a.tier+(a.earned?' earned':' locked')+(masked?' masked':'');
     c.setAttribute('data-q',(a.name+' '+a.desc+' '+a.tier).toLowerCase());
-    var ico=a.earned?('<img class="ico-badge" src="/badge-thumb/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon)):esc(a.icon);
+    var ico=a.earned?('<img class="ico-badge" src="/badge-thumb/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon))
+      :masked?'<img class="ico-badge" src="/branding/mystery/secret_feat.png" onerror="this.remove()">'+esc(a.icon)
+      :esc(a.icon);
     var body='<div class="ico">'+ico+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
       +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>'
       +(a.points?'<span class="ach-pts">'+a.points+' pts</span>':'');
