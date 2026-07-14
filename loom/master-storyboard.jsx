@@ -405,6 +405,18 @@ const V2_STYLES = `
 .lv-board{padding:8px;}
 .lv-act{margin-bottom:12px;}
 .lv-actname{font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);margin:2px 0 7px;}
+.lv-actrow{display:flex;align-items:center;gap:4px;margin:2px 0 7px;}
+.lv-actname-in{flex:1;min-width:0;background:transparent;border:none;border-bottom:1px dashed var(--surface1);
+  color:var(--accent);font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.06em;padding:2px 0;}
+.lv-actname-in:focus{outline:none;border-bottom-color:var(--accent);}
+.lv-ico{width:19px;height:17px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
+  border-radius:4px;cursor:pointer;font-size:10px;line-height:1;flex:0 0 auto;}
+.lv-ico:hover{color:var(--accent);border-color:var(--accent);}
+.lv-ico.danger:hover{color:var(--coral,#e06c75);border-color:var(--coral,#e06c75);}
+.lv-ico.xs{width:16px;height:15px;font-size:9px;}
+.lv-crow{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;}
+.lv-actsel{font-size:8px;background:var(--base);border:1px solid var(--surface1);color:var(--subtext);
+  border-radius:4px;padding:1px 3px;cursor:pointer;max-width:100%;}
 .lv-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(122px,1fr));gap:8px;}
 .lv-card{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:7px;cursor:pointer;}
 .lv-card:hover{border-color:var(--accent);}
@@ -428,6 +440,9 @@ const V2_STYLES = `
 .lv-dim{color:var(--subtext);font-style:italic;}
 .lv-gen{padding:10px;}
 .lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;}
+.lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
+.lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
+.lv-framehandoff .sb-frameprev{height:64px;}
 .lv-lab{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);display:block;margin:9px 0 5px;}
 .lv-chips{display:flex;gap:5px;flex-wrap:wrap;}
 .lv-chip{background:var(--surface1);border:1px solid var(--surface1);color:var(--subtext);border-radius:6px;padding:3px 9px;font:600 10px/1 system-ui;cursor:pointer;}
@@ -579,11 +594,12 @@ function ProjectSwitcher({ api }) {
   );
 }
 
-function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
+function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
   const wrapRef = useRef(null);
   const [scaleV, setScaleV] = useState(1);
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
+  const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
   useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
   useEffect(() => {
     const fit = () => { if (wrapRef.current) setScaleV(Math.min(1, wrapRef.current.clientWidth / 1498)); };
@@ -601,32 +617,52 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
   const collapse = (id) => setLayout((L) => L.map((x) => (x.id === id ? { ...x, collapsed: !x.collapsed } : x)));
   const sel = entries.find((e) => e.c.id === selShot) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
-  const grouped = [];
-  entries.forEach((e) => { let g = grouped.find((x) => x.ai === e.ai); if (!g) { g = { ai: e.ai, name: e.a.name, items: [] }; grouped.push(g); } g.items.push(e); });
-
   const board = (
     <div className="lv-board">
-      {grouped.map((g) => (
-        <div key={g.ai} className="lv-act">
-          <div className="lv-actname">{g.name || "Act " + (g.ai + 1)}</div>
-          <div className="lv-cards">
-            {g.items.map((e) => {
-              const gs = genState[e.c.id];
-              const st = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
-              return (
-                <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
-                  <div className="lv-cframe">{(() => { const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null); return s ? <img src={s} alt="" /> : <span className="lv-cframeph">{e.c.mode}</span>; })()}</div>
-                  <div className="lv-code">{e.code}</div>
-                  <div className="lv-ctitle">{e.c.title || "untitled"}</div>
-                  <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
-                    <span className={"lv-st " + st}>{gs && gs.msg ? gs.msg : st}</span></div>
-                </div>
-              );
-            })}
+      {project.acts.map((act, ai) => {
+        const items = entries.filter((e) => e.ai === ai);
+        return (
+          <div key={act.id} className="lv-act">
+            <div className="lv-actrow">
+              <input className="lv-actname-in" value={act.name} onChange={(ev) => setAct(act.id, { name: ev.target.value })} aria-label="Act name" />
+              <button className="lv-ico" onClick={() => moveAct(ai, -1)} title="Move act up">&#8593;</button>
+              <button className="lv-ico" onClick={() => moveAct(ai, 1)} title="Move act down">&#8595;</button>
+              <button className="lv-ico danger" onClick={() => delAct(act.id)} title="Delete act">&#10005;</button>
+            </div>
+            <div className="lv-cards">
+              {items.map((e) => {
+                const gs = genState[e.c.id];
+                const st = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
+                return (
+                  <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
+                    <div className="lv-cframe">{(() => { const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null); return s ? <img src={s} alt="" /> : <span className="lv-cframeph">{e.c.mode}</span>; })()}</div>
+                    <div className="lv-code">{e.code}</div>
+                    <div className="lv-ctitle">{e.c.title || "untitled"}</div>
+                    <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
+                      <span className={"lv-st " + st}>{gs && gs.msg ? gs.msg : st}</span></div>
+                    <div className="lv-crow" onClick={(ev) => ev.stopPropagation()}>
+                      <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, -1)} title="Move up">&#8593;</button>
+                      <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, 1)} title="Move down">&#8595;</button>
+                      <button className="lv-ico xs" onClick={() => dupCard(act.id, e.c)} title="Duplicate">&#10697;</button>
+                      <button className="lv-ico xs danger" onClick={() => delCard(act.id, e.c)} title="Delete">&#10005;</button>
+                      {project.acts.length > 1 && (
+                        <select className="lv-actsel" value="" title="Move to another act"
+                          onChange={(ev) => ev.target.value && moveCardToAct(act.id, e.c, ev.target.value)}>
+                          <option value="">move to&hellip;</option>
+                          {project.acts.filter((a) => a.id !== act.id).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <button className="lv-mini2" onClick={() => addCard(act.id)}>+ Add shot to {act.name}</button>
           </div>
-        </div>
-      ))}
-      {!entries.length && <div className="lv-ph">No shots yet — add them in the classic Loom for now (+ shot lands here in a later increment).</div>}
+        );
+      })}
+      <button className="lv-mini2" onClick={addAct}>+ New act</button>
+      {!project.acts.length && <div className="lv-ph">No acts yet — add one below.</div>}
     </div>
   );
   const timeline = (
@@ -650,6 +686,28 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
     const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error";
     const patch = (fn) => setCard(sel.a.id, sel.c.id, fn);
     const appendTo = (field, term) => patch((c) => ({ ...c, [field]: c[field] ? c[field] + ", " + term : term }));
+    // Frame handoff (reparented from the classic CardEditor): open/close frame, same
+    // splice-in-last-frame / inherit-close mechanics, driven by the same setCard.
+    const selIdx = entries.findIndex((e) => e.c.id === sel.c.id);
+    const prevEntry = selIdx > 0 ? entries[selIdx - 1] : null;
+    const patchFrame = (key, fp) => patch((c) => ({ ...c, [key]: { ...c[key], ...fp } }));
+    const inheritPrev = () => {
+      if (!prevEntry) return;
+      const rmid = prevEntry.c.resultMid;
+      if (rmid) {
+        setHandoff("wip");
+        fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ video_media_id: rmid }) })
+          .then((r) => r.json()).then((d) => {
+            if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
+            setHandoff("");
+            patchFrame("openFrame", { mediaId: d.frame_media_id, thumbId: "", source: "",
+              desc: "handed off from " + (prevEntry.code || "prev shot") });
+          }).catch(() => setHandoff("err"));
+      } else {
+        patchFrame("openFrame", { ...prevEntry.c.closeFrame });
+      }
+    };
     let tabBody;
     if (tab === "Video") tabBody = (
       <div>
@@ -755,6 +813,18 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
     gen = (
       <div className="lv-gen">
         <div className="lv-genhead">&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</div>
+        <div className="lv-framehandoff">
+          <FrameSlot which="open" frame={sel.c.openFrame} discreet={sel.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+            onPatch={(p) => patchFrame("openFrame", p)}
+            extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
+                title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
+                {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
+                  : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
+              : <span className="sb-hint">first shot — no previous frame</span>} />
+          <div className="sb-conn-mid">&#8594;</div>
+          <FrameSlot which="close" frame={sel.c.closeFrame} discreet={sel.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+            onPatch={(p) => patchFrame("closeFrame", p)} />
+        </div>
         <div className="lv-tabs">{["Image", "Edit", "Reference", "Video"].map((t) => (<span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
         {acct && (
           <div className="lv-bal">&#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
@@ -1286,7 +1356,9 @@ export default function App() {
       {v2 && <V2Boundary onClose={() => setV2(false)}><LoomV2 layout={panelLayout} setLayout={setPanelLayout} onClose={() => setV2(false)}
         project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
         selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} genState={genState}
-        thumbs={thumbs} openPick={openPick}
+        thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
+        setAct={setAct} addCard={addCard} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
+        moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
         genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg}
         genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
         projectApi={projectApi} /></V2Boundary>}
