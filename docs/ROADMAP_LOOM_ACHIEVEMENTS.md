@@ -175,30 +175,29 @@ still masked server-side as before (`"???"` / "A hidden feat of the Athenaeum.")
 a bare badge image with no text doesn't tell you what unlocks it. `SecretCurtainRectangle.png`
 (badge-in-center composition) banked for a possible future reveal-moment treatment, not used now.
 
-**✅ Layout reformat SHIPPED (2026-07-14, commit `c877919`) — applied to the real, live Hall, not a
-mockup.** The mockup exercise's spatial intent (rewards widened to full grid width instead of a cramped
-290px rail sliver) turned out to need a real DOM move, not a CSS tweak — the actual Hall is a simple
-2-column CSS grid (`grid-template-columns:1fr 370px`, was `1fr 290px`) with the rail as a vertically
-stacked flex column, not absolute-positioned regions like the mockup tool modeled. `renderRail()`'s
-Rewards Earned block moved into `renderGrid()` as a `.hall-rewards-bar` spanning the full grid width,
-with real text labels ("Unlocks skin: Ember") instead of icon-only chips. Rail widened 290px→370px.
-Browser-verified: rewards renders inside `#ach-grid` with full labels, old rail-rewards gone, rail's
-other sections (categories/within-reach/mascot) untouched.
+**⚠️ Layout reformat / toast-cards / ladder-carousel — CODE SHIPPED 2026-07-14 (commit `c877919`),
+BUT OWNER REPORTS IT'S VISUALLY WRONG.** NOT considered done. Do not build on top of this without
+re-checking it first.
 
-**✅ Toast-styled grid tiles SHIPPED (2026-07-14, commit `c877919`).** `.ach-card` restyled toward the
-unlock toast's own visual language (Hall-scoped, doesn't touch the toast or any other `.ach-card` use):
-64px badge (was 46px), tier-colored top accent bar, `minmax(340px,1fr)` grid columns (was 216px) so
-tiles read as small toasts, not compact rows. Resting-pose only — no entrance animation, that's the
-toast's job. Masked-feat mystery art (shipped earlier same session) carries over unchanged.
-
-**✅ Ladder-family depth-carousel SHIPPED (2026-07-14, commit `c877919`).** Ladder-bucket achievements
-(Archive, Loom, Moonforge, etc.) now group by `metric` client-side (already present per-achievement,
-no backend change needed) and render as a horizontal carousel instead of flat cards: current/next
-rung centered at full size+color with a spotlight glow (`box-shadow` bloom, not just size/color),
-earned/locked rungs recede left/right shrinking + desaturating by distance
-(`scale: max(.55,1-|d|*.15)`, `opacity: max(.4,1-|d|*.18)`, `filter: grayscale(min(1,|d|*.3))`) —
-grayscale not blur, confirmed against the real roster: longest family is The Archive at 5 rungs, so
-no scroll/drag was ever needed. Browser-verified: math exact per rung at every distance, 474 tests green.
+- **What actually landed:** rewards moved from the narrow 290px rail into a `.hall-rewards-bar`
+  spanning the full grid width (rail widened 290px→370px); `.ach-card` restyled toward the unlock
+  toast's visual language (64px badge, tier-colored top accent, `minmax(340px,1fr)` columns);
+  ladder-bucket achievements grouped by `metric` client-side into a horizontal depth-carousel
+  (current rung centered/full-color/spotlight-glowed, others recede + grayscale by distance).
+- **Why "shipped" was the wrong word:** every check that session was a `getComputedStyle`/DOM-assertion
+  call (grid-template-columns, rung scale/opacity/grayscale math, element presence) — genuinely correct
+  readings of *those specific properties*, but never an actual look at the rendered page, because
+  screenshot capture was unreliable all session and I leaned on programmatic checks instead of pushing
+  to get a real visual. That gap is almost certainly how something is wrong without having been caught —
+  a real screenshot or the owner's own eyes would have said differently than the computed styles did.
+  **Lesson for next time:** for a visual/layout task specifically, a passing `getComputedStyle` check is
+  not equivalent to "verified" — get an actual rendered view before claiming done, or say plainly that
+  visual confirmation is still outstanding instead of reporting success.
+- **Owner's exact words:** "Well you fucked that up." No detail yet on what's wrong specifically.
+- **Next step (Thursday):** re-open the Hall with the owner watching, find out exactly what's broken
+  (layout overlap? carousel rendering wrong? toast-cards illegible? something else entirely?), fix it
+  for real this time, and get an actual visual confirmation — screenshot or the owner looking at it
+  live — before marking this done again.
 
 **⏳ IN FLIGHT (2026-07-13, this session) — quick wins A + B:**
 - **A · per-criteria checklists (set masteries):** the two CLOSED-universe set masteries — **Full Toolbox**
