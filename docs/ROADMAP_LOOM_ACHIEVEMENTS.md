@@ -170,7 +170,23 @@ standalone drag+resize mockup artifact (7 blocks: header, tabs, main grid, categ
 rewards-earned, mascot alcove — matches the shipped default positions as the starting point) on a
 1400×820 canvas with a 16px grid (same convention as the Loom's snap-to-grid), live x/y/w/h readouts,
 and a copy-JSON export so the owner's final arrangement comes back as exact numbers, not a screenshot
-to eyeball. **Awaiting the owner's arrangement — nothing rebuilt yet.**
+to eyeball. **Owner sent a first revision (2026-07-14)** widening the rewards-earned lane to full grid
+width (1008px, room for real text labels like "Unlocks skin: Ember") and moving it below the grid
+instead of a cramped vertical sliver — confirmed there's still comfortable room for full 680px toast-width
+cards in the main grid column at that size. **Still awaiting a final locked arrangement.**
+
+**🎨 Ladder-family display — DECIDED (2026-07-14), not built:** a straight list of every rung breaks
+badly once toast-styled cards land in the grid (the Archive ladder alone is 5 rungs; some families run
+longer). Locked direction: a **horizontal depth-carousel** per ladder family, current/next-unearned rung
+centered + full-size + full-color, earned rungs recede to the left and locked ones recede to the right,
+each step smaller + more desaturated by `distance = index - currentIndex`
+(`scale: max(.55, 1-|d|*.15)`, `opacity: max(.4, 1-|d|*.18)`, `filter: grayscale(min(1,|d|*.3))`).
+**Grayscale, NOT blur** — owner's call after comparing: blur destroys medallion legibility at these small
+icon sizes (fine for photos, bad for small badges you still need to identify at a glance), grayscale
+keeps the shape readable while still reading as "not the current focus," and is cheaper to render.
+Static/computed-at-render (no JS animation needed) unless a ladder is long enough to need drag-scroll —
+open question: check the longest ladder family's rung count before deciding whether to clip history or
+make the row draggable.
 
 **⏳ IN FLIGHT (2026-07-13, this session) — quick wins A + B:**
 - **A · per-criteria checklists (set masteries):** the two CLOSED-universe set masteries — **Full Toolbox**
