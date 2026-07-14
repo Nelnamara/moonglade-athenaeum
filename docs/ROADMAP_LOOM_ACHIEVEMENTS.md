@@ -164,6 +164,14 @@ verified (mock payload) across every render path. **Owner's WoW screenshots now 
 **Deferred polish:** per-*tile* ornate frames (toast has them), ~~per-criteria checklists on set
 achievements~~ (⏳ IN FLIGHT 2026-07-13, see below), owner-made mystery-tile art (masked feats reuse the cloaked-card look).
 
+**🎨 Layout mockup tool (2026-07-14) — owner is hand-arranging the Hall's regions.** Owner wants to
+propose their own spatial layout rather than have it dictated from the shipped defaults. Built a
+standalone drag+resize mockup artifact (7 blocks: header, tabs, main grid, category nav, within-reach,
+rewards-earned, mascot alcove — matches the shipped default positions as the starting point) on a
+1400×820 canvas with a 16px grid (same convention as the Loom's snap-to-grid), live x/y/w/h readouts,
+and a copy-JSON export so the owner's final arrangement comes back as exact numbers, not a screenshot
+to eyeball. **Awaiting the owner's arrangement — nothing rebuilt yet.**
+
 **⏳ IN FLIGHT (2026-07-13, this session) — quick wins A + B:**
 - **A · per-criteria checklists (set masteries):** the two CLOSED-universe set masteries — **Full Toolbox**
   (`tools` = edit/enhance/fix) and **Master of the Loom** (`video_modes` = i2v/flf/r2v; V2V is NOT tracked) —
