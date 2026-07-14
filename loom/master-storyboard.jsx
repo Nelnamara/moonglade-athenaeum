@@ -921,7 +921,12 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
         );
       })}
       {!(project.assets || []).length && <div className="lv-ph">No cast yet — add one below.</div>}
-      <button className="lv-addcast" onClick={() => openPick((mid) => setAssets((a) => { const base = a.reduce((mx, x) => { const m = /@image(\d+)/.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0); return [...a, { id: uid(), name: "", kind: "image", tag: "@image" + (base + 1), thumbId: "", source: "", mediaId: mid, lock: false }]; }), "image")}>+ add from gallery</button>
+      <button className="lv-addcast" onClick={() => openPick((mid, thumb, isVideo) => setAssets((a) => {
+        const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
+        const re = new RegExp("^" + pre + "(\\d+)$");
+        const base = a.reduce((mx, x) => { const m = re.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0);
+        return [...a, { id: uid(), name: "", kind: k, tag: pre + (base + 1), thumbId: "", source: "", mediaId: mid, lock: false }];
+      }), "image", true)}>+ add from gallery</button>
     </div>
   );
   const legendPanel = (
@@ -1029,9 +1034,10 @@ export default function App() {
   const exportPoll = useRef(null);
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
   const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
+  const [pickAllowType, setPickAllowType] = useState(false);  // show the Image/Video/All filter?
   const [importOpen, setImportOpen] = useState(false);  // import-collection dialog
   const [batching, setBatching] = useState(false);
-  const openPick = useCallback((cb, kind) => { setPickKind(kind || "image"); setPickCb(() => cb); }, []);
+  const openPick = useCallback((cb, kind, allowType) => { setPickKind(kind || "image"); setPickAllowType(!!allowType); setPickCb(() => cb); }, []);
   // Bridge the shared <mg-gallery-picker> web component to React (mirrors bindPicker):
   // pickCb doesn't change while the picker is mounted (only open->close via setPickCb),
   // so the closure captured on mount stays correct for the whole picking session.
@@ -1498,7 +1504,9 @@ export default function App() {
             </>}
           </div>
         </div>)}
-      {pickCb && <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind}></mg-gallery-picker>}
+      {pickCb && (pickAllowType
+        ? <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind} show-type></mg-gallery-picker>
+        : <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind}></mg-gallery-picker>)}
       {importOpen && <ImportCollection onClose={() => setImportOpen(false)} onImport={importCollection} />}
 
       <header className="sb-top">
