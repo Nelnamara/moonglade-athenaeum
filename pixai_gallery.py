@@ -3170,6 +3170,9 @@ __DESIGN_TOKENS__
   .lb-prev { left: 14px; } .lb-next { right: 14px; }
   @media (max-width: 680px) { .lb-nav { padding: 8px 12px; font-size: 22px; } #lb-caption { max-width: 40%; } }
   .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--surface0); }
+  /* Panoramic sources (progress-bar/frame textures, letterboxed banners...) lose almost all
+     their content to a square center-crop -- show those uncropped instead, letterboxed. */
+  .card img.wide-thumb { object-fit: contain; }
   .card .no-thumb { width: 100%; aspect-ratio: 1; background: var(--surface0); display: flex; align-items: center; justify-content: center; color: var(--overlay0); font-size: 11px; }
   .card .meta { padding: 6px 8px; }
   .card .meta .title { font-size: 12px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3646,7 +3649,7 @@ document.addEventListener('DOMContentLoaded', function() {
          data-idx="{{ loop.index0 }}" onclick="return openLightbox(event, {{ loop.index0 }})"></a>
       {% if row._has_thumb %}
       <img src="{{ url_for('thumb', media_id=row._thumb_mid) }}" loading="lazy"
-           decoding="async" onload="this.classList.add('loaded')"
+           decoding="async" onload="this.classList.add('loaded');var r=this.naturalWidth/(this.naturalHeight||1);if(r>2.2||r<0.45)this.classList.add('wide-thumb')"
            alt="{{ row.prompt_preview[:60] }}">
       {% else %}
       <div class="no-thumb">no preview</div>
