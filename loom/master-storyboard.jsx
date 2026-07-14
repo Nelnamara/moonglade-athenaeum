@@ -398,6 +398,19 @@ const V2_STYLES = `
 .lv-col:hover{color:var(--accent);}
 .lv-body{flex:1;overflow:auto;min-height:0;}
 .lv-panel.collapsed .lv-body{display:none;}
+.lv-collapsedview{flex:1;overflow:hidden;min-height:0;display:flex;}
+/* Generate collapsed to a right-edge icon rail: the bar goes vertical, title hidden
+   (no room at 52px), the collapse button re-centers as the sole affordance. */
+.lv-panel.collapsed.rail{flex-direction:column;}
+.lv-panel.collapsed.rail .lv-bar{flex-direction:column;padding:6px 2px;gap:4px;cursor:default;}
+.lv-panel.collapsed.rail .lv-dots,.lv-panel.collapsed.rail .lv-title{display:none;}
+.lv-panel.collapsed.rail .lv-col{margin:0;}
+.lv-genrail{display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 0;width:100%;}
+.lv-railbtn{width:38px;height:38px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
+  border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
+.lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
+.lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
+.lv-reel.mini{min-height:0;}
 .lv-rh{position:absolute;right:2px;bottom:2px;width:14px;height:14px;cursor:nwse-resize;z-index:3;
  background:linear-gradient(135deg,transparent 46%,var(--subtext) 46%,var(--subtext) 58%,transparent 58%,transparent 72%,var(--subtext) 72%);opacity:.5;}
 .lv-rh:hover{opacity:1;}
@@ -524,7 +537,7 @@ class V2Boundary extends React.Component {
     return this.props.children;
   }
 }
-function DockablePanel({ p, scale, onChange, onCollapse, children }) {
+function DockablePanel({ p, scale, onChange, onCollapse, children, collapsedView }) {
   const startDrag = (e) => {
     if (e.target.closest("button")) return;
     e.preventDefault();
@@ -540,15 +553,22 @@ function DockablePanel({ p, scale, onChange, onCollapse, children }) {
     const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); };
     document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
   };
-  const h = p.collapsed ? (p.id === "timeline" ? 104 : 34) : p.h;
+  // Collapse axis is per-panel: "generate" is a full-height right-edge column, so it
+  // collapses in WIDTH (down to an icon rail) and keeps its height; "timeline" is
+  // full-width along the top, so it collapses in HEIGHT (down to just the scrubber)
+  // and keeps its width. Everything else collapses to just the title bar (unchanged).
+  const isRail = p.id === "generate";
+  const w = p.collapsed && isRail ? 52 : p.w;
+  const h = p.collapsed ? (isRail ? p.h : p.id === "timeline" ? 78 : 34) : p.h;
+  const showCollapsedView = p.collapsed && collapsedView;
   return (
-    <div className={"lv-panel" + (p.collapsed ? " collapsed" : "")} style={{ left: p.x, top: p.y, width: p.w, height: h }}>
+    <div className={"lv-panel" + (p.collapsed ? " collapsed" : "") + (p.collapsed && isRail ? " rail" : "")} style={{ left: p.x, top: p.y, width: w, height: h }}>
       <div className="lv-bar" onMouseDown={startDrag}>
         <span className="lv-dots" />
         <span className="lv-title">{p.title}</span>
-        <button className="lv-col" onClick={() => onCollapse(p.id)} title="collapse">{p.collapsed ? "▾" : "▴"}</button>
+        <button className="lv-col" onClick={() => onCollapse(p.id)} title="collapse">{p.collapsed ? (isRail ? "◂" : "▾") : (isRail ? "▸" : "▴")}</button>
       </div>
-      <div className="lv-body">{children}</div>
+      {showCollapsedView ? <div className="lv-collapsedview">{collapsedView}</div> : <div className="lv-body">{children}</div>}
       {!p.collapsed && <div className="lv-rh" onMouseDown={startResize} />}
     </div>
   );
@@ -677,6 +697,26 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
       <div className="lv-tlinfo">{sel
         ? <span><b>{sel.code}</b> &middot; {sel.c.title || "untitled"} &middot; {sel.c.mode} &middot; {durOf(sel.c)}s</span>
         : <span className="lv-dim">click a shot to select it — the whole workspace binds to it</span>}</div>
+    </div>
+  );
+  // Collapsed timeline: just the scrubber reel (no preview player, no info line) — the
+  // "slim top strip" the rail-layout plan calls for, instead of the old blunt full-hide.
+  const timelineCollapsed = (
+    <div className="lv-reel mini">
+      {entries.map((x, i) => (<div key={i} className={"lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : "")}
+        style={{ width: `${(durOf(x.c) / scale) * 100}%` }} title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)} />))}
+      <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
+    </div>
+  );
+  // Collapsed Generate: the right-edge icon rail ("gallery-drawer muscle memory") —
+  // clicking an icon expands the panel back out AND switches to that tab.
+  const GEN_ICONS = [["Image", "✦"], ["Edit", "✎"], ["Reference", "🖼"], ["Video", "🎬"]];
+  const genRail = (
+    <div className="lv-genrail">
+      {GEN_ICONS.map(([t, ic]) => (
+        <button key={t} className={"lv-railbtn" + (t === tab ? " on" : "")} title={t}
+          onClick={() => { setTab(t); collapse("generate"); }}>{ic}</button>
+      ))}
     </div>
   );
   let gen;
@@ -873,6 +913,7 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
   const content = (id) => id === "board" ? board : id === "timeline" ? timeline : id === "generate" ? gen
     : id === "cast" ? castPanel : id === "legend" ? legendPanel : id === "footage" ? footagePanel
     : <div className="lv-ph">{V2_PH[id] || id}</div>;
+  const collapsedContent = (id) => id === "timeline" ? timelineCollapsed : id === "generate" ? genRail : null;
 
   return (
     <div className="lv-overlay">
@@ -887,7 +928,7 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
       <div className="lv-scaler" ref={wrapRef} style={{ height: 820 * scaleV }}>
         <div className="lv-canvas" style={{ transform: "scale(" + scaleV + ")" }}>
           {layout.map((p) => (
-            <DockablePanel key={p.id} p={p} scale={scaleV} onChange={change} onCollapse={collapse}>
+            <DockablePanel key={p.id} p={p} scale={scaleV} onChange={change} onCollapse={collapse} collapsedView={collapsedContent(p.id)}>
               {content(p.id)}
             </DockablePanel>
           ))}
