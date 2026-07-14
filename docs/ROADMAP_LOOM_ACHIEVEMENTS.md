@@ -175,32 +175,30 @@ still masked server-side as before (`"???"` / "A hidden feat of the Athenaeum.")
 a bare badge image with no text doesn't tell you what unlocks it. `SecretCurtainRectangle.png`
 (badge-in-center composition) banked for a possible future reveal-moment treatment, not used now.
 
-**🎨 Layout — LOCKED (2026-07-14).** Owner hand-arranged the Hall's regions via a standalone drag+resize
-mockup artifact (7 blocks: header, tabs, main grid, category nav, within-reach, rewards-earned, mascot
-alcove; 1400×820 canvas, 16px grid, live x/y/w/h readouts, copy-JSON export). Final arrangement: header
-`0,0,1400,128` · tabs `0,128,1008,48` · grid `0,176,1008,528` (confirmed room for full 680px toast-width
-cards) · rewards `0,704,1008,112` (widened to full grid width so real text labels like "Unlocks skin:
-Ember" fit — the original narrow vertical-sliver version couldn't) · catnav `1024,144,368,128` · mascot
-`1024,288,368,336` · within-reach `1024,640,368,176`. Cosmetic-only nit, not blocking: grid/rewards sit
-flush (0px gap) where everything else uses 16px — a one-line nudge whenever convenient, not a redo.
-**What's left before building is content-level, not spatial:** reward-chip wording, grid tile density,
-mascot art placement — no more layout back-and-forth expected.
+**✅ Layout reformat SHIPPED (2026-07-14, commit `c877919`) — applied to the real, live Hall, not a
+mockup.** The mockup exercise's spatial intent (rewards widened to full grid width instead of a cramped
+290px rail sliver) turned out to need a real DOM move, not a CSS tweak — the actual Hall is a simple
+2-column CSS grid (`grid-template-columns:1fr 370px`, was `1fr 290px`) with the rail as a vertically
+stacked flex column, not absolute-positioned regions like the mockup tool modeled. `renderRail()`'s
+Rewards Earned block moved into `renderGrid()` as a `.hall-rewards-bar` spanning the full grid width,
+with real text labels ("Unlocks skin: Ember") instead of icon-only chips. Rail widened 290px→370px.
+Browser-verified: rewards renders inside `#ach-grid` with full labels, old rail-rewards gone, rail's
+other sections (categories/within-reach/mascot) untouched.
 
-**🎨 Ladder-family display — LOCKED (2026-07-14), not built:** a straight list of every rung breaks
-badly once toast-styled cards land in the grid. Locked direction: a **horizontal depth-carousel** per
-ladder family, current/next-unearned rung centered + full-size + full-color, earned rungs recede to the
-left and locked ones recede to the right, each step smaller + more desaturated by
-`distance = index - currentIndex` (`scale: max(.55, 1-|d|*.15)`, `opacity: max(.4, 1-|d|*.18)`,
-`filter: grayscale(min(1,|d|*.3))`). **Grayscale, NOT blur** — owner's call after comparing: blur
-destroys medallion legibility at these small icon sizes (fine for photos, bad for small badges you
-still need to identify at a glance), grayscale keeps the shape readable while still reading as "not
-the current focus," and is cheaper to render. **Plus a spotlight glow** on the centered/current rung —
-a soft light halo blooming from behind it (radial gradient / glow, not just size+color) so it reads as
-genuinely illuminated, not just "bigger." **No scroll/drag needed, confirmed against the real roster:**
-longest ladder family is The Archive at 5 rungs (First Light → Archivist → Hoardsmith → Loremaster →
-The Great Library); everything else is 2–4. All rungs always fit at full size in any reasonable panel
-width — the overflow/clip/drag question from the first pass at this design is moot, not deferred.
-Static/computed-at-render, no JS animation needed.
+**✅ Toast-styled grid tiles SHIPPED (2026-07-14, commit `c877919`).** `.ach-card` restyled toward the
+unlock toast's own visual language (Hall-scoped, doesn't touch the toast or any other `.ach-card` use):
+64px badge (was 46px), tier-colored top accent bar, `minmax(340px,1fr)` grid columns (was 216px) so
+tiles read as small toasts, not compact rows. Resting-pose only — no entrance animation, that's the
+toast's job. Masked-feat mystery art (shipped earlier same session) carries over unchanged.
+
+**✅ Ladder-family depth-carousel SHIPPED (2026-07-14, commit `c877919`).** Ladder-bucket achievements
+(Archive, Loom, Moonforge, etc.) now group by `metric` client-side (already present per-achievement,
+no backend change needed) and render as a horizontal carousel instead of flat cards: current/next
+rung centered at full size+color with a spotlight glow (`box-shadow` bloom, not just size/color),
+earned/locked rungs recede left/right shrinking + desaturating by distance
+(`scale: max(.55,1-|d|*.15)`, `opacity: max(.4,1-|d|*.18)`, `filter: grayscale(min(1,|d|*.3))`) —
+grayscale not blur, confirmed against the real roster: longest family is The Archive at 5 rungs, so
+no scroll/drag was ever needed. Browser-verified: math exact per rung at every distance, 474 tests green.
 
 **⏳ IN FLIGHT (2026-07-13, this session) — quick wins A + B:**
 - **A · per-criteria checklists (set masteries):** the two CLOSED-universe set masteries — **Full Toolbox**
