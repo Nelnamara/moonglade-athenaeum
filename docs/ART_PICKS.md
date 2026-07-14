@@ -110,10 +110,13 @@ Earlier "big artifact" (finalists in context, pre-course-correction): `b45a39a3`
 
 ## ⏳ Open / next
 
-- **CLAIM (daily credit claim) winner = crystal-cluster style** (owner correction, 2026-07-14 —
-  earlier "unresolved" note was stale). Exact final crystal id TBD, but the direction is settled:
-  crystal, NOT a gift box. **Not yet wired** — the header's `#acct-claim` button
-  (`Acct.paint()`, pixai_gallery.py) still renders a hardcoded 🎁 emoji via plain `textContent`.
+- **✅ CLAIM (daily credit claim) winner = CLAIM3, WIRED (2026-07-14).** Owner replaced the original
+  CLAIM3 (bad alpha) with a re-keyed version from `Downloads\Alpha Tags 7.13\CLAIM3.png` — "a BETTER
+  GEM." Downsized 2000×2000→128×128 (matches `gift.png`'s scale) and placed at
+  `out_dir/branding/rewards/claim.png` (D: run-copy + the C: dev sample project). The header's
+  `#acct-claim` button (`Acct.paint()`, `pixai_gallery.py`) now renders `<img class="claim-ico" ...>`
+  instead of the hardcoded 🎁 emoji, `onerror` fails soft (image removed, text still shows).
+  Browser-verified live: 200 on `/branding/rewards/claim.png`, renders at the CSS-capped 15×15.
   **CLAIM7 (gift box) is a SEPARATE slot** — earned-achievement goodies / card redemption / other
   PixAI gifts — already correctly wired into the achievement toast's reward ribbon (last night).
   Do not conflate the two claim surfaces again.
