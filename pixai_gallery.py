@@ -3012,6 +3012,9 @@ __DESIGN_TOKENS__
     .head-nav::-webkit-scrollbar { display: none; }
     .head-nav > * { flex: 0 0 auto; }
     .head-nav .btn, .acct-chip, .acct-claim { min-height: 40px; display: inline-flex; align-items: center; }
+    /* The Loom is a dense multi-panel desktop/tablet tool -- not viable on a phone screen.
+       Hidden here (phone-only breakpoint), stays visible at 481px+ incl. the tablet range. */
+    .head-nav .b-loom { display: none; }
 
     /* GRID: force a comfortable 2-up; ignore a too-large saved --thumb (else 1 giant column / overflow). */
     .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px; padding: 10px 10px; }
@@ -3052,6 +3055,18 @@ __DESIGN_TOKENS__
     .lb-bar { flex-wrap: wrap; padding: 8px 10px; }
     #lb-caption { max-width: 100%; order: 3; flex-basis: 100%; font-size: 11px; }
     .lb-actions .btn { min-height: 40px; padding: 8px 12px; }
+
+    /* FILTERS as a bottom sheet (owner: "fills a ton of the screen" / "bottom slider is
+       the way on an iphone"). Reuses the existing toggleFilters() + .open class unchanged --
+       only what .open MEANS visually changes, from an inline expand to a slide-up sheet. */
+    .filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 220;
+      max-height: 78vh; overflow-y: auto; background: var(--mantle); border-top: 1px solid var(--surface1);
+      border-radius: 16px 16px 0 0; box-shadow: 0 -14px 40px rgba(0,0,0,.5);
+      transform: translateY(100%); visibility: hidden; transition: transform .25s ease, visibility 0s linear .25s; }
+    .filters.open { transform: translateY(0); visibility: visible; transition: transform .25s ease; }
+    .filter-scrim { position: fixed; inset: 0; z-index: 219; background: rgba(0,0,0,.55);
+      opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+    .filters.open ~ .filter-scrim { opacity: 1; pointer-events: auto; }
   }
   /* Tablet: keep the filter bar visible but let wide text inputs shrink so the
      row wraps tidily instead of running off-screen. */
@@ -3464,6 +3479,7 @@ document.addEventListener('DOMContentLoaded', function() {
       aria-expanded="{{ 'true' if adv_active else 'false' }}">{{ 'Less ▴' if adv_active else 'More ▾' }}</button>
   </div>
 </div>
+<div class="filter-scrim" onclick="toggleFilters()"></div>
 <div class="filters filters-adv" id="filters-adv" {% if not adv_active %}style="display:none;"{% endif %}>
   <div>
     <label>Model</label><br>

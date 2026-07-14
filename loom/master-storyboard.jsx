@@ -567,7 +567,13 @@ function DockablePanel({ p, scale, onChange, onCollapse, children, collapsedView
   const startResize = (e) => {
     e.preventDefault(); e.stopPropagation();
     const sx = e.clientX, sy = e.clientY, ow = p.w, oh = p.h;
-    const mv = (ev) => onChange({ ...p, w: snap(Math.max(160, Math.round(ow + (ev.clientX - sx) / scale))), h: snap(Math.max(80, Math.round(oh + (ev.clientY - sy) / scale))) });
+    // Width: most panels never need to get very wide (Board, the widest by default, ships
+    // at 628px) -- cap regular panels at 800px. Timeline is the one panel meant to stay
+    // full-width, so it's exempt from that cap (still bounded by the canvas edge itself).
+    // Height: liberal per the owner's call -- only bounded by the canvas edge, no extra cap.
+    const maxW = (p.id === "timeline") ? (1498 - p.x) : Math.min(800, 1498 - p.x);
+    const maxH = 820 - p.y;
+    const mv = (ev) => onChange({ ...p, w: snap(Math.min(maxW, Math.max(160, Math.round(ow + (ev.clientX - sx) / scale)))), h: snap(Math.min(maxH, Math.max(80, Math.round(oh + (ev.clientY - sy) / scale)))) });
     const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); };
     document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
   };
