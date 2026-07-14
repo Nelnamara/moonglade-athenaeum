@@ -73,15 +73,16 @@ re-verified: migration + atomic per-key writes both confirmed live + 5 dedicated
 - **Selected-shot interaction model** (owner-approved via `loom_selectshot`): click a shot → binds Generate + panels to it; LOUD selection (gold ring + timeline glow + name in headers); two-way live edit; double-click = deep-focus modal; board never moves in place.
 - **Collapsing:** timeline collapses to keep just the scrubber; app banner header = "Collapsing" mode (sticky 260px, collapses on scroll; modes Collapsing/Always-slim/Off). Banner default = mark **#62**.
 
-**Wired / working (browser-verified):** V2 toggle · error boundary · layout persistence · real acts&shots board · timeline reel + `ShotPreview` trim · Cast (toggle refs, +add from gallery) · static Legend · Footage grid · **Generate VIDEO tab fully functional** (real `generateShot`, mode/prompt/duration/continuity/camera/lighting w/ palette chips).
+**Wired / working (browser-verified):** V2 toggle · error boundary · layout persistence · real acts&shots board · timeline reel + `ShotPreview` trim · Cast (toggle refs, +add from gallery) · static Legend · Footage grid · **all 4 Generate tabs functional** (Video/Image/Edit/Reference — real gens verified live 2026-07-12 with real task IDs, routed into open/close frame/cast).
 
-**Stubbed / NOT in V2 yet:**
-- Image / Edit / Reference generate tabs are **placeholders** (only Video generates).
-- **Cannot add shots** in V2 (cards are select-only).
-- **Cannot set open/close frames** in V2 (`FrameSlot` exists but not reparented into Generate).
-- Timeline collapse-to-scrubber is **buggy**; no snap-to-grid; no double-click deep-focus in the overlay yet.
+**✅ SHOT MECHANICS SHIPPED (2026-07-14) — V2 is now mechanically complete:**
+- **Add / reorder / duplicate / delete shots in V2** — `addCard`/`moveCard`/`dupCard`/`delCard`/`moveCardToAct` (the same functions classic Loom always used) now wired into the V2 board. Per-card icon row (↑↓⧉✕ + "move to act…").
+- **Add / reorder / delete ACTS in V2 too** — `addAct`/`moveAct`/`delAct`/`setAct` wired in; the board now iterates `project.acts` directly instead of the entries-derived `grouped`, so a freshly-added **empty act stays visible** (with its own "+ Add shot" button) instead of disappearing.
+- **`FrameSlot` (open/close frame) reparented into Generate** — sits above the tab bar so it applies across modes, exact same splice/inherit-from-previous mechanics as classic (`/api/loom/handoff`).
+- Browser-verified end-to-end: add act → shows immediately (incl. empty) → add shot → shows "first shot" placeholder → add a 2nd shot → shows "↳ inherit A·01 close" correctly. Zero console errors; Babel-transpile-checked clean.
+- **Still stubbed:** Timeline collapse-to-scrubber is **buggy** (blunt hide-body, not a real slim scrubber); no snap-to-grid; no double-click deep-focus in the overlay yet; no rail/icon-strip Generate collapse. These are item **#2 — the rail layout restructure** (next).
 
-**⚠️ NOT ready to ship as a standalone workspace** — it still needs classic Loom for add-shots + frame-setting. (I wrongly said "just merge it" once; retracted.)
+**✅ V2 can now replace classic Loom for full shot-building** — the two literal blockers ("still needs classic Loom for add-shots + frame-setting") are closed. Remaining work is ergonomics (rail/collapse) + polish (deep-focus/snap-grid), not missing mechanics.
 
 **✅ DECIDED (owner, 2026-07-11) — OFFICIAL PLAN: Loom V2.1 "drawer-ized" build. NEXT MAJOR BUILD after the achievement implementation.**
 The ref-gen question is resolved as **Option A + bridge** (supersedes the open decision below):
