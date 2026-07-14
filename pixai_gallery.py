@@ -2952,8 +2952,8 @@ __DESIGN_TOKENS__
   .ver-badge { font-size: 10px; font-weight: 500; color: var(--overlay0); font-family: ui-monospace, monospace; border: 1px solid var(--surface1); border-radius: 5px; padding: 1px 6px; vertical-align: middle; margin-left: 4px; letter-spacing: 0; }
   .header-stats { color: var(--subtext); font-size: 12px; } .header-stats b { color: var(--text); }
   .gen-live { color: var(--lavender); margin-left: 8px; display:inline-flex; align-items:center; }
-  .gen-nel-wrap{position:relative;display:inline-block;width:22px;height:22px;margin-right:5px;vertical-align:middle;flex:none;}
-  .gen-nel{position:absolute;inset:3px;width:16px;height:16px;border-radius:50%;object-fit:cover;object-position:60% 32%;}
+  .gen-nel-wrap{position:relative;display:inline-block;width:34px;height:34px;margin-right:6px;vertical-align:middle;flex:none;}
+  .gen-nel{position:absolute;inset:5px;width:24px;height:24px;border-radius:50%;object-fit:cover;object-position:60% 32%;animation:gen-spin 1.6s linear infinite;}
   .gen-ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
   @keyframes gen-spin{to{transform:rotate(360deg);}}
   .cover-badge { margin-left: 8px; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--surface1); cursor: default; }
@@ -4992,8 +4992,8 @@ document.addEventListener('DOMContentLoaded', function(){
   .jt-glyph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
   .jt-ok{color:var(--emerald);font-size:15px;} .jt-err{color:var(--red);font-size:15px;}
   .jt-nel{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
-  .jt-spin{position:relative;width:34px;height:34px;}
-  .jt-spin .jt-nel{inset:4px;width:26px;height:26px;border-radius:50%;object-fit:cover;object-position:60% 32%;}
+  .jt-spin{position:relative;width:48px;height:48px;}
+  .jt-spin .jt-nel{inset:6px;width:36px;height:36px;border-radius:50%;object-fit:cover;object-position:60% 32%;animation:gen-spin 1.6s linear infinite;}
   .jt-spin .gen-ring{position:absolute;inset:2px;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
   .jt-empty-nel{width:104px;height:104px;object-fit:contain;margin:0 auto 8px;display:block;opacity:.92;}
   .jt-main{flex:1;min-width:0;}
