@@ -386,7 +386,8 @@ const V2_STYLES = `
 .lv-top button{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top .lv-close{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
-.lv-scaler{flex:1;overflow:hidden;}
+.lv-scaler{flex:1;overflow:auto;}
+.lv-canvaswrap{position:relative;overflow:hidden;flex:none;}
 .lv-canvas{position:relative;width:1498px;height:820px;transform-origin:top left;
  background-image:radial-gradient(circle at 20px 20px,rgba(255,255,255,.03) 1px,transparent 1.4px);background-size:30px 30px;}
 .lv-panel{position:absolute;background:var(--surface0);border:1px solid var(--surface1);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 30px -14px rgba(0,0,0,.6);}
@@ -509,6 +510,21 @@ const V2_STYLES = `
 .lv-refline{font-size:10px;color:var(--subtext);margin:10px 0 4px;}
 .lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
+/* Deep Focus: double-click a board card to open a maximized, distraction-free editor
+   for just that shot (title/mode/duration/frames) without leaving the V2 overlay. */
+.lv-df-veil{position:fixed;inset:0;z-index:450;background:rgba(6,4,14,.72);display:flex;align-items:center;justify-content:center;padding:24px;}
+.lv-df{width:min(640px,92vw);max-height:88vh;overflow:auto;background:var(--surface0);border:1px solid var(--surface1);
+  border-radius:14px;padding:18px 20px 22px;box-shadow:0 30px 70px -20px rgba(0,0,0,.7);}
+.lv-df-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.lv-df-code{font:700 11px/1 ui-monospace,monospace;color:var(--subtext);flex:0 0 auto;}
+.lv-df-title{flex:1;min-width:0;background:transparent;border:none;border-bottom:1px solid var(--surface1);
+  color:var(--text);font:600 17px/1.2 system-ui;padding:4px 0;}
+.lv-df-title:focus{outline:none;border-bottom-color:var(--accent);}
+.lv-df-row{display:flex;gap:16px;margin-bottom:6px;}
+.lv-field{flex:1;min-width:0;}
+.lv-field.narrow{flex:0 0 120px;}
+.lv-df-frames{display:flex;gap:12px;align-items:flex-start;margin-top:14px;}
+.lv-df-frames .sb-frame{flex:1 1 0;min-width:0;}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
@@ -538,18 +554,20 @@ class V2Boundary extends React.Component {
   }
 }
 function DockablePanel({ p, scale, onChange, onCollapse, children, collapsedView }) {
+  const GRID = 16;   // snap-to-grid step (px, logical/unscaled canvas units)
+  const snap = (v) => Math.round(v / GRID) * GRID;
   const startDrag = (e) => {
     if (e.target.closest("button")) return;
     e.preventDefault();
     const sx = e.clientX, sy = e.clientY, ox = p.x, oy = p.y;
-    const mv = (ev) => onChange({ ...p, x: Math.max(0, Math.round(ox + (ev.clientX - sx) / scale)), y: Math.max(0, Math.round(oy + (ev.clientY - sy) / scale)) });
+    const mv = (ev) => onChange({ ...p, x: snap(Math.max(0, Math.round(ox + (ev.clientX - sx) / scale))), y: snap(Math.max(0, Math.round(oy + (ev.clientY - sy) / scale))) });
     const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); };
     document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
   };
   const startResize = (e) => {
     e.preventDefault(); e.stopPropagation();
     const sx = e.clientX, sy = e.clientY, ow = p.w, oh = p.h;
-    const mv = (ev) => onChange({ ...p, w: Math.max(160, Math.round(ow + (ev.clientX - sx) / scale)), h: Math.max(80, Math.round(oh + (ev.clientY - sy) / scale)) });
+    const mv = (ev) => onChange({ ...p, w: snap(Math.max(160, Math.round(ow + (ev.clientX - sx) / scale))), h: snap(Math.max(80, Math.round(oh + (ev.clientY - sy) / scale))) });
     const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); };
     document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
   };
@@ -620,7 +638,14 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
+  const [deepFocus, setDeepFocus] = useState(null);   // entry {a,c,ai,ci,code} double-clicked on the board, or null
   useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!deepFocus) return;
+    const onKey = (ev) => { if (ev.key === "Escape") setDeepFocus(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deepFocus]);
   useEffect(() => {
     const fit = () => { if (wrapRef.current) setScaleV(Math.min(1, wrapRef.current.clientWidth / 1498)); };
     fit(); window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit);
@@ -654,13 +679,14 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
                 const gs = genState[e.c.id];
                 const st = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
                 return (
-                  <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
+                  <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}
+                    onDoubleClick={() => setDeepFocus(e)} title="Double-click to open in Deep Focus">
                     <div className="lv-cframe">{(() => { const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null); return s ? <img src={s} alt="" /> : <span className="lv-cframeph">{e.c.mode}</span>; })()}</div>
                     <div className="lv-code">{e.code}</div>
                     <div className="lv-ctitle">{e.c.title || "untitled"}</div>
                     <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
                       <span className={"lv-st " + st}>{gs && gs.msg ? gs.msg : st}</span></div>
-                    <div className="lv-crow" onClick={(ev) => ev.stopPropagation()}>
+                    <div className="lv-crow" onClick={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, -1)} title="Move up">&#8593;</button>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, 1)} title="Move down">&#8595;</button>
                       <button className="lv-ico xs" onClick={() => dupCard(act.id, e.c)} title="Duplicate">&#10697;</button>
@@ -925,15 +951,55 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
         <button onClick={() => setLayout(V2_DEFAULT.map((d) => ({ ...d })))}>Reset layout</button>
         <button className="lv-close" onClick={onClose}>← Back to classic Loom</button>
       </div>
-      <div className="lv-scaler" ref={wrapRef} style={{ height: 820 * scaleV }}>
-        <div className="lv-canvas" style={{ transform: "scale(" + scaleV + ")" }}>
-          {layout.map((p) => (
-            <DockablePanel key={p.id} p={p} scale={scaleV} onChange={change} onCollapse={collapse} collapsedView={collapsedContent(p.id)}>
-              {content(p.id)}
-            </DockablePanel>
-          ))}
+      <div className="lv-scaler" ref={wrapRef}>
+        {/* .lv-canvaswrap reports the ACTUAL scaled footprint (1498*scaleV x 820*scaleV) to
+           .lv-scaler's scroll calculation. transform:scale() alone doesn't shrink an element's
+           contribution to its container's scrollable-overflow size (only its paint/visual size),
+           so without this wrapper a short viewport just clipped the excess with no way to reach
+           it -- the bug report ("scrollbar moves, nothing happens"). */}
+        <div className="lv-canvaswrap" style={{ width: 1498 * scaleV, height: 820 * scaleV }}>
+          <div className="lv-canvas" style={{ transform: "scale(" + scaleV + ")" }}>
+            {layout.map((p) => (
+              <DockablePanel key={p.id} p={p} scale={scaleV} onChange={change} onCollapse={collapse} collapsedView={collapsedContent(p.id)}>
+                {content(p.id)}
+              </DockablePanel>
+            ))}
+          </div>
         </div>
       </div>
+      {deepFocus && (() => {
+        const dfPatch = (fn) => setCard(deepFocus.a.id, deepFocus.c.id, fn);
+        const dfPatchFrame = (key, fp) => dfPatch((cc) => ({ ...cc, [key]: { ...cc[key], ...fp } }));
+        const c = deepFocus.c;
+        return (
+          <div className="lv-df-veil" onClick={(ev) => { if (ev.target === ev.currentTarget) setDeepFocus(null); }}>
+            <div className="lv-df">
+              <div className="lv-df-head">
+                <span className="lv-df-code">{deepFocus.code}</span>
+                <input className="lv-df-title" value={c.title || ""} placeholder="untitled"
+                  onChange={(ev) => dfPatch((cc) => ({ ...cc, title: ev.target.value }))} />
+                <button className="lv-col" onClick={() => setDeepFocus(null)} title="Close (Esc)">&#10005;</button>
+              </div>
+              <div className="lv-df-row">
+                <div className="lv-field"><label className="lv-lab">Mode</label>
+                  <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === c.mode ? "on" : "")}
+                    onClick={() => dfPatch((cc) => ({ ...cc, mode: m }))}>{m}</span>))}</div></div>
+                <div className="lv-field narrow"><label className="lv-lab">Duration (s)</label>
+                  <input className="lv-in" type="number" min="1" value={c.duration}
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, duration: Number(ev.target.value) }))} /></div>
+              </div>
+              <div className="lv-df-frames">
+                <FrameSlot which="open" frame={c.openFrame} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                  onPatch={(p) => dfPatchFrame("openFrame", p)} />
+                <div className="sb-conn-mid">&#8594;</div>
+                <FrameSlot which="close" frame={c.closeFrame} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                  onPatch={(p) => dfPatchFrame("closeFrame", p)} />
+              </div>
+              <button className="lv-go" onClick={() => { setSelShot(c.id); setDeepFocus(null); }}>Select in Generate &rarr;</button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
