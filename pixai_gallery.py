@@ -8281,7 +8281,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             isv = str(r.get("is_video") or "") == "1"
             out.append({"media_id": str(mid), "is_video": "1" if isv else "",
                         "thumb": "/thumbs/{}.jpg".format(mid),
-                        "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
+                        "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000],
+                        "duration": (r.get("video_duration") or "") if isv else ""})
         return jsonify({"images": out, "total": total, "page": page, "limit": limit})
 
     @app.route("/api/similar/<media_id>")
