@@ -465,6 +465,9 @@ const V2_STYLES = `
 .lv-ta:focus{outline:0;border-color:var(--accent);}
 .lv-go{width:100%;margin-top:11px;background:var(--accent);color:var(--base);border:0;border-radius:8px;padding:9px;font:700 12px/1 system-ui;cursor:pointer;}
 .lv-go:disabled{opacity:.6;cursor:default;}
+.lv-usevid{width:100%;margin-top:7px;background:transparent;color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
+.lv-usevid:hover{border-color:var(--accent);color:var(--accent);}
+.lv-usevid:disabled{opacity:.5;cursor:default;}
 .lv-note2{font-size:9px;color:var(--subtext);font-style:italic;margin-top:8px;text-align:center;}
 .lv-cframe{height:48px;border-radius:5px;overflow:hidden;background:var(--base);border:1px solid var(--surface1);display:flex;align-items:center;justify-content:center;margin-bottom:5px;}
 .lv-cframe img{width:100%;height:100%;object-fit:cover;}
@@ -638,7 +641,7 @@ function ProjectSwitcher({ api }) {
   );
 }
 
-function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
+function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
   const wrapRef = useRef(null);
   const [scaleV, setScaleV] = useState(1);
   const [tab, setTab] = useState("Video");
@@ -799,6 +802,9 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
         <div className="lv-mini">{LIGHTING_PALETTE.slice(0, 8).map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("lighting", t)}>+ {t}</span>))}</div>
         <div className="lv-refline">{(sel.c.cast || []).length} cast &middot; {(sel.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast panel)</span></div>
         <button className="lv-go" disabled={busy} onClick={() => generateShot(sel)}>{busy ? (gs.msg || "generating…") : "▶ Generate shot"}</button>
+        <button className="lv-usevid" disabled={busy} onClick={() => useExistingVideo(sel)} title="Skip generation -- use a video you already have in your gallery as this shot's clip">
+          &#128190; Use an existing video instead
+        </button>
       </div>
     );
     else if (tab === "Image") {
@@ -1046,7 +1052,7 @@ export default function App() {
       el._mgBound = true;
       el.addEventListener("mg-pick", (e) => {
         const cb = pickCb; setPickCb(null);
-        if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video);
+        if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration);
       });
       el.addEventListener("mg-close", () => setPickCb(null));
     }
@@ -1313,6 +1319,17 @@ export default function App() {
     }).catch(() => setTimeout(tick, 5000));
     setTimeout(tick, 2500);
   };
+  // Attach an already-produced video straight onto a shot as its finished clip -- no
+  // generation involved. /api/loom/export already treats every resultMid as just "a video
+  // file to trim+concat," so this writes the exact same shape pollShot does on completion.
+  const useExistingVideo = (entry) => {
+    openPick((mid, thumb, isVideo, duration) => {
+      const dur = parseFloat(duration);
+      setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
+      setCardStatus(entry.c.id, { status: "done", resultMid: mid,
+        ...(dur > 0 ? { actualDur: dur } : {}) });
+    }, "video");
+  };
   // ---- In-Loom reference-image gen: reuse /api/generate (image), poll, then route the result into the shot ----
   const pollImg = (cardId, tid) => {
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
@@ -1474,7 +1491,7 @@ export default function App() {
       <style>{STYLES}</style>
       {v2 && <V2Boundary onClose={() => setV2(false)}><LoomV2 layout={panelLayout} setLayout={setPanelLayout} onClose={() => setV2(false)}
         project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
-        selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} genState={genState}
+        selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} useExistingVideo={useExistingVideo} genState={genState}
         thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
         setAct={setAct} addCard={addCard} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
         moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}

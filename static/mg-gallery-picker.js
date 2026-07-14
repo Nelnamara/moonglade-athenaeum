@@ -249,7 +249,8 @@
         try { navigator.clipboard && navigator.clipboard.writeText(m.prompt); } catch (e) { /* clipboard denied */ }
       }
       this.dispatchEvent(new CustomEvent('mg-pick', { bubbles: true, composed: true,
-        detail: { media_id: m.media_id, thumb: m.thumb, prompt: m.prompt || '', is_video: m.is_video === '1' } }));
+        detail: { media_id: m.media_id, thumb: m.thumb, prompt: m.prompt || '',
+                  is_video: m.is_video === '1', duration: m.duration || '' } }));
     }
 
     _upload() {
