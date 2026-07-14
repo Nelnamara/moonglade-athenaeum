@@ -34,8 +34,34 @@ git tags. Full prose notes for tagged versions live on
   fix) and **Master of the Loom** (i2v / flf / r2v) — instead of a bare `2/3`. Open-ended
   distinct-counts (LoRAs, enhance workflows) stay count-only. Pure `achievement_criteria(sets)`
   threaded through `compute_achievements(…, sets=)` and rendered in the Hall tile; unit-tested.
+- **Model-tuned-preset prefill in the Generate drawer** — negative prompt / steps / CFG now prefill
+  from the selected base model's own tuned settings (`resolve_version_meta` already fetched this,
+  it just wasn't used), with a reset-to-defaults control. Models with no tuned preset leave existing
+  field values untouched.
+- **Daily-claim button art** — the header's claim button now renders the owner's chosen crystal art
+  (`branding/rewards/claim.png`) instead of a hardcoded gift emoji.
+- **Thumbnail size slider in the shared gallery-picker** (`<mg-gallery-picker>`) — 90–240px, persisted
+  to localStorage, shared by every picker instance app-wide (Loom Cast, both FrameSlots, etc.).
+- **The Loom's Cast panel can add existing videos from the gallery** — the picker's Image/Video/All
+  type filter (already built into `<mg-gallery-picker>` but unused there) is now enabled for Cast's
+  "+ add from gallery," and a picked video is correctly tagged `kind:"video"`/`@video1...` (was
+  forced to `kind:"image"` regardless of what was picked) — feeds `video_refs` for R2V/V2V shots.
+- **A Loom shot can use an existing video as its finished clip, skipping generation entirely** — a
+  "Use an existing video instead" button in the Video tab opens the (video-locked) gallery-picker and
+  writes `resultMid`/`actualDur` directly, same shape a completed generation writes. `/api/loom/export`
+  needed no changes — it was already agnostic about where a clip came from.
+- **Bigger spinning-Nel mascot, head now spins** (header banner + activity tracker) — sizes bumped
+  (22px→34px banner, 34px→48px tracker), and the chibi head itself rotates now (not just the loading
+  ring around it), on a slower cycle than the ring for a layered look.
+- **Mystery-tile art for masked feats** — hidden feat achievements now show the owner's cloaked-Nel
+  artwork (`branding/mystery/secret_feat.png`) instead of a plain grayscale `❓`, in full color (not
+  grayscaled — it's meant as an intentional tease, not a disabled state). Name/description stay masked.
 
 ### Fixed
+- **Panoramic images no longer get cropped to near-nothing in the main gallery grid** — `.card img`
+  forced every thumbnail into a square via `object-fit:cover`; an extreme-aspect source (progress-bar
+  and frame textures) now gets `object-fit:contain` instead (detected via `naturalWidth`/`naturalHeight`
+  on load), showing the whole image letterboxed. Normal-aspect thumbnails are unaffected.
 - **Loom save/load is now crash-safe** — every storyboard used to live in one `store.json` rewritten
   *non-atomically* on each edit, so a crash mid-save could corrupt **every** board at once. Each
   storyboard (and every `window.storage` key) is now its own file written atomically (tmp +
@@ -45,6 +71,13 @@ git tags. Full prose notes for tagged versions live on
 - **Canonical roster thresholds reconciled to shipped code** — `docs/achievements_roster_57.json`
   carried three stale thresholds (marathon 1→100, triggered 0→5, read-the-manual 0→1); aligned to
   what the code enforces so the canonical roster stops disagreeing with behavior.
+
+### Known issues
+- **Trophy Hall reformat (rewards-under-grid layout, toast-styled cards, ladder depth-carousel) is
+  visually broken** — code is committed (`c877919`) and every automated check passed (474 tests,
+  `getComputedStyle` assertions on layout/carousel math), but the owner found it wrong on an actual
+  look at the rendered page. Not fixed yet — see `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` §2b for detail
+  and next steps. Do not treat this as done.
 
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 
