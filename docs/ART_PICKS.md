@@ -110,7 +110,13 @@ Earlier "big artifact" (finalists in context, pre-course-correction): `b45a39a3`
 
 ## ⏳ Open / next
 
-- **CLAIM top-3 is unresolved** — needs a focused narrowing pass (owner: "tough one").
+- **CLAIM (daily credit claim) winner = crystal-cluster style** (owner correction, 2026-07-14 —
+  earlier "unresolved" note was stale). Exact final crystal id TBD, but the direction is settled:
+  crystal, NOT a gift box. **Not yet wired** — the header's `#acct-claim` button
+  (`Acct.paint()`, pixai_gallery.py) still renders a hardcoded 🎁 emoji via plain `textContent`.
+  **CLAIM7 (gift box) is a SEPARATE slot** — earned-achievement goodies / card redemption / other
+  PixAI gifts — already correctly wired into the achievement toast's reward ribbon (last night).
+  Do not conflate the two claim surfaces again.
 - **LEG files need the owner's flip + alpha + resave** before they're wire-ready.
 - **Owner has MANY more progress bars in the gallery** — a dive (like the Gems & Sigils pull)
   would surface them for a dedicated bar selection.
