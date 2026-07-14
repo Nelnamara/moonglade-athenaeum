@@ -15,6 +15,13 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Loom V2 panel resize cap** — non-timeline panels are capped at 800px width (most never need to
+  be wider); height stays bounded only by the canvas floor, per the owner's call for something more
+  liberal. The Timeline panel stays exempt from the width cap since it's meant to stay full-width.
+- **Loom nav button hidden on phone** — `.head-nav .b-loom` now hides at the sub-480px breakpoint;
+  the Loom is a dense multi-panel tool that isn't viable on a phone screen. Still visible on tablets.
+- **Mobile filters are now a bottom sheet** — `.filters` slides up from the bottom at the sub-480px
+  breakpoint with a backdrop scrim, reusing the existing `toggleFilters()`/`.open` mechanism unchanged.
 - **First shared web component — `<mg-model-picker>`** (the Option-A cohesion pilot from
   `docs/SUITE_ARCHITECTURE_AUDIT.md`): a framework-neutral custom element (search + rich cover cards +
   hover preview; emits a `mg-pick` event) loaded as a plain global like `picker-core.js` — **no build
