@@ -162,7 +162,18 @@ sections (via the `/badge-thumb` cache), a right rail (category nav · Within Re
 mascot alcove), and mobile stacking. Backend: earn-date persistence + badge thumb-cache (A0). Runtime-
 verified (mock payload) across every render path. **Owner's WoW screenshots now tune the INTERIOR only.**
 **Deferred polish:** per-*tile* ornate frames (toast has them), ~~per-criteria checklists on set
-achievements~~ (⏳ IN FLIGHT 2026-07-13, see below), owner-made mystery-tile art (masked feats reuse the cloaked-card look).
+achievements~~ (⏳ IN FLIGHT 2026-07-13, see below), ~~owner-made mystery-tile art~~ (✅ SHIPPED
+2026-07-14, see below).
+
+**✅ Mystery-tile art SHIPPED (2026-07-14, commit `43014ef`).** Masked feats showed a plain grayscale
+`❓` emoji before this; now use the owner's own cloaked-Nel artwork (`SecretCurtainSquare.png`, sourced
+from `Downloads/7.12`, downsized 2000×2000→512×512, served at `branding/mystery/secret_feat.png`).
+Shown in **full color, not grayscaled** — a pre-existing `.ach-card.t-feat.masked .ico` rule was
+force-graying it, changed to `filter:none` since the art is meant to read as an intentional tease
+(you can see *something*, just not the name/criteria) rather than a disabled state. Name/description
+still masked server-side as before (`"???"` / "A hidden feat of the Athenaeum.") — no spoiler risk,
+a bare badge image with no text doesn't tell you what unlocks it. `SecretCurtainRectangle.png`
+(badge-in-center composition) banked for a possible future reveal-moment treatment, not used now.
 
 **🎨 Layout — LOCKED (2026-07-14).** Owner hand-arranged the Hall's regions via a standalone drag+resize
 mockup artifact (7 blocks: header, tabs, main grid, category nav, within-reach, rewards-earned, mascot
