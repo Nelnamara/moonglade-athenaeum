@@ -54,8 +54,11 @@
     ' color:var(--text,#d6d2e2);border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;}',
     'mg-gallery-picker .mg-pk-upload:hover{border-color:var(--accent,#b692e6);}',
     'mg-gallery-picker .mg-pk-count{margin-left:auto;font-size:11px;color:var(--subtext,#9a93ab);font-family:ui-monospace,monospace;}',
-    'mg-gallery-picker .mg-pk-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));',
-    ' grid-auto-rows:118px;gap:8px;align-content:start;transition:opacity .12s;}',
+    'mg-gallery-picker .mg-pk-sizer{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--subtext,#9a93ab);}',
+    'mg-gallery-picker .mg-pk-sizer input{width:70px;}',
+    'mg-gallery-picker .mg-pk-grid{flex:1;overflow-y:auto;display:grid;',
+    ' grid-template-columns:repeat(auto-fill,minmax(var(--mg-pk-tile,122px),1fr));',
+    ' grid-auto-rows:var(--mg-pk-tile,122px);gap:8px;align-content:start;transition:opacity .12s;}',
     'mg-gallery-picker .mg-pk-cell{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--surface1,#3a3460);',
     ' cursor:pointer;background:var(--surface0,#211f3a);}',
     'mg-gallery-picker .mg-pk-cell:hover{border-color:var(--accent,#b692e6);}',
@@ -74,6 +77,7 @@
   }
 
   var COPY_KEY = 'pick-copyprompt';   // same localStorage key the gallery's own Picker uses
+  var TILE_KEY = 'mg-pk-tile';        // persisted thumbnail-size preference, shared by every picker instance
 
   class MgGalleryPickerEl extends HTMLElement {
     connectedCallback() {
@@ -100,6 +104,17 @@
       this._sourceEl = this.querySelector('[data-f="source"]');
       this._ratingEl = this.querySelector('[data-f="rating"]');
       this._sortEl = this.querySelector('[data-f="sort"]');
+      this._sizeEl = this.querySelector('.mg-pk-sizer input');
+      if (this._sizeEl) {
+        var savedTile = 122;
+        try { savedTile = +(localStorage.getItem(TILE_KEY)) || 122; } catch (e) { /* private mode */ }
+        this._sizeEl.value = savedTile;
+        this.style.setProperty('--mg-pk-tile', savedTile + 'px');
+        this._sizeEl.addEventListener('input', function () {
+          self.style.setProperty('--mg-pk-tile', self._sizeEl.value + 'px');
+          try { localStorage.setItem(TILE_KEY, self._sizeEl.value); } catch (e) { /* private mode */ }
+        });
+      }
       this._copyEl = this.querySelector('.mg-pk-copyck');
       if (this._copyEl) {
         try { this._copyEl.checked = localStorage.getItem(COPY_KEY) === '1'; } catch (e) { /* private mode */ }
@@ -171,7 +186,9 @@
         '<select data-f="rating"><option value="0">Any rating</option>' +
         opt(1, '★+') + opt(2, '★★+') + opt(3, '★★★+') + opt(4, '★★★★+') + opt(5, '★★★★★') + '</select>' +
         '<select data-f="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>' +
-        uploadBtn + '<span class="mg-pk-count"></span></div>' +
+        uploadBtn +
+        '<label class="mg-pk-sizer">Size <input type="range" min="90" max="240" step="8" title="Thumbnail size"></label>' +
+        '<span class="mg-pk-count"></span></div>' +
         copyCk +
         '<div class="mg-pk-grid"></div>' +
         '<div class="mg-pk-empty" style="display:none;">No matches for these filters.</div>' +
