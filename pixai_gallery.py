@@ -4363,8 +4363,20 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <textarea id="gen-prompt" class="gen-ta" rows="3" placeholder="Describe your image&hellip;"></textarea>
       <details style="margin-top:6px;">
-        <summary style="cursor:pointer;color:var(--subtext);font-size:11px;">Negative prompt</summary>
+        <summary style="cursor:pointer;color:var(--subtext);font-size:11px;">Advanced</summary>
         <textarea id="gen-neg" class="gen-ta" rows="2" placeholder="lowres, text, watermark&hellip;" style="margin-top:5px;"></textarea>
+        <div style="display:flex;gap:10px;margin-top:6px;">
+          <label style="font-size:11px;color:var(--subtext);flex:1;">Steps
+            <input type="number" id="gen-steps" min="1" max="150" step="1" value="25" style="width:100%;margin-top:2px;">
+          </label>
+          <label style="font-size:11px;color:var(--subtext);flex:1;">CFG scale
+            <input type="number" id="gen-cfg" min="1" max="30" step="0.5" value="7" style="width:100%;margin-top:2px;">
+          </label>
+        </div>
+        <div id="gen-modeldefaults" style="display:none;justify-content:space-between;align-items:center;margin-top:6px;">
+          <span style="font-size:10.5px;color:var(--overlay0);">&#10003; using this model's tuned preset</span>
+          <button type="button" class="snip-btn" onclick="Gen.resetModelDefaults()">&#8630; reset</button>
+        </div>
       </details>
       <div class="gen-lbl">Aspect</div>
       <div class="gen-aspects" id="gen-aspects">
@@ -4949,6 +4961,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .acct-chip b{color:var(--text);} .acct-chip .cd{color:var(--lavender);}
   .acct-claim{font-size:12px;border:1px solid var(--emerald);background:rgba(166,227,161,.13);color:var(--emerald);border-radius:6px;padding:5px 11px;cursor:pointer;white-space:nowrap;}
   .acct-claim:hover{background:rgba(166,227,161,.24);}
+  .acct-claim img.claim-ico{height:15px;width:15px;vertical-align:-2px;margin-right:3px;}
   /* ---- Jobs card: the activity tracker (bottom-left, always openable) ---- */
   #jobs-fab{position:fixed;left:14px;bottom:14px;z-index:234;display:none;align-items:center;gap:7px;background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);color:var(--subtext);cursor:pointer;padding:7px 13px 7px 10px;font-size:11.5px;letter-spacing:.02em;transition:border-color .15s,color .15s;}
   #jobs-fab.show{display:inline-flex;}
@@ -5557,7 +5570,7 @@ var Acct = (function(){
     c.title=tip.join('\\n');
     // claimable free-credits badge
     var b=claimEl();
-    if(b){ if(d.claim_credits){ b.textContent='\\ud83c\\udf81 +'+Number(d.claim_credits).toLocaleString()+' claim'; b.style.display=''; }
+    if(b){ if(d.claim_credits){ b.innerHTML='<img class="claim-ico" src="/branding/rewards/claim.png" onerror="this.remove()">+'+Number(d.claim_credits).toLocaleString()+' claim'; b.style.display=''; }
            else b.style.display='none'; }
   }
   function refresh(){
@@ -6026,11 +6039,27 @@ var Gen = (function(){
       .then(function(r){return r.json();})
       .then(function(d){ if(mySeq!==selSeq) return;   // a newer pick superseded this fetch
         selected.version_id=d.version_id||''; selected.model_type=d.model_type||'';
+        selected.negative_prompt=d.negative_prompt||''; selected.sampling_steps=d.sampling_steps||null;
+        selected.cfg_scale=d.cfg_scale||null;
         el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)');
         refreshLoraNotes();   // re-check any attached LoRAs against the new base + set go-state
+        applyModelDefaults();
         refreshCost(); })
       .catch(function(){ if(mySeq===selSeq) el('gen-selname').textContent=m.title; });
   }
+  // Prefill negative/steps/cfg from the model author's own tuned preset (resolve_version_meta
+  // already fetches these; the drawer just never used them). Only for fields the model actually
+  // has data for -- a model with no tuned preset leaves whatever's already in the fields alone.
+  function applyModelDefaults(){
+    var note=el('gen-modeldefaults'); if(!note) return;
+    var s=selected||{}, has=s.negative_prompt||s.sampling_steps||s.cfg_scale;
+    note.style.display = has ? 'flex' : 'none';
+    if(!has) return;
+    if(s.negative_prompt) el('gen-neg').value=s.negative_prompt;
+    if(s.sampling_steps) el('gen-steps').value=s.sampling_steps;
+    if(s.cfg_scale) el('gen-cfg').value=s.cfg_scale;
+  }
+  function resetModelDefaults(){ applyModelDefaults(); }
   var genRef=null;   // {media_id, thumb} -- the img2img reference, or null
   function refPick(){
     if(genRef){ genRef=null; renderGenRef(); debouncedCost(); return; }   // click filled slot = clear
@@ -6066,6 +6095,7 @@ var Gen = (function(){
   function payload(){ var a=dims();
     return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
+      steps:+el('gen-steps').value||25, cfg:+el('gen-cfg').value||7,
       count:+el('gen-count').value, seed:(el('gen-seed')?el('gen-seed').value.trim():''),
       high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
       ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
@@ -6471,6 +6501,7 @@ var Gen = (function(){
           videoAudioToggle:videoAudioToggle,
           vpOnInput:vpOnInput, vpChipify:vpChipify,
           videoPromptText:vpText, videoPromptSet:videoPromptSet,
+          resetModelDefaults:resetModelDefaults,
           get selected(){return selected;}};
 })();
 var Tags = (function(){
