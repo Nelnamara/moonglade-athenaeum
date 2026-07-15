@@ -50,9 +50,10 @@ fine) → pastes the frame URL → Claude implements from the frame → verifies
   reformat as throwaway scaffolding.
 - **Two caveats that are NOT the reformat's fault:**
   1. **Feats invisible until first earn was the ORIGINAL owner-approved spec** ("the whole feats
-     section stays cloaked until the first feat lands"). The later decision — mystery tiles under
-     owner-made art — was never built (art pending). A test gallery with zero earned feats shows no
-     feats section by design.
+     section stays cloaked until the first feat lands"). Mystery-tile art WAS wired on 2026-07-14
+     (`43014ef`, pre-reformat) for masked feat CARDS — but the whole-SECTION cloak still hides
+     feats entirely on a zero-feat gallery. **Owner call for the rebuild: lift the section cloak so
+     unearned feats show as mystery tiles** (which appears to be the actual intent).
   2. **Badges/mascots/frames are machine-local** (`out_dir/branding/` on the home D:). A test
      gallery without that art falls back to emoji — that's absent assets, not killed branding.
 
