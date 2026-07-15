@@ -15,6 +15,20 @@
 
 ---
 
+## 0.4 · ⚠️ TROPHY HALL REGRESSION + THE DESIGN WORKFLOW STANDARD (2026-07-14) — see `docs/DESIGN_WORKFLOW.md`
+
+**The reformat commit `c877919` landed way off the owner's intended visual target** — cards
+reorganized, carousel execution wrong, locked/DONE work undone without permission. Owner is
+**building a Figma mock** (with screenshotted real app assets) as the pixel source of truth for the
+rebuild. Full incident, recovery options (revert `c877919` vs rebuild-from-mock), tooling state
+(Figma plugin authed via `/mcp` per machine; Claude Design + `DesignSync`), the two
+not-actually-regressions caveats (feats-cloak = original spec; machine-local branding art), and the
+model-strategy guidance ALL live in **`docs/DESIGN_WORKFLOW.md`** — read it before touching any
+user-visible surface. **Standing rule from this incident: no visual build from prose alone; verify
+against the pixel source before calling it done.** Owner picks the recovery path at the home machine.
+
+---
+
 ## 0.5 · Suite architecture decisions (OWNER-LOCKED 2026-07-13) — see `docs/SUITE_ARCHITECTURE_AUDIT.md`
 
 The 5-agent front-end cohesion audit ran → `docs/SUITE_ARCHITECTURE_AUDIT.md`. Owner calls:

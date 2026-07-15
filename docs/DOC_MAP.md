@@ -28,6 +28,7 @@
 | `curation_reference_builder.py` | Reference implementation of the Curation Standard — clone for any vote artifact (swap input/classify/picks, keep the rest) | Reference |
 | `ART_PICKS.md` | Owner's achievement-flair selections (2026-07-12) from the Curation Workspace — feat/bar decided, LEG needs edits, CLAIM open, + repurpose ideas | **Active (provisional picks)** |
 | `LOOM.md` | The Loom user manual | Active |
+| `DESIGN_WORKFLOW.md` | ⭐ **The pixel-source-of-truth standard (2026-07-14)** — born from the Trophy Hall reformat incident: no visual build from prose alone; Figma plugin (bidirectional, auth via `/mcp`) + Claude Design/DesignSync tooling; Trophy Hall recovery options; model strategy | **Active standard** |
 | `SUITE_ARCHITECTURE_AUDIT.md` | ⭐ **Front-end cohesion audit (2026-07-13)** — every surface's stack, the duplication map, the web-component recommendation + migration order (pilot = model picker), and the Loom save/load defect + fix. Basis for the front-end direction decision | **Active (awaiting owner calls)** |
 | `MODEL_DECK.md` | 25-entry verified model research deck (badge/lifelike/local lanes) | Reference |
 | `ART_PROMPTS.md` | House badge style anchor (tiered-ring template, locked hexes) + brand prompt bank | Reference |

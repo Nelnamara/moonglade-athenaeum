@@ -48,6 +48,11 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
 3. **Flair/user-visible features** name their locked design source (artifact id / doc
    section) in the plan, and verification includes a "does it match what was decided" pass.
    A "locked" marker in a doc is a deliverable, not background.
+4. **Visual builds require a PIXEL source of truth** (a Figma frame via the Figma plugin's MCP,
+   a Claude Design project via DesignSync, or a locked mockup artifact) — never prose alone —
+   and the verify pass compares against that source. Restyling a shipped, owner-approved surface
+   needs an explicit owner go. See `docs/DESIGN_WORKFLOW.md` (added 2026-07-14 after the Trophy
+   Hall reformat landed off-target from prose notes).
 
 ## Architecture / request flow
 
