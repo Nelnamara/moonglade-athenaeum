@@ -293,6 +293,39 @@ const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s
 const actLetter = (i) => (i < 26 ? String.fromCharCode(65 + i) : `A${i}`);
 const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
 
+/* ---------- shared helpers (Phase 0, 2026-07-16) ----------
+   These replace ~7 independently-reimplemented copies of the same two ideas
+   (tag numbering, frame-identity comparison) that had silently drifted into
+   3 different algorithms and caused real collisions. One implementation now,
+   called from classic, V2, and every mutator — not prop-threaded, since
+   everything in this file shares one global scope. */
+
+// Highest existing "<prefix>N" tag number among items' `.tag` fields (anchored
+// regex-max — the one call site, V2's cast-add, that already had this right).
+const maxTagNum = (items, prefix) => {
+  const re = new RegExp("^" + prefix + "(\\d+)$");
+  return (items || []).reduce((mx, x) => { const m = re.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0);
+};
+// The next free "<prefix>N" tag for a single add. For a BATCH add, call
+// maxTagNum once and increment locally instead (see importCollection/cast-import).
+const nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1);
+
+// Two frames are "linked" (continuous) if they share EITHER identity field —
+// mediaId (gallery-picked / generated-in-Loom frames) or thumbId (locally
+// uploaded ones). The old check only looked at thumbId, so it was blind to
+// exactly the frames "↳ inherit close" produces (it copies mediaId and clears
+// thumbId), guaranteeing a false "needs link" warning on the tool's own
+// recommended workflow.
+const frameLinked = (a, b) => !!a && !!b && (
+  (!!a.mediaId && !!b.mediaId && a.mediaId === b.mediaId) ||
+  (!!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId)
+);
+
+// CONNECT[x] where x is a falsy/stale/legacy value throws. Every direct index
+// now goes through this instead, falling back to "new scene" (the safest,
+// most neutral default) rather than crashing shotText/export/render.
+const connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
+
 /* ---------- storage ---------- */
 const hasStore = typeof window !== "undefined" && window.storage;
 const PKEY = "storyboard:v2:project";        // legacy single-project key — migrated into PPRE on first load
@@ -929,9 +962,7 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
       {!(project.assets || []).length && <div className="lv-ph">No cast yet — add one below.</div>}
       <button className="lv-addcast" onClick={() => openPick((mid, thumb, isVideo) => setAssets((a) => {
         const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
-        const re = new RegExp("^" + pre + "(\\d+)$");
-        const base = a.reduce((mx, x) => { const m = re.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0);
-        return [...a, { id: uid(), name: "", kind: k, tag: pre + (base + 1), thumbId: "", source: "", mediaId: mid, lock: false }];
+        return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
       }), "image", true)}>+ add from gallery</button>
     </div>
   );
@@ -1165,10 +1196,11 @@ export default function App() {
       .split(",").map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
     if (!ids.length) return;
     setProject((p) => {
-      const base = (p.assets || []).filter((a) => a.kind === "image").length;
-      const added = ids.map((mid, i) => ({ id: uid(), name: "", kind: "image",
-        tag: `@image${base + i + 1}`, thumbId: "", source: "", mediaId: mid, lock: true }));
-      return { ...p, assets: [...(p.assets || []), ...added] };
+      const existing = p.assets || [];
+      let n = maxTagNum(existing, "@image");
+      const added = ids.map((mid) => ({ id: uid(), name: "", kind: "image",
+        tag: "@image" + (++n), thumbId: "", source: "", mediaId: mid, lock: true }));
+      return { ...p, assets: [...existing, ...added] };
     });
     history.replaceState(null, "", location.pathname);
   }, [project]);
@@ -1196,9 +1228,9 @@ export default function App() {
     setImportOpen(false);
     if (!items || !items.length) return;
     setAssets((a) => {
-      const base = a.reduce((mx, x) => { const m = /@image(\d+)/.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0);
+      let n = maxTagNum(a, "@image");
       const added = items.map((it, i) => ({ id: uid(), name: it.name || `${cname} ${i + 1}`, kind: "image",
-        tag: `@image${base + i + 1}`, thumbId: "", source: "", mediaId: it.mediaId, lock: false }));
+        tag: "@image" + (++n), thumbId: "", source: "", mediaId: it.mediaId, lock: false }));
       return [...a, ...added];
     });
   };
@@ -1206,7 +1238,10 @@ export default function App() {
   const addCard = (aId) => { const c = newCard();
     setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: [...a.cards, c] }) }));
     setOpen((o) => ({ ...o, [c.id]: true })); };
-  const dupCard = (aId, card) => { const c = { ...JSON.parse(JSON.stringify(card)), id: uid(), refs: card.refs.map((r) => ({ ...r, id: uid() })) };
+  const dupCard = (aId, card) => { const c = { ...JSON.parse(JSON.stringify(card)), id: uid(), refs: card.refs.map((r) => ({ ...r, id: uid() })),
+    // A duplicate is a fresh, unrendered shot -- it must not inherit the original's
+    // generation result, or it silently shows "done" and Export plays the SAME clip twice.
+    resultMid: "", status: "todo", actualDur: null, trimIn: 0, trimOut: null };
     setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: a.cards.flatMap((x) => x.id === card.id ? [x, c] : [x]) }) })); };
   const delCard = (aId, card) => setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: a.cards.filter((c) => c.id !== card.id) }) }));
   const moveCard = (aId, idx, dir) => setProject((p) => ({ ...p, acts: p.acts.map((a) => {
@@ -1222,9 +1257,10 @@ export default function App() {
     const as = [...p.acts];[as[idx], as[j]] = [as[j], as[idx]]; return { ...p, acts: as }; });
 
   /* refs */
-  const addRef = (aId, card, kind) => { const n = card.refs.filter((r) => r.kind === kind).length + 1;
+  const addRef = (aId, card, kind) => {
     const pre = kind === "image" ? "@image" : kind === "video" ? "@video" : "@audio";
-    setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { id: uid(), kind, tag: `${pre}${n}`, role: "", source: "", thumbId: "" }] })); };
+    const tag = nextTag(card.refs.filter((r) => r.kind === kind), pre);
+    setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { id: uid(), kind, tag, role: "", source: "", thumbId: "" }] })); };
   const setRef = (aId, cId, rId, patch) => setCard(aId, cId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== rId ? r : { ...r, ...patch }) }));
   const delRef = (aId, cId, ref) => setCard(aId, cId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== ref.id) }));
 
@@ -1234,7 +1270,7 @@ export default function App() {
     const { c, code, ai } = entry;
     const idx = flat(p).findIndex((x) => x.c.id === c.id);
     const prev = idx > 0 ? flat(p)[idx - 1] : null;
-    const L = [`[${code} — "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${CONNECT[c.connect].label})`, ""];
+    const L = [`[${code} — "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
     if (c.connect === "extend" && prev) L.push(`Continue seamlessly from the previous clip ${prev.code} (upload it as @video1).`);
     if (c.connect === "flf") {
       if (c.openFrame.desc || c.openFrame.tag) L.push(`Opening frame ${c.openFrame.tag || "(first image)"}: ${c.openFrame.desc || "—"}`);
@@ -1267,8 +1303,11 @@ export default function App() {
     const imgs = [];
     (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
       .forEach((as) => { const d = as.mediaId || imgSrc(as.thumbId, as.source); if (d) imgs.push({ tag: as.tag, d }); });
-    [c.openFrame, c.mode === "FLF" ? c.closeFrame : null].filter(Boolean).forEach((f) => {
-      const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) imgs.push({ tag: f.tag || "@image9", d }); });
+    // Untagged open/close frames need DISTINCT fallback tags -- both defaulting to the
+    // same literal meant an FLF shot with two untagged frames silently sent duplicate
+    // @image9 tags, and the model only ever saw one of the two images.
+    [["@image8", c.openFrame], ["@image9", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, f]) => {
+      if (!f) return; const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) imgs.push({ tag: f.tag || fallbackTag, d }); });
     (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
       const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) imgs.push({ tag: r.tag, d }); });
     const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
@@ -1361,7 +1400,7 @@ export default function App() {
     const mid = gs.mid;
     if (target === "open") setCard(entry.a.id, c.id, (x) => ({ ...x, openFrame: { ...x.openFrame, mediaId: mid, thumbId: "", source: "", desc: x.openFrame.desc || "generated in Loom" } }));
     else if (target === "close") setCard(entry.a.id, c.id, (x) => ({ ...x, closeFrame: { ...x.closeFrame, mediaId: mid, thumbId: "", source: "", desc: x.closeFrame.desc || "generated in Loom" } }));
-    else if (target === "cast") setAssets((a) => { const base = a.reduce((mx, x) => { const m = /@image(\d+)/.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0); return [...a, { id: uid(), name: c.title || "", kind: "image", tag: "@image" + (base + 1), thumbId: "", source: "", mediaId: mid, lock: false }]; });
+    else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
     setGenImgState((s) => ({ ...s, [c.id]: { ...s[c.id], routed: target } }));
   };
   // Generic gen runner for the Edit/Reference tabs — submit -> poll -> stash -> route.
@@ -1391,7 +1430,7 @@ export default function App() {
     const mid = gs.mid;
     if (target === "open") setCard(entry.a.id, c.id, (x) => ({ ...x, openFrame: { ...x.openFrame, mediaId: mid, thumbId: "", source: "", desc: x.openFrame.desc || "generated in Loom" } }));
     else if (target === "close") setCard(entry.a.id, c.id, (x) => ({ ...x, closeFrame: { ...x.closeFrame, mediaId: mid, thumbId: "", source: "", desc: x.closeFrame.desc || "generated in Loom" } }));
-    else if (target === "cast") setAssets((a) => { const base = a.reduce((mx, x) => { const m = /@image(\d+)/.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0); return [...a, { id: uid(), name: c.title || "", kind: "image", tag: "@image" + (base + 1), thumbId: "", source: "", mediaId: mid, lock: false }]; });
+    else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
     setState((s) => ({ ...s, [c.id]: { ...s[c.id], routed: target } }));
   };
   const genEdit = (entry) => {
@@ -1420,9 +1459,20 @@ export default function App() {
       a.cards.forEach((c, ci) => { out += shotText({ c, code: `${actLetter(ai)}·${String(ci + 1).padStart(2, "0")}`, ai, ci }, project) + "\n\n"; }); });
     download(out, `${project.name.replace(/\s+/g, "_")}_shotlist.txt`, "text/plain"); };
   const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
+  // A restored backup is always a NEW storyboard, never an in-place overwrite of
+  // whatever's currently open -- this used to clobber the active project silently
+  // (no new id, no confirm), a real data-loss footgun if you imported a backup
+  // while a different board was open.
   const importJSON = async (file) => { if (!file) return; try { const d = JSON.parse(await file.text());
-    if (d.project) { setProject(d.project); if (d.thumbs) { setThumbs(d.thumbs); if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v); } } }
-    catch { window.alert("That file didn't parse as a storyboard backup."); } };
+    if (!d.project) { window.alert("That file didn't parse as a storyboard backup."); return; }
+    if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?\n\nYour currently-open board is left untouched.`)) return;
+    await flushSave(activeId, project);
+    const id = uid();
+    await sSet(PPRE + id, JSON.stringify(d.project));
+    await sSet(ACTIVE_KEY, id);
+    if (d.thumbs) { setThumbs((t) => ({ ...t, ...d.thumbs })); if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v); }
+    setActiveId(id); setProject(d.project); setSelShot(null); readProjList();
+  } catch { window.alert("That file didn't parse as a storyboard backup."); } };
 
   if (!project) return <div className="sb-root"><style>{STYLES}</style><div className="sb-empty">Loading the bay…</div></div>;
 
@@ -1646,7 +1696,7 @@ export default function App() {
               })}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignSelf: "flex-start" }}>
                 <button className="sb-btn ghost sm"
-                  onClick={() => setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: `@image${a.filter((x) => x.kind === "image").length + 1}`, thumbId: "", source: "", lock: true }])}>+ Add reference</button>
+                  onClick={() => setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", lock: true }])}>+ Add reference</button>
                 <button className="sb-btn ghost sm" onClick={() => setImportOpen(true)}
                   title="Pull a whole gallery collection in as reusable @image references">&#8623; Import collection</button>
               </div>
@@ -1812,7 +1862,7 @@ function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpe
       : (f.source && f.source.startsWith("http") ? f.source : null));
   const openImg = framePrev(card.openFrame), closeImg = framePrev(card.closeFrame);
   const prevClose = prev ? prev.c.closeFrame : null;
-  const linked = prev && prevClose && card.openFrame.thumbId && prevClose.thumbId && card.openFrame.thumbId === prevClose.thumbId;
+  const linked = prev && frameLinked(card.openFrame, prevClose);
   const needsLink = prev && (card.connect === "extend" || card.connect === "flf" || card.connect === "cut");
   const entry = { c: card, code, ai, ci };
 
@@ -1822,7 +1872,7 @@ function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpe
         <div className="sb-fromstrip">
           <span className={"sb-linkdot " + (linked ? "sb-link-ok" : needsLink ? "sb-link-warn" : "")}>{linked ? "✓" : needsLink ? "⚠" : "·"}</span>
           {linked ? `opens on ${prev.code}'s closing frame` : needsLink ? `open frame ≠ ${prev.code} close — link it` : `from ${prev.code}`}
-          <span className="sb-connbadge">{CONNECT[card.connect].label}</span>
+          <span className="sb-connbadge">{connectMeta(card.connect).label}</span>
         </div>
       )}
       <div className="sb-slate">
@@ -1976,7 +2026,7 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
           <label className="sb-lab">Joins previous via</label>
           <select className="sb-sel" value={card.connect} onChange={(e) => setF("connect", e.target.value)}>
             {Object.entries(CONNECT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
-          <span className="sb-hint">{CONNECT[card.connect].hint}</span>
+          <span className="sb-hint">{connectMeta(card.connect).hint}</span>
         </div>
         <div className="sb-field" style={{ flex: "0 0 90px" }}>
           <label className="sb-lab">Duration (s)</label>
