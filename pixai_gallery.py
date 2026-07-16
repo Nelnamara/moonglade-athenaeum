@@ -4770,52 +4770,11 @@ document.addEventListener('DOMContentLoaded', function(){
     padding:8px 14px;border-radius:8px 8px 0 0;border-bottom:2px solid transparent;}
   .htab:hover{color:var(--text);}
   .htab.on{color:var(--lavender);border-bottom-color:var(--lavender);background:rgba(182,146,230,.06);}
-  .hall-body{flex:1;display:grid;grid-template-columns:1fr 370px;min-height:0;}
-  .hall-rewards-bar{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:18px;
-    padding-top:16px;border-top:1px solid var(--surface1);}
-  .hall-rewards-bar .rbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;
-    color:var(--overlay0);flex:0 0 100%;margin-bottom:2px;}
-  .hall-rewards-bar .chip{font-size:11.5px;color:var(--gold);border:1px solid #6b5330;
-    background:rgba(230,200,120,.1);border-radius:999px;padding:5px 12px;}
+  .hall-body{flex:1;display:grid;grid-template-columns:1fr 290px;min-height:0;}
   .hall-main{overflow-y:auto;padding:18px 20px 28px;min-width:0;}
   .hall-rail{overflow-y:auto;border-left:1px solid var(--surface1);background:rgba(0,0,0,.14);
     padding:16px 15px 22px;display:flex;flex-direction:column;gap:18px;}
-  .ach-hall .ach-grid{margin-top:0;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;}
-  /* Toast-styled cards (2026-07-14 reformat): a top accent cap + bigger badge, echoing the
-     .ach-m2 unlock toast's own visual language -- no entrance animation, this is the resting
-     pose. Reuses every existing .ach-card child class (.ico/.bd/.nm/.ds/.tier/...) unchanged. */
-  .ach-hall .ach-card{position:relative;padding:14px 14px 13px;border-left-width:0;
-    border-top:3px solid var(--surface1);gap:13px;}
-  .ach-hall .ach-card.t-common{border-top-color:#8a8298;}
-  .ach-hall .ach-card.t-rare{border-top-color:var(--blue);}
-  .ach-hall .ach-card.t-epic{border-top-color:var(--purple-bright);}
-  .ach-hall .ach-card.t-legendary{border-top-color:var(--gold);}
-  .ach-hall .ach-card.t-feat{border-top-color:var(--gunmetal);}
-  .ach-hall .ach-card .ico{width:64px;height:64px;font-size:36px;border-radius:50%;
-    background:var(--base);border:1px solid var(--surface1);}
-  .ach-hall .ach-card.earned .ico{border-color:var(--lavender);
-    box-shadow:0 0 0 1px rgba(182,146,230,.25),0 0 16px 2px rgba(182,146,230,.28);}
-  .ach-hall .ach-card .nm{font-size:15px;}
-  .ach-hall .ach-card .ds{font-size:11.5px;}
-  /* Ladder-family depth-carousel (2026-07-14, locked design): current/next rung centered,
-     full size + color + a spotlight glow; earned rungs recede left, locked recede right,
-     each a step smaller + more desaturated by distance. Grayscale, not blur -- blur destroys
-     a small badge's legibility, grayscale keeps the shape readable. No scroll needed --
-     longest ladder family (The Archive) is 5 rungs, always fits. */
-  .ach-ladder{grid-column:1/-1;background:var(--surface0);border:1px solid var(--surface1);
-    border-radius:11px;padding:6px 8px;}
-  .lad-row{display:flex;align-items:flex-end;justify-content:center;gap:4px;padding:16px 4px 6px;
-    flex-wrap:wrap;}
-  .lad-rung{display:flex;flex-direction:column;align-items:center;gap:6px;transition:transform .18s,opacity .18s;}
-  .lad-rung .ri{position:relative;width:60px;height:60px;border-radius:50%;display:flex;
-    align-items:center;justify-content:center;font-size:28px;background:var(--base);
-    border:2px solid var(--surface1);overflow:hidden;}
-  .lad-rung .ri img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
-  .lad-rung.current .ri{border-color:var(--lavender);
-    box-shadow:0 0 0 2px rgba(182,146,230,.3),0 0 26px 7px rgba(182,146,230,.55),0 0 48px 16px rgba(182,146,230,.22);}
-  .lad-rung .ln{font-size:10px;color:var(--subtext);text-align:center;max-width:82px;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .lad-rung.current .ln{color:var(--text);font-weight:700;}
+  .ach-hall .ach-grid{margin-top:0;}
   .hall-sec-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--overlay0);margin:0 0 11px;}
   .hall-block{margin-bottom:26px;}
   .hall-recent{display:flex;flex-direction:column;gap:8px;}
@@ -5123,30 +5082,6 @@ var Ach = (function(){
       c.onclick=function(){ celebrate(a); }; }
     return c;
   }
-  // Ladder-family depth-carousel: current/next-unearned rung centered, full size + color +
-  // a spotlight glow (pure CSS); earned rungs recede left, locked recede right, each a step
-  // smaller + more desaturated by distance-from-current. No scroll/drag -- the longest real
-  // ladder family is 5 rungs, always fits at full size.
-  function ladderRow(fam){
-    var cur=-1; for(var i=0;i<fam.length;i++){ if(!fam[i].earned){ cur=i; break; } }
-    if(cur<0) cur=fam.length-1;
-    var wrap=document.createElement('div'); wrap.className='ach-ladder';
-    wrap.setAttribute('data-q',fam.map(function(a){return a.name+' '+a.desc+' '+a.tier;}).join(' ').toLowerCase());
-    var row=document.createElement('div'); row.className='lad-row';
-    fam.forEach(function(a,i){
-      var dist=Math.abs(i-cur);
-      var scale=Math.max(.55,1-dist*.15), opac=Math.max(.4,1-dist*.18), gray=Math.min(1,dist*.3);
-      var r=document.createElement('div'); r.className='lad-rung'+(i===cur?' current':'')+(a.earned?' earned':'');
-      r.style.transform='scale('+scale+')'; r.style.opacity=opac;
-      r.title=a.name+' — '+a.desc;
-      var ico=a.earned?('<img src="/badge-thumb/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon))
-        :esc(a.icon);
-      r.innerHTML='<div class="ri" style="filter:grayscale('+gray+')">'+ico+'</div><div class="ln">'+esc(a.name)+'</div>';
-      row.appendChild(r);
-    });
-    wrap.appendChild(row);
-    return wrap;
-  }
   var _cur='summary';
   function tab(name){
     _cur=name;
@@ -5190,26 +5125,8 @@ var Ach = (function(){
       h.onclick=function(){ h.classList.toggle('collapsed'); var hide=h.classList.contains('collapsed');
         g.querySelectorAll('.card-'+b[0]).forEach(function(cd){ cd.style.display=hide?'none':''; }); };
       g.appendChild(h);
-      if(b[0]==='ladder'){
-        var fams={}, order=[];
-        rows.forEach(function(a){ var m=a.metric||a.id; if(!fams[m]){ fams[m]=[]; order.push(m); } fams[m].push(a); });
-        order.forEach(function(m){
-          var fam=fams[m].slice().sort(function(x,y){return (x.threshold||0)-(y.threshold||0);});
-          var cd=ladderRow(fam); cd.classList.add('card-'+b[0]); g.appendChild(cd);
-        });
-      } else {
-        rows.forEach(function(a){ var cd=card(d,a); cd.classList.add('card-'+b[0]); g.appendChild(cd); });
-      }
+      rows.forEach(function(a){ var cd=card(d,a); cd.classList.add('card-'+b[0]); g.appendChild(cd); });
     });
-    // Rewards Earned lives here now (full grid width), not the narrow rail -- owner's
-    // 2026-07-14 layout revision, so real text labels ("Unlocks skin: Ember") fit.
-    var rewards=(d.skins||[]).filter(function(s){return s.earned && !s.free;});
-    if(rewards.length){
-      var rb=document.createElement('div'); rb.className='hall-rewards-bar';
-      rb.innerHTML='<span class="rbl">Rewards Earned</span>'+rewards.map(function(s){
-        return '<span class="chip">&#127912; Unlocks skin: '+esc(s.name)+'</span>'; }).join('');
-      g.appendChild(rb);
-    }
   }
   function renderSummary(d){
     var host=el('ach-summary'); if(!host) return; var all=d.achievements||[]; var ea=d.earned_at||{};
@@ -5265,6 +5182,9 @@ var Ach = (function(){
         +'<div class="rbar"><i style="width:'+r.pct+'%"></i></div><div class="rbp">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div></div></div>'; });
     } else { h+='<div class="hall-empty">All caught up.</div>'; }
     h+='</div></div>';
+    var rewards=(d.skins||[]).filter(function(s){return s.earned && !s.free;});
+    if(rewards.length){ h+='<div><div class="rail-h">Rewards Earned</div><div class="rail-rewards">';
+      rewards.forEach(function(s){ h+='<span class="chip">&#127912; '+esc(s.name)+'</span>'; }); h+='</div></div>'; }
     h+='<div class="rail-mascot"><img src="/branding/mascots/gen_nel.png" onerror="this.remove()"><div class="bubble">Keep going. The Void will not archive itself.</div></div>';
     h+='<div class="rail-foot">Skins live in the <a href="/panel">Control Panel</a> now &middot; earn epics to unlock more.</div>';
     host.innerHTML=h;
