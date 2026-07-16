@@ -23,7 +23,7 @@ mass commit. Follow this protocol:
    If `git status` shows *every* file modified, STOP — that's line-ending drift. Re-check
    `.gitattributes` is present and run `git add --renormalize .`; never `git checkout -- .`
    away someone's real work to make it "clean."
-2. **Default working branch is `video-gen`** (until merged to master). `git checkout video-gen`
+2. **Default working branch is `loom-v2`** (until merged to master). `git checkout loom-v2`
    before doing anything. Do not start committing on `master`.
 3. **Pull before you start, push when you stop:** `git pull --rebase --no-edit` at session
    start, `git push` at session end. This is what prevents "updates were rejected" /
@@ -348,7 +348,7 @@ earlier (`440ecdf`); **v1.11.0 adds the flair layer + the Trophy Hall.**
 
 ## Test suite
 
-440+ pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
+474 pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
 over this number). Run with `python -m pytest` (add `--ignore=tests/test_similar.py` where the
 optional `pixeltable` dep isn't installed). All tests must pass before merging to master.
 
