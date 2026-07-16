@@ -710,23 +710,6 @@ ${"=".repeat(48)}
       ]
     };
   }
-  var V2_KEY = "storyboard:v2:layout";
-  var V2_DEFAULT = [
-    { id: "timeline", title: "Timeline & preview", x: 0, y: 0, w: 1498, h: 271 },
-    { id: "footage", title: "Asset bin \u2014 footage", x: 5, y: 275, w: 286, h: 538 },
-    { id: "cast", title: "Cast & assets", x: 301, y: 276, w: 255, h: 284 },
-    { id: "legend", title: "Legend & notes", x: 301, y: 565, w: 256, h: 244 },
-    { id: "board", title: "Acts & shots", x: 562, y: 278, w: 628, h: 536 },
-    { id: "generate", title: "\u2699 Generate \u2014 shot", x: 1198, y: 276, w: 294, h: 540 }
-  ];
-  var V2_PH = {
-    timeline: "Timeline + live preview (full width). Collapses to just the scrubber.",
-    footage: "Footage bin \u2014 finished shots + quick-trim.",
-    cast: "Cast & assets pool \u2014 reusable @image / @video members.",
-    legend: "Legend & notes \u2014 status key + open questions (static reference).",
-    board: "Acts & shots \u2014 the storyboard. Click a shot to select it.",
-    generate: "Generate (selected shot) \u2014 Image \xB7 Edit \xB7 Reference \xB7 Video, plus camera / lighting / status."
-  };
   var V2_STYLES = `
 .lv-overlay{position:fixed;inset:0;z-index:400;background:var(--base);display:flex;flex-direction:column;}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
@@ -735,35 +718,38 @@ ${"=".repeat(48)}
 .lv-top button{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top .lv-close{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
-.lv-scaler{flex:1;overflow:auto;}
-.lv-canvaswrap{position:relative;overflow:hidden;flex:none;}
-.lv-canvas{position:relative;width:1498px;height:820px;transform-origin:top left;
- background-image:radial-gradient(circle at 20px 20px,rgba(255,255,255,.03) 1px,transparent 1.4px);background-size:30px 30px;}
-.lv-panel{position:absolute;background:var(--surface0);border:1px solid var(--surface1);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 30px -14px rgba(0,0,0,.6);}
-.lv-bar{display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--surface1);cursor:grab;user-select:none;flex:0 0 auto;}
-.lv-bar:active{cursor:grabbing;}
-.lv-dots{width:12px;height:8px;background:radial-gradient(circle,var(--subtext) 1px,transparent 1.4px) 0 0/4px 4px;opacity:.55;flex:0 0 auto;}
-.lv-title{font:600 12px/1 system-ui,sans-serif;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.lv-col{margin-left:auto;width:22px;height:20px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
+/* Fixed 4-region shell: top Timeline drawer (below), then a row of left card /
+   board column / right drawer -- nothing free-floating, nothing draggable. */
+.lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;}
+.lv-side{flex:none;background:var(--surface0);display:flex;flex-direction:column;min-height:0;
+  transition:width .18s ease;overflow:hidden;}
+.lv-side.left{width:280px;border-right:1px solid var(--surface1);}
+.lv-side.right{width:320px;border-left:1px solid var(--surface1);}
+.lv-side.collapsed{width:52px;}
+.lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
+.lv-sidetabs{flex:1;min-width:0;margin-bottom:0;}
+.lv-col{width:22px;height:20px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
+  border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
 .lv-col:hover{color:var(--accent);}
-.lv-body{flex:1;overflow:auto;min-height:0;}
-.lv-panel.collapsed .lv-body{display:none;}
-.lv-collapsedview{flex:1;overflow:hidden;min-height:0;display:flex;}
-/* Generate collapsed to a right-edge icon rail: the bar goes vertical, title hidden
-   (no room at 52px), the collapse button re-centers as the sole affordance. */
-.lv-panel.collapsed.rail{flex-direction:column;}
-.lv-panel.collapsed.rail .lv-bar{flex-direction:column;padding:6px 2px;gap:4px;cursor:default;}
-.lv-panel.collapsed.rail .lv-dots,.lv-panel.collapsed.rail .lv-title{display:none;}
-.lv-panel.collapsed.rail .lv-col{margin:0;}
-.lv-genrail{display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 0;width:100%;}
+.lv-railicons{display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 0;width:100%;overflow:auto;}
 .lv-railbtn{width:38px;height:38px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
   border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
-.lv-reel.mini{min-height:0;}
-.lv-rh{position:absolute;right:2px;bottom:2px;width:14px;height:14px;cursor:nwse-resize;z-index:3;
- background:linear-gradient(135deg,transparent 46%,var(--subtext) 46%,var(--subtext) 58%,transparent 58%,transparent 72%,var(--subtext) 72%);opacity:.5;}
-.lv-rh:hover{opacity:1;}
+.lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
+/* Timeline: genuinely fixed to the banner, full width, never draggable -- unlike every
+   other region. Three states (hidden/slim/full) driven by tlState + a live drag height;
+   the preview sits ABOVE the scrubber, only rendered once mostly expanded. */
+.lv-tldrawer{flex:none;position:relative;background:var(--surface0);border-bottom:1px solid var(--surface1);}
+.lv-tlcontent{overflow:hidden;position:relative;}
+.lv-tlpreviewzone{padding:10px 14px 4px;height:280px;box-sizing:border-box;}
+.lv-tlpreviewbox{height:100%;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
+  display:flex;align-items:center;justify-content:center;text-align:center;}
+.lv-tlreelzone{padding:8px 14px 10px;}
+.lv-tlhandle{position:absolute;left:50%;bottom:-1px;transform:translateX(-50%);z-index:2;
+  display:flex;align-items:center;justify-content:center;padding:5px 22px;cursor:ns-resize;touch-action:none;}
+.lv-tlgrip{width:40px;height:4px;border-radius:3px;background:var(--surface1);transition:background .15s;}
+.lv-tlhandle:hover .lv-tlgrip{background:var(--accent);}
 .lv-ph{padding:14px;color:var(--subtext);font:12.5px/1.5 system-ui,sans-serif;font-style:italic;}
 .lv-board{padding:8px;}
 .lv-act{margin-bottom:12px;}
@@ -793,7 +779,6 @@ ${"=".repeat(48)}
 .lv-st.done{color:var(--green);background:color-mix(in srgb,var(--green) 16%,transparent);}
 .lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
-.lv-tl{padding:9px;display:flex;flex-direction:column;gap:8px;height:100%;}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}
@@ -832,15 +817,31 @@ ${"=".repeat(48)}
 .lv-castmeta span{font-size:10px;color:var(--subtext);}
 .lv-addcast{margin-top:8px;width:100%;background:var(--surface1);border:1px dashed var(--surface1);color:var(--subtext);border-radius:7px;padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
 .lv-addcast:hover{border-color:var(--accent);color:var(--accent);}
-.lv-legend{padding:9px;}
-.lv-key{display:flex;gap:12px;margin-bottom:10px;font-size:10px;color:var(--subtext);}
-.lv-kk{display:flex;align-items:center;gap:4px;}
-.lv-sw{width:9px;height:9px;border-radius:2px;display:inline-block;}
-.lv-sw.done{background:var(--green);}.lv-sw.wip{background:var(--amber);}.lv-sw.todo{background:var(--surface1);}
-.lv-lg{margin-bottom:9px;}
-.lv-lgt{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:5px;}
-.lv-lgchips{display:flex;flex-wrap:wrap;gap:4px;}
-.lv-lgchip{font-size:9.5px;color:var(--subtext);background:var(--surface1);border-radius:5px;padding:2px 6px;}
+/* Density toggle (Cast tab) + the Simple view's square-card grid. */
+.lv-density{margin-bottom:10px;}
+.lv-simplegrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px;}
+.lv-simplecard{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:6px;
+  text-align:center;cursor:pointer;}
+.lv-simplecard:hover{border-color:var(--accent);}
+.lv-simplecard.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);}
+.lv-simplecard img,.lv-simplecard .lv-castph{width:100%;aspect-ratio:1;border-radius:6px;object-fit:cover;margin-bottom:5px;display:block;}
+.lv-simplecard b{display:block;font-size:10.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-simplecard span{display:block;font-size:9px;}
+/* Footage tab: browse-the-whole-library + drop-to-add, both land as a Cast & Assets ref. */
+.lv-footagehead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
+.lv-footagehead .lv-castrow-h{margin-bottom:0;}
+.lv-browsebtn{font:600 10px/1 system-ui;background:var(--base);border:1px solid var(--surface1);color:var(--accent);
+  border-radius:6px;padding:5px 8px;cursor:pointer;flex:0 0 auto;}
+.lv-browsebtn:hover{border-color:var(--accent);}
+.lv-dropzone{margin-top:8px;border:1.5px dashed var(--surface1);border-radius:8px;padding:12px 8px;text-align:center;
+  font-size:10.5px;color:var(--subtext);transition:all .15s;}
+.lv-dropzone.hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 6%,transparent);}
+/* Legend as an on-demand "+ terms" popover per field -- no persistent panel anywhere. */
+.lv-termsbtn{font-size:9px;text-transform:none;letter-spacing:0;color:var(--accent);background:none;border:none;
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;margin-left:6px;}
+.lv-termspal{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 2px;padding:7px;background:var(--surface1);border-radius:7px;}
+.lv-termsgrp{width:100%;display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
+.lv-termsgrpt{width:100%;font-size:8px;letter-spacing:.05em;text-transform:uppercase;color:var(--subtext);margin-top:4px;}
 .lv-footage{padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;align-content:start;}
 .lv-fclip{border-radius:7px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
 .lv-fclip.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
@@ -850,7 +851,6 @@ ${"=".repeat(48)}
 .lv-err{padding:40px;text-align:center;}
 .lv-err p{color:var(--coral);}
 .lv-err pre{color:var(--subtext);font-size:11px;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;background:var(--base);padding:10px;border-radius:7px;}
-.lv-tlprev{flex:0 0 auto;margin-bottom:6px;}
 .lv-tabs{display:flex;gap:4px;margin-bottom:10px;}
 .lv-tab{flex:1;text-align:center;font:600 10px/1 system-ui;padding:6px 4px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lv-tab.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
@@ -904,41 +904,6 @@ ${"=".repeat(48)}
       return this.props.children;
     }
   };
-  function DockablePanel({ p, scale, onChange, onCollapse, children, collapsedView }) {
-    const GRID = 16;
-    const snap = (v) => Math.round(v / GRID) * GRID;
-    const startDrag = (e) => {
-      if (e.target.closest("button")) return;
-      e.preventDefault();
-      const sx = e.clientX, sy = e.clientY, ox = p.x, oy = p.y;
-      const mv = (ev) => onChange({ ...p, x: snap(Math.max(0, Math.round(ox + (ev.clientX - sx) / scale))), y: snap(Math.max(0, Math.round(oy + (ev.clientY - sy) / scale))) });
-      const up = () => {
-        document.removeEventListener("mousemove", mv);
-        document.removeEventListener("mouseup", up);
-      };
-      document.addEventListener("mousemove", mv);
-      document.addEventListener("mouseup", up);
-    };
-    const startResize = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const sx = e.clientX, sy = e.clientY, ow = p.w, oh = p.h;
-      const maxW = p.id === "timeline" ? 1498 - p.x : Math.min(800, 1498 - p.x);
-      const maxH = 820 - p.y;
-      const mv = (ev) => onChange({ ...p, w: snap(Math.min(maxW, Math.max(160, Math.round(ow + (ev.clientX - sx) / scale)))), h: snap(Math.min(maxH, Math.max(80, Math.round(oh + (ev.clientY - sy) / scale)))) });
-      const up = () => {
-        document.removeEventListener("mousemove", mv);
-        document.removeEventListener("mouseup", up);
-      };
-      document.addEventListener("mousemove", mv);
-      document.addEventListener("mouseup", up);
-    };
-    const isRail = p.id === "generate";
-    const w = p.collapsed && isRail ? 52 : p.w;
-    const h = p.collapsed ? isRail ? p.h : p.id === "timeline" ? 78 : 34 : p.h;
-    const showCollapsedView = p.collapsed && collapsedView;
-    return /* @__PURE__ */ React.createElement("div", { className: "lv-panel" + (p.collapsed ? " collapsed" : "") + (p.collapsed && isRail ? " rail" : ""), style: { left: p.x, top: p.y, width: w, height: h } }, /* @__PURE__ */ React.createElement("div", { className: "lv-bar", onMouseDown: startDrag }, /* @__PURE__ */ React.createElement("span", { className: "lv-dots" }), /* @__PURE__ */ React.createElement("span", { className: "lv-title" }, p.title), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => onCollapse(p.id), title: "collapse" }, p.collapsed ? isRail ? "\u25C2" : "\u25BE" : isRail ? "\u25B8" : "\u25B4")), showCollapsedView ? /* @__PURE__ */ React.createElement("div", { className: "lv-collapsedview" }, collapsedView) : /* @__PURE__ */ React.createElement("div", { className: "lv-body" }, children), !p.collapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-rh", onMouseDown: startResize }));
-  }
   function ProjectSwitcher({ api }) {
     const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
     return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
@@ -955,13 +920,20 @@ ${"=".repeat(48)}
       "\u25BE"
     ), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setProjMenu(false) }), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Storyboards"), /* @__PURE__ */ React.createElement("div", { className: "sb-projlist" }, projList.map((pr) => /* @__PURE__ */ React.createElement("div", { key: pr.id, className: "sb-projitem" + (pr.id === activeId ? " on" : "") }, /* @__PURE__ */ React.createElement("button", { className: "sb-projopen", onClick: () => openProject(pr.id), title: "Open this storyboard" }, /* @__PURE__ */ React.createElement("b", null, pr.name || "Untitled"), /* @__PURE__ */ React.createElement("span", null, pr.shots, " shot", pr.shots === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("button", { className: "sb-projx", title: "Delete", onClick: () => deleteProject(pr.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("div", { className: "sb-projacts" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: newProject }, "+ New"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: duplicateProject }, "\u29C9 Duplicate"))));
   }
-  function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
-    const wrapRef = useRef(null);
-    const [scaleV, setScaleV] = useState(1);
+  function LoomV2({ onClose, project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
     const [deepFocus, setDeepFocus] = useState(null);
+    const [leftTab, setLeftTab] = useState("cast");
+    const [leftCollapsed, setLeftCollapsed] = useState(false);
+    const [density, setDensity] = useState("detailed");
+    const [rightCollapsed, setRightCollapsed] = useState(false);
+    const [tlState, setTlState] = useState("slim");
+    const [tlDragH, setTlDragH] = useState(null);
+    const [palFor, setPalFor] = useState(null);
+    const [dzHover, setDzHover] = useState(false);
+    const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
     useEffect(() => {
       fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {
       });
@@ -974,22 +946,39 @@ ${"=".repeat(48)}
       window.addEventListener("keydown", onKey);
       return () => window.removeEventListener("keydown", onKey);
     }, [deepFocus]);
-    useEffect(() => {
-      const fit = () => {
-        if (wrapRef.current) setScaleV(Math.min(1, wrapRef.current.clientWidth / 1498));
-      };
-      fit();
-      window.addEventListener("resize", fit);
-      return () => window.removeEventListener("resize", fit);
-    }, []);
     const bindPicker = useCallback((el) => {
       if (el && !el._mgBound) {
         el._mgBound = true;
         el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
       }
     }, [setImgModel]);
-    const change = (np) => setLayout((L) => L.map((x) => x.id === np.id ? np : x));
-    const collapse = (id) => setLayout((L) => L.map((x) => x.id === id ? { ...x, collapsed: !x.collapsed } : x));
+    const TL_HEIGHTS = { hidden: 0, slim: 64, full: 360 };
+    const tlPointerDown = (e) => {
+      tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    };
+    const tlPointerMove = (e) => {
+      if (!tlDrag.current.dragging) return;
+      const h = Math.max(0, Math.min(TL_HEIGHTS.full, tlDrag.current.startH + (e.clientY - tlDrag.current.startY)));
+      tlDrag.current.lastH = h;
+      setTlDragH(h);
+    };
+    const tlPointerUp = () => {
+      if (!tlDrag.current.dragging) return;
+      tlDrag.current.dragging = false;
+      const h = tlDrag.current.lastH;
+      let best = "hidden", bestD = Infinity;
+      Object.entries(TL_HEIGHTS).forEach(([k, v]) => {
+        const d = Math.abs(v - h);
+        if (d < bestD) {
+          bestD = d;
+          best = k;
+        }
+      });
+      setTlState(best);
+      setTlDragH(null);
+    };
+    const togglePal = (which) => setPalFor((p) => p === which ? null : which);
     const sel = entries.find((e) => e.c.id === selShot) || null;
     const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
     const board = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act, ai) => {
@@ -1027,7 +1016,9 @@ ${"=".repeat(48)}
         );
       })), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => addCard(act.id) }, "+ Add shot to ", act.name));
     }), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: addAct }, "+ New act"), !project.acts.length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No acts yet \u2014 add one below."));
-    const timeline = /* @__PURE__ */ React.createElement("div", { className: "lv-tl" }, sel && sel.c.resultMid && /* @__PURE__ */ React.createElement("div", { className: "lv-tlprev" }, /* @__PURE__ */ React.createElement(
+    const tlHeight = tlDragH != null ? tlDragH : TL_HEIGHTS[tlState];
+    const showTlPreview = tlHeight > (TL_HEIGHTS.slim + TL_HEIGHTS.full) / 2;
+    const timelineDrawer = /* @__PURE__ */ React.createElement("div", { className: "lv-tldrawer" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlcontent", style: { height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" } }, showTlPreview && /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewzone" }, sel && sel.c.resultMid ? /* @__PURE__ */ React.createElement(
       ShotPreview,
       {
         mid: sel.c.resultMid,
@@ -1035,7 +1026,7 @@ ${"=".repeat(48)}
         trimOut: sel.c.trimOut,
         onTrim: (i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))
       }
-    )), /* @__PURE__ */ React.createElement("div", { className: "lv-reel" }, entries.map((x, i) => /* @__PURE__ */ React.createElement(
+    ) : /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewbox lv-ph" }, sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here.")), /* @__PURE__ */ React.createElement("div", { className: "lv-tlreelzone" }, /* @__PURE__ */ React.createElement("div", { className: "lv-reel" }, entries.map((x, i) => /* @__PURE__ */ React.createElement(
       "div",
       {
         key: i,
@@ -1044,31 +1035,8 @@ ${"=".repeat(48)}
         title: `${x.code} ${x.c.title || ""}`,
         onClick: () => setSelShot(x.c.id)
       }
-    )), /* @__PURE__ */ React.createElement("div", { className: "lv-target", style: { left: `${project.target / scale * 100}%` } })), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")));
-    const timelineCollapsed = /* @__PURE__ */ React.createElement("div", { className: "lv-reel mini" }, entries.map((x, i) => /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        key: i,
-        className: "lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : ""),
-        style: { width: `${durOf2(x.c) / scale * 100}%` },
-        title: `${x.code} ${x.c.title || ""}`,
-        onClick: () => setSelShot(x.c.id)
-      }
-    )), /* @__PURE__ */ React.createElement("div", { className: "lv-target", style: { left: `${project.target / scale * 100}%` } }));
+    )), /* @__PURE__ */ React.createElement("div", { className: "lv-target", style: { left: `${project.target / scale * 100}%` } })), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")))), /* @__PURE__ */ React.createElement("div", { className: "lv-tlhandle", onPointerDown: tlPointerDown, onPointerMove: tlPointerMove, onPointerUp: tlPointerUp, onPointerCancel: tlPointerUp }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlgrip" })));
     const GEN_ICONS = [["Image", "\u2726"], ["Edit", "\u270E"], ["Reference", "\u{1F5BC}"], ["Video", "\u{1F3AC}"]];
-    const genRail = /* @__PURE__ */ React.createElement("div", { className: "lv-genrail" }, GEN_ICONS.map(([t, ic]) => /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        key: t,
-        className: "lv-railbtn" + (t === tab ? " on" : ""),
-        title: t,
-        onClick: () => {
-          setTab(t);
-          collapse("generate");
-        }
-      },
-      ic
-    )));
     let gen;
     if (!sel) gen = /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "Select a shot on the board to edit & generate it here.");
     else {
@@ -1106,7 +1074,7 @@ ${"=".repeat(48)}
         }
       };
       let tabBody;
-      if (tab === "Video") tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, MODES.map((m) => /* @__PURE__ */ React.createElement("span", { key: m, className: "lv-chip " + (m === sel.c.mode ? "on" : ""), onClick: () => patch((c) => ({ ...c, mode: m })) }, m))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Continuity"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement("span", { key: k, className: "lv-chip " + (k === (sel.c.connect || "new") ? "on" : ""), title: CONNECT[k].hint, onClick: () => patch((c) => ({ ...c, connect: k })) }, CONNECT[k].label))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement("textarea", { className: "lv-ta", value: sel.c.prompt || "", onChange: (ev) => patch((c) => ({ ...c, prompt: ev.target.value })) }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Duration"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, [5, 6, 10, 15].map((d) => /* @__PURE__ */ React.createElement("span", { key: d, className: "lv-chip " + (d === sel.c.duration ? "on" : ""), onClick: () => patch((c) => ({ ...c, duration: d })) }, d, "s"))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera"), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: sel.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), /* @__PURE__ */ React.createElement("div", { className: "lv-mini" }, CAM_PALETTE["Movement"].slice(0, 8).map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, "+ ", t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting"), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: sel.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), /* @__PURE__ */ React.createElement("div", { className: "lv-mini" }, LIGHTING_PALETTE.slice(0, 8).map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, "+ ", t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (sel.c.cast || []).length, " cast \xB7 ", (sel.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast panel)")), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busy, onClick: () => generateShot(sel) }, busy ? gs.msg || "generating\u2026" : "\u25B6 Generate shot"), /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"));
+      if (tab === "Video") tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, MODES.map((m) => /* @__PURE__ */ React.createElement("span", { key: m, className: "lv-chip " + (m === sel.c.mode ? "on" : ""), onClick: () => patch((c) => ({ ...c, mode: m })) }, m))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Continuity"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement("span", { key: k, className: "lv-chip " + (k === (sel.c.connect || "new") ? "on" : ""), title: CONNECT[k].hint, onClick: () => patch((c) => ({ ...c, connect: k })) }, CONNECT[k].label))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement("textarea", { className: "lv-ta", value: sel.c.prompt || "", onChange: (ev) => patch((c) => ({ ...c, prompt: ev.target.value })) }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Duration"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, [5, 6, 10, 15].map((d) => /* @__PURE__ */ React.createElement("span", { key: d, className: "lv-chip " + (d === sel.c.duration ? "on" : ""), onClick: () => patch((c) => ({ ...c, duration: d })) }, d, "s"))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: sel.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: sel.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: sel.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: sel.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (sel.c.cast || []).length, " cast \xB7 ", (sel.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab)")), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busy, onClick: () => generateShot(sel) }, busy ? gs.msg || "generating\u2026" : "\u25B6 Generate shot"), /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"));
       else if (tab === "Image") {
         const gi = genImgState[sel.c.id] || {};
         const busyI = gi.phase === "submitting" || gi.phase === "running";
@@ -1180,7 +1148,7 @@ ${"=".repeat(48)}
         }
       )), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t))), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody);
     }
-    const castPanel = /* @__PURE__ */ React.createElement("div", { className: "lv-cast" }, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 click to toggle into ", sel.code) : null), (project.assets || []).map((as) => {
+    const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 click to toggle into ", sel.code) : null), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-density" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "simple" ? "on" : ""), onClick: () => setDensity("simple") }, "Simple"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "detailed" ? "on" : ""), onClick: () => setDensity("detailed") }, "Detailed")), density === "detailed" ? (project.assets || []).map((as) => {
       const inShot = sel && (sel.c.cast || []).includes(as.id);
       const src = frameSrc(as);
       return /* @__PURE__ */ React.createElement(
@@ -1193,16 +1161,70 @@ ${"=".repeat(48)}
         src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : /* @__PURE__ */ React.createElement("span", { className: "lv-castph" }),
         /* @__PURE__ */ React.createElement("div", { className: "lv-castmeta" }, /* @__PURE__ */ React.createElement("b", null, as.tag), /* @__PURE__ */ React.createElement("span", null, as.name || as.kind))
       );
-    }), !(project.assets || []).length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No cast yet \u2014 add one below."), /* @__PURE__ */ React.createElement("button", { className: "lv-addcast", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
+    }) : /* @__PURE__ */ React.createElement("div", { className: "lv-simplegrid" }, (project.assets || []).map((as) => {
+      const inShot = sel && (sel.c.cast || []).includes(as.id);
+      const src = frameSrc(as);
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: as.id,
+          className: "lv-simplecard " + (inShot ? "on" : ""),
+          onClick: () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...c.cast || [], as.id] }))
+        },
+        src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : /* @__PURE__ */ React.createElement("span", { className: "lv-castph" }),
+        /* @__PURE__ */ React.createElement("b", null, as.name || as.kind),
+        /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, as.tag)
+      );
+    })), !(project.assets || []).length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No cast yet \u2014 add one below."), /* @__PURE__ */ React.createElement("button", { className: "lv-addcast", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
       const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
       return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
     }), "image", true) }, "+ add from gallery"));
-    const legendPanel = /* @__PURE__ */ React.createElement("div", { className: "lv-legend" }, /* @__PURE__ */ React.createElement("div", { className: "lv-key" }, /* @__PURE__ */ React.createElement("span", { className: "lv-kk" }, /* @__PURE__ */ React.createElement("i", { className: "lv-sw done" }), "done"), /* @__PURE__ */ React.createElement("span", { className: "lv-kk" }, /* @__PURE__ */ React.createElement("i", { className: "lv-sw wip" }), "rendering"), /* @__PURE__ */ React.createElement("span", { className: "lv-kk" }, /* @__PURE__ */ React.createElement("i", { className: "lv-sw todo" }), "draft")), Object.keys(CAM_PALETTE).map((k) => /* @__PURE__ */ React.createElement("div", { key: k, className: "lv-lg" }, /* @__PURE__ */ React.createElement("div", { className: "lv-lgt" }, k), /* @__PURE__ */ React.createElement("div", { className: "lv-lgchips" }, CAM_PALETTE[k].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-lgchip" }, t))))), /* @__PURE__ */ React.createElement("div", { className: "lv-lg" }, /* @__PURE__ */ React.createElement("div", { className: "lv-lgt" }, "Lighting"), /* @__PURE__ */ React.createElement("div", { className: "lv-lgchips" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-lgchip" }, t)))), /* @__PURE__ */ React.createElement("div", { className: "lv-lg" }, /* @__PURE__ */ React.createElement("div", { className: "lv-lgt" }, "Transitions"), /* @__PURE__ */ React.createElement("div", { className: "lv-lgchips" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-lgchip" }, t)))), /* @__PURE__ */ React.createElement("div", { className: "lv-lg" }, /* @__PURE__ */ React.createElement("div", { className: "lv-lgt" }, "Audio"), /* @__PURE__ */ React.createElement("div", { className: "lv-lgchips" }, AUDIO_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-lgchip" }, t)))), /* @__PURE__ */ React.createElement("div", { className: "lv-note2" }, "Reference vocabulary for prompts. Editing a shot's camera / lighting lives in Generate."));
     const finished = entries.filter((e) => e.c.resultMid);
-    const footagePanel = finished.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-footage" }, finished.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lv-fclip " + (e.c.id === selShot ? "sel" : ""), onClick: () => setSelShot(e.c.id) }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + e.c.resultMid + ".jpg", alt: "" }), /* @__PURE__ */ React.createElement("div", { className: "lv-fmeta" }, /* @__PURE__ */ React.createElement("b", null, e.code), /* @__PURE__ */ React.createElement("span", null, durOf2(e.c), "s"))))) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No rendered shots yet \u2014 generate one and it lands here.");
-    const content = (id) => id === "board" ? board : id === "timeline" ? timeline : id === "generate" ? gen : id === "cast" ? castPanel : id === "legend" ? legendPanel : id === "footage" ? footagePanel : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, V2_PH[id] || id);
-    const collapsedContent = (id) => id === "timeline" ? timelineCollapsed : id === "generate" ? genRail : null;
-    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2 (preview)"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate. Drag / resize / collapse panels; layout auto-saves."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement("button", { onClick: () => setLayout(V2_DEFAULT.map((d) => ({ ...d }))) }, "Reset layout"), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: onClose }, "\u2190 Back to classic Loom")), /* @__PURE__ */ React.createElement("div", { className: "lv-scaler", ref: wrapRef }, /* @__PURE__ */ React.createElement("div", { className: "lv-canvaswrap", style: { width: 1498 * scaleV, height: 820 * scaleV } }, /* @__PURE__ */ React.createElement("div", { className: "lv-canvas", style: { transform: "scale(" + scaleV + ")" } }, layout.map((p) => /* @__PURE__ */ React.createElement(DockablePanel, { key: p.id, p, scale: scaleV, onChange: change, onCollapse: collapse, collapsedView: collapsedContent(p.id) }, content(p.id)))))), deepFocus && (() => {
+    const addAssetFromFile = async (file) => {
+      if (!file || !file.type || !file.type.startsWith("image/")) return;
+      const id = await storeThumb(file);
+      setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: nextTag(a, "@image"), thumbId: id, source: file.name, lock: false }]);
+    };
+    const footageList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-footagehead" }, /* @__PURE__ */ React.createElement("span", { className: "lv-castrow-h" }, "Finished shots"), /* @__PURE__ */ React.createElement("button", { className: "lv-browsebtn", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
+      const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
+      return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
+    }), "video", true) }, "\u2315 Browse library")), finished.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-footage" }, finished.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lv-fclip " + (e.c.id === selShot ? "sel" : ""), onClick: () => setSelShot(e.c.id) }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + e.c.resultMid + ".jpg", alt: "" }), /* @__PURE__ */ React.createElement("div", { className: "lv-fmeta" }, /* @__PURE__ */ React.createElement("b", null, e.code), /* @__PURE__ */ React.createElement("span", null, durOf2(e.c), "s"))))) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No rendered shots yet \u2014 generate one and it lands here."), /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "lv-dropzone" + (dzHover ? " hover" : ""),
+        onDragEnter: (ev) => {
+          ev.preventDefault();
+          setDzHover(true);
+        },
+        onDragOver: (ev) => ev.preventDefault(),
+        onDragLeave: () => setDzHover(false),
+        onDrop: (ev) => {
+          ev.preventDefault();
+          setDzHover(false);
+          [...ev.dataTransfer.files].forEach(addAssetFromFile);
+        }
+      },
+      "\u21E9 drag an image here to add it as a cast reference"
+    ));
+    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: onClose }, "\u2190 Back to classic Loom")), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
+      setLeftTab("cast");
+      setLeftCollapsed(false);
+    } }, "\u{1F464}"), /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "footage" ? " on" : ""), title: "Footage", onClick: () => {
+      setLeftTab("footage");
+      setLeftCollapsed(false);
+    } }, "\u{1F3AC}")) : /* @__PURE__ */ React.createElement("div", { className: "lv-cast" }, leftTab === "cast" ? castList : footageList)), /* @__PURE__ */ React.createElement("div", { className: "lv-boardcol" }, board), /* @__PURE__ */ React.createElement("div", { className: "lv-side right" + (rightCollapsed ? " collapsed" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setRightCollapsed((v) => !v), title: "collapse" }, rightCollapsed ? "\u25C2" : "\u25B8"), !rightCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t)))), rightCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, GEN_ICONS.map(([t, ic]) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: t,
+        className: "lv-railbtn" + (t === tab ? " on" : ""),
+        title: t,
+        onClick: () => {
+          setTab(t);
+          setRightCollapsed(false);
+        }
+      },
+      ic
+    ))) : gen)), deepFocus && (() => {
       const dfPatch = (fn) => setCard(deepFocus.a.id, deepFocus.c.id, fn);
       const dfPatchFrame = (key, fp) => dfPatch((cc) => ({ ...cc, [key]: { ...cc[key], ...fp } }));
       const c = deepFocus.c;
@@ -1268,32 +1290,8 @@ ${"=".repeat(48)}
     const [activeId, setActiveId] = useState(null);
     const [projList, setProjList] = useState([]);
     const [projMenu, setProjMenu] = useState(false);
-    const [panelLayout, setPanelLayout] = useState(() => V2_DEFAULT.map((d) => ({ ...d })));
     const saveTimer = useRef(null);
     const castImported = useRef(false);
-    const layoutTimer = useRef(null);
-    useEffect(() => {
-      (async () => {
-        if (hasStore) {
-          const raw = await sGet(V2_KEY);
-          if (raw) {
-            try {
-              const L = JSON.parse(raw);
-              if (Array.isArray(L) && L.length) setPanelLayout(L);
-            } catch {
-            }
-          }
-        }
-      })();
-    }, []);
-    useEffect(() => {
-      if (!hasStore) return;
-      clearTimeout(layoutTimer.current);
-      layoutTimer.current = setTimeout(() => {
-        sSet(V2_KEY, JSON.stringify(panelLayout));
-      }, 500);
-      return () => clearTimeout(layoutTimer.current);
-    }, [panelLayout]);
     const readProjList = useCallback(async () => {
       if (!hasStore) return [];
       const keys = await sList(PPRE);
@@ -1498,8 +1496,6 @@ Your currently-open board is left untouched.`)) return;
       projList,
       projMenu,
       setProjMenu,
-      panelLayout,
-      setPanelLayout,
       projectApi,
       importJSON
     };
@@ -1887,8 +1883,6 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       projList,
       projMenu,
       setProjMenu,
-      panelLayout,
-      setPanelLayout,
       projectApi,
       importJSON
     } = useProjectStore(setSelShot);
@@ -1988,8 +1982,6 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
     return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), v2 && /* @__PURE__ */ React.createElement(V2Boundary, { onClose: () => setV2(false) }, /* @__PURE__ */ React.createElement(
       LoomV2,
       {
-        layout: panelLayout,
-        setLayout: setPanelLayout,
         onClose: () => setV2(false),
         project,
         setCard,
