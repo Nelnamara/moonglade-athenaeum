@@ -722,7 +722,7 @@ ${"=".repeat(48)}
    board column / right drawer -- nothing free-floating, nothing draggable. */
 .lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;}
 .lv-side{flex:none;background:var(--surface0);display:flex;flex-direction:column;min-height:0;
-  transition:width .18s ease;overflow:hidden;}
+  transition:width .18s ease;overflow-x:hidden;}
 .lv-side.left{width:280px;border-right:1px solid var(--surface1);}
 .lv-side.right{width:320px;border-left:1px solid var(--surface1);}
 .lv-side.collapsed{width:52px;}
@@ -731,7 +731,7 @@ ${"=".repeat(48)}
 .lv-col{width:22px;height:20px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
   border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
 .lv-col:hover{color:var(--accent);}
-.lv-railicons{display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 0;width:100%;overflow:auto;}
+.lv-railicons{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 0;width:100%;overflow:auto;}
 .lv-railbtn{width:38px;height:38px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
   border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
@@ -786,7 +786,7 @@ ${"=".repeat(48)}
 .lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
 .lv-dim{color:var(--subtext);font-style:italic;}
-.lv-gen{padding:10px;}
+.lv-gen{flex:1;min-height:0;overflow-y:auto;padding:10px;}
 .lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;}
 .lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
@@ -806,7 +806,7 @@ ${"=".repeat(48)}
 .lv-cframe{height:48px;border-radius:5px;overflow:hidden;background:var(--base);border:1px solid var(--surface1);display:flex;align-items:center;justify-content:center;margin-bottom:5px;}
 .lv-cframe img{width:100%;height:100%;object-fit:cover;}
 .lv-cframeph{font:700 9px/1 system-ui;color:var(--subtext);}
-.lv-cast{padding:8px;}
+.lv-cast{flex:1;min-height:0;overflow-y:auto;padding:8px;}
 .lv-castrow-h{font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:8px;}
 .lv-castitem{display:flex;gap:8px;align-items:center;padding:5px;border-radius:7px;border:1px solid transparent;cursor:pointer;}
 .lv-castitem:hover{background:var(--surface1);}
@@ -815,6 +815,20 @@ ${"=".repeat(48)}
 .lv-castph{width:34px;height:34px;border-radius:6px;background:var(--surface1);flex:0 0 auto;}
 .lv-castmeta b{font:700 10px/1 ui-monospace,monospace;color:var(--accent);display:block;}
 .lv-castmeta span{font-size:10px;color:var(--subtext);}
+/* Detailed Cast & Assets row -- genuinely editable (name/tag/kind/lock), matching V1's
+   original sb-assetrow, not just a relabeled copy of the Simple glance card. */
+.lv-assetrow{display:flex;gap:7px;align-items:center;flex-wrap:wrap;background:var(--base);
+  border:1px solid var(--surface1);border-radius:9px;padding:7px;margin-bottom:6px;}
+.lv-assetprev{width:38px;height:32px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);
+  flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;overflow:hidden;}
+.lv-assetprev img{width:100%;height:100%;object-fit:cover;}
+.lv-tagin{width:76px;flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;
+  color:var(--accent);font:11px/1.3 ui-monospace,monospace;padding:6px 7px;}
+.lv-tagin:focus{outline:0;border-color:var(--accent);}
+.lv-sel{flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;color:var(--text);
+  font:10.5px/1.3 system-ui;padding:6px 3px;}
+.lv-locklab,.lv-inshot{display:flex;align-items:center;gap:4px;font-size:9.5px;color:var(--subtext);
+  cursor:pointer;flex:none;white-space:nowrap;}
 .lv-addcast{margin-top:8px;width:100%;background:var(--surface1);border:1px dashed var(--surface1);color:var(--subtext);border-radius:7px;padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
 .lv-addcast:hover{border-color:var(--accent);color:var(--accent);}
 /* Density toggle (Cast tab) + the Simple view's square-card grid. */
@@ -1148,19 +1162,50 @@ ${"=".repeat(48)}
         }
       )), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t))), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody);
     }
-    const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 click to toggle into ", sel.code) : null), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-density" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "simple" ? "on" : ""), onClick: () => setDensity("simple") }, "Simple"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "detailed" ? "on" : ""), onClick: () => setDensity("detailed") }, "Detailed")), density === "detailed" ? (project.assets || []).map((as) => {
+    const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-density" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "simple" ? "on" : ""), onClick: () => setDensity("simple") }, "Simple"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "detailed" ? "on" : ""), onClick: () => setDensity("detailed") }, "Detailed")), density === "detailed" ? (project.assets || []).map((as) => {
       const inShot = sel && (sel.c.cast || []).includes(as.id);
+      const toggleInShot = () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...c.cast || [], as.id] }));
       const src = frameSrc(as);
-      return /* @__PURE__ */ React.createElement(
-        "div",
+      return /* @__PURE__ */ React.createElement("div", { key: as.id, className: "lv-assetrow" }, as.kind === "image" ? /* @__PURE__ */ React.createElement("label", { className: "lv-assetprev", title: "Attach image" }, src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : "\uFF0B", /* @__PURE__ */ React.createElement(
+        "input",
         {
-          key: as.id,
-          className: "lv-castitem " + (inShot ? "on" : ""),
-          onClick: () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...c.cast || [], as.id] }))
+          type: "file",
+          accept: "image/*",
+          style: { display: "none" },
+          onChange: async (e) => {
+            const f = e.target.files[0];
+            if (!f) return;
+            const id = await storeThumb(f);
+            setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" }));
+          }
+        }
+      )) : /* @__PURE__ */ React.createElement("div", { className: "lv-assetprev" }, as.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          className: "lv-in",
+          style: { flex: "1 1 100px" },
+          value: as.name,
+          placeholder: "name",
+          onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, name: e.target.value }))
+        }
+      ), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          className: "lv-tagin",
+          value: as.tag,
+          onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, tag: e.target.value }))
+        }
+      ), /* @__PURE__ */ React.createElement(
+        "select",
+        {
+          className: "lv-sel",
+          value: as.kind,
+          onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, kind: e.target.value }))
         },
-        src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : /* @__PURE__ */ React.createElement("span", { className: "lv-castph" }),
-        /* @__PURE__ */ React.createElement("div", { className: "lv-castmeta" }, /* @__PURE__ */ React.createElement("b", null, as.tag), /* @__PURE__ */ React.createElement("span", null, as.name || as.kind))
-      );
+        /* @__PURE__ */ React.createElement("option", { value: "image" }, "image"),
+        /* @__PURE__ */ React.createElement("option", { value: "video" }, "video"),
+        /* @__PURE__ */ React.createElement("option", { value: "audio" }, "audio")
+      ), /* @__PURE__ */ React.createElement("label", { className: "lv-locklab", title: "Write 'maintain exact appearance' in prompts" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!as.lock, onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, lock: e.target.checked })) }), "lock"), sel && /* @__PURE__ */ React.createElement("label", { className: "lv-inshot", title: "Include in the selected shot's cast" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!inShot, onChange: toggleInShot }), "in ", sel.code), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs danger", onClick: () => setAssets((a) => a.filter((x) => x.id !== as.id)), title: "Remove" }, "\u2715"));
     }) : /* @__PURE__ */ React.createElement("div", { className: "lv-simplegrid" }, (project.assets || []).map((as) => {
       const inShot = sel && (sel.c.cast || []).includes(as.id);
       const src = frameSrc(as);
