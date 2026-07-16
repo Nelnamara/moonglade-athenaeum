@@ -2448,7 +2448,7 @@ ENHANCE_PLUGINS = {
 # calls to paint) and, per the tool's own integration notes, swaps window.storage onto
 # the gallery backend so a board persists server-side (shared across devices) instead
 # of per-browser localStorage.
-LOOM_PAGE = r"""<!DOCTYPE html>
+_LOOM_SHELL = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Loom - Moonglade Athenaeum</title>
@@ -2461,7 +2461,7 @@ body { background: var(--base); margin: 0; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
-<script src="/loom/vendor/babel.min.js"></script>
+__BABEL_LIB_TAG__
 <script src="/static/picker-core.js"></script>
 <script src="/static/mg-model-picker.js"></script>
 <script src="/static/mg-gallery-picker.js"></script>
@@ -2475,11 +2475,7 @@ window.storage = {
   delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
 };
 </script>
-<script type="text/babel" data-presets="react">
-const { useState, useEffect, useRef, useCallback } = React;
-__JSX__
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-</script>
+__RUNTIME_SCRIPT_BLOCK__
 <button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'docs'})})}catch(e){}"
   style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="How The Loom works">?</button>
@@ -2498,7 +2494,39 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     <p style="color:var(--subtext);">Full manual: <code>docs/LOOM.md</code> in the repo.</p>
   </div>
 </div>
-</body></html>""".replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS)
+</body></html>"""
+
+# Two delivery paths for the same master-storyboard.jsx, sharing everything except
+# the runtime-script block (Phase 1 tooling pass, 2026-07-16):
+#
+#   LOOM_PAGE        -- DEFAULT. Loads babel.min.js and transpiles master-storyboard.jsx
+#                       (+ loom/src/loom-core.js, inlined ahead of it) client-side, as
+#                       it always has. This is the trusted fallback; it is NOT being
+#                       removed or downgraded by the new path below.
+#   LOOM_PAGE_BUNDLE -- NEW, opt-in via /loom?bundle=1. Loads the pre-transpiled
+#                       loom/dist/master-storyboard.bundle.js (built by
+#                       `npm run build` in loom/, via esbuild) instead -- no Babel,
+#                       no client-side transpile. Only served if that file actually
+#                       exists on disk (see loom() below); otherwise /loom?bundle=1
+#                       silently falls back to LOOM_PAGE so a not-yet-built checkout
+#                       never breaks.
+LOOM_PAGE = (_LOOM_SHELL
+    .replace("__BABEL_LIB_TAG__", '<script src="/loom/vendor/babel.min.js"></script>')
+    .replace("__RUNTIME_SCRIPT_BLOCK__",
+             '<script type="text/babel" data-presets="react">\n'
+             'const { useState, useEffect, useRef, useCallback } = React;\n'
+             '__JSX__\n'
+             'ReactDOM.createRoot(document.getElementById("root")).render(<App />);\n'
+             '</script>')
+    .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS))
+
+LOOM_PAGE_BUNDLE = (_LOOM_SHELL
+    .replace("__BABEL_LIB_TAG__", "")   # pre-transpiled bundle -- no Babel needed
+    .replace("__RUNTIME_SCRIPT_BLOCK__",
+             '<script src="/loom/dist/master-storyboard.bundle.js"></script>\n'
+             '<script>ReactDOM.createRoot(document.getElementById("root"))'
+             '.render(React.createElement(LoomBundle.default));</script>')
+    .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS))
 
 
 def _build_stamp():
@@ -9242,21 +9270,72 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             abort(404)
         return send_from_directory(str(vdir), fname, max_age=31536000)
 
+    @app.route("/loom/dist/<path:fname>")
+    def loom_dist(fname):
+        """Serve the esbuild-bundled Loom (loom/dist/, built by `npm run build` in
+        loom/) -- the NEW, opt-in delivery path (/loom?bundle=1). Same path-safety
+        pattern as loom_vendor(). Absent files 404; loom() below treats that as
+        'bundle not built yet' and falls back to the Babel-standalone page rather
+        than erroring. max_age=0 (unlike the vendor libs) since this output changes
+        every time the source is rebuilt."""
+        from flask import send_from_directory, abort
+        ddir = (Path(__file__).resolve().parent / "loom" / "dist").resolve()
+        try:
+            target = (ddir / fname).resolve()
+            target.relative_to(ddir)          # reject path traversal
+        except (ValueError, OSError):
+            abort(404)
+        if not target.is_file():
+            abort(404)
+        return send_from_directory(str(ddir), fname, max_age=0)
+
     @app.route("/loom")
     def loom():
         """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
-        backend (window.storage swapped for /api/loom/*). Localhost-only."""
+        backend (window.storage swapped for /api/loom/*). Localhost-only.
+
+        Two delivery paths (see LOOM_PAGE / LOOM_PAGE_BUNDLE above):
+        default is the in-browser Babel-standalone transpile (unchanged); passing
+        ?bundle=1 opts into the pre-built esbuild bundle IF loom/dist/ actually has
+        one, else it quietly falls back to the default so a fresh checkout that
+        hasn't run `npm run build` yet never breaks."""
         if not _is_local_request():
             return "The Loom is localhost-only.", 403
         import re as _re
-        src = Path(__file__).resolve().parent / "loom" / "master-storyboard.jsx"
+        loom_dir = Path(__file__).resolve().parent / "loom"
+        src = loom_dir / "master-storyboard.jsx"
         try:
             jsx = src.read_text(encoding="utf-8")
         except OSError:
             return "Loom source not found (loom/master-storyboard.jsx).", 404
+
+        wants_bundle = request.args.get("bundle") in ("1", "true", "yes")
+        bundle_file = loom_dir / "dist" / "master-storyboard.bundle.js"
+        if wants_bundle and bundle_file.is_file():
+            return LOOM_PAGE_BUNDLE
+
+        # ---- Babel-standalone path (default + bundle-requested-but-not-built) ----
+        # loom/src/loom-core.js is a real ES module master-storyboard.jsx imports
+        # from; this <script type="text/babel"> block isn't a real module system,
+        # so inline the core module's source ahead of the JSX and strip `export`
+        # the same way "export default function App()" is already stripped below.
+        core_src = ""
+        try:
+            core_src = (loom_dir / "src" / "loom-core.js").read_text(encoding="utf-8")
+        except OSError:
+            pass
+        core_inline = _re.sub(r"(?m)^export const ", "const ", core_src)
+        # master-storyboard.jsx imports shotPayload aliased (`as buildShotPayload`)
+        # for its own local wrapper; provide that name once the real `import {...}`
+        # statement below is stripped out.
+        if core_inline:
+            core_inline += "\nconst buildShotPayload = shotPayload;\n"
+
         jsx = _re.sub(r"(?m)^\s*import\s+React.*$", "", jsx)          # React is a CDN global
+        jsx = _re.sub(r"import\s*\{.*?\}\s*from\s*[\"']\./src/loom-core\.js[\"'];?",
+                       "", jsx, count=1, flags=_re.S)                  # loom-core is inlined instead
         jsx = jsx.replace("export default function App()", "function App()")
-        return LOOM_PAGE.replace("__JSX__", jsx)
+        return LOOM_PAGE.replace("__JSX__", core_inline + "\n" + jsx)
 
     @app.route("/api/loom/get")
     def loom_get():
