@@ -83,7 +83,28 @@ re-verified: migration + atomic per-key writes both confirmed live + 5 dedicated
 
 ---
 
-## 1. Loom V2 — built, working, one decision from mergeable
+## 1. Loom V2 — DECISION LOCKED 2026-07-16: REBUILD, Phase 0 first
+
+**Everything below this point (the V2.1 rail-layout arc, the shot-mechanics work) is now historical — read for context, not as the active plan.** After the Trophy Hall incident forced a full ground-truth audit of the suite (2026-07-15), the Loom's classic/V2 fork got its own dedicated scrutiny: a first comprehensive-plan pass built independent consolidate and rebuild plans, then a focused 7-agent adversarial audit (2026-07-16, Sonnet/Opus/Fable mix) stress-tested both from multiple angles — a fresh skeptical re-read explicitly hunting for reasons rebuild was wrong, an off-the-shelf prior-art survey, a Loom-scoped standalone-app survey, a render-architecture-options survey, an adversarial stress-test of the rebuild plan's real costs, a Fable-model synthesis, and an Opus adversarial verify checking the synthesis for the same one-sidedness this exact decision had already shown in both directions.
+
+**What that audit actually found, load-bearing for everything after:** the "~600 good state-layer lines lift out cleanly" premise both plans shared is **false as stated** — two independent passes confirmed the real state layer (`generateShot`/`pollShot`/`exportCut`/the multi-project store) is React closures woven through ~150 setter call-sites inside `App()` (1024–1701), not a separable module; the genuinely pure, cheaply-testable core is ~150–200 lines. The audit also found real bugs living *inside* that "solid" layer, not just in the classic/V2 render fork: `importJSON` silently clobbers the currently-open project with no confirm (real data-loss risk); `CONNECT[c.connect]` is unguarded and can throw on a stale/legacy card; `shotPayload` defaults both open and close frames to the same `@image9` tag; generation polls have no abort/cleanup and leak if a card is deleted mid-render; the continuity indicator is broken *by the app's own headline frame-handoff feature* (handoff writes `mediaId`, the indicator only checks `thumbId`); and there are ~7 duplicate tag-numbering call sites in 3 different algorithm shapes (not the originally-counted 4). No off-the-shelf storyboard app or render-layer replacement exists to shortcut this (checked and ruled out) — though **Dockview or FlexLayout** (both mature, MIT-licensed, actively maintained) are real candidates to replace the hand-rolled `DockablePanel` docking chrome if/when the rebuild reaches that piece, rather than hand-rolling it again. React + esbuild + Vitest/RTL remains the right tooling combo (Preact is a legitimate but optional later spike; Svelte and hand-rolled vanilla+signals were both explicitly rejected for a solo-dev migration of untested code; canvas isn't needed for the reel at this scale).
+
+**Owner decision (2026-07-16): rebuild is the destination.** Not gated behind a probe-first decision tree — the owner weighed the evidence (including the audit's own "probe first, decide second" hybrid suggestion, which a subsequent adversarial-verify pass caught quietly pre-committing to rebuild's tooling anyway) and chose to commit directly, starting with:
+
+**PHASE 0 — kill the real bugs as shared helpers, no new tooling (in progress 2026-07-16):**
+1. `frameLinked(a,b)` helper checking both `thumbId` and `mediaId` — fixes the continuity indicator (also gives V2 an indicator it never had).
+2. `nextTag(assets, prefix)` helper — unifies every duplicate tag-numbering call site onto one algorithm (anchored regex-max, the best of the ~3 shapes found).
+3. `dupCard` resets `resultMid`/`status`/`actualDur`/`trimIn`/`trimOut` on clone (also fixes Export's double-include-footage side effect).
+4. Guard `CONNECT[c.connect]` against undefined/stale values.
+5. `importJSON` creates a new project + confirms instead of clobbering the open board.
+
+These are shared, in-file helpers — no build step, no module system change, matches "no new tooling" exactly. Rebuild's later phases (design pass via the owner's own Figma mocks → unified render tree) come after Phase 0, not before.
+
+**Standalone-app note, corrected twice by the owner:** "standalone" was scoped Loom-only in the 2026-07-16 audit by mistake — the owner's real question is **suite-wide** (the whole Moonglade Athenaeum app, not just the Loom), and they added real history: **"The loom started standalone and its how we got in this mess"** — the classic/V2 fork and general disconnection from the rest of the suite's patterns trace back to the Loom's own standalone-then-merged past. Treat that as a cautionary data point for whenever the suite-wide question gets its own real scoping pass, not an argument for or against outright. Not blocking the current rebuild — explicitly low-priority, "not the currently preferred direction" per the owner's own words.
+
+---
+
+### Historical: the V2.1 rail-layout arc (superseded by the rebuild decision above, kept for provenance)
 
 **State (git + transpile verified):** branch `loom-v2`, **6 commits ahead of master, unmerged**, transpiles clean. A **non-breaking opt-in overlay** behind a "V2 layout" toggle; classic waterfall Loom is default and untouched. All V2 code in `loom/master-storyboard.jsx`.
 
