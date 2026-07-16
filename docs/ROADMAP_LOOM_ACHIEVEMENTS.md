@@ -18,15 +18,20 @@
 ## 0.4 · TROPHY HALL REGRESSION — RESOLVED (revert) + THE DESIGN WORKFLOW STANDARD (2026-07-14/15) — see `docs/DESIGN_WORKFLOW.md`
 
 **The reformat commit `c877919` landed way off the owner's intended visual target** — cards
-reorganized, carousel execution wrong, locked/DONE work undone without permission. **Recovery: Option
-A (revert) was chosen and executed 2026-07-15** — `c877919` reverted clean as `0a8da3a` on the C:
-repo, confirmed with a real rendered screenshot. The Hall redesign itself is NOT done — the owner is
-**building a Figma mock** (screenshot-decomposition + a proper carousel treatment for ladder rungs) as
-the pixel source of truth for a rename+rebuild, using their own further-rolled-back D: install as the
-starting point. Full incident detail, tooling state (Figma plugin authed via `/mcp` per machine;
-Claude Design + `DesignSync`), the two not-actually-regressions caveats (feats-cloak = original spec;
-machine-local branding art), and the model-strategy guidance ALL live in **`docs/DESIGN_WORKFLOW.md`**
-— read it before touching any user-visible surface. **Standing rule from this incident: no visual
+reorganized, the ladder-carousel mechanic itself rejected outright ("didn't even work and looked like
+dogwater... not what I asked for... one of those charge-ahead sessions with no design questions"),
+locked/DONE work undone without permission. **Recovery: Option A (revert) was chosen and executed
+2026-07-15** — `c877919` reverted clean as `0a8da3a` on the C: repo, confirmed with a real rendered
+screenshot. The reverted commit's CSS/JS is kept filed as a reference artifact only — **not** a
+recommended starting point for the rebuild. **The Hall redesign itself is NOT done, but the owner
+already has real Figma mocks built** (told this repeatedly this session — do not re-suggest the
+screenshot-decomposition checklist, ask for the frame URL instead) for a rename+rebuild. Rename
+shortlist as of 2026-07-15: The Vault Against the Void / The Folio of Honors / the owner's own "The
+Ledger of the World Tree" (banner subtext: "The Pillar of the Vault"). Full incident detail, tooling
+state (Figma plugin — **confirmed live and authenticated 2026-07-15**, no more one-time-OAuth
+blocker; Claude Design + `DesignSync`), the two not-actually-regressions caveats (feats-cloak =
+original spec; machine-local branding art), and the model-strategy guidance ALL live in
+**`docs/DESIGN_WORKFLOW.md`** — read it before touching any user-visible surface. **Standing rule from this incident: no visual
 build from prose alone; verify against the pixel source before calling it done.**
 
 ---
