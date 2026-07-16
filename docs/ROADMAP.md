@@ -55,7 +55,42 @@ second real provider (Seedance) lands, so it's shaped by two concrete cases, not
 
 ---
 
+---
+
+## Epic C — Publish & Community integration (core + web) · added 2026-07-15
+
+**Confirmed direction, roadmapped into the next core + web passes** — owner's presence/art is
+gaining real traction, reopening a capability that was deliberately shelved earlier in the
+project's life ("just a backup tool" then; not anymore).
+
+**Already reverse-engineered, documented, deliberately OFF today** (`private/API_OPERATIONS.md`
++ `private/APP_OPERATIONS_FULL.md`): `createArtworkFromTaskV2` (publish a generation as an
+artwork), `upsertArtwork`/`deleteArtwork`, `markArtwork` (like/bookmark), follow, and read
+metadata on your own published artworks (already live via `--sync-artworks`, distinct from
+this — that's read-only history sync, this is publish/social *action*).
+
+**Standing design constraint carried over from `private/APP_OPERATIONS_FULL.md`'s own note:**
+*"Never used for spend/social/publish without explicit owner direction... mutations exist but
+stay OFF by design."* This epic changes that default deliberately, not by accident — scope as:
+
+- **Core (CLI):** a `--publish-artwork <media_id>` (or similar) command, explicit-confirm gated
+  like every other spend-adjacent action, even though publishing itself is free — the gate here
+  is about deliberateness, not cost.
+- **Web:** a Publish action from the gallery detail page / lightbox, with the same "you did this
+  on purpose" confirmation model as delete — never a background/automatic action, never
+  default-on for a whole batch.
+- **Like/follow:** lower priority than publish; scope only if there's a concrete use (e.g.
+  liking your own cross-posted variants, following collaborators) — don't build speculative
+  social-graph features nobody asked for.
+
+**Discipline, matching Epic A/B's own rule:** don't build the full surface speculatively — start
+with publish (the concrete, stated want), let like/follow follow only if a real need shows up.
+
+---
+
 ## Sequencing note
 Both epics wait on an explicit "go." Foundry Stage 1 is the nearer of the two (self-contained
 spike, no external account). The Provider Deck is bigger and benefits from the Foundry proving
-the provider-seam pattern a second time first.
+the provider-seam pattern a second time first. Epic C (Publish & Community) is independent of
+A/B and can move whenever core+web capacity allows — it doesn't share the provider-seam
+prerequisite the other two do.

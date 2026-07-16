@@ -22,7 +22,7 @@
 | `ROADMAP_LOOM_ACHIEVEMENTS.md` | ⭐ **THE active roadmap** — source of truth for the current threads (Loom V2.1 · Achievements). Checkpointed after every increment; re-read after every compaction | **Active** |
 | `REFINEMENTS.md` | Near-term tracker: small web-suite fixes/polish | Active |
 | `ROADMAP.md` | Far-horizon epics only (the Foundry, Provider Deck) | Active, rarely touched |
-| `achievements_roster_57.json` | Canonical 57-achievement roster (names/tiers/triggers/roasts) — code generates from this. Thresholds reconciled to shipped code 2026-07-13 (marathon 100 · read-the-manual 1 · triggered 5) | **Canonical data** |
+| `achievements_roster_57.json` | **Corrected 2026-07-15 — this is a design/content spec, not a runtime dependency.** Confirmed by reading it: a structured content reference (bucket definitions, per-track name/metric/design-note/roast flavor) used to author the 57-achievement roster. The live roster is the `ACHIEVEMENTS` Python literal in `pixai_gallery.py` — grep-confirmed nothing in the codebase loads this JSON. Keep it as the content-authoring reference it actually is; the old "canonical, code generates from this" phrasing implied a live dependency that was never true. Thresholds reconciled to shipped code 2026-07-13 (marathon 100 · read-the-manual 1 · triggered 5) | **Design reference** |
 | `DOC_MAP.md` | This file | Active |
 | `CURATION_STANDARD.md` | ⭐ **House baseline for selection/vote artifacts** (owner-approved 2026-07-12): 10 non-negotiables, pick/rank/view/note model, build discipline | **Active standard** |
 | `curation_reference_builder.py` | Reference implementation of the Curation Standard — clone for any vote artifact (swap input/classify/picks, keep the rest) | Reference |

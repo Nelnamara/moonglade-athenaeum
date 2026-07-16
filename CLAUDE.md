@@ -41,7 +41,12 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
 1. **Checkpoint** after every shipped increment (and before starting any new build): update
    the active roadmap doc (`docs/ROADMAP_LOOM_ACHIEVEMENTS.md` while it's current) +
    `CHANGELOG.md [Unreleased]` + memory with what shipped, what's in flight, the decided
-   NEXT STEPS, and the locked design artifacts by id.
+   NEXT STEPS, and the locked design artifacts by id. **This includes `wiki/` — there was a
+   standing pre-1.9.1 practice of updating docs AND the wiki on every commit as needed; it
+   silently dropped because it was never written down here, only followed by habit. Writing
+   it down now (2026-07-15) so it can't drop again the same way.** If a shipped change is
+   user-facing, check whether any `wiki/` page describes the area it touched and update it in
+   the same pass — don't let the wiki decay into a separate, forgotten catch-up task.
 2. **After any compaction**, the FIRST act is to re-read the roadmap doc and re-open every
    artifact/doc the next task depends on — never build from the conversation summary alone.
    Say what was re-read before proceeding.
@@ -56,19 +61,22 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
 
 ## Architecture / request flow
 
-1. **Listing query is an Apollo persisted query (GET).** The site sends `operationName` + a `sha256Hash`; the query body lives on PixAI's server. Constants (`OPERATION_NAME`, `PERSISTED_QUERY_HASH`, `U3T`, `USER_ID`) are captured from the browser and stored in git-ignored `config.json`.
+There is no official API for listing your own generations, so a few personal-history
+operations (listing, task detail) reuse the website's own interfaces, with working defaults
+already shipped in the app — you never capture anything by hand. Auth is your official API
+key (`PIXAI_API_KEY`), auto-resolving `USER_ID`; HTTPS verification is always on. Media URLs
+come from `GET /v1/media/<mediaId>` (variant `PUBLIC`); videos expose their mp4 via the media
+object's `fileUrl`. SSL trust store: `truststore.inject_into_ssl()` called at import if
+present — fixes corporate/antivirus HTTPS interception.
 
-2. **It's a GET** with `operation`, `u3t`, `operationName`, `variables`, and `extensions` (carrying the persisted hash) as URL query params. See `gql()`.
-
-3. **Apollo CSRF headers required** on that GET: `apollo-require-preflight: true` and `x-apollo-operation-name`. Set on the session in `main()`.
-
-4. **Pagination is BACKWARD.** Variables are `{last, before, userId}`. Start with no `before` (newest page), follow `pageInfo.startCursor` → `before` while `hasPreviousPage` is true.
-
-5. **Task summaries contain `mediaId` + `batchMediaIds`, NOT image URLs.** To get a URL, fetch `https://api.pixai.art/v1/media/<mediaId>`. Its `urls` list has variants; full-resolution is `variant: "PUBLIC"`. See `resolve_media()`.
-
-6. **Auth** is a Bearer token (JWT) from the logged-in browser. Via `PIXAI_TOKEN` env, `token.txt`, or `--token`. HTTPS verification always on.
-
-7. **SSL trust store**: `truststore.inject_into_ssl()` called at import if present — fixes corporate/antivirus HTTPS interception.
+> **Reverse-engineering detail (the persisted-query/hash mechanism, pagination internals,
+> `gql_adhoc()` technique, Apollo header requirements) lives in `private/ARCHITECTURE_RE.md`**
+> — git-ignored, not public. Read it there when you need the specifics; this section stays at
+> the same redacted level as the public `docs/architecture.md` on purpose (owner's IP/security
+> boundary, set 2026-07-04 — public docs describe how to USE the tool, never how it
+> reverse-engineers PixAI). **This section was found duplicating the excised detail verbatim on
+> 2026-07-15 — the 2026-07-04 redaction only touched `docs/architecture.md`, not this file. Do
+> not let mechanism detail creep back into this section.**
 
 ---
 
