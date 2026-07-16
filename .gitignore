@@ -38,6 +38,9 @@ env/
 .coverage.*
 htmlcov/
 
+# ---- Working dashboard artifact (Claude+owner reference; not project documentation) ----
+docs/DASHBOARD.html
+
 # ---- Editor / OS ----
 .vscode/
 .idea/

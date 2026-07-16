@@ -34,12 +34,35 @@
 | `ART_PROMPTS.md` | House badge style anchor (tiered-ring template, locked hexes) + brand prompt bank | Reference |
 | `ART_SPECS.md` | Art asset specs (sizes, keying, formats) | Reference |
 | `badge_generation_prompts.md` | Badge prompt system v2 + 11 gunmetal feat prompts | **Parked** (owner: maybe when credits allow) |
+| `architecture.md` | Contributor-facing architecture doc — `README.md` links to it directly as the in-repo architecture reference. Reclassified from "historical" 2026-07-15 (it was never a snapshot, it's the live doc) | **Active** |
 
 ### `docs/` — historical (kept, not maintained)
 | File | Note |
 |---|---|
-| `STATE_OF_THE_SUITE_2026-07-10.md` | Point-in-time snapshot |
-| `architecture.md` | Older architecture notes |
+| `STATE_OF_THE_SUITE_2026-07-10.md` (+ `state-of-suite.html` twin) | Point-in-time snapshot |
+
+### Wiki (published GitHub wiki, linked from `README.md`) — added to this map 2026-07-15
+
+The GitHub wiki (`Nelnamara/moonglade-athenaeum.wiki.git`) is a **separate repo**, staged locally in
+`wiki/` before manual publish. As of 2026-07-15: the real published wiki was last pushed **2026-06-29**;
+the local staged copy stopped being updated **2026-07-05**. Loom V2, the Control Panel,
+branding/mascots, and the whole Achievements/Trophy Hall system are undocumented on the one public
+doc surface — needs an update-then-republish pass.
+
+| File | Role | Status (2026-07-15 audit) |
+|---|---|---|
+| `Home.md` | Wiki landing page + table of contents | Accurate |
+| `_Sidebar.md` | Wiki nav | Accurate |
+| `Setup.md` | Install/config | Accurate |
+| `Backing-Up.md` | CLI backup/sync flags | Accurate |
+| `Gallery.md` | Gallery browsing UI | Accurate, silent on chrome added since (header pill-nav, balance chip, branding marks) |
+| `Generating.md` | Generate/edit/video CLI + web drawer | Accurate for what it covers; missing `--account`/`--claims`/`--watch`/`--contests`/`--sync` entirely; Loom V2 unmentioned |
+| `Collections.md` | Collection filter semantics | Accurate |
+| `Deleting.md` | `_deleted/` quarantine + task delete | Accurate |
+| `Health.md` | `/health`, `/duplicates` | Accurate |
+| `How-It-Works.md` | Architecture overview | Test count was stale (195 — fixed to 474, 2026-07-15); otherwise structurally accurate |
+| `Troubleshooting.md` | Error-message driven | Evergreen, accurate |
+| `FAQ.md` | General Q&A | Evergreen, accurate |
 
 ---
 

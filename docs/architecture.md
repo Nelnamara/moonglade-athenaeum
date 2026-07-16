@@ -76,5 +76,5 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 
 ## Testing
 
-300+ pytest tests in `tests/` (pure functions, filesystem, catalog, gallery
+474 pytest tests in `tests/` (pure functions, filesystem, catalog, gallery
 routes, mocked network). `python -m pytest`. All must pass before merging.
