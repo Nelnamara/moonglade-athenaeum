@@ -110,6 +110,146 @@ var LoomBundle = (() => {
     return { total, scale, over };
   };
 
+  // src/loom-mutations.js
+  var patchCard = (project, actId, cardId, fn) => ({
+    ...project,
+    acts: project.acts.map((a) => a.id !== actId ? a : {
+      ...a,
+      cards: a.cards.map((c) => c.id !== cardId ? c : fn(c))
+    })
+  });
+  var patchCardById = (project, cardId, patch) => ({
+    ...project,
+    acts: project.acts.map((a) => ({
+      ...a,
+      cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch })
+    }))
+  });
+  var patchAct = (project, actId, patch) => ({
+    ...project,
+    acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch })
+  });
+  var patchAssets = (project, fn) => ({ ...project, assets: fn(project.assets || []) });
+  var appendCardToAct = (project, actId, card) => ({
+    ...project,
+    acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: [...a.cards, card] })
+  });
+  var buildDuplicateCard = (card, newCardId, newRefIds) => ({
+    ...JSON.parse(JSON.stringify(card)),
+    id: newCardId,
+    refs: card.refs.map((r, i) => ({ ...r, id: newRefIds && newRefIds[i] || r.id })),
+    // A duplicate is a fresh, unrendered shot -- it must not inherit the
+    // original's generation result, or it silently shows "done" and Export
+    // plays the SAME clip twice.
+    resultMid: "",
+    status: "todo",
+    actualDur: null,
+    trimIn: 0,
+    trimOut: null
+  });
+  var insertCardAfter = (project, actId, origCardId, newCard2) => ({
+    ...project,
+    acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: a.cards.flatMap((x) => x.id === origCardId ? [x, newCard2] : [x]) })
+  });
+  var removeCard = (project, actId, cardId) => ({
+    ...project,
+    acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: a.cards.filter((c) => c.id !== cardId) })
+  });
+  var moveCardInAct = (project, actId, idx, dir) => ({
+    ...project,
+    acts: project.acts.map((a) => {
+      if (a.id !== actId) return a;
+      const j = idx + dir;
+      if (j < 0 || j >= a.cards.length) return a;
+      const cs = [...a.cards];
+      [cs[idx], cs[j]] = [cs[j], cs[idx]];
+      return { ...a, cards: cs };
+    })
+  });
+  var moveCardToAct = (project, fromActId, card, toActId) => {
+    if (fromActId === toActId) return project;
+    return {
+      ...project,
+      acts: project.acts.map((a) => a.id === fromActId ? { ...a, cards: a.cards.filter((c) => c.id !== card.id) } : a.id === toActId ? { ...a, cards: [...a.cards, card] } : a)
+    };
+  };
+  var nextActName = (project) => `Act ${project.acts.length + 1}`;
+  var appendAct = (project, act) => ({ ...project, acts: [...project.acts, act] });
+  var removeAct = (project, actId) => ({ ...project, acts: project.acts.filter((a) => a.id !== actId) });
+  var moveActInProject = (project, idx, dir) => {
+    const j = idx + dir;
+    if (j < 0 || j >= project.acts.length) return project;
+    const as = [...project.acts];
+    [as[idx], as[j]] = [as[j], as[idx]];
+    return { ...project, acts: as };
+  };
+  var buildNewRef = (kind, id) => ({ id, kind, tag: "", role: "", source: "", thumbId: "" });
+  var patchRef = (project, actId, cardId, refId, patch) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== refId ? r : { ...r, ...patch }) }));
+  var removeRef = (project, actId, cardId, refId) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== refId) }));
+  var countShots = (project) => (project.acts || []).reduce((n, a) => n + (a.cards || []).length, 0);
+  var parseCastIdsFromSearch = (search) => (search || "").replace(/^\?/, "").split("&").map((kv) => kv.split("=")).filter(([k]) => k === "cast").flatMap(([, v]) => (v || "").split(",")).map((s) => decodeURIComponent(s).trim()).filter((s) => /^\d+$/.test(s));
+  function friendlyGenErr(raw) {
+    const s = String(raw || "");
+    if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
+      return "Out of balance for this model \u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
+    if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
+      return "PixAI's content filter blocked this generation \u2014 that's decided on PixAI's side, not in the Loom.";
+    return s || "generation failed";
+  }
+  function classifyTaskStatus(d) {
+    if (!d) return { phase: "pending" };
+    if (d.phase === "done") {
+      const mid = (d.media_ids || [])[0] || "";
+      const out = { phase: "done", mid };
+      if (d.duration) out.duration = d.duration;
+      return out;
+    }
+    if (d.phase === "failed") return { phase: "failed", msg: friendlyGenErr(d.error || d.status || "failed") };
+    return { phase: "pending" };
+  }
+  function buildShotListText(project, fmt2, actLetter2, shotText2) {
+    let out = `${project.name}
+Runtime target ${fmt2(project.target)}
+`;
+    if ((project.assets || []).length) {
+      out += `
+Cast & assets:
+`;
+      project.assets.forEach((as) => {
+        out += `  ${as.tag}  ${as.name} (${as.kind})${as.lock ? " \xB7 lock appearance" : ""}
+`;
+      });
+    }
+    project.acts.forEach((a, ai) => {
+      out += `
+${"=".repeat(48)}
+${a.name}
+${"=".repeat(48)}
+
+`;
+      a.cards.forEach((c, ci) => {
+        out += shotText2({ c, code: `${actLetter2(ai)}\xB7${String(ci + 1).padStart(2, "0")}`, ai, ci }, project) + "\n\n";
+      });
+    });
+    return out;
+  }
+  var buildPlaySequence = (entries) => entries.filter((e) => e.c.resultMid).map((e) => ({
+    mid: e.c.resultMid,
+    in: e.c.trimIn || 0,
+    out: e.c.trimOut,
+    title: e.c.title,
+    code: e.code
+  }));
+  function buildExportClips(entries) {
+    const clips = entries.filter((e) => e.c.resultMid).map((e) => {
+      const dur = e.c.actualDur || e.c.duration || 8, cin = e.c.trimIn || 0;
+      const cout = e.c.trimOut != null ? e.c.trimOut : dur;
+      return { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
+    });
+    const total = clips.reduce((s, c) => s + c.span, 0);
+    return { clips, total };
+  }
+
   // master-storyboard.jsx
   var { useState, useEffect, useRef, useCallback } = React;
   var STYLES = `
@@ -799,14 +939,6 @@ var LoomBundle = (() => {
     const showCollapsedView = p.collapsed && collapsedView;
     return /* @__PURE__ */ React.createElement("div", { className: "lv-panel" + (p.collapsed ? " collapsed" : "") + (p.collapsed && isRail ? " rail" : ""), style: { left: p.x, top: p.y, width: w, height: h } }, /* @__PURE__ */ React.createElement("div", { className: "lv-bar", onMouseDown: startDrag }, /* @__PURE__ */ React.createElement("span", { className: "lv-dots" }), /* @__PURE__ */ React.createElement("span", { className: "lv-title" }, p.title), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => onCollapse(p.id), title: "collapse" }, p.collapsed ? isRail ? "\u25C2" : "\u25BE" : isRail ? "\u25B8" : "\u25B4")), showCollapsedView ? /* @__PURE__ */ React.createElement("div", { className: "lv-collapsedview" }, collapsedView) : /* @__PURE__ */ React.createElement("div", { className: "lv-body" }, children), !p.collapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-rh", onMouseDown: startResize }));
   }
-  function friendlyGenErr(raw) {
-    const s = String(raw || "");
-    if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
-      return "Out of balance for this model \u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
-    if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
-      return "PixAI's content filter blocked this generation \u2014 that's decided on PixAI's side, not in the Loom.";
-    return s || "generation failed";
-  }
   function ProjectSwitcher({ api }) {
     const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
     return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
@@ -823,7 +955,7 @@ var LoomBundle = (() => {
       "\u25BE"
     ), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setProjMenu(false) }), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Storyboards"), /* @__PURE__ */ React.createElement("div", { className: "sb-projlist" }, projList.map((pr) => /* @__PURE__ */ React.createElement("div", { key: pr.id, className: "sb-projitem" + (pr.id === activeId ? " on" : "") }, /* @__PURE__ */ React.createElement("button", { className: "sb-projopen", onClick: () => openProject(pr.id), title: "Open this storyboard" }, /* @__PURE__ */ React.createElement("b", null, pr.name || "Untitled"), /* @__PURE__ */ React.createElement("span", null, pr.shots, " shot", pr.shots === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("button", { className: "sb-projx", title: "Delete", onClick: () => deleteProject(pr.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("div", { className: "sb-projacts" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: newProject }, "+ New"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: duplicateProject }, "\u29C9 Duplicate"))));
   }
-  function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
+  function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
     const wrapRef = useRef(null);
     const [scaleV, setScaleV] = useState(1);
     const [tab, setTab] = useState("Video");
@@ -887,7 +1019,7 @@ var LoomBundle = (() => {
               className: "lv-actsel",
               value: "",
               title: "Move to another act",
-              onChange: (ev) => ev.target.value && moveCardToAct(act.id, e.c, ev.target.value)
+              onChange: (ev) => ev.target.value && moveCardToAct2(act.id, e.c, ev.target.value)
             },
             /* @__PURE__ */ React.createElement("option", { value: "" }, "move to\u2026"),
             project.acts.filter((a) => a.id !== act.id).map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name))
@@ -1129,57 +1261,16 @@ var LoomBundle = (() => {
       } }, "Select in Generate \u2192")));
     })());
   }
-  function App() {
+  function useProjectStore(setSelShot) {
     const [project, setProject] = useState(null);
     const [thumbs, setThumbs] = useState({});
-    const [open, setOpen] = useState({});
     const [busy, setBusy] = useState(false);
-    const [genImgState, setGenImgState] = useState({});
-    const [imgModel, setImgModel] = useState(null);
-    const [genEditState, setGenEditState] = useState({});
-    const [genRefState, setGenRefState] = useState({});
-    const [showHelp, setShowHelp] = useState(false);
-    const [showGuide, setShowGuide] = useState(() => {
-      try {
-        return !localStorage.getItem("loom_guide_seen");
-      } catch (e) {
-        return true;
-      }
-    });
-    const [showCast, setShowCast] = useState(true);
-    const [genState, setGenState] = useState({});
-    const [seq, setSeq] = useState(null);
-    const [exp, setExp] = useState(null);
-    const exportPoll = useRef(null);
-    const [pickCb, setPickCb] = useState(null);
-    const [pickKind, setPickKind] = useState("image");
-    const [pickAllowType, setPickAllowType] = useState(false);
-    const [importOpen, setImportOpen] = useState(false);
-    const [batching, setBatching] = useState(false);
-    const openPick = useCallback((cb, kind, allowType) => {
-      setPickKind(kind || "image");
-      setPickAllowType(!!allowType);
-      setPickCb(() => cb);
-    }, []);
-    const bindGalleryPicker = useCallback((el) => {
-      if (el && !el._mgBound) {
-        el._mgBound = true;
-        el.addEventListener("mg-pick", (e) => {
-          const cb = pickCb;
-          setPickCb(null);
-          if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration);
-        });
-        el.addEventListener("mg-close", () => setPickCb(null));
-      }
-    }, [pickCb]);
-    const saveTimer = useRef(null);
-    const castImported = useRef(false);
-    const [v2, setV2] = useState(false);
-    const [selShot, setSelShot] = useState(null);
     const [activeId, setActiveId] = useState(null);
     const [projList, setProjList] = useState([]);
     const [projMenu, setProjMenu] = useState(false);
     const [panelLayout, setPanelLayout] = useState(() => V2_DEFAULT.map((d) => ({ ...d })));
+    const saveTimer = useRef(null);
+    const castImported = useRef(false);
     const layoutTimer = useRef(null);
     useEffect(() => {
       (async () => {
@@ -1212,8 +1303,7 @@ var LoomBundle = (() => {
           const raw = await sGet(k);
           if (!raw) continue;
           const pr = JSON.parse(raw);
-          const shots = (pr.acts || []).reduce((n, a) => n + (a.cards || []).length, 0);
-          out.push({ id: k.slice(PPRE.length), name: pr.name || "Untitled", shots });
+          out.push({ id: k.slice(PPRE.length), name: pr.name || "Untitled", shots: countShots(pr) });
         } catch {
         }
       }
@@ -1280,7 +1370,7 @@ var LoomBundle = (() => {
       setProject(p);
       setSelShot(null);
       setProjMenu(false);
-    }, [activeId, project, flushSave]);
+    }, [activeId, project, flushSave, setSelShot]);
     const newProject = useCallback(async () => {
       await flushSave(activeId, project);
       const id = uid();
@@ -1293,7 +1383,7 @@ var LoomBundle = (() => {
       setSelShot(null);
       setProjMenu(false);
       readProjList();
-    }, [activeId, project, flushSave, readProjList]);
+    }, [activeId, project, flushSave, readProjList, setSelShot]);
     const duplicateProject = useCallback(async () => {
       await flushSave(activeId, project);
       const id = uid();
@@ -1331,12 +1421,12 @@ var LoomBundle = (() => {
       }
       await readProjList();
       setProjMenu(false);
-    }, [activeId, readProjList]);
+    }, [activeId, readProjList, setSelShot]);
     const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
     useEffect(() => {
       if (!project || castImported.current) return;
       castImported.current = true;
-      const ids = (new URLSearchParams(location.search).get("cast") || "").split(",").map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
+      const ids = parseCastIdsFromSearch(location.search);
       if (!ids.length) return;
       setProject((p) => {
         const existing = p.assets || [];
@@ -1372,82 +1462,107 @@ var LoomBundle = (() => {
       if (hasStore) await sSet(TPRE + id, data);
       return id;
     }, []);
-    const setCard = useCallback((aId, cId, fn) => setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: a.cards.map((c) => c.id !== cId ? c : fn(c)) }) })), []);
-    const setAct = useCallback((aId, patch) => setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, ...patch }) })), []);
-    const setAssets = useCallback((fn) => setProject((p) => ({ ...p, assets: fn(p.assets || []) })), []);
-    const importCollection = (items, cname) => {
-      setImportOpen(false);
-      if (!items || !items.length) return;
-      setAssets((a) => {
-        let n = maxTagNum(a, "@image");
-        const added = items.map((it, i) => ({
-          id: uid(),
-          name: it.name || `${cname} ${i + 1}`,
-          kind: "image",
-          tag: "@image" + ++n,
-          thumbId: "",
-          source: "",
-          mediaId: it.mediaId,
-          lock: false
-        }));
-        return [...a, ...added];
-      });
+    const importJSON = async (file) => {
+      if (!file) return;
+      try {
+        const d = JSON.parse(await file.text());
+        if (!d.project) {
+          window.alert("That file didn't parse as a storyboard backup.");
+          return;
+        }
+        if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?
+
+Your currently-open board is left untouched.`)) return;
+        await flushSave(activeId, project);
+        const id = uid();
+        await sSet(PPRE + id, JSON.stringify(d.project));
+        await sSet(ACTIVE_KEY, id);
+        if (d.thumbs) {
+          setThumbs((t) => ({ ...t, ...d.thumbs }));
+          if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v);
+        }
+        setActiveId(id);
+        setProject(d.project);
+        setSelShot(null);
+        readProjList();
+      } catch {
+        window.alert("That file didn't parse as a storyboard backup.");
+      }
     };
+    return {
+      project,
+      setProject,
+      thumbs,
+      storeThumb,
+      busy,
+      projList,
+      projMenu,
+      setProjMenu,
+      panelLayout,
+      setPanelLayout,
+      projectApi,
+      importJSON
+    };
+  }
+  function useShotMutations(project, setProject) {
+    const [open, setOpen] = useState({});
+    const setCard = useCallback((aId, cId, fn) => setProject((p) => patchCard(p, aId, cId, fn)), [setProject]);
+    const setAct = useCallback((aId, patch) => setProject((p) => patchAct(p, aId, patch)), [setProject]);
+    const setAssets = useCallback((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
+    const setCardStatus = (cardId, patch) => setProject((p) => patchCardById(p, cardId, patch));
     const addCard = (aId) => {
       const c = newCard();
-      setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: [...a.cards, c] }) }));
+      setProject((p) => appendCardToAct(p, aId, c));
       setOpen((o) => ({ ...o, [c.id]: true }));
     };
     const dupCard = (aId, card) => {
-      const c = {
-        ...JSON.parse(JSON.stringify(card)),
-        id: uid(),
-        refs: card.refs.map((r) => ({ ...r, id: uid() })),
-        // A duplicate is a fresh, unrendered shot -- it must not inherit the original's
-        // generation result, or it silently shows "done" and Export plays the SAME clip twice.
-        resultMid: "",
-        status: "todo",
-        actualDur: null,
-        trimIn: 0,
-        trimOut: null
-      };
-      setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: a.cards.flatMap((x) => x.id === card.id ? [x, c] : [x]) }) }));
+      const clone = buildDuplicateCard(card, uid(), card.refs.map(() => uid()));
+      setProject((p) => insertCardAfter(p, aId, card.id, clone));
     };
-    const delCard = (aId, card) => setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: a.cards.filter((c) => c.id !== card.id) }) }));
-    const moveCard = (aId, idx, dir) => setProject((p) => ({ ...p, acts: p.acts.map((a) => {
-      if (a.id !== aId) return a;
-      const j = idx + dir;
-      if (j < 0 || j >= a.cards.length) return a;
-      const cs = [...a.cards];
-      [cs[idx], cs[j]] = [cs[j], cs[idx]];
-      return { ...a, cards: cs };
-    }) }));
-    const moveCardToAct = (fromId, card, toId) => {
-      if (fromId === toId) return;
-      setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id === fromId ? { ...a, cards: a.cards.filter((c) => c.id !== card.id) } : a.id === toId ? { ...a, cards: [...a.cards, card] } : a) }));
-    };
-    const addAct = () => setProject((p) => ({ ...p, acts: [...p.acts, { id: uid(), name: `Act ${p.acts.length + 1}`, collapsed: false, cards: [] }] }));
+    const delCard = (aId, card) => setProject((p) => removeCard(p, aId, card.id));
+    const moveCard = (aId, idx, dir) => setProject((p) => moveCardInAct(p, aId, idx, dir));
+    const moveCardToAct2 = (fromId, card, toId) => setProject((p) => moveCardToAct(p, fromId, card, toId));
+    const addAct = () => setProject((p) => appendAct(p, { id: uid(), name: nextActName(p), collapsed: false, cards: [] }));
     const delAct = (aId) => {
       const a = project.acts.find((x) => x.id === aId);
       if (a.cards.length && !window.confirm(`Delete "${a.name}" and its ${a.cards.length} card(s)?`)) return;
-      setProject((p) => ({ ...p, acts: p.acts.filter((x) => x.id !== aId) }));
+      setProject((p) => removeAct(p, aId));
     };
-    const moveAct = (idx, dir) => setProject((p) => {
-      const j = idx + dir;
-      if (j < 0 || j >= p.acts.length) return p;
-      const as = [...p.acts];
-      [as[idx], as[j]] = [as[j], as[idx]];
-      return { ...p, acts: as };
-    });
+    const moveAct = (idx, dir) => setProject((p) => moveActInProject(p, idx, dir));
     const addRef = (aId, card, kind) => {
       const pre = kind === "image" ? "@image" : kind === "video" ? "@video" : "@audio";
       const tag = nextTag(card.refs.filter((r) => r.kind === kind), pre);
-      setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { id: uid(), kind, tag, role: "", source: "", thumbId: "" }] }));
+      setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { ...buildNewRef(kind, uid()), tag }] }));
     };
-    const setRef = (aId, cId, rId, patch) => setCard(aId, cId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== rId ? r : { ...r, ...patch }) }));
-    const delRef = (aId, cId, ref) => setCard(aId, cId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== ref.id) }));
-    const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
-    const setCardStatus = (cardId, patch) => setProject((p) => ({ ...p, acts: p.acts.map((a) => ({ ...a, cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch }) })) }));
+    const setRef = (aId, cId, rId, patch) => setProject((p) => patchRef(p, aId, cId, rId, patch));
+    const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
+    return {
+      open,
+      setOpen,
+      setCard,
+      setAct,
+      setAssets,
+      setCardStatus,
+      addCard,
+      dupCard,
+      delCard,
+      moveCard,
+      moveCardToAct: moveCardToAct2,
+      addAct,
+      delAct,
+      moveAct,
+      addRef,
+      setRef,
+      delRef
+    };
+  }
+  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick }) {
+    const [genState, setGenState] = useState({});
+    const [genImgState, setGenImgState] = useState({});
+    const [imgModel, setImgModel] = useState(null);
+    const [genEditState, setGenEditState] = useState({});
+    const [genRefState, setGenRefState] = useState({});
+    const [batching, setBatching] = useState(false);
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
     const shotPayload2 = (entry) => shotPayload(entry, project, imgSrc);
     const priceShot = async (entry) => {
@@ -1503,15 +1618,11 @@ Generate anyway?`)) return;
     const pollShot = (cardId, tid) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(tid).slice(-6) + ")" } }));
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-        if (d.phase === "done") {
-          const mid = (d.media_ids || [])[0] || "";
-          setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } }));
-          setCardStatus(cardId, {
-            status: "done",
-            resultMid: mid,
-            ...d.duration ? { actualDur: d.duration } : {}
-          });
-        } else if (d.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: friendlyGenErr(d.error || d.status || "failed") } }));
+        const cls = classifyTaskStatus(d);
+        if (cls.phase === "done") {
+          setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+          setCardStatus(cardId, { status: "done", resultMid: cls.mid, ...cls.duration ? { actualDur: cls.duration } : {} });
+        } else if (cls.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
         else setTimeout(tick, 4e3);
       }).catch(() => setTimeout(tick, 5e3));
       setTimeout(tick, 2500);
@@ -1529,10 +1640,9 @@ Generate anyway?`)) return;
     };
     const pollImg = (cardId, tid) => {
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-        if (d.phase === "done") {
-          const mid = (d.media_ids || [])[0] || "";
-          setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } }));
-        } else if (d.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: friendlyGenErr(d.error || d.status || "failed") } }));
+        const cls = classifyTaskStatus(d);
+        if (cls.phase === "done") setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+        else if (cls.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
         else setTimeout(tick, 4e3);
       }).catch(() => setTimeout(tick, 5e3));
       setTimeout(tick, 2500);
@@ -1584,10 +1694,9 @@ A matching free card auto-applies; otherwise it spends credits.`)) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll = (tid) => {
         const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-          if (d.phase === "done") {
-            const mid = (d.media_ids || [])[0] || "";
-            setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } }));
-          } else if (d.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: friendlyGenErr(d.error || d.status || "failed") } }));
+          const cls = classifyTaskStatus(d);
+          if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+          else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
           else setTimeout(tick, 4e3);
         }).catch(() => setTimeout(tick, 5e3));
         setTimeout(tick, 2500);
@@ -1659,121 +1768,7 @@ An Edit-Pro card auto-applies; otherwise it spends credits.`
 A Reference-Pro card auto-applies; otherwise it spends credits.`
       );
     };
-    const download = (text, name, type) => {
-      const url = URL.createObjectURL(new Blob([text], { type }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1e3);
-    };
-    const exportAll = () => {
-      let out = `${project.name}
-Runtime target ${fmt(project.target)}
-`;
-      if ((project.assets || []).length) {
-        out += `
-Cast & assets:
-`;
-        project.assets.forEach((as) => out += `  ${as.tag}  ${as.name} (${as.kind})${as.lock ? " \xB7 lock appearance" : ""}
-`);
-      }
-      project.acts.forEach((a, ai) => {
-        out += `
-${"=".repeat(48)}
-${a.name}
-${"=".repeat(48)}
-
-`;
-        a.cards.forEach((c, ci) => {
-          out += shotText({ c, code: `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}`, ai, ci }, project) + "\n\n";
-        });
-      });
-      download(out, `${project.name.replace(/\s+/g, "_")}_shotlist.txt`, "text/plain");
-    };
-    const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
-    const importJSON = async (file) => {
-      if (!file) return;
-      try {
-        const d = JSON.parse(await file.text());
-        if (!d.project) {
-          window.alert("That file didn't parse as a storyboard backup.");
-          return;
-        }
-        if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?
-
-Your currently-open board is left untouched.`)) return;
-        await flushSave(activeId, project);
-        const id = uid();
-        await sSet(PPRE + id, JSON.stringify(d.project));
-        await sSet(ACTIVE_KEY, id);
-        if (d.thumbs) {
-          setThumbs((t) => ({ ...t, ...d.thumbs }));
-          if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v);
-        }
-        setActiveId(id);
-        setProject(d.project);
-        setSelShot(null);
-        readProjList();
-      } catch {
-        window.alert("That file didn't parse as a storyboard backup.");
-      }
-    };
-    if (!project) return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement("div", { className: "sb-empty" }, "Loading the bay\u2026"));
-    const entries = flat(project);
-    const playSequence = () => {
-      const clips = entries.filter((e) => e.c.resultMid).map((e) => ({
-        mid: e.c.resultMid,
-        in: e.c.trimIn || 0,
-        out: e.c.trimOut,
-        title: e.c.title,
-        code: e.code
-      }));
-      if (clips.length) setSeq(clips);
-      else alert("No finished shots yet \u2014 generate one first.");
-    };
-    const anyDone = entries.some((e) => e.c.resultMid);
-    const exportCut = () => {
-      const clips = entries.filter((e) => e.c.resultMid).map((e) => {
-        const dur = e.c.actualDur || e.c.duration || 8, cin = e.c.trimIn || 0;
-        const cout = e.c.trimOut != null ? e.c.trimOut : dur;
-        return { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
-      });
-      if (!clips.length) {
-        alert("No finished shots to export yet \u2014 generate one first.");
-        return;
-      }
-      const total2 = clips.reduce((s, c) => s + c.span, 0);
-      setExp({ status: "running", progress: 0, elapsed: 0 });
-      fetch("/api/loom/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out })), total_seconds: total2 })
-      }).then((r) => r.json()).then((d) => {
-        if (d.error) {
-          setExp({ status: "failed", error: d.error });
-          return;
-        }
-        const tick = () => fetch("/api/loom/export-status").then((r) => r.json()).then((s) => {
-          setExp(s);
-          if (s.status === "running") exportPoll.current = setTimeout(tick, 1e3);
-        }).catch(() => {
-          exportPoll.current = setTimeout(tick, 2e3);
-        });
-        tick();
-      }).catch(() => setExp({ status: "failed", error: "network error" }));
-    };
-    const cancelExport = () => {
-      fetch("/api/loom/export-cancel", { method: "POST" }).catch(() => {
-      });
-    };
-    const closeExport = () => {
-      if (exportPoll.current) clearTimeout(exportPoll.current);
-      setExp(null);
-    };
-    const { total, scale, over } = reelStats(entries, project.target);
-    const done = entries.filter((x) => x.c.status === "done").length;
-    const batchGenerate = async () => {
+    const batchGenerate = async (entries) => {
       const todo = entries.filter((e) => e.c.status !== "done");
       if (!todo.length) return;
       setBatching(true);
@@ -1803,6 +1798,193 @@ Your currently-open board is left untouched.`)) return;
       }
       setBatching(false);
     };
+    return {
+      genState,
+      genImgState,
+      imgModel,
+      setImgModel,
+      genEditState,
+      setGenEditState,
+      genRefState,
+      setGenRefState,
+      batching,
+      generateShot,
+      useExistingVideo,
+      genImage,
+      routeImg,
+      genEdit,
+      genRef,
+      routeGen,
+      batchGenerate
+    };
+  }
+  function useExportPipeline(project, thumbs) {
+    const [seq, setSeq2] = useState(null);
+    const [exp, setExp] = useState(null);
+    const exportPoll = useRef(null);
+    const download = (text, name, type) => {
+      const url = URL.createObjectURL(new Blob([text], { type }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1e3);
+    };
+    const exportAll = () => download(
+      buildShotListText(project, fmt, actLetter, shotText),
+      `${project.name.replace(/\s+/g, "_")}_shotlist.txt`,
+      "text/plain"
+    );
+    const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
+    const playSequence = (entries) => {
+      const clips = buildPlaySequence(entries);
+      if (clips.length) setSeq2(clips);
+      else alert("No finished shots yet \u2014 generate one first.");
+    };
+    const exportCut = (entries) => {
+      const { clips, total } = buildExportClips(entries);
+      if (!clips.length) {
+        alert("No finished shots to export yet \u2014 generate one first.");
+        return;
+      }
+      setExp({ status: "running", progress: 0, elapsed: 0 });
+      fetch("/api/loom/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out })), total_seconds: total })
+      }).then((r) => r.json()).then((d) => {
+        if (d.error) {
+          setExp({ status: "failed", error: d.error });
+          return;
+        }
+        const tick = () => fetch("/api/loom/export-status").then((r) => r.json()).then((s) => {
+          setExp(s);
+          if (s.status === "running") exportPoll.current = setTimeout(tick, 1e3);
+        }).catch(() => {
+          exportPoll.current = setTimeout(tick, 2e3);
+        });
+        tick();
+      }).catch(() => setExp({ status: "failed", error: "network error" }));
+    };
+    const cancelExport = () => {
+      fetch("/api/loom/export-cancel", { method: "POST" }).catch(() => {
+      });
+    };
+    const closeExport = () => {
+      if (exportPoll.current) clearTimeout(exportPoll.current);
+      setExp(null);
+    };
+    return { seq, exp, playSequence, exportCut, cancelExport, closeExport, exportAll, exportJSON };
+  }
+  function App() {
+    const [selShot, setSelShot] = useState(null);
+    const {
+      project,
+      setProject,
+      thumbs,
+      storeThumb,
+      busy,
+      projList,
+      projMenu,
+      setProjMenu,
+      panelLayout,
+      setPanelLayout,
+      projectApi,
+      importJSON
+    } = useProjectStore(setSelShot);
+    const {
+      open,
+      setOpen,
+      setCard,
+      setAct,
+      setAssets,
+      setCardStatus,
+      addCard,
+      dupCard,
+      delCard,
+      moveCard,
+      moveCardToAct: moveCardToAct2,
+      addAct,
+      delAct,
+      moveAct,
+      addRef,
+      setRef,
+      delRef
+    } = useShotMutations(project, setProject);
+    const [pickCb, setPickCb] = useState(null);
+    const [pickKind, setPickKind] = useState("image");
+    const [pickAllowType, setPickAllowType] = useState(false);
+    const [importOpen, setImportOpen] = useState(false);
+    const [v2, setV2] = useState(false);
+    const [showHelp, setShowHelp] = useState(false);
+    const [showGuide, setShowGuide] = useState(() => {
+      try {
+        return !localStorage.getItem("loom_guide_seen");
+      } catch (e) {
+        return true;
+      }
+    });
+    const [showCast, setShowCast] = useState(true);
+    const openPick = useCallback((cb, kind, allowType) => {
+      setPickKind(kind || "image");
+      setPickAllowType(!!allowType);
+      setPickCb(() => cb);
+    }, []);
+    const bindGalleryPicker = useCallback((el) => {
+      if (el && !el._mgBound) {
+        el._mgBound = true;
+        el.addEventListener("mg-pick", (e) => {
+          const cb = pickCb;
+          setPickCb(null);
+          if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration);
+        });
+        el.addEventListener("mg-close", () => setPickCb(null));
+      }
+    }, [pickCb]);
+    const {
+      genState,
+      genImgState,
+      imgModel,
+      setImgModel,
+      genEditState,
+      setGenEditState,
+      genRefState,
+      setGenRefState,
+      batching,
+      generateShot,
+      useExistingVideo,
+      genImage,
+      routeImg,
+      genEdit,
+      genRef,
+      routeGen,
+      batchGenerate
+    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick });
+    const { seq, exp, playSequence, exportCut, cancelExport, closeExport, exportAll, exportJSON } = useExportPipeline(project, thumbs);
+    const importCollection = (items, cname) => {
+      setImportOpen(false);
+      if (!items || !items.length) return;
+      setAssets((a) => {
+        let n = maxTagNum(a, "@image");
+        const added = items.map((it, i) => ({
+          id: uid(),
+          name: it.name || `${cname} ${i + 1}`,
+          kind: "image",
+          tag: "@image" + ++n,
+          thumbId: "",
+          source: "",
+          mediaId: it.mediaId,
+          lock: false
+        }));
+        return [...a, ...added];
+      });
+    };
+    const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
+    if (!project) return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement("div", { className: "sb-empty" }, "Loading the bay\u2026"));
+    const entries = flat(project);
+    const anyDone = entries.some((e) => e.c.resultMid);
+    const { total, scale, over } = reelStats(entries, project.target);
+    const done = entries.filter((x) => x.c.status === "done").length;
     return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), v2 && /* @__PURE__ */ React.createElement(V2Boundary, { onClose: () => setV2(false) }, /* @__PURE__ */ React.createElement(
       LoomV2,
       {
@@ -1828,7 +2010,7 @@ Your currently-open board is left untouched.`)) return;
         dupCard,
         delCard,
         moveCard,
-        moveCardToAct,
+        moveCardToAct: moveCardToAct2,
         addAct,
         delAct,
         moveAct,
@@ -1861,7 +2043,7 @@ Your currently-open board is left untouched.`)) return;
       "button",
       {
         className: "sb-btn",
-        onClick: batchGenerate,
+        onClick: () => batchGenerate(entries),
         disabled: batching || !entries.length,
         title: "Generate every shot that isn't done yet, one after another"
       },
@@ -1870,7 +2052,7 @@ Your currently-open board is left untouched.`)) return;
       "button",
       {
         className: "sb-btn amber",
-        onClick: playSequence,
+        onClick: () => playSequence(entries),
         disabled: !anyDone,
         title: "Play every finished shot back-to-back, honoring trims \u2014 a rough cut, no rendering"
       },
@@ -1879,7 +2061,7 @@ Your currently-open board is left untouched.`)) return;
       "button",
       {
         className: "sb-btn",
-        onClick: exportCut,
+        onClick: () => exportCut(entries),
         disabled: !anyDone,
         title: "Trim + stitch every finished shot into one mp4 (ffmpeg)"
       },
@@ -1987,7 +2169,7 @@ Your currently-open board is left untouched.`)) return;
           dupCard,
           delCard,
           moveCard,
-          moveCardToAct,
+          moveCardToAct: moveCardToAct2,
           copyShot,
           generateShot,
           genState,
@@ -2142,7 +2324,7 @@ Your currently-open board is left untouched.`)) return;
       else onClose();
     } }, "next \u25B6"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: onClose }, "\u2715 close"))));
   }
-  function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpen, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries, openPick }) {
+  function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpen, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, copyShot, generateShot, genState, entries, openPick }) {
     const isOpen = open[card.id];
     const framePrev = (f) => f.thumbId ? thumbs[f.thumbId] : f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : f.source && f.source.startsWith("http") ? f.source : null;
     const openImg = framePrev(card.openFrame), closeImg = framePrev(card.closeFrame);
@@ -2158,7 +2340,7 @@ Your currently-open board is left untouched.`)) return;
         onClick: () => setCard(act.id, card.id, (c) => ({ ...c, status: c.status === "todo" ? "wip" : c.status === "wip" ? "done" : "todo" }))
       },
       "\u2713"
-    ), /* @__PURE__ */ React.createElement("span", { className: "sb-code" }, code), /* @__PURE__ */ React.createElement("input", { className: "sb-ctitle", placeholder: "shot title\u2026", value: card.title, onChange: (e) => setCard(act.id, card.id, (c) => ({ ...c, title: e.target.value })) }), /* @__PURE__ */ React.createElement("span", { className: "sb-mode" }, card.mode), /* @__PURE__ */ React.createElement("span", { className: "sb-tc" }, card.duration, "s"), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", onClick: () => setOpen((o) => ({ ...o, [card.id]: !isOpen })), title: isOpen ? "Collapse" : "Edit" }, isOpen ? "\u25BE" : "\u270E")), !isOpen ? /* @__PURE__ */ React.createElement("div", { className: "sb-body" }, /* @__PURE__ */ React.createElement("div", { className: "sb-frames-mini" }, /* @__PURE__ */ React.createElement("div", { className: "sb-fm" }, /* @__PURE__ */ React.createElement("div", { className: "sb-fmlab" }, /* @__PURE__ */ React.createElement("span", null, "open")), /* @__PURE__ */ React.createElement("div", { className: "sb-fmbox" + (card.discreet ? " discreet" : "") }, openImg ? /* @__PURE__ */ React.createElement("img", { src: openImg, alt: "open" }) : card.openFrame.desc || "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "sb-arrowmid" }, "\u2192"), /* @__PURE__ */ React.createElement("div", { className: "sb-fm" }, /* @__PURE__ */ React.createElement("div", { className: "sb-fmlab" }, /* @__PURE__ */ React.createElement("span", null, "close")), /* @__PURE__ */ React.createElement("div", { className: "sb-fmbox" + (card.discreet ? " discreet" : "") }, closeImg ? /* @__PURE__ */ React.createElement("img", { src: closeImg, alt: "close" }) : card.closeFrame.desc || "\u2014"))), /* @__PURE__ */ React.createElement("div", { className: "sb-prompt-mini" + (card.prompt ? "" : " empty"), onClick: () => setOpen((o) => ({ ...o, [card.id]: true })) }, card.prompt || "no prompt yet \u2014 tap to write"), /* @__PURE__ */ React.createElement("div", { className: "sb-minimeta" }, card.camera && /* @__PURE__ */ React.createElement("span", { className: "sb-chip" }, /* @__PURE__ */ React.createElement("b", null, "cam"), " ", card.camera), card.cast.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "sb-chip" }, /* @__PURE__ */ React.createElement("b", null, "cast"), " ", card.cast.length))) : /* @__PURE__ */ React.createElement(CardEditor, { ...{ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev, openPick } }));
+    ), /* @__PURE__ */ React.createElement("span", { className: "sb-code" }, code), /* @__PURE__ */ React.createElement("input", { className: "sb-ctitle", placeholder: "shot title\u2026", value: card.title, onChange: (e) => setCard(act.id, card.id, (c) => ({ ...c, title: e.target.value })) }), /* @__PURE__ */ React.createElement("span", { className: "sb-mode" }, card.mode), /* @__PURE__ */ React.createElement("span", { className: "sb-tc" }, card.duration, "s"), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", onClick: () => setOpen((o) => ({ ...o, [card.id]: !isOpen })), title: isOpen ? "Collapse" : "Edit" }, isOpen ? "\u25BE" : "\u270E")), !isOpen ? /* @__PURE__ */ React.createElement("div", { className: "sb-body" }, /* @__PURE__ */ React.createElement("div", { className: "sb-frames-mini" }, /* @__PURE__ */ React.createElement("div", { className: "sb-fm" }, /* @__PURE__ */ React.createElement("div", { className: "sb-fmlab" }, /* @__PURE__ */ React.createElement("span", null, "open")), /* @__PURE__ */ React.createElement("div", { className: "sb-fmbox" + (card.discreet ? " discreet" : "") }, openImg ? /* @__PURE__ */ React.createElement("img", { src: openImg, alt: "open" }) : card.openFrame.desc || "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "sb-arrowmid" }, "\u2192"), /* @__PURE__ */ React.createElement("div", { className: "sb-fm" }, /* @__PURE__ */ React.createElement("div", { className: "sb-fmlab" }, /* @__PURE__ */ React.createElement("span", null, "close")), /* @__PURE__ */ React.createElement("div", { className: "sb-fmbox" + (card.discreet ? " discreet" : "") }, closeImg ? /* @__PURE__ */ React.createElement("img", { src: closeImg, alt: "close" }) : card.closeFrame.desc || "\u2014"))), /* @__PURE__ */ React.createElement("div", { className: "sb-prompt-mini" + (card.prompt ? "" : " empty"), onClick: () => setOpen((o) => ({ ...o, [card.id]: true })) }, card.prompt || "no prompt yet \u2014 tap to write"), /* @__PURE__ */ React.createElement("div", { className: "sb-minimeta" }, card.camera && /* @__PURE__ */ React.createElement("span", { className: "sb-chip" }, /* @__PURE__ */ React.createElement("b", null, "cam"), " ", card.camera), card.cast.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "sb-chip" }, /* @__PURE__ */ React.createElement("b", null, "cast"), " ", card.cast.length))) : /* @__PURE__ */ React.createElement(CardEditor, { ...{ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, copyShot, generateShot, genState, entry, framePrev, openPick } }));
   }
   function ImportCollection({ onImport, onClose }) {
     const [colls, setColls] = useState([]);
@@ -2211,7 +2393,7 @@ Your currently-open board is left untouched.`)) return;
       }
     )), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "describe this frame (composition, subject position, light)", value: frame.desc, onChange: (e) => onPatch({ desc: e.target.value }) }), extraBtn);
   }
-  function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev, openPick }) {
+  function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, copyShot, generateShot, genState, entry, framePrev, openPick }) {
     const [palFor, setPalFor] = useState(null);
     const setF = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: val }));
     const append = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: c[field] ? `${c[field]}, ${val}` : val }));
@@ -2313,7 +2495,7 @@ Your currently-open board is left untouched.`)) return;
         },
         busy ? "Generating\u2026" : "\u25B6 Generate shot"
       );
-    })(), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => moveCard(act.id, ci, -1) }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => moveCard(act.id, ci, 1) }, "\u2193"), /* @__PURE__ */ React.createElement("select", { className: "sb-sel sm", style: { width: "auto", fontSize: 12, padding: "6px 8px" }, value: "", onChange: (e) => e.target.value && moveCardToAct(act.id, card, e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "move to act\u2026"), project.acts.filter((a) => a.id !== act.id).map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name))), /* @__PURE__ */ React.createElement("div", { className: "sb-divider" }), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => dupCard(act.id, card) }, "Duplicate"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm danger", onClick: () => delCard(act.id, card) }, "Delete")), (() => {
+    })(), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => moveCard(act.id, ci, -1) }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => moveCard(act.id, ci, 1) }, "\u2193"), /* @__PURE__ */ React.createElement("select", { className: "sb-sel sm", style: { width: "auto", fontSize: 12, padding: "6px 8px" }, value: "", onChange: (e) => e.target.value && moveCardToAct2(act.id, card, e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "move to act\u2026"), project.acts.filter((a) => a.id !== act.id).map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name))), /* @__PURE__ */ React.createElement("div", { className: "sb-divider" }), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => dupCard(act.id, card) }, "Duplicate"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm danger", onClick: () => delCard(act.id, card) }, "Delete")), (() => {
       const g = genState[card.id];
       if (!g) return null;
       const col = g.phase === "done" ? "var(--green)" : g.phase === "error" ? "var(--coral)" : "var(--amber)";

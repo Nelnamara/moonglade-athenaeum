@@ -9315,10 +9315,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return LOOM_PAGE_BUNDLE
 
         # ---- Babel-standalone path (default + bundle-requested-but-not-built) ----
-        # loom/src/loom-core.js is a real ES module master-storyboard.jsx imports
-        # from; this <script type="text/babel"> block isn't a real module system,
-        # so inline the core module's source ahead of the JSX and strip `export`
-        # the same way "export default function App()" is already stripped below.
+        # loom/src/loom-core.js AND loom/src/loom-mutations.js (Phase 2, the
+        # composed-hooks extraction, 2026-07-16) are real ES modules
+        # master-storyboard.jsx imports from; this <script type="text/babel">
+        # block isn't a real module system, so inline both modules' source
+        # ahead of the JSX and strip `export` the same way "export default
+        # function App()" is already stripped below.
         core_src = ""
         try:
             core_src = (loom_dir / "src" / "loom-core.js").read_text(encoding="utf-8")
@@ -9331,11 +9333,27 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if core_inline:
             core_inline += "\nconst buildShotPayload = shotPayload;\n"
 
+        mut_src = ""
+        try:
+            mut_src = (loom_dir / "src" / "loom-mutations.js").read_text(encoding="utf-8")
+        except OSError:
+            pass
+        mut_inline = _re.sub(r"(?m)^export const ", "const ", mut_src)
+        mut_inline = _re.sub(r"(?m)^export function ", "function ", mut_inline)
+
         jsx = _re.sub(r"(?m)^\s*import\s+React.*$", "", jsx)          # React is a CDN global
         jsx = _re.sub(r"import\s*\{.*?\}\s*from\s*[\"']\./src/loom-core\.js[\"'];?",
                        "", jsx, count=1, flags=_re.S)                  # loom-core is inlined instead
+        jsx = _re.sub(r"import\s*\{.*?\}\s*from\s*[\"']\./src/loom-mutations\.js[\"'];?",
+                       "", jsx, count=1, flags=_re.S)                  # loom-mutations is inlined instead
+        # master-storyboard.jsx imports moveCardToAct aliased (`as mvCardToAct`)
+        # so the useShotMutations hook's own returned `moveCardToAct` doesn't
+        # collide with the pure reducer of the same name; provide that alias
+        # once the real `import {...}` statement above is stripped out.
+        if mut_inline:
+            mut_inline += "\nconst mvCardToAct = moveCardToAct;\n"
         jsx = jsx.replace("export default function App()", "function App()")
-        return LOOM_PAGE.replace("__JSX__", core_inline + "\n" + jsx)
+        return LOOM_PAGE.replace("__JSX__", core_inline + "\n" + mut_inline + "\n" + jsx)
 
     @app.route("/api/loom/get")
     def loom_get():

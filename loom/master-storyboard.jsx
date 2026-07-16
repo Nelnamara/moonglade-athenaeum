@@ -10,6 +10,19 @@ import {
   flat, shotText, durOf, reelStats,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
+// Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
+// hooks extraction pass, 2026-07-16) -- same discipline as loom-core.js
+// (no React, no DOM, no fetch), consumed by the useProjectStore /
+// useShotMutations / useGenerationPipeline / useExportPipeline hooks below.
+import {
+  patchCard, patchCardById, patchAct, patchAssets,
+  appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard,
+  moveCardInAct, moveCardToAct as mvCardToAct, nextActName, appendAct, removeAct, moveActInProject,
+  buildNewRef, patchRef, removeRef, countShots,
+  parseCastIdsFromSearch,
+  friendlyGenErr, classifyTaskStatus,
+  buildShotListText, buildPlaySequence, buildExportClips,
+} from "./src/loom-mutations.js";
 
 /* =========================================================================
    THE EDIT BAY v2 — reusable Seedance 2.0 storyboard with continuity chaining
@@ -606,15 +619,7 @@ function DockablePanel({ p, scale, onChange, onCollapse, children, collapsedView
     </div>
   );
 }
-// Turn a raw gen error (esp. PixAI's GraphQL "insufficient balance") into a human message.
-function friendlyGenErr(raw) {
-  const s = String(raw || "");
-  if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
-    return "Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
-  if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
-    return "PixAI's content filter blocked this generation — that's decided on PixAI's side, not in the Loom.";
-  return s || "generation failed";
-}
+// friendlyGenErr now imported from ./src/loom-mutations.js (Phase 2).
 
 // Shared storyboard switcher — used in BOTH the classic header and the V2 header.
 // All project state/actions arrive bundled as `api` (built once in App).
@@ -1025,51 +1030,37 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
   );
 }
 
-export default function App() {
+/* =========================================================================
+   COMPOSED HOOKS (Phase 2, 2026-07-16) -- App()'s former ~450-line body,
+   decomposed by RESPONSIBILITY into four focused hooks instead of one
+   monolithic one, each thin-wrapping the pure reducers/classifiers imported
+   from ./src/loom-mutations.js above. App() composes them back together;
+   every prop name a child component (CardView, CardEditor, LoomV2, ...)
+   already expects is preserved unchanged below.
+
+     useProjectStore        -- multi-project CRUD + window.storage persistence
+     useShotMutations        -- act/card/ref CRUD on the open project
+     useGenerationPipeline    -- generate/poll/route across image/edit/reference/video
+     useExportPipeline        -- shot-list/backup export, play-sequence, ffmpeg cut
+
+   See the worktree report for exactly where this did and didn't separate
+   cleanly (setCardStatus straddling shot-mutations/generation; the
+   recursive-setTimeout poll loops not being meaningfully "pure").
+   ========================================================================= */
+
+// ---- 1. useProjectStore: multi-project CRUD + persistence ----
+function useProjectStore(setSelShot) {
   const [project, setProject] = useState(null);
   const [thumbs, setThumbs] = useState({});
-  const [open, setOpen] = useState({});
   const [busy, setBusy] = useState(false);
-  const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
-  const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
-  const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
-  const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
-  const [showHelp, setShowHelp] = useState(false);
-  const [showGuide, setShowGuide] = useState(() => {
-    try { return !localStorage.getItem("loom_guide_seen"); } catch (e) { return true; } });
-  const [showCast, setShowCast] = useState(true);
-  const [genState, setGenState] = useState({});   // cardId -> {phase, msg, mid}
-  const [seq, setSeq] = useState(null);           // Play-sequence: [clip,...] or null
-  const [exp, setExp] = useState(null);           // export overlay: {status,progress,...} or null
-  const exportPoll = useRef(null);
-  const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
-  const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
-  const [pickAllowType, setPickAllowType] = useState(false);  // show the Image/Video/All filter?
-  const [importOpen, setImportOpen] = useState(false);  // import-collection dialog
-  const [batching, setBatching] = useState(false);
-  const openPick = useCallback((cb, kind, allowType) => { setPickKind(kind || "image"); setPickAllowType(!!allowType); setPickCb(() => cb); }, []);
-  // Bridge the shared <mg-gallery-picker> web component to React (mirrors bindPicker):
-  // pickCb doesn't change while the picker is mounted (only open->close via setPickCb),
-  // so the closure captured on mount stays correct for the whole picking session.
-  const bindGalleryPicker = useCallback((el) => {
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => {
-        const cb = pickCb; setPickCb(null);
-        if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration);
-      });
-      el.addEventListener("mg-close", () => setPickCb(null));
-    }
-  }, [pickCb]);
-  const saveTimer = useRef(null);
-  const castImported = useRef(false);
-  const [v2, setV2] = useState(false);
-  const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
   const [activeId, setActiveId] = useState(null);   // id of the open storyboard (multi-project store)
   const [projList, setProjList] = useState([]);     // [{id,name,shots}] for the switcher
   const [projMenu, setProjMenu] = useState(false);  // switcher dropdown open?
   const [panelLayout, setPanelLayout] = useState(() => V2_DEFAULT.map((d) => ({ ...d })));
+  const saveTimer = useRef(null);
+  const castImported = useRef(false);
   const layoutTimer = useRef(null);
+
   useEffect(() => { (async () => {
     if (hasStore) { const raw = await sGet(V2_KEY); if (raw) { try { const L = JSON.parse(raw); if (Array.isArray(L) && L.length) setPanelLayout(L); } catch {} } }
   })(); }, []);
@@ -1087,8 +1078,7 @@ export default function App() {
     const keys = await sList(PPRE); const out = [];
     for (const k of keys) {
       try { const raw = await sGet(k); if (!raw) continue; const pr = JSON.parse(raw);
-        const shots = (pr.acts || []).reduce((n, a) => n + ((a.cards || []).length), 0);
-        out.push({ id: k.slice(PPRE.length), name: pr.name || "Untitled", shots });
+        out.push({ id: k.slice(PPRE.length), name: pr.name || "Untitled", shots: countShots(pr) });
       } catch {}
     }
     out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -1126,13 +1116,13 @@ export default function App() {
     if (!p) return;
     await sSet(ACTIVE_KEY, id);
     setActiveId(id); setProject(p); setSelShot(null); setProjMenu(false);
-  }, [activeId, project, flushSave]);
+  }, [activeId, project, flushSave, setSelShot]);
   const newProject = useCallback(async () => {
     await flushSave(activeId, project);
     const id = uid(); const p = seedProject(); p.name = "New storyboard";
     await sSet(PPRE + id, JSON.stringify(p)); await sSet(ACTIVE_KEY, id);
     setActiveId(id); setProject(p); setSelShot(null); setProjMenu(false); readProjList();
-  }, [activeId, project, flushSave, readProjList]);
+  }, [activeId, project, flushSave, readProjList, setSelShot]);
   const duplicateProject = useCallback(async () => {
     await flushSave(activeId, project);
     const id = uid(); const p = { ...project, name: (project.name || "Untitled") + " copy" };
@@ -1157,7 +1147,7 @@ export default function App() {
     }
     await readProjList();
     setProjMenu(false);
-  }, [activeId, readProjList]);
+  }, [activeId, readProjList, setSelShot]);
   const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
 
   // Gallery -> cast: /loom?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
@@ -1165,8 +1155,7 @@ export default function App() {
   useEffect(() => {
     if (!project || castImported.current) return;
     castImported.current = true;
-    const ids = (new URLSearchParams(location.search).get("cast") || "")
-      .split(",").map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
+    const ids = parseCastIdsFromSearch(location.search);
     if (!ids.length) return;
     setProject((p) => {
       const existing = p.assets || [];
@@ -1190,67 +1179,80 @@ export default function App() {
     setThumbs((t) => ({ ...t, [id]: data })); if (hasStore) await sSet(TPRE + id, data); return id;
   }, []);
 
-  /* mutators */
-  const setCard = useCallback((aId, cId, fn) => setProject((p) => ({ ...p, acts: p.acts.map((a) =>
-    a.id !== aId ? a : { ...a, cards: a.cards.map((c) => c.id !== cId ? c : fn(c)) }) })), []);
-  const setAct = useCallback((aId, patch) => setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, ...patch }) })), []);
-  const setAssets = useCallback((fn) => setProject((p) => ({ ...p, assets: fn(p.assets || []) })), []);
-  // Import a whole gallery collection as reusable @image references (media_id kept
-  // -> free reference at generate time). Tags continue from the current max @imageN.
-  const importCollection = (items, cname) => {
-    setImportOpen(false);
-    if (!items || !items.length) return;
-    setAssets((a) => {
-      let n = maxTagNum(a, "@image");
-      const added = items.map((it, i) => ({ id: uid(), name: it.name || `${cname} ${i + 1}`, kind: "image",
-        tag: "@image" + (++n), thumbId: "", source: "", mediaId: it.mediaId, lock: false }));
-      return [...a, ...added];
-    });
-  };
+  // A restored backup is always a NEW storyboard, never an in-place overwrite of
+  // whatever's currently open -- this used to clobber the active project silently
+  // (no new id, no confirm), a real data-loss footgun if you imported a backup
+  // while a different board was open.
+  const importJSON = async (file) => { if (!file) return; try { const d = JSON.parse(await file.text());
+    if (!d.project) { window.alert("That file didn't parse as a storyboard backup."); return; }
+    if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?\n\nYour currently-open board is left untouched.`)) return;
+    await flushSave(activeId, project);
+    const id = uid();
+    await sSet(PPRE + id, JSON.stringify(d.project));
+    await sSet(ACTIVE_KEY, id);
+    if (d.thumbs) { setThumbs((t) => ({ ...t, ...d.thumbs })); if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v); }
+    setActiveId(id); setProject(d.project); setSelShot(null); readProjList();
+  } catch { window.alert("That file didn't parse as a storyboard backup."); } };
+
+  return { project, setProject, thumbs, storeThumb, busy,
+    projList, projMenu, setProjMenu, panelLayout, setPanelLayout, projectApi, importJSON };
+}
+
+// ---- 2. useShotMutations: act/card/ref CRUD on the open project ----
+function useShotMutations(project, setProject) {
+  const [open, setOpen] = useState({});
+
+  const setCard = useCallback((aId, cId, fn) => setProject((p) => patchCard(p, aId, cId, fn)), [setProject]);
+  const setAct = useCallback((aId, patch) => setProject((p) => patchAct(p, aId, patch)), [setProject]);
+  const setAssets = useCallback((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
+  // setCardStatus finds a card by id ALONE (searches every act) -- distinct from setCard,
+  // which needs the act id. generateShot/pollShot/useExistingVideo don't know (or care)
+  // which act a shot lives in, so this stays a sibling of setCard rather than folding in.
+  const setCardStatus = (cardId, patch) => setProject((p) => patchCardById(p, cardId, patch));
 
   const addCard = (aId) => { const c = newCard();
-    setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: [...a.cards, c] }) }));
+    setProject((p) => appendCardToAct(p, aId, c));
     setOpen((o) => ({ ...o, [c.id]: true })); };
-  const dupCard = (aId, card) => { const c = { ...JSON.parse(JSON.stringify(card)), id: uid(), refs: card.refs.map((r) => ({ ...r, id: uid() })),
-    // A duplicate is a fresh, unrendered shot -- it must not inherit the original's
-    // generation result, or it silently shows "done" and Export plays the SAME clip twice.
-    resultMid: "", status: "todo", actualDur: null, trimIn: 0, trimOut: null };
-    setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: a.cards.flatMap((x) => x.id === card.id ? [x, c] : [x]) }) })); };
-  const delCard = (aId, card) => setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id !== aId ? a : { ...a, cards: a.cards.filter((c) => c.id !== card.id) }) }));
-  const moveCard = (aId, idx, dir) => setProject((p) => ({ ...p, acts: p.acts.map((a) => {
-    if (a.id !== aId) return a; const j = idx + dir; if (j < 0 || j >= a.cards.length) return a;
-    const cs = [...a.cards];[cs[idx], cs[j]] = [cs[j], cs[idx]]; return { ...a, cards: cs }; }) }));
-  const moveCardToAct = (fromId, card, toId) => { if (fromId === toId) return;
-    setProject((p) => ({ ...p, acts: p.acts.map((a) => a.id === fromId ? { ...a, cards: a.cards.filter((c) => c.id !== card.id) } : a.id === toId ? { ...a, cards: [...a.cards, card] } : a) })); };
-  const addAct = () => setProject((p) => ({ ...p, acts: [...p.acts, { id: uid(), name: `Act ${p.acts.length + 1}`, collapsed: false, cards: [] }] }));
+  const dupCard = (aId, card) => {
+    const clone = buildDuplicateCard(card, uid(), card.refs.map(() => uid()));
+    setProject((p) => insertCardAfter(p, aId, card.id, clone));
+  };
+  const delCard = (aId, card) => setProject((p) => removeCard(p, aId, card.id));
+  const moveCard = (aId, idx, dir) => setProject((p) => moveCardInAct(p, aId, idx, dir));
+  const moveCardToAct = (fromId, card, toId) => setProject((p) => mvCardToAct(p, fromId, card, toId));
+  const addAct = () => setProject((p) => appendAct(p, { id: uid(), name: nextActName(p), collapsed: false, cards: [] }));
   const delAct = (aId) => { const a = project.acts.find((x) => x.id === aId);
     if (a.cards.length && !window.confirm(`Delete "${a.name}" and its ${a.cards.length} card(s)?`)) return;
-    setProject((p) => ({ ...p, acts: p.acts.filter((x) => x.id !== aId) })); };
-  const moveAct = (idx, dir) => setProject((p) => { const j = idx + dir; if (j < 0 || j >= p.acts.length) return p;
-    const as = [...p.acts];[as[idx], as[j]] = [as[j], as[idx]]; return { ...p, acts: as }; });
+    setProject((p) => removeAct(p, aId)); };
+  const moveAct = (idx, dir) => setProject((p) => moveActInProject(p, idx, dir));
 
-  /* refs */
   const addRef = (aId, card, kind) => {
     const pre = kind === "image" ? "@image" : kind === "video" ? "@video" : "@audio";
     const tag = nextTag(card.refs.filter((r) => r.kind === kind), pre);
-    setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { id: uid(), kind, tag, role: "", source: "", thumbId: "" }] })); };
-  const setRef = (aId, cId, rId, patch) => setCard(aId, cId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== rId ? r : { ...r, ...patch }) }));
-  const delRef = (aId, cId, ref) => setCard(aId, cId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== ref.id) }));
+    setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { ...buildNewRef(kind, uid()), tag }] })); };
+  const setRef = (aId, cId, rId, patch) => setProject((p) => patchRef(p, aId, cId, rId, patch));
+  const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
 
-  /* export -- flat/shotText now imported from ./src/loom-core.js (same names,
-     same call shape: flat(project), shotText(entry, project)), so every
-     call site below is unchanged. */
-  const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
+  return { open, setOpen, setCard, setAct, setAssets, setCardStatus,
+    addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
+    addRef, setRef, delRef };
+}
 
-  /* ---- Generate shot on PixAI (video provider) ---- */
-  const setCardStatus = (cardId, patch) => setProject((p) => ({ ...p, acts: p.acts.map((a) =>
-    ({ ...a, cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch }) })) }));
+// ---- 3. useGenerationPipeline: generate/poll/route across all four modes ----
+function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick }) {
+  const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid} (video)
+  const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
+  const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
+  const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
+  const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
+  const [batching, setBatching] = useState(false);
+
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
     : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
   /* Build the /api/loom/generate + /api/price payload for a shot (single source).
-     Wraps the pure, imported buildShotPayload with this component's own
-     `project` state + `imgSrc` (closes over `thumbs`), preserving the original
-     single-argument call shape used below and in priceShot/generateShot. */
+     Wraps the pure, imported buildShotPayload with this hook's own `project` state
+     + `imgSrc` (closes over `thumbs`), preserving the original single-argument
+     call shape used below and in priceShot/generateShot. */
   const shotPayload = (entry) => buildShotPayload(entry, project, imgSrc);
   /* READ-ONLY cost + free-card check for a shot (reuses the drawer's /api/price; spends nothing). */
   const priceShot = async (entry) => {
@@ -1282,15 +1284,18 @@ export default function App() {
       pollShot(c.id, d.task_id);
     } catch { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
   };
+  // classifyTaskStatus (loom-mutations.js) is the shared, tested response classifier;
+  // the recursive setTimeout tick loop around it stays here since the polling/timing
+  // itself is an inherently side-effectful concern, not a pure reducer.
   const pollShot = (cardId, tid) => {
     setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(tid).slice(-6) + ")" } }));
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-      if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
-        setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } }));
+      const cls = classifyTaskStatus(d);
+      if (cls.phase === "done") {
+        setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
         // capture the clip's REAL length so the reel reflects what was rendered, not planned
-        setCardStatus(cardId, { status: "done", resultMid: mid,
-          ...(d.duration ? { actualDur: d.duration } : {}) }); }
-      else if (d.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: friendlyGenErr(d.error || d.status || "failed") } }));
+        setCardStatus(cardId, { status: "done", resultMid: cls.mid, ...(cls.duration ? { actualDur: cls.duration } : {}) });
+      } else if (cls.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
       else setTimeout(tick, 4000);
     }).catch(() => setTimeout(tick, 5000));
     setTimeout(tick, 2500);
@@ -1309,9 +1314,9 @@ export default function App() {
   // ---- In-Loom reference-image gen: reuse /api/generate (image), poll, then route the result into the shot ----
   const pollImg = (cardId, tid) => {
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-      if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
-        setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } })); }
-      else if (d.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: friendlyGenErr(d.error || d.status || "failed") } }));
+      const cls = classifyTaskStatus(d);
+      if (cls.phase === "done") setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+      else if (cls.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
       else setTimeout(tick, 4000);
     }).catch(() => setTimeout(tick, 5000));
     setTimeout(tick, 2500);
@@ -1347,9 +1352,9 @@ export default function App() {
     setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
     const poll = (tid) => {
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-        if (d.phase === "done") { const mid = (d.media_ids || [])[0] || "";
-          setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid } })); }
-        else if (d.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: friendlyGenErr(d.error || d.status || "failed") } }));
+        const cls = classifyTaskStatus(d);
+        if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+        else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
         else setTimeout(tick, 4000);
       }).catch(() => setTimeout(tick, 5000));
       setTimeout(tick, 2500);
@@ -1388,71 +1393,11 @@ export default function App() {
     runGen(setGenRefState, c.id, "/api/edit", { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" },
       `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?\n\nA Reference-Pro card auto-applies; otherwise it spends credits.`);
   };
-  const download = (text, name, type) => { const url = URL.createObjectURL(new Blob([text], { type }));
-    const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
-  const exportAll = () => { let out = `${project.name}\nRuntime target ${fmt(project.target)}\n`;
-    if ((project.assets || []).length) { out += `\nCast & assets:\n`; project.assets.forEach((as) => out += `  ${as.tag}  ${as.name} (${as.kind})${as.lock ? " · lock appearance" : ""}\n`); }
-    project.acts.forEach((a, ai) => { out += `\n${"=".repeat(48)}\n${a.name}\n${"=".repeat(48)}\n\n`;
-      a.cards.forEach((c, ci) => { out += shotText({ c, code: `${actLetter(ai)}·${String(ci + 1).padStart(2, "0")}`, ai, ci }, project) + "\n\n"; }); });
-    download(out, `${project.name.replace(/\s+/g, "_")}_shotlist.txt`, "text/plain"); };
-  const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
-  // A restored backup is always a NEW storyboard, never an in-place overwrite of
-  // whatever's currently open -- this used to clobber the active project silently
-  // (no new id, no confirm), a real data-loss footgun if you imported a backup
-  // while a different board was open.
-  const importJSON = async (file) => { if (!file) return; try { const d = JSON.parse(await file.text());
-    if (!d.project) { window.alert("That file didn't parse as a storyboard backup."); return; }
-    if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?\n\nYour currently-open board is left untouched.`)) return;
-    await flushSave(activeId, project);
-    const id = uid();
-    await sSet(PPRE + id, JSON.stringify(d.project));
-    await sSet(ACTIVE_KEY, id);
-    if (d.thumbs) { setThumbs((t) => ({ ...t, ...d.thumbs })); if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v); }
-    setActiveId(id); setProject(d.project); setSelShot(null); readProjList();
-  } catch { window.alert("That file didn't parse as a storyboard backup."); } };
-
-  if (!project) return <div className="sb-root"><style>{STYLES}</style><div className="sb-empty">Loading the bay…</div></div>;
-
-  const entries = flat(project);
-  // Play-sequence: every finished shot (persisted resultMid), in order, with its
-  // in/out trim -- a rough cut played back-to-back, nothing rendered.
-  const playSequence = () => {
-    const clips = entries.filter((e) => e.c.resultMid).map((e) => ({
-      mid: e.c.resultMid, in: e.c.trimIn || 0, out: e.c.trimOut, title: e.c.title, code: e.code }));
-    if (clips.length) setSeq(clips); else alert("No finished shots yet — generate one first.");
-  };
-  const anyDone = entries.some((e) => e.c.resultMid);
-  // Export: trim each finished shot + concat into one mp4 (ffmpeg, server-side).
-  const exportCut = () => {
-    const clips = entries.filter((e) => e.c.resultMid).map((e) => {
-      const dur = e.c.actualDur || e.c.duration || 8, cin = e.c.trimIn || 0;
-      const cout = (e.c.trimOut != null ? e.c.trimOut : dur);
-      return { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
-    });
-    if (!clips.length) { alert("No finished shots to export yet — generate one first."); return; }
-    const total = clips.reduce((s, c) => s + c.span, 0);
-    setExp({ status: "running", progress: 0, elapsed: 0 });
-    fetch("/api/loom/export", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out })), total_seconds: total }) })
-      .then((r) => r.json()).then((d) => {
-        if (d.error) { setExp({ status: "failed", error: d.error }); return; }
-        const tick = () => fetch("/api/loom/export-status").then((r) => r.json()).then((s) => {
-          setExp(s);
-          if (s.status === "running") exportPoll.current = setTimeout(tick, 1000);
-        }).catch(() => { exportPoll.current = setTimeout(tick, 2000); });
-        tick();
-      }).catch(() => setExp({ status: "failed", error: "network error" }));
-  };
-  const cancelExport = () => { fetch("/api/loom/export-cancel", { method: "POST" }).catch(() => {}); };
-  const closeExport = () => { if (exportPoll.current) clearTimeout(exportPoll.current); setExp(null); };
-  // durOf/reelStats now imported from ./src/loom-core.js (reel uses the ACTUAL
-  // generated length when a shot has rendered, else the planned duration).
-  const { total, scale, over } = reelStats(entries, project.target);
-  const done = entries.filter((x) => x.c.status === "done").length;
-
   // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
   // the submits don't collide. Each shot manages its own status/poll via generateShot.
-  const batchGenerate = async () => {
+  // Takes `entries` as a call-site argument (computed by App() from the current
+  // project) rather than closing over it, since this hook has no `entries` of its own.
+  const batchGenerate = async (entries) => {
     const todo = entries.filter((e) => e.c.status !== "done");
     if (!todo.length) return;
     // Price every shot FIRST so the confirm shows real cost + card coverage — no silent spend.
@@ -1470,6 +1415,117 @@ export default function App() {
     }
     setBatching(false);
   };
+
+  return {
+    genState, genImgState, imgModel, setImgModel, genEditState, setGenEditState,
+    genRefState, setGenRefState, batching,
+    generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+  };
+}
+
+// ---- 4. useExportPipeline: shot-list/backup export, play-sequence, ffmpeg cut ----
+function useExportPipeline(project, thumbs) {
+  const [seq, setSeq] = useState(null);           // Play-sequence: [clip,...] or null
+  const [exp, setExp] = useState(null);           // export overlay: {status,progress,...} or null
+  const exportPoll = useRef(null);
+
+  const download = (text, name, type) => { const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
+  const exportAll = () => download(buildShotListText(project, fmt, actLetter, shotText),
+    `${project.name.replace(/\s+/g, "_")}_shotlist.txt`, "text/plain");
+  const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
+  // Play-sequence: every finished shot (persisted resultMid), in order, with its
+  // in/out trim -- a rough cut played back-to-back, nothing rendered.
+  const playSequence = (entries) => {
+    const clips = buildPlaySequence(entries);
+    if (clips.length) setSeq(clips); else alert("No finished shots yet — generate one first.");
+  };
+  // Export: trim each finished shot + concat into one mp4 (ffmpeg, server-side).
+  const exportCut = (entries) => {
+    const { clips, total } = buildExportClips(entries);
+    if (!clips.length) { alert("No finished shots to export yet — generate one first."); return; }
+    setExp({ status: "running", progress: 0, elapsed: 0 });
+    fetch("/api/loom/export", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out })), total_seconds: total }) })
+      .then((r) => r.json()).then((d) => {
+        if (d.error) { setExp({ status: "failed", error: d.error }); return; }
+        const tick = () => fetch("/api/loom/export-status").then((r) => r.json()).then((s) => {
+          setExp(s);
+          if (s.status === "running") exportPoll.current = setTimeout(tick, 1000);
+        }).catch(() => { exportPoll.current = setTimeout(tick, 2000); });
+        tick();
+      }).catch(() => setExp({ status: "failed", error: "network error" }));
+  };
+  const cancelExport = () => { fetch("/api/loom/export-cancel", { method: "POST" }).catch(() => {}); };
+  const closeExport = () => { if (exportPoll.current) clearTimeout(exportPoll.current); setExp(null); };
+
+  return { seq, exp, playSequence, exportCut, cancelExport, closeExport, exportAll, exportJSON };
+}
+
+export default function App() {
+  const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
+  const { project, setProject, thumbs, storeThumb, busy,
+    projList, projMenu, setProjMenu, panelLayout, setPanelLayout, projectApi, importJSON } = useProjectStore(setSelShot);
+
+  const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
+    addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
+    addRef, setRef, delRef } = useShotMutations(project, setProject);
+
+  const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
+  const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
+  const [pickAllowType, setPickAllowType] = useState(false);  // show the Image/Video/All filter?
+  const [importOpen, setImportOpen] = useState(false);  // import-collection dialog
+  const [v2, setV2] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [showGuide, setShowGuide] = useState(() => {
+    try { return !localStorage.getItem("loom_guide_seen"); } catch (e) { return true; } });
+  const [showCast, setShowCast] = useState(true);
+  const openPick = useCallback((cb, kind, allowType) => { setPickKind(kind || "image"); setPickAllowType(!!allowType); setPickCb(() => cb); }, []);
+  // Bridge the shared <mg-gallery-picker> web component to React (mirrors bindPicker):
+  // pickCb doesn't change while the picker is mounted (only open->close via setPickCb),
+  // so the closure captured on mount stays correct for the whole picking session.
+  const bindGalleryPicker = useCallback((el) => {
+    if (el && !el._mgBound) {
+      el._mgBound = true;
+      el.addEventListener("mg-pick", (e) => {
+        const cb = pickCb; setPickCb(null);
+        if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration);
+      });
+      el.addEventListener("mg-close", () => setPickCb(null));
+    }
+  }, [pickCb]);
+
+  const { genState, genImgState, imgModel, setImgModel, genEditState, setGenEditState,
+    genRefState, setGenRefState, batching,
+    generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate }
+    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick });
+
+  const { seq, exp, playSequence, exportCut, cancelExport, closeExport, exportAll, exportJSON }
+    = useExportPipeline(project, thumbs);
+
+  // Import a whole gallery collection as reusable @image references (media_id kept
+  // -> free reference at generate time). Tags continue from the current max @imageN.
+  const importCollection = (items, cname) => {
+    setImportOpen(false);
+    if (!items || !items.length) return;
+    setAssets((a) => {
+      let n = maxTagNum(a, "@image");
+      const added = items.map((it, i) => ({ id: uid(), name: it.name || `${cname} ${i + 1}`, kind: "image",
+        tag: "@image" + (++n), thumbId: "", source: "", mediaId: it.mediaId, lock: false }));
+      return [...a, ...added];
+    });
+  };
+
+  const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
+
+  if (!project) return <div className="sb-root"><style>{STYLES}</style><div className="sb-empty">Loading the bay…</div></div>;
+
+  const entries = flat(project);
+  const anyDone = entries.some((e) => e.c.resultMid);
+  // durOf/reelStats now imported from ./src/loom-core.js (reel uses the ACTUAL
+  // generated length when a shot has rendered, else the planned duration).
+  const { total, scale, over } = reelStats(entries, project.target);
+  const done = entries.filter((x) => x.c.status === "done").length;
 
   return (
     <div className="sb-root">
@@ -1519,12 +1575,12 @@ export default function App() {
             <h1 className="sb-disp"><span className="sb-clap">▰</span> The Loom</h1>
             <input className="sb-projname" value={project.name} onChange={(e) => setProject((p) => ({ ...p, name: e.target.value }))} aria-label="Project name" />
             <ProjectSwitcher api={projectApi} />
-            <button className="sb-btn" onClick={batchGenerate} disabled={batching || !entries.length}
+            <button className="sb-btn" onClick={() => batchGenerate(entries)} disabled={batching || !entries.length}
               title="Generate every shot that isn't done yet, one after another">
               {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
-            <button className="sb-btn amber" onClick={playSequence} disabled={!anyDone}
+            <button className="sb-btn amber" onClick={() => playSequence(entries)} disabled={!anyDone}
               title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
-            <button className="sb-btn" onClick={exportCut} disabled={!anyDone}
+            <button className="sb-btn" onClick={() => exportCut(entries)} disabled={!anyDone}
               title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Export</button>
             <button className="sb-btn ghost sm" onClick={() => setV2(true)}
               title="Preview the new dockable V2 layout (non-destructive — your board is untouched)">&#9707; V2 layout</button>
