@@ -377,26 +377,10 @@ function seedProject() {
 }
 
 /* ============================ APP ============================ */
-// ─── Loom V2 (dockable layout) — STAGE 1: a non-breaking shell behind the "V2 layout"
-// toggle. Panels drag/resize/collapse; positions persist to store key V2_KEY. Panel
-// CONTENT is reparented from the classic UI in Stage 2. Layout = owner's canvas export.
-const V2_KEY = "storyboard:v2:layout";
-const V2_DEFAULT = [
-  { id: "timeline", title: "Timeline & preview", x: 0, y: 0, w: 1498, h: 271 },
-  { id: "footage", title: "Asset bin — footage", x: 5, y: 275, w: 286, h: 538 },
-  { id: "cast", title: "Cast & assets", x: 301, y: 276, w: 255, h: 284 },
-  { id: "legend", title: "Legend & notes", x: 301, y: 565, w: 256, h: 244 },
-  { id: "board", title: "Acts & shots", x: 562, y: 278, w: 628, h: 536 },
-  { id: "generate", title: "⚙ Generate — shot", x: 1198, y: 276, w: 294, h: 540 },
-];
-const V2_PH = {
-  timeline: "Timeline + live preview (full width). Collapses to just the scrubber.",
-  footage: "Footage bin — finished shots + quick-trim.",
-  cast: "Cast & assets pool — reusable @image / @video members.",
-  legend: "Legend & notes — status key + open questions (static reference).",
-  board: "Acts & shots — the storyboard. Click a shot to select it.",
-  generate: "Generate (selected shot) — Image · Edit · Reference · Video, plus camera / lighting / status.",
-};
+// ─── Loom V2 — a fixed 4-region shell (left Cast&Assets/Footage, center board, right
+// Generate, top Timeline drawer), replacing the old free-floating dockable-panel system.
+// Locked design source: docs/ROADMAP_LOOM_ACHIEVEMENTS.md §1 + the two owner-approved
+// mockup artifacts (e41a3020 full shell, 84be1748 Timeline-only wireframe).
 const V2_STYLES = `
 .lv-overlay{position:fixed;inset:0;z-index:400;background:var(--base);display:flex;flex-direction:column;}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
@@ -405,35 +389,38 @@ const V2_STYLES = `
 .lv-top button{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top .lv-close{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
-.lv-scaler{flex:1;overflow:auto;}
-.lv-canvaswrap{position:relative;overflow:hidden;flex:none;}
-.lv-canvas{position:relative;width:1498px;height:820px;transform-origin:top left;
- background-image:radial-gradient(circle at 20px 20px,rgba(255,255,255,.03) 1px,transparent 1.4px);background-size:30px 30px;}
-.lv-panel{position:absolute;background:var(--surface0);border:1px solid var(--surface1);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 30px -14px rgba(0,0,0,.6);}
-.lv-bar{display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--surface1);cursor:grab;user-select:none;flex:0 0 auto;}
-.lv-bar:active{cursor:grabbing;}
-.lv-dots{width:12px;height:8px;background:radial-gradient(circle,var(--subtext) 1px,transparent 1.4px) 0 0/4px 4px;opacity:.55;flex:0 0 auto;}
-.lv-title{font:600 12px/1 system-ui,sans-serif;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.lv-col{margin-left:auto;width:22px;height:20px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
+/* Fixed 4-region shell: top Timeline drawer (below), then a row of left card /
+   board column / right drawer -- nothing free-floating, nothing draggable. */
+.lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;}
+.lv-side{flex:none;background:var(--surface0);display:flex;flex-direction:column;min-height:0;
+  transition:width .18s ease;overflow:hidden;}
+.lv-side.left{width:280px;border-right:1px solid var(--surface1);}
+.lv-side.right{width:320px;border-left:1px solid var(--surface1);}
+.lv-side.collapsed{width:52px;}
+.lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
+.lv-sidetabs{flex:1;min-width:0;margin-bottom:0;}
+.lv-col{width:22px;height:20px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
+  border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
 .lv-col:hover{color:var(--accent);}
-.lv-body{flex:1;overflow:auto;min-height:0;}
-.lv-panel.collapsed .lv-body{display:none;}
-.lv-collapsedview{flex:1;overflow:hidden;min-height:0;display:flex;}
-/* Generate collapsed to a right-edge icon rail: the bar goes vertical, title hidden
-   (no room at 52px), the collapse button re-centers as the sole affordance. */
-.lv-panel.collapsed.rail{flex-direction:column;}
-.lv-panel.collapsed.rail .lv-bar{flex-direction:column;padding:6px 2px;gap:4px;cursor:default;}
-.lv-panel.collapsed.rail .lv-dots,.lv-panel.collapsed.rail .lv-title{display:none;}
-.lv-panel.collapsed.rail .lv-col{margin:0;}
-.lv-genrail{display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 0;width:100%;}
+.lv-railicons{display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 0;width:100%;overflow:auto;}
 .lv-railbtn{width:38px;height:38px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
   border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
-.lv-reel.mini{min-height:0;}
-.lv-rh{position:absolute;right:2px;bottom:2px;width:14px;height:14px;cursor:nwse-resize;z-index:3;
- background:linear-gradient(135deg,transparent 46%,var(--subtext) 46%,var(--subtext) 58%,transparent 58%,transparent 72%,var(--subtext) 72%);opacity:.5;}
-.lv-rh:hover{opacity:1;}
+.lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
+/* Timeline: genuinely fixed to the banner, full width, never draggable -- unlike every
+   other region. Three states (hidden/slim/full) driven by tlState + a live drag height;
+   the preview sits ABOVE the scrubber, only rendered once mostly expanded. */
+.lv-tldrawer{flex:none;position:relative;background:var(--surface0);border-bottom:1px solid var(--surface1);}
+.lv-tlcontent{overflow:hidden;position:relative;}
+.lv-tlpreviewzone{padding:10px 14px 4px;height:280px;box-sizing:border-box;}
+.lv-tlpreviewbox{height:100%;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
+  display:flex;align-items:center;justify-content:center;text-align:center;}
+.lv-tlreelzone{padding:8px 14px 10px;}
+.lv-tlhandle{position:absolute;left:50%;bottom:-1px;transform:translateX(-50%);z-index:2;
+  display:flex;align-items:center;justify-content:center;padding:5px 22px;cursor:ns-resize;touch-action:none;}
+.lv-tlgrip{width:40px;height:4px;border-radius:3px;background:var(--surface1);transition:background .15s;}
+.lv-tlhandle:hover .lv-tlgrip{background:var(--accent);}
 .lv-ph{padding:14px;color:var(--subtext);font:12.5px/1.5 system-ui,sans-serif;font-style:italic;}
 .lv-board{padding:8px;}
 .lv-act{margin-bottom:12px;}
@@ -463,7 +450,6 @@ const V2_STYLES = `
 .lv-st.done{color:var(--green);background:color-mix(in srgb,var(--green) 16%,transparent);}
 .lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
-.lv-tl{padding:9px;display:flex;flex-direction:column;gap:8px;height:100%;}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}
@@ -502,15 +488,31 @@ const V2_STYLES = `
 .lv-castmeta span{font-size:10px;color:var(--subtext);}
 .lv-addcast{margin-top:8px;width:100%;background:var(--surface1);border:1px dashed var(--surface1);color:var(--subtext);border-radius:7px;padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
 .lv-addcast:hover{border-color:var(--accent);color:var(--accent);}
-.lv-legend{padding:9px;}
-.lv-key{display:flex;gap:12px;margin-bottom:10px;font-size:10px;color:var(--subtext);}
-.lv-kk{display:flex;align-items:center;gap:4px;}
-.lv-sw{width:9px;height:9px;border-radius:2px;display:inline-block;}
-.lv-sw.done{background:var(--green);}.lv-sw.wip{background:var(--amber);}.lv-sw.todo{background:var(--surface1);}
-.lv-lg{margin-bottom:9px;}
-.lv-lgt{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:5px;}
-.lv-lgchips{display:flex;flex-wrap:wrap;gap:4px;}
-.lv-lgchip{font-size:9.5px;color:var(--subtext);background:var(--surface1);border-radius:5px;padding:2px 6px;}
+/* Density toggle (Cast tab) + the Simple view's square-card grid. */
+.lv-density{margin-bottom:10px;}
+.lv-simplegrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px;}
+.lv-simplecard{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:6px;
+  text-align:center;cursor:pointer;}
+.lv-simplecard:hover{border-color:var(--accent);}
+.lv-simplecard.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);}
+.lv-simplecard img,.lv-simplecard .lv-castph{width:100%;aspect-ratio:1;border-radius:6px;object-fit:cover;margin-bottom:5px;display:block;}
+.lv-simplecard b{display:block;font-size:10.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-simplecard span{display:block;font-size:9px;}
+/* Footage tab: browse-the-whole-library + drop-to-add, both land as a Cast & Assets ref. */
+.lv-footagehead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
+.lv-footagehead .lv-castrow-h{margin-bottom:0;}
+.lv-browsebtn{font:600 10px/1 system-ui;background:var(--base);border:1px solid var(--surface1);color:var(--accent);
+  border-radius:6px;padding:5px 8px;cursor:pointer;flex:0 0 auto;}
+.lv-browsebtn:hover{border-color:var(--accent);}
+.lv-dropzone{margin-top:8px;border:1.5px dashed var(--surface1);border-radius:8px;padding:12px 8px;text-align:center;
+  font-size:10.5px;color:var(--subtext);transition:all .15s;}
+.lv-dropzone.hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 6%,transparent);}
+/* Legend as an on-demand "+ terms" popover per field -- no persistent panel anywhere. */
+.lv-termsbtn{font-size:9px;text-transform:none;letter-spacing:0;color:var(--accent);background:none;border:none;
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;margin-left:6px;}
+.lv-termspal{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 2px;padding:7px;background:var(--surface1);border-radius:7px;}
+.lv-termsgrp{width:100%;display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
+.lv-termsgrpt{width:100%;font-size:8px;letter-spacing:.05em;text-transform:uppercase;color:var(--subtext);margin-top:4px;}
 .lv-footage{padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;align-content:start;}
 .lv-fclip{border-radius:7px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
 .lv-fclip.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
@@ -520,7 +522,6 @@ const V2_STYLES = `
 .lv-err{padding:40px;text-align:center;}
 .lv-err p{color:var(--coral);}
 .lv-err pre{color:var(--subtext);font-size:11px;white-space:pre-wrap;text-align:left;max-height:200px;overflow:auto;background:var(--base);padding:10px;border-radius:7px;}
-.lv-tlprev{flex:0 0 auto;margin-bottom:6px;}
 .lv-tabs{display:flex;gap:4px;margin-bottom:10px;}
 .lv-tab{flex:1;text-align:center;font:600 10px/1 system-ui;padding:6px 4px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lv-tab.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
@@ -575,50 +576,6 @@ class V2Boundary extends React.Component {
     return this.props.children;
   }
 }
-function DockablePanel({ p, scale, onChange, onCollapse, children, collapsedView }) {
-  const GRID = 16;   // snap-to-grid step (px, logical/unscaled canvas units)
-  const snap = (v) => Math.round(v / GRID) * GRID;
-  const startDrag = (e) => {
-    if (e.target.closest("button")) return;
-    e.preventDefault();
-    const sx = e.clientX, sy = e.clientY, ox = p.x, oy = p.y;
-    const mv = (ev) => onChange({ ...p, x: snap(Math.max(0, Math.round(ox + (ev.clientX - sx) / scale))), y: snap(Math.max(0, Math.round(oy + (ev.clientY - sy) / scale))) });
-    const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); };
-    document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
-  };
-  const startResize = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    const sx = e.clientX, sy = e.clientY, ow = p.w, oh = p.h;
-    // Width: most panels never need to get very wide (Board, the widest by default, ships
-    // at 628px) -- cap regular panels at 800px. Timeline is the one panel meant to stay
-    // full-width, so it's exempt from that cap (still bounded by the canvas edge itself).
-    // Height: liberal per the owner's call -- only bounded by the canvas edge, no extra cap.
-    const maxW = (p.id === "timeline") ? (1498 - p.x) : Math.min(800, 1498 - p.x);
-    const maxH = 820 - p.y;
-    const mv = (ev) => onChange({ ...p, w: snap(Math.min(maxW, Math.max(160, Math.round(ow + (ev.clientX - sx) / scale)))), h: snap(Math.min(maxH, Math.max(80, Math.round(oh + (ev.clientY - sy) / scale)))) });
-    const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); };
-    document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
-  };
-  // Collapse axis is per-panel: "generate" is a full-height right-edge column, so it
-  // collapses in WIDTH (down to an icon rail) and keeps its height; "timeline" is
-  // full-width along the top, so it collapses in HEIGHT (down to just the scrubber)
-  // and keeps its width. Everything else collapses to just the title bar (unchanged).
-  const isRail = p.id === "generate";
-  const w = p.collapsed && isRail ? 52 : p.w;
-  const h = p.collapsed ? (isRail ? p.h : p.id === "timeline" ? 78 : 34) : p.h;
-  const showCollapsedView = p.collapsed && collapsedView;
-  return (
-    <div className={"lv-panel" + (p.collapsed ? " collapsed" : "") + (p.collapsed && isRail ? " rail" : "")} style={{ left: p.x, top: p.y, width: w, height: h }}>
-      <div className="lv-bar" onMouseDown={startDrag}>
-        <span className="lv-dots" />
-        <span className="lv-title">{p.title}</span>
-        <button className="lv-col" onClick={() => onCollapse(p.id)} title="collapse">{p.collapsed ? (isRail ? "◂" : "▾") : (isRail ? "▸" : "▴")}</button>
-      </div>
-      {showCollapsedView ? <div className="lv-collapsedview">{collapsedView}</div> : <div className="lv-body">{children}</div>}
-      {!p.collapsed && <div className="lv-rh" onMouseDown={startResize} />}
-    </div>
-  );
-}
 // friendlyGenErr now imported from ./src/loom-mutations.js (Phase 2).
 
 // Shared storyboard switcher — used in BOTH the classic header and the V2 header.
@@ -652,13 +609,20 @@ function ProjectSwitcher({ api }) {
   );
 }
 
-function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
-  const wrapRef = useRef(null);
-  const [scaleV, setScaleV] = useState(1);
+function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
   const [deepFocus, setDeepFocus] = useState(null);   // entry {a,c,ai,ci,code} double-clicked on the board, or null
+  const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage'
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [tlState, setTlState] = useState("slim");        // 'hidden' | 'slim' | 'full'
+  const [tlDragH, setTlDragH] = useState(null);          // live px height while dragging the handle, else null
+  const [palFor, setPalFor] = useState(null);            // which field's "+ terms" popover is open, or null
+  const [dzHover, setDzHover] = useState(false);          // footage drop-zone hover feedback
+  const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
   useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
   useEffect(() => {
     if (!deepFocus) return;
@@ -666,10 +630,6 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [deepFocus]);
-  useEffect(() => {
-    const fit = () => { if (wrapRef.current) setScaleV(Math.min(1, wrapRef.current.clientWidth / 1498)); };
-    fit(); window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit);
-  }, []);
   // Bridge the shared <mg-model-picker> web component to React: a ref callback (React
   // doesn't route custom events through JSX props) that binds the 'mg-pick' listener once.
   const bindPicker = useCallback((el) => {
@@ -678,8 +638,28 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
       el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
     }
   }, [setImgModel]);
-  const change = (np) => setLayout((L) => L.map((x) => (x.id === np.id ? np : x)));
-  const collapse = (id) => setLayout((L) => L.map((x) => (x.id === id ? { ...x, collapsed: !x.collapsed } : x)));
+
+  // Fixed Timeline drawer: hidden(0) / slim(default, scrubber only) / full(preview above
+  // scrubber, real 16:9). The handle drags freely between 0 and TL_HEIGHTS.full, snapping
+  // to the nearest named state on release -- same mechanic as the owner-approved mockup.
+  const TL_HEIGHTS = { hidden: 0, slim: 64, full: 360 };
+  const tlPointerDown = (e) => { tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] }; e.currentTarget.setPointerCapture(e.pointerId); };
+  const tlPointerMove = (e) => {
+    if (!tlDrag.current.dragging) return;
+    const h = Math.max(0, Math.min(TL_HEIGHTS.full, tlDrag.current.startH + (e.clientY - tlDrag.current.startY)));
+    tlDrag.current.lastH = h;   // read by tlPointerUp -- setTlDragH's state update is batched/async,
+    setTlDragH(h);               // so the ref (not the state) is the reliable live value on release.
+  };
+  const tlPointerUp = () => {
+    if (!tlDrag.current.dragging) return;
+    tlDrag.current.dragging = false;
+    const h = tlDrag.current.lastH;
+    let best = "hidden", bestD = Infinity;
+    Object.entries(TL_HEIGHTS).forEach(([k, v]) => { const d = Math.abs(v - h); if (d < bestD) { bestD = d; best = k; } });
+    setTlState(best); setTlDragH(null);
+  };
+  const togglePal = (which) => setPalFor((p) => (p === which ? null : which));
+
   const sel = entries.find((e) => e.c.id === selShot) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   const board = (
@@ -731,40 +711,41 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
       {!project.acts.length && <div className="lv-ph">No acts yet — add one below.</div>}
     </div>
   );
-  const timeline = (
-    <div className="lv-tl">
-      {sel && sel.c.resultMid && <div className="lv-tlprev"><ShotPreview mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
-        onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))} /></div>}
-      <div className="lv-reel">
-        {entries.map((x, i) => (<div key={i} className={"lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : "")}
-          style={{ width: `${(durOf(x.c) / scale) * 100}%` }} title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)} />))}
-        <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
+  // Fixed drawer, banner-attached, never draggable (unlike every other region). Preview
+  // only renders once the drawer is more than halfway to full, so it doesn't paint fighting
+  // the collapse/expand animation.
+  const tlHeight = tlDragH != null ? tlDragH : TL_HEIGHTS[tlState];
+  const showTlPreview = tlHeight > (TL_HEIGHTS.slim + TL_HEIGHTS.full) / 2;
+  const timelineDrawer = (
+    <div className="lv-tldrawer">
+      <div className="lv-tlcontent" style={{ height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" }}>
+        {showTlPreview && (
+          <div className="lv-tlpreviewzone">
+            {sel && sel.c.resultMid
+              ? <ShotPreview mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
+                  onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))} />
+              : <div className="lv-tlpreviewbox lv-ph">{sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here."}</div>}
+          </div>
+        )}
+        <div className="lv-tlreelzone">
+          <div className="lv-reel">
+            {entries.map((x, i) => (<div key={i} className={"lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : "")}
+              style={{ width: `${(durOf(x.c) / scale) * 100}%` }} title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)} />))}
+            <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
+          </div>
+          <div className="lv-tlinfo">{sel
+            ? <span><b>{sel.code}</b> &middot; {sel.c.title || "untitled"} &middot; {sel.c.mode} &middot; {durOf(sel.c)}s</span>
+            : <span className="lv-dim">click a shot to select it — the whole workspace binds to it</span>}</div>
+        </div>
       </div>
-      <div className="lv-tlinfo">{sel
-        ? <span><b>{sel.code}</b> &middot; {sel.c.title || "untitled"} &middot; {sel.c.mode} &middot; {durOf(sel.c)}s</span>
-        : <span className="lv-dim">click a shot to select it — the whole workspace binds to it</span>}</div>
-    </div>
-  );
-  // Collapsed timeline: just the scrubber reel (no preview player, no info line) — the
-  // "slim top strip" the rail-layout plan calls for, instead of the old blunt full-hide.
-  const timelineCollapsed = (
-    <div className="lv-reel mini">
-      {entries.map((x, i) => (<div key={i} className={"lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : "")}
-        style={{ width: `${(durOf(x.c) / scale) * 100}%` }} title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)} />))}
-      <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
+      <div className="lv-tlhandle" onPointerDown={tlPointerDown} onPointerMove={tlPointerMove} onPointerUp={tlPointerUp} onPointerCancel={tlPointerUp}>
+        <div className="lv-tlgrip" />
+      </div>
     </div>
   );
   // Collapsed Generate: the right-edge icon rail ("gallery-drawer muscle memory") —
-  // clicking an icon expands the panel back out AND switches to that tab.
+  // clicking an icon expands the drawer back out AND switches to that tab.
   const GEN_ICONS = [["Image", "✦"], ["Edit", "✎"], ["Reference", "🖼"], ["Video", "🎬"]];
-  const genRail = (
-    <div className="lv-genrail">
-      {GEN_ICONS.map(([t, ic]) => (
-        <button key={t} className={"lv-railbtn" + (t === tab ? " on" : "")} title={t}
-          onClick={() => { setTab(t); collapse("generate"); }}>{ic}</button>
-      ))}
-    </div>
-  );
   let gen;
   if (!sel) gen = <div className="lv-ph">Select a shot on the board to edit &amp; generate it here.</div>;
   else {
@@ -805,13 +786,32 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
         <textarea className="lv-ta" value={sel.c.prompt || ""} onChange={(ev) => patch((c) => ({ ...c, prompt: ev.target.value }))} />
         <label className="lv-lab">Duration</label>
         <div className="lv-chips">{[5, 6, 10, 15].map((d) => (<span key={d} className={"lv-chip " + (d === sel.c.duration ? "on" : "")} onClick={() => patch((c) => ({ ...c, duration: d }))}>{d}s</span>))}</div>
-        <label className="lv-lab">Camera</label>
+        <label className="lv-lab">Camera <button className="lv-termsbtn" onClick={() => togglePal("camera")}>+ terms</button></label>
         <input className="lv-in" value={sel.c.camera || ""} placeholder="e.g. slow push in, shallow DoF" onChange={(ev) => patch((c) => ({ ...c, camera: ev.target.value }))} />
-        <div className="lv-mini">{CAM_PALETTE["Movement"].slice(0, 8).map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("camera", t)}>+ {t}</span>))}</div>
-        <label className="lv-lab">Lighting</label>
+        {palFor === "camera" && (
+          <div className="lv-termspal">{Object.entries(CAM_PALETTE).map(([grp, items]) => (
+            <div key={grp} className="lv-termsgrp">
+              <div className="lv-termsgrpt">{grp}</div>
+              {items.map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("camera", t)}>{t}</span>))}
+            </div>
+          ))}</div>
+        )}
+        <label className="lv-lab">Lighting <button className="lv-termsbtn" onClick={() => togglePal("lighting")}>+ terms</button></label>
         <input className="lv-in" value={sel.c.lighting || ""} placeholder="e.g. moonlit, soft haze" onChange={(ev) => patch((c) => ({ ...c, lighting: ev.target.value }))} />
-        <div className="lv-mini">{LIGHTING_PALETTE.slice(0, 8).map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("lighting", t)}>+ {t}</span>))}</div>
-        <div className="lv-refline">{(sel.c.cast || []).length} cast &middot; {(sel.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast panel)</span></div>
+        {palFor === "lighting" && (
+          <div className="lv-termspal">{LIGHTING_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("lighting", t)}>{t}</span>))}</div>
+        )}
+        <label className="lv-lab">Transition in <button className="lv-termsbtn" onClick={() => togglePal("transIn")}>+ terms</button></label>
+        <input className="lv-in" value={sel.c.transIn || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transIn: ev.target.value }))} />
+        {palFor === "transIn" && (
+          <div className="lv-termspal">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => patch((c) => ({ ...c, transIn: t }))}>{t}</span>))}</div>
+        )}
+        <label className="lv-lab">Transition out <button className="lv-termsbtn" onClick={() => togglePal("transOut")}>+ terms</button></label>
+        <input className="lv-in" value={sel.c.transOut || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transOut: ev.target.value }))} />
+        {palFor === "transOut" && (
+          <div className="lv-termspal">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => patch((c) => ({ ...c, transOut: t }))}>{t}</span>))}</div>
+        )}
+        <div className="lv-refline">{(sel.c.cast || []).length} cast &middot; {(sel.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast &amp; assets tab)</span></div>
         <button className="lv-go" disabled={busy} onClick={() => generateShot(sel)}>{busy ? (gs.msg || "generating…") : "▶ Generate shot"}</button>
         <button className="lv-usevid" disabled={busy} onClick={() => useExistingVideo(sel)} title="Skip generation -- use a video you already have in your gallery as this shot's clip">
           &#128190; Use an existing video instead
@@ -923,10 +923,14 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
       </div>
     );
   }
-  const castPanel = (
-    <div className="lv-cast">
+  const castList = (
+    <>
       <div className="lv-castrow-h">Cast &amp; assets{sel ? <span className="lv-dim"> — click to toggle into {sel.code}</span> : null}</div>
-      {(project.assets || []).map((as) => {
+      <div className="lv-tabs lv-density">
+        <span className={"lv-tab " + (density === "simple" ? "on" : "")} onClick={() => setDensity("simple")}>Simple</span>
+        <span className={"lv-tab " + (density === "detailed" ? "on" : "")} onClick={() => setDensity("detailed")}>Detailed</span>
+      </div>
+      {density === "detailed" ? (project.assets || []).map((as) => {
         const inShot = sel && (sel.c.cast || []).includes(as.id);
         const src = frameSrc(as);
         return (
@@ -936,61 +940,109 @@ function LoomV2({ layout, setLayout, onClose, project, setCard, setAssets, entri
             <div className="lv-castmeta"><b>{as.tag}</b><span>{as.name || as.kind}</span></div>
           </div>
         );
-      })}
+      }) : (
+        <div className="lv-simplegrid">{(project.assets || []).map((as) => {
+          const inShot = sel && (sel.c.cast || []).includes(as.id);
+          const src = frameSrc(as);
+          return (
+            <div key={as.id} className={"lv-simplecard " + (inShot ? "on" : "")}
+              onClick={() => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...(c.cast || []), as.id] }))}>
+              {src ? <img src={src} alt="" /> : <span className="lv-castph" />}
+              <b>{as.name || as.kind}</b><span className="lv-dim">{as.tag}</span>
+            </div>
+          );
+        })}</div>
+      )}
       {!(project.assets || []).length && <div className="lv-ph">No cast yet — add one below.</div>}
       <button className="lv-addcast" onClick={() => openPick((mid, thumb, isVideo) => setAssets((a) => {
         const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
         return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
       }), "image", true)}>+ add from gallery</button>
-    </div>
-  );
-  const legendPanel = (
-    <div className="lv-legend">
-      <div className="lv-key"><span className="lv-kk"><i className="lv-sw done" />done</span><span className="lv-kk"><i className="lv-sw wip" />rendering</span><span className="lv-kk"><i className="lv-sw todo" />draft</span></div>
-      {Object.keys(CAM_PALETTE).map((k) => (<div key={k} className="lv-lg"><div className="lv-lgt">{k}</div><div className="lv-lgchips">{CAM_PALETTE[k].map((t) => (<span key={t} className="lv-lgchip">{t}</span>))}</div></div>))}
-      <div className="lv-lg"><div className="lv-lgt">Lighting</div><div className="lv-lgchips">{LIGHTING_PALETTE.map((t) => (<span key={t} className="lv-lgchip">{t}</span>))}</div></div>
-      <div className="lv-lg"><div className="lv-lgt">Transitions</div><div className="lv-lgchips">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-lgchip">{t}</span>))}</div></div>
-      <div className="lv-lg"><div className="lv-lgt">Audio</div><div className="lv-lgchips">{AUDIO_PALETTE.map((t) => (<span key={t} className="lv-lgchip">{t}</span>))}</div></div>
-      <div className="lv-note2">Reference vocabulary for prompts. Editing a shot's camera / lighting lives in Generate.</div>
-    </div>
+    </>
   );
   const finished = entries.filter((e) => e.c.resultMid);
-  const footagePanel = finished.length
-    ? <div className="lv-footage">{finished.map((e) => (
-        <div key={e.c.id} className={"lv-fclip " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
-          <img src={"/thumbs/" + e.c.resultMid + ".jpg"} alt="" />
-          <div className="lv-fmeta"><b>{e.code}</b><span>{durOf(e.c)}s</span></div>
-        </div>))}</div>
-    : <div className="lv-ph">No rendered shots yet — generate one and it lands here.</div>;
-  const content = (id) => id === "board" ? board : id === "timeline" ? timeline : id === "generate" ? gen
-    : id === "cast" ? castPanel : id === "legend" ? legendPanel : id === "footage" ? footagePanel
-    : <div className="lv-ph">{V2_PH[id] || id}</div>;
-  const collapsedContent = (id) => id === "timeline" ? timelineCollapsed : id === "generate" ? genRail : null;
+  // Dropped/browsed footage becomes a reusable Cast & Assets reference -- "footage" itself
+  // means "this project's own rendered shots" (keyed off resultMid), so external media has
+  // nowhere else honest to land. addAssetFromFile only handles images; video files are
+  // directed to "Browse library" instead of a half-built local-video-upload path.
+  const addAssetFromFile = async (file) => {
+    if (!file || !file.type || !file.type.startsWith("image/")) return;
+    const id = await storeThumb(file);
+    setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: nextTag(a, "@image"), thumbId: id, source: file.name, lock: false }]);
+  };
+  const footageList = (
+    <>
+      <div className="lv-footagehead">
+        <span className="lv-castrow-h">Finished shots</span>
+        <button className="lv-browsebtn" onClick={() => openPick((mid, thumb, isVideo) => setAssets((a) => {
+          const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
+          return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
+        }), "video", true)}>&#8981; Browse library</button>
+      </div>
+      {finished.length
+        ? <div className="lv-footage">{finished.map((e) => (
+            <div key={e.c.id} className={"lv-fclip " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
+              <img src={"/thumbs/" + e.c.resultMid + ".jpg"} alt="" />
+              <div className="lv-fmeta"><b>{e.code}</b><span>{durOf(e.c)}s</span></div>
+            </div>))}</div>
+        : <div className="lv-ph">No rendered shots yet — generate one and it lands here.</div>}
+      <div className={"lv-dropzone" + (dzHover ? " hover" : "")}
+        onDragEnter={(ev) => { ev.preventDefault(); setDzHover(true); }}
+        onDragOver={(ev) => ev.preventDefault()}
+        onDragLeave={() => setDzHover(false)}
+        onDrop={(ev) => { ev.preventDefault(); setDzHover(false); [...ev.dataTransfer.files].forEach(addAssetFromFile); }}>
+        &#8681; drag an image here to add it as a cast reference
+      </div>
+    </>
+  );
 
   return (
     <div className="lv-overlay">
       <style>{V2_STYLES}</style>
       <div className="lv-top">
-        <span className="lv-eyebrow">The Loom · V2 (preview)</span>
-        <span className="lv-note">Click a shot → it binds to Generate. Drag / resize / collapse panels; layout auto-saves.</span>
+        <span className="lv-eyebrow">The Loom · V2</span>
+        <span className="lv-note">Click a shot → it binds to Generate.</span>
         <ProjectSwitcher api={projectApi} />
-        <button onClick={() => setLayout(V2_DEFAULT.map((d) => ({ ...d })))}>Reset layout</button>
         <button className="lv-close" onClick={onClose}>← Back to classic Loom</button>
       </div>
-      <div className="lv-scaler" ref={wrapRef}>
-        {/* .lv-canvaswrap reports the ACTUAL scaled footprint (1498*scaleV x 820*scaleV) to
-           .lv-scaler's scroll calculation. transform:scale() alone doesn't shrink an element's
-           contribution to its container's scrollable-overflow size (only its paint/visual size),
-           so without this wrapper a short viewport just clipped the excess with no way to reach
-           it -- the bug report ("scrollbar moves, nothing happens"). */}
-        <div className="lv-canvaswrap" style={{ width: 1498 * scaleV, height: 820 * scaleV }}>
-          <div className="lv-canvas" style={{ transform: "scale(" + scaleV + ")" }}>
-            {layout.map((p) => (
-              <DockablePanel key={p.id} p={p} scale={scaleV} onChange={change} onCollapse={collapse} collapsedView={collapsedContent(p.id)}>
-                {content(p.id)}
-              </DockablePanel>
-            ))}
+      {timelineDrawer}
+      <div className="lv-shell">
+        <div className={"lv-side left" + (leftCollapsed ? " collapsed" : "")}>
+          <div className="lv-sidehead">
+            {!leftCollapsed && (
+              <div className="lv-tabs lv-sidetabs">
+                <span className={"lv-tab " + (leftTab === "cast" ? "on" : "")} onClick={() => setLeftTab("cast")}>Cast &amp; assets</span>
+                <span className={"lv-tab " + (leftTab === "footage" ? "on" : "")} onClick={() => setLeftTab("footage")}>Footage</span>
+              </div>
+            )}
+            <button className="lv-col" onClick={() => setLeftCollapsed((v) => !v)} title="collapse">{leftCollapsed ? "▸" : "◂"}</button>
           </div>
+          {leftCollapsed ? (
+            <div className="lv-railicons">
+              <button className={"lv-railbtn" + (leftTab === "cast" ? " on" : "")} title="Cast & assets" onClick={() => { setLeftTab("cast"); setLeftCollapsed(false); }}>&#128100;</button>
+              <button className={"lv-railbtn" + (leftTab === "footage" ? " on" : "")} title="Footage" onClick={() => { setLeftTab("footage"); setLeftCollapsed(false); }}>&#127916;</button>
+            </div>
+          ) : (
+            <div className="lv-cast">{leftTab === "cast" ? castList : footageList}</div>
+          )}
+        </div>
+
+        <div className="lv-boardcol">{board}</div>
+
+        <div className={"lv-side right" + (rightCollapsed ? " collapsed" : "")}>
+          <div className="lv-sidehead">
+            <button className="lv-col" onClick={() => setRightCollapsed((v) => !v)} title="collapse">{rightCollapsed ? "◂" : "▸"}</button>
+            {!rightCollapsed && (
+              <div className="lv-tabs lv-sidetabs">{["Image", "Edit", "Reference", "Video"].map((t) => (
+                <span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
+            )}
+          </div>
+          {rightCollapsed ? (
+            <div className="lv-railicons">
+              {GEN_ICONS.map(([t, ic]) => (<button key={t} className={"lv-railbtn" + (t === tab ? " on" : "")} title={t}
+                onClick={() => { setTab(t); setRightCollapsed(false); }}>{ic}</button>))}
+            </div>
+          ) : gen}
         </div>
       </div>
       {deepFocus && (() => {
@@ -1056,20 +1108,8 @@ function useProjectStore(setSelShot) {
   const [activeId, setActiveId] = useState(null);   // id of the open storyboard (multi-project store)
   const [projList, setProjList] = useState([]);     // [{id,name,shots}] for the switcher
   const [projMenu, setProjMenu] = useState(false);  // switcher dropdown open?
-  const [panelLayout, setPanelLayout] = useState(() => V2_DEFAULT.map((d) => ({ ...d })));
   const saveTimer = useRef(null);
   const castImported = useRef(false);
-  const layoutTimer = useRef(null);
-
-  useEffect(() => { (async () => {
-    if (hasStore) { const raw = await sGet(V2_KEY); if (raw) { try { const L = JSON.parse(raw); if (Array.isArray(L) && L.length) setPanelLayout(L); } catch {} } }
-  })(); }, []);
-  useEffect(() => {
-    if (!hasStore) return;
-    clearTimeout(layoutTimer.current);
-    layoutTimer.current = setTimeout(() => { sSet(V2_KEY, JSON.stringify(panelLayout)); }, 500);
-    return () => clearTimeout(layoutTimer.current);
-  }, [panelLayout]);
 
   // ---- Multi-project store: each storyboard lives at PPRE+id; ACTIVE_KEY names the open one.
   //      The legacy single project (PKEY) is migrated in as the first storyboard on first load. ----
@@ -1195,7 +1235,7 @@ function useProjectStore(setSelShot) {
   } catch { window.alert("That file didn't parse as a storyboard backup."); } };
 
   return { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, panelLayout, setPanelLayout, projectApi, importJSON };
+    projList, projMenu, setProjMenu, projectApi, importJSON };
 }
 
 // ---- 2. useShotMutations: act/card/ref CRUD on the open project ----
@@ -1465,7 +1505,7 @@ function useExportPipeline(project, thumbs) {
 export default function App() {
   const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
   const { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, panelLayout, setPanelLayout, projectApi, importJSON } = useProjectStore(setSelShot);
+    projList, projMenu, setProjMenu, projectApi, importJSON } = useProjectStore(setSelShot);
 
   const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
@@ -1530,7 +1570,7 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
-      {v2 && <V2Boundary onClose={() => setV2(false)}><LoomV2 layout={panelLayout} setLayout={setPanelLayout} onClose={() => setV2(false)}
+      {v2 && <V2Boundary onClose={() => setV2(false)}><LoomV2 onClose={() => setV2(false)}
         project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
         selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} useExistingVideo={useExistingVideo} genState={genState}
         thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
