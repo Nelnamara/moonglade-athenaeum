@@ -1,4 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+// Pure, framework-agnostic logic (tag numbering, continuity checks, shot-text
+// assembly, reel duration/pricing math) lives in ./src/loom-core.js so it can
+// be unit-tested under `node --test` outside React. `shotPayload` is imported
+// under an alias because App() wraps it with the component's own `imgSrc`
+// (which closes over `thumbs` state) under the ORIGINAL single-arg call shape.
+import {
+  CONNECT, CONTINUITY_PHRASE, actLetter,
+  maxTagNum, nextTag, frameLinked, connectMeta,
+  flat, shotText, durOf, reelStats,
+  shotPayload as buildShotPayload,
+} from "./src/loom-core.js";
 
 /* =========================================================================
    THE EDIT BAY v2 — reusable Seedance 2.0 storyboard with continuity chaining
@@ -266,12 +277,6 @@ const MODE_HINT = {
   V2V: "Video edit / extend an existing clip",
   FLF: "First & last frame — interpolate between two images",
 };
-const CONNECT = {
-  new:    { label: "New scene",     hint: "intentional break — fresh look/place" },
-  cut:    { label: "Cut (in edit)", hint: "hard/match cut joined in your editor — rhyme the frames" },
-  flf:    { label: "First→Last",    hint: "land on an exact end frame; prompt the motion between" },
-  extend: { label: "Extend prev",   hint: "feed previous clip as @video1; continue seamlessly" },
-};
 const CAM_PALETTE = {
   "Shot size": ["EWS", "WS", "MLS", "MS", "MCU", "CU", "ECU", "OTS", "two-shot", "insert", "POV"],
   "Movement": ["static/locked", "pan left", "pan right", "tilt up", "tilt down", "dolly in", "dolly out",
@@ -286,45 +291,13 @@ const LIGHTING_PALETTE = ["golden hour", "blue hour", "low-key", "high-key", "wa
   "chiaroscuro", "volumetric god rays", "overcast", "silhouette"];
 const AUDIO_PALETTE = ["no music", "room tone", "ambient hum", "soft breathing", "whispered dialogue",
   "distant music", "rain", "heartbeat", "beat sync", "diegetic only", "muffled", "rustling fabric"];
-const CONTINUITY_PHRASE = "Smooth, continuous, seamless — no hard cut.";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-const actLetter = (i) => (i < 26 ? String.fromCharCode(65 + i) : `A${i}`);
 const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
-
-/* ---------- shared helpers (Phase 0, 2026-07-16) ----------
-   These replace ~7 independently-reimplemented copies of the same two ideas
-   (tag numbering, frame-identity comparison) that had silently drifted into
-   3 different algorithms and caused real collisions. One implementation now,
-   called from classic, V2, and every mutator — not prop-threaded, since
-   everything in this file shares one global scope. */
-
-// Highest existing "<prefix>N" tag number among items' `.tag` fields (anchored
-// regex-max — the one call site, V2's cast-add, that already had this right).
-const maxTagNum = (items, prefix) => {
-  const re = new RegExp("^" + prefix + "(\\d+)$");
-  return (items || []).reduce((mx, x) => { const m = re.exec(x.tag || ""); return m ? Math.max(mx, +m[1]) : mx; }, 0);
-};
-// The next free "<prefix>N" tag for a single add. For a BATCH add, call
-// maxTagNum once and increment locally instead (see importCollection/cast-import).
-const nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1);
-
-// Two frames are "linked" (continuous) if they share EITHER identity field —
-// mediaId (gallery-picked / generated-in-Loom frames) or thumbId (locally
-// uploaded ones). The old check only looked at thumbId, so it was blind to
-// exactly the frames "↳ inherit close" produces (it copies mediaId and clears
-// thumbId), guaranteeing a false "needs link" warning on the tool's own
-// recommended workflow.
-const frameLinked = (a, b) => !!a && !!b && (
-  (!!a.mediaId && !!b.mediaId && a.mediaId === b.mediaId) ||
-  (!!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId)
-);
-
-// CONNECT[x] where x is a falsy/stale/legacy value throws. Every direct index
-// now goes through this instead, falling back to "new scene" (the safest,
-// most neutral default) rather than crashing shotText/export/render.
-const connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
+// CONNECT, CONTINUITY_PHRASE, actLetter, maxTagNum/nextTag, frameLinked, and
+// connectMeta now live in ./src/loom-core.js (imported above) -- Phase 1
+// tooling pass, 2026-07-16.
 
 /* ---------- storage ---------- */
 const hasStore = typeof window !== "undefined" && window.storage;
@@ -1264,31 +1237,9 @@ export default function App() {
   const setRef = (aId, cId, rId, patch) => setCard(aId, cId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== rId ? r : { ...r, ...patch }) }));
   const delRef = (aId, cId, ref) => setCard(aId, cId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== ref.id) }));
 
-  /* export */
-  const flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}·${String(ci + 1).padStart(2, "0")}` })));
-  const shotText = (entry, p) => {
-    const { c, code, ai } = entry;
-    const idx = flat(p).findIndex((x) => x.c.id === c.id);
-    const prev = idx > 0 ? flat(p)[idx - 1] : null;
-    const L = [`[${code} — "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
-    if (c.connect === "extend" && prev) L.push(`Continue seamlessly from the previous clip ${prev.code} (upload it as @video1).`);
-    if (c.connect === "flf") {
-      if (c.openFrame.desc || c.openFrame.tag) L.push(`Opening frame ${c.openFrame.tag || "(first image)"}: ${c.openFrame.desc || "—"}`);
-      if (c.closeFrame.desc || c.closeFrame.tag) L.push(`Closing frame ${c.closeFrame.tag || "(last image)"}: ${c.closeFrame.desc || "—"}`);
-    }
-    L.push("", c.prompt || "(prompt tbd)");
-    if (c.connect === "extend" || c.connect === "flf") L.push(CONTINUITY_PHRASE);
-    const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id));
-    if (usedCast.length) { L.push("", "Keep consistent:"); usedCast.forEach((as) =>
-      L.push(`  ${as.name} — ${as.lock ? "maintain exact appearance from " : "reference "}${as.tag}`)); }
-    if (c.refs.length) { L.push("", "Other references:"); c.refs.forEach((r) => L.push(`  ${r.tag} — ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`)); }
-    if (c.camera) L.push("", `Camera: ${c.camera}`);
-    if (c.lighting) L.push(`Lighting/Mood: ${c.lighting}`);
-    if (c.audioCue) L.push(`Audio: ${c.audioCue}`);
-    if (c.transIn || c.transOut) L.push(`Edit transitions: in ${c.transIn || "—"} / out ${c.transOut || "—"}`);
-    if (c.notes) L.push(`Notes: ${c.notes}`);
-    return L.join("\n");
-  };
+  /* export -- flat/shotText now imported from ./src/loom-core.js (same names,
+     same call shape: flat(project), shotText(entry, project)), so every
+     call site below is unchanged. */
   const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
 
   /* ---- Generate shot on PixAI (video provider) ---- */
@@ -1296,25 +1247,11 @@ export default function App() {
     ({ ...a, cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch }) })) }));
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
     : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
-  /* Build the /api/loom/generate + /api/price payload for a shot (single source). */
-  const shotPayload = (entry) => {
-    const c = entry.c;
-    const tagNum = (t) => { const m = /(\d+)/.exec(t || ""); return m ? +m[1] : 99; };
-    const imgs = [];
-    (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
-      .forEach((as) => { const d = as.mediaId || imgSrc(as.thumbId, as.source); if (d) imgs.push({ tag: as.tag, d }); });
-    // Untagged open/close frames need DISTINCT fallback tags -- both defaulting to the
-    // same literal meant an FLF shot with two untagged frames silently sent duplicate
-    // @image9 tags, and the model only ever saw one of the two images.
-    [["@image8", c.openFrame], ["@image9", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, f]) => {
-      if (!f) return; const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) imgs.push({ tag: f.tag || fallbackTag, d }); });
-    (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
-      const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) imgs.push({ tag: r.tag, d }); });
-    const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
-    imgs.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
-    return { mode: c.mode, prompt: shotText(entry, project), images: imgs.map((x) => x.d),
-             video_refs: vids, duration: c.duration, hasInput: (imgs.length + vids.length) > 0 };
-  };
+  /* Build the /api/loom/generate + /api/price payload for a shot (single source).
+     Wraps the pure, imported buildShotPayload with this component's own
+     `project` state + `imgSrc` (closes over `thumbs`), preserving the original
+     single-argument call shape used below and in priceShot/generateShot. */
+  const shotPayload = (entry) => buildShotPayload(entry, project, imgSrc);
   /* READ-ONLY cost + free-card check for a shot (reuses the drawer's /api/price; spends nothing). */
   const priceShot = async (entry) => {
     try {
@@ -1508,12 +1445,10 @@ export default function App() {
   };
   const cancelExport = () => { fetch("/api/loom/export-cancel", { method: "POST" }).catch(() => {}); };
   const closeExport = () => { if (exportPoll.current) clearTimeout(exportPoll.current); setExp(null); };
-  // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration
-  const durOf = (c) => Number(c.actualDur || c.duration) || 0;
-  const total = entries.reduce((s, x) => s + durOf(x.c), 0);
+  // durOf/reelStats now imported from ./src/loom-core.js (reel uses the ACTUAL
+  // generated length when a shot has rendered, else the planned duration).
+  const { total, scale, over } = reelStats(entries, project.target);
   const done = entries.filter((x) => x.c.status === "done").length;
-  const scale = Math.max(total, project.target) || 1;
-  const over = total - project.target;
 
   // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
   // the submits don't collide. Each shot manages its own status/poll via generateShot.
