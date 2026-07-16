@@ -91,12 +91,15 @@ re-verified: migration + atomic per-key writes both confirmed live + 5 dedicated
 
 **Owner decision (2026-07-16): rebuild is the destination.** Not gated behind a probe-first decision tree — the owner weighed the evidence (including the audit's own "probe first, decide second" hybrid suggestion, which a subsequent adversarial-verify pass caught quietly pre-committing to rebuild's tooling anyway) and chose to commit directly, starting with:
 
-**PHASE 0 — kill the real bugs as shared helpers, no new tooling (in progress 2026-07-16):**
-1. `frameLinked(a,b)` helper checking both `thumbId` and `mediaId` — fixes the continuity indicator (also gives V2 an indicator it never had).
-2. `nextTag(assets, prefix)` helper — unifies every duplicate tag-numbering call site onto one algorithm (anchored regex-max, the best of the ~3 shapes found).
+**✅ PHASE 0 SHIPPED (2026-07-16, commit `b4303f5`):**
+1. `frameLinked(a,b)` helper checking both `thumbId` and `mediaId` — fixes the continuity indicator. (Not ported to V2 — V2 never had this indicator at all; adding it there is later-phase feature-parity work, not a Phase 0 bugfix.)
+2. `nextTag`/`maxTagNum(assets, prefix)` helpers — unified all 7 duplicate tag-numbering call sites (V2 cast-add, URL cast-import, `importCollection`, `routeImg`, `routeGen`, classic "+Add reference", `addRef`) onto one anchored-regex-max algorithm.
 3. `dupCard` resets `resultMid`/`status`/`actualDur`/`trimIn`/`trimOut` on clone (also fixes Export's double-include-footage side effect).
-4. Guard `CONNECT[c.connect]` against undefined/stale values.
-5. `importJSON` creates a new project + confirms instead of clobbering the open board.
+4. `connectMeta(connect)` guards every `CONNECT[...]` index (3 call sites) against undefined/stale/legacy values, falling back to "new scene" instead of throwing.
+5. `importJSON` creates a new storyboard + confirms instead of clobbering the open board in place.
+6. (Found during implementation, not in the original 5:) `shotPayload`'s untagged-frame fallback gave both open AND close frame the same literal `@image9` tag on an FLF shot with neither tagged — now distinct fallbacks (`@image8`/`@image9`) so both images actually reach the model.
+
+Verified: babel-in-node transpile clean, full pytest suite 474/474, live browser check (tag numbering + continuity indicator confirmed working end-to-end, zero console errors). `dupCard`/`importJSON` verified by code read, not live-triggered (would need either a faked rendered-shot state or a real PixAI generation call — declined per the standing hands-off-PixAI-generation rule).
 
 These are shared, in-file helpers — no build step, no module system change, matches "no new tooling" exactly. Rebuild's later phases (design pass via the owner's own Figma mocks → unified render tree) come after Phase 0, not before.
 
