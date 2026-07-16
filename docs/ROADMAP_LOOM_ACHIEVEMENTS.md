@@ -15,17 +15,19 @@
 
 ---
 
-## 0.4 · ⚠️ TROPHY HALL REGRESSION + THE DESIGN WORKFLOW STANDARD (2026-07-14) — see `docs/DESIGN_WORKFLOW.md`
+## 0.4 · TROPHY HALL REGRESSION — RESOLVED (revert) + THE DESIGN WORKFLOW STANDARD (2026-07-14/15) — see `docs/DESIGN_WORKFLOW.md`
 
 **The reformat commit `c877919` landed way off the owner's intended visual target** — cards
-reorganized, carousel execution wrong, locked/DONE work undone without permission. Owner is
-**building a Figma mock** (with screenshotted real app assets) as the pixel source of truth for the
-rebuild. Full incident, recovery options (revert `c877919` vs rebuild-from-mock), tooling state
-(Figma plugin authed via `/mcp` per machine; Claude Design + `DesignSync`), the two
-not-actually-regressions caveats (feats-cloak = original spec; machine-local branding art), and the
-model-strategy guidance ALL live in **`docs/DESIGN_WORKFLOW.md`** — read it before touching any
-user-visible surface. **Standing rule from this incident: no visual build from prose alone; verify
-against the pixel source before calling it done.** Owner picks the recovery path at the home machine.
+reorganized, carousel execution wrong, locked/DONE work undone without permission. **Recovery: Option
+A (revert) was chosen and executed 2026-07-15** — `c877919` reverted clean as `0a8da3a` on the C:
+repo, confirmed with a real rendered screenshot. The Hall redesign itself is NOT done — the owner is
+**building a Figma mock** (screenshot-decomposition + a proper carousel treatment for ladder rungs) as
+the pixel source of truth for a rename+rebuild, using their own further-rolled-back D: install as the
+starting point. Full incident detail, tooling state (Figma plugin authed via `/mcp` per machine;
+Claude Design + `DesignSync`), the two not-actually-regressions caveats (feats-cloak = original spec;
+machine-local branding art), and the model-strategy guidance ALL live in **`docs/DESIGN_WORKFLOW.md`**
+— read it before touching any user-visible surface. **Standing rule from this incident: no visual
+build from prose alone; verify against the pixel source before calling it done.**
 
 ---
 
@@ -189,9 +191,17 @@ still masked server-side as before (`"???"` / "A hidden feat of the Athenaeum.")
 a bare badge image with no text doesn't tell you what unlocks it. `SecretCurtainRectangle.png`
 (badge-in-center composition) banked for a possible future reveal-moment treatment, not used now.
 
-**⚠️ Layout reformat / toast-cards / ladder-carousel — CODE SHIPPED 2026-07-14 (commit `c877919`),
-BUT OWNER REPORTS IT'S VISUALLY WRONG.** NOT considered done. Do not build on top of this without
-re-checking it first.
+**✅ RESOLVED 2026-07-15 — reverted, not fixed-in-place.** `c877919` was reverted clean
+(`0a8da3a`, inverse diff, zero conflicts — every commit in between was docs-only). The Hall is back
+to the pre-reformat rail-rewards/plain-grid layout, confirmed with an actual rendered screenshot this
+time (not just computed-style checks — see the lesson below for why that distinction matters). Tests
+still 474/474. **This does not mean the Hall redesign is abandoned** — the owner is building a Figma
+mock (screenshot-decomposition of the real app + a proper carousel/"lightboard" treatment for the
+ladder rungs) as the actual pixel source of truth, and the Hall is getting renamed as part of that
+rebuild. Treat the revert as returning to a known-good baseline to design forward from, not as the
+final answer. D: was independently rolled back further by the owner (to the point custom
+Legendary/Feat frames were introduced) and is not necessarily in sync with this C: revert point —
+don't assume the two match without checking.
 
 - **What actually landed:** rewards moved from the narrow 290px rail into a `.hall-rewards-bar`
   spanning the full grid width (rail widened 290px→370px); `.ach-card` restyled toward the unlock
