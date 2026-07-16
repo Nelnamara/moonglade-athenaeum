@@ -41,6 +41,9 @@ htmlcov/
 # ---- Working dashboard artifact (Claude+owner reference; not project documentation) ----
 docs/DASHBOARD.html
 
+# ---- Loom Node toolchain (loom/package.json) ----
+loom/node_modules/
+
 # ---- Editor / OS ----
 .vscode/
 .idea/

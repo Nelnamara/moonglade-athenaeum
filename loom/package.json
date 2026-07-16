@@ -1,0 +1,14 @@
+{
+  "name": "loom-storyboard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Build tooling for The Loom (loom/master-storyboard.jsx). Scoped to loom/ only -- the rest of the pixai-gallery-backup repo has no Node/npm toolchain. Bundles master-storyboard.jsx (+ loom-core.js) into loom/dist/ via esbuild as an ADDITIONAL delivery path; the existing in-browser Babel-standalone transpile (served by pixai_gallery.py's /loom route) is unchanged and remains the default/fallback.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
