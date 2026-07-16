@@ -72,12 +72,16 @@ git tags. Full prose notes for tagged versions live on
   carried three stale thresholds (marathon 1→100, triggered 0→5, read-the-manual 0→1); aligned to
   what the code enforces so the canonical roster stops disagreeing with behavior.
 
-### Known issues
-- **Trophy Hall reformat (rewards-under-grid layout, toast-styled cards, ladder depth-carousel) is
-  visually broken** — code is committed (`c877919`) and every automated check passed (474 tests,
-  `getComputedStyle` assertions on layout/carousel math), but the owner found it wrong on an actual
-  look at the rendered page. Not fixed yet — see `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` §2b for detail
-  and next steps. Do not treat this as done.
+### Fixed
+- **Trophy Hall reformat reverted (`0a8da3a`, reverts `c877919`)** — the rewards-under-grid layout,
+  toast-styled cards, and ladder depth-carousel landed visually wrong and are backed out; the Hall is
+  back to the pre-reformat rail-rewards/plain-grid layout. Clean revert (86 deletions / 6 insertions,
+  the exact inverse of the original diff) — every commit between the two touched only docs, so no
+  conflicts. 474 tests still pass. **This time actually confirmed with a real rendered screenshot**
+  (Summary + All tabs, rewards back in the rail, no carousel), not just computed-style assertions —
+  see `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` §2b. A ground-truth audit (10-agent read-only pass over the
+  whole repo) preceded this: full doc-vs-code reconciliation, a CLI command map, a PySide6 removal
+  recommendation, and a Loom consolidation verdict — see that section for the follow-up plan.
 
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 
