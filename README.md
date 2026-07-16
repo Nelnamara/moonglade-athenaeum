@@ -8,8 +8,7 @@
 
 ![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.8%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey)
 
-![Gallery hero](docs/img/hero.png)
-<sub>*The local web gallery — your entire PixAI history, full-resolution, searchable.*</sub>
+*The local web gallery — your entire PixAI history, full-resolution, searchable.*
 
 </div>
 
@@ -71,24 +70,19 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 | **Run & control** | Web **Control Panel**: one-click maintenance jobs with a real progress bar and a Stop button, scheduled auto-backups, and **server Stop/Restart from the browser** · double-click `Serve Gallery` launcher · **make it yours**: pick your header mark + its animation, and set the Desktop launcher icon to match |
 
 ### Collections & Select mode
-![Collections and select mode](docs/img/curation.png)
-<sub>*Toggle **Select**, drag across images to paint a selection, then **+ Add to Collection** — files never move, and it survives Organize.*</sub>
+*Toggle **Select**, drag across images to paint a selection, then **+ Add to Collection** — files never move, and it survives Organize.*
 
 ### Generate, and watch it appear
-![Generate](docs/img/generate.png)
-<sub>*Model/LoRA pickers, quality modes, cheaper priority by default. New images land in the same catalog you browse.*</sub>
+*Model/LoRA pickers, quality modes, cheaper priority by default. New images land in the same catalog you browse.*
 
 ### Collection Health
-![Collection Health](docs/img/health.png)
-<sub>*Storage, full-meta coverage, duplicates, images-by-month, top models/LoRAs/tags, prompt word-cloud.*</sub>
+*Storage, full-meta coverage, duplicates, images-by-month, top models/LoRAs/tags, prompt word-cloud.*
 
 ---
 
 ## 🖥️ The desktop app
 
 A PySide6 GUI (`pixai_gui.py`) wraps the whole workflow — Download, Generate, Organize, Convert, Utilities, and a one-click Gallery launcher — with live logs and a dark theme. Prefer the terminal? Every feature has a CLI flag. Want a double-click launcher? Use **`Moonglade Athenaeum.pyw`** (no console window).
-
-![GUI](docs/img/gui.png)
 
 ---
 
