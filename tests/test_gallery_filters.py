@@ -15,11 +15,11 @@ def db(tmp_path):
     p = tmp_path / "catalog.db"
     save_catalog(p, [
         _row(media_id="1", filename="a_1.png", prompt_preview="night elf druid",
-             created_at="2024-03-10T00:00:00", model_name="ModelA", task_id="task-1001"),
+             created_at="2024-03-10T00:00:00", model_name="ModelA", task_id="744376191043610001"),
         _row(media_id="2", filename="b_2.png", prompt_preview="nighttime city",
-             created_at="2025-07-01T00:00:00", model_name="ModelB", task_id="task-1002"),
+             created_at="2025-07-01T00:00:00", model_name="ModelB", task_id="744376191043610002"),
         _row(media_id="3", filename="c_3.png", prompt_preview="bright morning",
-             created_at="2026-01-05T00:00:00", model_name="ModelA", task_id="task-1003"),
+             created_at="2026-01-05T00:00:00", model_name="ModelA", task_id="744376191043610003"),
     ])
     return p
 
@@ -65,16 +65,22 @@ def test_multiword_no_match(db):
     assert total == 0
 
 
-def test_search_matches_task_id_substring(db):
-    rows, total = query_catalog(db, q="1002")
+def test_search_matches_long_task_id_exactly(db):
+    rows, total = query_catalog(db, q="744376191043610002")
     assert total == 1
     assert rows[0]["media_id"] == "2"
 
 
 def test_search_matches_media_id_exactly(db):
+    rows, total = query_catalog(db, q="12345678")
+    assert total == 0  # no fixture row has this id -- confirms it's an exact match, not substring
+
+
+def test_short_numeric_term_does_not_id_match(db):
+    # A short digit term (under the length gate) must NOT substring-match ids by chance --
+    # it should only ever search prompt text. None of the fixture prompts contain "3".
     rows, total = query_catalog(db, q="3")
-    assert total == 1
-    assert rows[0]["media_id"] == "3"
+    assert total == 0
 
 
 # ---- date range (YYYY-MM comparison) --------------------------------------
