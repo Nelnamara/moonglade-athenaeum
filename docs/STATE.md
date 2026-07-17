@@ -31,9 +31,9 @@ PixAI's API, and curates the archive. Two surfaces are current — the CLI
 legacy and folding into the web app. All work happens on the `loom-v2` branch; `master` has no
 commits that aren't already in `loom-v2`. Merging `loom-v2` → `master` with `--no-ff` is the
 single act that carries the Loom V2 set, the achievement system, `CHANGELOG.md` and `LICENSE`
-to master. The active thread is the Loom's V1 → V2 convergence: **V2 is the live storyboard
-surface**, and classic Loom retires once Export, batch generate and per-shot other-references
-land in it. The repo is public and has real external users.
+to master. **V2 is the live storyboard surface** and has full feature parity with classic Loom;
+whether to retire classic (delete its render tree and the `v2` toggle) is an open owner call —
+see *Open owner calls*. The repo is public and has real external users.
 
 **Numbers live in commands, not in this file:**
 
