@@ -724,6 +724,7 @@ ${"=".repeat(48)}
 .lv-side{flex:none;background:var(--surface0);display:flex;flex-direction:column;min-height:0;
   transition:width .18s ease;overflow-x:hidden;}
 .lv-side.left{width:280px;border-right:1px solid var(--surface1);}
+.lv-side.left.wide{width:560px;}
 .lv-side.right{width:320px;border-left:1px solid var(--surface1);}
 .lv-side.collapsed{width:52px;}
 .lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
@@ -835,9 +836,11 @@ ${"=".repeat(48)}
 .lv-density{margin-bottom:10px;}
 .lv-simplegrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px;}
 .lv-simplecard{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:6px;
-  text-align:center;cursor:pointer;}
-.lv-simplecard:hover{border-color:var(--accent);}
+  text-align:center;}
+.lv-simplecard:not(.nosel){cursor:pointer;}
+.lv-simplecard:not(.nosel):hover{border-color:var(--accent);}
 .lv-simplecard.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);}
+.lv-simplecard.nosel{opacity:.55;}
 .lv-simplecard img,.lv-simplecard .lv-castph{width:100%;aspect-ratio:1;border-radius:6px;object-fit:cover;margin-bottom:5px;display:block;}
 .lv-simplecard b{display:block;font-size:10.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lv-simplecard span{display:block;font-size:9px;}
@@ -1213,7 +1216,8 @@ ${"=".repeat(48)}
         "div",
         {
           key: as.id,
-          className: "lv-simplecard " + (inShot ? "on" : ""),
+          className: "lv-simplecard " + (inShot ? "on " : "") + (!sel ? "nosel" : ""),
+          title: sel ? `Toggle into ${sel.code}` : "Select a shot on the board to toggle its cast",
           onClick: () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...c.cast || [], as.id] }))
         },
         src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : /* @__PURE__ */ React.createElement("span", { className: "lv-castph" }),
@@ -1251,7 +1255,7 @@ ${"=".repeat(48)}
       },
       "\u21E9 drag an image here to add it as a cast reference"
     ));
-    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: onClose }, "\u2190 Back to classic Loom")), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
+    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: onClose }, "\u2190 Back to classic Loom")), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
       setLeftTab("cast");
       setLeftCollapsed(false);
     } }, "\u{1F464}"), /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "footage" ? " on" : ""), title: "Footage", onClick: () => {
