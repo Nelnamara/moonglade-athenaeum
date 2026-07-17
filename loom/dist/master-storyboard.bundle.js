@@ -1088,6 +1088,7 @@ ${"=".repeat(48)}
     const timelineDrawer = /* @__PURE__ */ React.createElement("div", { className: "lv-tldrawer" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlcontent", style: { height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" } }, showTlPreview && /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewzone" }, sel && sel.c.resultMid ? /* @__PURE__ */ React.createElement(
       ShotPreview,
       {
+        key: sel.c.id,
         mid: sel.c.resultMid,
         trimIn: sel.c.trimIn,
         trimOut: sel.c.trimOut,
@@ -1623,7 +1624,8 @@ Your currently-open board is left untouched.`)) return;
       projMenu,
       setProjMenu,
       projectApi,
-      importJSON
+      importJSON,
+      activeId
     };
   }
   function useShotMutations(project, setProject) {
@@ -1931,7 +1933,9 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
     };
     return {
       genState,
+      setGenState,
       genImgState,
+      setGenImgState,
       imgModel,
       setImgModel,
       genEditState,
@@ -2020,7 +2024,8 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       projMenu,
       setProjMenu,
       projectApi,
-      importJSON
+      importJSON,
+      activeId
     } = useProjectStore(setSelShot);
     const {
       open,
@@ -2073,7 +2078,9 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
     }, [pickCb]);
     const {
       genState,
+      setGenState,
       genImgState,
+      setGenImgState,
       imgModel,
       setImgModel,
       genEditState,
@@ -2090,6 +2097,18 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       routeGen,
       batchGenerate
     } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick });
+    useEffect(() => {
+      const clearDraft = (s) => {
+        if (!("__draft__" in s)) return s;
+        const n = { ...s };
+        delete n.__draft__;
+        return n;
+      };
+      setGenState(clearDraft);
+      setGenImgState(clearDraft);
+      setGenEditState(clearDraft);
+      setGenRefState(clearDraft);
+    }, [activeId]);
     const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence, exportAll, exportJSON } = useExportPipeline(project, thumbs);
     const importCollection = (items, cname) => {
       setImportOpen(false);
