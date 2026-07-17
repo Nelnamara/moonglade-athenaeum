@@ -209,6 +209,32 @@ git tags. Full prose notes for tagged versions live on
   suite unaffected (505 passing, JS-only change). The item that originally gated classic Loom's
   retirement has now landed in V2 — whether to actually retire classic Loom, or promote the two
   remaining smaller gaps to retirement-blockers first, is an open owner call.
+- **The Loom V2 shell surfaces Export shot-list, Backup, Restore, and Import Collection.** Item 2
+  of the punch list the owner promoted to retirement-blockers — `exportAll`/`exportJSON`
+  (`useExportPipeline`) and `importJSON` (`useProjectStore`) are now threaded into `LoomV2`'s
+  props, with three new buttons in V2's top strip ("Shot list (.txt)", "Backup (.json)", and a
+  file-input-in-a-label "Restore") plus an "⇄ Import collection" button beside V2's existing
+  "+ add from gallery" in the Cast panel (opens the same `ImportCollection` modal classic uses).
+  Caught and fixed before shipping: `.lv-top button{...}`'s CSS only targeted `<button>`, so the
+  new `<label>`-wrapped Restore control would have rendered unstyled — broadened to
+  `.lv-top button,.lv-top label`. `ImportCollection`'s `.sb-pick-ov` overlay shares V2's overlay
+  z-index (400, not a clean 500-over-400 tier like Export's `.sb-seq`) and relies on DOM paint
+  order instead — flagged for a live check, not assumed safe. Verified via `npm run build` (clean
+  esbuild bundle) and `node --test` (66/66); full Python suite unaffected (JS-only change).
+- **Deep Focus gains audio cue, notes, the discreet toggle, manual status-cycle, and "Copy
+  shot."** Item 1 of the same punch list — the five smaller classic-only fields all live on the
+  card object and now render inside Deep Focus, ported verbatim from classic's `CardEditor`/
+  `CardView` markup: a Music/audio-cue field with the `AUDIO_PALETTE` quick-pick chips, a Notes
+  textarea, a blur-preview checkbox, the `.sb-tick` status button (todo → wip → done) in the
+  header, and a "Copy shot" button wired to the existing `copyShot` (now threaded into `LoomV2`'s
+  props; Deep Focus's own `live` var already matches the `{c,a,ai,ci,code}` shape it expects, so
+  no adapter was needed). Deep Focus is an IIFE inside a conditional render, not a component, so
+  the new `palFor`-equivalent local state (`dfPalFor`) had to be lifted to `LoomV2`'s own top
+  level rather than declared with `useState` inside it — the same rule that already governs
+  `deepFocus`/`setDeepFocus` itself. Verified via `npm run build` (clean esbuild bundle) and
+  `node --test` (66/66); full Python suite green (509 passing). **Both items the owner promoted
+  to retirement-blockers on 2026-07-17 are now landed — V2 has full feature parity with classic
+  Loom. Retiring classic Loom itself is a separate step, open for the owner to call.**
 
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 
