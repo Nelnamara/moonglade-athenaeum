@@ -987,6 +987,13 @@ ${"=".repeat(48)}
     const [draftAttachedInfo, setDraftAttachedInfo] = useState(null);
     const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
     useEffect(() => {
+      const prevOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prevOverflow;
+      };
+    }, []);
+    useEffect(() => {
       fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {
       });
     }, []);
