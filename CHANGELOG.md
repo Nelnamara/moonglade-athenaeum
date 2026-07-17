@@ -167,6 +167,21 @@ git tags. Full prose notes for tagged versions live on
   document) kept a live scrollbar; a wheel scroll not captured by an internal panel bubbled
   up and scrolled that instead. Body scroll is now locked while the V2 overlay is open.
 
+### Fixed — 2026-07-17
+- **Loom export no longer silently discards audio.** `/api/loom/export`'s ffmpeg concat hardcoded
+  `a=0` (video-only) since the export feature shipped — a shot generated with "Generate audio" on
+  would have that audio thrown away the moment it was stitched into a multi-shot export. New
+  `probe_has_audio`/`probe_duration` (ffprobe-backed, fail-soft) detect real audio per segment;
+  segments with audio trim+concat it, segments without get matching-duration synthesized silence
+  (`anullsrc`) so the track can't desync across a boundary; both `[vout]`/`[aout]` are mapped with
+  an AAC codec. Real-ffmpeg verified (not just mocked): a genuine two-clip export (one with audio,
+  one silent) produced an mp4 with both a video and an audio stream, each exactly 3.000000s, no
+  drift. A genuine ffmpeg-pad-ordering bug (concat needs `[v0][a0][v1][a1]...` interleaved per
+  segment, not grouped by type) survived the mocked test suite entirely and was only caught by
+  actually running ffmpeg — a dedicated assertion now pins the correct interleaving so it can't
+  silently return. Scoped as a correctness fix only; the tabled audio-lane/multi-track-timeline
+  feature remains explicitly out of scope (a scene-builder, not an NLE).
+
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 
 _On `loom-v2`, past the `v1.10.0` tag. The 57-achievement system plus its flair layer (toast frames,
