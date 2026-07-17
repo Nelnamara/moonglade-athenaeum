@@ -107,12 +107,20 @@ git tags. Full prose notes for tagged versions live on
   Scrub/fast-forward/rewind/split/crop remain a modest follow-on set, not yet built.
 - **Gallery search now matches task id / media id**, not just prompt text — paste an id
   from PixAI's site (or `--dump-params` output) to jump straight to that generation.
+- **Play sequence wired into V2** — the first item off the V1→V2 convergence punch list.
+  Reuses the exact same `playSequence()`/`SequencePlayer` classic Loom already has (no new
+  logic); a "▶▶ Play" button in V2's top banner, disabled until a shot has a result.
 
 ### Fixed — 2026-07-16
 - **Health page vs. Panel page image counts disagreed** (43,829 vs. 31,064) — the Health
   page's disk scan counted `_deleted/` (recoverable trash from anything ever deleted through
   the gallery UI) and `branding/` (UI art assets) as "images on disk"; both are now excluded,
   matching the Panel's already-correct catalog-row count.
+- **A real, pre-existing bug: the sequence player's close/next silently did nothing once
+  playing.** Found live while wiring Play sequence into V2 (above) — `useExportPipeline`'s
+  `onClose` called `setSeq` directly, but the hook never actually exposed `setSeq` (only
+  `seq`), so every close click threw a silent `ReferenceError`. Predates this session
+  entirely. Fixed by exposing a proper `closeSequence()` closer instead.
 - **Three rounds of Loom V2 shell bugs**, found and fixed same day as the shell shipped:
   side-panel scroll clipping + Detailed cast rows made genuinely editable again; Detailed
   Cast & Assets widened 2× + Simple-density cards no longer look clickable when nothing's
