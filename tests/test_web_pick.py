@@ -4,6 +4,7 @@ paging + full prompts for the copy-to-clipboard feature) and /api/upload (local 
 monkeypatched so nothing touches the network."""
 import io
 import os
+import re
 
 import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
@@ -730,14 +731,48 @@ def test_lightbox_video_uses_load_not_premature_seek(tmp_path):
     assert "vid.error" in html                          # surfaces the MediaError code on failure
 
 
+# Cache generations that shipped a poisoning bug. A client holding one of these must be
+# force-healed by a bump, so the live cache name may never be any of them again:
+#   v1 -- froze 404s in (blank video tile until a hard-refresh)
+#   v2 -- cache-first on /thumbs/, which pinned the stale poster --rebuild-thumbs repairs
+_POISONED_CACHES = ("pixai-img-v1", "pixai-img-v2")
+
+
 def test_service_worker_never_caches_misses(tmp_path):
     """The SW must NOT freeze a 404 (a thumbnail that didn't exist yet) into its cache --
     that was the 'blank video tile until a hard-refresh' bug. It must only cache OK
-    responses, use a bumped cache name, and delete the old (poisoned) cache on activate
-    so existing clients self-heal without Ctrl+Shift+R."""
+    responses, use a cache name bumped past every known-poisoned generation, and delete the
+    old cache on activate so existing clients self-heal without Ctrl+Shift+R."""
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     sw = cli.get("/sw.js").get_data(as_text=True)
     assert "resp.ok" in sw and "c.put" in sw                # caches only successful fetches
-    assert "pixai-img-v2" in sw and "pixai-img-v1" not in sw  # bumped cache name
     assert "caches.delete" in sw                            # purges the poisoned old cache
+    # Assert the invariant, not a literal: pinning the exact name here meant every
+    # legitimate bump broke this test, which is how it came to assert a stale version.
+    m = re.search(r"const C='(pixai-img-v\d+)'", sw)
+    assert m, "SW must declare a versioned cache name"
+    assert m.group(1) not in _POISONED_CACHES, (
+        "cache name {} shipped a poisoning bug -- bump it so held clients self-heal"
+        .format(m.group(1)))
+
+
+def test_service_worker_revalidates_thumbnails(tmp_path):
+    """Thumbnails are rewritten IN PLACE at the same /thumbs/<media_id>.jpg URL by
+    --rebuild-thumbs, so they must NOT be served cache-first: this worker never consults
+    Cache-Control, so a cache-first hit pins the broken poster the rebuild was meant to
+    repair -- for the life of the cache. Thumbs get stale-while-revalidate (paint from
+    cache, refresh behind it); only write-once originals stay cache-first."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    sw = cli.get("/sw.js").get_data(as_text=True)
+    # /thumbs/ is handled on its own branch, separate from the originals' cache-first one
+    assert "isThumb" in sw and "isOrig" in sw
+    # the thumb branch always fires a fetch -- it does not short-circuit on a cache hit
+    thumb_branch = sw.split("if(isOrig){")[1].split("}")[-1]
+    assert "r||n" in sw, "thumbs must fall back to the network, not stop at a cache hit"
+    assert "c.put" in thumb_branch or "c.put" in sw
+    # and the server must stop claiming thumbnails are immutable
+    hdr = cli.get("/thumbs/1.jpg").headers.get("Cache-Control", "")
+    assert "immutable" not in hdr, (
+        "thumbnails are rewritten in place; 'immutable' pins the stale one. Got: " + hdr)
