@@ -156,8 +156,9 @@ land in it. The repo is public and has real external users.
 
 ## In flight
 
-- **The Loom's V1 → V2 convergence is the active thread.** The gap list is in *Next* below —
-  it is the only copy; do not restate it in another file.
+- **The Loom's V1 → V2 feature convergence is complete** (2026-07-17) — V2 has everything
+  classic has. Classic Loom's actual retirement (deleting its render tree and the `v2` toggle)
+  is the remaining step; see *Open owner calls*.
 - Gated on nothing, ready whenever there's capacity: further V2 shell work, the two-tier
   project export, the Loom visual-refinement pass, and the video-control base set. Render-tree
   unification is parked (see *Later epics*) and is orthogonal to all four.
@@ -168,13 +169,13 @@ land in it. The repo is public and has real external users.
 
 ### The Loom — V1 → V2 gap (the only copy of this list)
 
-The one item that originally gated classic Loom's retirement (per-shot "other references") has
-landed in V2. Whether classic Loom is actually ready to retire, or whether the two remaining
-gaps below should be promoted to retirement-blockers too, is an owner call — not decided here.
-
-1. Smaller classic-only gaps needing V2 homes: **Audio cue**, **Notes**, the **Discreet/blur
-   toggle**, **manual status-cycle**, **"Copy shot."**
-2. Surface **Import Collection / Backup / Restore / Export-shot-list** from inside V2.
+**Empty.** Both retirement-blocking items the owner set on 2026-07-17 have landed in V2: Deep
+Focus now carries audio cue, notes, the discreet/blur toggle, manual status-cycle, and "Copy
+shot"; and V2's top strip/Cast panel now surface Export shot-list, Backup, Restore, and Import
+Collection. `ImportCollection`'s `.sb-pick-ov` overlay still shares a z-index with `.lv-overlay`
+(400, not a clean 500-over-400 hierarchy) rather than a bug — it relies on DOM paint order, which
+holds today but is worth a live look next time that stacking area changes. Classic Loom's
+retirement itself is next — see *Open owner calls*.
 
 ### The Loom — other
 
@@ -259,6 +260,11 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 
 ## Open owner calls
 
+- **Retire classic Loom?** V2 has reached full feature parity with classic (see *The Loom —
+  V1 → V2 gap*, now empty) — the condition the owner set for retirement is met. Not yet acted
+  on: removing classic's render tree, the `v2` toggle, and the classic-only code path is a
+  distinct, larger step from the parity work itself, and needs an explicit owner go before
+  any of it is deleted.
 - **Trophy Hall redesign** is blocked on the owner's own Figma frame. Ask for the frame URL; do
   not re-suggest the screenshot-decomposition checklist. The Figma plugin is live and
   authenticated. (`docs/DESIGN_WORKFLOW.md`.)

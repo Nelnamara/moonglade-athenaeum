@@ -390,7 +390,7 @@ const V2_STYLES = `
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
-.lv-top button{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+.lv-top button,.lv-top label{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top .lv-close{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
@@ -643,11 +643,16 @@ function ProjectSwitcher({ api }) {
   );
 }
 
-function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef }) {
+function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, importJSON, setImportOpen, copyShot }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
   const [deepFocus, setDeepFocus] = useState(null);   // entry {a,c,ai,ci,code} double-clicked on the board, or null
+  // Deep Focus's own body is an IIFE inside a conditional render (below), not a component or
+  // hook -- calling useState there would violate the rules of hooks (conditional hook call).
+  // This state belongs to Deep Focus but has to live up here, at LoomV2's real top level, same
+  // as deepFocus itself; the IIFE below only reads/writes it via closure.
+  const [dfPalFor, setDfPalFor] = useState(null);     // which term-palette is open in Deep Focus, or null
   const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage'
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
@@ -1073,6 +1078,8 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
         const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
         return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
       }), "image", true)}>+ add from gallery</button>
+      <button className="lv-addcast" onClick={() => setImportOpen(true)}
+        title="Pull a whole gallery collection in as reusable @image references">&#8623; Import collection</button>
     </>
   );
   const finished = entries.filter((e) => e.c.resultMid);
@@ -1125,6 +1132,10 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
           title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
           title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Export</button>
+        <button onClick={exportAll} title="Export a plain-text shot list">Shot list (.txt)</button>
+        <button onClick={exportJSON} title="Back up this project as JSON">Backup (.json)</button>
+        <label style={{ cursor: "pointer" }} title="Restore a project from a backup JSON file">Restore
+          <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => importJSON(e.target.files[0])} /></label>
         <button className="lv-close" onClick={onClose}>← Back to classic Loom</button>
       </div>
       {timelineDrawer}
@@ -1177,11 +1188,14 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
         if (!live) { setDeepFocus(null); return null; }
         const dfPatch = (fn) => setCard(live.a.id, live.c.id, fn);
         const dfPatchFrame = (key, fp) => dfPatch((cc) => ({ ...cc, [key]: { ...cc[key], ...fp } }));
+        const dfAppend = (field, val) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? `${cc[field]}, ${val}` : val }));
         const c = live.c;
         return (
           <div className="lv-df-veil" onClick={(ev) => { if (ev.target === ev.currentTarget) setDeepFocus(null); }}>
             <div className="lv-df">
               <div className="lv-df-head">
+                <button className={"sb-tick " + c.status} title={`Status: ${c.status} (click to cycle)`}
+                  onClick={() => dfPatch((cc) => ({ ...cc, status: cc.status === "todo" ? "wip" : cc.status === "wip" ? "done" : "todo" }))}>✓</button>
                 <span className="lv-df-code">{deepFocus.code}</span>
                 <input className="lv-df-title" value={c.title || ""} placeholder="untitled"
                   onChange={(ev) => dfPatch((cc) => ({ ...cc, title: ev.target.value }))} />
@@ -1194,6 +1208,9 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
                 <div className="lv-field narrow"><label className="lv-lab">Duration (s)</label>
                   <input className="lv-in" type="number" min="1" value={c.duration}
                     onChange={(ev) => dfPatch((cc) => ({ ...cc, duration: Number(ev.target.value) }))} /></div>
+                <div className="lv-field narrow"><label className="lv-lab">Discreet</label>
+                  <label className="sb-toggle" title="Blur this shot's frames/refs on the board">
+                    <input type="checkbox" checked={c.discreet} onChange={(ev) => dfPatch((cc) => ({ ...cc, discreet: ev.target.checked }))} />blur previews</label></div>
               </div>
               <div className="lv-df-frames">
                 <FrameSlot which="open" frame={c.openFrame} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
@@ -1231,6 +1248,14 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
                   <button className="sb-btn sm ghost" onClick={() => addRef(live.a.id, c, "video")}>+ Video</button>
                   <button className="sb-btn sm ghost" onClick={() => addRef(live.a.id, c, "audio")}>+ Audio</button>
                 </div>
+              </div>
+              <div className="sb-field"><label className="sb-lab">Music / audio cue <button className="sb-ico" style={{ fontSize: 11 }} onClick={() => setDfPalFor(dfPalFor === "audio" ? null : "audio")}>＋terms</button></label>
+                <input className="sb-in" value={c.audioCue} onChange={(ev) => dfPatch((cc) => ({ ...cc, audioCue: ev.target.value }))} placeholder="track, beat sync, room tone…" />
+                {dfPalFor === "audio" && <div className="sb-pal">{AUDIO_PALETTE.map((t) => <button key={t} className="sb-pchip sb-mono" onClick={() => dfAppend("audioCue", t)}>{t}</button>)}</div>}</div>
+              <div className="sb-field"><label className="sb-lab">Notes</label>
+                <textarea className="sb-ta" value={c.notes} onChange={(ev) => dfPatch((cc) => ({ ...cc, notes: ev.target.value }))} placeholder="blocking, continuity reminders…" /></div>
+              <div className="sb-toolbar">
+                <button className="sb-btn amber sm" onClick={() => copyShot(live)}>Copy shot</button>
               </div>
               <button className="lv-go" onClick={() => { setSelShot(c.id); setDeepFocus(null); }}>Select in Generate &rarr;</button>
             </div>
@@ -1783,7 +1808,9 @@ export default function App() {
         genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
         projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
         batching={batching} batchGenerate={batchGenerate}
-        addRef={addRef} setRef={setRef} delRef={delRef} /></V2Boundary>}
+        addRef={addRef} setRef={setRef} delRef={delRef}
+        exportAll={exportAll} exportJSON={exportJSON} importJSON={importJSON}
+        setImportOpen={setImportOpen} copyShot={copyShot} /></V2Boundary>}
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
