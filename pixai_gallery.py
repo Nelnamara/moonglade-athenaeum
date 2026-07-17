@@ -384,12 +384,16 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         clauses.append("LOWER(COALESCE(loras,'')) LIKE ?")
         params.append("%" + lora.strip().lower() + "%")
     if q:
-        # Whitespace-separated terms are ANDed; each may use * / ? wildcards.
+        # Whitespace-separated terms are ANDed; each may use * / ? wildcards. Matches
+        # prompt text OR a task/media id substring, so pasting an id from PixAI's site
+        # (or from --dump-params output) finds the row without needing prompt words.
         for term in q.split():
             clauses.append("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
-                           "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')")
+                           "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\' "
+                           "OR LOWER(COALESCE(task_id,'')) LIKE ? ESCAPE '\\' "
+                           "OR LOWER(COALESCE(media_id,'')) LIKE ? ESCAPE '\\')")
             like = _like_pattern(term)
-            params += [like, like]
+            params += [like, like, like, like]
     if model:
         clauses.append("model_name = ?")
         params.append(model)
@@ -1955,6 +1959,8 @@ def collection_health(out_dir, db_path):
     from collections import defaultdict, Counter
     gallery_dir = out_dir / "gallery"
     quarantine_dir = out_dir / "_duplicates"
+    deleted_dir = out_dir / DELETED_DIRNAME
+    branding_dir = out_dir / "branding"
 
     def _under(p, parent):
         try:
@@ -1978,7 +1984,8 @@ def collection_health(out_dir, db_path):
         is_img = ext in _IMAGE_EXTS
         if (not is_img and ext not in _video_exts) or not p.is_file():
             continue
-        if p.name.endswith(".part") or _under(p, gallery_dir) or _under(p, quarantine_dir):
+        if (p.name.endswith(".part") or _under(p, gallery_dir) or _under(p, quarantine_dir)
+                or _under(p, deleted_dir) or _under(p, branding_dir)):
             continue
         rel = p.relative_to(out_dir)
         on_disk_rels.add(str(rel).replace("\\", "/"))
@@ -3452,9 +3459,9 @@ document.addEventListener('DOMContentLoaded', function() {
 {% set adv_active = model_filter or lora_filter or date_from or date_to or batch_filter or rating_min or art_tag or source_filter or published_only %}
 <div class="filters">
   <div class="f-grow">
-    <label>Search prompt</label><br>
-    <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard…"
-           title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf">
+    <label>Search prompt / task or media id</label><br>
+    <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard, or an id…"
+           title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf. Also matches task id / media id.">
   </div>
   <div>
     <label>Media</label><br>
