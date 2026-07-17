@@ -393,6 +393,8 @@ const V2_STYLES = `
 .lv-top button{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top .lv-close{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
+.lv-top button:disabled{opacity:.5;cursor:default;}
+.lv-top button:disabled:hover{border-color:var(--surface1);}
 /* Fixed 4-region shell: top Timeline drawer (below), then a row of left card /
    board column / right drawer -- nothing free-floating, nothing draggable. */
 .lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;}
@@ -638,7 +640,7 @@ function ProjectSwitcher({ api }) {
   );
 }
 
-function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi }) {
+function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -1106,6 +1108,8 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
         <span className="lv-eyebrow">The Loom · V2</span>
         <span className="lv-note">Click a shot → it binds to Generate.</span>
         <ProjectSwitcher api={projectApi} />
+        <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
+          title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
         <button className="lv-close" onClick={onClose}>← Back to classic Loom</button>
       </div>
       {timelineDrawer}
@@ -1608,8 +1612,14 @@ function useExportPipeline(project, thumbs) {
   };
   const cancelExport = () => { fetch("/api/loom/export-cancel", { method: "POST" }).catch(() => {}); };
   const closeExport = () => { if (exportPoll.current) clearTimeout(exportPoll.current); setExp(null); };
+  // The genuinely-confirmed root cause of "play works, but close/next don't once it's
+  // playing": the sequence player's onClose called setSeq directly, but setSeq was never
+  // exposed by this hook (only seq was) -- every close/next-past-the-end click threw
+  // ReferenceError: setSeq is not defined, silently (only visible in the console), which
+  // is exactly why it looked like the buttons just didn't respond.
+  const closeSequence = () => setSeq(null);
 
-  return { seq, exp, playSequence, exportCut, cancelExport, closeExport, exportAll, exportJSON };
+  return { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence, exportAll, exportJSON };
 }
 
 export default function App() {
@@ -1650,7 +1660,7 @@ export default function App() {
     generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate }
     = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick });
 
-  const { seq, exp, playSequence, exportCut, cancelExport, closeExport, exportAll, exportJSON }
+  const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence, exportAll, exportJSON }
     = useExportPipeline(project, thumbs);
 
   // Import a whole gallery collection as reusable @image references (media_id kept
@@ -1688,8 +1698,8 @@ export default function App() {
         moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
         genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg}
         genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
-        projectApi={projectApi} /></V2Boundary>}
-      {seq && <SequencePlayer clips={seq} onClose={() => setSeq(null)} />}
+        projectApi={projectApi} playSequence={playSequence} /></V2Boundary>}
+      {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
           <div className="sb-export-box">
