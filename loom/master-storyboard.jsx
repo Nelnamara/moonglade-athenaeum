@@ -663,6 +663,16 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
   const [draftTarget, setDraftTarget] = useState("");              // shot id chosen to route/attach a draft result into
   const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
   const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
+  // The overlay is position:fixed, so it never visibly moves -- but classic Loom's own
+  // page underneath is a normal tall document, and without this, its body/html scrollbar
+  // stays live. A wheel scroll that isn't captured by one of the internal panels (already
+  // at its own scroll limit, or over a non-scrolling area) bubbles up and scrolls THAT,
+  // which reads as the whole thing randomly jumping since nothing visible moved to explain it.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, []);
   useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
   useEffect(() => {
     if (!deepFocus) return;
