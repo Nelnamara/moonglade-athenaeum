@@ -1528,6 +1528,7 @@ ${"=".repeat(48)}
       }
       const tgt = list.find((x) => x.id === id);
       if (!window.confirm(`Delete "${tgt && tgt.name || "this storyboard"}"? This can't be undone.`)) return;
+      clearTimeout(saveTimer.current);
       if (id === activeId) {
         const next = list.find((x) => x.id !== id);
         let p = null;
@@ -2394,6 +2395,11 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
     const startDrag = (which) => (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (playing) {
+        const v = vidRef.current;
+        if (v) v.pause();
+        setPlaying(false);
+      }
       dragRef.current = which;
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
