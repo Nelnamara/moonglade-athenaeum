@@ -384,16 +384,22 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         clauses.append("LOWER(COALESCE(loras,'')) LIKE ?")
         params.append("%" + lora.strip().lower() + "%")
     if q:
-        # Whitespace-separated terms are ANDed; each may use * / ? wildcards. Matches
-        # prompt text OR a task/media id substring, so pasting an id from PixAI's site
-        # (or from --dump-params output) finds the row without needing prompt words.
+        # Whitespace-separated terms are ANDed; each may use * / ? wildcards over prompt
+        # text. A term that looks like a WHOLE task/media id (all digits, long enough
+        # that a short numeric prompt word can't collide -- PixAI ids run ~18-19 digits)
+        # also matches that id EXACTLY, so pasting an id from PixAI's site (or
+        # --dump-params output) finds the row. Short numeric terms stay prompt-only:
+        # a substring match on ids made a term like "88" match ~14% of the whole
+        # catalog by id chance alone, swamping any real prompt hits (found 2026-07-16).
         for term in q.split():
-            clauses.append("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
-                           "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\' "
-                           "OR LOWER(COALESCE(task_id,'')) LIKE ? ESCAPE '\\' "
-                           "OR LOWER(COALESCE(media_id,'')) LIKE ? ESCAPE '\\')")
-            like = _like_pattern(term)
-            params += [like, like, like, like]
+            if term.isdigit() and len(term) >= 8:
+                clauses.append("(task_id = ? OR media_id = ?)")
+                params += [term, term]
+            else:
+                clauses.append("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
+                               "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')")
+                like = _like_pattern(term)
+                params += [like, like]
     if model:
         clauses.append("model_name = ?")
         params.append(model)
