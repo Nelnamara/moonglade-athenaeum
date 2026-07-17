@@ -107,5 +107,5 @@ pip install requests pillow PySide6 flask truststore
 ---
 
 <div align="center">
-<sub>Unofficial · personal-use · MIT-spirited. Made for Nelnamara's archive, shared in case it helps yours.</sub>
+<sub>Unofficial · personal-use · <a href="LICENSE">MIT licensed</a>. Made for Nelnamara's archive, shared in case it helps yours.</sub>
 </div>
