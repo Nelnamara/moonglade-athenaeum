@@ -175,6 +175,11 @@ data-model divergence.
   exists yet. Design is locked (see *Locked design*).
 - **`ShotPreview` base control set:** fast-forward, rewind, split (cut a clip into two), crop.
   Play/pause and hover-scrub already ship. Explicitly not a full NLE.
+- **Export carries real audio.** Segments with a detected audio stream (`probe_has_audio`) trim
+  and concat it; segments without one get matching-duration synthesized silence (`anullsrc`) so
+  the track can't desync across a boundary. `ffmpeg`'s `concat` filter requires its input pads
+  interleaved per segment (`[v0][a0][v1][a1]...`), not grouped by stream type — a real ffmpeg
+  constraint, not a style choice. A multi-track audio lane remains out of scope (see below).
 - **Visual-refinement pass.** The skin system already reaches the Loom, so what's left is
   polish against a real design pass, not wiring.
 - **Opt-in larger text/button scale** covering *both* the V2 shell's side panels and the
@@ -308,9 +313,6 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 
 ## Known defects
 
-- **The Loom's export silently discards audio.** `/api/loom/export`'s ffmpeg concat hardcodes
-  `a=0`. A generation made with the "Generate audio" toggle on has that audio thrown away the
-  moment it is stitched into a multi-shot export.
 - **No UI for removing an image from a collection.** The `/collection-remove` POST route exists
   with zero callers anywhere in the codebase. A real gap, not a design choice.
 - **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not roam between

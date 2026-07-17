@@ -566,28 +566,6 @@ date or superseded elsewhere in this same doc. Two genuinely dropped:
    lane as a roadmap idea without anyone noticing the export path already drops audio outright.
    A generation with the "Generate audio" toggle on would have that audio silently thrown away
    the moment it's stitched into a multi-shot export.
-   **✅ FIXED + REAL-FFMPEG VERIFIED (2026-07-17) — scoped as a correctness fix, NOT the tabled
-   audio-lane/multi-track-timeline feature** (owner reconfirmed 2026-07-17: multi-track/audio-lane
-   stays explicitly out of scope per line 140 above; this was purely "don't throw away audio that
-   already exists on a rendered clip"). `probe_has_audio`/`probe_duration` (new, `pixai_gallery.py`,
-   ffprobe-backed, fail-soft) detect real audio per segment; real audio trims+concats, segments with
-   none get matching-duration synthesized silence (`anullsrc`, one shared input reused across every
-   silent segment) so the track never desyncs across a boundary; both `[vout]`/`[aout]` are mapped
-   with an AAC codec, replacing the old video-only, `a=0`-hardcoded output.
-   **A real bug survived the mocked test suite and was only caught by actually running ffmpeg:**
-   ffmpeg's `concat` filter requires input pads interleaved PER SEGMENT (`[v0][a0][v1][a1]`), not
-   grouped by stream type (`[v0][v1][a0][a1]`) — the first implementation built the latter, which
-   passed every mocked assertion (all of which checked substrings like `"a=1" in fc`, blind to pad
-   *order*) but fails for real with `Media type mismatch ... audio ... video`. Caught by building two
-   real fixture clips (one with audio, one silent) via `ffmpeg -f lavfi`, driving the actual Flask
-   route with NO subprocess/shutil mocking, and ffprobing the real output — which is what surfaced
-   the ordering bug the mocks couldn't see. Fixed; the real run now produces a real mp4 with BOTH a
-   video and an audio stream, each exactly matching duration (3.000000s for two 1.5s trims), verified
-   via `ffprobe`. A dedicated mocked-test assertion now pins the exact interleaved substring
-   (`"[v0][a0][v1][a1]concat=" in fc`) so this exact regression can't silently return.
-   Known, accepted edge case (not fixed by this pass): if a real clip's OWN audio track is shorter
-   than its video track (a PixAI-generation-level property), that one clip may drift locally — out
-   of scope for a scene-builder that hands stitched output to a real editor for post.
 2. **File logging** — `CLAUDE.md` has called this "a separate, still-open discussion" since the
    `-v/--verbose` feature shipped (~2026-06-22) and it has never entered any active tracker
    (not in `REFINEMENTS.md`'s owner list, not in `ROADMAP.md`'s epics) — a loose thread, not a
