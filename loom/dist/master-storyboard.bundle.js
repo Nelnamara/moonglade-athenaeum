@@ -1697,9 +1697,13 @@ Your currently-open board is left untouched.`)) return;
       }
       if (!opts.skipConfirm) {
         const pr = await priceShot(entry);
-        if (pr && !pr.free && pr.cost != null && !window.confirm(`No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.
+        if (pr && !pr.free && pr.cost != null) {
+          if (!window.confirm(`No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.
 
 Generate anyway?`)) return;
+        } else if (!pr || !pr.free) {
+          if (!window.confirm("Couldn't verify this shot's cost or free-card coverage \u2014 it may spend credits.\n\nGenerate anyway?")) return;
+        }
       }
       setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
       setCardStatus(c.id, { status: "wip" });
@@ -1886,18 +1890,19 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       if (!todo.length) return;
       setBatching(true);
       const prices = await Promise.all(todo.map((e) => priceShot(e)));
-      let free = 0, paid = 0, credits = 0;
+      let free = 0, paid = 0, credits = 0, unknown = 0;
       prices.forEach((pr) => {
         if (pr && pr.free) free++;
-        else {
+        else if (pr && pr.cost != null) {
           paid++;
-          if (pr && pr.cost != null) credits += pr.cost;
-        }
+          credits += pr.cost;
+        } else unknown++;
       });
       const msg = `Generate ${todo.length} shot(s)?
 
 \u{1F3AB} ${free} covered by a free card
-\u2248 ${paid} will spend credits \u2014 about ${credits.toLocaleString()} total.`;
+\u2248 ${paid} will spend credits \u2014 about ${credits.toLocaleString()} total` + (unknown ? `
+\u26A0 ${unknown} shot(s)' cost couldn't be verified \u2014 they may also spend credits.` : ".");
       if (!window.confirm(msg)) {
         setBatching(false);
         return;

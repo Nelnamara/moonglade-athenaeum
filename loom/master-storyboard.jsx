@@ -1422,10 +1422,17 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     if (!p.hasInput) {
       setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } })); return; }
     // GUARDRAIL: never spend credits silently. Check cost + free-card, confirm any credit spend.
+    // Must fail CLOSED: priceShot swallows its own errors and returns null, and the server's
+    // own /api/price returns HTTP 200 with cost:null on any exception -- either one used to
+    // slip straight through the confirm below (every condition short-circuited on cost==null),
+    // submitting a paid generation with zero confirmation. A verify failure now still asks.
     if (!opts.skipConfirm) {
       const pr = await priceShot(entry);
-      if (pr && !pr.free && pr.cost != null &&
-          !window.confirm(`No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.\n\nGenerate anyway?`)) return;
+      if (pr && !pr.free && pr.cost != null) {
+        if (!window.confirm(`No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.\n\nGenerate anyway?`)) return;
+      } else if (!pr || !pr.free) {
+        if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return;
+      }
     }
     setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     setCardStatus(c.id, { status: "wip" });
@@ -1564,11 +1571,19 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     // Price every shot FIRST so the confirm shows real cost + card coverage — no silent spend.
     setBatching(true);
     const prices = await Promise.all(todo.map((e) => priceShot(e)));
-    let free = 0, paid = 0, credits = 0;
-    prices.forEach((pr) => { if (pr && pr.free) free++; else { paid++; if (pr && pr.cost != null) credits += pr.cost; } });
+    // A failed price check (pr null, or cost null despite not being free) must not silently
+    // count as "0 credits" in the total shown below -- same fail-closed fix as generateShot's
+    // own guardrail, just for the batch total instead of a single-shot confirm.
+    let free = 0, paid = 0, credits = 0, unknown = 0;
+    prices.forEach((pr) => {
+      if (pr && pr.free) free++;
+      else if (pr && pr.cost != null) { paid++; credits += pr.cost; }
+      else unknown++;
+    });
     const msg = `Generate ${todo.length} shot(s)?\n\n` +
       `🎫 ${free} covered by a free card\n` +
-      `≈ ${paid} will spend credits — about ${credits.toLocaleString()} total.`;
+      `≈ ${paid} will spend credits — about ${credits.toLocaleString()} total` +
+      (unknown ? `\n⚠ ${unknown} shot(s)' cost couldn't be verified — they may also spend credits.` : ".");
     if (!window.confirm(msg)) { setBatching(false); return; }
     for (const e of todo) {
       try { await generateShot(e, { skipConfirm: true }); } catch (_e) { /* keep going */ }
