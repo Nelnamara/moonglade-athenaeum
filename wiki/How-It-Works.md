@@ -59,5 +59,5 @@ pixai_backup/
    naming layouts, so resume / gallery / audit never drift.
 
 ## Testing
-474 pytest tests in `tests/` (pure, filesystem, catalog, gallery routes, mocked
+477 pytest tests in `tests/` (pure, filesystem, catalog, gallery routes, mocked
 network, embedded-JS syntax). `python -m pytest`. All must pass before merging.

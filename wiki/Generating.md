@@ -218,5 +218,7 @@ but only the owner's machine can spend credits or cards.
   so everything you make lands in your own library the moment it finishes.
 
 **The Loom** (`/loom`) is the storyboard for multi-clip video — acts, shots, cast,
-frame handoff, and per-shot **Generate** on the same engine. Full manual: `docs/LOOM.md`
-(or the ? button on the page).
+frame handoff, and per-shot **Generate** on the same engine. It has two layouts (the
+original vertical one, and a newer fixed 4-region shell with its own "draft generation"
+mode for exploring a look before assigning it to a shot) over the same project data.
+Full manual: `docs/LOOM.md` (or the ? button on the page).
