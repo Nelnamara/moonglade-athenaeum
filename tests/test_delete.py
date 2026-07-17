@@ -35,10 +35,18 @@ class TestDeleteTaskGql:
         mock_session.post.assert_called_once()  # single attempt, no retry loop
 
     def test_missing_hash_raises_before_any_call(self, mock_session, monkeypatch):
+        """Defensive only -- the hash ships with a working default, so this guard can fire
+        solely if that default is stripped or blanked in config.json. It is NOT a setup
+        gate (--apply + the typed 'delete' are); the message must not claim otherwise."""
         monkeypatch.setattr(core, "DELETE_TASK_HASH", "")
-        with pytest.raises(core.PixAIError, match="DELETE_TASK_HASH missing"):
+        with pytest.raises(core.PixAIError, match="DELETE_TASK_HASH is empty"):
             core.delete_task_gql(mock_session, "123")
         mock_session.post.assert_not_called()
+
+    def test_delete_hash_has_a_working_default(self):
+        """The real gates are --apply + the typed confirm. Docs claimed for months that a
+        missing hash was a setup gate that stopped deletion from firing -- it never was."""
+        assert core.DELETE_TASK_HASH and len(core.DELETE_TASK_HASH) == 64
 
     def test_persisted_query_not_found(self, mock_session, mocker, monkeypatch):
         monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")

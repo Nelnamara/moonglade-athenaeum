@@ -2220,7 +2220,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       {
         className: "sb-btn ghost sm",
         onClick: () => setV2(true),
-        title: "Preview the new dockable V2 layout (non-destructive \u2014 your board is untouched)"
+        title: "Switch to the V2 layout (non-destructive \u2014 your board is untouched)"
       },
       "\u25EB V2 layout"
     )), /* @__PURE__ */ React.createElement("div", { className: "sb-stat" }, /* @__PURE__ */ React.createElement("b", null, done, "/", entries.length), /* @__PURE__ */ React.createElement("span", null, "shots done")), /* @__PURE__ */ React.createElement("div", { className: "sb-stat" }, /* @__PURE__ */ React.createElement("b", { style: { color: over > 0 ? "var(--coral)" : "var(--ink)" } }, fmt(total)), /* @__PURE__ */ React.createElement("span", null, "of ", fmt(project.target), over > 0 ? ` \xB7 +${fmt(over)} over` : "")), /* @__PURE__ */ React.createElement("div", { className: "sb-saved", title: hasStore ? "Saved to this browser" : "In-memory only \u2014 export to keep" }, /* @__PURE__ */ React.createElement("span", { className: "sb-dot" + (busy ? " busy" : "") }), " ", hasStore ? busy ? "saving" : "saved" : "session only")), /* @__PURE__ */ React.createElement("div", { className: "sb-reel-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "sb-reel" }, entries.map((x, i) => /* @__PURE__ */ React.createElement(

@@ -55,6 +55,29 @@ git tags. Full prose notes for tagged versions live on
   grayscaled — it's meant as an intentional tease, not a disabled state). Name/description stay masked.
 
 ### Fixed
+- **`--rebuild-thumbs` repairs are now actually visible in the browser** — thumbnails were served
+  `Cache-Control: immutable, max-age=31536000` on the reasoning that they're "content-addressed", but
+  they're keyed by **`media_id`, which is an identity, not a content hash**: `--rebuild-thumbs`
+  regenerates the poster *in place at the same URL*. Any browser that had cached a broken video poster
+  would not re-fetch it **for a year**, so running the rebuild job appeared to do nothing. Worse, the
+  service worker was pure cache-first (`c.match(…).then(r => r || fetch(…))`) and never consults
+  `Cache-Control` at all, pinning the stale poster for the life of the cache regardless of headers.
+  Thumbnails now use **stale-while-revalidate** (cached bytes still paint instantly; a `no-cache`
+  refetch updates behind them, so the rebuild lands on the next view) and the route drops `immutable`
+  for a short `max-age` + ETag — which is also what bounds staleness for LAN viewers, who get no
+  service worker at all (secure-context only). The cache name is bumped to **`pixai-img-v3`**, so every
+  client currently holding a stale poster self-heals on activate without a hard refresh. Write-once
+  originals (`/img/`, `/full/`) keep the immutable cache-first path. This is the same failure shape as
+  the `v1` 404-poisoning bug, one status code over. Regression-tested end-to-end.
+- **`__version__` bumped to `1.11.0`** — the `v1.11.0` tag has been on `loom-v2` since the Trophy Hall
+  landed, but the version string was never bumped, so the code reported `1.10.0` under a `1.11.0` tag.
+- **`delete_task_gql`'s guard no longer claims a setup gate that doesn't exist** — its error told a
+  maintainer that a missing `DELETE_TASK_HASH` meant "deletion can't run without an explicit setup
+  step". The hash ships with a working 64-char default, so the guard is unreachable under normal
+  config and deletion fires fine; `--apply` plus the typed `delete` confirm are the only real gates.
+  The message (and the module comment, which named `--confirm` — a *generation* flag) now say so.
+- **Loom V2 toggle tooltip** no longer calls the layout "dockable" — `c0c7399` removed the dockable
+  shell in favour of the fixed 4-region layout.
 - **Panoramic images no longer get cropped to near-nothing in the main gallery grid** — `.card img`
   forced every thumbnail into a square via `object-fit:cover`; an extreme-aspect source (progress-bar
   and frame textures) now gets `object-fit:contain` instead (detected via `naturalWidth`/`naturalHeight`
