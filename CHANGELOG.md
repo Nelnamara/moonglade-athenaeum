@@ -182,6 +182,16 @@ git tags. Full prose notes for tagged versions live on
   silently return. Scoped as a correctness fix only; the tabled audio-lane/multi-track-timeline
   feature remains explicitly out of scope (a scene-builder, not an NLE).
 
+### Added — 2026-07-17
+- **The Loom V2 shell can Export.** Item 1 of the V1→V2 convergence punch list — `exportCut`
+  (from `useExportPipeline`) is now threaded into `LoomV2`'s props, with an Export button beside
+  V2's existing Play button (same disabled-until-a-shot-has-a-result gate). No restructuring
+  needed: the export-status overlay already renders above the V2 shell automatically (`.sb-seq`
+  z-index 500 vs `.lv-overlay` 400) — the identical trick that already let Play's
+  `SequencePlayer` work in V2 unchanged. Verified via `npm run build` (clean esbuild bundle,
+  real JSX-syntax check) and `node --test` (66/66, unaffected); full Python suite unaffected
+  (JS-only change).
+
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 
 _On `loom-v2`, past the `v1.10.0` tag. The 57-achievement system plus its flair layer (toast frames,
