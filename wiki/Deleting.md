@@ -1,11 +1,12 @@
 # Deleting & cloud sync
 
-Two delete buttons appear when images are selected in the gallery:
+Two delete actions live in the **Actions** dropdown that appears when images are selected
+in the gallery:
 
-- **Delete (local)** — removes from your local catalog only (the cloud task is
+- **Delete locally** — removes from your local catalog only (the cloud task is
   untouched).
 - **Delete from PixAI** — deletes the whole **task** from your account *and* removes it
-  locally, so they never drift.
+  locally, so they never drift. Localhost-only — hidden for LAN viewers.
 
 > 🛟 **Local files are recoverable.** Both buttons *move* your files to a `_deleted/`
 > folder inside your backup rather than destroying them, and clear the catalog row. If
@@ -21,9 +22,9 @@ Two delete buttons appear when images are selected in the gallery:
 Deleting a task on PixAI doesn't touch your local backup (by design). To find and
 prune those orphans:
 
-1. GUI **Utilities → Reconcile Deleted** (or `--reconcile-deleted`). It pages your
+1. GUI **Library → Reconcile Deleted** (or `--reconcile-deleted`). It pages your
    live feed (~1–2 min) and flags catalog rows whose task is gone.
-2. Gallery → **Source → "Deleted on PixAI"** → select → **Delete (local)**.
+2. Gallery → **Source → "Deleted on PixAI"** → select → **Delete locally**.
 
 It skips imports and anything generated in the last ~2 days (so a fresh generation
 isn't false-flagged), and aborts if the feed comes back empty.
@@ -32,8 +33,11 @@ isn't false-flagged), and aborts if the feed comes back empty.
 
 ```bash
 python pixai_gallery_backup.py --reconcile-deleted     # flag cloud-deleted orphans
-python pixai_gallery_backup.py --delete-task <taskid>  # delete one task cloud+local (irreversible)
+python pixai_gallery_backup.py --delete-task <taskid>  # preview deleting one task from PixAI (cloud only; add --apply to do it)
 ```
 
-`--delete-task` requires confirmation. Deletion uses a baked-in persisted hash; the
-typed-`DELETE` / `--confirm` gates are the safety mechanism.
+`--delete-task` is dry-run until `--apply`, and is **cloud-only** — your local files and
+`catalog.db` are untouched. Deletion uses a baked-in persisted hash; the `--apply` flag plus
+a typed lowercase `delete` (skippable with `--yes`) are the safety mechanism. Uppercase
+`DELETE` is the *gallery's* gate; `--confirm` is a different flag entirely — it gates
+credit-spending generation, not deletion.

@@ -8,8 +8,10 @@
 > **2026-07-16 note:** `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` received extensive same-day updates —
 > the V2 shell ship, three rounds of bug fixes, draft generation, and a full top-down audit
 > (V1/V2 parity, doc staleness, suite QoL, early-dropped-feature archaeology). `wiki/` remains
-> the biggest lagging doc — it has **zero** Loom coverage of any kind (confirmed by full-text
-> search), predating even the V1-only era, let alone today's V2 work.
+> the biggest lagging doc — but **not on the Loom**: `wiki/Generating.md` has covered it since
+> **2026-07-05** (`0c8872d`), and `6b1065e` expanded that blurb the same day to describe the V2
+> shell + draft generation. The real wiki gap is the Control Panel, branding/mascots, and the
+> Achievements/Trophy Hall system — none of them documented anywhere in `wiki/`.
 
 ---
 
@@ -27,15 +29,15 @@
 |---|---|---|
 | `ROADMAP_LOOM_ACHIEVEMENTS.md` | ⭐ **THE active roadmap** — source of truth for the current threads (Loom V2.1 · Achievements). Checkpointed after every increment; re-read after every compaction | **Active** |
 | `REFINEMENTS.md` | Near-term tracker: small web-suite fixes/polish | Active |
-| `ROADMAP.md` | Far-horizon epics only (the Foundry, Provider Deck) | Active, rarely touched |
+| `ROADMAP.md` | Far-horizon epics only (the Foundry, the Provider Deck, and Publish & Community integration — Epic C, added 2026-07-15) | Active, rarely touched |
 | `achievements_roster_57.json` | **Corrected 2026-07-15 — this is a design/content spec, not a runtime dependency.** Confirmed by reading it: a structured content reference (bucket definitions, per-track name/metric/design-note/roast flavor) used to author the 57-achievement roster. The live roster is the `ACHIEVEMENTS` Python literal in `pixai_gallery.py` — grep-confirmed nothing in the codebase loads this JSON. Keep it as the content-authoring reference it actually is; the old "canonical, code generates from this" phrasing implied a live dependency that was never true. Thresholds reconciled to shipped code 2026-07-13 (marathon 100 · read-the-manual 1 · triggered 5) | **Design reference** |
 | `DOC_MAP.md` | This file | Active |
 | `CURATION_STANDARD.md` | ⭐ **House baseline for selection/vote artifacts** (owner-approved 2026-07-12): 10 non-negotiables, pick/rank/view/note model, build discipline | **Active standard** |
 | `curation_reference_builder.py` | Reference implementation of the Curation Standard — clone for any vote artifact (swap input/classify/picks, keep the rest) | Reference |
-| `ART_PICKS.md` | Owner's achievement-flair selections (2026-07-12) from the Curation Workspace — feat/bar decided, LEG needs edits, CLAIM open, + repurpose ideas | **Active (provisional picks)** |
+| `ART_PICKS.md` | Owner's achievement-flair selections from the Curation Workspace — feat (FEAT13), bar (BAR9) and legendary (LEG6) all locked 2026-07-13 (`df0dc35`); CLAIM3 won and was WIRED 2026-07-14 (`f1e35d1`, browser-verified). Only CLAIM7's separate redemption slot is still unassigned, + repurpose ideas | **Active (picks locked; CLAIM7 slot open)** |
 | `LOOM.md` | The Loom user manual | Active |
 | `DESIGN_WORKFLOW.md` | ⭐ **The pixel-source-of-truth standard (2026-07-14)** — born from the Trophy Hall reformat incident: no visual build from prose alone; Figma plugin (bidirectional, auth via `/mcp`) + Claude Design/DesignSync tooling; Trophy Hall recovery options; model strategy | **Active standard** |
-| `SUITE_ARCHITECTURE_AUDIT.md` | ⭐ **Front-end cohesion audit (2026-07-13)** — every surface's stack, the duplication map, the web-component recommendation + migration order (pilot = model picker), and the Loom save/load defect + fix. Basis for the front-end direction decision | **Active (awaiting owner calls)** |
+| `SUITE_ARCHITECTURE_AUDIT.md` | ⭐ **Front-end cohesion audit (2026-07-13)** — every surface's stack, the duplication map, the web-component recommendation + migration order (pilot = model picker), and the Loom save/load defect + fix. The direction was decided **and acted on** — the model-picker pilot shipped (`static/mg-model-picker.js`) and the same pattern was extended to a gallery picker (`static/mg-gallery-picker.js`, which cites this doc as its rationale). One open question remains: §8's `REFINEMENTS.md:72` "no framework" note — confirm or strike it | **Active (one open question — §8)** |
 | `MODEL_DECK.md` | 25-entry verified model research deck (badge/lifelike/local lanes) | Reference |
 | `ART_PROMPTS.md` | House badge style anchor (tiered-ring template, locked hexes) + brand prompt bank | Reference |
 | `ART_SPECS.md` | Art asset specs (sizes, keying, formats) | Reference |
@@ -50,10 +52,11 @@
 ### Wiki (published GitHub wiki, linked from `README.md`) — added to this map 2026-07-15
 
 The GitHub wiki (`Nelnamara/moonglade-athenaeum.wiki.git`) is a **separate repo**, staged locally in
-`wiki/` before manual publish. As of 2026-07-15: the real published wiki was last pushed **2026-06-29**;
-the local staged copy stopped being updated **2026-07-05**. Loom V2, the Control Panel,
-branding/mascots, and the whole Achievements/Trophy Hall system are undocumented on the one public
-doc surface — needs an update-then-republish pass.
+`wiki/` before manual publish. As of 2026-07-16: the update-then-republish pass **ran** — the staged
+copy was updated **2026-07-15** (`4be6142`) and **2026-07-16** (`6b1065e`), and the real published
+wiki was pushed **2026-07-16** (`29bf1db`, off its v1.6-era 2026-06-29 base). The Loom (V1 + V2) is
+now covered there. Still undocumented on the one public doc surface: the Control Panel,
+branding/mascots, and the whole Achievements/Trophy Hall system.
 
 | File | Role | Status (2026-07-15 audit) |
 |---|---|---|
@@ -62,11 +65,11 @@ doc surface — needs an update-then-republish pass.
 | `Setup.md` | Install/config | Accurate |
 | `Backing-Up.md` | CLI backup/sync flags | Accurate |
 | `Gallery.md` | Gallery browsing UI | Accurate, silent on chrome added since (header pill-nav, balance chip, branding marks) |
-| `Generating.md` | Generate/edit/video CLI + web drawer | Accurate for what it covers; missing `--account`/`--claims`/`--watch`/`--contests`/`--sync` entirely; Loom V2 unmentioned |
+| `Generating.md` | Generate/edit/video CLI + web drawer | Accurate for what it covers; missing `--account`/`--claims`/`--watch`/`--contests`/`--sync` entirely. Covers The Loom (since 2026-07-05, `0c8872d`), incl. the V2 shell + draft generation (`6b1065e`, 2026-07-16) |
 | `Collections.md` | Collection filter semantics | Accurate |
 | `Deleting.md` | `_deleted/` quarantine + task delete | Accurate |
 | `Health.md` | `/health`, `/duplicates` | Accurate |
-| `How-It-Works.md` | Architecture overview | Test count was stale (195 — fixed to 474, 2026-07-15); otherwise structurally accurate |
+| `How-It-Works.md` | Architecture overview | Test count is chronically stale — 195 → 474 (2026-07-15) → 477 (2026-07-16) → **478**, the measured count as of 2026-07-16 (483 with `pixeltable` installed); trust `python -m pytest` over any written number. Otherwise structurally accurate |
 | `Troubleshooting.md` | Error-message driven | Evergreen, accurate |
 | `FAQ.md` | General Q&A | Evergreen, accurate |
 
@@ -85,9 +88,10 @@ captured. **Never committed** — contains op hashes + account specifics.
 
 Lives at `~\.claude\projects\C--Users-gwilkins-source-repos\memory\` — survives every
 session. `MEMORY.md` is the index (one line per memory, loaded at session start). ~25 of
-the 56 files are the Moonglade cluster: project state, PixAI API knowledge, and the
-owner's standing rules (checkpoint protocol, design-intent rule, commit style, push
-cadence, PixAI hands-off, etc.).
+the 64 files (counted 2026-07-16) are the Moonglade cluster — 23 by strict
+`moonglade_*`/`pixai_*` prefix, ~30 counting the project's other memories: project state,
+PixAI API knowledge, and the owner's standing rules (checkpoint protocol, design-intent
+rule, commit style, push cadence, PixAI hands-off, etc.).
 
 **Hierarchy when sources disagree:** repo docs win for project state
 (`ROADMAP_LOOM_ACHIEVEMENTS.md` above all) · memory wins for owner preferences ·

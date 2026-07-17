@@ -38,16 +38,16 @@ tooling on 3+ occasions and was dismissed — that dismissal is now a banked nev
 **The working pipeline:** owner designs/locks a frame in Figma (screenshotted real app assets are
 fine) → pastes the frame URL → Claude implements from the frame → verifies against it → owner QA.
 
-## Trophy Hall recovery plan (owner to choose at the home machine)
+## Trophy Hall recovery — RESOLVED by revert (2026-07-15)
 
-- **Owner is building a Figma mock** of the intended Trophy Hall using screenshots of real app
-  assets — that mock becomes the source of truth for the rebuild.
-- **Option A — revert `c877919`** (the reformat commit): restores the pre-reformat Hall now.
-  Backend infra from the same arc (earn-dates, badge thumb-cache) lives in earlier commits and
-  survives. Check `git log` at recovery time — later commits touching the same regions may need
-  conflict resolution.
+- **Owner already has Figma mocks** of the intended Trophy Hall, built from screenshots of real app
+  assets — **ask for the frame URL**; they are the source of truth for the Hall redesign (still open).
+- **Option A — revert `c877919`** (the reformat commit): **CHOSEN AND EXECUTED 2026-07-15 as
+  `0a8da3a`** (an ancestor of HEAD) — the pre-reformat Hall is restored. It applied clean.
+  Backend infra from the same arc (earn-dates, badge thumb-cache) lived in earlier commits and
+  survived as predicted (`43014ef`'s mystery-tile wiring predates the reformat and is still live).
 - **Option B — leave it, rebuild from the Figma mock** once the plugin is authed, treating the
-  reformat as throwaway scaffolding.
+  reformat as throwaway scaffolding: **not taken.**
 - **Two caveats that are NOT the reformat's fault:**
   1. **Feats invisible until first earn was the ORIGINAL owner-approved spec** ("the whole feats
      section stays cloaked until the first feat lands"). Mystery-tile art WAS wired on 2026-07-14

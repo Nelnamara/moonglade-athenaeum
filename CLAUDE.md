@@ -56,8 +56,8 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
 4. **Visual builds require a PIXEL source of truth** (a Figma frame via the Figma plugin's MCP,
    a Claude Design project via DesignSync, or a locked mockup artifact) — never prose alone —
    and the verify pass compares against that source. Restyling a shipped, owner-approved surface
-   needs an explicit owner go. See `docs/DESIGN_WORKFLOW.md` (added 2026-07-14 after the Trophy
-   Hall reformat landed off-target from prose notes).
+   needs an explicit owner go. See `docs/DESIGN_WORKFLOW.md` (added 2026-07-15, `6a0f99d`, after the
+   Trophy Hall reformat landed off-target from prose notes).
 
 ## Architecture / request flow
 
@@ -178,7 +178,7 @@ present — fixes corporate/antivirus HTTPS interception.
 ## Critical constraints
 
 - **NEVER** append `Co-Authored-By: Claude` trailers to commits.
-- **NEVER** commit `config.json` — git-ignored; contains real user credentials (USER_ID, U3T, hashes).
+- **NEVER** commit `config.json` — git-ignored; contains a real user credential (`PIXAI_API_KEY`). USER_ID, U3T and the hashes are optional legacy overrides, absent from a normal live file (`USER_ID` auto-resolves; the hashes ship baked-in).
 - `token.txt`, `pixai_backup/`, `*.webp` are also git-ignored.
 - No real credentials or user-specific values should appear in any committed file.
 - All traffic is HTTPS with verification on; do not add `verify=False` anywhere.
@@ -191,14 +191,14 @@ present — fixes corporate/antivirus HTTPS interception.
 - `config.json` is git-ignored and will never be committed.
 - `config.example.json` (committed) shows the required structure with placeholder values only.
 - The output folder (`pixai_backup/`) contains images, prompts, and catalog — git-ignored.
-- The repo is public on GitHub at `Nelnamara/pixai-gallery-backup`.
+- The repo is public on GitHub at `Nelnamara/moonglade-athenaeum` (only the local directory is still named `pixai-gallery-backup`).
 
 ---
 
 ## Deleting tasks from your account (`--delete-task`)
 
 - `deleteGenerationTask` is a persisted **mutation** sent by POST (Apollo blocks mutations over GET), unlike the GET listing/query path. It is a **void mutation: it returns `null` on success** — the meaningful signal is the ABSENCE of a GraphQL error, NOT the payload. (Verified against a real task via the site, which shows a "Task has been deleted" toast off that same null/no-error response. `getTaskById` is NOT a valid post-delete existence check — it still resolves deleted tasks.)
-- Hash lives in `config.json` as `DELETE_TASK_HASH` with **no built-in default** — capturing it is a deliberate manual step so deletion can't fire without explicit setup.
+- Hash ships with a **built-in default** — no manual capture step. `DELETE_TASK_HASH` in `config.json` only *overrides* it if the hash rotates. Deletion is NOT gated by the hash being absent; the guards below (`--apply` + the typed confirm) are what stand between you and a real delete.
 - Guards: dry-run by default; `--apply` to perform; typed `delete` confirmation unless `--yes` (refused on non-interactive stdin). Single-attempt per task.
 - Deletes ONLY the cloud generation; local image files + `catalog.db` are left intact.
 
@@ -271,13 +271,17 @@ The Flask gallery is a full creation suite. Everything below is **localhost-gate
   `wss://gw.pixai.art/graphql`, root field `personalEvents` (taskUpdated +
   newNotification; done status = `completed`). `--watch-backup` auto-collects each
   finished task the moment it completes — this is how website gens can land without
-  polling. NOTE: only runs while the watcher runs; gens made on pixai.art otherwise
-  still need `--update`/backfill. ("Live-mirror inside the server" is the planned fix.)
+  polling. The gallery server runs this same machinery always-on as the **live-mirror**
+  watcher (shipped 2026-07-05, `f502beb`; auto-reconnects with backoff, `MOONGLADE_DISABLE_WATCH=1`
+  opts out), so gens land the instant they finish and `--update`/backfill is the fallback,
+  not the only path.
 - **Control Panel jobs**: whitelisted CLI subprocesses with live log, a REAL progress
   bar (CLI emits `~=MGPROG=~done|total|new` lines when `MOONGLADE_PROGRESS=1`), a
   **Stop this job** cancel (`/api/panel/cancel`, terminates the subprocess, status
-  `cancelled` not `failed`), and an hourly scheduler for safe jobs. Includes
-  `backfill-meta` (`--backfill-full-meta`) — web parity with the GUI.
+  `cancelled` not `failed`), and an hour-granular scheduler for safe jobs (defaults to
+  every 6 h, min 1; `destructive` actions are skipped). `backfill-meta` is **gone as a
+  standalone action** — `--sync` now folds `fix-models` + `--backfill-full-meta` in
+  internally.
 - **Server control**: Homebridge-style **Stop/Restart** from the Panel
   (`/api/server/stop|restart`; restart = exit 42 relaunched by the `Serve Gallery.pyw`
   supervisor, `MOONGLADE_SUPERVISED=1`; single-instance guard pings `/api/ping` and
@@ -352,13 +356,14 @@ earlier (`440ecdf`); **v1.11.0 adds the flair layer + the Trophy Hall.**
   a **badge thumb-cache** (`_badge_thumb()` → `/badge-thumb/<id>.png`, lazy ~256 px copies to
   `branding/_thumbs`, mtime self-heal + master fallback) so a 57-tile Hall doesn't pull ~300 MB.
 - **Deferred polish** (non-blocking): per-*tile* ornate frames (the toast has them; tiles use the
-  tier band + glow), per-criteria checklists on set achievements, owner-made mystery-tile art.
+  tier band + glow). Per-criteria checklists on set achievements (`_ACH_CRITERIA` → `.ach-crit`) and
+  the mystery-tile art (`branding/mystery/secret_feat.png`) have since shipped.
 
 ## Test suite
 
-477 pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
+478 pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
 over this number). Run with `python -m pytest` (add `--ignore=tests/test_similar.py` where the
-optional `pixeltable` dep isn't installed; 482 if it's installed and that file runs too). All
+optional `pixeltable` dep isn't installed; 483 if it's installed and that file runs too). All
 tests must pass before merging to master. On `loom-v2`, the Loom's pure-logic extraction also
 has 66 `node --test` cases in `loom/` (`loom/src/loom-core.js`, `loom-mutations.js`) — run from
 `loom/` with `node --test`.
@@ -367,14 +372,17 @@ has 66 `node --test` cases in `loom/` (`loom/src/loom-core.js`, `loom-mutations.
 
 ## Current state
 
-- **Version:** `1.11.0` on `loom-v2` (achievements flair + Trophy Hall). NOTE: `loom-v2` is still
-  unmerged to `master` — it carries the whole Loom V2 set *plus* achievements; the `v1.11.0` tag sits
-  on `loom-v2`. Merging `loom-v2` → `master` is a separate owner call. `master` is still at `1.10.0`.
+- **Version:** the `v1.11.0` **tag** sits on `loom-v2` (achievements flair + Trophy Hall), but
+  `__version__` in `pixai_gallery_backup.py` was **never bumped past `1.10.0`** — the tag has no
+  matching version string. Bump it or leave it knowingly, but don't read `v1.11.0` as the code's
+  version. NOTE: `loom-v2` is still unmerged to `master` — it carries the whole Loom V2 set *plus*
+  achievements. Merging `loom-v2` → `master` is a separate owner call. `master` is also at `1.10.0`.
   `loom-v2` has since also shipped the full V2 shell redesign (fixed 4-region layout, `c0c7399`),
   "draft generation" (the Generate drawer works with no shot selected), and several rounds of
   live-verified bug fixes — see `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` §1 for the current, detailed
-  state. **V2 is NOT yet at feature parity with classic Loom** (missing Play-sequence, Export, and
-  a few CardEditor fields — same doc has the concrete gap list) — don't retire classic Loom yet.
+  state. **V2 is NOT yet at feature parity with classic Loom** (Play-sequence is now wired in,
+  `768aecf`; still missing Export, the batch "Generate all", and per-shot "other references" — same
+  doc has the concrete gap list) — don't retire classic Loom until those land.
   The `generate-drawer`/`suite-polish`/`video-gen` branches and `master` are all fully contained in
   `loom-v2`'s history (zero unique commits) — safe to delete once confirmed, just stale pointers.
 - **Branch strategy:** feature branches, merge to master with `--no-ff`, tag releases
@@ -385,8 +393,9 @@ has 66 `node --test` cases in `loom/` (`loom/src/loom-core.js`, `loom-mutations.
 - **`CHANGELOG.md` (repo root) is the source of truth** — update its `[Unreleased]` section with
   every notable change, and cut it into a dated `## [x.y.z]` block when a release is tagged.
 - Releases are **git tags** + **GitHub Releases**. History to know: Releases were published through
-  **v1.6.0**, then paused; **v1.8.0–v1.10.0 were tagged but not released** (their notes are
-  reconstructed in `CHANGELOG.md` and back-published from there). **There is no v1.7.x.**
+  **v1.6.0**, then paused; **v1.8.0–v1.10.0 were back-published on 2026-07-10** from their
+  reconstructed `CHANGELOG.md` notes, so Releases now run through **v1.10.0**. Only **v1.11.0** is
+  tagged-but-unreleased. **There is no v1.7.x.**
 
 ---
 

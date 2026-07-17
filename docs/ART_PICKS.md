@@ -1,10 +1,10 @@
 # Art Picks — achievement flair (owner selections, 2026-07-12)
 
 > Owner's picks + notes exported from the Curation Workspace (artifact
-> `ef9f5853`). **Provisional** — several files still need the owner's own
-> alpha/flip/resave passes before wiring (some generators forced JPGs). Do NOT
-> place any of these into `branding/` until the owner confirms the final keyed
-> file. Card IDs map to that artifact's grid.
+> `ef9f5853`). The 07-12 "provisional" caveat is **CLOSED** — the owner's
+> 2026-07-13 alpha pass keyed every finalist (the JPG problem is gone) and the
+> winners were wired on 2026-07-14, so picked art now lives in `branding/`.
+> Card IDs map to that artifact's grid.
 
 ## Status at a glance
 
@@ -14,14 +14,15 @@
 | **Progress-bar pilot** | ✅ decided | **BAR9** (moon-phase gauge); BAR6 = 2nd trial |
 | **Mystery tiles** | ✅ aligned | square: SecretFeatSquareAlpha (MYS8) · wides → section banner |
 | **Legendary frame** | ✅ **DECIDED** | **LEG6** (gold+emerald = house palette); BAR4 parked as a future test |
-| **Claim icon** | 🟡 5 finalists in-action | CLAIM1/2/3/8/9 in the credit chip; CLAIM7 = redeem — awaiting final pick |
+| **Claim icon** | ✅ **DECIDED** | **CLAIM3** (re-keyed gallery gem) — wired 2026-07-14 in the credit chip; CLAIM7 = redeem (separate slot) |
 | **Other repurposes** | 💡 ideas | OTHER1 → card-specific redemption · OTHER15 → reserve badge (Krea2) |
 
 ## The picks (verbatim from export)
 
 **CLAIM (open):** ranked #4 `CLAIM135` (19h34m54s crystal) · #5 `CLAIM119` (00085 crystal).
 Shortlist bullets: CLAIM16, CLAIM85, CLAIM96, CLAIM97, CLAIM98, CLAIM102, CLAIM110,
-CLAIM122 (18h21m21s gold-bow gift box). **No #1–3 chosen — the top is unresolved.**
+CLAIM122 (18h21m21s gold-bow gift box). **No #1–3 chosen at export time — the top is now RESOLVED:
+✅ CLAIM3** (the re-keyed gallery gem) wins, wired 2026-07-14 into the header credit chip.
 
 **LEG:** #3 `LEG21` · #4 `LEG6` · #5 `LEG16` · bullets LEG7, LEG17. Owner note: LEG6/7 are the
 real top picks but need flipping + alpha; many need resave/edit (JPG problem); possible fallback
@@ -91,12 +92,15 @@ Emerged from the "in action" review — owner course-corrected the surface, then
 1. **Frames wrap the TOAST, 9-sliced** (WoW-style: corners fixed, edges stretch; the frame grows
    to the content so text never overflows). NOT the achievement-page cards — that was a wrong turn.
    Proven in artifact `3655423e`. The real toast markup is `.ach-m2` (locked `335ef4e7`).
-2. **Tier-gated flair — legendary + feat ONLY** get the custom frame + custom toast, on BOTH the
-   toast moment AND the page tile. Common/rare/epic stay clean chrome. *"WoW-like, our own flavor —
-   always the real intent."* (⚠ confirm whether **epic** joins the framed tier or stays plain.)
+2. **Tier-gated flair — legendary + feat ONLY** get the custom frame + custom toast, on the **toast
+   moment only** — the page tiles get a tier-colored left band + earned glow instead (the ornate
+   per-tile frames are deferred, not shipped). Common/rare/epic stay clean chrome. *"WoW-like, our
+   own flavor — always the real intent."* (⚠ confirm whether **epic** joins the framed tier or
+   stays plain.)
 3. **Point values come to the toasts + cards.** Economy already locked (`points = tier base +
    5×(rung−1)`; bases 5/10/25/50; **feats = 0** → feats show no points, reinforcing them as pure
-   bragging-rights flair). Currently planning — to wire into the toast + card.
+   bragging-rights flair). ✅ **Wired** — points render on the toast (gold `+N` pill), the grid
+   tiles, the Within-Reach rail, and the Trophy Hall header total.
 4. **CLAIM7 gift box → the toast reward ribbon** (`🎁 Unlocks skin / ⚑ banner`) is its confirmed home.
 
 **Finalists in action (all 6 wrapping the identical toast):** artifact `3655423e`.
@@ -120,7 +124,10 @@ Earlier "big artifact" (finalists in context, pre-course-correction): `b45a39a3`
   **CLAIM7 (gift box) is a SEPARATE slot** — earned-achievement goodies / card redemption / other
   PixAI gifts — already correctly wired into the achievement toast's reward ribbon (last night).
   Do not conflate the two claim surfaces again.
-- **LEG files need the owner's flip + alpha + resave** before they're wire-ready.
+- **✅ LEG files are done** — the owner delivered flipped + keyed LEG6/LEG7 in the 2026-07-13 Alpha
+  Tags pass; LEG6 already ships as the legendary toast frame (`branding/frames/legendary.png`).
 - **Owner has MANY more progress bars in the gallery** — a dive (like the Gems & Sigils pull)
   would surface them for a dedicated bar selection.
-- Nothing gets placed into `branding/` until the owner hands over final keyed files.
+- **Art from these picks IS in `branding/` now** — `rewards/claim.png` (CLAIM3) ·
+  `rewards/gift.png` (CLAIM7) · `mystery/secret_feat.png` · `frames/legendary.png` (LEG6) +
+  `frames/feat.png` (FEAT13), all wired. Any *future* pick still waits on the owner's final keyed file.

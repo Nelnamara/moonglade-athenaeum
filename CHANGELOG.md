@@ -8,16 +8,13 @@ git tags. Full prose notes for tagged versions live on
 
 > **Maintenance note.** This file is the in-repo source of truth — **update the `[Unreleased]`
 > section with every change, and cut it into a dated version block when you tag a release.**
-> GitHub Releases were published through **v1.6.0**, then paused; **v1.8.0–v1.10.0 were tagged but
-> never released** — their notes are reconstructed here from tag messages + git history and are being
-> back-published. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
+> GitHub Releases are published through **v1.10.0** — publishing paused after **v1.6.0**, and
+> **v1.8.0–v1.10.0 were back-published** on 2026-07-10 from tag messages + git history. **v1.11.0 is
+> tagged but has no Release yet.** There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
 
 ### Added
-- **Loom V2 panel resize cap** — non-timeline panels are capped at 800px width (most never need to
-  be wider); height stays bounded only by the canvas floor, per the owner's call for something more
-  liberal. The Timeline panel stays exempt from the width cap since it's meant to stay full-width.
 - **Loom nav button hidden on phone** — `.head-nav .b-loom` now hides at the sub-480px breakpoint;
   the Loom is a dense multi-panel tool that isn't viable on a phone screen. Still visible on tablets.
 - **Mobile filters are now a bottom sheet** — `.filters` slides up from the bottom at the sub-480px
@@ -77,7 +74,7 @@ git tags. Full prose notes for tagged versions live on
   toast-styled cards, and ladder depth-carousel landed visually wrong and are backed out; the Hall is
   back to the pre-reformat rail-rewards/plain-grid layout. Clean revert (86 deletions / 6 insertions,
   the exact inverse of the original diff) — every commit between the two touched only docs, so no
-  conflicts. 474 tests still pass. **This time actually confirmed with a real rendered screenshot**
+  conflicts. 478 tests still pass. **This time actually confirmed with a real rendered screenshot**
   (Summary + All tabs, rewards back in the rail, no carousel), not just computed-style assertions —
   see `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` §2b. A ground-truth audit (10-agent read-only pass over the
   whole repo) preceded this: full doc-vs-code reconciliation, a CLI command map, a PySide6 removal
