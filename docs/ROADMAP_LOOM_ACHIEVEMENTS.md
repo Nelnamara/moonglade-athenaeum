@@ -539,6 +539,19 @@ date or superseded elsewhere in this same doc. Two genuinely dropped:
    (not in `REFINEMENTS.md`'s owner list, not in `ROADMAP.md`'s epics) — a loose thread, not a
    parked decision.
 
+**➡ Second sweep, same evening (owner: "small SMALL items slip past") — full results in
+`docs/SWEEP_2026-07-16.md`.** 8 briefed finders + adversarial per-claim verification: **10 unique
+confirmed defects** (headline: Deep Focus edits visibly revert — stale snapshot; V2 has no shot
+deselect so draft mode is one-way; the credit-spend confirm FAILS OPEN on any price-check error;
+attaching a new clip keeps stale trims that can hang the sequence player; today's id-search floods
+results for short numeric terms; the Panel stop-server spinner never stops), 2 untracked in-code
+promises (ENHANCE_PLUGINS curated cards never added; hand/face-fix workflowNames still unverified),
+8 fresh-clone/public-user issues (**no LICENSE file**, broken README screenshots on master, the
+published wiki is v1.6-era, `websockets` missing from requirements, master has no CHANGELOG), and
+three grounded feature slates (Loom creator / gallery curator / PixAI power user + community).
+None of the 11 raised claims were refuted — several were confirmed-with-corrections, recorded in
+the sweep doc.
+
 **Branch hygiene — verified, not acted on (deletion needs your go-ahead):**
 `generate-drawer`, `suite-polish`, `video-gen`, and `master` all have **zero commits** not
 already in `loom-v2` (`git log --oneline loom-v2..<branch>` is empty for each) — safe,
