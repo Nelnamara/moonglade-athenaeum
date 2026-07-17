@@ -1298,6 +1298,10 @@ function useProjectStore(setSelShot) {
     if (list.length <= 1) { window.alert("This is your only storyboard — make another before deleting this one."); return; }
     const tgt = list.find((x) => x.id === id);
     if (!window.confirm(`Delete "${(tgt && tgt.name) || "this storyboard"}"? This can't be undone.`)) return;
+    // A pending 600ms autosave timer for THIS project can otherwise fire during the
+    // awaits below (sGet/sDel/sSet all hit the network) and re-create the very key
+    // sDel just removed, silently resurrecting a "permanently deleted" board.
+    clearTimeout(saveTimer.current);
     if (id === activeId) {
       // Switch to a survivor WITHOUT flushing the doomed project first — openProject()'s
       // flushSave(activeId) would re-create the very project we're deleting.
@@ -1998,7 +2002,13 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim }) {
     dragRef.current = null;
   };
   const startDrag = (which) => (e) => {
-    e.preventDefault(); e.stopPropagation(); dragRef.current = which;
+    e.preventDefault(); e.stopPropagation();
+    // scrub/mouseLeave already step aside while playing (see their `if (playing) return`
+    // guards) so a drag doesn't fight the video's own advancing currentTime -- startDrag
+    // needs the same courtesy, or dragging a handle mid-playback visibly yanks the seek
+    // position and can trip onTimeUpdate's pause-and-rewind mid-drag.
+    if (playing) { const v = vidRef.current; if (v) v.pause(); setPlaying(false); }
+    dragRef.current = which;
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
