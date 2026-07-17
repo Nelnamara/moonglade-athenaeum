@@ -3,7 +3,13 @@
 > The catalog of every document and Claude artifact this project maintains, and where each
 > one stands. **Maintained under the checkpoint protocol** (see `CLAUDE.md`): updated after
 > shipped increments, and whenever a new artifact is published its entry lands in the
-> ledger below. Last full refresh: **2026-07-12**.
+> ledger below. Last full refresh: **2026-07-16**.
+>
+> **2026-07-16 note:** `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` received extensive same-day updates —
+> the V2 shell ship, three rounds of bug fixes, draft generation, and a full top-down audit
+> (V1/V2 parity, doc staleness, suite QoL, early-dropped-feature archaeology). `wiki/` remains
+> the biggest lagging doc — it has **zero** Loom coverage of any kind (confirmed by full-text
+> search), predating even the V1-only era, let alone today's V2 work.
 
 ---
 

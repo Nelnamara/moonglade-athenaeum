@@ -16,7 +16,9 @@ reconcile (see [Deleting & Sync](Deleting)).
 ## Browsing & filtering
 
 The filter bar:
-- **Prompt** — wildcard (`night*`, `a?c`) and multi-word AND search.
+- **Prompt / task / media id** — wildcard (`night*`, `a?c`) and multi-word AND search over the
+  prompt text, plus a substring match on task id or media id — paste an id from PixAI's site (or
+  from `--dump-params` output) to jump straight to that generation.
 - **Model / Batch** — searchable dropdowns.
 - **From / To** — year + month pickers.
 - **Min rating**, **Tag / contest**, **LoRA**, **Published only**.
