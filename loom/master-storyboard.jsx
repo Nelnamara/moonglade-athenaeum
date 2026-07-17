@@ -548,6 +548,9 @@ const V2_STYLES = `
 .lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:2px 5px;cursor:pointer;}
 .lv-minichip:hover{border-color:var(--accent);color:var(--accent);}
 .lv-refline{font-size:10px;color:var(--subtext);margin:10px 0 4px;}
+/* Draft-mode "route into a shot" picker -- shown only with no shot selected. */
+.lv-drafttarget{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
+.lv-drafttarget select.lv-sel{display:block;width:100%;flex:none;padding:7px 8px;font-size:11px;}
 .lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
 /* Deep Focus: double-click a board card to open a maximized, distraction-free editor
@@ -639,6 +642,17 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
   const [tlDragH, setTlDragH] = useState(null);          // live px height while dragging the handle, else null
   const [palFor, setPalFor] = useState(null);            // which field's "+ terms" popover is open, or null
   const [dzHover, setDzHover] = useState(false);          // footage drop-zone hover feedback
+  // Draft generation: the Generate drawer works with no shot selected, exactly like the
+  // main gallery's own drawer -- a "card" that lives in component state instead of the
+  // project, generation-state dicts keyed by its "__draft__" id right alongside real shots'.
+  const [draftCard, setDraftCard] = useState(() => ({
+    id: "__draft__", mode: "R2V", duration: 5, connect: "new", title: "", prompt: "",
+    camera: "", lighting: "", transIn: "", transOut: "", audioCue: "", notes: "",
+    imgPrompt: "", editPrompt: "", refPrompt: "",
+    cast: [], refs: [], openFrame: {}, closeFrame: {},
+  }));
+  const [draftTarget, setDraftTarget] = useState("");              // shot id chosen to route/attach a draft result into
+  const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
   const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
   useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
   useEffect(() => {
@@ -678,6 +692,12 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
   const togglePal = (which) => setPalFor((p) => (p === which ? null : which));
 
   const sel = entries.find((e) => e.c.id === selShot) || null;
+  // No shot selected -> operate on the draft card instead (same shape, "__draft__" id).
+  // routeTarget is who an Image/Edit/Reference/Video RESULT gets routed/attached into:
+  // the selected shot when bound, or whatever's chosen in the draft-mode shot picker.
+  const draftEntry = { a: { id: "__draft__" }, c: draftCard, code: "Draft" };
+  const active = sel || draftEntry;
+  const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   const board = (
     <div className="lv-board">
@@ -764,15 +784,18 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
   // clicking an icon expands the drawer back out AND switches to that tab.
   const GEN_ICONS = [["Image", "✦"], ["Edit", "✎"], ["Reference", "🖼"], ["Video", "🎬"]];
   let gen;
-  if (!sel) gen = <div className="lv-ph">Select a shot on the board to edit &amp; generate it here.</div>;
-  else {
-    const gs = genState[sel.c.id];
+  {
+    const gs = genState[active.c.id];
     const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error";
-    const patch = (fn) => setCard(sel.a.id, sel.c.id, fn);
+    // Writes into the selected shot when bound, or the draft card when not -- everything
+    // below (tab bodies, frame slots) reads/writes through this one function either way.
+    const patch = (fn) => { if (sel) setCard(sel.a.id, sel.c.id, fn); else setDraftCard(fn); };
     const appendTo = (field, term) => patch((c) => ({ ...c, [field]: c[field] ? c[field] + ", " + term : term }));
     // Frame handoff (reparented from the classic CardEditor): open/close frame, same
     // splice-in-last-frame / inherit-close mechanics, driven by the same setCard.
-    const selIdx = entries.findIndex((e) => e.c.id === sel.c.id);
+    // "Previous shot" is a board-sequence concept -- a draft isn't on the board, so it
+    // has none (selIdx stays -1, prevEntry stays null) rather than pretending otherwise.
+    const selIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
     const prevEntry = selIdx > 0 ? entries[selIdx - 1] : null;
     const patchFrame = (key, fp) => patch((c) => ({ ...c, [key]: { ...c[key], ...fp } }));
     const inheritPrev = () => {
@@ -796,15 +819,15 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
     if (tab === "Video") tabBody = (
       <div>
         <label className="lv-lab">Mode</label>
-        <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === sel.c.mode ? "on" : "")} onClick={() => patch((c) => ({ ...c, mode: m }))}>{m}</span>))}</div>
+        <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === active.c.mode ? "on" : "")} onClick={() => patch((c) => ({ ...c, mode: m }))}>{m}</span>))}</div>
         <label className="lv-lab">Continuity</label>
-        <div className="lv-chips">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-chip " + (k === (sel.c.connect || "new") ? "on" : "")} title={CONNECT[k].hint} onClick={() => patch((c) => ({ ...c, connect: k }))}>{CONNECT[k].label}</span>))}</div>
+        <div className="lv-chips">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-chip " + (k === (active.c.connect || "new") ? "on" : "")} title={CONNECT[k].hint} onClick={() => patch((c) => ({ ...c, connect: k }))}>{CONNECT[k].label}</span>))}</div>
         <label className="lv-lab">Prompt</label>
-        <textarea className="lv-ta" value={sel.c.prompt || ""} onChange={(ev) => patch((c) => ({ ...c, prompt: ev.target.value }))} />
+        <textarea className="lv-ta" value={active.c.prompt || ""} onChange={(ev) => patch((c) => ({ ...c, prompt: ev.target.value }))} />
         <label className="lv-lab">Duration</label>
-        <div className="lv-chips">{[5, 6, 10, 15].map((d) => (<span key={d} className={"lv-chip " + (d === sel.c.duration ? "on" : "")} onClick={() => patch((c) => ({ ...c, duration: d }))}>{d}s</span>))}</div>
+        <div className="lv-chips">{[5, 6, 10, 15].map((d) => (<span key={d} className={"lv-chip " + (d === active.c.duration ? "on" : "")} onClick={() => patch((c) => ({ ...c, duration: d }))}>{d}s</span>))}</div>
         <label className="lv-lab">Camera <button className="lv-termsbtn" onClick={() => togglePal("camera")}>+ terms</button></label>
-        <input className="lv-in" value={sel.c.camera || ""} placeholder="e.g. slow push in, shallow DoF" onChange={(ev) => patch((c) => ({ ...c, camera: ev.target.value }))} />
+        <input className="lv-in" value={active.c.camera || ""} placeholder="e.g. slow push in, shallow DoF" onChange={(ev) => patch((c) => ({ ...c, camera: ev.target.value }))} />
         {palFor === "camera" && (
           <div className="lv-termspal">{Object.entries(CAM_PALETTE).map(([grp, items]) => (
             <div key={grp} className="lv-termsgrp">
@@ -814,74 +837,87 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
           ))}</div>
         )}
         <label className="lv-lab">Lighting <button className="lv-termsbtn" onClick={() => togglePal("lighting")}>+ terms</button></label>
-        <input className="lv-in" value={sel.c.lighting || ""} placeholder="e.g. moonlit, soft haze" onChange={(ev) => patch((c) => ({ ...c, lighting: ev.target.value }))} />
+        <input className="lv-in" value={active.c.lighting || ""} placeholder="e.g. moonlit, soft haze" onChange={(ev) => patch((c) => ({ ...c, lighting: ev.target.value }))} />
         {palFor === "lighting" && (
           <div className="lv-termspal">{LIGHTING_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("lighting", t)}>{t}</span>))}</div>
         )}
         <label className="lv-lab">Transition in <button className="lv-termsbtn" onClick={() => togglePal("transIn")}>+ terms</button></label>
-        <input className="lv-in" value={sel.c.transIn || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transIn: ev.target.value }))} />
+        <input className="lv-in" value={active.c.transIn || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transIn: ev.target.value }))} />
         {palFor === "transIn" && (
           <div className="lv-termspal">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => patch((c) => ({ ...c, transIn: t }))}>{t}</span>))}</div>
         )}
         <label className="lv-lab">Transition out <button className="lv-termsbtn" onClick={() => togglePal("transOut")}>+ terms</button></label>
-        <input className="lv-in" value={sel.c.transOut || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transOut: ev.target.value }))} />
+        <input className="lv-in" value={active.c.transOut || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transOut: ev.target.value }))} />
         {palFor === "transOut" && (
           <div className="lv-termspal">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => patch((c) => ({ ...c, transOut: t }))}>{t}</span>))}</div>
         )}
-        <div className="lv-refline">{(sel.c.cast || []).length} cast &middot; {(sel.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast &amp; assets tab)</span></div>
-        <button className="lv-go" disabled={busy} onClick={() => generateShot(sel)}>{busy ? (gs.msg || "generating…") : "▶ Generate shot"}</button>
-        <button className="lv-usevid" disabled={busy} onClick={() => useExistingVideo(sel)} title="Skip generation -- use a video you already have in your gallery as this shot's clip">
+        <div className="lv-refline">{(active.c.cast || []).length} cast &middot; {(active.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast &amp; assets tab)</span></div>
+        <button className="lv-go" disabled={busy} onClick={() => generateShot(active)}>{busy ? (gs.msg || "generating…") : "▶ Generate shot"}</button>
+        {sel && <button className="lv-usevid" disabled={busy} onClick={() => useExistingVideo(sel)} title="Skip generation -- use a video you already have in your gallery as this shot's clip">
           &#128190; Use an existing video instead
-        </button>
+        </button>}
+        {!sel && gs && gs.mid && (
+          <div className="lv-imgresult">
+            <img src={"/thumbs/" + gs.mid + ".jpg"} alt="result" />
+            <div className="lv-route"><span className="lv-dim">attach to shot &#8594;</span>
+              <button className="lv-routebtn" disabled={!routeTarget} onClick={() => {
+                if (!routeTarget) return;
+                setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, ...(gs.duration ? { actualDur: gs.duration } : {}) }));
+                setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
+              }}>{routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above"}</button>
+            </div>
+            {draftAttachedInfo && draftAttachedInfo.mid === gs.mid && <div className="lv-ok2">&#10003; attached to {draftAttachedInfo.code} &middot; it's now that shot's result</div>}
+          </div>
+        )}
       </div>
     );
     else if (tab === "Image") {
-      const gi = genImgState[sel.c.id] || {};
+      const gi = genImgState[active.c.id] || {};
       const busyI = gi.phase === "submitting" || gi.phase === "running";
       tabBody = (
         <div>
           <label className="lv-lab">Model {imgModel ? <span className="lv-dim">· {imgModel.title}</span> : null}</label>
           <mg-model-picker ref={bindPicker} kind="base"></mg-model-picker>
           <label className="lv-lab">Image prompt</label>
-          <textarea className="lv-ta" value={sel.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
+          <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
-          <button className="lv-mini2" onClick={() => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, (c.openFrame && c.openFrame.desc) || "", c.lighting || ""].filter(Boolean).join(", ") }))}>&#8615; seed from shot description</button>
-          <button className="lv-go" disabled={busyI} onClick={() => genImage(sel)}>{busyI ? (gi.msg || "generating…") : "✦ Generate reference image"}</button>
+          {sel && <button className="lv-mini2" onClick={() => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, (c.openFrame && c.openFrame.desc) || "", c.lighting || ""].filter(Boolean).join(", ") }))}>&#8615; seed from shot description</button>}
+          <button className="lv-go" disabled={busyI} onClick={() => genImage(active)}>{busyI ? (gi.msg || "generating…") : "✦ Generate reference image"}</button>
           {gi.phase === "error" && <div className="lv-gerr">{gi.msg}</div>}
           {gi.mid && (
             <div className="lv-imgresult">
               <img src={"/thumbs/" + gi.mid + ".jpg"} alt="result" />
               <div className="lv-route"><span className="lv-dim">route &#8594;</span>
-                <button className={"lv-routebtn" + (gi.routed === "open" ? " on" : "")} onClick={() => routeImg(sel, "open")}>open frame</button>
-                <button className={"lv-routebtn" + (gi.routed === "close" ? " on" : "")} onClick={() => routeImg(sel, "close")}>close frame</button>
-                <button className={"lv-routebtn" + (gi.routed === "cast" ? " on" : "")} onClick={() => routeImg(sel, "cast")}>cast</button>
+                <button className={"lv-routebtn" + (gi.routed === "open" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeImg(routeTarget, "open", active.c.id)}>open frame</button>
+                <button className={"lv-routebtn" + (gi.routed === "close" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeImg(routeTarget, "close", active.c.id)}>close frame</button>
+                <button className={"lv-routebtn" + (gi.routed === "cast" ? " on" : "")} onClick={() => routeImg(routeTarget || active, "cast", active.c.id)}>cast</button>
               </div>
-              {gi.routed && <div className="lv-ok2">&#10003; sent to {gi.routed} &middot; it now feeds this shot's video gen</div>}
+              {gi.routed && <div className="lv-ok2">&#10003; sent to {gi.routed}{sel ? " · it now feeds this shot's video gen" : ""}</div>}
             </div>)}
         </div>
       );
     }
     else if (tab === "Edit") {
-      const ge = genEditState[sel.c.id] || {};
+      const ge = genEditState[active.c.id] || {};
       const busyE = ge.phase === "submitting" || ge.phase === "running";
-      const src = sel.c.openFrame && sel.c.openFrame.mediaId;
+      const src = active.c.openFrame && active.c.openFrame.mediaId;
       tabBody = (
         <div>
-          <label className="lv-lab">Source — this shot's open frame</label>
+          <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
           {src ? <img className="lv-editsrc" src={"/thumbs/" + src + ".jpg"} alt="source" />
-               : <div className="lv-ph">No open-frame image yet — route one from the <b>Image</b> tab, or pick it into the open frame.</div>}
+               : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
           <label className="lv-lab">Edit instruction</label>
-          <textarea className="lv-ta" value={sel.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
+          <textarea className="lv-ta" value={active.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
             onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
-          <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(sel)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
+          <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(active)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
           {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
           {ge.mid && (
             <div className="lv-imgresult">
               <img src={"/thumbs/" + ge.mid + ".jpg"} alt="result" />
               <div className="lv-route"><span className="lv-dim">route &#8594;</span>
-                <button className={"lv-routebtn" + (ge.routed === "open" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, sel, "open")}>open frame</button>
-                <button className={"lv-routebtn" + (ge.routed === "close" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, sel, "close")}>close frame</button>
-                <button className={"lv-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, sel, "cast")}>cast</button>
+                <button className={"lv-routebtn" + (ge.routed === "open" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id)}>open frame</button>
+                <button className={"lv-routebtn" + (ge.routed === "close" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id)}>close frame</button>
+                <button className={"lv-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id)}>cast</button>
               </div>
               {ge.routed && <div className="lv-ok2">&#10003; sent to {ge.routed}</div>}
             </div>)}
@@ -889,7 +925,7 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
       );
     }
     else if (tab === "Reference") {
-      const gr = genRefState[sel.c.id] || {};
+      const gr = genRefState[active.c.id] || {};
       const busyR = gr.phase === "submitting" || gr.phase === "running";
       const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId);
       tabBody = (
@@ -898,17 +934,17 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
           {refs.length ? <div className="lv-refstrip">{refs.map((a) => (<img key={a.id} src={"/thumbs/" + a.mediaId + ".jpg"} title={a.tag} alt="" />))}</div>
                        : <div className="lv-ph">No cast @image references with a gallery image yet — add some in <b>Cast &amp; assets</b>.</div>}
           <label className="lv-lab">Prompt</label>
-          <textarea className="lv-ta" value={sel.c.refPrompt || ""} placeholder="compose a new still from the references…"
+          <textarea className="lv-ta" value={active.c.refPrompt || ""} placeholder="compose a new still from the references…"
             onChange={(ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))} />
-          <button className="lv-go" disabled={busyR || !refs.length} onClick={() => genRef(sel)}>{busyR ? (gr.msg || "generating…") : "✦ Generate from references"}</button>
+          <button className="lv-go" disabled={busyR || !refs.length} onClick={() => genRef(active)}>{busyR ? (gr.msg || "generating…") : "✦ Generate from references"}</button>
           {gr.phase === "error" && <div className="lv-gerr">{gr.msg}</div>}
           {gr.mid && (
             <div className="lv-imgresult">
               <img src={"/thumbs/" + gr.mid + ".jpg"} alt="result" />
               <div className="lv-route"><span className="lv-dim">route &#8594;</span>
-                <button className={"lv-routebtn" + (gr.routed === "open" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, sel, "open")}>open frame</button>
-                <button className={"lv-routebtn" + (gr.routed === "close" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, sel, "close")}>close frame</button>
-                <button className={"lv-routebtn" + (gr.routed === "cast" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, sel, "cast")}>cast</button>
+                <button className={"lv-routebtn" + (gr.routed === "open" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id)}>open frame</button>
+                <button className={"lv-routebtn" + (gr.routed === "close" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id)}>close frame</button>
+                <button className={"lv-routebtn" + (gr.routed === "cast" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id)}>cast</button>
               </div>
               {gr.routed && <div className="lv-ok2">&#10003; sent to {gr.routed}</div>}
             </div>)}
@@ -918,17 +954,28 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
     else tabBody = <div className="lv-ph">The <b>{tab}</b> tab renders the shot on PixAI.</div>;
     gen = (
       <div className="lv-gen">
-        <div className="lv-genhead">&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</div>
+        <div className="lv-genhead">{sel
+          ? <>&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</>
+          : <>&#10024; Draft generation <span className="lv-dim">— generate freely, then route or attach it to a shot</span></>}</div>
+        {!sel && (
+          <div className="lv-drafttarget">
+            <label className="lv-lab">Route results into a shot <span className="lv-dim">(cast doesn't need one)</span></label>
+            <select className="lv-sel" value={draftTarget} onChange={(ev) => setDraftTarget(ev.target.value)}>
+              <option value="">— choose a shot —</option>
+              {entries.map((e) => <option key={e.c.id} value={e.c.id}>{e.code} &middot; {e.c.title || "untitled"}</option>)}
+            </select>
+          </div>
+        )}
         <div className="lv-framehandoff">
-          <FrameSlot which="open" frame={sel.c.openFrame} discreet={sel.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+          <FrameSlot which="open" frame={active.c.openFrame} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("openFrame", p)}
             extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
                 title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
                 {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
                   : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
-              : <span className="sb-hint">first shot — no previous frame</span>} />
+              : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
           <div className="sb-conn-mid">&#8594;</div>
-          <FrameSlot which="close" frame={sel.c.closeFrame} discreet={sel.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+          <FrameSlot which="close" frame={active.c.closeFrame} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("closeFrame", p)} />
         </div>
         <div className="lv-tabs">{["Image", "Edit", "Reference", "Video"].map((t) => (<span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
@@ -1369,7 +1416,10 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
       if (cls.phase === "done") {
-        setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+        // duration is stashed here too (not just via setCardStatus below) so a draft
+        // generation -- with no real card for setCardStatus to find -- still has it
+        // on hand when the owner later attaches this result to a shot.
+        setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
         // capture the clip's REAL length so the reel reflects what was rendered, not planned
         setCardStatus(cardId, { status: "done", resultMid: cls.mid, ...(cls.duration ? { actualDur: cls.duration } : {}) });
       } else if (cls.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
@@ -1414,13 +1464,17 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       pollImg(c.id, d.task_id);
     } catch { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
   };
-  const routeImg = (entry, target) => {
-    const c = entry.c; const gs = genImgState[c.id]; if (!gs || !gs.mid) return;
+  // sourceId defaults to entry.c.id (unchanged behavior: routing a bound shot's own
+  // result into itself). Draft-mode calls pass "__draft__" explicitly, since the mid
+  // being routed lives under the draft's key while entry is whichever shot got chosen
+  // as the destination -- two different ids where bound mode only ever needed one.
+  const routeImg = (entry, target, sourceId) => {
+    const c = entry.c; const sid = sourceId || c.id; const gs = genImgState[sid]; if (!gs || !gs.mid) return;
     const mid = gs.mid;
     if (target === "open") setCard(entry.a.id, c.id, (x) => ({ ...x, openFrame: { ...x.openFrame, mediaId: mid, thumbId: "", source: "", desc: x.openFrame.desc || "generated in Loom" } }));
     else if (target === "close") setCard(entry.a.id, c.id, (x) => ({ ...x, closeFrame: { ...x.closeFrame, mediaId: mid, thumbId: "", source: "", desc: x.closeFrame.desc || "generated in Loom" } }));
     else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
-    setGenImgState((s) => ({ ...s, [c.id]: { ...s[c.id], routed: target } }));
+    setGenImgState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
   };
   // Generic gen runner for the Edit/Reference tabs — submit -> poll -> stash -> route.
   // Parameterized on the state setter so the proven Image path above stays untouched.
@@ -1444,13 +1498,13 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       poll(d.task_id);
     } catch { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: "network error" } })); }
   };
-  const routeGen = (state, setState, entry, target) => {
-    const c = entry.c; const gs = state[c.id]; if (!gs || !gs.mid) return;
+  const routeGen = (state, setState, entry, target, sourceId) => {
+    const c = entry.c; const sid = sourceId || c.id; const gs = state[sid]; if (!gs || !gs.mid) return;
     const mid = gs.mid;
     if (target === "open") setCard(entry.a.id, c.id, (x) => ({ ...x, openFrame: { ...x.openFrame, mediaId: mid, thumbId: "", source: "", desc: x.openFrame.desc || "generated in Loom" } }));
     else if (target === "close") setCard(entry.a.id, c.id, (x) => ({ ...x, closeFrame: { ...x.closeFrame, mediaId: mid, thumbId: "", source: "", desc: x.closeFrame.desc || "generated in Loom" } }));
     else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
-    setState((s) => ({ ...s, [c.id]: { ...s[c.id], routed: target } }));
+    setState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
   };
   const genEdit = (entry) => {
     const c = entry.c;
