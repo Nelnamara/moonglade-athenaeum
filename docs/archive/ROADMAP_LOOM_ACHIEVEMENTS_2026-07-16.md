@@ -1,8 +1,21 @@
 # Moonglade Athenaeum — Active Roadmap (Loom V2 + Achievements)
 
-> Consolidated 2026-07-11 from every relevant artifact + repo doc + the live code/branch state.
-> **This is the source of truth for the two active threads. Read it at session start instead of re-deriving.**
-> Operating rule (owner, hard): **roadmap/notate here BEFORE building. No plowing.**
+> ## ❄️ FROZEN — historical record, do not edit. Superseded by `docs/STATE.md`.
+>
+> **Frozen 2026-07-17.** This file was the project's source-of-truth doc from 2026-07-11. It is no
+> longer maintained; current state lives in **`docs/STATE.md`**.
+>
+> **Why it was retired — read this before starting another "living" doc.** This file was itself a
+> consolidation, and it became the single rottenest file in the repo: a 2026-07-16 audit checked 914
+> documentation claims against the code and found 158 false or stale — **40 of them here**, a quarter
+> of the entire repo's doc-rot in one file. The cause was structural, not careless: it was written as
+> an **append-only journal**. Corrections piled up *beside* the errors (`~~struck~~`, "SUPERSEDED",
+> "459 tests green — that day's count; 478 now") instead of replacing them, so reading it end-to-end
+> meant wading through contradictory statements — the owner's words, "countless conflicting data
+> points". `STATE.md` replaces the journal habit with one hard rule: it describes only what is true
+> now, and a fact that stops being true is **deleted, not annotated**. The narrative this file
+> preserves — what was tried, flipped, and abandoned — is exactly what `STATE.md` refuses to carry;
+> that is what this frozen copy is *for*. Read it for history; never as current fact.
 > (Far-horizon epics — the Foundry + Provider Deck — live in `docs/ROADMAP.md`. Near-term tracker: `docs/REFINEMENTS.md`.)
 
 ---

@@ -70,6 +70,7 @@ pixai_backup/
    naming layouts, so resume / gallery / audit never drift.
 
 ## Testing
-478 pytest tests in `tests/` (pure, filesystem, catalog, gallery routes, mocked
-network, embedded-JS syntax); 483 with the optional `pixeltable` dep installed, which
-enables `tests/test_similar.py`. `python -m pytest`. All must pass before merging.
+Run `python -m pytest -q` from the repo root — pure functions, filesystem, catalog,
+gallery routes, mocked network, embedded-JS syntax. `tests/test_similar.py` needs the
+optional `pixeltable` dep and skips itself cleanly without it. The Loom's pure-logic
+modules have their own suite: `node --test` from `loom/`. All must pass before merging.

@@ -1,5 +1,16 @@
 # Art prompts for Mio — Moonglade Athenaeum branding
 
+> ## ❄️ FROZEN — historical record, do not edit. Live art doc is `docs/ART.md`.
+>
+> **Frozen 2026-07-17.** Merged into **`docs/ART.md`** (the one live art doc), then frozen — not
+> deleted, by the owner's call: these prompt bodies are kept as reference craft. The four art docs
+> (this one, `ART_SPECS`, `ART_PICKS`, `badge_generation_prompts`) disagreed with each other and with
+> themselves on sizes, hexes, and which art shipped — a 2026-07-16 audit found 32 false/stale claims
+> across them. `ART.md` reconciles against the code and, where the code settles nothing, says so
+> plainly instead of picking. Use `ART.md` for what is true now; use this file only for the full
+> original prompt text. A hex or size here that disagrees with `ART.md` is stale — `ART.md` wins.
+
+
 Copy-paste prompts to generate the branding art (see `docs/ART_SPECS.md` for sizes/slots).
 Written for Mio's natural-language style. Two standing rules:
 

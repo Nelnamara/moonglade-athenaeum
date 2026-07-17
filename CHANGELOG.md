@@ -14,6 +14,22 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Docs
+- **Documentation consolidated from 16 `docs/` files to 6, with the rest frozen.** A 42-agent audit
+  verified 914 documentation claims against the code and found 158 false or stale — a quarter of them
+  in one file, `ROADMAP_LOOM_ACHIEVEMENTS.md`, because it was written as an append-only journal where
+  corrections piled up beside the errors they replaced. New **`docs/STATE.md`** is the now-only state
+  doc (present tense; a fact that stops being true is deleted, not annotated) and replaces the roadmap
+  as the post-compaction re-read target; **`docs/ART.md`** merges the four art docs into one that
+  reconciles against the code and, where the code settles nothing (e.g. the banner master size), says
+  so instead of inventing an answer. `REFINEMENTS.md` and `ROADMAP.md` fold into `STATE.md`;
+  `DOC_MAP.md` is deleted (its artifact ledger moved to `STATE.md`, its source-of-truth hierarchy to
+  `CLAUDE.md`). The roadmap, the four art docs, `MODEL_DECK`, and the three dated snapshots are frozen
+  under **`docs/archive/`** with banners pointing at their live successors. `CLAUDE.md`'s checkpoint
+  protocol now points at `STATE.md`. New **`tests/test_docs_dont_hardcode_counts.py`** fails the suite
+  if a live doc hardcodes the test count — the fact that was wrong in every one of the 6+ files that
+  stated it. Live docs now name the command (`python -m pytest`) instead.
+
 ### Added
 - **Loom nav button hidden on phone** — `.head-nav .b-loom` now hides at the sub-480px breakpoint;
   the Loom is a dense multi-panel tool that isn't viable on a phone screen. Still visible on tablets.

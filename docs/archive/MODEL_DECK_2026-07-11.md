@@ -1,5 +1,21 @@
 # Moonglade Model Deck — verified research (2026-07-11)
 
+> ## ❄️ FROZEN — historical record, do not edit
+>
+> **Frozen 2026-07-17** (owner's call). This is dated research about the *outside world* —
+> Civitai/HuggingFace/Pinokio listings — so it decays on its own schedule no matter what this
+> repo does. It was verified on **2026-07-11** and is not maintained past that date. Treat every
+> claim below as "true on 2026-07-11", not as current: links rot, models get pulled or superseded,
+> and the Pinokio ecosystem moves weekly.
+>
+> **If you are starting the Nel-LoRA run** ([[nel_character_lora]]), re-verify before relying on
+> anything here — in particular, this deck **contradicts itself on OneTrainer**: it states OneTrainer
+> is not available in Pinokio *and* ranks a Pinokio port third. That was never resolved because the
+> run never started. Resolve it against reality first; it is a decision input, not trivia.
+>
+> Anything still true and still needed belongs in a live doc — copy it forward rather than editing
+> this file. Editing a frozen record destroys the only thing it is for: what we believed, and when.
+
 > Produced by a 9-agent research+verify workflow (owner-directed, Track 2). Every model below was
 > adversarially verified: the link resolves, the base-architecture claim checked, token needs noted.
 > 25/25 candidates CONFIRMED. Raw JSON: session scratchpad `model_deck_raw.json`.
