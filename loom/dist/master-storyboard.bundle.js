@@ -351,6 +351,10 @@ ${"=".repeat(48)}
   background:rgba(0,0,0,.5);border-radius:5px;padding:2px 7px;pointer-events:none;
   opacity:0;transition:opacity .15s}
 .sb-shotprev:hover .sb-shotprev-hint{opacity:1}
+.sb-shotprev-play{position:absolute;left:7px;bottom:6px;font-size:12px;line-height:1;color:#fff;
+  background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:4px 7px;
+  cursor:pointer;}
+.sb-shotprev-play:hover{background:rgba(0,0,0,.75);border-color:var(--amber);}
 .sb-shotprev-wrap{margin-top:8px;max-width:340px}
 .sb-trim{margin-top:6px}
 .sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
@@ -2266,6 +2270,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
     const vidRef = useRef(null), trackRef = useRef(null);
     const [dur, setDur] = useState(0);
     const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
+    const [playing, setPlaying] = useState(false);
     const rangeRef = useRef(range);
     rangeRef.current = range;
     const durRef = useRef(0);
@@ -2282,11 +2287,32 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       return Math.max(0, Math.min(durRef.current, (clientX - t.left) / t.width * durRef.current));
     };
     const scrub = (e) => {
+      if (playing) return;
       const v = vidRef.current;
       if (!v || !dur) return;
       const r = e.currentTarget.getBoundingClientRect();
       const t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
       v.currentTime = range.in + t * Math.max(0.01, effOut - range.in);
+    };
+    const togglePlay = (e) => {
+      e.stopPropagation();
+      const v = vidRef.current;
+      if (!v) return;
+      if (playing) {
+        v.pause();
+        setPlaying(false);
+        return;
+      }
+      if (v.currentTime < range.in || v.currentTime >= effOut) v.currentTime = range.in;
+      v.play();
+      setPlaying(true);
+    };
+    const onTimeUpdate = (e) => {
+      if (playing && e.currentTarget.currentTime >= effOut) {
+        e.currentTarget.pause();
+        e.currentTarget.currentTime = range.in;
+        setPlaying(false);
+      }
     };
     const onMove = (e) => {
       if (!dragRef.current || !durRef.current) return;
@@ -2318,6 +2344,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         className: "sb-shotprev",
         onMouseMove: scrub,
         onMouseLeave: () => {
+          if (playing) return;
           const v = vidRef.current;
           if (v) v.currentTime = range.in;
         }
@@ -2330,9 +2357,12 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
           muted: true,
           preload: "metadata",
           playsInline: true,
-          onLoadedMetadata: (e) => setDur(e.currentTarget.duration || 0)
+          onLoadedMetadata: (e) => setDur(e.currentTarget.duration || 0),
+          onTimeUpdate,
+          onEnded: () => setPlaying(false)
         }
       ),
+      /* @__PURE__ */ React.createElement("button", { className: "sb-shotprev-play", onClick: togglePlay, title: playing ? "Pause" : "Play" }, playing ? "\u23F8" : "\u25B6"),
       /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-hint" }, "hover to scrub")
     ), /* @__PURE__ */ React.createElement("div", { className: "sb-trim" }, /* @__PURE__ */ React.createElement(
       "div",
@@ -2396,6 +2426,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         key: clip.mid,
         src: "/video-file/" + clip.mid,
         autoPlay: true,
+        muted: true,
         playsInline: true,
         onClick: (e) => {
           const v = e.currentTarget;

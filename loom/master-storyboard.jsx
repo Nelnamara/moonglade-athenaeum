@@ -130,6 +130,10 @@ const STYLES = `
   background:rgba(0,0,0,.5);border-radius:5px;padding:2px 7px;pointer-events:none;
   opacity:0;transition:opacity .15s}
 .sb-shotprev:hover .sb-shotprev-hint{opacity:1}
+.sb-shotprev-play{position:absolute;left:7px;bottom:6px;font-size:12px;line-height:1;color:#fff;
+  background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:4px 7px;
+  cursor:pointer;}
+.sb-shotprev-play:hover{background:rgba(0,0,0,.75);border-color:var(--amber);}
 .sb-shotprev-wrap{margin-top:8px;max-width:340px}
 .sb-trim{margin-top:6px}
 .sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
@@ -1880,6 +1884,7 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim }) {
   const vidRef = useRef(null), trackRef = useRef(null);
   const [dur, setDur] = useState(0);
   const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
+  const [playing, setPlaying] = useState(false);
   const rangeRef = useRef(range); rangeRef.current = range;
   const durRef = useRef(0); durRef.current = dur;
   const dragRef = useRef(null);
@@ -1891,11 +1896,29 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim }) {
     const t = trackRef.current.getBoundingClientRect();
     return Math.max(0, Math.min(durRef.current, ((clientX - t.left) / t.width) * durRef.current));
   };
+  // Hover-scrub is a "not playing" interaction -- while actual playback is running,
+  // mouse movement over the frame must not fight it by yanking currentTime around.
   const scrub = (e) => {
+    if (playing) return;
     const v = vidRef.current; if (!v || !dur) return;
     const r = e.currentTarget.getBoundingClientRect();
     const t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
     v.currentTime = range.in + t * Math.max(0.01, effOut - range.in);
+  };
+  const togglePlay = (e) => {
+    e.stopPropagation();
+    const v = vidRef.current; if (!v) return;
+    if (playing) { v.pause(); setPlaying(false); return; }
+    if (v.currentTime < range.in || v.currentTime >= effOut) v.currentTime = range.in;
+    v.play(); setPlaying(true);
+  };
+  // Playback honors the trim -- stop (and rewind to the kept range's start) at the
+  // trimmed-out point, not the clip's real end, so play always previews what Export
+  // would actually keep.
+  const onTimeUpdate = (e) => {
+    if (playing && e.currentTarget.currentTime >= effOut) {
+      e.currentTarget.pause(); e.currentTarget.currentTime = range.in; setPlaying(false);
+    }
   };
   const onMove = (e) => {
     if (!dragRef.current || !durRef.current) return;
@@ -1919,9 +1942,11 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim }) {
   return (
     <div className="sb-shotprev-wrap">
       <div className="sb-shotprev" onMouseMove={scrub}
-        onMouseLeave={() => { const v = vidRef.current; if (v) v.currentTime = range.in; }}>
+        onMouseLeave={() => { if (playing) return; const v = vidRef.current; if (v) v.currentTime = range.in; }}>
         <video ref={vidRef} src={"/video-file/" + mid} muted preload="metadata" playsInline
-          onLoadedMetadata={(e) => setDur(e.currentTarget.duration || 0)} />
+          onLoadedMetadata={(e) => setDur(e.currentTarget.duration || 0)}
+          onTimeUpdate={onTimeUpdate} onEnded={() => setPlaying(false)} />
+        <button className="sb-shotprev-play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>{playing ? "⏸" : "▶"}</button>
         <div className="sb-shotprev-hint">hover to scrub</div>
       </div>
       <div className="sb-trim">
@@ -1969,7 +1994,7 @@ function SequencePlayer({ clips, onClose }) {
   return (
     <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="sb-seq-box">
-        <video ref={vRef} key={clip.mid} src={"/video-file/" + clip.mid} autoPlay playsInline
+        <video ref={vRef} key={clip.mid} src={"/video-file/" + clip.mid} autoPlay muted playsInline
           onClick={(e) => { const v = e.currentTarget; v.paused ? v.play() : v.pause(); }} />
         <div className="sb-seq-bar">
           <span>Shot {i + 1}/{clips.length}{clip.code ? " · " + clip.code : ""}{clip.title ? " — " + clip.title : ""}</span>
