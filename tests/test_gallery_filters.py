@@ -15,11 +15,11 @@ def db(tmp_path):
     p = tmp_path / "catalog.db"
     save_catalog(p, [
         _row(media_id="1", filename="a_1.png", prompt_preview="night elf druid",
-             created_at="2024-03-10T00:00:00", model_name="ModelA"),
+             created_at="2024-03-10T00:00:00", model_name="ModelA", task_id="task-1001"),
         _row(media_id="2", filename="b_2.png", prompt_preview="nighttime city",
-             created_at="2025-07-01T00:00:00", model_name="ModelB"),
+             created_at="2025-07-01T00:00:00", model_name="ModelB", task_id="task-1002"),
         _row(media_id="3", filename="c_3.png", prompt_preview="bright morning",
-             created_at="2026-01-05T00:00:00", model_name="ModelA"),
+             created_at="2026-01-05T00:00:00", model_name="ModelA", task_id="task-1003"),
     ])
     return p
 
@@ -63,6 +63,18 @@ def test_multiword_is_anded(db):
 def test_multiword_no_match(db):
     rows, total = query_catalog(db, q="night morning")
     assert total == 0
+
+
+def test_search_matches_task_id_substring(db):
+    rows, total = query_catalog(db, q="1002")
+    assert total == 1
+    assert rows[0]["media_id"] == "2"
+
+
+def test_search_matches_media_id_exactly(db):
+    rows, total = query_catalog(db, q="3")
+    assert total == 1
+    assert rows[0]["media_id"] == "3"
 
 
 # ---- date range (YYYY-MM comparison) --------------------------------------
@@ -148,6 +160,24 @@ def test_collection_health_counts_and_missing(tmp_path):
     assert h["rated"] == 1
     assert h["missing"] == 1          # row 222 has no file on disk
     assert h["per_bucket"].get("month") == 1
+
+
+def test_collection_health_excludes_deleted_and_branding(tmp_path):
+    # _deleted/ (purge_media_local's recoverable trash) and branding/ (UI art assets,
+    # not user content) both used to be tallied into "Images on disk", inflating it far
+    # past the Panel's catalog-row count — see the Health-vs-Panel discrepancy fix.
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="111", filename="111.webp", created_at="2024-03-01", model_name="ModelA"),
+    ])
+    (tmp_path / "2024-03").mkdir()
+    (tmp_path / "2024-03" / "111.webp").write_bytes(b"data")
+    (tmp_path / "_deleted").mkdir()
+    (tmp_path / "_deleted" / "999.webp").write_bytes(b"data")
+    (tmp_path / "branding" / "marks").mkdir(parents=True)
+    (tmp_path / "branding" / "marks" / "logo.png").write_bytes(b"data")
+    h = collection_health(tmp_path, db)
+    assert h["total_files"] == 1   # only the real, non-deleted, non-branding image counts
 
 
 def test_published_and_tag_filters(tmp_path):
