@@ -13,6 +13,25 @@ python pixai_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate
 `catalog.db` + your files, but can also make authenticated API calls for prune /
 reconcile (see [Deleting & Sync](Deleting)).
 
+## The header
+
+A row of frosted glow-pill buttons, one hue per destination:
+
+- **✦ Generate** — the dockable Generate / Edit / Video drawer, right over the grid. See
+  [Generating](Generating).
+- **▰ The Loom** — the storyboard for multi-clip video (acts, shots, cast, frame handoff),
+  at `/loom`. Also [Generating](Generating); full manual in `docs/LOOM.md`.
+- **🏆** — the Trophy Hall: achievements, points, and earnable skins. It opens as a
+  maximized overlay over the gallery, not a separate page (`Esc` closes it).
+- **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing.
+- **⚙ Panel** — the Control Panel at `/panel`: maintenance jobs with live logs and progress,
+  the scheduler, server Stop/Restart, branding.
+- **♡ Health** — the [collection health](Health) dashboard.
+
+**Generate**, **The Loom**, **Panel** and the balance chip are **localhost-only**. Served over
+the LAN they're hidden and the header shows a *👁 read-only LAN view* note instead — so you can
+browse and curate from a tablet while only your own machine can spend credits.
+
 ## Browsing & filtering
 
 The filter bar:
@@ -39,8 +58,16 @@ images and videos with the arrow keys without leaving the overlay.
   end of a page and it loads the next one, continuing seamlessly. Closing leaves your
   scroll and selections intact.
 - **Detail page** (via the lightbox's *Details*, or by clicking a video): full
-  metadata (incl. negative + clip-skip), Copy Prompt, Find Similar, View Batch, Edit
-  Prompt. Keys: `←` `→` prev-next, **`Esc` / `↑` back to gallery**, `F` focus mode.
+  metadata (incl. negative + clip-skip), Copy Prompt, **Find Similar (model)** — a filter
+  link to every image from the same model — View Batch, Edit Prompt. Keys: `←` `→`
+  prev-next, **`Esc` / `↑` back to gallery**, `F` focus mode.
+- **✧ Similar** — lookalikes by *eye* rather than by model, and a different control from
+  *Find Similar (model)* above: right-click any image card, or **✧ Similar** in the
+  lightbox, for the 48 closest images in your catalog. Images only. Needs the optional
+  CLIP index — `pip install pixeltable`, then build it once with
+  `python pixai_gallery_backup.py --rebuild-similar` (run that while the gallery isn't
+  serving Similar queries — both use the same embedded database). Without the index the
+  panel just tells you so; nothing else breaks.
 
 Scroll position and your selections are preserved when you open an image and come
 back (even via the browser Back button).

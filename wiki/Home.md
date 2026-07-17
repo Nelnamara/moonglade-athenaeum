@@ -8,7 +8,7 @@ New here? Start with **[Setup](Setup)** — it takes one API key and about a min
 - **[Setup](Setup)** — install + the one-key `config.json`.
 - **[Backing Up](Backing-Up)** — download your history, incremental updates, organizing files.
 - **[The Gallery](Gallery)** — browse, search, filter, rate, the lightbox.
-- **[Generating Images](Generating)** — create images via the API (GUI + CLI).
+- **[Generating Images](Generating)** — create images via the API (the web Generate drawer + CLI; legacy GUI tab).
 - **[Collections & Curation](Collections)** — Select mode, drag-paint, Collections.
 - **[Deleting & Cloud Sync](Deleting)** — local vs cloud delete, reconcile orphans.
 - **[Collection Health](Health)** — the analytics dashboard.
@@ -20,4 +20,4 @@ New here? Start with **[Setup](Setup)** — it takes one API key and about a min
 
 ---
 
-> **Personal-use tool.** Built to preserve and organize *your own* PixAI work — cheaper priority by default, no credit-farming automation, destructive actions touch only your account. Unofficial; not affiliated with PixAI.
+> **Personal-use tool.** Built to preserve and organize *your own* PixAI work — cheaper priority by default, claims your own daily free credits/stamina and auto-applies your free cards, destructive actions touch only your account. Unofficial; not affiliated with PixAI.

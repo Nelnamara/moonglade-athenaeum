@@ -19,7 +19,7 @@ among — art picks, model/LoRA picks, design options, badge/frame/icon selectio
 Ten things every selection artifact has. The ones marked **MUST** are hard requirements.
 
 1. **Completeness, asserted — MUST.** Every candidate appears. The builder ends with a hard
-   `assert len(placed) == len(all_files)` that **fails the build** rather than let a file slip.
+   `assert len(placed) == len(folder_imgs)` that **fails the build** rather than let a file slip.
    A catch-all **"Everything Else"** section absorbs anything the classifier doesn't place —
    still rankable, never hidden.
    *Why: a filename classifier silently dropped ~half the gems. Nothing gets cherry-picked out again.*
@@ -85,7 +85,7 @@ Dark, single-theme — the Athenaeum's violet world, deliberately.
 1. **Clone `docs/curation_reference_builder.py`.** Never start from a blank file.
 2. **Source candidates comprehensively** — iterate the whole folder/collection; classify into
    sections and route anything unmatched to "Everything Else."
-3. **Assert completeness** — `assert len(placed) == len(all_files)`; the build refuses to run if
+3. **Assert completeness** — `assert len(placed) == len(folder_imgs)`; the build refuses to run if
    a file is missing.
 4. **Ground the picks** — view the candidates, then write recommendations with real technical +
    thematic reasons; mark them on the cards.

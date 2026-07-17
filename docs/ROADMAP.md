@@ -18,7 +18,7 @@ the main tool. Gated behind its own extra.
 | Stage | Work | Gate |
 |---|---|---|
 | **1 · Spike** | Standalone script: one gallery image → **Hunyuan3D-2 mini/turbo** (pip + weights, CUDA, CPU-offload if VRAM-tight) → export **GLB**. Judge quality on a real Nelnamara render. | **Go/no-go.** If 12 GB + mini gives figurine-grade output, proceed. If not, pivot to Meshy API (Epic B provider). *Waiting on owner's go.* |
-| **2 · Cleanup** | Headless Blender (already wired): import GLB → decimate, make-manifold, recompute normals, auto-orient for resin → export **watertight STL**. | Clean STL that slices in Photon Workshop. |
+| **2 · Cleanup** | Headless Blender (**not wired** — nothing Blender-related exists in the project yet; install + script it as part of this stage): import GLB → decimate, make-manifold, recompute normals, auto-orient for resin → export **watertight STL**. | Clean STL that slices in Photon Workshop. |
 | **3 · Integration** | "Send to Foundry" button (detail + right-click) → async job (reuses submit/poll/collect + **Jobs tray**) → **three.js GLB mesh preview** → **STL download**. Mesh stored beside the image in the catalog. | Owner picks an image, gets an STL. |
 | **4 · Provider seam** | Meshy / Tripo API as a fallback provider behind the same interface — **this is Epic B**. | — |
 
