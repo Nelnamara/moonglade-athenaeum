@@ -36,7 +36,7 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "1.10.0"
+__version__ = "1.11.0"
 
 import argparse
 import csv
@@ -178,8 +178,9 @@ ARTWORK_DETAIL_HASH = _cfg.get("ARTWORK_DETAIL_HASH", "") or \
 CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 # Deletion mutation (deleteGenerationTask). Also a public persisted hash. It only
 # ever touches YOUR OWN tasks, and the destructive paths are independently gated by
-# explicit confirmation (typed "DELETE" in the gallery, --confirm on the CLI), so the
-# default is safe; override in config.json if it rotates.
+# explicit confirmation (typed "DELETE" in the gallery; --apply plus a typed "delete"
+# on the CLI -- NOT --confirm, which gates credit-spending generation), so the default
+# is safe; override in config.json if it rotates.
 DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "") or \
     "9f0c8dd3edfe712a4479d700df0b33faebbbc28c7d2310589ea192e1a35d6ee4"
 DELETE_OPERATION = "deleteGenerationTask"
@@ -936,12 +937,16 @@ def delete_task_gql(session, task_id):
     PixAIError with a clear message on any failure. Deliberately single-attempt (NO
     retry/backoff loop) so a flaky network can never cause a delete to fire twice.
     """
+    # Defensive only: DELETE_TASK_HASH ships with a working built-in default, so this
+    # can fire solely if that default is stripped or the hash rotates and someone blanks
+    # it. It is NOT a setup gate -- --apply plus the typed "delete" confirm are what stand
+    # between a caller and a real delete.
     if not DELETE_TASK_HASH:
         raise PixAIError(
-            "DELETE_TASK_HASH missing from config.json. Capture deleteGenerationTask's "
-            "sha256Hash from DevTools (Network -> graphql -> a delete request -> Payload "
-            "-> extensions.persistedQuery.sha256Hash) and add it. This is required on "
-            "purpose so deletion can't run without an explicit setup step.")
+            "DELETE_TASK_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current "
+            "deleteGenerationTask sha256Hash from DevTools (Network -> graphql -> a delete "
+            "request -> Payload -> extensions.persistedQuery.sha256Hash) if the hash rotated.")
     # Mutations are POST (Apollo blocks them over GET). Mirror the site's params.
     params = {"operation": DELETE_OPERATION, "u3t": U3T}
     body = {

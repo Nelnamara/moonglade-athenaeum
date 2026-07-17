@@ -1791,7 +1791,7 @@ export default function App() {
             <button className="sb-btn" onClick={() => exportCut(entries)} disabled={!anyDone}
               title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Export</button>
             <button className="sb-btn ghost sm" onClick={() => setV2(true)}
-              title="Preview the new dockable V2 layout (non-destructive — your board is untouched)">&#9707; V2 layout</button>
+              title="Switch to the V2 layout (non-destructive — your board is untouched)">&#9707; V2 layout</button>
           </div>
           <div className="sb-stat"><b>{done}/{entries.length}</b><span>shots done</span></div>
           <div className="sb-stat"><b style={{ color: over > 0 ? "var(--coral)" : "var(--ink)" }}>{fmt(total)}</b>

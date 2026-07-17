@@ -8119,17 +8119,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         sep = "&" if "?" in back else "?"
         return redirect("{}{}replaced={}".format(back, sep, n))
 
-    # Thumbnails and full images are content-addressed (keyed by media_id /
-    # filename) and never change once written, so we can cache them in the browser
-    # essentially forever. This makes pagination, back-navigation, and re-visits
-    # instant with zero re-download -- the single biggest win on mobile / LAN.
+    # Full images are write-once: /img/ is keyed by on-disk path and /full/ resolves to
+    # the downloaded original, so the bytes behind a given URL never change. Cache those
+    # forever -- pagination, back-navigation, and re-visits cost zero re-download, the
+    # single biggest win on mobile / LAN.
     _IMMUTABLE = "public, max-age=31536000, immutable"
+
+    # Thumbnails are NOT immutable, despite being keyed by media_id: `--rebuild-thumbs`
+    # regenerates them IN PLACE at the same key (that is its whole job -- repairing
+    # posters that ffmpeg missed). media_id is an identity, not a content hash, so an
+    # `immutable` year-long cache pins the broken poster it was meant to fix. Short
+    # max-age + the ETag send_from_directory already sets = a 304 on the common path.
+    _THUMB_CACHE = "public, max-age=300"
 
     @app.route("/thumbs/<media_id>.jpg")
     def thumb(media_id):
         resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
-                                   max_age=31536000)
-        resp.headers["Cache-Control"] = _IMMUTABLE
+                                   max_age=300)
+        resp.headers["Cache-Control"] = _THUMB_CACHE
         return resp
 
     @app.route("/img/<path:rel>")
@@ -8166,22 +8173,49 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/sw.js")
     def service_worker():
-        # Cache-first for immutable thumbnails/images; network for everything else.
-        # v2: only cache OK (200) responses -- NEVER a 404 -- so a thumbnail that
-        # didn't exist yet (poster-less video mid-collect) can't get its miss frozen
-        # into the cache. Bumping the cache name + deleting old caches on activate
-        # self-heals any client still holding a poisoned v1 404 (no hard-refresh needed).
+        # Cache-first for write-once originals; stale-while-revalidate for thumbnails;
+        # network for everything else. Only OK (200) responses are cached -- NEVER a 404 --
+        # so a thumbnail that didn't exist yet (poster-less video mid-collect) can't get its
+        # miss frozen in. Bumping the cache name + deleting old caches on activate self-heals
+        # any client holding a poisoned entry from an older version (no hard-refresh needed).
+        #
+        # v3: /thumbs/ moved OFF cache-first. This worker ignores Cache-Control entirely --
+        # `c.match()` returns a hit without ever revalidating -- so cache-first pinned every
+        # thumbnail for the lifetime of the cache. `--rebuild-thumbs` rewrites posters in
+        # place at the same media_id URL, so the repair was invisible to any client that had
+        # already cached the broken one. Same failure shape as the v1 404 poisoning, one
+        # status code over. Originals stay cache-first: their bytes really are write-once.
+        #
+        # The thumb refetch passes cache:'no-cache' so it revalidates against the server
+        # instead of being answered by the HTTP cache's own max-age -- otherwise the
+        # "revalidate" half of stale-while-revalidate is a no-op until max-age expires.
+        # It costs one conditional request per thumb per view, answered by a ~200-byte 304
+        # off the ETag, and it never blocks paint (the cached bytes render immediately).
+        # LAN viewers over plain http get no service worker at all (secure-context only) --
+        # for them the route's short max-age + ETag is what bounds staleness.
         sw = (
-            "const C='pixai-img-v2';\n"
+            "const C='pixai-img-v3';\n"
             "self.addEventListener('install',e=>self.skipWaiting());\n"
             "self.addEventListener('activate',e=>e.waitUntil(\n"
             "  caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k))))\n"
             "  .then(()=>self.clients.claim())));\n"
             "self.addEventListener('fetch',e=>{\n"
             " const u=new URL(e.request.url);\n"
-            " if(e.request.method==='GET' && (u.pathname.startsWith('/thumbs/')||u.pathname.startsWith('/img/')||u.pathname.startsWith('/full/'))){\n"
-            "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;}))));\n"
+            " if(e.request.method!=='GET') return;\n"
+            " const isThumb=u.pathname.startsWith('/thumbs/');\n"
+            " const isOrig=u.pathname.startsWith('/img/')||u.pathname.startsWith('/full/');\n"
+            " if(!isThumb&&!isOrig) return;\n"
+            " if(isOrig){\n"
+            "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(\n"
+            "   r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;}))));\n"
+            "  return;\n"
             " }\n"
+            " e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>{\n"
+            "  const n=fetch(e.request,{cache:'no-cache'})\n"
+            "          .then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;})\n"
+            "          .catch(()=>r);\n"
+            "  return r||n;\n"
+            " })));\n"
             "});\n")
         return app.response_class(sw, mimetype="application/javascript")
 
