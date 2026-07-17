@@ -54,6 +54,10 @@ land in it. The repo is public and has real external users.
   draggable, resizable, or x/y/w/h-persisted (c0c7399).
 - The top strip's **Play** button runs the sequence, disabled until a shot has a result
   (768aecf).
+- The top strip's **Export** button trims + stitches every finished shot into one mp4
+  (`exportCut`, shared with classic Loom unchanged), disabled until a shot has a result. The
+  export-status overlay renders above V2 automatically (`.sb-seq` z-index 500 vs `.lv-overlay`
+  400), same as Play's `SequencePlayer`.
 - The **Timeline** is a fixed drawer with three states (hidden / slim / full), video preview
   above the scrubber, drag handle on `.lv-tlhandle`.
 - **Legend** is a per-field on-demand "+ terms" popover on Camera, Lighting, Transition in and
@@ -155,19 +159,17 @@ land in it. The repo is public and has real external users.
 
 ### The Loom — V1 → V2 gap (the only copy of this list)
 
-Classic Loom retires only once items 1–3 land. V2 is additive and non-destructive: both render
+Classic Loom retires only once items 1–2 land. V2 is additive and non-destructive: both render
 trees take project state and mutators from the same four hooks, so running both risks no
 data-model divergence.
 
-1. **Export** (trim + stitch to mp4). `exportCut` is defined in `useExportPipeline` and
-   consumed only by classic's header; it is not among `LoomV2`'s props.
-2. **Batch "Generate all."** Exists only in classic's header, with its own batching state.
-3. **Per-shot "other references"** (add / set / delete). `addRef` / `setRef` / `delRef` live in
+1. **Batch "Generate all."** Exists only in classic's header, with its own batching state.
+2. **Per-shot "other references"** (add / set / delete). `addRef` / `setRef` / `delRef` live in
    `useShotMutations` but reach only classic's `CardView` → `CardEditor`. Target: V2's Video
    tab or Deep Focus.
-4. Smaller classic-only gaps needing V2 homes: **Audio cue**, **Notes**, the **Discreet/blur
+3. Smaller classic-only gaps needing V2 homes: **Audio cue**, **Notes**, the **Discreet/blur
    toggle**, **manual status-cycle**, **"Copy shot."**
-5. Surface **Import Collection / Backup / Restore / Export-shot-list** from inside V2.
+4. Surface **Import Collection / Backup / Restore / Export-shot-list** from inside V2.
 
 ### The Loom — other
 
