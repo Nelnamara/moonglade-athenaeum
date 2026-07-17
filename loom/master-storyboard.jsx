@@ -395,6 +395,7 @@ const V2_STYLES = `
 .lv-side{flex:none;background:var(--surface0);display:flex;flex-direction:column;min-height:0;
   transition:width .18s ease;overflow-x:hidden;}
 .lv-side.left{width:280px;border-right:1px solid var(--surface1);}
+.lv-side.left.wide{width:560px;}
 .lv-side.right{width:320px;border-left:1px solid var(--surface1);}
 .lv-side.collapsed{width:52px;}
 .lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
@@ -506,9 +507,11 @@ const V2_STYLES = `
 .lv-density{margin-bottom:10px;}
 .lv-simplegrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px;}
 .lv-simplecard{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:6px;
-  text-align:center;cursor:pointer;}
-.lv-simplecard:hover{border-color:var(--accent);}
+  text-align:center;}
+.lv-simplecard:not(.nosel){cursor:pointer;}
+.lv-simplecard:not(.nosel):hover{border-color:var(--accent);}
 .lv-simplecard.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);}
+.lv-simplecard.nosel{opacity:.55;}
 .lv-simplecard img,.lv-simplecard .lv-castph{width:100%;aspect-ratio:1;border-radius:6px;object-fit:cover;margin-bottom:5px;display:block;}
 .lv-simplecard b{display:block;font-size:10.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lv-simplecard span{display:block;font-size:9px;}
@@ -978,7 +981,8 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
           const inShot = sel && (sel.c.cast || []).includes(as.id);
           const src = frameSrc(as);
           return (
-            <div key={as.id} className={"lv-simplecard " + (inShot ? "on" : "")}
+            <div key={as.id} className={"lv-simplecard " + (inShot ? "on " : "") + (!sel ? "nosel" : "")}
+              title={sel ? `Toggle into ${sel.code}` : "Select a shot on the board to toggle its cast"}
               onClick={() => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...(c.cast || []), as.id] }))}>
               {src ? <img src={src} alt="" /> : <span className="lv-castph" />}
               <b>{as.name || as.kind}</b><span className="lv-dim">{as.tag}</span>
@@ -1040,7 +1044,7 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
       </div>
       {timelineDrawer}
       <div className="lv-shell">
-        <div className={"lv-side left" + (leftCollapsed ? " collapsed" : "")}>
+        <div className={"lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "")}>
           <div className="lv-sidehead">
             {!leftCollapsed && (
               <div className="lv-tabs lv-sidetabs">
