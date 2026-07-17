@@ -375,3 +375,158 @@ def test_loom_export_needs_a_video(tmp_path, monkeypatch):
     cli = _client(tmp_path).test_client()
     r = cli.post("/api/loom/export", json={"clips": [{"mid": "nope", "in": 0}]})
     assert r.status_code == 400 and "no finished shot" in r.get_json()["error"]
+
+
+# --- probe_has_audio / probe_duration: pure ffprobe wrappers, fail-soft ---------
+
+def test_probe_has_audio(monkeypatch):
+    import subprocess, shutil
+    monkeypatch.setattr(shutil, "which", lambda n: "/bin/ffprobe" if n == "ffprobe" else None)
+
+    class R:
+        def __init__(self, out):
+            self.stdout = out
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("0\n"))
+    assert g.probe_has_audio("clip.mp4") is True
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R(""))
+    assert g.probe_has_audio("silent.mp4") is False          # no stream index -> no audio
+    monkeypatch.setattr(shutil, "which", lambda n: None)
+    assert g.probe_has_audio("clip.mp4") is False            # ffprobe missing -> fail soft
+
+    def _boom(*a, **k):
+        raise OSError("gone")
+    monkeypatch.setattr(shutil, "which", lambda n: "/bin/ffprobe")
+    monkeypatch.setattr(subprocess, "run", _boom)
+    assert g.probe_has_audio("clip.mp4") is False             # never raises
+
+
+def test_probe_duration(monkeypatch):
+    import subprocess, shutil
+    monkeypatch.setattr(shutil, "which", lambda n: "/bin/ffprobe")
+
+    class R:
+        def __init__(self, out):
+            self.stdout = out
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("5.234\n"))
+    assert g.probe_duration("clip.mp4") == 5.234
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("not-a-number\n"))
+    assert g.probe_duration("clip.mp4") is None                # never raises on garbage
+    monkeypatch.setattr(shutil, "which", lambda n: None)
+    assert g.probe_duration("clip.mp4") is None                # ffprobe missing -> None
+
+
+# --- /api/loom/export: real audio rides along, silence fills the gap -----------
+
+def _mock_export_ffmpeg(monkeypatch):
+    """Same FakeProc convention as test_loom_export_runs_and_downloads, but captures
+    every argv so the constructed ffmpeg command is inspectable."""
+    import subprocess, shutil, io
+    monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg" if n == "ffmpeg" else None)
+    captured = []
+
+    class FakeProc:
+        def __init__(self, argv):
+            captured.append(argv)
+            open(argv[-1], "wb").write(b"OUTPUT")
+            self.stderr = io.StringIO("frame=1 time=00:00:01.00 bitrate=x\n")
+        def wait(self):
+            return 0
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: FakeProc(argv))
+    return captured
+
+
+def _two_video_client(tmp_path):
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "shot_v1.mp4").write_bytes(b"fakemp4")
+    (tmp_path / "videos" / "shot_v2.mp4").write_bytes(b"fakemp4")
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="v1", filename="videos/shot_v1.mp4", is_video="1",
+             created_at="2025-01-01T00:00:00"),
+        _row(media_id="v2", filename="videos/shot_v2.mp4", is_video="1",
+             created_at="2025-01-01T00:00:00")])
+    return create_app(tmp_path).test_client()
+
+
+def _ffmpeg_call(captured):
+    """create_app() shells out to git rev-parse for its build stamp -- pick out the
+    actual ffmpeg invocation from everything Popen captured, not just captured[0]."""
+    return next(argv for argv in captured if argv and argv[0] == "ffmpeg")
+
+
+def _filter_complex_of(argv):
+    return argv[argv.index("-filter_complex") + 1]
+
+
+def test_export_real_audio_maps_both_streams_no_a0(tmp_path, monkeypatch):
+    """The original bug: audio was hard-dropped (concat=...a=0, no -c:a, no [aout] map)
+    even when every clip has real audio. Two clips, both WITH audio."""
+    captured = _mock_export_ffmpeg(monkeypatch)
+    monkeypatch.setattr(g, "probe_has_audio", lambda path: True)
+    cli = _two_video_client(tmp_path)
+    r = cli.post("/api/loom/export", json={"clips": [
+        {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 0, "out": 3}],
+        "total_seconds": 5})
+    assert r.get_json()["ok"] is True
+    argv = _ffmpeg_call(captured)
+    fc = _filter_complex_of(argv)
+    assert "a=0" not in fc and "a=1" in fc
+    assert "-map" in argv and "[aout]" in argv
+    assert "-c:a" in argv and "aac" in argv
+    assert "anullsrc" not in fc                    # no silence needed, no synthetic input
+    # concat's input pads must be PER-SEGMENT interleaved (v0,a0,v1,a1,...) -- grouping by
+    # stream type instead ([v0][v1][a0][a1]) is a real ffmpeg error ("media type mismatch
+    # between ... audio and ... video"), caught only by actually running ffmpeg, not by any
+    # assertion on individual substrings above. Pin the exact adjacent ordering.
+    assert "[v0][a0][v1][a1]concat=" in fc
+    assert argv.count("-i") == 2                   # exactly the two real clips, no lavfi extra
+
+
+def test_export_silent_clip_gets_matching_duration_silence(tmp_path, monkeypatch):
+    """One real-audio clip + one silent clip (e.g. rendered without 'Generate audio') --
+    the silent one must get a synthetic track sized to its OWN trim span, not skipped."""
+    captured = _mock_export_ffmpeg(monkeypatch)
+    monkeypatch.setattr(g, "probe_has_audio",
+                        lambda path: "v1" in str(path))   # v1 has audio, v2 doesn't
+    cli = _two_video_client(tmp_path)
+    r = cli.post("/api/loom/export", json={"clips": [
+        {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 1, "out": 4}],
+        "total_seconds": 5})
+    assert r.get_json()["ok"] is True
+    argv = _ffmpeg_call(captured)
+    fc = _filter_complex_of(argv)
+    assert "a=1" in fc and "a=0" not in fc
+    assert "anullsrc" in " ".join(argv)             # synthetic-silence input WAS added
+    assert argv.count("-i") == 3                    # 2 real clips + 1 lavfi anullsrc
+    # the silent segment (v2, span 4-1=3.0s) draws from input index 2 (after the 2 real -i's)
+    assert "[2:a]atrim=duration=3.000" in fc
+    assert "atrim=start=0.000:end=2.000" in fc      # v1's real audio trimmed to its own span
+
+
+def test_export_all_silent_reuses_one_anullsrc_input(tmp_path, monkeypatch):
+    """Neither clip has audio -- exactly ONE synthetic-silence input is added and referenced
+    twice (not duplicated per segment); each segment still gets its own correctly-sized span."""
+    captured = _mock_export_ffmpeg(monkeypatch)
+    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
+    cli = _two_video_client(tmp_path)
+    r = cli.post("/api/loom/export", json={"clips": [
+        {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 0, "out": 3}],
+        "total_seconds": 5})
+    assert r.get_json()["ok"] is True
+    argv = _ffmpeg_call(captured)
+    fc = _filter_complex_of(argv)
+    assert argv.count("-i") == 3                    # 2 real clips + exactly 1 lavfi input
+    assert "[2:a]atrim=duration=2.000" in fc and "[2:a]atrim=duration=3.000" in fc
+
+
+def test_export_silent_clip_with_no_trim_out_probes_real_duration(tmp_path, monkeypatch):
+    """When 'out' isn't set (trim to the clip's real end) AND the clip has no audio, the
+    synthetic silence can't infer a length from anullsrc -- probe_duration must be consulted."""
+    captured = _mock_export_ffmpeg(monkeypatch)
+    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(g, "probe_duration", lambda path: 6.0)
+    cli = _two_video_client(tmp_path)
+    r = cli.post("/api/loom/export", json={"clips": [
+        {"mid": "v1", "in": 1.0}], "total_seconds": 5})   # no 'out' -> co is None
+    assert r.get_json()["ok"] is True
+    fc = _filter_complex_of(_ffmpeg_call(captured))
+    assert "[1:a]atrim=duration=5.000" in fc         # probed 6.0 - in(1.0) = 5.0

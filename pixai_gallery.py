@@ -2322,6 +2322,41 @@ def make_video_thumbnail(video_path, thumb_path):
                 pass
 
 
+def probe_has_audio(path, timeout=15):
+    """True if the media file has at least one audio stream (ffprobe). Fails soft to
+    False (never raises) -- a probe failure means the Loom export treats the clip as
+    silent and pads it, which is safe; it must never crash the export."""
+    import shutil as _sh
+    import subprocess
+    if not _sh.which("ffprobe"):
+        return False
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+             "stream=index", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=timeout)
+        return bool(r.stdout.strip())
+    except Exception:
+        return False
+
+
+def probe_duration(path, timeout=15):
+    """Real duration in seconds via ffprobe, or None on failure (missing ffprobe,
+    unreadable file, non-numeric output). Never raises."""
+    import shutil as _sh
+    import subprocess
+    if not _sh.which("ffprobe"):
+        return None
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=timeout)
+        return float(r.stdout.strip())
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None
+
+
 def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8):
     """Generate JPEG thumbnails for rows that have a file. CPU-bound (Pillow),
     so a thread pool gives a real multi-core speedup (Pillow releases the GIL
@@ -9591,7 +9626,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Trim each finished shot to its in/out and concat into one 720p mp4 -- the
         rough cut becomes a real deliverable. Async (ffmpeg in a thread); poll
         /api/loom/export-status, download /api/loom/export-file. Localhost-only.
-        Video-only for now (audio is a follow-up). body: {clips:[{mid,in,out}], total_seconds}"""
+        Each segment's real audio rides along when the clip has one (ffprobe-detected);
+        segments with no audio stream (e.g. rendered without the "Generate audio" toggle)
+        get matching-duration silence synthesized (anullsrc) so the concatenated audio
+        track never desyncs across a segment boundary. body: {clips:[{mid,in,out}], total_seconds}"""
         if not _is_local_request():
             return jsonify({"error": "localhost-only"}), 403
         import shutil
@@ -9627,24 +9665,43 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 co = float(co) if co not in (None, "") else None
             except (TypeError, ValueError):
                 co = None
-            segs.append((path, ci, co))
+            segs.append((path, ci, co, probe_has_audio(path)))
         if not segs:
             return jsonify({"error": "no finished shot videos found on disk to export"}), 400
         _export_dir.mkdir(parents=True, exist_ok=True)
         out_path = _export_dir / "loom_cut.mp4"
         W, H = 1280, 720
         parts, labels = [], ""
-        for i, (path, ci, co) in enumerate(segs):
+        # A silent segment needs an explicit numeric span to synthesize (anullsrc has no
+        # natural end); reuse the trim's own end if given, else probe the real file once.
+        need_silence = any(not ha for (_p, _ci, _co, ha) in segs)
+        silence_idx = len(segs)   # the synthetic-silence input, appended after all real -i's
+        for i, (path, ci, co, has_audio) in enumerate(segs):
             tr = "trim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
             parts.append("[%d:v]%s,setpts=PTS-STARTPTS,scale=%d:%d:force_original_aspect_ratio=decrease,"
                          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24[v%d]" % (i, tr, W, H, W, H, i))
-            labels += "[v%d]" % i
-        fc = ";".join(parts) + ";" + labels + "concat=n=%d:v=1:a=0[vout]" % len(segs)
+            if has_audio:
+                atr = "atrim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
+                parts.append("[%d:a]%s,asetpts=PTS-STARTPTS[a%d]" % (i, atr, i))
+            else:
+                span = (co - ci) if co is not None else max(0.1, (probe_duration(path) or ci + 0.1) - ci)
+                # [silence_idx:a] is a raw decoder-input reference (the lavfi anullsrc), not a
+                # named filter output -- ffmpeg allows referencing it multiple times (once per
+                # silent segment) without an explicit asplit.
+                parts.append("[%d:a]atrim=duration=%.3f,asetpts=PTS-STARTPTS[a%d]" % (silence_idx, span, i))
+            # concat's input pads are PER-SEGMENT interleaved (v0,a0,v1,a1,...), never grouped
+            # by stream type (v0,v1,...,a0,a1,...) -- ffmpeg errors "media type mismatch" if
+            # the pad order doesn't match n*(v+a) in that exact per-segment sequence.
+            labels += "[v%d][a%d]" % (i, i)
+        fc = ";".join(parts) + ";" + labels + "concat=n=%d:v=1:a=1[vout][aout]" % len(segs)
         cmd = ["ffmpeg", "-y"]
-        for (path, _ci, _co) in segs:
+        for (path, _ci, _co, _ha) in segs:
             cmd += ["-i", path]
-        cmd += ["-filter_complex", fc, "-map", "[vout]", "-c:v", "libx264",
-                "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", str(out_path)]
+        if need_silence:
+            cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+        cmd += ["-filter_complex", fc, "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264",
+                "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k", str(out_path)]
         with _export_lock:
             _export_job.update(status="running", progress=0, elapsed=0.0, out="",
                                error="", proc=None, cancelled=False)
