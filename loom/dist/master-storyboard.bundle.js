@@ -794,7 +794,10 @@ ${"=".repeat(48)}
 .lv-tlinfo{font-size:11px;color:var(--text);}
 .lv-dim{color:var(--subtext);font-style:italic;}
 .lv-gen{flex:1;min-height:0;overflow-y:auto;padding:10px;}
-.lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;}
+.lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:8px;}
+.lv-unbind{margin-left:auto;flex:none;font:600 10px/1 system-ui;background:var(--surface1);border:1px solid var(--surface1);
+  color:var(--subtext);border-radius:6px;padding:4px 8px;cursor:pointer;}
+.lv-unbind:hover{border-color:var(--accent);color:var(--accent);}
 .lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
 /* The @tag input (.sb-tagin) is 90px in classic Loom's own wide layout -- too wide for
@@ -1184,7 +1187,15 @@ ${"=".repeat(48)}
           }
         ), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyR || !refs.length, onClick: () => genRef(active) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
       } else tabBody = /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "The ", /* @__PURE__ */ React.createElement("b", null, tab), " tab renders the shot on PixAI.");
-      gen = /* @__PURE__ */ React.createElement("div", { className: "lv-gen" }, /* @__PURE__ */ React.createElement("div", { className: "lv-genhead" }, sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2699 ", sel.code, " \xB7 ", sel.c.title || "untitled") : /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2728 Draft generation ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2014 generate freely, then route or attach it to a shot"))), !sel && /* @__PURE__ */ React.createElement("div", { className: "lv-drafttarget" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Route results into a shot ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(cast doesn't need one)")), /* @__PURE__ */ React.createElement("select", { className: "lv-sel", value: draftTarget, onChange: (ev) => setDraftTarget(ev.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 choose a shot \u2014"), entries.map((e) => /* @__PURE__ */ React.createElement("option", { key: e.c.id, value: e.c.id }, e.code, " \xB7 ", e.c.title || "untitled")))), /* @__PURE__ */ React.createElement("div", { className: "lv-framehandoff" }, /* @__PURE__ */ React.createElement(
+      gen = /* @__PURE__ */ React.createElement("div", { className: "lv-gen" }, /* @__PURE__ */ React.createElement("div", { className: "lv-genhead" }, sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2699 ", sel.code, " \xB7 ", sel.c.title || "untitled") : /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2728 Draft generation ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2014 generate freely, then route or attach it to a shot")), sel && /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          className: "lv-unbind",
+          onClick: () => setSelShot(null),
+          title: "Unbind this shot and go back to draft generation"
+        },
+        "\u2715 unbind"
+      )), !sel && /* @__PURE__ */ React.createElement("div", { className: "lv-drafttarget" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Route results into a shot ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(cast doesn't need one)")), /* @__PURE__ */ React.createElement("select", { className: "lv-sel", value: draftTarget, onChange: (ev) => setDraftTarget(ev.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 choose a shot \u2014"), entries.map((e) => /* @__PURE__ */ React.createElement("option", { key: e.c.id, value: e.c.id }, e.code, " \xB7 ", e.c.title || "untitled")))), /* @__PURE__ */ React.createElement("div", { className: "lv-framehandoff" }, /* @__PURE__ */ React.createElement(
         FrameSlot,
         {
           which: "open",
