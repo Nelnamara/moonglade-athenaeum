@@ -3,6 +3,13 @@ UDF needs a GPU, so every test mocks the table handle (_get_table) and, where ne
 indexed_ids — the logic under test (dedup, the row-by-row fallback, self-exclusion) is
 pure Python around those. Importing the module pulls in pixeltable but no torch/model
 (the model is lazy) and never touches Postgres."""
+import pytest
+
+pytest.importorskip("pixeltable")  # optional heavy dep, not in requirements.txt -- skip
+# cleanly (not a collection error) for anyone who hasn't installed it, e.g. a fresh clone
+# running plain `pytest`. CLAUDE.md's --ignore=tests/test_similar.py flag is still the
+# documented way to exclude this file explicitly; this is the fallback for someone who
+# doesn't know that yet.
 import pixai_similar as S
 
 
