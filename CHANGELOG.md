@@ -198,6 +198,17 @@ git tags. Full prose notes for tagged versions live on
   spends, disabled while a batch is running or the board is empty. Same verification as Export
   (clean esbuild build, `node --test` 66/66, full Python suite unaffected). Classic Loom now
   retires once the one remaining punch-list item (per-shot "other references") lands in V2.
+- **Deep Focus can add/edit/remove a shot's other references.** The last item on the V1→V2
+  convergence punch list — `addRef`/`setRef`/`delRef` (from `useShotMutations`) are threaded
+  into `LoomV2`, and Deep Focus's modal gains the same "Other references & @tags" section
+  classic Loom's `CardEditor` has, reusing its exact markup/CSS verbatim (`FrameSlot` already
+  proved `.sb-*` classes render correctly inside Deep Focus). Owner call (2026-07-17): lands in
+  Deep Focus rather than the Video tab, since it's already the "everything about this one shot"
+  view; may end up in both once usage shows whether refs are wanted without leaving the board.
+  Verified via `npm run build` (clean esbuild bundle) and `node --test` (66/66); full Python
+  suite unaffected (505 passing, JS-only change). The item that originally gated classic Loom's
+  retirement has now landed in V2 — whether to actually retire classic Loom, or promote the two
+  remaining smaller gaps to retirement-blockers first, is an open owner call.
 
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 

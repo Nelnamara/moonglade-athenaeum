@@ -643,7 +643,7 @@ function ProjectSwitcher({ api }) {
   );
 }
 
-function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate }) {
+function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -1202,6 +1202,36 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
                 <FrameSlot which="close" frame={c.closeFrame} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
                   onPatch={(p) => dfPatchFrame("closeFrame", p)} />
               </div>
+              <div className="sb-field">
+                <label className="sb-lab">Other references &amp; @tags</label>
+                {c.refs.map((r) => {
+                  const preview = r.thumbId ? thumbs[r.thumbId] : (r.kind === "image" && r.source.startsWith("http") ? r.source : null);
+                  return (
+                    <div className="sb-ref" key={r.id}>
+                      {r.kind === "image" ? (
+                        <label className={"sb-refprev" + (c.discreet ? " discreet" : "")} title="Attach image">
+                          {preview ? <img src={preview} alt={r.tag} /> : "＋"}
+                          <input type="file" accept="image/*" style={{ display: "none" }}
+                            onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); setRef(live.a.id, c.id, r.id, { thumbId: id, source: r.source || f.name }); }} /></label>
+                      ) : <div className="sb-refprev">{r.kind === "video" ? "🎞" : "♪"}</div>}
+                      <div className="sb-refbody">
+                        <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+                          <input className="sb-tagin sb-mono" value={r.tag} onChange={(e) => setRef(live.a.id, c.id, r.id, { tag: e.target.value })} />
+                          <span className="sb-hint">{r.kind}</span>
+                          <button className="sb-ico" style={{ marginLeft: "auto" }} onClick={() => delRef(live.a.id, c.id, r)}>✕</button>
+                        </div>
+                        <input className="sb-in" placeholder="what to use it for (motion / camera / mood…)" value={r.role} onChange={(e) => setRef(live.a.id, c.id, r.id, { role: e.target.value })} />
+                        <input className="sb-in" placeholder="file name or URL" value={r.source} onChange={(e) => setRef(live.a.id, c.id, r.id, { source: e.target.value })} />
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                  <button className="sb-btn sm ghost" onClick={() => addRef(live.a.id, c, "image")}>+ Image</button>
+                  <button className="sb-btn sm ghost" onClick={() => addRef(live.a.id, c, "video")}>+ Video</button>
+                  <button className="sb-btn sm ghost" onClick={() => addRef(live.a.id, c, "audio")}>+ Audio</button>
+                </div>
+              </div>
               <button className="lv-go" onClick={() => { setSelShot(c.id); setDeepFocus(null); }}>Select in Generate &rarr;</button>
             </div>
           </div>
@@ -1752,7 +1782,8 @@ export default function App() {
         genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg}
         genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
         projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
-        batching={batching} batchGenerate={batchGenerate} /></V2Boundary>}
+        batching={batching} batchGenerate={batchGenerate}
+        addRef={addRef} setRef={setRef} delRef={delRef} /></V2Boundary>}
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
