@@ -1145,7 +1145,7 @@ ${"=".repeat(48)}
       let tabBody;
       if (tab === "Video") tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, MODES.map((m) => /* @__PURE__ */ React.createElement("span", { key: m, className: "lv-chip " + (m === active.c.mode ? "on" : ""), onClick: () => patch((c) => ({ ...c, mode: m })) }, m))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Continuity"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement("span", { key: k, className: "lv-chip " + (k === (active.c.connect || "new") ? "on" : ""), title: CONNECT[k].hint, onClick: () => patch((c) => ({ ...c, connect: k })) }, CONNECT[k].label))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement("textarea", { className: "lv-ta", value: active.c.prompt || "", onChange: (ev) => patch((c) => ({ ...c, prompt: ev.target.value })) }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Duration"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, [5, 6, 10, 15].map((d) => /* @__PURE__ */ React.createElement("span", { key: d, className: "lv-chip " + (d === active.c.duration ? "on" : ""), onClick: () => patch((c) => ({ ...c, duration: d })) }, d, "s"))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab)")), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busy, onClick: () => generateShot(active) }, busy ? gs.msg || "generating\u2026" : "\u25B6 Generate shot"), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"), !sel && gs && gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gs.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "attach to shot \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn", disabled: !routeTarget, onClick: () => {
         if (!routeTarget) return;
-        setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, ...gs.duration ? { actualDur: gs.duration } : {} }));
+        setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...gs.duration ? { actualDur: gs.duration } : {} }));
         setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
       } }, routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above")), draftAttachedInfo && draftAttachedInfo.mid === gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 attached to ", draftAttachedInfo.code, " \xB7 it's now that shot's result")));
       else if (tab === "Image") {
@@ -1747,7 +1747,7 @@ Generate anyway?`)) return;
         const cls = classifyTaskStatus(d);
         if (cls.phase === "done") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
-          setCardStatus(cardId, { status: "done", resultMid: cls.mid, ...cls.duration ? { actualDur: cls.duration } : {} });
+          setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, ...cls.duration ? { actualDur: cls.duration } : {} });
         } else if (cls.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
         else setTimeout(tick, 4e3);
       }).catch(() => setTimeout(tick, 5e3));
@@ -1760,6 +1760,8 @@ Generate anyway?`)) return;
         setCardStatus(entry.c.id, {
           status: "done",
           resultMid: mid,
+          trimIn: 0,
+          trimOut: null,
           ...dur > 0 ? { actualDur: dur } : {}
         });
       }, "video");
@@ -2434,19 +2436,22 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         v.play().catch(() => {
         });
       };
+      const advance = () => {
+        if (i < clips.length - 1) setI(i + 1);
+        else onClose();
+      };
       const onTime = () => {
         const end = (clip.out != null ? clip.out : v.duration) || 0;
-        if (end && v.currentTime >= end - 0.04) {
-          if (i < clips.length - 1) setI(i + 1);
-          else onClose();
-        }
+        if (end && v.currentTime >= end - 0.04) advance();
       };
       v.addEventListener("loadedmetadata", seekPlay);
       v.addEventListener("timeupdate", onTime);
+      v.addEventListener("ended", advance);
       if (v.readyState >= 1) seekPlay();
       return () => {
         v.removeEventListener("loadedmetadata", seekPlay);
         v.removeEventListener("timeupdate", onTime);
+        v.removeEventListener("ended", advance);
       };
     }, [i]);
     useEffect(() => {

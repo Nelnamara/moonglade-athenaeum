@@ -886,7 +886,7 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
             <div className="lv-route"><span className="lv-dim">attach to shot &#8594;</span>
               <button className="lv-routebtn" disabled={!routeTarget} onClick={() => {
                 if (!routeTarget) return;
-                setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, ...(gs.duration ? { actualDur: gs.duration } : {}) }));
+                setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...(gs.duration ? { actualDur: gs.duration } : {}) }));
                 setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
               }}>{routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above"}</button>
             </div>
@@ -1462,8 +1462,11 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // generation -- with no real card for setCardStatus to find -- still has it
         // on hand when the owner later attaches this result to a shot.
         setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
-        // capture the clip's REAL length so the reel reflects what was rendered, not planned
-        setCardStatus(cardId, { status: "done", resultMid: cls.mid, ...(cls.duration ? { actualDur: cls.duration } : {}) });
+        // capture the clip's REAL length so the reel reflects what was rendered, not planned.
+        // Reset trims too -- a re-roll's new clip is a different length than whatever the
+        // PREVIOUS result was trimmed to, and a stale trimOut past the new clip's end can hang
+        // SequencePlayer on it forever (it never reaches the advance threshold).
+        setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
       } else if (cls.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
       else setTimeout(tick, 4000);
     }).catch(() => setTimeout(tick, 5000));
@@ -1476,7 +1479,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     openPick((mid, thumb, isVideo, duration) => {
       const dur = parseFloat(duration);
       setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-      setCardStatus(entry.c.id, { status: "done", resultMid: mid,
+      setCardStatus(entry.c.id, { status: "done", resultMid: mid, trimIn: 0, trimOut: null,
         ...(dur > 0 ? { actualDur: dur } : {}) });
     }, "video");
   };
@@ -2022,16 +2025,24 @@ function SequencePlayer({ clips, onClose }) {
   useEffect(() => {
     const v = vRef.current; if (!v || !clip) return;
     const seekPlay = () => { try { v.currentTime = clip.in || 0; } catch (e) {} v.play().catch(() => {}); };
+    const advance = () => { if (i < clips.length - 1) setI(i + 1); else onClose(); };
     const onTime = () => {
       const end = (clip.out != null ? clip.out : v.duration) || 0;
-      if (end && v.currentTime >= end - 0.04) {
-        if (i < clips.length - 1) setI(i + 1); else onClose();
-      }
+      if (end && v.currentTime >= end - 0.04) advance();
     };
+    // Fallback for a stale/out-of-range trimOut (e.g. a clip got replaced by a differently-
+    // sized re-roll without its old trim being reset): timeupdate's threshold can then sit
+    // past the file's real end and never fire, hanging playback here forever. The browser's
+    // own "ended" event still fires once real playback naturally finishes, regardless.
     v.addEventListener("loadedmetadata", seekPlay);
     v.addEventListener("timeupdate", onTime);
+    v.addEventListener("ended", advance);
     if (v.readyState >= 1) seekPlay();
-    return () => { v.removeEventListener("loadedmetadata", seekPlay); v.removeEventListener("timeupdate", onTime); };
+    return () => {
+      v.removeEventListener("loadedmetadata", seekPlay);
+      v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("ended", advance);
+    };
   }, [i]);   // eslint-disable-line
   useEffect(() => {
     const esc = (e) => { if (e.key === "Escape") onClose(); };
