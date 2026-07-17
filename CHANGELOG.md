@@ -191,6 +191,13 @@ git tags. Full prose notes for tagged versions live on
   `SequencePlayer` work in V2 unchanged. Verified via `npm run build` (clean esbuild bundle,
   real JSX-syntax check) and `node --test` (66/66, unaffected); full Python suite unaffected
   (JS-only change).
+- **The Loom V2 shell can batch-generate.** Next punch-list item — `batching`/`batchGenerate`
+  (already returned by `useGenerationPipeline` for classic's own header) are now threaded into
+  `LoomV2`'s props too, with a "Generate all" button matching classic's exactly: prices every
+  not-done shot first so the confirm shows real cost + free-card coverage before anything
+  spends, disabled while a batch is running or the board is empty. Same verification as Export
+  (clean esbuild build, `node --test` 66/66, full Python suite unaffected). Classic Loom now
+  retires once the one remaining punch-list item (per-shot "other references") lands in V2.
 
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 

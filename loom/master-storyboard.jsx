@@ -643,7 +643,7 @@ function ProjectSwitcher({ api }) {
   );
 }
 
-function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut }) {
+function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -1118,6 +1118,9 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
         <span className="lv-eyebrow">The Loom · V2</span>
         <span className="lv-note">Click a shot → it binds to Generate.</span>
         <ProjectSwitcher api={projectApi} />
+        <button onClick={() => batchGenerate(entries)} disabled={batching || !entries.length}
+          title="Generate every shot that isn't done yet, one after another">
+          {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
           title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
@@ -1748,7 +1751,8 @@ export default function App() {
         moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
         genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg}
         genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
-        projectApi={projectApi} playSequence={playSequence} exportCut={exportCut} /></V2Boundary>}
+        projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
+        batching={batching} batchGenerate={batchGenerate} /></V2Boundary>}
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
