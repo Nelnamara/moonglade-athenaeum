@@ -783,7 +783,12 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
         {showTlPreview && (
           <div className="lv-tlpreviewzone">
             {sel && sel.c.resultMid
-              ? <ShotPreview mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
+              // key={sel.c.id}: without it, switching between two finished shots on the
+              // reel reuses the same instance -- swapping `mid` on a live <video> silently
+              // pauses it (no pause event fires), leaving `playing` state stuck true (button
+              // stuck on the pause icon, hover-scrub disabled) and `dur` stale until the new
+              // clip's metadata loads. Forcing a remount resets all of that for free.
+              ? <ShotPreview key={sel.c.id} mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
                   onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))} />
               : <div className="lv-tlpreviewbox lv-ph">{sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here."}</div>}
           </div>
@@ -1354,7 +1359,7 @@ function useProjectStore(setSelShot) {
   } catch { window.alert("That file didn't parse as a storyboard backup."); } };
 
   return { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, projectApi, importJSON };
+    projList, projMenu, setProjMenu, projectApi, importJSON, activeId };
 }
 
 // ---- 2. useShotMutations: act/card/ref CRUD on the open project ----
@@ -1601,7 +1606,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   };
 
   return {
-    genState, genImgState, imgModel, setImgModel, genEditState, setGenEditState,
+    genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel, genEditState, setGenEditState,
     genRefState, setGenRefState, batching,
     generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
   };
@@ -1655,7 +1660,7 @@ function useExportPipeline(project, thumbs) {
 export default function App() {
   const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
   const { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, projectApi, importJSON } = useProjectStore(setSelShot);
+    projList, projMenu, setProjMenu, projectApi, importJSON, activeId } = useProjectStore(setSelShot);
 
   const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
@@ -1685,10 +1690,19 @@ export default function App() {
     }
   }, [pickCb]);
 
-  const { genState, genImgState, imgModel, setImgModel, genEditState, setGenEditState,
+  const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel, genEditState, setGenEditState,
     genRefState, setGenRefState, batching,
     generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate }
     = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick });
+  // Draft-generation results (Image/Edit/Reference/Video) are keyed by the fixed "__draft__"
+  // id, shared across every open project -- without this, a finished draft from project A
+  // resurfaces in project B's drawer (still-live thumbnail + a working attach button that
+  // writes into whichever shot in B you pick) the moment you switch projects, since nothing
+  // else ever clears these four dicts. Reset all of them whenever the active project changes.
+  useEffect(() => {
+    const clearDraft = (s) => { if (!("__draft__" in s)) return s; const n = { ...s }; delete n.__draft__; return n; };
+    setGenState(clearDraft); setGenImgState(clearDraft); setGenEditState(clearDraft); setGenRefState(clearDraft);
+  }, [activeId]);
 
   const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence, exportAll, exportJSON }
     = useExportPipeline(project, thumbs);
