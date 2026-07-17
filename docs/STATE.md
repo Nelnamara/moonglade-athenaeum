@@ -62,6 +62,11 @@ land in it. The repo is public and has real external users.
   shared with classic Loom unchanged), pricing every shot first so the confirm shows real
   cost + free-card coverage before anything spends. Disabled while a batch is running or the
   board is empty.
+- **Deep Focus** (double-click a board card) is a maximized single-shot editor: title, mode,
+  duration, both `FrameSlot`s, and per-shot **other references** (add/edit/remove image, video,
+  or audio refs and their `@tags`) — the same `addRef`/`setRef`/`delRef` classic Loom's
+  `CardEditor` uses, reusing its exact markup. A "Select in Generate →" button binds the shot and
+  closes the modal.
 - The **Timeline** is a fixed drawer with three states (hidden / slim / full), video preview
   above the scrubber, drag handle on `.lv-tlhandle`.
 - **Legend** is a per-field on-demand "+ terms" popover on Camera, Lighting, Transition in and
@@ -163,16 +168,13 @@ land in it. The repo is public and has real external users.
 
 ### The Loom — V1 → V2 gap (the only copy of this list)
 
-Classic Loom retires only once item 1 lands. V2 is additive and non-destructive: both render
-trees take project state and mutators from the same four hooks, so running both risks no
-data-model divergence.
+The one item that originally gated classic Loom's retirement (per-shot "other references") has
+landed in V2. Whether classic Loom is actually ready to retire, or whether the two remaining
+gaps below should be promoted to retirement-blockers too, is an owner call — not decided here.
 
-1. **Per-shot "other references"** (add / set / delete). `addRef` / `setRef` / `delRef` live in
-   `useShotMutations` but reach only classic's `CardView` → `CardEditor`. Target: V2's Video
-   tab or Deep Focus.
-2. Smaller classic-only gaps needing V2 homes: **Audio cue**, **Notes**, the **Discreet/blur
+1. Smaller classic-only gaps needing V2 homes: **Audio cue**, **Notes**, the **Discreet/blur
    toggle**, **manual status-cycle**, **"Copy shot."**
-3. Surface **Import Collection / Backup / Restore / Export-shot-list** from inside V2.
+2. Surface **Import Collection / Backup / Restore / Export-shot-list** from inside V2.
 
 ### The Loom — other
 
