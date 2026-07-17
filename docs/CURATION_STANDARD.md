@@ -93,7 +93,8 @@ Dark, single-theme — the Athenaeum's violet world, deliberately.
    (This caught a real crash — ranking while the lightbox was closed.)
 6. **Watch the weight** — inline images add up; past ~6–8 MB, drop embed resolution or give
    reference-only items smaller thumbs.
-7. **Publish & log** — redeploy to the same URL on updates; add the artifact to `docs/DOC_MAP.md`.
+7. **Publish & log** — redeploy to the same URL on updates; add the artifact to the ledger in
+   `docs/STATE.md` (§ Locked design → Artifact ledger).
 
 ---
 
