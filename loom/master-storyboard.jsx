@@ -465,7 +465,10 @@ const V2_STYLES = `
 .lv-tlinfo{font-size:11px;color:var(--text);}
 .lv-dim{color:var(--subtext);font-style:italic;}
 .lv-gen{flex:1;min-height:0;overflow-y:auto;padding:10px;}
-.lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;}
+.lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:8px;}
+.lv-unbind{margin-left:auto;flex:none;font:600 10px/1 system-ui;background:var(--surface1);border:1px solid var(--surface1);
+  color:var(--subtext);border-radius:6px;padding:4px 8px;cursor:pointer;}
+.lv-unbind:hover{border-color:var(--accent);color:var(--accent);}
 .lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
 /* The @tag input (.sb-tagin) is 90px in classic Loom's own wide layout -- too wide for
@@ -977,7 +980,9 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
       <div className="lv-gen">
         <div className="lv-genhead">{sel
           ? <>&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</>
-          : <>&#10024; Draft generation <span className="lv-dim">— generate freely, then route or attach it to a shot</span></>}</div>
+          : <>&#10024; Draft generation <span className="lv-dim">— generate freely, then route or attach it to a shot</span></>}
+          {sel && <button className="lv-unbind" onClick={() => setSelShot(null)}
+            title="Unbind this shot and go back to draft generation">&#10005; unbind</button>}</div>
         {!sel && (
           <div className="lv-drafttarget">
             <label className="lv-lab">Route results into a shot <span className="lv-dim">(cast doesn't need one)</span></label>
