@@ -83,6 +83,46 @@ git tags. Full prose notes for tagged versions live on
   whole repo) preceded this: full doc-vs-code reconciliation, a CLI command map, a PySide6 removal
   recommendation, and a Loom consolidation verdict — see that section for the follow-up plan.
 
+### Added — 2026-07-16
+- **Loom state-layer consolidated via a composed-hooks extraction** (`ee4b33a`) — a decisive
+  probe found the state layer (project store, shot mutations, generation pipeline, export
+  pipeline) separates cleanly into `loom/src/loom-mutations.js` + four hooks *without* first
+  merging classic Loom and V2's render trees, which reduces rather than confirms the case for
+  a full render-tree rebuild. **The full rebuild is parked, not cancelled** — undecided,
+  awaiting its own probe if ever revisited.
+- **Loom V2 shell redesign shipped for real** (`c0c7399`) — the six free-floating dockable
+  panels are gone; replaced with a fixed 4-region layout: a tabbed Cast & Assets / Footage
+  card (left), the Acts & Shots board (center), a Generate drawer (right), and a fixed
+  Timeline drawer (top, 3-state drag: hidden/slim/full). Legend became per-field on-demand
+  "+terms" popovers instead of a persistent panel.
+- **Draft generation** — the Generate drawer (Image/Edit/Reference/Video) now works with no
+  shot selected, mirroring the main gallery's own drawer. A `draftCard` stands in for the
+  selected shot everywhere the tabs read/write, keyed into the same generation-state dicts
+  real shots already use. Results route into a chosen shot (Image/Edit/Reference) or attach
+  to one (Video) via a small picker; cast routing needs no target since it writes to the
+  project's asset pool directly. Live-tested end-to-end with two real generations.
+- **Real playback controls in both Loom layouts** — V2's Timeline/Deep-Focus preview
+  (`ShotPreview`) gained a play/pause button (honors the trim range); classic Loom's
+  sequence player had a missing `muted` attribute fixed (could silently block autoplay).
+  Scrub/fast-forward/rewind/split/crop remain a modest follow-on set, not yet built.
+- **Gallery search now matches task id / media id**, not just prompt text — paste an id
+  from PixAI's site (or `--dump-params` output) to jump straight to that generation.
+
+### Fixed — 2026-07-16
+- **Health page vs. Panel page image counts disagreed** (43,829 vs. 31,064) — the Health
+  page's disk scan counted `_deleted/` (recoverable trash from anything ever deleted through
+  the gallery UI) and `branding/` (UI art assets) as "images on disk"; both are now excluded,
+  matching the Panel's already-correct catalog-row count.
+- **Three rounds of Loom V2 shell bugs**, found and fixed same day as the shell shipped:
+  side-panel scroll clipping + Detailed cast rows made genuinely editable again; Detailed
+  Cast & Assets widened 2× + Simple-density cards no longer look clickable when nothing's
+  selected; the Generate drawer's frame-slot header didn't fit its own drawer width (widened
+  the drawer, narrowed the `@tag` input specifically there).
+- **Loom's own page scrollbar fought the shell's internal panel scrolling** — the V2 overlay
+  is fixed and never visibly moves, but classic Loom's page underneath (a normal tall
+  document) kept a live scrollbar; a wheel scroll not captured by an internal panel bubbled
+  up and scrolled that instead. Body scroll is now locked while the V2 overlay is open.
+
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 
 _On `loom-v2`, past the `v1.10.0` tag. The 57-achievement system plus its flair layer (toast frames,

@@ -84,6 +84,35 @@ you cast shots.
 - **Export .txt** writes the full shot list as text — a script you can read, annotate,
   or hand to someone else.
 
+## Two layouts: classic and V2
+
+The Loom has two visual layouts over the exact same project data — nothing about switching
+between them changes or risks your board.
+
+**Classic** is the original layout described above: a vertical waterfall of acts and shot
+cards, each expanding in place to edit.
+
+**V2** (open via **⛛ V2 layout**, return via **← Back to classic Loom**) is a fixed
+4-region shell: a **Cast & Assets / Footage** tabbed card on the left (with a Simple/Detailed
+density toggle), the **Acts & Shots board** in the center (click a shot to select it — the
+whole workspace binds to it), a **Generate drawer** on the right (Image/Edit/Reference/Video
+tabs), and a fixed **Timeline drawer** across the top (hidden/slim/full, drag to resize;
+pulling it to full shows the selected shot's trimmable preview above the scrubber, with a
+play/pause button).
+
+**Draft generation** — V2's Generate drawer also works with *no shot selected*: pick a mode,
+write a prompt, generate, then either route the result into a shot (Image/Edit/Reference —
+open frame / close frame / cast) or attach it (Video — pick a shot from a small "route into"
+dropdown). This is for exploring a look before you've decided which shot it belongs to; the
+main gallery's own Generate drawer behaves the same way for the same reason.
+
+**V2 is not yet at full parity with classic** — **Play sequence** (play every finished shot
+back-to-back), **Export** (trim + stitch into one mp4), and **Generate all** (batch-render
+every unfinished shot) are only reachable from classic Loom today; switch back for those.
+A few card fields (audio cue, notes, the discreet/blur toggle, per-shot "other references")
+also don't have a home in V2 yet. Everything else — shot editing, cast/assets, frame handoff,
+acts/shots management — works the same in both.
+
 ## Workflow suggestions
 
 1. Block the whole piece first (acts, shots, durations) until the reel bar hits target.

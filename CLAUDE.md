@@ -356,9 +356,12 @@ earlier (`440ecdf`); **v1.11.0 adds the flair layer + the Trophy Hall.**
 
 ## Test suite
 
-474 pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
+477 pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
 over this number). Run with `python -m pytest` (add `--ignore=tests/test_similar.py` where the
-optional `pixeltable` dep isn't installed). All tests must pass before merging to master.
+optional `pixeltable` dep isn't installed; 482 if it's installed and that file runs too). All
+tests must pass before merging to master. On `loom-v2`, the Loom's pure-logic extraction also
+has 66 `node --test` cases in `loom/` (`loom/src/loom-core.js`, `loom-mutations.js`) — run from
+`loom/` with `node --test`.
 
 ---
 
@@ -367,6 +370,13 @@ optional `pixeltable` dep isn't installed). All tests must pass before merging t
 - **Version:** `1.11.0` on `loom-v2` (achievements flair + Trophy Hall). NOTE: `loom-v2` is still
   unmerged to `master` — it carries the whole Loom V2 set *plus* achievements; the `v1.11.0` tag sits
   on `loom-v2`. Merging `loom-v2` → `master` is a separate owner call. `master` is still at `1.10.0`.
+  `loom-v2` has since also shipped the full V2 shell redesign (fixed 4-region layout, `c0c7399`),
+  "draft generation" (the Generate drawer works with no shot selected), and several rounds of
+  live-verified bug fixes — see `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` §1 for the current, detailed
+  state. **V2 is NOT yet at feature parity with classic Loom** (missing Play-sequence, Export, and
+  a few CardEditor fields — same doc has the concrete gap list) — don't retire classic Loom yet.
+  The `generate-drawer`/`suite-polish`/`video-gen` branches and `master` are all fully contained in
+  `loom-v2`'s history (zero unique commits) — safe to delete once confirmed, just stale pointers.
 - **Branch strategy:** feature branches, merge to master with `--no-ff`, tag releases
 - **Owner:** Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev
 
