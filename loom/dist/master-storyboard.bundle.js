@@ -725,7 +725,7 @@ ${"=".repeat(48)}
   transition:width .18s ease;overflow-x:hidden;}
 .lv-side.left{width:280px;border-right:1px solid var(--surface1);}
 .lv-side.left.wide{width:560px;}
-.lv-side.right{width:320px;border-left:1px solid var(--surface1);}
+.lv-side.right{width:380px;border-left:1px solid var(--surface1);}
 .lv-side.collapsed{width:52px;}
 .lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
 .lv-sidetabs{flex:1;min-width:0;margin-bottom:0;}
@@ -791,6 +791,11 @@ ${"=".repeat(48)}
 .lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;}
 .lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
+/* The @tag input (.sb-tagin) is 90px in classic Loom's own wide layout -- too wide for
+   a frame-slot header squeezed into this narrower drawer, which is what actually caused
+   the side-scroll. Narrower here only; classic Loom keeps its own room to spare. */
+.lv-framehandoff .sb-framehead{flex-wrap:nowrap;}
+.lv-framehandoff .sb-tagin{width:62px;}
 .lv-framehandoff .sb-frameprev{height:64px;}
 .lv-lab{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);display:block;margin:9px 0 5px;}
 .lv-chips{display:flex;gap:5px;flex-wrap:wrap;}
