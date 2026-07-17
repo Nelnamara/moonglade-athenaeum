@@ -471,3 +471,75 @@ The **session ledger** (my picks, Z-codes) disagrees with the **2026-07-07 vote*
 **Local-gen reality check (2026-07-11 · UPDATED 2026-07-12): Krea2 on Maestro is the new local quality lane** — owner: "we hit the motherload" on the legendary/feat frame run; ornate-effect prompts "just come through." First local model to meet the house art bar; prefer it for frames/ornament work going forward. **CORRECTION (same day):** some frame/icon renders in the 2026-07-12 haul carry real alpha because the OWNER keyed them by hand before sharing, not because Krea2/ComfyUI/ChatGPT output alpha natively — don't assume any of these tools produce transparent output on their own; verify per-file, not per-model. (Prior state: Maestro Flux/Chroma + Forge WAI infra worked but neither matched the badge bar — the benchmark is **PixAI Tsubaki.2 v1, detailed prose, NO LoRA** (the Hoardsmith dragon, task 2031115782282256404). Model research (Track 2) ✅ DELIVERED 2026-07-11 → **`docs/MODEL_DECK.md`** (25 verified entries + methods; artifact 9f16f42d). Headlines: WAI v11→**v17** upgrade (no token) · NoobAI-XL V-Pred = crispness lane (vpred settings mandatory) · badge stack = Game Icon Institute V4_XL / ZavyChromaXL+Zavy Fantasy Icons LoRA (glow trigger) / game-icon-XL LoRA (full-frame icon LoRAs WANT high weight — the overcook rule inverts) · SpatterXL verdict: SKIP (dated; Black Magic absorbed the look) · lifelike = Illustrij/Equinox/Semi-Real MM + Chroma1-HD prose recipes · **train Nel LoRA locally on Illustrious via OneTrainer (12GB ok; 50-150 imgs; FLUX.1 via FluxGym ok, Flux2/Chroma = cloud)** · Pinokio adds: ComfyUI, BEN2 bg-remover (green-key killer), Invoke · newcomer to watch: Anima (Cosmos 2B, ComfyUI). Next: owner picks downloads → bake-off vs Tsubaki dragon benchmark. Loom ref-gen call ✅ DECIDED → see §1 "Loom V2.1" official plan (A+bridge, rail layout, after achievements). Board v2.1 republished same URL with Originals (74, `Moonglade Icons` collection) + 201 banners (7 Art Scratch + 194 `Moonglade Banners` gallery); Add-On/App Icons (227) deliberately excluded like the Canva dump.
 
 _Superseded/older roadmap artifacts (kept for provenance, not authoritative for these threads): 51a7931d, a67437b9, placement_report, Final Placement, Assignment Board. This doc supersedes them for Loom V2 + Achievements._
+
+---
+
+## 6. Top-down audit — 2026-07-16 (suite-wide, 4-agent workflow)
+
+Owner asked, after the day's Loom work: is the roadmap actually accurate, when can V1 Loom be
+retired, what's still open on the Trophy Hall and gallery QoL, and what got dropped early in
+dev that deserves attention now. Full agent reports are in the workflow journal
+(`wf_cde74217-82b`); this is the condensed, actioned version.
+
+**Loom V1 → V2 parity — verdict: NOT at parity, don't retire classic yet.** V2 is additive and
+non-destructive (both render trees share one `project` state and one set of mutators — verified,
+no data-model divergence risk). Structural gaps requiring classic Loom today: **Play sequence**
+(back-to-back playback), **Export** (trim+stitch to mp4), **batch "Generate all"**, and per-shot
+**"other references"** (add/set/delete) — none of these are wired into `LoomV2` at all. Smaller
+gaps: Audio cue, Notes, and the Discreet/blur toggle have no home in V2; manual status-cycle and
+"Copy shot" aren't reachable; Cast&Assets can't do a blank manual add or swap an existing asset's
+image via the gallery picker (local-file-only); Import Collection / Backup / Restore / Export
+shot-list require exiting to classic. **Concrete convergence punch list**, in priority order:
+wire Play sequence + Export into V2 → wire batch-generate → bring "other references" into the
+Video tab or Deep Focus → add the three small missing fields → surface the four classic-only
+modals from inside V2. Once the first three land, the retirement conversation is real.
+
+**Docs reconciliation — done.** CLAUDE.md/architecture.md/wiki test counts (474→477, node suite
+noted), CHANGELOG.md's `[Unreleased]` (had nothing from today), docs/DOC_MAP.md's refresh date,
+docs/LOOM.md (was V1-only — added a "Two layouts" section), and wiki/Gallery.md +
+wiki/Generating.md (search box, Loom blurb) all updated same day — see CHANGELOG.md for the
+itemized list. **wiki/ had zero Loom coverage of any kind before today's fix** — confirmed by a
+full-text search, not assumed.
+
+**Trophy Hall — confirmed still-open** (cross-checked against live code, nothing silently
+shipped or regressed): the redesign is blocked on the owner's own Figma frame (don't re-suggest
+the screenshot-decomposition checklist, per `docs/DESIGN_WORKFLOW.md` — ask for the URL when
+ready); rename undecided (3-item shortlist banked); per-tile ornate frames not yet built (the
+unlock toast has them, grid tiles don't); epic-tier frame art not yet made; "earned rewards" as
+its own display is shape-TBD; the "toast badge grows to its home marker" idea needs the owner to
+finish articulating it before it's buildable. The 2026-07-14 rejected reformat's revert holds —
+verified no trace of it survives in the code.
+
+**Gallery QoL — real, non-duplicate opportunities** (the gallery is already unusually mature —
+full filters, saved views, bulk actions, a real lightbox, keyboard nav — these are genuine gaps,
+checked against the code so nothing below already exists): rate/delete from inside the lightbox
+without closing it; bulk "set rating" on a selection; an "unrated only" filter (today's
+`rating_min` is `>=` only); **a UI for removing an image from a collection — the backend route
+exists (`/collection-remove`) with zero callers anywhere**, a real gap not a design choice;
+export just the current search/selection instead of always the whole catalog; a random/shuffle
+sort for rediscovering older generations; a manual side-by-side two-image compare (distinct from
+the existing algorithmic "Similar" search); and saved-view presets are localStorage-only, so they
+don't roam between the home/work machines this project is already edited from.
+
+**Early-dev archaeology — two real candidates, not padded.** The audit was told to hunt
+specifically for the video-controls pattern (a real early ask that quietly never got built) and
+came back honest that most "unfinished-looking" things are actually deliberately tabled with a
+date or superseded elsewhere in this same doc. Two genuinely dropped:
+1. **Loom export silently discards audio** — `/api/loom/export`'s ffmpeg concat still hardcodes
+   `a=0`; the code comment ("audio is a follow-up") is unchanged since at least 2026-07-10. Not
+   reconnected even during today's Loom rebuild session, which *did* discuss a timeline audio
+   lane as a roadmap idea without anyone noticing the export path already drops audio outright.
+   A generation with the "Generate audio" toggle on would have that audio silently thrown away
+   the moment it's stitched into a multi-shot export.
+2. **File logging** — `CLAUDE.md` has called this "a separate, still-open discussion" since the
+   `-v/--verbose` feature shipped (~2026-06-22) and it has never entered any active tracker
+   (not in `REFINEMENTS.md`'s owner list, not in `ROADMAP.md`'s epics) — a loose thread, not a
+   parked decision.
+
+**Branch hygiene — verified, not acted on (deletion needs your go-ahead):**
+`generate-drawer`, `suite-polish`, `video-gen`, and `master` all have **zero commits** not
+already in `loom-v2` (`git log --oneline loom-v2..<branch>` is empty for each) — safe,
+no-data-loss deletes whenever you want them gone, both local and on `origin`. `loom-v2` is 109
+commits ahead of `master`. `loom-extract-hook` has exactly the one disproven single-hook-attempt
+commit not in `loom-v2` — keep it as the documented record per the Phase 1b writeup above, don't
+delete it.
