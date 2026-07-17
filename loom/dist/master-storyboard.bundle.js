@@ -1335,9 +1335,14 @@ ${"=".repeat(48)}
       },
       ic
     ))) : gen)), deepFocus && (() => {
-      const dfPatch = (fn) => setCard(deepFocus.a.id, deepFocus.c.id, fn);
+      const live = entries.find((x) => x.c.id === deepFocus.c.id);
+      if (!live) {
+        setDeepFocus(null);
+        return null;
+      }
+      const dfPatch = (fn) => setCard(live.a.id, live.c.id, fn);
       const dfPatchFrame = (key, fp) => dfPatch((cc) => ({ ...cc, [key]: { ...cc[key], ...fp } }));
-      const c = deepFocus.c;
+      const c = live.c;
       return /* @__PURE__ */ React.createElement("div", { className: "lv-df-veil", onClick: (ev) => {
         if (ev.target === ev.currentTarget) setDeepFocus(null);
       } }, /* @__PURE__ */ React.createElement("div", { className: "lv-df" }, /* @__PURE__ */ React.createElement("div", { className: "lv-df-head" }, /* @__PURE__ */ React.createElement("span", { className: "lv-df-code" }, deepFocus.code), /* @__PURE__ */ React.createElement(

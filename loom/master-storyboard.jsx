@@ -1153,9 +1153,16 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
         </div>
       </div>
       {deepFocus && (() => {
-        const dfPatch = (fn) => setCard(deepFocus.a.id, deepFocus.c.id, fn);
+        // deepFocus itself is a one-time snapshot captured at double-click time -- setCard's
+        // patches are immutable, so deepFocus.c never updates. Render from the LIVE entry
+        // (re-derived from entries, which App() already recomputes every render) instead, or
+        // every edit here would silently revert on the next keystroke while the board behind
+        // the veil quietly shows the real change.
+        const live = entries.find((x) => x.c.id === deepFocus.c.id);
+        if (!live) { setDeepFocus(null); return null; }
+        const dfPatch = (fn) => setCard(live.a.id, live.c.id, fn);
         const dfPatchFrame = (key, fp) => dfPatch((cc) => ({ ...cc, [key]: { ...cc[key], ...fp } }));
-        const c = deepFocus.c;
+        const c = live.c;
         return (
           <div className="lv-df-veil" onClick={(ev) => { if (ev.target === ev.currentTarget) setDeepFocus(null); }}>
             <div className="lv-df">
