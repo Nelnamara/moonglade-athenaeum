@@ -2147,7 +2147,8 @@ def _make_session(token_val):
         raise PixAIError(
             "No API key found. Add PIXAI_API_KEY to config.json (recommended -- then "
             "nothing else is required), or use the legacy token path (U3T + token.txt).\n"
-            "Copy config.example.json to config.json. See docs/setup.md.")
+            "Copy config.example.json to config.json. See the Setup wiki page: "
+            "https://github.com/Nelnamara/moonglade-athenaeum/wiki/Setup")
     token = load_token(token_val)
     session = requests.Session()
     session.headers.update({
