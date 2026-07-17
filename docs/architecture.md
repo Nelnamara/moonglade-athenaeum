@@ -94,6 +94,11 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 
 ## Testing
 
-478 pytest tests in `tests/` (pure functions, filesystem, catalog, gallery
-routes, mocked network) — 483 with the optional `pixeltable` dep installed, which
-enables `tests/test_similar.py`. `python -m pytest`. All must pass before merging.
+`python -m pytest -q` from the repo root — pure functions, filesystem, catalog, gallery
+routes, mocked network. `tests/test_similar.py` needs the optional `pixeltable` dep and
+skips itself cleanly without it (`--ignore=tests/test_similar.py` to exclude it explicitly).
+The Loom's pure-logic modules have their own suite: `node --test` from `loom/`.
+All must pass before merging.
+
+The count is deliberately not written here — it was stated across six-plus docs and was wrong
+in every one. `tests/test_docs_dont_hardcode_counts.py` enforces that. Ask `pytest`.

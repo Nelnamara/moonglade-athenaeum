@@ -1,5 +1,14 @@
 # Suite Architecture & Cohesion Audit — Moonglade Athenaeum
 
+> ## ❄️ FROZEN — historical record, do not edit
+>
+> **Archived 2026-07-17.** Produced **2026-07-13**; not maintained since. Its direction was
+> **decided and acted on** — the web-component pilot shipped (`static/mg-model-picker.js`) and the
+> pattern was extended to `static/mg-gallery-picker.js`, which cites this audit as its rationale.
+> Its highest-severity finding (the non-atomic `store.json` write) is fixed.
+>
+> Live architecture lives in **`docs/architecture.md`**; current work in **`docs/STATE.md`**.
+
 > **Produced 2026-07-13** by a 5-agent parallel audit (one auditor per surface + synthesis), then
 > spot-verified. The highest-severity finding (§7 — the non-atomic single-file `store.json` write at
 > `pixai_gallery.py:9137-9139`, with the repo's own atomic tmp+`os.replace` idiom at line 1620 sitting

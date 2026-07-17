@@ -39,15 +39,19 @@ mass commit. Follow this protocol:
 Long sessions get compacted; summaries lose design intent. Standing rule:
 
 1. **Checkpoint** after every shipped increment (and before starting any new build): update
-   the active roadmap doc (`docs/ROADMAP_LOOM_ACHIEVEMENTS.md` while it's current) +
-   `CHANGELOG.md [Unreleased]` + memory with what shipped, what's in flight, the decided
-   NEXT STEPS, and the locked design artifacts by id. **This includes `wiki/` — there was a
-   standing pre-1.9.1 practice of updating docs AND the wiki on every commit as needed; it
-   silently dropped because it was never written down here, only followed by habit. Writing
-   it down now (2026-07-15) so it can't drop again the same way.** If a shipped change is
-   user-facing, check whether any `wiki/` page describes the area it touched and update it in
-   the same pass — don't let the wiki decay into a separate, forgotten catch-up task.
-2. **After any compaction**, the FIRST act is to re-read the roadmap doc and re-open every
+   **`docs/STATE.md`** (the now-only state doc — present tense, no history) +
+   `CHANGELOG.md [Unreleased]` (what shipped, dated) + memory with what shipped, what's in
+   flight, the decided NEXT STEPS, and the locked design artifacts by id (the artifact ledger
+   lives in `STATE.md`). **This includes `wiki/` — there was a standing pre-1.9.1 practice of
+   updating docs AND the wiki on every commit as needed; it silently dropped because it was
+   never written down here, only followed by habit. Writing it down now (2026-07-15) so it
+   can't drop again the same way.** If a shipped change is user-facing, check whether any
+   `wiki/` page describes the area it touched and update it in the same pass — don't let the
+   wiki decay into a separate, forgotten catch-up task. **`STATE.md`'s writing rule is
+   load-bearing: a fact that stops being true is DELETED, never annotated. Its predecessor,
+   `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` (now frozen in `docs/archive/`), died holding 40 stale
+   claims precisely because it was an append-only journal — do not recreate that habit.**
+2. **After any compaction**, the FIRST act is to re-read **`docs/STATE.md`** and re-open every
    artifact/doc the next task depends on — never build from the conversation summary alone.
    Say what was re-read before proceeding.
 3. **Flair/user-visible features** name their locked design source (artifact id / doc
@@ -58,6 +62,12 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
    and the verify pass compares against that source. Restyling a shipped, owner-approved surface
    needs an explicit owner go. See `docs/DESIGN_WORKFLOW.md` (added 2026-07-15, `6a0f99d`, after the
    Trophy Hall reformat landed off-target from prose notes).
+5. **Hierarchy when sources disagree:** for a measurable fact (test count, version, branch lead,
+   release status) the **code/git/pytest/gh answer wins over every doc** — never trust a number a
+   command can answer. For project state, `docs/STATE.md` wins. For how it works, the code, then
+   `docs/architecture.md`. For owner preferences, memory wins. A memory that describes code is
+   verified against the code before acting on it. Frozen files under `docs/archive/` are historical
+   record, never current fact.
 
 ## Architecture / request flow
 
@@ -361,41 +371,37 @@ earlier (`440ecdf`); **v1.11.0 adds the flair layer + the Trophy Hall.**
 
 ## Test suite
 
-478 pytest tests in `tests/` (the count grows with every feature — trust `python -m pytest`
-over this number). Run with `python -m pytest` (add `--ignore=tests/test_similar.py` where the
-optional `pixeltable` dep isn't installed; 483 if it's installed and that file runs too). All
-tests must pass before merging to master. On `loom-v2`, the Loom's pure-logic extraction also
-has 66 `node --test` cases in `loom/` (`loom/src/loom-core.js`, `loom-mutations.js`) — run from
-`loom/` with `node --test`.
+Run `python -m pytest -q` from the repo root. Add `--ignore=tests/test_similar.py` where the
+optional `pixeltable` dep isn't installed (that file skips itself cleanly otherwise). The Loom's
+pure-logic modules (`loom/src/loom-core.js`, `loom-mutations.js`) have their own suite — run
+`node --test` from `loom/`. All tests must pass before merging to master.
+
+**Do not write the test count here, or in any live doc.** It changed under this very sentence
+more than once: it was stated in six-plus files and was wrong in *every one of them*, including a
+2026-07-16 pass that "corrected" it to 477 when the real number was 478 — and which was stale
+again within hours. `tests/test_docs_dont_hardcode_counts.py` now fails the suite if a live doc
+states it. Frozen records under `docs/archive/` are exempt: saying what was true on their date is
+their job.
 
 ---
 
 ## Current state
 
-- **Version:** the `v1.11.0` **tag** sits on `loom-v2` (achievements flair + Trophy Hall), but
-  `__version__` in `pixai_gallery_backup.py` was **never bumped past `1.10.0`** — the tag has no
-  matching version string. Bump it or leave it knowingly, but don't read `v1.11.0` as the code's
-  version. NOTE: `loom-v2` is still unmerged to `master` — it carries the whole Loom V2 set *plus*
-  achievements. Merging `loom-v2` → `master` is a separate owner call. `master` is also at `1.10.0`.
-  `loom-v2` has since also shipped the full V2 shell redesign (fixed 4-region layout, `c0c7399`),
-  "draft generation" (the Generate drawer works with no shot selected), and several rounds of
-  live-verified bug fixes — see `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` §1 for the current, detailed
-  state. **V2 is NOT yet at feature parity with classic Loom** (Play-sequence is now wired in,
-  `768aecf`; still missing Export, the batch "Generate all", and per-shot "other references" — same
-  doc has the concrete gap list) — don't retire classic Loom until those land.
-  The `generate-drawer`/`suite-polish`/`video-gen` branches and `master` are all fully contained in
-  `loom-v2`'s history (zero unique commits) — safe to delete once confirmed, just stale pointers.
-- **Branch strategy:** feature branches, merge to master with `--no-ff`, tag releases
-- **Owner:** Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev
+Current state is not tracked here — it rots when two files both describe "now". See **`docs/STATE.md`**
+(what's shipped / in flight / next / open owner calls / known defects / the Loom V1→V2 gap list / the
+locked-artifact ledger). Version, branch lead, and release status are commands, not prose — `STATE.md`
+names them. Owner: Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev. Branch strategy: feature
+branches, merge to master with `--no-ff`, tag releases.
 
 ## Changelog & releases
 
 - **`CHANGELOG.md` (repo root) is the source of truth** — update its `[Unreleased]` section with
   every notable change, and cut it into a dated `## [x.y.z]` block when a release is tagged.
-- Releases are **git tags** + **GitHub Releases**. History to know: Releases were published through
-  **v1.6.0**, then paused; **v1.8.0–v1.10.0 were back-published on 2026-07-10** from their
-  reconstructed `CHANGELOG.md` notes, so Releases now run through **v1.10.0**. Only **v1.11.0** is
-  tagged-but-unreleased. **There is no v1.7.x.**
+- Releases are **git tags** + **GitHub Releases**. Whether a given tag has a published Release is a
+  live fact — `gh release list` against `git tag` — not something to transcribe here and let drift.
+  Two durable history notes that a command *won't* tell you: Releases were published through **v1.6.0**,
+  paused, then **v1.8.0–v1.10.0 were back-published on 2026-07-10** from reconstructed notes; and
+  **there is no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ---
 

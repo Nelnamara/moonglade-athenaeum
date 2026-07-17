@@ -1,5 +1,16 @@
 # Moonglade Athenaeum — State of the Suite (2026-07-10)
 
+> ## ❄️ FROZEN — historical record, do not edit
+>
+> **Archived 2026-07-17.** True as of **2026-07-10**; not maintained since. For where the project
+> actually stands, see **`docs/STATE.md`**.
+>
+> Worth reading for one reason beyond the history: this doc was written *because* `REFINEMENTS.md`
+> had drifted into listing shipped features as "next up". Then `ROADMAP_LOOM_ACHIEVEMENTS.md` became
+> the consolidation and rotted worse — 40 false claims by 2026-07-16. `STATE.md` is the **third**
+> attempt at this same fix. That is why it ships with an enforced writing rule rather than good
+> intentions: every previous attempt had good intentions too.
+
 > **What this is.** A point-in-time assessment written by the work-machine ("idiot brother")
 > session after a code-level pass. It exists because `docs/REFINEMENTS.md` had drifted badly
 > out of sync with the code — it listed ~5 already-shipped features as "next up." This doc
