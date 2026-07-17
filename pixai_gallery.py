@@ -7277,7 +7277,7 @@ function savePrompt() {
   </div>
 </div>
 <div id="srv-overlay">
-  <div class="srv-box"><div class="srv-spin"></div>
+  <div class="srv-box"><div class="srv-spin" id="srv-spin"></div>
     <div class="srv-msg" id="srv-msg">Working&hellip;</div>
     <div class="srv-sub" id="srv-sub"></div></div>
 </div>
