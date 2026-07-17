@@ -43,3 +43,8 @@ just won't have a thumbnail.
 ## A generation isn't in the gallery yet
 Generated tasks don't always flow into `--update` instantly. Recover by id without
 spending credits: `python pixai_gallery_backup.py --generate --task-id <id>`.
+
+To stop it stranding in the first place, use the live push path: the web gallery
+runs a live-mirror thread automatically, and the CLI exposes the same machinery as
+`python pixai_gallery_backup.py --watch --watch-backup`, which collects each
+generation the moment it completes. Both need `websockets` — see [Setup](Setup).

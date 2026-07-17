@@ -23,7 +23,7 @@ PixAI's site only shows a handful of images at a time and nothing older is easy 
 ## ⚡ Quickstart — one key, that's it
 
 ```bash
-pip install requests pillow PySide6 flask truststore
+pip install requests pillow PySide6 flask truststore websockets
 ```
 
 1. Generate an API key at **[platform.pixai.art](https://platform.pixai.art)** (lifetime up to ~2 years).
@@ -82,7 +82,7 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 
 ## 🖥️ The desktop app
 
-A PySide6 GUI (`pixai_gui.py`) wraps the whole workflow — Download, Generate, Organize, Convert, Utilities, and a one-click Gallery launcher — with live logs and a dark theme. Prefer the terminal? Every feature has a CLI flag. Want a double-click launcher? Use **`Moonglade Athenaeum.pyw`** (no console window).
+A PySide6 GUI (`pixai_gui.py`) wraps the whole workflow — Download, Generate, Organize, Convert, Utilities, and a one-click Gallery launcher — with live logs and a dark theme. Prefer the terminal? Every backup and generation feature has a CLI flag (the curation and web-suite surfaces — collections, star ratings, saved views, the Loom, branding, achievements/skins, the Trophy Hall — are browser-only). Want a double-click launcher? Use **`Moonglade Athenaeum.pyw`** (no console window).
 
 ---
 
@@ -98,10 +98,10 @@ In-repo: [`docs/architecture.md`](docs/architecture.md) (contributors).
 
 ## Requirements
 
-`requests` is the only hard dependency. `pillow` (thumbnails/convert), `PySide6` (GUI), `flask` (gallery), and `truststore` (HTTPS behind AV/proxies) are recommended; `ffmpeg` on PATH is optional for video posters.
+`requests` is the only hard dependency. `pillow` (thumbnails/convert), `PySide6` (GUI), `flask` (gallery), `truststore` (HTTPS behind AV/proxies), and `websockets` (`--watch` and the gallery's live-mirror) are recommended; `ffmpeg` on PATH is required for the Loom's export and frame handoff, and optional for video posters.
 
 ```bash
-pip install requests pillow PySide6 flask truststore
+pip install requests pillow PySide6 flask truststore websockets
 ```
 
 ---

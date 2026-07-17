@@ -16,7 +16,7 @@ its prompts to any Seedance-style generator via **Copy shot**. Plan here, render
 Project
 └── Acts            (chapters of your piece)
     └── Shot cards  (one generated clip each)
-        ├── mode      T2V / I2V / FLF / R2V / V2V
+        ├── mode      I2V / R2V / V2V / FLF
         ├── connect   new / cut / flf / extend
         ├── duration  feeds the reel-bar runtime
         ├── open + close frames   (continuity chain)
@@ -32,17 +32,20 @@ so you always know how much piece you've planned.
 
 | Mode | What it does | Engine mapping |
 |------|--------------|----------------|
-| `T2V` | Text-only shot | reference-video with no refs (prompt drives everything) |
 | `I2V` | Animate a single image | i2vPro — the image is the first frame |
 | `FLF` | Morph from a start frame to an end frame | i2vPro with `tailMediaId` |
 | `R2V` | Multi-reference: cast + scene images | referenceVideo (`@image1…`) |
 | `V2V` | Extend / transform an existing clip | referenceVideo with the clip as `@video1` |
 
+There is no text-only mode: every shot needs an input frame or reference, and one with nothing
+attached refuses with *"PixAI video needs a frame or a reference image/video for this shot"*.
+(`T2V` was retired from the picker on 2026-07-06 for exactly that reason.)
+
 ## Cast & Assets
 
 Reusable references live once and get cited everywhere. In shot text, refer to them as
 **`@image1`, `@image2`, `@video1`, `@audio1`** — lowercase (PixAI normalizes case, but
-lowercase is the canonical grammar). **Lock appearance** marks a cast member as the
+lowercase is the canonical grammar). The **lock** checkbox on a cast row marks that member as the
 consistency anchor across shots.
 
 ## Frame handoff (continuity)
@@ -58,13 +61,15 @@ The button on every card renders it for real:
 
 1. Cast/frames referenced by the card upload in @-tag order (uploads are free).
 2. The assembled shot text becomes the prompt; the mode picks the engine path.
-3. The task runs async on PixAI — the card shows **wip → done**, and **open clip ↗**
-   plays the result.
+3. The task runs async on PixAI — the card shows **wip → done** and plays the clip inline;
+   **open full ↗** opens it in the gallery (`/image/<media_id>`) in a new tab.
 4. The finished mp4 is downloaded and **cataloged into the gallery** like any other
    generation. **Free when a V4.0 video card covers it** (cards auto-apply); otherwise
    the credit price applies — same rules as everywhere else in the suite.
 
-Generation is **localhost-only** — another device browsing the gallery can look, not spend.
+The Loom is **localhost-only** — the board *and* generation. Another device on your network can
+browse the gallery, but the header's **▦ The Loom** button is hidden for it and `/loom` answers
+*"The Loom is localhost-only."* (403) — it can't look, and it can't spend.
 
 ## Copy shot (the engine-agnostic path)
 
@@ -78,8 +83,10 @@ you cast shots.
 
 ## Saving, backup, export
 
-- The board **autosaves to the gallery server** (`loom/store.json` in your backup
-  folder) — it survives restarts and browser changes.
+- The board **autosaves to the gallery server** (one atomically-written file per key under
+  `loom/kv/` in your backup folder) — it survives restarts and browser changes. A legacy
+  `loom/store.json` is split into that layout on first touch and left behind as
+  `store.json.migrated`.
 - **Backup .json** exports the whole project; importing one restores it.
 - **Export .txt** writes the full shot list as text — a script you can read, annotate,
   or hand to someone else.
@@ -106,12 +113,13 @@ open frame / close frame / cast) or attach it (Video — pick a shot from a smal
 dropdown). This is for exploring a look before you've decided which shot it belongs to; the
 main gallery's own Generate drawer behaves the same way for the same reason.
 
-**V2 is not yet at full parity with classic** — **Play sequence** (play every finished shot
-back-to-back), **Export** (trim + stitch into one mp4), and **Generate all** (batch-render
-every unfinished shot) are only reachable from classic Loom today; switch back for those.
-A few card fields (audio cue, notes, the discreet/blur toggle, per-shot "other references")
-also don't have a home in V2 yet. Everything else — shot editing, cast/assets, frame handoff,
-acts/shots management — works the same in both.
+**V2 is not yet at full parity with classic** — **Export** (trim + stitch into one mp4),
+**Generate all** (batch-render every unfinished shot), and **Copy shot** are only reachable
+from classic Loom today; switch back for those. (**Play sequence** — play every finished shot
+back-to-back — now has a **▶▶ Play** button in V2's top banner.) A few card fields (audio cue,
+notes, the discreet/blur toggle, per-shot "other references") also don't have a home in V2 yet.
+Everything else — shot editing, cast/assets, frame handoff, acts/shots management — works the
+same in both.
 
 ## Workflow suggestions
 

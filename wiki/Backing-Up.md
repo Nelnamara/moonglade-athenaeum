@@ -18,11 +18,17 @@ Everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
 The download path is parallel and incremental. For routine "grab what's new":
 
 ```bash
+python pixai_gallery_backup.py --sync                      # one-shot: the whole refresh chain
 python pixai_gallery_backup.py --update                    # stops when it reaches what you have
 python pixai_gallery_backup.py --update --workers 8        # more concurrency
 python pixai_gallery_backup.py --workers 8 --page-size 500 # fast full backfill
 ```
 
+- `--sync` is the one-shot refresh: incremental pull **with** full metadata (same as
+  `--update --full-meta`), then re-resolve unlabeled model names, fill any rows still
+  missing prompts/seeds/models, build missing thumbnails, and flag rows deleted on the
+  website. Every step is idempotent, so re-running it on a clean catalog costs almost
+  nothing. `--update` on its own is the narrower primitive.
 - `--workers N` (default 4) = how many images download at once. 6–8 saturates most
   connections; composes with every flag.
 - `--update` stops after `--update-grace` consecutive already-on-disk pages (default
