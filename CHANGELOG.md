@@ -15,6 +15,28 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **`<mg-generate-drawer>` gets per-model mode gating**, off the newly-completed 7-model video
+  capability matrix (`private/GENERATOR_SURFACE.md`, owner screenshots): the First
+  Frame / First & Last Frames / Multi-Reference mode buttons now show only what the selected
+  model actually supports (Multi-Reference is exclusive to the V4.0 pair; First & Last spans
+  the three V3.0-generation models; V2.7 and V3.0 Flash are First-Frame-only), auto-switching
+  off an invalid mode on model change rather than allowing a submit shape PixAI's own UI never
+  offers. Same pass, all sourced from the matrix: the model roster reordered to match PixAI's
+  real list (V4.0 Preview now before V4.0 Lite Preview, previously backwards); frame slots
+  relabeled to PixAI's exact "Start Frame" / "End Frame (Optional)" (End now renders as its
+  own block — leaving it empty already submits fine, matching PixAI's own optional-end
+  behavior); the "Priority" control renamed "Basic / Professional" (PixAI's real tab pair, not
+  a speed setting — a wrong label, not just an imprecise one); and the Camera-movement
+  dropdown now uses PixAI's real option wording (Unset / Side-to-side move / Vertical Pan /
+  Zoom in or out / Camera sweep / Tilt up or down / Camera spin) instead of internal-value
+  placeholders. Verified live against a running server: all three gating tiers clicked
+  through, zero console errors, 554 Python + 80 Node tests green. Investigated but **not**
+  shipped this pass: removing the Loom's own duplicate Mode/Duration/Prompt/audio controls
+  (per the locked convergence mockup v3) — a separate "Generate all" batch path reads those
+  fields directly off the shot card, bypassing the drawer entirely, and the Video tab's prompt
+  textarea is the only write site for it in the whole app; deleting the controls as designed
+  would have silently frozen prompts/audio settings while real paid generations kept firing
+  off stale data. Needs its own pass (see `docs/STATE.md`).
 - **The Loom's Video tab now mounts `<mg-generate-drawer>`** — the same shared component the
   gallery panel's full-parity build produced, replacing the hand-rolled Generate button + bare
   prompt textarea. Mode, Continuity, the raw prompt, Duration, and Camera/Lighting/Transition
