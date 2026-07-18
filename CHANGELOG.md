@@ -15,6 +15,36 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Drawer↔card Mode-sync fix + legacy Mode-chip removal** (2026-07-18, found live-testing a
+  real multi-reference shot: the drawer's mode segment kept visibly "bouncing back" to First
+  Frame). Root cause: the drawer's mode-segment click handler called its internal `_setMode()`
+  directly, which never told the host anything changed, so the next prefill re-sync silently
+  reasserted whatever the card's `mode` field still said. Fixed by adding a `mg-mode-commit`
+  event, fired ONLY from a direct user click on the drawer's own segment buttons (never from
+  `_setMode()` itself, which `prefill()`/`_applyModelGating()`/`setRefs()` also call internally
+  — dispatching from those would create a host↔drawer sync loop). The host listener maps the
+  drawer's 3-value `r2v` to the card's `R2V` (never `V2V` — confirmed at the server layer that
+  V2V/R2V already resolve to the identical generation path, and V2V is excluded from pricing/
+  telemetry) and routes through the existing, tested `setShotMode` reducer, preserving its
+  Continuity-reset coupling (`connect:"flf"→"new"`). **The old duplicate Continuity-panel Mode
+  chips are deleted outright** — the drawer's segment is now the single source of truth for a
+  bound shot's mode; Deep Focus's own, structurally separate Mode chips are deliberately left
+  in place as the sole remaining way to set a card to V2V (no drawer is mounted in that modal).
+  Designed then independently adversarially reviewed before implementation (Workflow tool,
+  design + review agents) — the reviewer caught two real bugs the design missed: (1) a model-
+  gating auto-switch (`_applyModelGating`) can make the drawer submit a different mode than the
+  card believes, with nothing reconciling it if the owner generates immediately after browsing
+  models, permanently desyncing badges/telemetry from what actually rendered — closed by
+  reconciling `card.mode` from the actually-submitted payload in the existing `mg-submit`
+  listener; (2) the drawer's 3-value display can't distinguish an existing V2V shot from R2V,
+  so a redundant click on an already-highlighted Multi-Reference button would have silently
+  downgraded a real V2V shot to R2V — closed with a no-op guard. Also rebuilt the opt-in
+  `/loom?bundle=1` pre-built bundle (`npm run build`), flagged by the same review as going
+  stale otherwise. Live-verified against a real project: drawer clicks now durably update the
+  card with no bounce-back across re-renders, the FLF↔Continuity coupling still fires, the
+  redundant-click guard no-ops cleanly, Deep Focus's Mode chips still work, zero console
+  errors. 93 Node tests green (no new test coverage needed — reuses `setShotMode`/
+  `setShotConnect`'s existing coverage unchanged).
 - **Standing cost-to-finish pill + durable prompt overrides + batch-generate hardening**
   ("Batch 2" of the generation-flow shakedown, 2026-07-18). Three items, each designed then
   independently adversarially reviewed before any code was written (one design agent's first
