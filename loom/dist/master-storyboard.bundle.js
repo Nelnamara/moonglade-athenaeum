@@ -55,6 +55,7 @@ var LoomBundle = (() => {
     }
     L.push("", c.prompt || "(prompt tbd)");
     if (c.connect === "extend" || c.connect === "flf") L.push(CONTINUITY_PHRASE);
+    if (p.look) L.push("", `Look (consistent across the film): ${p.look}`);
     const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id));
     if (usedCast.length) {
       L.push("", "Keep consistent:");
@@ -99,6 +100,7 @@ var LoomBundle = (() => {
       images: imgs.map((x) => x.d),
       video_refs: vids,
       duration: c.duration,
+      quality: project.draft ? "basic" : "professional",
       hasInput: imgs.length + vids.length > 0
     };
   };
@@ -155,6 +157,22 @@ var LoomBundle = (() => {
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: a.cards.filter((c) => c.id !== cardId) })
   });
+  var splitCardAt = (project, actId, cardId, t, newCardId) => {
+    const act = project.acts.find((a) => a.id === actId);
+    const card = act && act.cards.find((c) => c.id === cardId);
+    if (!card) return project;
+    const ti = card.trimIn || 0, to = card.trimOut;
+    if (!(t > ti + 0.1 && (to == null || t < to - 0.1))) return project;
+    const right = {
+      ...JSON.parse(JSON.stringify(card)),
+      id: newCardId,
+      title: card.title ? card.title + " (cont.)" : "cont.",
+      trimIn: t,
+      trimOut: to
+    };
+    const withLeft = patchCard(project, actId, cardId, (c) => ({ ...c, trimOut: t }));
+    return insertCardAfter(withLeft, actId, cardId, right);
+  };
   var moveCardInAct = (project, actId, idx, dir) => ({
     ...project,
     acts: project.acts.map((a) => {
@@ -244,7 +262,11 @@ ${"=".repeat(48)}
     const clips = entries.filter((e) => e.c.resultMid).map((e) => {
       const dur = e.c.actualDur || e.c.duration || 8, cin = e.c.trimIn || 0;
       const cout = e.c.trimOut != null ? e.c.trimOut : dur;
-      return { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
+      const clip = { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
+      const cr = e.c.crop;
+      if (cr && cr.w > 0.05 && cr.h > 0.05 && (cr.w < 0.99 || cr.h < 0.99 || cr.x > 0.01 || cr.y > 0.01))
+        clip.crop = { x: cr.x, y: cr.y, w: cr.w, h: cr.h };
+      return clip;
     });
     const total = clips.reduce((s, c) => s + c.span, 0);
     return { clips, total };
@@ -363,6 +385,16 @@ ${"=".repeat(48)}
   cursor:pointer;}
 .sb-shotprev-play:hover{background:rgba(0,0,0,.75);border-color:var(--amber);}
 .sb-shotprev-wrap{margin-top:8px;max-width:340px}
+.sb-shotprev-ctrls{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
+.sb-shotprev-ctrls button{font:600 11px/1 system-ui;color:var(--ink2);background:var(--panel2);
+  border:1px solid var(--line);border-radius:6px;padding:5px 8px;cursor:pointer}
+.sb-shotprev-ctrls button:hover{border-color:var(--amber);color:var(--ink)}
+.sb-shotprev-ctrls button.on{background:var(--amber);color:#1a1206;border-color:var(--amber)}
+.sb-crop-rect{position:absolute;border:2px solid var(--amber);box-shadow:0 0 0 9999px rgba(0,0,0,.45);
+  pointer-events:none;z-index:2}
+.sb-crop-layer{position:absolute;inset:0;z-index:3;cursor:crosshair;touch-action:none;
+  display:flex;align-items:center;justify-content:center;font:600 11px/1 system-ui;
+  color:rgba(255,255,255,.85);background:rgba(0,0,0,.15)}
 .sb-trim{margin-top:6px}
 .sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
 .sb-trim-sel{position:absolute;top:0;bottom:0;background:rgba(224,162,78,.26);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
@@ -689,6 +721,8 @@ ${"=".repeat(48)}
     return {
       name: "Untitled storyboard",
       target: 480,
+      look: "",
+      draft: false,
       assets: [
         { id: uid(), name: "Her", kind: "image", tag: "@image1", thumbId: "", source: "", lock: true },
         { id: uid(), name: "Me", kind: "image", tag: "@image2", thumbId: "", source: "", lock: true },
@@ -830,6 +864,13 @@ ${"=".repeat(48)}
 .lv-cframeph{font:700 9px/1 system-ui;color:var(--subtext);}
 .lv-cast{flex:1;min-height:0;overflow-y:auto;padding:8px;}
 .lv-castrow-h{font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:8px;}
+.lv-draft{display:inline-flex;align-items:center;gap:4px;font:600 11px/1 system-ui;color:var(--subtext);cursor:pointer;padding:5px 8px;border-radius:7px;border:1px solid var(--surface1);user-select:none;}
+.lv-draft.on{color:var(--accent);border-color:var(--accent);}
+.lv-draft input{margin:0;cursor:pointer;}
+.lv-look{margin-bottom:10px;border:1px solid var(--surface1);border-radius:8px;padding:6px 8px;background:var(--surface0);}
+.lv-look>summary{font:600 11px/1.3 system-ui;color:var(--text);cursor:pointer;list-style:none;user-select:none;}
+.lv-look>summary::-webkit-details-marker{display:none;}
+.lv-lookin{width:100%;margin-top:6px;box-sizing:border-box;resize:vertical;font:12px/1.4 system-ui;color:var(--text);background:var(--surface1);border:1px solid var(--surface1);border-radius:6px;padding:6px;}
 .lv-castitem{display:flex;gap:8px;align-items:center;padding:5px;border-radius:7px;border:1px solid transparent;cursor:pointer;}
 .lv-castitem:hover{background:var(--surface1);}
 .lv-castitem.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);}
@@ -1021,7 +1062,7 @@ ${"=".repeat(48)}
       )
     )));
   }
-  function LoomV2({ onClose, project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot }) {
+  function LoomV2({ onClose, project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
@@ -1160,7 +1201,10 @@ ${"=".repeat(48)}
         mid: sel.c.resultMid,
         trimIn: sel.c.trimIn,
         trimOut: sel.c.trimOut,
-        onTrim: (i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))
+        onTrim: (i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o })),
+        onSplit: (t) => splitShot(sel, t),
+        crop: sel.c.crop,
+        onCrop: (rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))
       }
     ) : /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewbox lv-ph" }, sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here.")), /* @__PURE__ */ React.createElement("div", { className: "lv-tlreelzone" }, /* @__PURE__ */ React.createElement("div", { className: "lv-reel" }, entries.map((x, i) => /* @__PURE__ */ React.createElement(
       "div",
@@ -1193,7 +1237,7 @@ ${"=".repeat(48)}
           fetch("/api/loom/handoff", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ video_media_id: rmid })
+            body: JSON.stringify({ video_media_id: rmid, trim_out: prevEntry.c.trimOut })
           }).then((r) => r.json()).then((d) => {
             if (d.error || !d.frame_media_id) {
               setHandoff("err");
@@ -1298,7 +1342,16 @@ ${"=".repeat(48)}
         }
       )), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t))), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody);
     }
-    const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-density" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "simple" ? "on" : ""), onClick: () => setDensity("simple") }, "Simple"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "detailed" ? "on" : ""), onClick: () => setDensity("detailed") }, "Detailed")), density === "detailed" ? (project.assets || []).map((as) => {
+    const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), /* @__PURE__ */ React.createElement("details", { className: "lv-look", open: !!(project.look || "").trim() }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F3A8} Project look", (project.look || "").trim() ? "" : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 a style line added to every shot")), /* @__PURE__ */ React.createElement(
+      "textarea",
+      {
+        className: "lv-lookin",
+        value: project.look || "",
+        rows: 2,
+        onChange: (e) => setLook(e.target.value),
+        placeholder: "e.g. muted teal grade, 35mm grain, anamorphic flares \u2014 applied to every shot's prompt"
+      }
+    )), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-density" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "simple" ? "on" : ""), onClick: () => setDensity("simple") }, "Simple"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "detailed" ? "on" : ""), onClick: () => setDensity("detailed") }, "Detailed")), density === "detailed" ? (project.assets || []).map((as) => {
       const inShot = sel && (sel.c.cast || []).includes(as.id);
       const toggleInShot = () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...c.cast || [], as.id] }));
       const src = frameSrc(as);
@@ -1397,6 +1450,14 @@ ${"=".repeat(48)}
       "\u21E9 drag an image here to add it as a cast reference"
     ));
     return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
+      "label",
+      {
+        className: "lv-draft" + (project.draft ? " on" : ""),
+        title: "Draft mode renders every shot at the cheaper 'basic' quality \u2014 block out the animatic, then turn Draft off and re-generate the keepers at pro quality"
+      },
+      /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!project.draft, onChange: (e) => setDraft(e.target.checked) }),
+      "\u26A1 Draft"
+    ), /* @__PURE__ */ React.createElement(
       "button",
       {
         onClick: () => batchGenerate(entries),
@@ -1811,6 +1872,7 @@ Your currently-open board is left untouched.`)) return;
     };
     const setRef = (aId, cId, rId, patch) => setProject((p) => patchRef(p, aId, cId, rId, patch));
     const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
+    const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
     return {
       open,
       setOpen,
@@ -1828,11 +1890,13 @@ Your currently-open board is left untouched.`)) return;
       moveAct,
       addRef,
       setRef,
-      delRef
+      delRef,
+      splitShot
     };
   }
-  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick }) {
+  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId }) {
     const [genState, setGenState] = useState({});
+    const resumedRef = useRef({});
     const [genImgState, setGenImgState] = useState({});
     const [imgModel, setImgModel] = useState(null);
     const [genEditState, setGenEditState] = useState({});
@@ -1881,6 +1945,7 @@ Generate anyway?`)) return;
             images: p.images,
             video_refs: p.video_refs,
             duration: p.duration,
+            quality: p.quality,
             origin: "loom-shot"
           })
         });
@@ -1889,6 +1954,7 @@ Generate anyway?`)) return;
           setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
           return;
         }
+        setCardStatus(c.id, { pendingTaskId: d.task_id });
         pollShot(c.id, d.task_id);
       } catch {
         setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
@@ -1900,12 +1966,23 @@ Generate anyway?`)) return;
         const cls = classifyTaskStatus(d);
         if (cls.phase === "done") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
-          setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, ...cls.duration ? { actualDur: cls.duration } : {} });
-        } else if (cls.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        else setTimeout(tick, 4e3);
+          setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, ...cls.duration ? { actualDur: cls.duration } : {} });
+        } else if (cls.phase === "failed") {
+          setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+          setCardStatus(cardId, { pendingTaskId: null });
+        } else setTimeout(tick, 4e3);
       }).catch(() => setTimeout(tick, 5e3));
       setTimeout(tick, 2500);
     };
+    useEffect(() => {
+      if (!project) return;
+      (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
+        if (c.status === "wip" && c.pendingTaskId && !resumedRef.current[c.pendingTaskId]) {
+          resumedRef.current[c.pendingTaskId] = true;
+          pollShot(c.id, c.pendingTaskId);
+        }
+      }));
+    }, [activeId]);
     const useExistingVideo = (entry) => {
       openPick((mid, thumb, isVideo, duration) => {
         const dur = parseFloat(duration);
@@ -2166,7 +2243,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       fetch("/api/loom/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out })), total_seconds: total })
+        body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out, crop: c.crop })), total_seconds: total })
       }).then((r) => r.json()).then((d) => {
         if (d.error) {
           setExp({ status: "failed", error: d.error });
@@ -2236,7 +2313,8 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       moveAct,
       addRef,
       setRef,
-      delRef
+      delRef,
+      splitShot
     } = useShotMutations(project, setProject);
     const [pickCb, setPickCb] = useState(null);
     const [pickKind, setPickKind] = useState("image");
@@ -2288,7 +2366,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       genRef,
       routeGen,
       batchGenerate
-    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick });
+    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
     useEffect(() => {
       const clearDraft = (s) => {
         if (!("__draft__" in s)) return s;
@@ -2333,6 +2411,8 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       });
     };
     const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
+    const setLook = (v) => setProject((p) => ({ ...p, look: v }));
+    const setDraft = (v) => setProject((p) => ({ ...p, draft: v }));
     if (!project) return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement("div", { className: "sb-empty" }, "Loading the bay\u2026"));
     const entries = flat(project);
     const anyDone = entries.some((e) => e.c.resultMid);
@@ -2391,7 +2471,10 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         bundling,
         importBackup,
         setImportOpen,
-        copyShot
+        copyShot,
+        setLook,
+        setDraft,
+        splitShot
       }
     )), seq && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
@@ -2553,11 +2636,12 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       }), /* @__PURE__ */ React.createElement("button", { className: "sb-add", onClick: () => addCard(act.id) }, "+ Add shot to ", act.name)));
     }), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost", onClick: addAct, style: { marginTop: 6 } }, "+ Add act")));
   }
-  function ShotPreview({ mid, trimIn, trimOut, onTrim }) {
+  function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
     const vidRef = useRef(null), trackRef = useRef(null);
     const [dur, setDur] = useState(0);
     const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
     const [playing, setPlaying] = useState(false);
+    const [cropping, setCropping] = useState(false);
     const rangeRef = useRef(range);
     rangeRef.current = range;
     const durRef = useRef(0);
@@ -2629,14 +2713,59 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     };
+    const seek = (delta) => {
+      const v = vidRef.current;
+      if (!v || !dur) return;
+      if (playing) {
+        v.pause();
+        setPlaying(false);
+      }
+      v.currentTime = Math.max(0, Math.min(dur, v.currentTime + delta));
+    };
+    const doSplit = () => {
+      const v = vidRef.current;
+      if (!v || !onSplit) return;
+      const t = v.currentTime;
+      if (t > range.in + 0.15 && t < effOut - 0.15) onSplit(t);
+      else alert("Move the playhead to where you want the cut first (not at either edge).");
+    };
+    const cropRef = useRef(null);
+    const [cropDraft, setCropDraft] = useState(null);
+    const cropStart = (e) => {
+      if (!cropping) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const box = e.currentTarget.getBoundingClientRect();
+      const fx = (cx) => Math.max(0, Math.min(1, (cx - box.left) / box.width));
+      const fy = (cy) => Math.max(0, Math.min(1, (cy - box.top) / box.height));
+      const x0 = fx(e.clientX), y0 = fy(e.clientY);
+      const move = (ev) => {
+        const x1 = fx(ev.clientX), y1 = fy(ev.clientY);
+        const r = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+        cropRef.current = r;
+        setCropDraft(r);
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        const r = cropRef.current;
+        if (r && r.w > 0.05 && r.h > 0.05 && onCrop) onCrop(r);
+        cropRef.current = null;
+        setCropDraft(null);
+        setCropping(false);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    };
+    const shownCrop = cropDraft || crop;
     const trimmed = range.in > 0 || range.out != null;
     return /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-wrap" }, /* @__PURE__ */ React.createElement(
       "div",
       {
         className: "sb-shotprev",
-        onMouseMove: scrub,
+        onMouseMove: cropping ? void 0 : scrub,
         onMouseLeave: () => {
-          if (playing) return;
+          if (playing || cropping) return;
           const v = vidRef.current;
           if (v) v.currentTime = range.in;
         }
@@ -2654,9 +2783,27 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
           onEnded: () => setPlaying(false)
         }
       ),
-      /* @__PURE__ */ React.createElement("button", { className: "sb-shotprev-play", onClick: togglePlay, title: playing ? "Pause" : "Play" }, playing ? "\u23F8" : "\u25B6"),
-      /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-hint" }, "hover to scrub")
-    ), /* @__PURE__ */ React.createElement("div", { className: "sb-trim" }, /* @__PURE__ */ React.createElement(
+      shownCrop && /* @__PURE__ */ React.createElement("div", { className: "sb-crop-rect", style: {
+        left: shownCrop.x * 100 + "%",
+        top: shownCrop.y * 100 + "%",
+        width: shownCrop.w * 100 + "%",
+        height: shownCrop.h * 100 + "%"
+      } }),
+      cropping && /* @__PURE__ */ React.createElement("div", { className: "sb-crop-layer", onPointerDown: cropStart }, "drag to crop"),
+      !cropping && /* @__PURE__ */ React.createElement("button", { className: "sb-shotprev-play", onClick: togglePlay, title: playing ? "Pause" : "Play" }, playing ? "\u23F8" : "\u25B6"),
+      !cropping && /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-hint" }, "hover to scrub")
+    ), /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-ctrls" }, /* @__PURE__ */ React.createElement("button", { onClick: () => seek(-0.25), title: "Rewind (step back)" }, "\u23EA"), /* @__PURE__ */ React.createElement("button", { onClick: () => seek(0.25), title: "Fast-forward (step ahead)" }, "\u23E9"), onSplit && /* @__PURE__ */ React.createElement("button", { onClick: doSplit, title: "Split this shot in two at the playhead" }, "\u2702 Split"), onCrop && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: cropping ? "on" : "",
+        onClick: () => {
+          setCropping((v) => !v);
+          setCropDraft(null);
+        },
+        title: "Crop the frame \u2014 drag a rectangle; applied on export"
+      },
+      "\u26F6 Crop"
+    ), crop && onCrop && /* @__PURE__ */ React.createElement("button", { onClick: () => onCrop(null), title: "Clear crop" }, "clear crop")), /* @__PURE__ */ React.createElement("div", { className: "sb-trim" }, /* @__PURE__ */ React.createElement(
       "div",
       {
         className: "sb-trim-track",
@@ -2816,7 +2963,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         fetch("/api/loom/handoff", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ video_media_id: rmid })
+          body: JSON.stringify({ video_media_id: rmid, trim_out: prev.c.trimOut })
         }).then((r) => r.json()).then((d) => {
           if (d.error || !d.frame_media_id) {
             setHandoff("err");

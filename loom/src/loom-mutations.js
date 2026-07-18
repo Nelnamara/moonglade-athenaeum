@@ -83,6 +83,23 @@ export const removeCard = (project, actId, cardId) => ({
   acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: a.cards.filter((c) => c.id !== cardId) }),
 });
 
+// Split one shot into two at playhead time `t`. Unlike buildDuplicateCard (which makes a
+// FRESH, unrendered shot), both halves KEEP the same rendered clip (resultMid) and just
+// divide the kept trim range at `t`: the left becomes [trimIn..t], the right [t..trimOut].
+// Export then plays the two ranges of one clip back-to-back -- an actual cut. No-ops (returns
+// the project unchanged) if `t` isn't strictly inside the kept range, so neither half is empty.
+export const splitCardAt = (project, actId, cardId, t, newCardId) => {
+  const act = project.acts.find((a) => a.id === actId);
+  const card = act && act.cards.find((c) => c.id === cardId);
+  if (!card) return project;
+  const ti = card.trimIn || 0, to = card.trimOut;     // to == null means "to the clip's real end"
+  if (!(t > ti + 0.1 && (to == null || t < to - 0.1))) return project;
+  const right = { ...JSON.parse(JSON.stringify(card)), id: newCardId,
+    title: card.title ? card.title + " (cont.)" : "cont.", trimIn: t, trimOut: to };
+  const withLeft = patchCard(project, actId, cardId, (c) => ({ ...c, trimOut: t }));
+  return insertCardAfter(withLeft, actId, cardId, right);
+};
+
 export const moveCardInAct = (project, actId, idx, dir) => ({
   ...project,
   acts: project.acts.map((a) => {
@@ -191,7 +208,13 @@ export function buildExportClips(entries) {
   const clips = entries.filter((e) => e.c.resultMid).map((e) => {
     const dur = e.c.actualDur || e.c.duration || 8, cin = e.c.trimIn || 0;
     const cout = (e.c.trimOut != null ? e.c.trimOut : dur);
-    return { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
+    const clip = { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
+    // A spatial crop (fractions of the frame) rides along so export applies it via ffmpeg's
+    // crop filter. Only carried when it meaningfully crops -- a full-frame or tiny rect is dropped.
+    const cr = e.c.crop;
+    if (cr && cr.w > 0.05 && cr.h > 0.05 && (cr.w < 0.99 || cr.h < 0.99 || cr.x > 0.01 || cr.y > 0.01))
+      clip.crop = { x: cr.x, y: cr.y, w: cr.w, h: cr.h };
+    return clip;
   });
   const total = clips.reduce((s, c) => s + c.span, 0);
   return { clips, total };

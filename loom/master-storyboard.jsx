@@ -16,7 +16,7 @@ import {
 // useShotMutations / useGenerationPipeline / useExportPipeline hooks below.
 import {
   patchCard, patchCardById, patchAct, patchAssets,
-  appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard,
+  appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard, splitCardAt,
   moveCardInAct, moveCardToAct as mvCardToAct, nextActName, appendAct, removeAct, moveActInProject,
   buildNewRef, patchRef, removeRef, countShots,
   parseCastIdsFromSearch,
@@ -142,6 +142,16 @@ const STYLES = `
   cursor:pointer;}
 .sb-shotprev-play:hover{background:rgba(0,0,0,.75);border-color:var(--amber);}
 .sb-shotprev-wrap{margin-top:8px;max-width:340px}
+.sb-shotprev-ctrls{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
+.sb-shotprev-ctrls button{font:600 11px/1 system-ui;color:var(--ink2);background:var(--panel2);
+  border:1px solid var(--line);border-radius:6px;padding:5px 8px;cursor:pointer}
+.sb-shotprev-ctrls button:hover{border-color:var(--amber);color:var(--ink)}
+.sb-shotprev-ctrls button.on{background:var(--amber);color:#1a1206;border-color:var(--amber)}
+.sb-crop-rect{position:absolute;border:2px solid var(--amber);box-shadow:0 0 0 9999px rgba(0,0,0,.45);
+  pointer-events:none;z-index:2}
+.sb-crop-layer{position:absolute;inset:0;z-index:3;cursor:crosshair;touch-action:none;
+  display:flex;align-items:center;justify-content:center;font:600 11px/1 system-ui;
+  color:rgba(255,255,255,.85);background:rgba(0,0,0,.15)}
 .sb-trim{margin-top:6px}
 .sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
 .sb-trim-sel{position:absolute;top:0;bottom:0;background:rgba(224,162,78,.26);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
@@ -360,7 +370,7 @@ function newCard(extra = {}) {
 }
 function seedProject() {
   return {
-    name: "Untitled storyboard", target: 480,
+    name: "Untitled storyboard", target: 480, look: "", draft: false,
     assets: [
       { id: uid(), name: "Her", kind: "image", tag: "@image1", thumbId: "", source: "", lock: true },
       { id: uid(), name: "Me", kind: "image", tag: "@image2", thumbId: "", source: "", lock: true },
@@ -501,6 +511,13 @@ const V2_STYLES = `
 .lv-cframeph{font:700 9px/1 system-ui;color:var(--subtext);}
 .lv-cast{flex:1;min-height:0;overflow-y:auto;padding:8px;}
 .lv-castrow-h{font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:8px;}
+.lv-draft{display:inline-flex;align-items:center;gap:4px;font:600 11px/1 system-ui;color:var(--subtext);cursor:pointer;padding:5px 8px;border-radius:7px;border:1px solid var(--surface1);user-select:none;}
+.lv-draft.on{color:var(--accent);border-color:var(--accent);}
+.lv-draft input{margin:0;cursor:pointer;}
+.lv-look{margin-bottom:10px;border:1px solid var(--surface1);border-radius:8px;padding:6px 8px;background:var(--surface0);}
+.lv-look>summary{font:600 11px/1.3 system-ui;color:var(--text);cursor:pointer;list-style:none;user-select:none;}
+.lv-look>summary::-webkit-details-marker{display:none;}
+.lv-lookin{width:100%;margin-top:6px;box-sizing:border-box;resize:vertical;font:12px/1.4 system-ui;color:var(--text);background:var(--surface1);border:1px solid var(--surface1);border-radius:6px;padding:6px;}
 .lv-castitem{display:flex;gap:8px;align-items:center;padding:5px;border-radius:7px;border:1px solid transparent;cursor:pointer;}
 .lv-castitem:hover{background:var(--surface1);}
 .lv-castitem.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);}
@@ -687,7 +704,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot }) {
+function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -838,7 +855,9 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
               // stuck on the pause icon, hover-scrub disabled) and `dur` stale until the new
               // clip's metadata loads. Forcing a remount resets all of that for free.
               ? <ShotPreview key={sel.c.id} mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
-                  onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))} />
+                  onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))}
+                  onSplit={(t) => splitShot(sel, t)}
+                  crop={sel.c.crop} onCrop={(rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))} />
               : <div className="lv-tlpreviewbox lv-ph">{sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here."}</div>}
           </div>
         )}
@@ -882,7 +901,7 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
       if (rmid) {
         setHandoff("wip");
         fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ video_media_id: rmid }) })
+          body: JSON.stringify({ video_media_id: rmid, trim_out: prevEntry.c.trimOut }) })
           .then((r) => r.json()).then((d) => {
             if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
             setHandoff("");
@@ -1070,6 +1089,12 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
   const castList = (
     <>
       <div className="lv-castrow-h">Cast &amp; assets{sel ? <span className="lv-dim"> — bound to {sel.code}</span> : null}</div>
+      <details className="lv-look" open={!!(project.look || "").trim()}>
+        <summary>🎨 Project look{(project.look || "").trim() ? "" : <span className="lv-dim"> — a style line added to every shot</span>}</summary>
+        <textarea className="lv-lookin" value={project.look || ""} rows={2}
+          onChange={(e) => setLook(e.target.value)}
+          placeholder="e.g. muted teal grade, 35mm grain, anamorphic flares — applied to every shot's prompt" />
+      </details>
       <div className="lv-tabs lv-density">
         <span className={"lv-tab " + (density === "simple" ? "on" : "")} onClick={() => setDensity("simple")}>Simple</span>
         <span className={"lv-tab " + (density === "detailed" ? "on" : "")} onClick={() => setDensity("detailed")}>Detailed</span>
@@ -1169,6 +1194,9 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
         <span className="lv-eyebrow">The Loom · V2</span>
         <span className="lv-note">Click a shot → it binds to Generate.</span>
         <ProjectSwitcher api={projectApi} />
+        <label className={"lv-draft" + (project.draft ? " on" : "")}
+          title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
+          <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />⚡ Draft</label>
         <button onClick={() => batchGenerate(entries)} disabled={batching || !entries.length}
           title="Generate every shot that isn't done yet, one after another">
           {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
@@ -1524,15 +1552,17 @@ function useShotMutations(project, setProject) {
     setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { ...buildNewRef(kind, uid()), tag }] })); };
   const setRef = (aId, cId, rId, patch) => setProject((p) => patchRef(p, aId, cId, rId, patch));
   const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
+  const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
 
   return { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
-    addRef, setRef, delRef };
+    addRef, setRef, delRef, splitShot };
 }
 
 // ---- 3. useGenerationPipeline: generate/poll/route across all four modes ----
-function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick }) {
+function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId }) {
   const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid} (video)
+  const resumedRef = useRef({});    // taskId -> true: shots whose interrupted poll we've re-attached this session
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
   const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
   const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
@@ -1577,9 +1607,14 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     try {
       const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: p.mode, prompt: p.prompt, images: p.images,
-          video_refs: p.video_refs, duration: p.duration, origin: "loom-shot" }) });
+          video_refs: p.video_refs, duration: p.duration, quality: p.quality, origin: "loom-shot" }) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
+      // Persist the task id on the card so a mid-render tab close is recoverable: the
+      // in-memory pollShot loop dies with the page, but a resume effect re-attaches it
+      // from pendingTaskId on next load (otherwise the shot is stuck "wip" forever while
+      // its clip lands orphaned in the gallery). Cleared on done/fail.
+      setCardStatus(c.id, { pendingTaskId: d.task_id });
       pollShot(c.id, d.task_id);
     } catch { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
   };
@@ -1599,12 +1634,26 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // Reset trims too -- a re-roll's new clip is a different length than whatever the
         // PREVIOUS result was trimmed to, and a stale trimOut past the new clip's end can hang
         // SequencePlayer on it forever (it never reaches the advance threshold).
-        setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
-      } else if (cls.phase === "failed") setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+        setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
+      } else if (cls.phase === "failed") { setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } })); setCardStatus(cardId, { pendingTaskId: null }); }
       else setTimeout(tick, 4000);
     }).catch(() => setTimeout(tick, 5000));
     setTimeout(tick, 2500);
   };
+  // Resume any shot whose render was interrupted by a tab close: the card kept
+  // status:"wip" + pendingTaskId, but its in-memory poll loop died with the page. On
+  // project load (activeId change), re-attach a poll so the finished clip lands on the
+  // card. Deduped per task id so flipping projects back and forth mid-render doesn't
+  // stack loops; a resumed poll clears pendingTaskId itself on done/fail.
+  useEffect(() => {
+    if (!project) return;   // project is null until the store loads the first board
+    (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
+      if (c.status === "wip" && c.pendingTaskId && !resumedRef.current[c.pendingTaskId]) {
+        resumedRef.current[c.pendingTaskId] = true;
+        pollShot(c.id, c.pendingTaskId);
+      }
+    }));
+  }, [activeId]);   // eslint-disable-line
   // Attach an already-produced video straight onto a shot as its finished clip -- no
   // generation involved. /api/loom/export already treats every resultMid as just "a video
   // file to trim+concat," so this writes the exact same shape pollShot does on completion.
@@ -1786,7 +1835,7 @@ function useExportPipeline(project, thumbs) {
     if (!clips.length) { alert("No finished shots to export yet — generate one first."); return; }
     setExp({ status: "running", progress: 0, elapsed: 0 });
     fetch("/api/loom/export", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out })), total_seconds: total }) })
+      body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out, crop: c.crop })), total_seconds: total }) })
       .then((r) => r.json()).then((d) => {
         if (d.error) { setExp({ status: "failed", error: d.error }); return; }
         const tick = () => fetch("/api/loom/export-status").then((r) => r.json()).then((s) => {
@@ -1816,7 +1865,7 @@ export default function App() {
 
   const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
-    addRef, setRef, delRef } = useShotMutations(project, setProject);
+    addRef, setRef, delRef, splitShot } = useShotMutations(project, setProject);
 
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
   const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
@@ -1845,7 +1894,7 @@ export default function App() {
   const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel, genEditState, setGenEditState,
     genRefState, setGenRefState, batching,
     generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate }
-    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick });
+    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
   // Draft-generation results (Image/Edit/Reference/Video) are keyed by the fixed "__draft__"
   // id, shared across every open project -- without this, a finished draft from project A
   // resurfaces in project B's drawer (still-live thumbnail + a working attach button that
@@ -1873,6 +1922,8 @@ export default function App() {
   };
 
   const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
+  const setLook = (v) => setProject((p) => ({ ...p, look: v }));
+  const setDraft = (v) => setProject((p) => ({ ...p, draft: v }));
 
   if (!project) return <div className="sb-root"><style>{STYLES}</style><div className="sb-empty">Loading the bay…</div></div>;
 
@@ -1898,7 +1949,7 @@ export default function App() {
         batching={batching} batchGenerate={batchGenerate}
         addRef={addRef} setRef={setRef} delRef={delRef}
         exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
-        importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} /></V2Boundary>}
+        importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot} /></V2Boundary>}
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
@@ -2098,11 +2149,12 @@ export default function App() {
    handles that store trimIn/trimOut (seconds) on the shot. Nothing is re-encoded
    here -- trims are just metadata that Play-sequence and Export will honor.
    /video-file/<id> supports Range requests, so every seek is instant. */
-function ShotPreview({ mid, trimIn, trimOut, onTrim }) {
+function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
   const vidRef = useRef(null), trackRef = useRef(null);
   const [dur, setDur] = useState(0);
   const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
   const [playing, setPlaying] = useState(false);
+  const [cropping, setCropping] = useState(false);   // crop-draw mode active
   const rangeRef = useRef(range); rangeRef.current = range;
   const durRef = useRef(0); durRef.current = dur;
   const dragRef = useRef(null);
@@ -2162,16 +2214,59 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim }) {
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
+  // Fast-forward / rewind: nudge the playhead in small hops for framing a split or crop.
+  const seek = (delta) => { const v = vidRef.current; if (!v || !dur) return;
+    if (playing) { v.pause(); setPlaying(false); }
+    v.currentTime = Math.max(0, Math.min(dur, v.currentTime + delta)); };
+  // Split: cut this shot in two at the playhead -- the parent makes a second shot pointing
+  // at the same clip with the kept range divided here. Only fires strictly inside the kept
+  // range so neither half is zero-length.
+  const doSplit = () => { const v = vidRef.current; if (!v || !onSplit) return;
+    const t = v.currentTime;
+    if (t > range.in + 0.15 && t < effOut - 0.15) onSplit(t);
+    else alert("Move the playhead to where you want the cut first (not at either edge)."); };
+  // Crop: drag a rectangle over the frame; stored as {x,y,w,h} fractions on the card and
+  // applied at export via ffmpeg's crop filter. Draw-mode is one-shot (commits on release).
+  const cropRef = useRef(null);
+  const [cropDraft, setCropDraft] = useState(null);
+  const cropStart = (e) => {
+    if (!cropping) return;
+    e.preventDefault(); e.stopPropagation();
+    const box = e.currentTarget.getBoundingClientRect();
+    const fx = (cx) => Math.max(0, Math.min(1, (cx - box.left) / box.width));
+    const fy = (cy) => Math.max(0, Math.min(1, (cy - box.top) / box.height));
+    const x0 = fx(e.clientX), y0 = fy(e.clientY);
+    const move = (ev) => { const x1 = fx(ev.clientX), y1 = fy(ev.clientY);
+      const r = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+      cropRef.current = r; setCropDraft(r); };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      const r = cropRef.current;
+      if (r && r.w > 0.05 && r.h > 0.05 && onCrop) onCrop(r);
+      cropRef.current = null; setCropDraft(null); setCropping(false); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  const shownCrop = cropDraft || crop;   // draft while drawing, else the committed rect
   const trimmed = range.in > 0 || range.out != null;
   return (
     <div className="sb-shotprev-wrap">
-      <div className="sb-shotprev" onMouseMove={scrub}
-        onMouseLeave={() => { if (playing) return; const v = vidRef.current; if (v) v.currentTime = range.in; }}>
+      <div className="sb-shotprev" onMouseMove={cropping ? undefined : scrub}
+        onMouseLeave={() => { if (playing || cropping) return; const v = vidRef.current; if (v) v.currentTime = range.in; }}>
         <video ref={vidRef} src={"/video-file/" + mid} muted preload="metadata" playsInline
           onLoadedMetadata={(e) => setDur(e.currentTarget.duration || 0)}
           onTimeUpdate={onTimeUpdate} onEnded={() => setPlaying(false)} />
-        <button className="sb-shotprev-play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>{playing ? "⏸" : "▶"}</button>
-        <div className="sb-shotprev-hint">hover to scrub</div>
+        {shownCrop && <div className="sb-crop-rect" style={{ left: shownCrop.x * 100 + "%", top: shownCrop.y * 100 + "%",
+          width: shownCrop.w * 100 + "%", height: shownCrop.h * 100 + "%" }} />}
+        {cropping && <div className="sb-crop-layer" onPointerDown={cropStart}>drag to crop</div>}
+        {!cropping && <button className="sb-shotprev-play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>{playing ? "⏸" : "▶"}</button>}
+        {!cropping && <div className="sb-shotprev-hint">hover to scrub</div>}
+      </div>
+      <div className="sb-shotprev-ctrls">
+        <button onClick={() => seek(-0.25)} title="Rewind (step back)">⏪</button>
+        <button onClick={() => seek(0.25)} title="Fast-forward (step ahead)">⏩</button>
+        {onSplit && <button onClick={doSplit} title="Split this shot in two at the playhead">✂ Split</button>}
+        {onCrop && <button className={cropping ? "on" : ""} onClick={() => { setCropping((v) => !v); setCropDraft(null); }}
+          title="Crop the frame — drag a rectangle; applied on export">⛶ Crop</button>}
+        {crop && onCrop && <button onClick={() => onCrop(null)} title="Clear crop">clear crop</button>}
       </div>
       <div className="sb-trim">
         <div className="sb-trim-track" ref={trackRef}
@@ -2385,7 +2480,7 @@ function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef,
     if (rmid) {
       setHandoff("wip");
       fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_media_id: rmid }) })
+        body: JSON.stringify({ video_media_id: rmid, trim_out: prev.c.trimOut }) })
         .then((r) => r.json()).then((d) => {
           if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
           setHandoff("");
