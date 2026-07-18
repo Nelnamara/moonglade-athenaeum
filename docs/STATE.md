@@ -279,7 +279,19 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   finished clip landing on the shot) via two new handlers (`onVideoSubmit`/`onVideoResult`/
   `onVideoError`) threaded down from the parent component, mirroring exactly what
   `generateShot`/`pollShot` already write for every other generation path — same board/resume
-  behavior regardless of which UI submitted. **R2V's image/video banks auto-populate from the
+  behavior regardless of which UI submitted. **Per-model mode gating shipped 2026-07-18**,
+  off the completed 7-model capability matrix (`private/GENERATOR_SURFACE.md`): the mode
+  segment (First Frame / First & Last Frames / Multi-Reference) now shows only the modes a
+  selected model actually supports (Multi-Reference is V4.0-pair-only; First & Last is the
+  three V3.0-generation models; V2.7/V3.0 Flash are First-Frame-only), auto-switching off an
+  invalid mode rather than allowing a submit shape PixAI's own UI never offers. Same pass:
+  model roster reordered to PixAI's real order (V4.0 Preview before V4.0 Lite Preview — was
+  backwards), frame slots relabeled to PixAI's exact "Start Frame" / "End Frame (Optional)"
+  (End renders as its own block, confirming leaving it empty already submits fine), the
+  "Priority" control renamed "Basic / Professional" (PixAI's real tab pair, not a speed
+  setting), and the Camera-movement dropdown uses PixAI's real option wording. Verified live
+  (all 3 gating tiers clicked through, zero console errors) — see the convergence mockup v3
+  in the artifact ledger below. **R2V's image/video banks auto-populate from the
   shot's cast + other refs**, via `buildShotPayload` (loom-core.js) — the exact tag-sorted
   composition `shotText()`'s "@imageN" / "Keep consistent" citations are written against. This
   is load-bearing, not a convenience: an initial build left these banks empty for the owner to
@@ -298,6 +310,25 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   (status badge, thumbnail, duration) — all with zero console errors. **The gallery keeps its
   own working Video tab** — adoption there is a later, live-QA'd swap, same as the model-picker
   precedent.
+- **BLOCKER found 2026-07-18, not yet acted on:** the Loom's Video tab still shows its own
+  Mode chips / Duration chips / Prompt textarea / audio checkbox+language chips ABOVE the
+  mounted drawer, duplicating fields the drawer also owns — the "convoluted... multiple sets
+  of the same button groups" state the owner flagged, and exactly what the locked convergence
+  mockup v3 (artifact ledger below) designs away. **Do not just delete those controls** —
+  traced first (Explore agent, full file read of `master-storyboard.jsx`/`loom-core.js`) and
+  found a second, separate generation path: the toolbar's "▶ Generate all" batch button →
+  `batchGenerate` → `generateShot` → `shotPayload()` (loom-core.js) reads `c.mode`/
+  `c.duration`/`c.prompt` (via `shotText()`, which **concatenates** the stored prompt, not
+  recomputes it) /`c.audioGen`/`c.audioLanguage` **directly off the shot card**, completely
+  bypassing `<mg-generate-drawer>`. The Video tab's prompt textarea is the **only write site
+  for `c.prompt` in the entire app** (no Deep Focus equivalent); audio fields have no
+  fallback surface either. Deleting those controls as designed would freeze `.prompt`/
+  `.audioGen`/`.audioLanguage` at whatever value each shot last had while Generate-all kept
+  submitting real paid generations off the stale/empty data — for a NEW shot, `c.prompt` is
+  empty, so `shotText()`'s own fallback (`c.prompt || "(prompt tbd)"`) would submit that
+  literal placeholder string. Needs its own design pass (most likely: make the drawer write
+  back into the card on change, so Generate-all and the drawer share one source of truth)
+  before the mockup's control removal can ship — NOT a JSX-deletion task.
 - `<mg-cost-badge>` remains unbuilt. Nothing exists in `static/` for it.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
@@ -571,6 +602,7 @@ surface: no visual build from prose alone.
 |---|---|---|
 | [The Loom — Shell Mockup v1](https://claude.ai/code/artifact/e41a3020-32fb-4baa-ae81-69814d5ee4c9) | Interactive pixel source of truth for the V2 shell | **LOCKED** — matches the shipped shell |
 | [Video Tab — Full Parity Mockup v1](https://claude.ai/code/artifact/74ad3fd0-ff82-4430-bfe5-275194afa556) | Pixel source of truth for the `<mg-generate-drawer>` Video form, both mounts: 6 image + 3 video + audio ref slots, negative prompt, channel (ships default Normal, persisted), full roster w/ capability tags, Loom shot-weave | **LOCKED** 2026-07-18 (owner-approved) — the full-parity build verifies against it |
+| [Loom Convergence Mockup v3](https://claude.ai/code/artifact/e6659d99-8376-400a-a4e5-04a3419d4ca4) | Side-by-side Gallery\|Loom source of truth: one shared drawer, Loom-only shot chrome (Continuity/Camera/Lighting/Transitions/Cast) kept, live per-model mode-gating demo, Camera+Basic/Professional hidden in the Loom (owned by the shot Camera field + Draft toggle) | **LOCKED** 2026-07-18 (owner-approved, interactively verified) — component-side fixes (gating, labels, model order) shipped from it; the Loom-side control-removal half is blocked, see the Generate-all finding above |
 | [toast_mockup](https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3) | The unlock-moment design (the real toast is `.ach-m2`) | **LOCKED** — shipped, `077e1f0` |
 | [loom_selectshot](https://claude.ai/code/artifact/0d9c4e02-200e-44f9-982c-e3add482b905) | Selected-shot interaction model | **LOCKED** — shipped in V2 |
 | [Moonglade — Finalists In Action](https://claude.ai/code/artifact/b45a39a3-b6a8-4e73-9f62-e03cb390bd00) | Finalists in context: frames wrapping a real unlock, bars filling live, claim icons in the header chip | Current — pairs with `docs/ART.md` §3 (picks ledger) |

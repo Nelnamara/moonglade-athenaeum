@@ -76,6 +76,11 @@
     'mg-generate-drawer .mgd-sel{width:100%;box-sizing:border-box;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);border-radius:6px;color:var(--text,#d6d2e2);padding:6px 8px;font-size:12.5px;}',
     'mg-generate-drawer .mgd-sel:focus{outline:none;border-color:var(--accent-soft,#4fc99a);box-shadow:0 0 0 2px rgba(79,201,154,.25);}',
     'mg-generate-drawer .mgd-sel:disabled{color:var(--overlay0,#6a6088);}',
+    /* Loom mount only: Camera + Basic/Professional are each already owned by an existing
+       Loom control (the shot Camera field; the top-strip Draft toggle) -- host sets
+       data-loom-ctx on the element itself to hide the shared drawer's own copies rather
+       than show two controls for the same setting. Gallery/harness mounts are unaffected. */
+    'mg-generate-drawer[data-loom-ctx] .mgd-cam-wrap,mg-generate-drawer[data-loom-ctx] .mgd-quality-wrap{display:none;}',
     'mg-generate-drawer .mgd-caps{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;}',
     'mg-generate-drawer .mgd-cap{font-size:9.5px;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);color:var(--subtext,#9a93ab);padding:1px 7px;border-radius:5px;}',
     'mg-generate-drawer .mgd-cap.hot{color:var(--emerald,#4fc99a);border-color:var(--emerald,#4fc99a);}',
@@ -112,10 +117,14 @@
     (document.head || document.documentElement).appendChild(s);
   }
 
-  // Per-mode chrome, copied from the gallery's setVideoMode.
+  // Per-mode chrome, copied from the gallery's setVideoMode. i2v/flf's primary slot is
+  // always the Start Frame -- flf's End Frame (Optional) renders as its own labeled block
+  // (see .mgd-endlbl/.mgd-endslots) since PixAI shows them as two separately-labeled boxes,
+  // not one combined "start & end" section. Exact PixAI wording, title case, confirmed on
+  // V3.0 Lite's and V3.2's real panels (private/GENERATOR_SURFACE.md, 2026-07-18).
   var MODE_LBL = {
-    i2v: 'Source image (first frame)',
-    flf: 'Start & end frame',
+    i2v: 'Start Frame',
+    flf: 'Start Frame',
     r2v: 'Image references'
   };
   var MODE_PH = {
@@ -124,21 +133,39 @@
     r2v: 'Type @image1 / @video1 / @audio1 to cite a ref — it becomes a chip — ‘the girl from @image1 dances to @audio1…’'
   };
 
-  // Full site roster (private/GENERATOR_SURFACE.md's i18n capture, 2026-07-06 screenshots).
-  // Only the five with a real numeric modelId in VIDEO_MODELS (pixai_gallery_backup.py) are
-  // selectable -- PixAI resolves "Unknown or removed model" without one, and no free card
-  // can match. The other two ship visible-but-disabled so the roster is honest about what
-  // exists without offering a guaranteed-fail submit; enable once each gets one
-  // --dump-params capture (free, read-only) off a real recovered task.
+  // Full site roster, in PixAI's real model-picker order -- newest first, V2.7 last
+  // (private/GENERATOR_SURFACE.md per-model matrix, owner screenshots 2026-07-18; our
+  // V4.0 pair was previously reversed). Only the five with a real numeric modelId in
+  // VIDEO_MODELS (pixai_gallery_backup.py) are selectable -- PixAI resolves "Unknown or
+  // removed model" without one, and no free card can match. The other two ship
+  // visible-but-disabled so the roster is honest about what exists without offering a
+  // guaranteed-fail submit; enable once each gets one --dump-params capture (free,
+  // read-only) off a real recovered task.
   var MODELS = [
+    { value: 'v4.0', label: 'V4.0 Preview', caps: ['multi-ref', 'audio', '15s', 'top quality', '~2.5× cost'] },
     { value: 'v4.0.1', label: 'V4.0 Lite Preview', caps: ['multi-ref', 'audio', '15s', 'end-frame'] },
-    { value: 'v4.0', label: 'V4.0 Preview (full)', caps: ['multi-ref', 'audio', '15s', 'top quality', '~2.5× cost'] },
     { value: 'v3.2', label: 'V3.2', caps: ['audio', 'prompt-following'] },
     { value: 'v3.0.2', label: 'V3.0 Lite', caps: ['complex motion', 'cheap'] },
-    { value: 'v3.0', label: 'V3.0 · High Consistency', caps: ['high-consistency', 'action presets', 'start/end'] },
+    { value: 'v3.0', label: 'V3.0 (High Consistency)', caps: ['high-consistency', 'action presets', 'start/end'] },
     { value: 'v3.0f', label: 'V3.0 Flash', caps: ['multi-shot'], disabled: true },
-    { value: 'v2.7', label: 'V2.7 High Dynamics', caps: ['camera moves', 'dynamic'], disabled: true }
+    { value: 'v2.7', label: 'V2.7 (High Dynamics)', caps: ['camera moves', 'dynamic'], disabled: true }
   ];
+
+  // Per-model reference/frame-mode gating -- which of our i2v/flf/r2v vmode buttons a given
+  // model actually supports. Confirmed matrix, all 7 models (private/GENERATOR_SURFACE.md,
+  // owner screenshots 2026-07-18): Multi-Reference (r2v) is exclusive to the V4.0 pair; the
+  // First+Last tier (flf) is available on the three V3.0-generation models; V2.7 and V3.0
+  // Flash offer First Frame only. Leaving End Frame empty in flf mode already submits as
+  // first-frame-only (see _hasAnyRef), matching PixAI's own "End Frame (Optional)" behavior.
+  var MODEL_VMODES = {
+    'v4.0': ['i2v', 'flf', 'r2v'],
+    'v4.0.1': ['i2v', 'flf', 'r2v'],
+    'v3.2': ['i2v', 'flf'],
+    'v3.0.2': ['i2v', 'flf'],
+    'v3.0': ['i2v', 'flf'],
+    'v3.0f': ['i2v'],
+    'v2.7': ['i2v']
+  };
 
   // Matches the server's VIDEO_DURATIONS / _snap_video_duration exactly -- prefill() snaps
   // to the nearest of these so an out-of-range shot duration (e.g. a hand-typed "8") can
@@ -166,12 +193,14 @@
 
   var MARKUP =
     '<div class="mgd-seg" role="tablist">' +
-      '<button type="button" class="on" data-vmode="i2v">First frame</button>' +
-      '<button type="button" data-vmode="flf">First + last</button>' +
-      '<button type="button" data-vmode="r2v">Multi-ref</button>' +
+      '<button type="button" class="on" data-vmode="i2v">First Frame</button>' +
+      '<button type="button" data-vmode="flf">First &amp; Last Frames</button>' +
+      '<button type="button" data-vmode="r2v">Multi-Reference</button>' +
     '</div>' +
-    '<div class="mgd-lbl mgd-slots-lbl">Source image (first frame)</div>' +
+    '<div class="mgd-lbl mgd-slots-lbl">Start Frame</div>' +
     '<div class="mgd-slots mgd-imgslots"></div>' +
+    '<div class="mgd-lbl mgd-endlbl" style="display:none;">End Frame <span class="mgd-note">(Optional)</span></div>' +
+    '<div class="mgd-slots mgd-endslots" style="display:none;"></div>' +
     '<div class="mgd-lbl mgd-vidlbl" style="display:none;">Video references <span class="mgd-note">&middot; up to 3 &middot; 2&ndash;15s each, 15s total</span></div>' +
     '<div class="mgd-slots mgd-vidslots" style="display:none;"></div>' +
     '<div class="mgd-lbl mgd-audlbl" style="display:none;">Audio reference <span class="mgd-note">&middot; WAV &le;15MB</span></div>' +
@@ -190,13 +219,16 @@
     '<div class="mgd-row">' +
       '<div class="mgd-cam-wrap"><div class="mgd-lbl">Camera</div>' +
         '<select class="mgd-sel mgd-cam">' +
-          '<option value="unset">Auto</option><option value="zoom">Zoom</option>' +
-          '<option value="pan">Pan</option><option value="tilt">Tilt</option>' +
-          '<option value="roll">Roll</option><option value="horizontal">Horizontal</option>' +
-          '<option value="vertical-pan">Vertical pan</option>' +
+          '<option value="unset">Unset</option>' +
+          '<option value="horizontal">Side-to-side move</option>' +
+          '<option value="vertical-pan">Vertical Pan</option>' +
+          '<option value="zoom">Zoom in or out</option>' +
+          '<option value="pan">Camera sweep</option>' +
+          '<option value="tilt">Tilt up or down</option>' +
+          '<option value="roll">Camera spin</option>' +
         '</select></div>' +
-      '<div><div class="mgd-lbl">Priority</div>' +
-        '<select class="mgd-sel mgd-quality"><option value="professional">Professional</option><option value="basic">Basic (cheaper)</option></select></div>' +
+      '<div class="mgd-quality-wrap"><div class="mgd-lbl">Basic / Professional</div>' +
+        '<select class="mgd-sel mgd-quality"><option value="basic">Basic</option><option value="professional" selected>Professional</option></select></div>' +
       '<div><div class="mgd-lbl">Channel</div>' +
         '<select class="mgd-sel mgd-channel"><option value="normal" selected>Normal</option><option value="enhanced">Enhanced</option></select>' +
         '<div class="mgd-caps mgd-chancap"></div></div>' +
@@ -232,6 +264,8 @@
       this.innerHTML = MARKUP;
       this._slotsLbl = this.querySelector('.mgd-slots-lbl');
       this._slotsWrap = this.querySelector('.mgd-imgslots');
+      this._endLbl = this.querySelector('.mgd-endlbl');
+      this._endWrap = this.querySelector('.mgd-endslots');
       this._vidLbl = this.querySelector('.mgd-vidlbl');
       this._vidWrap = this.querySelector('.mgd-vidslots');
       this._audLbl = this.querySelector('.mgd-audlbl');
@@ -265,7 +299,7 @@
       });
       this._ce.addEventListener('blur', function () { self._chipify(true); });
       this._neg.addEventListener('input', function () { self._debCost(); });
-      this._model.addEventListener('change', function () { self._renderModelCaps(); self._debCost(); });
+      this._model.addEventListener('change', function () { self._renderModelCaps(); self._applyModelGating(); self._debCost(); });
       this._dur.addEventListener('change', function () { self._debCost(); });
       this._channel.addEventListener('change', function () { self._renderChanCap(); self._debCost(); });
       this._audio.addEventListener('change', function () { self._audioToggle(); });
@@ -277,6 +311,7 @@
       this._renderModelCaps();
       this._renderChanCap();
       this._setMode('i2v');
+      this._applyModelGating();
     }
 
     disconnectedCallback() {
@@ -310,16 +345,30 @@
       if (showR2v) { this._renderVidSlots(); this._renderAudioRow(); }
     }
 
+    // Shows/hides the mode buttons a selected model doesn't actually support (MODEL_VMODES)
+    // and switches off an now-invalid current mode. Called on model change and prefill.
+    _applyModelGating() {
+      var allowed = MODEL_VMODES[this._model.value] || ['i2v', 'flf', 'r2v'];
+      this.querySelectorAll('.mgd-seg button').forEach(function (b) {
+        b.style.display = allowed.indexOf(b.getAttribute('data-vmode')) === -1 ? 'none' : '';
+      });
+      if (allowed.indexOf(this._mode) === -1) this._setMode(allowed[0]);
+    }
+
     // ---- primary (image) bank rendering: i2v/flf's _slots, r2v's _imgSlots --------
+    // flf only ever renders _slots[0] (Start Frame) here -- _slots[1] (End Frame) gets its
+    // own labeled block via _renderEndSlot, matching PixAI's two-separately-labeled-boxes
+    // layout rather than one combined "start & end" row.
     _renderSlots() {
       var wrap = this._slotsWrap, self = this, arr = this._primary();
       wrap.innerHTML = '';
+      var mainArr = (this._mode === 'flf') ? [arr[0]] : arr;
       var refN = 0;
-      arr.forEach(function (s, i) {
+      mainArr.forEach(function (s, i) {
         var box = slotBox();
         if (s) {
           refN++;
-          var tag = (self._mode === 'flf' ? (i === 0 ? 'start' : 'end') : '@image' + refN);
+          var tag = (self._mode === 'flf' ? 'start' : '@image' + refN);
           box.innerHTML = '<img src="' + esc(s.thumb) + '" style="width:100%;height:100%;object-fit:cover;">' +
             '<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.88);color:var(--lavender,#b692e6);font-size:9px;padding:1px 5px;border-radius:4px;">' + tag + '</span>' +
             '<button type="button" class="mgd-vs-x" style="position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;border:none;background:rgba(21,19,28,.88);color:var(--subtext,#9a93ab);font-size:10px;line-height:1;cursor:pointer;padding:0;">&times;</button>';
@@ -332,7 +381,7 @@
           box.onmouseenter = function () { self._showPreview(s.media_id, box); };
           box.onmouseleave = function () { self._hidePreview(); };
         } else {
-          box.textContent = (self._mode === 'flf' ? (i === 0 ? '+ start' : '+ end') : '+ pick');
+          box.textContent = (self._mode === 'flf' || self._mode === 'i2v') ? '+ start' : '+ pick';
         }
         box.onclick = function () { self._requestPick('primary', i); };
         wrap.appendChild(box);
@@ -344,7 +393,37 @@
         add.onclick = function () { arr.push(null); self._setPrimary(arr); self._renderSlots(); };
         wrap.appendChild(add);
       }
+      this._renderEndSlot();
       this._debCost();
+    }
+
+    // End Frame (Optional) -- flf mode only, always _slots[1]. Leaving it empty is valid
+    // (see _hasAnyRef): PixAI's own "(Optional)" label means Start Frame alone submits fine.
+    _renderEndSlot() {
+      var self = this;
+      if (this._mode !== 'flf') {
+        this._endLbl.style.display = 'none';
+        this._endWrap.style.display = 'none';
+        return;
+      }
+      this._endLbl.style.display = '';
+      this._endWrap.style.display = '';
+      this._endWrap.innerHTML = '';
+      var box = slotBox(), s = this._slots[1];
+      if (s) {
+        box.innerHTML = '<img src="' + esc(s.thumb) + '" style="width:100%;height:100%;object-fit:cover;">' +
+          '<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.88);color:var(--lavender,#b692e6);font-size:9px;padding:1px 5px;border-radius:4px;">end</span>' +
+          '<button type="button" class="mgd-vs-x" style="position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;border:none;background:rgba(21,19,28,.88);color:var(--subtext,#9a93ab);font-size:10px;line-height:1;cursor:pointer;padding:0;">&times;</button>';
+        box.querySelector('.mgd-vs-x').onclick = function (ev) {
+          ev.stopPropagation(); self._hidePreview(); self._slots[1] = null; self._renderEndSlot(); self._debCost();
+        };
+        box.onmouseenter = function () { self._showPreview(s.media_id, box); };
+        box.onmouseleave = function () { self._hidePreview(); };
+      } else {
+        box.textContent = '+ end';
+      }
+      box.onclick = function () { self._requestPick('primary', 1); };
+      this._endWrap.appendChild(box);
     }
 
     // ---- video reference bank (r2v only, max 3) -- real poster thumbs, play badge -
@@ -743,6 +822,11 @@
         if (this._mode === 'r2v') this._renderAudioRow();
       }
       if (o.prompt != null) this._promptSet(o.prompt);
+      // Gate LAST, after refs/mode are all settled -- setRefs() above can itself force
+      // mode to r2v (>1 ref), so an earlier gate call could be second-guessed by it. One
+      // final authoritative pass here means the drawer never ends up showing a mode/slot
+      // bank the selected model doesn't actually support.
+      this._applyModelGating();
       this._debCost();
     }
 
