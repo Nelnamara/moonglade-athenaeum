@@ -250,15 +250,21 @@ users.
 
 Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
-- `<mg-cost-badge>` is the next component. Nothing exists in `static/` for it yet.
-- `<mg-generate-drawer>` is what would make "same component as the gallery" literally true for
-  the Loom's Generate panel. The Loom's `genImage` / `runGen` / `genEdit` / `genRef` and
-  all Generate-tab chrome are hand-rolled in `master-storyboard.jsx`; `<mg-model-picker>` is
-  the only thing actually shared with the gallery's drawer. Concrete cost of staying
-  hand-duplicated, found 2026-07-18: the two Video tabs' audio control didn't exist at all in
-  the Loom and was missing an option in the gallery — the same feature landed on the two
-  surfaces at different times with different gaps, because they're two independent
-  implementations, not one shared one.
+- `<mg-generate-drawer>` (`static/mg-generate-drawer.js` + its harness
+  `static/mg-generate-drawer.html`) is the third shared component: the **Video tab** at full
+  gallery parity — the gallery panel is the locked standard it extracts. It owns the whole
+  lifecycle (form → `/api/price` cost → `/api/loom/generate` submit → `/api/task-status` poll
+  → result strip) and stays picker-agnostic via `mg-pick-request` (host services it with its
+  own picker; `mg-submit`/`mg-result`/`mg-error` report the run; `setRefs()`/`prefill()` are
+  the bridge/shot-context entries). **No host mounts it yet**: the gallery keeps its own
+  working Video tab (adoption is a later, live-QA'd swap, same as the model-picker precedent),
+  and the Loom mount is the next step — blocked on one owner design call (how the component's
+  form binds to shot state: the shot-composed prompt vs a free prompt box, V2V, and the
+  Continuity coupling). Until that mount lands, the Loom's `genImage` / `runGen` / `genEdit` /
+  `genRef` and its Generate-tab chrome remain hand-rolled in `master-storyboard.jsx` — the
+  duplication that let the two Video tabs ship the same audio feature with different gaps is
+  still live.
+- `<mg-cost-badge>` remains unbuilt. Nothing exists in `static/` for it.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
 
