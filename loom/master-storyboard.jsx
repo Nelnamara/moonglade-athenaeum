@@ -718,7 +718,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -774,6 +774,32 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
     }
   }, [setImgModel]);
+  // Bridge <mg-generate-drawer> the same way. activeRef always holds the CURRENT active
+  // shot (updated every render below) so these long-lived, bind-once listeners never read
+  // a stale closure from whichever shot happened to be selected when the element first
+  // mounted. promptDirtyRef tracks "the owner has typed in the drawer's prompt box since
+  // the last prefill" -- the weave-resync effect below checks it so a hand-edit wins,
+  // exactly the locked design's "your edit wins" rule. onVideoSubmit/onVideoResult/
+  // onVideoError are passed down from the parent (where setGenState/setCardStatus live,
+  // via useGenerationPipeline) -- LoomV2 itself only gets genState read-only, not its
+  // setter, so the actual state writes stay owned one level up, same layering as
+  // generateShot/useExistingVideo already crossing this same boundary.
+  const activeRef = useRef(null);
+  const genDrawerRef = useRef(null);
+  const promptDirtyRef = useRef(false);
+  const bindGenDrawer = useCallback((el) => {
+    genDrawerRef.current = el;
+    if (el && !el._mgBound) {
+      el._mgBound = true;
+      el.addEventListener("mg-dirty", () => { promptDirtyRef.current = true; });
+      el.addEventListener("mg-pick-request", (e) => {
+        openPick((mid, thumb) => e.detail.respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
+      });
+      el.addEventListener("mg-submit", (e) => onVideoSubmit(activeRef.current.c.id, e.detail));
+      el.addEventListener("mg-result", (e) => onVideoResult(activeRef.current.c.id, e.detail));
+      el.addEventListener("mg-error", (e) => onVideoError(activeRef.current.c.id, e.detail));
+    }
+  }, [openPick, onVideoSubmit, onVideoResult, onVideoError]);
 
   // Fixed Timeline drawer: hidden(0) / slim(default, scrubber only) / full(preview above
   // scrubber, real 16:9). The handle drags freely between 0 and TL_HEIGHTS.full, snapping
@@ -804,6 +830,44 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const active = sel || draftEntry;
   const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
+  activeRef.current = active;
+  // Duplicate of the Video tabBody's own selIdx/prevEntry below (kept deliberately separate
+  // rather than hoisted -- that one lives inside a bare block for frame-handoff, this one
+  // feeds a Hook, which can't live inside a block).
+  const drawerModeFor = (m) => { const u = (m || "R2V").toUpperCase(); return u === "FLF" ? "flf" : u === "I2V" ? "i2v" : "r2v"; };
+  const weaveSelIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
+  const weavePrevEntry = weaveSelIdx > 0 ? entries[weaveSelIdx - 1] : null;
+  // Feed the shot's structured fields into the mounted <mg-generate-drawer> whenever they
+  // change -- mode/duration/audio/quality sync unconditionally (structural, not a "hand-edit"
+  // concern); the composed PROMPT only re-syncs while the owner hasn't typed in the drawer's
+  // own prompt box since the last sync (promptDirtyRef, set by the mg-dirty event). Cast/
+  // other-refs are NOT auto-populated into the video/audio ref banks -- deliberately deferred
+  // (see docs/STATE.md), the owner fills those via the drawer's own slot-click UI, same as
+  // the gallery. The one exception: Continuity "extend" prefills @video1 from the previous
+  // shot's clip, mirroring the explicit line shotText() already puts in the composed prompt.
+  useEffect(() => {
+    const el = genDrawerRef.current;
+    if (!el || tab !== "Video") return;
+    const nextMode = drawerModeFor(active.c.mode);
+    const payload = {
+      mode: nextMode, duration: active.c.duration, audio: !!active.c.audioGen,
+      audio_language: active.c.audioLanguage || "english",
+      quality: project.draft ? "basic" : "professional",
+    };
+    if (nextMode === "i2v" && active.c.openFrame && active.c.openFrame.mediaId) {
+      payload.images = [{ media_id: active.c.openFrame.mediaId, thumb: frameSrc(active.c.openFrame) }];
+    } else if (nextMode === "flf") {
+      payload.images = [active.c.openFrame, active.c.closeFrame].filter((f) => f && f.mediaId)
+        .map((f) => ({ media_id: f.mediaId, thumb: frameSrc(f) }));
+    } else if (nextMode === "r2v" && active.c.connect === "extend" && weavePrevEntry && weavePrevEntry.c.resultMid) {
+      payload.video_refs = [{ media_id: weavePrevEntry.c.resultMid, thumb: "/thumbs/" + weavePrevEntry.c.resultMid + ".jpg" }];
+    }
+    if (!promptDirtyRef.current) payload.prompt = shotText(active, project);
+    el.prefill(payload);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.c.id, active.c.mode, active.c.connect, active.c.duration, active.c.audioGen, active.c.audioLanguage,
+      active.c.prompt, active.c.camera, active.c.lighting, active.c.transIn, active.c.transOut,
+      active.c.title, project.look, project.draft, tab]);
   const board = (
     <div className="lv-board">
       {project.acts.map((act, ai) => {
@@ -972,8 +1036,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         {palFor === "transOut" && (
           <div className="lv-termspal">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => patch((c) => ({ ...c, transOut: t }))}>{t}</span>))}</div>
         )}
-        <div className="lv-refline">{(active.c.cast || []).length} cast &middot; {(active.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast &amp; assets tab)</span></div>
-        <button className="lv-go" disabled={busy} onClick={() => generateShot(active)}>{busy ? (gs.msg || "generating…") : "▶ Generate shot"}</button>
+        <div className="lv-refline">{(active.c.cast || []).length} cast &middot; {(active.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast &amp; assets tab; add extra image/video/audio refs directly below)</span></div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" }}>
+          <span className="lv-dim">&#8595; woven into the form below</span>
+          <button className="lv-mini2" onClick={() => {
+            promptDirtyRef.current = false;
+            if (genDrawerRef.current) genDrawerRef.current.prefill({ prompt: shotText(active, project) });
+          }}>&#8634; re-sync from shot</button>
+        </div>
+        <mg-generate-drawer ref={bindGenDrawer}></mg-generate-drawer>
         {sel && <button className="lv-usevid" disabled={busy} onClick={() => useExistingVideo(sel)} title="Skip generation -- use a video you already have in your gallery as this shot's clip">
           &#128190; Use an existing video instead
         </button>}
@@ -1923,6 +1994,24 @@ export default function App() {
     genRefState, setGenRefState, batching,
     generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate }
     = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
+  // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
+  // three mirror exactly what generateShot/pollShot already write for every OTHER path, so
+  // the board card's live status badge, tab-close resume (pendingTaskId), and the finished
+  // clip landing on the shot all keep working identically regardless of which UI submitted.
+  const onVideoSubmit = useCallback((cardId, detail) => {
+    setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(detail.task_id).slice(-6) + ")" } }));
+    setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id });
+  }, [setGenState, setCardStatus]);
+  const onVideoResult = useCallback((cardId, detail) => {
+    const mid = (detail.media_ids || [])[0];
+    setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
+    setCardStatus(cardId, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null,
+      ...(detail.duration ? { actualDur: detail.duration } : {}) });
+  }, [setGenState, setCardStatus]);
+  const onVideoError = useCallback((cardId, detail) => {
+    setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
+    setCardStatus(cardId, { pendingTaskId: null });
+  }, [setGenState, setCardStatus]);
   // Draft-generation results (Image/Edit/Reference/Video) are keyed by the fixed "__draft__"
   // id, shared across every open project -- without this, a finished draft from project A
   // resurfaces in project B's drawer (still-live thumbnail + a working attach button that
@@ -1977,7 +2066,8 @@ export default function App() {
         batching={batching} batchGenerate={batchGenerate}
         addRef={addRef} setRef={setRef} delRef={delRef}
         exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
-        importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot} /></V2Boundary>
+        importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
+        onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError} /></V2Boundary>
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>

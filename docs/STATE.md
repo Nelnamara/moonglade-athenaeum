@@ -251,7 +251,7 @@ users.
 Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
 - `<mg-generate-drawer>` (`static/mg-generate-drawer.js` + its harness
-  `static/mg-generate-drawer.html`) is the third shared component: the **Video tab**, now at
+  `static/mg-generate-drawer.html`) is the third shared component: the **Video tab**, at
   FULL PixAI Multi-ref parity per the locked mockup — 6 image + 3 video + 1 audio ref slot
   (video slots show real poster thumbs; audio uploads directly via `/api/upload`, no gallery
   picker involved since audio isn't catalogued), negative prompt (i2vPro only — referenceVideo
@@ -261,15 +261,34 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   whole lifecycle (form → `/api/price` cost → `/api/loom/generate` submit → `/api/task-status`
   poll → result strip) and stays picker-agnostic via `mg-pick-request` (carries a `kind` hint
   so a host filters image vs. video picks; `mg-submit`/`mg-result`/`mg-error` report the run;
-  `setRefs()`/`prefill()` are the bridge/shot-context entries, `prefill()` now also taking
-  `video_refs`/`audio_ref`/`negative`/`is_private`). Server-side, `build_shot_video_params()`
-  threads `negative`/`is_private` through to both builders, and `/api/price`'s video branch
-  now accepts ANY reference kind alone for R2V (was image-only — a video- or audio-only
-  Multi-ref silently mispriced as "pick a source image" until this build). **No host mounts
-  it yet**: the gallery keeps its own working Video tab (adoption is a later, live-QA'd swap,
-  same as the model-picker precedent), and the Loom mount is next. Until that mount lands, the
-  Loom's `genImage` / `runGen` / `genEdit` / `genRef` and its Generate-tab chrome remain
-  hand-rolled in `master-storyboard.jsx`.
+  `mg-dirty` fires on a genuine hand-edit to the prompt box, distinct from a programmatic
+  `prefill()`; `setRefs()`/`prefill()` are the bridge/shot-context entries, `prefill()` taking
+  `video_refs`/`audio_ref`/`negative`/`is_private`, snapping an out-of-range duration to the
+  nearest real option rather than leaving the `<select>` on no match). Server-side,
+  `build_shot_video_params()` threads `negative`/`is_private` through to both builders, and
+  `/api/price`'s video branch accepts ANY reference kind alone for R2V (was image-only — a
+  video- or audio-only Multi-ref used to silently mis-price as "pick a source image").
+  **Mounted in the Loom's Video tab** (`master-storyboard.jsx`'s `LoomV2`): Mode, Continuity,
+  the raw prompt, Duration, and Camera/Lighting/Transition in/out stay Loom-native fields
+  (structured, feed the reel/export/FLF-continuity coupling unchanged) sitting above the
+  drawer as a weave strip; the drawer's own prompt box shows `shotText()`'s live composition
+  and re-syncs on any weave-field change UNLESS the owner has hand-typed in it since
+  (`mg-dirty`-tracked), with an explicit "↺ re-sync from shot" override. `mg-submit`/
+  `mg-result`/`mg-error` write into `genState` (board card's live status badge) and
+  `setCardStatus` (`pendingTaskId` for tab-close resume, `resultMid`/`actualDur` for the
+  finished clip landing on the shot) via two new handlers (`onVideoSubmit`/`onVideoResult`/
+  `onVideoError`) threaded down from the parent component, mirroring exactly what
+  `generateShot`/`pollShot` already write for every other generation path — same board/resume
+  behavior regardless of which UI submitted. **Deliberately deferred**: the shot's cast images
+  and other `c.refs` are NOT auto-populated into the drawer's image/video/audio banks — the
+  owner fills those via the drawer's own slot-click UI now (same interactive model as the
+  gallery), except Continuity "extend" still auto-prefills `@video1` from the previous shot's
+  clip. Live-verified against a real project: mode/duration sync (incl. the out-of-range-
+  duration snap bug found and fixed live), prompt composition + hand-edit-wins + re-sync, the
+  real picker bridge (type-filtered, real pick landed in the slot), and the submit/result event
+  chain correctly updating the board card (status badge, thumbnail, duration) — all with zero
+  console errors. **The gallery keeps its own working Video tab** — adoption there is a later,
+  live-QA'd swap, same as the model-picker precedent.
 - `<mg-cost-badge>` remains unbuilt. Nothing exists in `static/` for it.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
