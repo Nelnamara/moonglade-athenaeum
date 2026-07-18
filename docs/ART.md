@@ -127,7 +127,7 @@ not specced.
 | 14 | **Job-tracker mascots** | `mascots/trk_done.png` · `trk_fail.png` · `trk_empty.png` | 329×364 / 324×365 / 402×356 | Job card states | ✅ |
 | 15 | **Easter egg** | `ee_nelstarfall.png` + `ee_starfall_cast.ogg` + `ee_starfall_loop.ogg` (`:3391-3399`) | 684×704 + 2 ogg | Konami Starfall overlay | ✅ |
 | 16 | **Tier SFX** | `sfx/ach_<tier>.ogg` (`_chime`, `:5264-5270`) | **absent** | Slot is wired; `_synth` covers the absence with a per-tier chime. Drop a file in and it plays | ⬜ slot only |
-| 17 | **Loom mark** | — | — | **No slot exists.** `_LOOM_SHELL` consumes no `mark_url` / `has_banner` / `brand-banner`; `loom/master-storyboard.jsx` contains zero `branding/` references. Both headers are text (`▰ The Loom`, jsx:1783; `The Loom · V2`, jsx:1118). Prompts A/B/C are banked in the archived `ART_PROMPTS` (§6) — build the slot first | ⬜ unbuilt |
+| 17 | **Loom mark** | — | — | **No slot exists.** `_LOOM_SHELL` consumes no `mark_url` / `has_banner` / `brand-banner`; `loom/master-storyboard.jsx` contains zero `branding/` references. Since classic Loom's retirement there is only one header, plain text (`The Loom · V2`). Prompts A/B/C are banked in the archived `ART_PROMPTS` (§6) — build the slot first | ⬜ unbuilt |
 | 18 | **Skin banners** | — | — | **No slot.** The 5 shipped skins are token swaps only (§1.1). "One banner per skin" was specced but never built; there is exactly one banner slot (#1), shared by every skin. Three sketch prompts are archived (§6) — none of the three names a shipped skin | ⬜ unbuilt |
 | 19 | **Progress-bar frames** | — | — | **No slot.** BAR9 was picked (§3) but `.ach-bar` is pure CSS (`:4760` — `--surface1` track, `--accent` fill) and no `branding/bar*` file is referenced anywhere | ⬜ decided, unbuilt |
 

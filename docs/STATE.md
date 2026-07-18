@@ -298,7 +298,7 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 
 - **Trophy Hall redesign** is blocked on the owner's own Figma frame. Ask for the frame URL; do
   not re-suggest the screenshot-decomposition checklist. The Figma plugin is live and
-  authenticated. (`docs/DESIGN_WORKFLOW.md`.)
+  authenticated. (`docs/STANDARDS.md` Part 2.)
 - **Trophy Hall rename** undecided. Shortlist: *The Vault Against the Void* / *The Folio of
   Honors* / *The Ledger of the World Tree* (banner subtext: "The Pillar of the Vault").
 - **Epic-tier frame art** undecided. The owner wants epic to read "deep-purple WoW epic /
@@ -457,7 +457,7 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 ## Locked design
 
 Do not re-litigate these. Build against the named source, and verify against it before calling
-anything done — that is `docs/DESIGN_WORKFLOW.md`'s rule, and it governs any user-visible
+anything done — that is `docs/STANDARDS.md` Part 2's rule, and it governs any user-visible
 surface: no visual build from prose alone.
 
 - **The V2 shell's pixel source of truth** is the interactive *Loom — Shell Mockup v1*
@@ -514,7 +514,7 @@ surface: no visual build from prose alone.
 
 | Artifact | What it is | Status |
 |---|---|---|
-| [The Curation Standard](https://claude.ai/code/artifact/6d6b9d2d-281e-4fd5-b1dc-7a11c599950e) | House standard for vote/selection artifacts | Mirror — `docs/CURATION_STANDARD.md` is truth |
+| [The Curation Standard](https://claude.ai/code/artifact/6d6b9d2d-281e-4fd5-b1dc-7a11c599950e) | House standard for vote/selection artifacts | Mirror — `docs/STANDARDS.md` Part 1 is truth |
 | [Curation Workspace](https://claude.ai/code/artifact/ef9f5853-5c8f-40eb-87f2-8cf123f0b6ef) | Reference builder: lightbox + pick + rank + tray + export | Clone this for new selection passes |
 | [Moonglade Roster Board](https://claude.ai/code/artifact/31d6c68a-bd54-4824-886f-9017c6012912) | The 57-achievement three-lane voting board | Reference board (votes complete) — the model for the new board to build from `achievements_roster_57.json` |
 | [ledger](https://claude.ai/code/artifact/d1ee39a1-db65-487b-a6ef-067ea6d1392d) | Per-achievement mascot + badge assignment | Live |

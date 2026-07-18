@@ -1,5 +1,17 @@
 # Design Workflow — the pixel source of truth standard
 
+> ## ❄️ FROZEN — historical record, do not edit. Live home is `docs/STANDARDS.md`.
+>
+> **Frozen 2026-07-17.** Merged into **`docs/STANDARDS.md`** (Part 2) as part of finishing a
+> merge recommended on 2026-07-16 that was never executed. This is the concrete proof the merge
+> was overdue: this file's own Tooling table still said Figma MCP "needs one-time auth... repeat
+> per machine" and that a `/design-sync` skill exists, and its Trophy Hall section was headed
+> "RESOLVED by revert" — all three had already gone stale (MCP has been authenticated since
+> 2026-07-15, no `/design-sync` skill was ever installed, and Trophy Hall has two owner calls
+> still genuinely open) while a same-day copy in `docs/STANDARDS.md` carried the corrected text.
+> Two live copies of one standard is how that kind of drift happens. Read `docs/STANDARDS.md`
+> for the current text; this copy is preserved for its history.
+
 > Born 2026-07-14 from the Trophy Hall incident. **Standing rule: no user-visible design build
 > proceeds from prose alone.** Every visual build works from a pixel source of truth (a Figma frame,
 > a Claude Design project, or a locked mockup artifact) and verification includes a
