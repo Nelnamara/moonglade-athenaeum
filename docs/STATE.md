@@ -542,6 +542,12 @@ surface: no visual build from prose alone.
 | [Moonglade — Finalists In Action](https://claude.ai/code/artifact/b45a39a3-b6a8-4e73-9f62-e03cb390bd00) | Finalists in context: frames wrapping a real unlock, bars filling live, claim icons in the header chip | Current — pairs with `docs/ART.md` §3 (picks ledger) |
 | [Timeline Drawer — Wireframe v1](https://claude.ai/code/artifact/84be1748-2c7d-4304-967c-8ac22cd37687) | Timeline drawer detail | Reference only — the Shell Mockup is the pixel source |
 
+**Awaiting owner review**
+
+| Artifact | What it is | Status |
+|---|---|---|
+| [Video Tab — Full Parity Mockup v1](https://claude.ai/code/artifact/74ad3fd0-ff82-4430-bfe5-275194afa556) | Interactive mockup of the shared Video form at full PixAI parity: both mounts (gallery / Loom weave), 6 image + 3 video + audio ref slots, negative prompt, channel, 7-model roster w/ capability tags | Awaiting owner markup/approval — **locks as the `<mg-generate-drawer>` Video-form pixel source** on approval; the build follows it |
+
 **Live tools & references**
 
 | Artifact | What it is | Status |
