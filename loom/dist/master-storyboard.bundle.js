@@ -100,6 +100,8 @@ var LoomBundle = (() => {
       video_refs: vids,
       duration: c.duration,
       quality: project.draft ? "basic" : "professional",
+      generate_audio: !!c.audioGen,
+      audio_language: c.audioLanguage || "english",
       hasInput: imgs.length + vids.length > 0
     };
   };
@@ -200,6 +202,16 @@ var LoomBundle = (() => {
     [as[idx], as[j]] = [as[j], as[idx]];
     return { ...project, acts: as };
   };
+  var setShotMode = (c, mode) => ({
+    ...c,
+    mode,
+    connect: mode !== "FLF" && c.connect === "flf" ? "new" : c.connect
+  });
+  var setShotConnect = (c, connect) => ({
+    ...c,
+    connect,
+    mode: connect === "flf" ? "FLF" : c.mode
+  });
   var buildNewRef = (kind, id) => ({ id, kind, tag: "", role: "", source: "", thumbId: "" });
   var patchRef = (project, actId, cardId, refId, patch) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== refId ? r : { ...r, ...patch }) }));
   var removeRef = (project, actId, cardId, refId) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== refId) }));
@@ -545,6 +557,7 @@ ${"=".repeat(48)}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 `;
   var MODES = ["I2V", "R2V", "V2V", "FLF"];
+  var AUDIO_LANGUAGES = [["english", "EN"], ["japanese", "JA"], ["chinese", "ZH"], ["korean", "KO"], ["none", "SE only"]];
   var CAM_PALETTE = {
     "Shot size": ["EWS", "WS", "MLS", "MS", "MCU", "CU", "ECU", "OTS", "two-shot", "insert", "POV"],
     "Movement": [
@@ -700,6 +713,14 @@ ${"=".repeat(48)}
       camera: "",
       lighting: "",
       audioCue: "",
+      // audioGen/audioLanguage are the actual generation request (does PixAI render sound at
+      // all, and in what language) -- distinct from audioCue above, which is prompt TEXT
+      // ("ambient room tone") that only ever influences wording, never the real generateAudio/
+      // audioLanguage params. Neither surface exposed this until now (private/GENERATOR_SURFACE.md
+      // had it reverse-engineered but never wired to a control): the server already accepts
+      // generate_audio/audio_language on /api/loom/generate, this was purely a missing control.
+      audioGen: false,
+      audioLanguage: "english",
       transIn: "",
       transOut: "",
       notes: "",
@@ -840,6 +861,8 @@ ${"=".repeat(48)}
 .lv-framehandoff .sb-tagin{width:62px;}
 .lv-framehandoff .sb-frameprev{height:64px;}
 .lv-lab{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);display:block;margin:9px 0 5px;}
+.lv-check{display:flex;align-items:center;gap:6px;font:600 11px/1 system-ui;color:var(--text);margin:9px 0 5px;cursor:pointer;user-select:none;}
+.lv-check input{margin:0;cursor:pointer;}
 .lv-chips{display:flex;gap:5px;flex-wrap:wrap;}
 .lv-chip{background:var(--surface1);border:1px solid var(--surface1);color:var(--subtext);border-radius:6px;padding:3px 9px;font:600 10px/1 system-ui;cursor:pointer;}
 .lv-chip.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
@@ -1081,6 +1104,8 @@ ${"=".repeat(48)}
       transOut: "",
       audioCue: "",
       notes: "",
+      audioGen: false,
+      audioLanguage: "english",
       imgPrompt: "",
       editPrompt: "",
       refPrompt: "",
@@ -1248,7 +1273,39 @@ ${"=".repeat(48)}
         }
       };
       let tabBody;
-      if (tab === "Video") tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, MODES.map((m) => /* @__PURE__ */ React.createElement("span", { key: m, className: "lv-chip " + (m === active.c.mode ? "on" : ""), onClick: () => patch((c) => ({ ...c, mode: m })) }, m))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Continuity"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement("span", { key: k, className: "lv-chip " + (k === (active.c.connect || "new") ? "on" : ""), title: CONNECT[k].hint, onClick: () => patch((c) => ({ ...c, connect: k })) }, CONNECT[k].label))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement("textarea", { className: "lv-ta", value: active.c.prompt || "", onChange: (ev) => patch((c) => ({ ...c, prompt: ev.target.value })) }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Duration"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, [5, 6, 10, 15].map((d) => /* @__PURE__ */ React.createElement("span", { key: d, className: "lv-chip " + (d === active.c.duration ? "on" : ""), onClick: () => patch((c) => ({ ...c, duration: d })) }, d, "s"))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab)")), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busy, onClick: () => generateShot(active) }, busy ? gs.msg || "generating\u2026" : "\u25B6 Generate shot"), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"), !sel && gs && gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gs.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "attach to shot \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn", disabled: !routeTarget, onClick: () => {
+      if (tab === "Video") tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, MODES.map((m) => /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          key: m,
+          className: "lv-chip " + (m === active.c.mode ? "on" : ""),
+          onClick: () => patch((c) => setShotMode(c, m))
+        },
+        m
+      ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Continuity"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          key: k,
+          className: "lv-chip " + (k === (active.c.connect || "new") ? "on" : ""),
+          title: CONNECT[k].hint,
+          onClick: () => patch((c) => setShotConnect(c, k))
+        },
+        CONNECT[k].label
+      ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement("textarea", { className: "lv-ta", value: active.c.prompt || "", onChange: (ev) => patch((c) => ({ ...c, prompt: ev.target.value })) }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Duration"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, [5, 6, 10, 15].map((d) => /* @__PURE__ */ React.createElement("span", { key: d, className: "lv-chip " + (d === active.c.duration ? "on" : ""), onClick: () => patch((c) => ({ ...c, duration: d })) }, d, "s"))), /* @__PURE__ */ React.createElement("label", { className: "lv-check" }, /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "checkbox",
+          checked: !!active.c.audioGen,
+          onChange: (ev) => patch((c) => ({ ...c, audioGen: ev.target.checked }))
+        }
+      ), " Generate audio"), active.c.audioGen && /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, AUDIO_LANGUAGES.map(([v, label]) => /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          key: v,
+          className: "lv-chip " + (v === (active.c.audioLanguage || "english") ? "on" : ""),
+          onClick: () => patch((c) => ({ ...c, audioLanguage: v }))
+        },
+        label
+      ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab)")), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busy, onClick: () => generateShot(active) }, busy ? gs.msg || "generating\u2026" : "\u25B6 Generate shot"), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"), !sel && gs && gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gs.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "attach to shot \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn", disabled: !routeTarget, onClick: () => {
         if (!routeTarget) return;
         setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...gs.duration ? { actualDur: gs.duration } : {} }));
         setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
@@ -1533,7 +1590,7 @@ ${"=".repeat(48)}
         {
           key: m,
           className: "lv-chip " + (m === c.mode ? "on" : ""),
-          onClick: () => dfPatch((cc) => ({ ...cc, mode: m }))
+          onClick: () => dfPatch((cc) => setShotMode(cc, m))
         },
         m
       )))), /* @__PURE__ */ React.createElement("div", { className: "lv-field narrow" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Duration (s)"), /* @__PURE__ */ React.createElement(
@@ -1938,6 +1995,8 @@ Generate anyway?`)) return;
             video_refs: p.video_refs,
             duration: p.duration,
             quality: p.quality,
+            generate_audio: p.generate_audio,
+            audio_language: p.audio_language,
             origin: "loom-shot"
           })
         });

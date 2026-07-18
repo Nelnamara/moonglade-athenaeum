@@ -153,6 +153,29 @@ def test_price_route_video_mode(tmp_path, monkeypatch):
     assert i2v["generateAudio"] is True
 
 
+def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch):
+    """The Loom sends `generate_audio` (matching /api/loom/generate's own key); the older
+    `audio` key is the web drawer's. /api/price must accept either -- it used to only read
+    `audio`, so a Loom price preview never reflected the real audio-enabled cost even though
+    the actual generation correctly included it (a real, if smaller, mismatch fixed alongside
+    wiring audio into the Loom for the first time)."""
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task",
+                        lambda s, params: seen.update(params=params) or 27500)
+    monkeypatch.setattr(core, "match_kaisuuken",
+                        lambda s, params, enrich=False: {"id": "c1", "total": 9, "expiresAt": 1})
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/price", json={"mode": "I2V", "images": ["55"], "prompt": "pan",
+                                     "duration": 5, "video_model": "v3.2",
+                                     "generate_audio": True, "audio_language": "none"}).get_json()
+    assert d["cost"] == 27500
+    i2v = seen["params"]["i2vPro"]
+    assert i2v["generateAudio"] is True
+    assert i2v["audioLanguage"] == "none"   # PixAI's real SE-only value, not literal silence
+
+
 def test_price_route_video_needs_an_image(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise AssertionError("no pricing without a source image")

@@ -4650,7 +4650,7 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <label class="gen-check"><input type="checkbox" id="video-audio" onchange="Gen.videoAudioToggle()"> Generate audio <span style="color:var(--overlay0);">(V4.0 / V3.2 &middot; spoken lines in the prompt become voiceover)</span></label>
       <div id="video-lang-wrap" style="display:none;margin-top:4px;"><div class="gen-lbl">Audio language</div>
-        <select id="video-lang" class="gen-sel"><option value="english">English</option><option value="japanese">Japanese</option><option value="chinese">Chinese</option><option value="korean">Korean</option></select></div>
+        <select id="video-lang" class="gen-sel"><option value="english">English</option><option value="japanese">Japanese</option><option value="chinese">Chinese</option><option value="korean">Korean</option><option value="none">SE only (no dialogue)</option></select></div>
       <div class="gen-cost" id="video-cost" style="margin-top:10px;">Pick a source image to see the cost.</div>
       <button id="video-go" class="gen-go" onclick="Gen.videoGenerate()">Generate video</button>
       <div id="video-result" class="gen-result" style="display:none;"></div>
@@ -9261,7 +9261,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 params = core.build_shot_video_params(
                     p["mode"], (p.get("prompt") or "").strip(), image_ids=imgs,
                     duration=p.get("duration") or 5,
-                    generate_audio=bool(p.get("audio")),
+                    generate_audio=bool(p.get("generate_audio") or p.get("audio")),
                     model=(p.get("video_model") or ""),
                     camera_movement=(p.get("camera_movement") or ""),
                     quality=(p.get("quality") or "professional"),
