@@ -38,6 +38,15 @@
                         Distinct from mg-dirty (which fires every keystroke for cheap live
                         tracking): a host that wants to DURABLY PERSIST a hand-edit (not
                         just know one is in progress) listens for this instead.
+     mg-mode-commit  -- detail: {vmode}. Fired ONLY from a direct user click on one of this
+                        drawer's own mode-segment buttons -- never from prefill() or
+                        _applyModelGating() re-asserting/auto-switching the mode internally,
+                        which would create a host<->drawer sync loop. vmode is this drawer's
+                        own 3-value vocabulary ('i2v'|'flf'|'r2v'); a host that maps this to a
+                        richer mode concept (e.g. the Loom's 4-value I2V/R2V/V2V/FLF card
+                        field) owns that mapping entirely -- this drawer has no concept of the
+                        host's mode values at all (stays host-agnostic, per this file's own
+                        contract).
    Public API:
      setRefs([{media_id,thumb},...]) -- the lightbox/bulk "Send to Video" entry, image refs
        only (unchanged from Phase 1); >1 ref switches to multi-ref.
@@ -304,7 +313,7 @@
       this._preview = this.querySelector('.mgd-preview');
       var self = this;
       this.querySelectorAll('.mgd-seg button').forEach(function (b) {
-        b.addEventListener('click', function () { self._setMode(b.getAttribute('data-vmode')); });
+        b.addEventListener('click', function () { self._userSetMode(b.getAttribute('data-vmode')); });
       });
       this._ce.addEventListener('input', function () {
         self._dirty = true;
@@ -358,6 +367,19 @@
       this._audRow.style.display = showR2v ? '' : 'none';
       this._renderSlots();
       if (showR2v) { this._renderVidSlots(); this._renderAudioRow(); }
+    }
+
+    // Called ONLY from a direct user click on a mode-segment button (First Frame/First &
+    // Last Frames/Multi-Reference). Applies the mode locally via _setMode AND tells the host
+    // a real, user-initiated mode choice happened -- distinct from _setMode() itself, which
+    // is ALSO called internally by prefill() (re-syncing FROM the host), _applyModelGating()
+    // (an auto-switch forced by a model/mode incompatibility), and setRefs() (a host-driven
+    // bulk "Send to Video" load) -- none of those represent the user asking for a mode, and
+    // none of them may dispatch, or a click -> event -> host update -> prefill() -> _setMode()
+    // -> re-dispatch loop results. Mirrors the mg-prompt-commit / _emitCommitIfDirty split.
+    _userSetMode(m) {
+      this._setMode(m);
+      this.dispatchEvent(new CustomEvent('mg-mode-commit', { bubbles: true, composed: true, detail: { vmode: m } }));
     }
 
     // Shows/hides the mode buttons a selected model doesn't actually support (MODEL_VMODES)

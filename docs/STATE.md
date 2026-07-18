@@ -374,25 +374,52 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   (status badge, thumbnail, duration) — all with zero console errors. **The gallery keeps its
   own working Video tab** — adoption there is a later, live-QA'd swap, same as the model-picker
   precedent.
-- **BLOCKER found 2026-07-18, not yet acted on:** the Loom's Video tab still shows its own
-  Mode chips / Duration chips / Prompt textarea / audio checkbox+language chips ABOVE the
-  mounted drawer, duplicating fields the drawer also owns — the "convoluted... multiple sets
-  of the same button groups" state the owner flagged, and exactly what the locked convergence
-  mockup v3 (artifact ledger below) designs away. **Do not just delete those controls** —
+- **BLOCKER found 2026-07-18, Mode resolved 2026-07-18 (live-tested against a real project):**
+  the Loom's Video tab showed its own Mode chips / Duration chips / Prompt textarea / audio
+  checkbox+language chips ABOVE the mounted drawer, duplicating fields the drawer also owns —
+  the "convoluted... multiple sets of the same button groups" state the owner flagged (and the
+  root cause of a real bug: clicking the drawer's own mode segment never wrote back to the
+  card, so the segment visibly "bounced back" the moment anything re-triggered the prefill
+  sync). **Mode is fixed and the legacy Continuity-panel Mode chips are deleted outright** —
+  the drawer's own mode-segment buttons (First Frame / First & Last Frames / Multi-Reference)
+  are now the single source of truth for a bound shot's mode. A new `mg-mode-commit` event
+  fires ONLY from a direct user click on those buttons (never from the drawer's internal
+  `_setMode()`, which `prefill()`/`_applyModelGating()`/`setRefs()` also call — dispatching
+  from those would create a host↔drawer sync loop); the host listener maps the drawer's 3-value
+  `r2v` to the card's `R2V` (never `V2V` — the drawer has no V2V concept, and at the real submit
+  layer V2V/R2V already resolve to the identical generation path) and routes through the
+  existing, tested `setShotMode` reducer, so its Continuity-reset coupling
+  (`connect:"flf"→"new"`) keeps firing exactly as before. A guard skips the write when the
+  drawer's collapsed display already matches the card's mode, specifically so a redundant click
+  on an already-highlighted Multi-Reference button can't silently clobber an existing **V2V**
+  shot down to R2V — Deep Focus's own, deliberately separate Mode chips are now the sole
+  remaining way to set a card to V2V, left in place on purpose (no `<mg-generate-drawer>` is
+  mounted in that modal). A second gap an adversarial review caught before this shipped: model
+  gating (`_applyModelGating`) can force the drawer to submit a mode different from what the
+  card believes, with no write-back at change-time (browsing models must not silently corrupt a
+  card's real mode) — closed by reconciling `card.mode` from the actually-submitted payload's
+  mode in the existing `mg-submit` listener, the one moment the true mode is known for certain.
+  **Duration chips / Prompt textarea / audio checkbox+language chips are still duplicated** —
   traced first (Explore agent, full file read of `master-storyboard.jsx`/`loom-core.js`) and
   found a second, separate generation path: the toolbar's "▶ Generate all" batch button →
-  `batchGenerate` → `generateShot` → `shotPayload()` (loom-core.js) reads `c.mode`/
-  `c.duration`/`c.prompt` (via `shotText()`, which **concatenates** the stored prompt, not
-  recomputes it) /`c.audioGen`/`c.audioLanguage` **directly off the shot card**, completely
-  bypassing `<mg-generate-drawer>`. The Video tab's prompt textarea is the **only write site
-  for `c.prompt` in the entire app** (no Deep Focus equivalent); audio fields have no
-  fallback surface either. Deleting those controls as designed would freeze `.prompt`/
-  `.audioGen`/`.audioLanguage` at whatever value each shot last had while Generate-all kept
-  submitting real paid generations off the stale/empty data — for a NEW shot, `c.prompt` is
-  empty, so `shotText()`'s own fallback (`c.prompt || "(prompt tbd)"`) would submit that
-  literal placeholder string. Needs its own design pass (most likely: make the drawer write
-  back into the card on change, so Generate-all and the drawer share one source of truth)
-  before the mockup's control removal can ship — NOT a JSX-deletion task.
+  `batchGenerate` → `generateShot` → `shotPayload()` (loom-core.js) reads `c.duration`/
+  `c.prompt` (via `shotText()`, which **concatenates** the stored prompt, not recomputes it)
+  /`c.audioGen`/`c.audioLanguage` **directly off the shot card**, completely bypassing
+  `<mg-generate-drawer>`. The Video tab's prompt textarea is the **only write site for
+  `c.prompt` in the entire app** (no Deep Focus equivalent); audio fields have no fallback
+  surface either. Deleting those controls as designed would freeze `.prompt`/`.audioGen`/
+  `.audioLanguage` at whatever value each shot last had while Generate-all kept submitting real
+  paid generations off the stale/empty data — for a NEW shot, `c.prompt` is empty, so
+  `shotText()`'s own fallback (`c.prompt || "(prompt tbd)"`) would submit that literal
+  placeholder string. Needs its own design pass (most likely: make the drawer write back into
+  the card on change, mirroring Mode's fix, so Generate-all and the drawer share one source of
+  truth) before the mockup's control removal can ship for these remaining fields — NOT a
+  JSX-deletion task.
+- The opt-in pre-built Loom bundle (`/loom?bundle=1`, `loom/dist/master-storyboard.bundle.js`,
+  `npm run build` in `loom/`) must be rebuilt whenever `master-storyboard.jsx` changes, or that
+  path keeps serving whatever bug the default Babel-in-browser path already fixed — flagged by
+  an adversarial review 2026-07-18, rebuilt as part of the Mode fix landing. Not yet on any
+  automated rebuild step; still a manual reminder.
 - `<mg-cost-badge>` remains unbuilt. Nothing exists in `static/` for it.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
