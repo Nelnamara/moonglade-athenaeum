@@ -60,10 +60,19 @@ git tags. Full prose notes for tagged versions live on
   `inferenceProfile` auto-fallback claim, `FAQ.md`/`Home.md`'s false "Troubleshooting covers hash
   recapture" claim, and — highest priority — `Trust-and-Safety.md`'s incorrect claim that
   `--organize` is dry-run-by-default like `--dedup`; it isn't, it runs live by default and is
-  opted out via `--dry-run`). `docs/` maintained files: 6 → 5. Flagged, not executed: a further
-  ~234-line trim of `CLAUDE.md` (migrating its function tables and feature-description sections to
-  `docs/architecture.md`/`docs/STATE.md`, per its own hierarchy rule) — the daily-driver doc every
-  session loads first, held for explicit review before landing.
+  opted out via `--dry-run`). `docs/` maintained files: 6 → 5.
+- **`CLAUDE.md` trimmed from 466 to 264 lines**, executing the deferred plan above: the stale
+  "three-file" table, both per-function reference tables, the `Catalog / SQLite` section, and the
+  GUI module-cache note moved into a new `docs/architecture.md` "Module reference" section (plus
+  two invariants and an `_IMAGE_EXTS` fact that were only ever stated in `CLAUDE.md`, now added to
+  `architecture.md` too so nothing was lost); the redundant `Creating` section (a compressed
+  restatement of the function tables) deleted outright; `The web suite` / `Since 1.9.x` condensed
+  into a new `docs/architecture.md` "The web suite" section (structure) with current
+  shipped/in-flight status left to `docs/STATE.md`; `Achievements & the Trophy Hall` trimmed to a
+  pointer at `docs/STATE.md` (status) + `docs/ART.md` (art direction); the one-shot `--sync` step
+  list moved to `docs/architecture.md`, with the broad-except landmine warning kept in `CLAUDE.md`
+  since it's exactly the kind of gotcha that file exists to carry. `CLAUDE.md` is now rules and
+  protocol; facts live in one place each, per its own hierarchy rule.
 
 ### Changed
 - **Classic Loom (V1) retired — the Loom is now a single surface.** With V2 at full feature parity,

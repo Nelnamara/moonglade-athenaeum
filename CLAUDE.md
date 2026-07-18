@@ -6,7 +6,7 @@ This file is committed so it is available on every machine that clones the repo.
 
 ## What this project is
 
-**Moonglade Athenaeum** — *"a library against the Void."* A Python CLI (`pixai_gallery_backup.py`) with a PySide6 GUI (`pixai_gui.py`) and local Flask gallery (`pixai_gallery.py`). It began as a backup tool for the **owner's own** PixAI.art generations and grew into a full local PixAI **client**: back up · browse · generate · curate. Talks to the same API the browser uses, pages the entire history at full resolution, keeps a searchable SQLite catalog, **creates** new images via the API, and manages both the local archive and the cloud account.
+**Moonglade Athenaeum** — *"a library against the Void."* It began as a backup tool for the **owner's own** PixAI.art generations and grew into a full local PixAI **client**: back up · browse · generate · curate. Talks to the same API the browser uses, pages the entire history at full resolution, keeps a searchable SQLite catalog, **creates** new images via the API, and manages both the local archive and the cloud account. See `docs/architecture.md` for the module breakdown, function reference, and catalog schema.
 
 Built by reverse-engineering site network traffic (catalogued privately in `private/API_OPERATIONS.md`, git-ignored). The `gql_adhoc()` ad-hoc POST path means most operations need no persisted-hash capture. There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `docs/`.
 
@@ -91,98 +91,26 @@ present — fixes corporate/antivirus HTTPS interception.
 
 ---
 
-## Three-file architecture
+## Module map, functions, catalog schema
 
-| File | Role |
-|---|---|
-| `pixai_gallery_backup.py` | CLI downloader: download, organize, backfill, catalog stats |
-| `pixai_gallery.py` | Flask gallery server + ALL SQLite catalog helpers; imported by both other files |
-| `pixai_gui.py` | PySide6 GUI wrapping CLI commands in background Worker threads |
-
-### Key functions in `pixai_gallery_backup.py`
-
-| Function | Role |
-|---|---|
-| `gql()` | Replay persisted GraphQL GET; retry/backoff; surfaces errors clearly |
-| `find_connection()` | Schema-agnostic: walks JSON for Relay connection (`edges`+`pageInfo`) |
-| `media_ids_for()` | `mediaId` + `batchMediaIds` for a task node |
-| `extract_meta()` | Pulls `id`, `createdAt`, `promptsPreview`, `status` |
-| `resolve_media()` | Fetch media object, pick the `PUBLIC` full-res URL |
-| `download()` | Stream to disk with resume + retries; optional convert |
-| `convert_image()` | WebP→PNG/JPEG via Pillow; flattens alpha for JPEG |
-| `embed_metadata()` | Write prompt/IDs/date into PNG text chunks or JPEG EXIF |
-| `build_stem_name()` | Filesystem-safe names from prompt |
-| `already_downloaded()` | Resume check: rglob the whole tree for `*_<mediaId>.*` |
-| `cmd_organize()` | Re-normalize the WHOLE backup (`rglob`) into ONE scheme — `YYYY-MM/` month folders, descriptive names, no `batches/` (collapsed 2026-06-27, `9e3f4a1`). Reversible via `organize_manifest.csv` / `--undo-organize` |
-| `_ensure_db()` | Auto-migrates catalog.csv → catalog.db if needed; used by all commands |
-| `audit_collection()` | Filesystem-truth duplicate audit: Class A (same media_id in >1 folder) + Class B (byte-identical, different id via size-bucketed hashing) |
-| `cmd_audit()` / `cmd_dedup()` | Read-only report / quarantine-or-delete redundant copies, keep most-organized, reconcile catalog |
-| `reconcile_catalog_with_disk()` | Repoint each catalog row's filename/batch at the surviving on-disk file |
-| `delete_task_gql()` | Replay the `deleteGenerationTask` persisted **mutation** (POST, not the GET listing path). VOID mutation: returns `null` on success, raises on error. Single-attempt — no retry, so a flaky network can't double-fire a delete |
-| `run_delete_tasks()` | Guarded `--delete-task` driver: dry-run by default, `--apply` + typed `delete` confirm (or `--yes`), counts deleted/failed. Leaves local files + `catalog.db` untouched |
-| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout (the GUI log pane captures it). No-op until enabled |
-| `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error |
-| `account_info()` / `run_account_info()` | Read-only account dashboard (credits/membership/subscription) via `gql_adhoc`. **Never moves money** — no payment/subscription mutations are implemented, by design |
-| `run_generate()` | `--generate`: create images via `createGenerationTask` (ad-hoc POST), poll, download, catalog as `source='api'`. Preview unless `--confirm`. `--task-id` recovers an already-created task for free |
-| `build_video_parameters()` / `run_generate_video()` | `--generate-video`: image-to-video (`i2vPro`) — VERIFIED submit `{priority, i2vPro:{model,mediaId,[tailMediaId],mode,duration,generateAudio,audioLanguage,[cameraMovement]…}, isPrivate, enablePreview, hidePrompts, modelId}`. **No top-level `channel` field** — `--video-channel` maps to the boolean `isPrivate`, not a `channel` key. Enums banked (`--camera-movement`, `--video-channel`, duration 5/6/10/15). Preview unless `--confirm`; captures `paidCredit`; downloads mp4 into `videos/` |
-| `build_reference_video_parameters()` / `run_reference_video()` | `--reference-video`: multi-image/video/audio reference — VERIFIED **top-level `referenceVideo`** block (NOT i2vPro): `{priority, referenceVideo:{model,prompt,duration(int),referenceImageMediaIds/…VideoMediaIds/…AudioMediaIds}, isPrivate, modelId}`. `--ref-image/--ref-video/--ref-audio` (media_id OR local file, auto-uploaded), cited in `--prompt` as `@image1/@video1/@audio1`. Preview unless `--confirm` |
-| `_download_video_task()` | Shared video download+catalog (used by both i2v and reference-video): `video_outputs` → `media_file_gql.fileUrl` → `download` → catalog `is_video='1'` + poster thumbnail |
-| `_maybe_dump_params()` | `--dump-params`: print a task's full submit `parameters` (esp. on `--task-id` recovery) — bank any shape (multiRef/referenceVideo/…) with NO browser capture |
-| `upload_media()` | `--upload`: local file → `media_id` via the 3-step S3 handshake (`uploadMedia` presign → PUT bytes → `uploadMedia` register). Plain mutation over `gql_adhoc`; **free**. Unblocks inpaint / Edit / LoRA "bring your own image" |
-| `build_chat_edit_parameters()` / `run_edit_image()` | `--edit-image`: instruct editing via `createGenerationTask` with a `chat` block (`prompts`+`mediaId`/`mediaIds`+`modelId`+`modelConfig`). `--edit-src` takes a catalog `media_id` OR a local file (auto-uploaded on `--confirm`); repeat for multi-image reference. Preview unless `--confirm` |
-| `list_kaisuukens()` / `match_kaisuuken()` / `_apply_kaisuuken()` / `run_cards()` | Free-generation cards ("kaisuuken" / 回数券) live on the oRPC **`/v2` REST API**, not GraphQL (verified 2026-07-03 from the app's own contract). `list_kaisuukens` = `GET /v2/kaisuuken/summary` (one row per template w/ count + locked model); `match_kaisuuken` = `POST /v2/kaisuuken/check {type:"generation-task", parameters}` → matching ticket ids. **Cards auto-apply now**: `_apply_kaisuuken` runs on `--confirm` for every create path, calls `check`, and attaches the nearest-expiry `kaisuukenId` → 0 credits (like the website). Preview shows FREE/paid up-front. `--no-card` opts out; `--kaisuuken-id` forces one. `--cards` = read-only display. All fail soft. REST base `REST_API_BASE` + helpers `_rest_get`/`_rest_post` |
-| `price_task()` | `GET /v2/task-price`: compute a generation's credit cost WITHOUT creating it (mirrors GraphQL `pricingTask`). Scalars → query params, nested blocks (`i2vPro`/`referenceVideo`/`chat`/`loraParameters`/…) → URL-encoded JSON. Returns `actualPrice` (int) or None. **READ-ONLY, spends nothing** — used in previews to show the real cost + card savings. Verified exact: i2v/ref-video 27,500, edit 8,000 |
-| `suggest_prompt()` / `run_suggest_prompt()` | `--suggest-prompt <media_id\|file>`: image-to-prompt via `GET /v2/tag/suggest-prompt/{mediaId}` → `{output:[…]}` (a Danbooru-style tag list + natural-language description variants). Local files upload first (free). **FREE / read-only**, no `--confirm` |
-| `list_claims()` / `claim_reward()` / `run_claims()` | `--claims`: list claimable rewards (daily credits, agent stamina) via `GET /v2/claim` — **read-only**. `--claim <id\|all>`: claim ready rewards via `POST /v2/claim/{id}` — **gated behind `--confirm`**, previews otherwise, and never fires on a not-yet-claimable reward. Grants free credits/stamina to the owner's own account (no money moves) |
-
-### Key helpers in `pixai_gallery.py`
-
-| Symbol | Role |
-|---|---|
-| `CATALOG_FIELDS` | Single source of truth for all column names |
-| `_IMAGE_EXTS` | Single source of truth for image extensions — import this, never redefine |
-| `_MIGRATIONS` | List of ALTER TABLE statements run on every `_connect()` call — add new columns here |
-| `init_db()` | Creates table + runs migrations; called at gallery startup and by `save_catalog` |
-| `save_catalog()` | Upsert list of dicts; calls `init_db` first |
-| `query_catalog()` | SQL-backed filter/sort/paginate for gallery index |
-| `list_media_ids()` | Returns ordered media IDs for prev/next navigation |
-| `backfill_batches()` | Scans `batches/` on disk and fills empty `batch` column; called on gallery startup |
-| `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). INVARIANT 1, single source |
-| `find_files_for_media_id()` | SHARED matcher: all on-disk files for a media_id, BOTH layouts (prefixed `*_<mid>.*` AND bare `<mid>.*`), exact-id checked, gallery excluded. Resume, gallery, and audit all use it so they never drift apart |
-| `create_app()` | Flask app factory; calls `init_db` + `backfill_batches` before serving |
-
----
-
-## Catalog / SQLite
-
-- **File:** `catalog.db` (SQLite), stored in `out_dir/`. Auto-migrated from `catalog.csv` on first run.
-- **All catalog I/O** goes through helpers in `pixai_gallery.py` — never raw SQL elsewhere.
-- **Schema migrations:** new columns go in THREE places: `CATALOG_FIELDS` list, `_CREATE_TABLE` DDL, and `_MIGRATIONS` list. The `_MIGRATIONS` list runs on every `_connect()` so existing DBs get the column automatically.
-- **`_IMAGE_EXTS`:** defined once in `pixai_gallery.py`, imported by `pixai_gallery_backup.py`. Never redefine locally.
-
----
-
-## GUI module cache
-
-`pixai_gui.py` imports `pixai_gallery` at module level. Changes to `pixai_gallery.py` require a **full GUI restart** (close and reopen the app) — stopping and restarting just the gallery server thread is not enough to reload the Python module.
+Five modules, one shared SQLite catalog, on-disk layout, and the full function/helper
+reference all live in **`docs/architecture.md`** — do not restate them here; that's how
+this file drifted (a stale "three-file" table, a wrong function shape) badly enough that
+`tests/test_docs_dont_hardcode_counts.py` had to exist. `pixai_gui.py` is legacy and its
+module-cache quirk (needs a full app restart on `pixai_gallery.py` changes) is documented
+there too.
 
 ---
 
 ## INVARIANTS — do not break
 
-1. **`media_id` is always the last `_`-delimited chunk of the filename stem.** Resume, `--organize`, and catalog lookup all parse it as `stem.split("_")[-1]`. Never append anything after the media id.
-
-2. **Resume is keyed on media id, checked BEFORE any network call.** `already_downloaded(out, mid)` runs before `resolve_media()`/`download()`. Keep that order.
-
-3. **Incomplete files must not count as done.** `.part` temp files and zero-byte files are treated as not-downloaded. Downloads write to `*.part` then atomically `replace()` the final name.
-
-4. **`catalog.db` is the source of truth** for `--organize` and related commands. Don't make those modes depend on re-querying the API.
-
-5. **`--organize` re-normalizes the WHOLE backup via `rglob`** into one collapsed scheme — `out/YYYY-MM/<prompt_taskid_mediaid>` month folders (since `9e3f4a1`, 2026-06-27; the old `images/`-only non-recursive glob and `batches/` mode are gone — do NOT reintroduce them). It stays idempotent (files already at target = "already in place"), byte-safe (identical dupes dropped, differing kept side-by-side), and reversible (`organize_manifest.csv` + `--undo-organize`). Skips `gallery/`, `_duplicates/`, `videos/`, `imported/`; leaves `source='local'` + videos untouched.
-
-6. **`find_image_file` excludes `out_dir/gallery/`** to prevent thumbnails from being returned as full-res images.
-
-7. **Media-id → file resolution goes through `find_files_for_media_id` ONLY.** It matches BOTH naming layouts — prefixed `*_<mid>.*` (flat/batch) and bare `<mid>.*` (single-image month files). Resume (`already_downloaded`), the gallery (`find_image_file`), and the audit all share it. Never reintroduce a `*_<mid>.*`-only glob: that mismatch (bare month files invisible to resume) is exactly what caused the historical images/+month duplication — re-downloads recreated flat copies that organize then orphaned.
+The seven numbered invariants (media_id parsing, resume ordering, incomplete-file
+handling, catalog-as-source-of-truth, `--organize` normalization, gallery-thumbnail
+exclusion, and the shared media-id → file matcher) are documented in full, with the
+historical bugs each one prevents, in **`docs/architecture.md`**'s Invariants section.
+Read them before touching resume, organize, or file-resolution code — they are not
+stylistic preferences, each one is there because breaking it caused a real, previously
+shipped bug.
 
 ---
 
@@ -233,161 +161,32 @@ recapture is in `private/RE_NOTES.md`.
 
 ---
 
-## Creating: generate · video · reference-video · edit · upload · cards
+## Creating, the web suite, and feature history
 
-All creation rides the SAME `createGenerationTask` mutation over `gql_adhoc` (no persisted hash),
-differing only in the `parameters` object. **Every credit-spending path is preview-only until
-`--confirm`**, `--task-id` recovers an already-created task for free, and `--dump-params` prints a
-recovered task's full submit shape (bank any param shape with no browser capture).
+All creation (generate/video/reference-video/edit/upload/cards) rides one
+`createGenerationTask` mutation over `gql_adhoc`, and every credit-spending path is
+preview-only until `--confirm` — see `docs/architecture.md`'s function reference for the
+per-command shapes and the **Quick command reference** below for usage. The Flask gallery
+is a full web creation suite (Generate drawer, Picker, The Loom, live-events push, Control
+Panel jobs, branding) — its structure lives in `docs/architecture.md`'s "The web suite"
+section; what's currently shipped/in-flight on top of that structure lives in
+**`docs/STATE.md`**; dated history in `CHANGELOG.md`. Don't restate feature detail here —
+that's how this file drifted badly enough to need `tests/test_docs_dont_hardcode_counts.py`.
 
-- `--generate` → image (`parameters` = the image params).
-- `--generate-video --image <media_id>` → i2vPro video (`{priority, i2vPro:{…, [tailMediaId], [cameraMovement]}, isPrivate, modelId}`);
-  first/last-frame via `--tail`, enums via `--camera-movement`/`--video-channel`, duration 5/6/10/15.
-- `--reference-video --ref-image/--ref-video/--ref-audio` → multi-reference video (top-level `referenceVideo`
-  block, distinct from i2vPro); cite refs in `--prompt` as `@image1/@video1/@audio1`; local files auto-upload.
-- `--edit-image --edit-src <media_id|file> --prompt "…"` → instruct edit (`{chat:{…}}`); local files
-  auto-upload via `uploadMedia`; repeat `--edit-src` for multi-image reference.
-- `--upload <file>` → prints a `media_id` (free; the 3-step S3 handshake).
-- `--cards` → read-only free-card (kaisuuken) list (via `GET /v2/kaisuuken/summary`). Cards **auto-apply**:
-  on `--confirm` the tool calls `/v2/kaisuuken/check`, attaches the matching card, and the gen is 0 credits.
-  `--no-card` to pay credits anyway; `--kaisuuken-id <id>` to force a specific card.
+`--sync`'s reconcile step (`run_reconcile_deleted`) is caught with a deliberately **BROAD
+`except Exception`** — do NOT narrow it to `except PixAIError`, or a transient network blip
+during the advisory reconcile scan can crash a sync that already succeeded. Guarded by
+`tests/test_sync.py`; full rationale in `docs/architecture.md`.
 
-Deeper RE detail (submit shapes, the full app op catalog, kaisuuken/upload/edit captures, pricing) is
-in git-ignored `private/GENERATOR_SURFACE.md` + `private/APP_OPERATIONS_FULL.md`.
-
-## The web suite (v1.9.0): the Generate drawer + The Loom
-
-The Flask gallery is a full creation suite. Everything below is **localhost-gated**
-(`_is_local_request`) -- LAN browsers can look, only the owner's machine can spend.
-
-- **Generate drawer** (header ✦, dockable Left/Top/Bottom/Right, persisted): three tabs.
-  - *Generate*: base model + attachable **LoRA chips with weights** (separate state; rides
-    `loras:[{version_id,weight}]` -> `loraParameters`), model/LoRA browser in a **flyout**
-    with a **hover preview card** (cover/likes/author/tags), live cost + free-card check.
-  - *Edit* (600px wide): sub-tabs **Edit | Enhance | Fix** over a shared source; instruct-edit,
-    the 80-workflow enhance catalog, hand/face fixer boxes.
-  - *Video* (600px wide): I2V / FLF (first+last) / R2V modes, **gallery Picker slots** with
-    @image badges + hover previews + remove, contenteditable prompt with **@image chips**,
-    model picker (v4.0.1/v4.0/v3.2/v3.0.2/v3.0), audio toggle, **live cost + card count**.
-- **Picker** (`/api/gallery-images` + `/api/upload`): whole-catalog infinite scroll, search,
-  Collection/Source/Rating/Sort filters, upload -> media_id, optional copy-prompt-on-pick.
-- **Tag Suggestions** (`/api/tag-suggest` -> GraphQL `tags(q:...)`): Danbooru-style
-  autocomplete in the prompt boxes; TAB accepts. Field-probed 2026-07-04.
-- **Gallery bridges**: lightbox ✎ Edit / ▶ To Video buttons; right-click context menu on
-  cards; bulk-bar **Send to Video** (multi-select -> R2V refs).
-- **The Loom** (`/loom`): the Seedance-style storyboard (acts/shots/cast/frame handoff)
-  with **Generate shot** on PixAI + gallery picking for cast/frames. Manual: `docs/LOOM.md`.
-- **Async engine**: submit (`/api/generate|edit|enhance|fix|loom/generate`) -> poll
-  (`/api/task-status`) -> auto-download + catalog (`source='api'`, videos to `videos/`).
-  Free cards auto-apply on every path.
-
-## Since 1.9.x (shipped in v1.10.0)
-
-- **Live events / push (`--watch`)**: graphql-transport-ws subscription to
-  `wss://gw.pixai.art/graphql`, root field `personalEvents` (taskUpdated +
-  newNotification; done status = `completed`). `--watch-backup` auto-collects each
-  finished task the moment it completes — this is how website gens can land without
-  polling. The gallery server runs this same machinery always-on as the **live-mirror**
-  watcher (shipped 2026-07-05, `f502beb`; auto-reconnects with backoff, `MOONGLADE_DISABLE_WATCH=1`
-  opts out), so gens land the instant they finish and `--update`/backfill is the fallback,
-  not the only path.
-- **Control Panel jobs**: whitelisted CLI subprocesses with live log, a REAL progress
-  bar (CLI emits `~=MGPROG=~done|total|new` lines when `MOONGLADE_PROGRESS=1`), a
-  **Stop this job** cancel (`/api/panel/cancel`, terminates the subprocess, status
-  `cancelled` not `failed`), and an hour-granular scheduler for safe jobs (defaults to
-  every 6 h, min 1; `destructive` actions are skipped). `backfill-meta` is **gone as a
-  standalone action** — `--sync` now folds `fix-models` + `--backfill-full-meta` in
-  internally.
-- **Server control**: Homebridge-style **Stop/Restart** from the Panel
-  (`/api/server/stop|restart`; restart = exit 42 relaunched by the `Serve Gallery.pyw`
-  supervisor, `MOONGLADE_SUPERVISED=1`; single-instance guard pings `/api/ping` and
-  just opens the browser if already running; extra args in untracked `serve.txt`,
-  child output in `serve.log`).
-- **CSV export is a browser download** (`/export-csv`, in-memory, lands in Downloads)
-  — deliberately NOT a panel subprocess.
-- **Branding system**: machine-local marks in `out_dir/branding/marks/` (PNG +
-  multi-res ICO + `marks.json`; green-keyed floaters or `mk-tile` rounded tiles),
-  `branding.json` `{mark, anim}`, `/api/branding` GET/POST (POST localhost-only),
-  15 banner-mark animations (`classic` legacy glow/glint/twinkle + glow/shine/aurora/
-  twinkle/shoot/halo/eclipse/ripple/mist/prism/breathe/tilt/float/orbit — per-anim
-  rules use !important over the mute rules; reduced-motion catch-all is
-  class-tripled), Panel > Branding card, and `/api/branding/shortcut` which writes a
-  Desktop `.lnk` (whitelisted mark -> `.ico`; a `.pyw` can't carry an icon, the
-  shortcut can). A context processor injects `mark_url/mark_anim/mark_kind` into
-  every page; corrupt branding JSON degrades to `logo.png`+classic, never a 500.
-- **Header**: frosted glow-pill nav with per-destination hue (`--btn-hue` classes
-  `b-loom/b-ach/b-contest/b-art/b-panel/b-health`); the balance chip caches
-  last-known credits/cards in localStorage so it never blanks on navigation.
-- **Community**: `--contests` + `/api/contests` (REST `/contest/list`); achievements
-  + earnable skins (`/api/achievements`, `/api/skin`).
-
-## The one-shot sync (`--sync`) — completed 2026-07-10 (loom-v2, post-1.10.0)
-
-`--sync` is the "it should just happen" refresh — one command runs the whole chain, and every
-step is idempotent (re-running on a clean catalog costs almost nothing):
-
-1. incremental pull WITH metadata (sets `--update --full-meta`, calls `run_download`)
-2. re-resolve blank/numeric model names (`run_fix_models`)
-3. fill any rows still missing prompt/seed/model (`run_backfill_full_meta`)
-4. rebuild any missing gallery thumbnails (`build_thumbnails`, **skips thumbs already on disk**)
-5. flag rows deleted on the website (`run_reconcile_deleted`)
-
-Steps 4–5 were added 2026-07-10 (the pipeline previously stopped at step 3). The `build_thumbnails`
-progress callback is adapted at the call site because it reports `(done, total, pct)` while the
-shared progress cb expects `(done, total, new-count)`.
-
-> **Reconcile (step 5) is advisory and caught with a deliberately BROAD `except Exception` — do NOT
-> narrow it back to `except PixAIError`.** It runs its own live-feed scan through `gql()`, which
-> re-raises bare `requests` network/HTTP errors that are *not* `PixAIError`; a narrow catch would let
-> a transient network blip crash the entire sync **after** the backup already succeeded. Guarded by
-> `tests/test_sync.py` (chain order, flag-setting, and survival of BOTH `PixAIError` and
-> non-`PixAIError` reconcile failures). The bug was caught by an adversarial-verify pass before merge.
-
-## Achievements & the Trophy Hall (v1.11.0, on `loom-v2`)
-
-The 57-achievement system (roster, telemetry, hidden feats, the toast-v2 `.ach-m2` moment) shipped
-earlier (`440ecdf`); **v1.11.0 adds the flair layer + the Trophy Hall.**
-
-- **Tier flair frames** wrap the unlock toast for **legendary + feat only** — tier-gated in
-  `_mkMoment` via `framed={legendary:1,feat:1}` (add `epic:1` to include epic; summaries never
-  framed). A `.tframe` wrapper carries a 9-slice `border-image` (`branding/frames/legendary.png`
-  = LEG6, `feat.png` = FEAT13) that **grows with the toast** so the roast never overflows. The
-  reward ribbon shows the **CLAIM7 gift box** (`branding/rewards/gift.png`) instead of the emoji.
-- **Points economy** — `_TIER_POINTS` + a *derived* `_ACH_RUNG` (ladder families = `bucket=='ladder'`
-  grouped by metric, ordered by threshold; non-ladder = rung 1) drive `achievement_points()` =
-  `tier base + 5*(rung-1)`; **feats score 0** so the total never hints at a hidden feat.
-  `compute_achievements` emits per-ach `points` + `earned_points`/`possible_points` (summed AFTER the
-  skin-changer/completionist post-passes). 960 possible; the Archive ladder is 5/15/35/65/70. Shown
-  on the toast (gold `+N` chip), tiles, and a Warband-style header total.
-- **The Trophy Hall** — the achievement window is a **maximized overlay, NOT a page/route**: the
-  existing `#ach-modal` grows to full-screen (instant open, gallery behind, ESC, animates from the
-  🏆 button). All Hall CSS is scoped to `.ach-hall` so the contest/art modals that share `.ach-panel`
-  are untouched. Layout: header (title · narrator · points total · search · close) → tabs
-  (Summary | All | Statistics) → body (main grid + right rail). Summary = Recent Achievements (from
-  `earned_at`) + Progress Overview bars. Rail = category nav (jump-to-section) · Within Reach
-  (3 closest w/ mini bars) · Rewards Earned chips · mascot alcove. Search filters tiles; sections
-  collapse; masked feats keep the cloaked mystery-tile look; mobile stacks the rail under the grid.
-- **Supporting infra**: **earn-date persistence** (`achievements.json` `earned_at:{id:iso}`; stamped
-  on `/api/achievements?mark=1`, backfills existing earns, only earned ids → no hidden-feat leak) and
-  a **badge thumb-cache** (`_badge_thumb()` → `/badge-thumb/<id>.png`, lazy ~256 px copies to
-  `branding/_thumbs`, mtime self-heal + master fallback) so a 57-tile Hall doesn't pull ~300 MB.
-- **Deferred polish** (non-blocking): per-*tile* ornate frames (the toast has them; tiles use the
-  tier band + glow). Per-criteria checklists on set achievements (`_ACH_CRITERIA` → `.ach-crit`) and
-  the mystery-tile art (`branding/mystery/secret_feat.png`) have since shipped.
+Achievement/Trophy-Hall current shape lives in `docs/STATE.md`; art direction (badge style
+anchor, tier palette, prompt bank) lives in `docs/ART.md` — don't restate hexes or sizes here.
 
 ## Test suite
 
-Run `python -m pytest -q` from the repo root. Add `--ignore=tests/test_similar.py` where the
-optional `pixeltable` dep isn't installed (that file skips itself cleanly otherwise). The Loom's
-pure-logic modules (`loom/src/loom-core.js`, `loom-mutations.js`) have their own suite — run
-`node --test` from `loom/`. All tests must pass before merging to master.
-
-**Do not write the test count here, or in any live doc.** It changed under this very sentence
-more than once: it was stated in six-plus files and was wrong in *every one of them*, including a
-2026-07-16 pass that "corrected" it to 477 when the real number was 478 — and which was stale
-again within hours. `tests/test_docs_dont_hardcode_counts.py` now fails the suite if a live doc
-states it. Frozen records under `docs/archive/` are exempt: saying what was true on their date is
-their job.
+Full run instructions live in `docs/architecture.md`'s Testing section. **Never write the
+test count in this or any live doc** — `tests/test_docs_dont_hardcode_counts.py` fails the
+suite if you do; it was wrong in every one of six-plus files it was ever stated in, most
+recently within hours of a "correction." All tests must pass before merging to master.
 
 ---
 
