@@ -29,6 +29,18 @@ git tags. Full prose notes for tagged versions live on
   failure state is unreachable through the UI in either direction.
 
 ### Added
+- **`<mg-generate-drawer>` Phase 1 — the shared Video generation form.** Third Option-A web
+  component (`static/mg-generate-drawer.js` + standalone harness): a faithful extraction of
+  the gallery drawer's Video tab, which is the locked standard — I2V/FLF/R2V modes, picker
+  slots with `@imageN` badges and hover previews, the chip-prompt contenteditable, model /
+  duration / camera / priority selects, the audio checkbox + 5-language picker, live
+  `/api/price` cost line (free-card + V4.0-warn branches), and the submit → poll → result
+  lifecycle, all self-contained. Hosts integrate through events only (`mg-pick-request`
+  keeps it picker-agnostic; `mg-submit` / `mg-result` / `mg-error` report the run) plus
+  `setRefs()` / `prefill()`. Verified live against the real server: exact known pricing
+  (i2v 27,500; v4.0 70,000/5s), real catalog picks through `<mg-gallery-picker>` servicing
+  the pick-request seam. Nothing mounts it yet — the gallery keeps its working tab, and the
+  Loom mount is the next step.
 - **Video generation gained audio controls, on both surfaces.** PixAI's real audio-language
   options (English/Japanese/Chinese/Korean/**SE only** — sound effects with no spoken
   dialogue, not silence) were reverse-engineered in `private/GENERATOR_SURFACE.md` well before
