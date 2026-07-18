@@ -3064,6 +3064,15 @@ __DESIGN_TOKENS__
     header .back-link { font-size: 12px; }
   .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
   .lan-note { font-size: 11.5px; color: var(--overlay0); font-style: italic; padding: 5px 10px; border: 1px dashed var(--surface1); border-radius: 7px; }
+  .setup-wizard { margin: 10px 14px 0; }
+  .setup-step { background: var(--surface0); border: 1px solid var(--surface1); border-left: 3px solid var(--gold); border-radius: 10px; padding: 14px 18px; color: var(--text); font-size: 13.5px; line-height: 1.5; }
+  .setup-step a { color: var(--accent); }
+  .setup-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .setup-row input { flex: 1 1 320px; min-width: 220px; background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+  .setup-row input:focus { outline: none; border-color: var(--accent); }
+  .setup-msg { display: inline-block; margin-top: 8px; font-size: 12.5px; }
+  .setup-msg.err { color: var(--red); }
+  .setup-msg.ok { color: var(--green); }
     .filter-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 12px 0; }
     .filters { display: none; flex-direction: column; align-items: stretch; padding: 10px 12px; }
     .filters.open { display: flex; }
@@ -3493,6 +3502,34 @@ document.addEventListener('DOMContentLoaded', function() {
     <a class="btn b-health" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
   </div>
 </header>
+
+{% if needs_key %}
+<div class="setup-wizard" id="setup-wizard">
+  <div class="setup-step">
+    <b>Welcome to Moonglade Athenaeum.</b> Paste your PixAI API key to get started —
+    <a href="https://platform.pixai.art" target="_blank" rel="noopener">generate one at platform.pixai.art</a>
+    (free, lifetime up to ~2 years). Nothing else is required; your account id and everything
+    else is resolved from it.
+    <div class="setup-row">
+      <input type="password" id="setup-key-input" placeholder="Your PixAI API key"
+             autocomplete="off" onkeydown="if(event.key==='Enter')Setup.saveKey()">
+      <button type="button" class="btn btn-primary" onclick="Setup.saveKey()">Connect</button>
+    </div>
+    <span id="setup-key-msg" class="setup-msg"></span>
+  </div>
+</div>
+{% elif catalog_empty %}
+<div class="setup-wizard" id="setup-wizard">
+  <div class="setup-step">
+    <b>You're connected.</b> Run your first sync to pull your PixAI generation history into
+    this gallery — full resolution, searchable, yours to keep.
+    <div class="setup-row">
+      <button type="button" class="btn btn-primary" onclick="Setup.firstSync()">&#8635; Sync now</button>
+    </div>
+    <span id="setup-sync-msg" class="setup-msg"></span>
+  </div>
+</div>
+{% endif %}
 
 <button type="button" class="filter-toggle btn" onclick="toggleFilters()"
         aria-expanded="false">Filters &#9662;</button>
@@ -5688,6 +5725,50 @@ var Acct = (function(){
     b.style.display='';
   }
   return {refresh:refresh, claim:claim};
+})();
+/* ---- First-run wizard: paste a key, then trigger the first sync as a Panel job ---- */
+var Setup = (function(){
+  function msg(id, text, cls){
+    var el=document.getElementById(id); if(!el) return;
+    el.textContent=text; el.className='setup-msg'+(cls?' '+cls:'');
+  }
+  function saveKey(){
+    var input=document.getElementById('setup-key-input');
+    var key=(input&&input.value||'').trim();
+    if(!key){ msg('setup-key-msg','Paste your API key first.','err'); return; }
+    msg('setup-key-msg','Connecting\\u2026','');
+    fetch('/api/setup/save-key',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({api_key:key})}).then(function(r){return r.json();}).then(function(d){
+      if(d.error){ msg('setup-key-msg',d.error,'err'); return; }
+      var extra=d.credits!=null?(' \\u2014 '+Number(d.credits).toLocaleString()+' credits'):'';
+      msg('setup-key-msg','Connected'+extra+'. Reloading\\u2026','ok');
+      setTimeout(function(){ location.reload(); },900);
+    }).catch(function(){ msg('setup-key-msg','Network error \\u2014 try again.','err'); });
+  }
+  var poll=null;
+  function firstSync(){
+    var btn=event&&event.target; if(btn) btn.disabled=true;
+    msg('setup-sync-msg','Starting\\u2026','');
+    fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'sync'})}).then(function(r){return r.json();}).then(function(d){
+      if(d.error){ msg('setup-sync-msg',d.error,'err'); if(btn) btn.disabled=false; return; }
+      poll=setInterval(tick, 1500); tick();
+    }).catch(function(){ msg('setup-sync-msg','Network error \\u2014 try again.','err'); if(btn) btn.disabled=false; });
+  }
+  function tick(){
+    fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
+      if(d.status==='running'){
+        var p=d.progress;
+        msg('setup-sync-msg', p ? ('Syncing\\u2026 '+p.done+' / '+p.total+(p.new?(' ('+p.new+' new)'):'')) : 'Syncing\\u2026', '');
+        return;
+      }
+      clearInterval(poll); poll=null;
+      if(d.status==='failed'){ msg('setup-sync-msg','Sync failed \\u2014 see the Panel for details.','err'); return; }
+      msg('setup-sync-msg','Done! Reloading\\u2026','ok');
+      setTimeout(function(){ location.reload(); },900);
+    }).catch(function(){});
+  }
+  return {saveKey:saveKey, firstSync:firstSync};
 })();
 /* ---- Toasts: small corner notices, reusable (job notices now; achievements can adopt) ---- */
 var Toast = (function(){
@@ -7907,12 +7988,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if collection:
             chips.append({"k": "collection", "v": collection, "url": _without("collection")})
 
+        stats = catalog_counts(db_path)
+        # First-run wizard gating: a FRESH read of config.json, not the module-cached
+        # core._cfg -- someone who just pasted a key via the wizard needs this to flip on
+        # the very next page load, not after a process restart. Real catalog size (not the
+        # current search/filter's `total`) is what decides "never synced yet".
+        import pixai_gallery_backup as _core
+        _fresh_cfg = _core._load_config()
+        needs_key = _is_local_request() and not bool(
+            _fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
+        catalog_empty = _is_local_request() and not needs_key and (stats["images"] + stats["videos"]) == 0
+
         return render_template_string(
             INDEX_HTML,
             chips=chips, published_only=published_only, art_tag=art_tag,
             lora_filter=lora_filter, media_type=media_type, source_filter=source,
             collection=collection, collections=collections,
-            rows=page_rows, total=total, page=page, stats=catalog_counts(db_path),
+            rows=page_rows, total=total, page=page, stats=stats,
+            needs_key=needs_key, catalog_empty=catalog_empty,
             build_stamp=build_stamp, is_local=_is_local_request(),
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
@@ -8635,6 +8728,58 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "following": me.get("followingCount")})
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
+
+    @app.route("/api/setup/save-key", methods=["POST"])
+    def api_setup_save_key():
+        """First-run wizard: validate the submitted key with a real, read-only account_info
+        call, and only write config.json AFTER that succeeds -- never write first and hope.
+
+        Deliberately does NOT go through core._make_session()/load_token(): those prefer
+        the module-cached core._cfg over a fresh config.json read (by design, so a running
+        process doesn't need a restart to keep using its already-loaded key), which means
+        validating "the same way normal calls authenticate" would silently validate against
+        whatever key was cached at process start, not the one just pasted here. Confirmed
+        live: a garbage key was reported as verified because the real cached key answered
+        instead. Building the session by hand with the submitted key as the sole credential
+        avoids that entirely. Localhost-only: makes a live network call with a pasted key."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        key = (body.get("api_key") or "").strip()
+        if not key:
+            return jsonify({"error": "paste your API key first"}), 400
+        import pixai_gallery_backup as core
+        import requests as _requests
+        test_session = _requests.Session()
+        test_session.headers.update({
+            "Authorization": "Bearer {}".format(key),
+            "Accept": "application/json",
+            "User-Agent": "pixai-personal-backup/1.0",
+            "apollo-require-preflight": "true",
+            "x-apollo-operation-name": core.OPERATION_NAME,
+        })
+        try:
+            me = core.account_info(test_session, raise_on_error=True)
+        except Exception as e:
+            msg = str(e)
+            if "401" in msg or "Unauthorized" in msg:
+                return jsonify({"error": "That key was rejected by PixAI -- double-check it."}), 200
+            return jsonify({"error": "Couldn't verify that key (temporary connection issue) -- try again."}), 200
+        cfg_path = Path(core.__file__).resolve().parent / "config.json"
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+        except (ValueError, OSError):
+            cfg = {}
+        cfg["PIXAI_API_KEY"] = key
+        try:
+            cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        except OSError as e:
+            return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(e)}), 200
+        try:
+            credits = int(me.get("quotaAmount") or 0)
+        except (TypeError, ValueError):
+            credits = None
+        return jsonify({"ok": True, "credits": credits})
 
     @app.route("/api/claim", methods=["POST"])
     def api_claim():
@@ -10019,8 +10164,12 @@ def main():
     args = ap.parse_args()
 
     out_dir = Path(args.out)
-    if not out_dir.exists():
-        sys.exit("Output folder not found: {}".format(out_dir))
+    # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
+    # to start here used to be the ONLY thing a brand-new user saw: a console exit, before
+    # the web app's own first-run wizard (paste a key, run the first sync) ever had a
+    # chance to render. Create the folder and an empty, schema-initialized catalog instead
+    # and let the server boot; the wizard banner is what guides them from there.
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     db_path  = out_dir / "catalog.db"
     csv_path = out_dir / "catalog.csv"
@@ -10031,7 +10180,10 @@ def main():
         n = migrate_csv_to_db(csv_path, db_path)
         print("Migrated {:,} rows.".format(n))
     elif _db_is_empty(db_path):
-        sys.exit("No catalog found in {}. Run a download first.".format(out_dir))
+        init_db(db_path)
+        print("No catalog yet in {} -- starting anyway. "
+              "Use the setup wizard on the gallery's home page, "
+              "or run `python pixai_gallery_backup.py --sync` yourself.".format(out_dir))
 
     thumb_dir = out_dir / "gallery" / "thumbs"
     print("Loading catalog...")
