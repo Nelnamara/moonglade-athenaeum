@@ -287,6 +287,14 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   non-incremental re-walk of full history, to catalog rows without downloading files (fast
   inventory pass), or to pull a handful of tasks as a quick test. Needs its own scoping pass to
   pick the UI shape (a Panel "Advanced" section vs. per-run options).
+- **Video/audio reference slots are missing from the gallery drawer's Multi-ref.** The web
+  Video tab was born "simple mode" (`d03e6c8`, 2026-07-03) with image slots only, one day
+  after the CLI shipped the full `--ref-image/--ref-video/--ref-audio` grammar — and the
+  follow-up to grow it was never tracked until 2026-07-18. The server route already accepts
+  `video_refs`/`audio_refs` from any caller, and the Loom's refs already use them; only the
+  gallery panel's UI lacks the slots. PixAI's real Multi-ref split is 6 image + 3 video
+  slots, which the current undifferentiated 9-image cap doesn't reflect. Fix lands in
+  `<mg-generate-drawer>` so both panels inherit it.
 - **Video negative prompts** are unreachable from the web drawer and the Loom.
   `build_video_parameters()` accepts a `negative` kwarg and emits `i2v["negativePrompts"]`, but
   the shared adapter `build_shot_video_params()` — used by both surfaces — has no `negative`
