@@ -48,8 +48,12 @@ just changing their default. Browsing, backing up, and searching your existing c
 keep working normally — only the account-mutating paths refuse.
 
 `READ_ONLY` does **not** cover purely local operations (`--organize`, `--dedup`) — those never
-touch the network in the first place, and already default to a dry run with their own
-`--apply` gate. This flag is specifically about your PixAI *account*, not your local files.
+touch the network in the first place, so there's no account to protect. They're safe in a
+different way, and **not the same way as each other**: `--dedup` is dry-run by default (an
+explicit `--apply` makes it act), while `--organize` runs live by default and is instead
+opted *out* of with `--dry-run` — its safety net is that moves are reversible
+(`organize_manifest.csv` + `--undo-organize`), not that it waits for permission first. This
+flag is specifically about your PixAI *account*, not your local files.
 
 ## Found a real gap in any of this?
 

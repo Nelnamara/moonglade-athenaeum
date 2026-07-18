@@ -23,8 +23,8 @@ cp config.example.json config.json   # add your own PIXAI_API_KEY
 ```
 
 See the [Setup wiki page](https://github.com/Nelnamara/moonglade-athenaeum/wiki/Setup) for
-the full walkthrough, and [`docs/architecture.md`](docs/architecture.md) for how the three
-main files (`pixai_gallery_backup.py`, `pixai_gallery.py`, `pixai_gui.py`) fit together.
+the full walkthrough, and [`docs/architecture.md`](docs/architecture.md) for how the five
+modules fit together.
 
 ## Running the tests
 

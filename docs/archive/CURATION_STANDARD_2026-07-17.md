@@ -1,5 +1,14 @@
 # The Curation Standard — Moonglade house baseline
 
+> ## ❄️ FROZEN — historical record, do not edit. Live home is `docs/STANDARDS.md`.
+>
+> **Frozen 2026-07-17.** Merged into **`docs/STANDARDS.md`** (Part 1) as part of finishing a
+> merge recommended back on 2026-07-16 that was never executed until now — an adversarial audit
+> caught that leaving this file standalone alongside its merged copy was itself a drift risk,
+> even though this specific file's own content hadn't gone stale yet (its sibling,
+> `DESIGN_WORKFLOW_2026-07-17.md`, had). Read `docs/STANDARDS.md` for the current text; this
+> copy is preserved for its history.
+
 > **Owner-approved 2026-07-12** ("that's the baseline"). The baseline every **selection /
 > vote artifact** is built to — so we clone one proven pattern instead of rebuilding it
 > (and losing features) each time. Every rule below exists because its absence broke a real

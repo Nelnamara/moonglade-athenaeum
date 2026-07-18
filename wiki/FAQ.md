@@ -21,8 +21,9 @@ defaults. See [Setup](Setup) and [How It Works](How-It-Works).
 
 **Why are there "hashes" if I don't need to set them?**
 They're public identifiers of PixAI's own frontend queries (not secrets), baked in so
-you don't capture anything. You only touch one if PixAI overhauls their frontend —
-[Troubleshooting](Troubleshooting) covers recapture.
+you don't capture anything. If PixAI overhauls their frontend and one goes stale, you
+don't recapture it yourself — see [Troubleshooting](Troubleshooting): update to the
+latest release, or open an issue so the shared default gets refreshed for everyone.
 
 **Where do my files and credentials go?**
 Everything is local. `config.json`, `token.txt`, and `pixai_backup/` are git-ignored.
@@ -44,4 +45,5 @@ No. Lookups are by `media_id`, so files can live in any subfolder.
 reload the code) — see [Troubleshooting](Troubleshooting).
 
 **Something broke after a PixAI change.**
-See [Troubleshooting](Troubleshooting) — usually a one-line hash recapture.
+See [Troubleshooting](Troubleshooting): update to the latest release first, or open an
+issue if it's still broken.
