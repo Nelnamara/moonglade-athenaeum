@@ -179,6 +179,22 @@ see *Open owner calls*. The repo is public and has real external users.
   gating there covers both surfaces from one place. Scoped to the PixAI account specifically —
   `--organize`/`--dedup` are untouched (already dry-run-by-default, never network). Documented
   for users on the wiki's **Trust & Safety** page.
+- **A first-run wizard banner** appears on the gallery's home page for the owner only,
+  gating on a fresh (not module-cached) read of `config.json` and the true unfiltered catalog
+  count: no key configured → paste-a-key form; key present but zero rows → a "Sync now"
+  button. Neither shows once the catalog has real rows, or for a LAN request.
+  `/api/setup/save-key` validates the submitted key by hand-building a session with it as the
+  sole credential — deliberately NOT via `core._make_session()`/`load_token()`, which prefer
+  the module-cached `core._cfg` over a fresh file read (correct for normal operation, wrong
+  for validating a just-pasted key: confirmed live, a garbage key was reported as verified
+  because the cached real key answered instead). Config is written only after that call
+  actually succeeds — never written first and rolled back. "Sync now" reuses the existing
+  Panel job machinery (`/api/panel/run` action `sync`, polled via `/api/panel/status`) — no
+  new job-running code. A second fix was needed for the wizard to be reachable on a genuine
+  fresh clone at all: `pixai_gallery.py`'s CLI entry point used to `sys.exit` outright when
+  the (git-ignored) output folder or `catalog.db` didn't exist yet — a console error before
+  Flask ever started, with no page for the wizard to render on. It now creates the folder and
+  an empty, schema-initialized catalog and boots normally instead.
 
 ---
 
