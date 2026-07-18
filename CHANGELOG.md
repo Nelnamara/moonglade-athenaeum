@@ -14,7 +14,36 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Added
+- **`<mg-generate-drawer>` reaches full PixAI Multi-ref parity.** Extends the Phase 1 Video
+  form (2026-07-18 earlier today) to match the owner-locked "Video Tab — Full Parity Mockup
+  v1": 6 image + 3 video + 1 audio reference slot (video slots show real poster thumbnails
+  with a play badge; audio uploads directly to `/api/upload`, bypassing the gallery picker
+  entirely since audio isn't catalogued anywhere), a negative-prompt field, Channel
+  (Normal/Enhanced — PixAI's own wording, ships defaulting Normal), and the full 7-model
+  roster with capability chips (2 models ship disabled pending a `--dump-params` capture:
+  V3.0 Flash, V2.7 — the previously-planned "3 need capture" reading was wrong on inspection:
+  the site's "V3.0 High Consistency" is our existing `v3.0` key under its fuller real name,
+  not a 6th distinct model). `mg-pick-request` now carries a `kind` hint so a host filters
+  image vs. video picks; `prefill()` gained `video_refs`/`audio_ref`/`negative`/`is_private`.
+  Server-side: `build_shot_video_params()` threads `negative` (i2vPro only — referenceVideo's
+  captured submit shape has no such field, a genuine API gap, not an oversight) and
+  `is_private` through to both builders; `/api/loom/generate` and `/api/price` both read the
+  new payload keys. Live-verified end to end against the real server: real catalog image +
+  video picks (each correctly type-filtered), a real audio upload round-trip (`/api/upload`
+  → real media_id → chip → payload), real `/api/price` pricing for a mixed image+video+
+  negative+Enhanced request (84,000 credits), and bank isolation between i2v/flf's own slot
+  and r2v's separate image bank on mode switch. Zero console errors across the whole sequence.
+  +6 tests (549 total). Nothing mounts the component yet — the gallery keeps its own working
+  tab; the Loom mount is next.
+
 ### Fixed
+- **`/api/price`'s video branch required an image even for a video- or audio-only Multi-ref.**
+  Found while wiring the ref-slot expansion above: the price-preview gate checked only
+  `images`, so a valid R2V request carrying nothing but a video or audio reference silently
+  failed with "pick a source image" even though the same request would have submitted fine.
+  Now accepts any reference kind alone for R2V specifically; I2V/FLF still correctly require
+  an image (they're frame-anchored by definition).
 - **The Loom silently dropped a shot's end frame from real generations.** Continuity's
   "First→Last" chip (its own hint: "land on an exact end frame") and Mode's separate `FLF`
   chip both read as the same thing to a user, but only `mode==="FLF"` actually made the close

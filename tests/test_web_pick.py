@@ -187,6 +187,55 @@ def test_price_route_video_needs_an_image(tmp_path, monkeypatch):
     assert d["cost"] is None and "source image" in d["note"]
 
 
+def test_price_route_i2v_still_needs_an_image_even_with_video_refs(tmp_path, monkeypatch):
+    # I2V/FLF are image-anchored -- a video_refs entry must NOT waive the image requirement
+    # for those two modes, only for R2V (which the multi-parity build made a genuine option).
+    def boom(*a, **k):
+        raise AssertionError("no pricing without a source frame")
+    monkeypatch.setattr(core, "price_task", boom)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/price", json={"mode": "I2V", "images": [], "video_refs": ["9"]}).get_json()
+    assert d["cost"] is None and "source image" in d["note"]
+
+
+def test_price_route_r2v_prices_video_only_multiref(tmp_path, monkeypatch):
+    """Found while wiring the ref-slot expansion: R2V's price gate checked ONLY `images`,
+    so a video-only or audio-only Multi-ref (both real, API-supported references) silently
+    failed pricing with 'pick a source image' even though the submit itself would have
+    worked. R2V must accept ANY reference kind alone."""
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/price", json={"mode": "R2V", "images": [], "video_refs": ["9"],
+                                     "prompt": "@video1 dances"}).get_json()
+    assert d["cost"] == 27500 and d.get("note") is None
+    rv = seen["params"]["referenceVideo"]
+    assert rv["referenceVideoMediaIds"] == ["9"] and rv["referenceImageMediaIds"] == []
+    seen.clear()
+    d2 = cli.post("/api/price", json={"mode": "R2V", "images": [], "audio_refs": ["7"],
+                                      "prompt": "@audio1 plays"}).get_json()
+    assert d2["cost"] == 27500 and d2.get("note") is None
+    assert seen["params"]["referenceVideo"]["referenceAudioMediaIds"] == ["7"]
+
+
+def test_price_route_threads_negative_and_channel(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    cli.post("/api/price", json={"mode": "I2V", "images": ["55"], "negative": "blurry",
+                                 "is_private": True})
+    assert seen["params"]["i2vPro"]["negativePrompts"] == "blurry"
+    assert seen["params"]["isPrivate"] is True
+
+
 def test_account_route_sums_cards_and_coverage(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "account_info", lambda s: {
