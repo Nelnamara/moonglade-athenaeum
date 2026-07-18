@@ -14,6 +14,20 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Added
+- **The Loom's two-tier project export** — one "Export ▾" menu off `ProjectSwitcher`
+  (`ExportMenu`, shared by classic and V2) replaces three flat buttons: Shot list (.txt),
+  Lightweight backup (.json — project + local-only thumbs, referencing your own catalog by
+  media id), and a new **Full bundle (.zip)** built server-side at `/api/loom/export-bundle` —
+  the same JSON plus every media file the project actually references, so it's shareable with
+  someone who doesn't share your catalog. A real PixAI media_id is globally issued, so the
+  bundle keeps ids as-is end to end; a shot's video result is resolved via the catalog row's
+  filename, since `find_files_for_media_id` only ever sees images by design (the same fallback
+  `/api/loom/export` already uses). Restore accepts either file back and sniffs which one it
+  got; a bundle's media is reconciled at `/api/loom/import-bundle` (`source='api'`, since it's
+  real PixAI media just synced by transfer) — a media_id already resolvable on the receiving
+  machine is skipped, so importing the same bundle twice is a no-op the second time.
+
 ### Docs
 - **Documentation consolidated from 16 `docs/` files to 6, with the rest frozen.** A 42-agent audit
   verified 914 documentation claims against the code and found 158 false or stale — a quarter of them

@@ -84,6 +84,13 @@ const STYLES = `
 .sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
 .sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
 .sb-projveil{position:fixed;inset:0;z-index:59}
+/* Export ▾ menu reuses .sb-projwrap/.sb-projbtn/.sb-projveil/.sb-projpop's chrome as-is --
+   same popover language as the storyboard switcher it sits beside. Only the row style is new. */
+.sb-exportitem{display:flex;align-items:center;gap:6px;background:transparent;border:none;cursor:pointer;text-align:left;padding:7px 8px;border-radius:7px;color:var(--ink);font-size:12px;width:100%}
+.sb-exportitem:hover{background:rgba(255,255,255,.05)}
+.sb-exportitem:disabled{color:var(--ink3);cursor:default;background:transparent}
+.sb-exportitem small{color:var(--ink3);font-size:10px;margin-left:auto;white-space:nowrap}
+.sb-exportdiv{border-top:1px solid var(--line);margin:2px 0}
 .sb-stat{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
 .sb-stat b{font-family:ui-monospace,monospace;font-size:15px}
 .sb-stat span{font-size:10px;color:var(--ink3);letter-spacing:.08em;text-transform:uppercase}
@@ -643,7 +650,44 @@ function ProjectSwitcher({ api }) {
   );
 }
 
-function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, importJSON, setImportOpen, copyShot }) {
+// Two-tier project export, off the ProjectSwitcher as one "Export ▾" menu (the locked
+// design) rather than three flat buttons: Shot list (.txt, unchanged), Lightweight backup
+// (.json -- project + local-only thumbs, referencing your own catalog by media id, the
+// existing exportJSON), and Full bundle (.zip -- the same JSON plus the actual referenced
+// media files, for sharing with someone who doesn't share your catalog). Restore accepts
+// either file back; importBackup sniffs which one it got.
+function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="sb-projwrap">
+      <button className="sb-projbtn" onClick={() => setOpen((v) => !v)}
+        title="Export or restore this project" aria-label="Export">Export &#9662;</button>
+      {open && <div className="sb-projveil" onClick={() => setOpen(false)} />}
+      {open && (
+        <div className="sb-projpop">
+          <div className="sb-projpoph">Export</div>
+          <button className="sb-exportitem" onClick={() => { exportAll(); setOpen(false); }}>
+            Shot list <small>.txt</small></button>
+          <button className="sb-exportitem" onClick={() => { exportJSON(); setOpen(false); }}
+            title="Project + any locally-added assets, referencing your own catalog by media id -- the quiet default for your own home ⇄ work use">
+            Lightweight backup <small>.json</small></button>
+          <button className="sb-exportitem" disabled={bundling}
+            onClick={() => { exportBundle(); setOpen(false); }}
+            title="Everything in the lightweight backup, plus the actual media files -- for sharing with someone who doesn't share your catalog">
+            {bundling ? "Building bundle…" : <>Full bundle <small>.zip</small></>}</button>
+          <div className="sb-exportdiv" />
+          <label className="sb-exportitem" style={{ cursor: "pointer" }}
+            title="Restore either a lightweight backup or a full bundle -- always opens as a new storyboard">
+            &#8681; Restore from file
+            <input type="file" accept=".json,.zip,application/json,application/zip" style={{ display: "none" }}
+              onChange={(e) => { importBackup(e.target.files[0]); setOpen(false); }} /></label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -1132,10 +1176,8 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
           title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
           title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Export</button>
-        <button onClick={exportAll} title="Export a plain-text shot list">Shot list (.txt)</button>
-        <button onClick={exportJSON} title="Back up this project as JSON">Backup (.json)</button>
-        <label style={{ cursor: "pointer" }} title="Restore a project from a backup JSON file">Restore
-          <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => importJSON(e.target.files[0])} /></label>
+        <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
+          bundling={bundling} importBackup={importBackup} />
         <button className="lv-close" onClick={onClose}>← Back to classic Loom</button>
       </div>
       {timelineDrawer}
@@ -1410,9 +1452,11 @@ function useProjectStore(setSelShot) {
   // A restored backup is always a NEW storyboard, never an in-place overwrite of
   // whatever's currently open -- this used to clobber the active project silently
   // (no new id, no confirm), a real data-loss footgun if you imported a backup
-  // while a different board was open.
-  const importJSON = async (file) => { if (!file) return; try { const d = JSON.parse(await file.text());
-    if (!d.project) { window.alert("That file didn't parse as a storyboard backup."); return; }
+  // while a different board was open. Shared by both export tiers: a lightweight
+  // {project, thumbs} parsed client-side, or the same shape handed back by the
+  // server after a full-bundle zip's media has been reconciled into the catalog.
+  const _adoptBackup = async (d) => {
+    if (!d || !d.project) { window.alert("That file didn't parse as a storyboard backup."); return; }
     if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?\n\nYour currently-open board is left untouched.`)) return;
     await flushSave(activeId, project);
     const id = uid();
@@ -1420,10 +1464,30 @@ function useProjectStore(setSelShot) {
     await sSet(ACTIVE_KEY, id);
     if (d.thumbs) { setThumbs((t) => ({ ...t, ...d.thumbs })); if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v); }
     setActiveId(id); setProject(d.project); setSelShot(null); readProjList();
-  } catch { window.alert("That file didn't parse as a storyboard backup."); } };
+  };
+  const importJSON = async (file) => { if (!file) return;
+    try { await _adoptBackup(JSON.parse(await file.text())); }
+    catch { window.alert("That file didn't parse as a storyboard backup."); } };
+  // Full-bundle import: the zip's media is reconciled into THIS machine's catalog
+  // server-side (existing media_ids are skipped -- both sides already have them),
+  // then the response is the exact same {project, thumbs} shape as the lightweight
+  // tier, so it shares _adoptBackup's create-new-project path unchanged.
+  const importBundle = async (file) => { if (!file) return;
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const r = await fetch("/api/loom/import-bundle", { method: "POST", body: fd });
+      const d = await r.json();
+      if (d.error) { window.alert("Couldn't import that bundle: " + d.error); return; }
+      await _adoptBackup(d);
+    } catch { window.alert("Couldn't import that bundle -- network error."); } };
+  // Public entry point: sniff which tier a restored file actually is. Zips are only
+  // ever full bundles; anything else is tried as the lightweight JSON.
+  const importBackup = (file) => { if (!file) return;
+    const isZip = /\.zip$/i.test(file.name) || file.type === "application/zip";
+    return isZip ? importBundle(file) : importJSON(file); };
 
   return { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, projectApi, importJSON, activeId };
+    projList, projMenu, setProjMenu, projectApi, importJSON, importBackup, activeId };
 }
 
 // ---- 2. useShotMutations: act/card/ref CRUD on the open project ----
@@ -1687,6 +1751,29 @@ function useExportPipeline(project, thumbs) {
   const exportAll = () => download(buildShotListText(project, fmt, actLetter, shotText),
     `${project.name.replace(/\s+/g, "_")}_shotlist.txt`, "text/plain");
   const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
+  const [bundling, setBundling] = useState(false);
+  // Tier 2: same {project, thumbs} as the lightweight backup, but the server zips in
+  // every media file the project actually references (resultMid, both frame slots, every
+  // cast/asset) -- for sharing with someone who doesn't share your catalog. media_ids ride
+  // along unchanged; a real PixAI id is globally issued, so the receiving machine either
+  // already has it or files it fresh -- no path-rewriting needed either direction.
+  const exportBundle = async () => {
+    setBundling(true);
+    try {
+      const r = await fetch("/api/loom/export-bundle", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project, thumbs }) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); alert("Bundle export failed: " + (d.error || r.status)); return; }
+      const missing = parseInt(r.headers.get("X-Bundle-Missing-Count") || "0", 10);
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url;
+      a.download = `${project.name.replace(/\s+/g, "_")}_bundle.zip`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (missing) alert(`Bundle exported, but ${missing} referenced file(s) couldn't be found on disk and were left out.`);
+    } catch { alert("Bundle export failed -- network error."); }
+    finally { setBundling(false); }
+  };
   // Play-sequence: every finished shot (persisted resultMid), in order, with its
   // in/out trim -- a rough cut played back-to-back, nothing rendered.
   const playSequence = (entries) => {
@@ -1718,13 +1805,14 @@ function useExportPipeline(project, thumbs) {
   // is exactly why it looked like the buttons just didn't respond.
   const closeSequence = () => setSeq(null);
 
-  return { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence, exportAll, exportJSON };
+  return { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
+    exportAll, exportJSON, exportBundle, bundling };
 }
 
 export default function App() {
   const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
   const { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, projectApi, importJSON, activeId } = useProjectStore(setSelShot);
+    projList, projMenu, setProjMenu, projectApi, importBackup, activeId } = useProjectStore(setSelShot);
 
   const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
@@ -1768,8 +1856,8 @@ export default function App() {
     setGenState(clearDraft); setGenImgState(clearDraft); setGenEditState(clearDraft); setGenRefState(clearDraft);
   }, [activeId]);
 
-  const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence, exportAll, exportJSON }
-    = useExportPipeline(project, thumbs);
+  const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
+    exportAll, exportJSON, exportBundle, bundling } = useExportPipeline(project, thumbs);
 
   // Import a whole gallery collection as reusable @image references (media_id kept
   // -> free reference at generate time). Tags continue from the current max @imageN.
@@ -1809,8 +1897,8 @@ export default function App() {
         projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
         batching={batching} batchGenerate={batchGenerate}
         addRef={addRef} setRef={setRef} delRef={delRef}
-        exportAll={exportAll} exportJSON={exportJSON} importJSON={importJSON}
-        setImportOpen={setImportOpen} copyShot={copyShot} /></V2Boundary>}
+        exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
+        importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} /></V2Boundary>}
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
@@ -1884,10 +1972,8 @@ export default function App() {
           <button className="sb-btn sm" onClick={() => setShowGuide((s) => !s)}>{showGuide ? "Hide guide" : "? How it works"}</button>
           <button className="sb-btn ghost sm" onClick={() => setShowHelp((s) => !s)}>{showHelp ? "Hide cheat-sheet" : "Continuity cheat-sheet"}</button>
           <div className="sb-divider" />
-          <button className="sb-btn sm" onClick={exportAll}>Export shot list (.txt)</button>
-          <button className="sb-btn sm" onClick={exportJSON}>Backup (.json)</button>
-          <label className="sb-btn sm ghost" style={{ cursor: "pointer" }}>Restore
-            <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => importJSON(e.target.files[0])} /></label>
+          <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
+            bundling={bundling} importBackup={importBackup} />
         </div>
         {showGuide && (
           <div className="sb-helpbox" style={{ borderColor: "var(--amber-d)" }}>

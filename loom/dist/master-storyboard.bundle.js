@@ -305,6 +305,13 @@ ${"=".repeat(48)}
 .sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
 .sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
 .sb-projveil{position:fixed;inset:0;z-index:59}
+/* Export \u25BE menu reuses .sb-projwrap/.sb-projbtn/.sb-projveil/.sb-projpop's chrome as-is --
+   same popover language as the storyboard switcher it sits beside. Only the row style is new. */
+.sb-exportitem{display:flex;align-items:center;gap:6px;background:transparent;border:none;cursor:pointer;text-align:left;padding:7px 8px;border-radius:7px;color:var(--ink);font-size:12px;width:100%}
+.sb-exportitem:hover{background:rgba(255,255,255,.05)}
+.sb-exportitem:disabled{color:var(--ink3);cursor:default;background:transparent}
+.sb-exportitem small{color:var(--ink3);font-size:10px;margin-left:auto;white-space:nowrap}
+.sb-exportdiv{border-top:1px solid var(--line);margin:2px 0}
 .sb-stat{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
 .sb-stat b{font-family:ui-monospace,monospace;font-size:15px}
 .sb-stat span{font-size:10px;color:var(--ink3);letter-spacing:.08em;text-transform:uppercase}
@@ -719,7 +726,7 @@ ${"=".repeat(48)}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
-.lv-top button{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+.lv-top button,.lv-top label{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top .lv-close{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
@@ -954,11 +961,72 @@ ${"=".repeat(48)}
       "\u25BE"
     ), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setProjMenu(false) }), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Storyboards"), /* @__PURE__ */ React.createElement("div", { className: "sb-projlist" }, projList.map((pr) => /* @__PURE__ */ React.createElement("div", { key: pr.id, className: "sb-projitem" + (pr.id === activeId ? " on" : "") }, /* @__PURE__ */ React.createElement("button", { className: "sb-projopen", onClick: () => openProject(pr.id), title: "Open this storyboard" }, /* @__PURE__ */ React.createElement("b", null, pr.name || "Untitled"), /* @__PURE__ */ React.createElement("span", null, pr.shots, " shot", pr.shots === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("button", { className: "sb-projx", title: "Delete", onClick: () => deleteProject(pr.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("div", { className: "sb-projacts" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: newProject }, "+ New"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: duplicateProject }, "\u29C9 Duplicate"))));
   }
-  function LoomV2({ onClose, project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence }) {
+  function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling }) {
+    const [open, setOpen] = useState(false);
+    return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "sb-projbtn",
+        onClick: () => setOpen((v) => !v),
+        title: "Export or restore this project",
+        "aria-label": "Export"
+      },
+      "Export \u25BE"
+    ), open && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setOpen(false) }), open && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Export"), /* @__PURE__ */ React.createElement("button", { className: "sb-exportitem", onClick: () => {
+      exportAll();
+      setOpen(false);
+    } }, "Shot list ", /* @__PURE__ */ React.createElement("small", null, ".txt")), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "sb-exportitem",
+        onClick: () => {
+          exportJSON();
+          setOpen(false);
+        },
+        title: "Project + any locally-added assets, referencing your own catalog by media id -- the quiet default for your own home \u21C4 work use"
+      },
+      "Lightweight backup ",
+      /* @__PURE__ */ React.createElement("small", null, ".json")
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "sb-exportitem",
+        disabled: bundling,
+        onClick: () => {
+          exportBundle();
+          setOpen(false);
+        },
+        title: "Everything in the lightweight backup, plus the actual media files -- for sharing with someone who doesn't share your catalog"
+      },
+      bundling ? "Building bundle\u2026" : /* @__PURE__ */ React.createElement(React.Fragment, null, "Full bundle ", /* @__PURE__ */ React.createElement("small", null, ".zip"))
+    ), /* @__PURE__ */ React.createElement("div", { className: "sb-exportdiv" }), /* @__PURE__ */ React.createElement(
+      "label",
+      {
+        className: "sb-exportitem",
+        style: { cursor: "pointer" },
+        title: "Restore either a lightweight backup or a full bundle -- always opens as a new storyboard"
+      },
+      "\u21E9 Restore from file",
+      /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "file",
+          accept: ".json,.zip,application/json,application/zip",
+          style: { display: "none" },
+          onChange: (e) => {
+            importBackup(e.target.files[0]);
+            setOpen(false);
+          }
+        }
+      )
+    )));
+  }
+  function LoomV2({ onClose, project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
     const [deepFocus, setDeepFocus] = useState(null);
+    const [dfPalFor, setDfPalFor] = useState(null);
     const [leftTab, setLeftTab] = useState("cast");
     const [leftCollapsed, setLeftCollapsed] = useState(false);
     const [density, setDensity] = useState("detailed");
@@ -1292,7 +1360,15 @@ ${"=".repeat(48)}
     })), !(project.assets || []).length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No cast yet \u2014 add one below."), /* @__PURE__ */ React.createElement("button", { className: "lv-addcast", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
       const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
       return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-    }), "image", true) }, "+ add from gallery"));
+    }), "image", true) }, "+ add from gallery"), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "lv-addcast",
+        onClick: () => setImportOpen(true),
+        title: "Pull a whole gallery collection in as reusable @image references"
+      },
+      "\u21AF Import collection"
+    ));
     const finished = entries.filter((e) => e.c.resultMid);
     const addAssetFromFile = async (file) => {
       if (!file || !file.type || !file.type.startsWith("image/")) return;
@@ -1323,11 +1399,36 @@ ${"=".repeat(48)}
     return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
       "button",
       {
+        onClick: () => batchGenerate(entries),
+        disabled: batching || !entries.length,
+        title: "Generate every shot that isn't done yet, one after another"
+      },
+      batching ? "\u25B6 generating all\u2026" : `\u25B6 Generate all (${entries.filter((e) => e.c.status !== "done").length})`
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
         disabled: !entries.some((e) => e.c.resultMid),
         onClick: () => playSequence(entries),
         title: "Play every finished shot back-to-back, honoring trims \u2014 a rough cut, no rendering"
       },
       "\u25B6\u25B6 Play"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        disabled: !entries.some((e) => e.c.resultMid),
+        onClick: () => exportCut(entries),
+        title: "Trim + stitch every finished shot into one mp4 (ffmpeg)"
+      },
+      "\u21E9 Export"
+    ), /* @__PURE__ */ React.createElement(
+      ExportMenu,
+      {
+        exportAll,
+        exportJSON,
+        exportBundle,
+        bundling,
+        importBackup
+      }
     ), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: onClose }, "\u2190 Back to classic Loom")), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
       setLeftTab("cast");
       setLeftCollapsed(false);
@@ -1354,10 +1455,19 @@ ${"=".repeat(48)}
       }
       const dfPatch = (fn) => setCard(live.a.id, live.c.id, fn);
       const dfPatchFrame = (key, fp) => dfPatch((cc) => ({ ...cc, [key]: { ...cc[key], ...fp } }));
+      const dfAppend = (field, val) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? `${cc[field]}, ${val}` : val }));
       const c = live.c;
       return /* @__PURE__ */ React.createElement("div", { className: "lv-df-veil", onClick: (ev) => {
         if (ev.target === ev.currentTarget) setDeepFocus(null);
-      } }, /* @__PURE__ */ React.createElement("div", { className: "lv-df" }, /* @__PURE__ */ React.createElement("div", { className: "lv-df-head" }, /* @__PURE__ */ React.createElement("span", { className: "lv-df-code" }, deepFocus.code), /* @__PURE__ */ React.createElement(
+      } }, /* @__PURE__ */ React.createElement("div", { className: "lv-df" }, /* @__PURE__ */ React.createElement("div", { className: "lv-df-head" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          className: "sb-tick " + c.status,
+          title: `Status: ${c.status} (click to cycle)`,
+          onClick: () => dfPatch((cc) => ({ ...cc, status: cc.status === "todo" ? "wip" : cc.status === "wip" ? "done" : "todo" }))
+        },
+        "\u2713"
+      ), /* @__PURE__ */ React.createElement("span", { className: "lv-df-code" }, deepFocus.code), /* @__PURE__ */ React.createElement(
         "input",
         {
           className: "lv-df-title",
@@ -1382,7 +1492,7 @@ ${"=".repeat(48)}
           value: c.duration,
           onChange: (ev) => dfPatch((cc) => ({ ...cc, duration: Number(ev.target.value) }))
         }
-      ))), /* @__PURE__ */ React.createElement("div", { className: "lv-df-frames" }, /* @__PURE__ */ React.createElement(
+      )), /* @__PURE__ */ React.createElement("div", { className: "lv-field narrow" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Discreet"), /* @__PURE__ */ React.createElement("label", { className: "sb-toggle", title: "Blur this shot's frames/refs on the board" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: c.discreet, onChange: (ev) => dfPatch((cc) => ({ ...cc, discreet: ev.target.checked })) }), "blur previews"))), /* @__PURE__ */ React.createElement("div", { className: "lv-df-frames" }, /* @__PURE__ */ React.createElement(
         FrameSlot,
         {
           which: "open",
@@ -1404,7 +1514,23 @@ ${"=".repeat(48)}
           openPick,
           onPatch: (p) => dfPatchFrame("closeFrame", p)
         }
-      )), /* @__PURE__ */ React.createElement("button", { className: "lv-go", onClick: () => {
+      )), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Other references & @tags"), c.refs.map((r) => {
+        const preview = r.thumbId ? thumbs[r.thumbId] : r.kind === "image" && r.source.startsWith("http") ? r.source : null;
+        return /* @__PURE__ */ React.createElement("div", { className: "sb-ref", key: r.id }, r.kind === "image" ? /* @__PURE__ */ React.createElement("label", { className: "sb-refprev" + (c.discreet ? " discreet" : ""), title: "Attach image" }, preview ? /* @__PURE__ */ React.createElement("img", { src: preview, alt: r.tag }) : "\uFF0B", /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "file",
+            accept: "image/*",
+            style: { display: "none" },
+            onChange: async (e) => {
+              const f = e.target.files[0];
+              if (!f) return;
+              const id = await storeThumb(f);
+              setRef(live.a.id, c.id, r.id, { thumbId: id, source: r.source || f.name });
+            }
+          }
+        )) : /* @__PURE__ */ React.createElement("div", { className: "sb-refprev" }, r.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement("div", { className: "sb-refbody" }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("input", { className: "sb-tagin sb-mono", value: r.tag, onChange: (e) => setRef(live.a.id, c.id, r.id, { tag: e.target.value }) }), /* @__PURE__ */ React.createElement("span", { className: "sb-hint" }, r.kind), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { marginLeft: "auto" }, onClick: () => delRef(live.a.id, c.id, r) }, "\u2715")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "what to use it for (motion / camera / mood\u2026)", value: r.role, onChange: (e) => setRef(live.a.id, c.id, r.id, { role: e.target.value }) }), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "file name or URL", value: r.source, onChange: (e) => setRef(live.a.id, c.id, r.id, { source: e.target.value }) })));
+      }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 7, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(live.a.id, c, "image") }, "+ Image"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(live.a.id, c, "video") }, "+ Video"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(live.a.id, c, "audio") }, "+ Audio"))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Music / audio cue ", /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { fontSize: 11 }, onClick: () => setDfPalFor(dfPalFor === "audio" ? null : "audio") }, "\uFF0Bterms")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", value: c.audioCue, onChange: (ev) => dfPatch((cc) => ({ ...cc, audioCue: ev.target.value })), placeholder: "track, beat sync, room tone\u2026" }), dfPalFor === "audio" && /* @__PURE__ */ React.createElement("div", { className: "sb-pal" }, AUDIO_PALETTE.map((t) => /* @__PURE__ */ React.createElement("button", { key: t, className: "sb-pchip sb-mono", onClick: () => dfAppend("audioCue", t) }, t)))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Notes"), /* @__PURE__ */ React.createElement("textarea", { className: "sb-ta", value: c.notes, onChange: (ev) => dfPatch((cc) => ({ ...cc, notes: ev.target.value })), placeholder: "blocking, continuity reminders\u2026" })), /* @__PURE__ */ React.createElement("div", { className: "sb-toolbar" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn amber sm", onClick: () => copyShot(live) }, "Copy shot")), /* @__PURE__ */ React.createElement("button", { className: "lv-go", onClick: () => {
         setSelShot(c.id);
         setDeepFocus(null);
       } }, "Select in Generate \u2192")));
@@ -1588,32 +1714,55 @@ ${"=".repeat(48)}
       if (hasStore) await sSet(TPRE + id, data);
       return id;
     }, []);
+    const _adoptBackup = async (d) => {
+      if (!d || !d.project) {
+        window.alert("That file didn't parse as a storyboard backup.");
+        return;
+      }
+      if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?
+
+Your currently-open board is left untouched.`)) return;
+      await flushSave(activeId, project);
+      const id = uid();
+      await sSet(PPRE + id, JSON.stringify(d.project));
+      await sSet(ACTIVE_KEY, id);
+      if (d.thumbs) {
+        setThumbs((t) => ({ ...t, ...d.thumbs }));
+        if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v);
+      }
+      setActiveId(id);
+      setProject(d.project);
+      setSelShot(null);
+      readProjList();
+    };
     const importJSON = async (file) => {
       if (!file) return;
       try {
-        const d = JSON.parse(await file.text());
-        if (!d.project) {
-          window.alert("That file didn't parse as a storyboard backup.");
-          return;
-        }
-        if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?
-
-Your currently-open board is left untouched.`)) return;
-        await flushSave(activeId, project);
-        const id = uid();
-        await sSet(PPRE + id, JSON.stringify(d.project));
-        await sSet(ACTIVE_KEY, id);
-        if (d.thumbs) {
-          setThumbs((t) => ({ ...t, ...d.thumbs }));
-          if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v);
-        }
-        setActiveId(id);
-        setProject(d.project);
-        setSelShot(null);
-        readProjList();
+        await _adoptBackup(JSON.parse(await file.text()));
       } catch {
         window.alert("That file didn't parse as a storyboard backup.");
       }
+    };
+    const importBundle = async (file) => {
+      if (!file) return;
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const r = await fetch("/api/loom/import-bundle", { method: "POST", body: fd });
+        const d = await r.json();
+        if (d.error) {
+          window.alert("Couldn't import that bundle: " + d.error);
+          return;
+        }
+        await _adoptBackup(d);
+      } catch {
+        window.alert("Couldn't import that bundle -- network error.");
+      }
+    };
+    const importBackup = (file) => {
+      if (!file) return;
+      const isZip = /\.zip$/i.test(file.name) || file.type === "application/zip";
+      return isZip ? importBundle(file) : importJSON(file);
     };
     return {
       project,
@@ -1626,6 +1775,7 @@ Your currently-open board is left untouched.`)) return;
       setProjMenu,
       projectApi,
       importJSON,
+      importBackup,
       activeId
     };
   }
@@ -1972,6 +2122,35 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       "text/plain"
     );
     const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
+    const [bundling, setBundling] = useState(false);
+    const exportBundle = async () => {
+      setBundling(true);
+      try {
+        const r = await fetch("/api/loom/export-bundle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project, thumbs })
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          alert("Bundle export failed: " + (d.error || r.status));
+          return;
+        }
+        const missing = parseInt(r.headers.get("X-Bundle-Missing-Count") || "0", 10);
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${project.name.replace(/\s+/g, "_")}_bundle.zip`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1e3);
+        if (missing) alert(`Bundle exported, but ${missing} referenced file(s) couldn't be found on disk and were left out.`);
+      } catch {
+        alert("Bundle export failed -- network error.");
+      } finally {
+        setBundling(false);
+      }
+    };
     const playSequence = (entries) => {
       const clips = buildPlaySequence(entries);
       if (clips.length) setSeq(clips);
@@ -2011,7 +2190,19 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       setExp(null);
     };
     const closeSequence = () => setSeq(null);
-    return { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence, exportAll, exportJSON };
+    return {
+      seq,
+      exp,
+      playSequence,
+      exportCut,
+      cancelExport,
+      closeExport,
+      closeSequence,
+      exportAll,
+      exportJSON,
+      exportBundle,
+      bundling
+    };
   }
   function App() {
     const [selShot, setSelShot] = useState(null);
@@ -2025,7 +2216,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       projMenu,
       setProjMenu,
       projectApi,
-      importJSON,
+      importBackup,
       activeId
     } = useProjectStore(setSelShot);
     const {
@@ -2110,7 +2301,19 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       setGenEditState(clearDraft);
       setGenRefState(clearDraft);
     }, [activeId]);
-    const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence, exportAll, exportJSON } = useExportPipeline(project, thumbs);
+    const {
+      seq,
+      exp,
+      playSequence,
+      exportCut,
+      cancelExport,
+      closeExport,
+      closeSequence,
+      exportAll,
+      exportJSON,
+      exportBundle,
+      bundling
+    } = useExportPipeline(project, thumbs);
     const importCollection = (items, cname) => {
       setImportOpen(false);
       if (!items || !items.length) return;
@@ -2175,7 +2378,20 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         genRef,
         routeGen,
         projectApi,
-        playSequence
+        playSequence,
+        exportCut,
+        batching,
+        batchGenerate,
+        addRef,
+        setRef,
+        delRef,
+        exportAll,
+        exportJSON,
+        exportBundle,
+        bundling,
+        importBackup,
+        setImportOpen,
+        copyShot
       }
     )), seq && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
@@ -2231,7 +2447,16 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         style: { width: `${durOf(x.c) / scale * 100}%` },
         title: `${x.code} ${x.c.title || ""} \xB7 ${durOf(x.c)}s${x.c.actualDur ? " (rendered)" : ""}`
       }
-    )), /* @__PURE__ */ React.createElement("div", { className: "sb-target", style: { left: `${project.target / scale * 100}%` } })), /* @__PURE__ */ React.createElement("div", { className: "sb-reel-legend" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { style: { background: "var(--surface1)" } }), "to do"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { style: { background: "var(--amber)" } }), "in progress"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { style: { background: "var(--green)" } }), "done"), /* @__PURE__ */ React.createElement("span", { style: { marginLeft: "auto" } }, entries.length, " clips \xB7 target 8:00")))), /* @__PURE__ */ React.createElement("div", { className: "sb-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "sb-toolbar" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: () => setShowGuide((s) => !s) }, showGuide ? "Hide guide" : "? How it works"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => setShowHelp((s) => !s) }, showHelp ? "Hide cheat-sheet" : "Continuity cheat-sheet"), /* @__PURE__ */ React.createElement("div", { className: "sb-divider" }), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: exportAll }, "Export shot list (.txt)"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: exportJSON }, "Backup (.json)"), /* @__PURE__ */ React.createElement("label", { className: "sb-btn sm ghost", style: { cursor: "pointer" } }, "Restore", /* @__PURE__ */ React.createElement("input", { type: "file", accept: "application/json", style: { display: "none" }, onChange: (e) => importJSON(e.target.files[0]) }))), showGuide && /* @__PURE__ */ React.createElement("div", { className: "sb-helpbox", style: { borderColor: "var(--amber-d)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 10 } }, /* @__PURE__ */ React.createElement("h4", { style: { marginTop: 0 } }, "What the Loom is"), /* @__PURE__ */ React.createElement(
+    )), /* @__PURE__ */ React.createElement("div", { className: "sb-target", style: { left: `${project.target / scale * 100}%` } })), /* @__PURE__ */ React.createElement("div", { className: "sb-reel-legend" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { style: { background: "var(--surface1)" } }), "to do"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { style: { background: "var(--amber)" } }), "in progress"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { style: { background: "var(--green)" } }), "done"), /* @__PURE__ */ React.createElement("span", { style: { marginLeft: "auto" } }, entries.length, " clips \xB7 target 8:00")))), /* @__PURE__ */ React.createElement("div", { className: "sb-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "sb-toolbar" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: () => setShowGuide((s) => !s) }, showGuide ? "Hide guide" : "? How it works"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => setShowHelp((s) => !s) }, showHelp ? "Hide cheat-sheet" : "Continuity cheat-sheet"), /* @__PURE__ */ React.createElement("div", { className: "sb-divider" }), /* @__PURE__ */ React.createElement(
+      ExportMenu,
+      {
+        exportAll,
+        exportJSON,
+        exportBundle,
+        bundling,
+        importBackup
+      }
+    )), showGuide && /* @__PURE__ */ React.createElement("div", { className: "sb-helpbox", style: { borderColor: "var(--amber-d)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 10 } }, /* @__PURE__ */ React.createElement("h4", { style: { marginTop: 0 } }, "What the Loom is"), /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "sb-btn ghost sm",

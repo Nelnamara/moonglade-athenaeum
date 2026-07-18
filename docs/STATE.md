@@ -104,6 +104,17 @@ see *Open owner calls*. The repo is public and has real external users.
   (c24837c).
 - Loom projects persist as one atomically-written file per key under `out_dir/loom/kv`, with
   the legacy `store.json` auto-migrated in on first touch (1710f04).
+- **Project export is a two-tier "Export ▾" menu** off `ProjectSwitcher` (the `ExportMenu`
+  component, shared by classic and V2): Shot list (.txt), Lightweight backup (.json — project +
+  local-only thumbs, referencing your own catalog by media id), and Full bundle (.zip — the
+  same plus the actual referenced media files, server-built at `/api/loom/export-bundle`). A
+  real PixAI media_id is globally issued, so the bundle keeps ids as-is end to end; media
+  resolution falls back to the catalog row's filename for videos, since
+  `find_files_for_media_id` is image-only by design. Restore accepts either file back
+  (`importBackup` sniffs which); a bundle's media is reconciled server-side at
+  `/api/loom/import-bundle` (`source='api'`, since it's real PixAI media just synced by
+  transfer) — a media_id already resolvable on the receiving machine is skipped, so
+  re-importing the same bundle twice is a no-op the second time.
 
 ## Gallery
 
@@ -159,9 +170,9 @@ see *Open owner calls*. The repo is public and has real external users.
 - **The Loom's V1 → V2 feature convergence is complete** (2026-07-17) — V2 has everything
   classic has. Classic Loom's actual retirement (deleting its render tree and the `v2` toggle)
   is the remaining step; see *Open owner calls*.
-- Gated on nothing, ready whenever there's capacity: further V2 shell work, the two-tier
-  project export, the Loom visual-refinement pass, and the video-control base set. Render-tree
-  unification is parked (see *Later epics*) and is orthogonal to all four.
+- Gated on nothing, ready whenever there's capacity: further V2 shell work, the Loom
+  visual-refinement pass, and the video-control base set. Render-tree unification is parked
+  (see *Later epics*) and is orthogonal to all three.
 
 ---
 
@@ -179,8 +190,6 @@ retirement itself is next — see *Open owner calls*.
 
 ### The Loom — other
 
-- **Two-tier project export**, off the `ProjectSwitcher` as an "Export ▾" menu. No code for it
-  exists yet. Design is locked (see *Locked design*).
 - **`ShotPreview` base control set:** fast-forward, rewind, split (cut a clip into two), crop.
   Play/pause and hover-scrub already ship. Explicitly not a full NLE.
 - **Export carries real audio.** Segments with a detected audio stream (`probe_has_audio`) trim
@@ -447,13 +456,6 @@ surface: no visual build from prose alone.
   gallery and the React Loom mount. "No framework" means *no build step / framework-neutral
   shared widgets* — **not** "no framework": the Loom is React by design. Migration order in
   `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
-- **Project export is two deliberate tiers.** (1) *Lightweight* — the default quiet background
-  save: one real project file, media referenced by catalog `media_id`, correct for the owner's
-  own home⇄work use since both sides share a catalog. (2) *Full bundle* — a zip of the project
-  JSON plus the actual referenced full-res media copied in, references rewritten to point
-  inside the bundle. Import auto-detects which it received. Delete stays one-file-removal. UI
-  lives off the `ProjectSwitcher` as an "Export ▾" menu, not new persistent chrome. This is a
-  live need: the repo is public and already has real users.
 - **The Trophy Hall's form factor is a maximized overlay**, not a page or route: grow the
   existing `#ach-modal` to full-screen — instant open, gallery stays mounted behind, ESC out,
   animates from the trophy button. Owner screenshots tune the INTERIOR only; the form factor is
