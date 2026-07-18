@@ -11,7 +11,9 @@ rate-paced to be polite. It does claim PixAI's own free rewards (`--claims`/`--c
 daily credits + agent stamina) and auto-apply your free cards — self-service on your
 own account, not farming. Generation spends your own credits: the CLI always asks
 (`--confirm` is required to submit), while the web Generate drawer submits on click and
-shows a live price estimate up front instead.
+shows a live price estimate up front instead. For the full, precise list of what this
+tool can and can't do to your account — plus a `READ_ONLY` config flag that refuses
+every spend/delete path outright — see **[Trust & Safety](Trust-and-Safety)**.
 
 **Do I really only need an API key?**
 Yes. `USER_ID` auto-resolves from the key and the persisted-query hashes ship as

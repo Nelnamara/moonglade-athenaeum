@@ -6,7 +6,7 @@
 
 **Back up · browse · generate · curate** — a complete local companion for **your own** [PixAI.art](https://pixai.art) work.
 
-![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.8%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey)
+![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.8%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey) [![Tests](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml/badge.svg)](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml)
 
 *The local web gallery — your entire PixAI history, full-resolution, searchable.*
 
@@ -92,7 +92,7 @@ Everything deep lives in the **[Wiki](../../wiki)**:
 
 [Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Troubleshooting](../../wiki/Troubleshooting) · [How It Works](../../wiki/How-It-Works)
 
-In-repo: [`docs/architecture.md`](docs/architecture.md) (contributors).
+In-repo: [`docs/architecture.md`](docs/architecture.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 

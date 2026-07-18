@@ -15,6 +15,25 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **CI** (`.github/workflows/tests.yml`) — the Python suite and the Loom's `node --test` now
+  run on every push and pull request, so "all tests must pass before merging" is enforced
+  rather than trusted. PySide6 and `pixeltable` are deliberately not installed in CI: no test
+  imports either, and pulling in Qt just to sit unused is exactly the kind of CI flakiness
+  (headless-display system deps) worth avoiding.
+- **`CONTRIBUTING.md`** — setup, running the tests, the conventions that matter most to an
+  outside contributor (`media_id` resolution, three-place catalog-schema changes, never
+  committing `config.json`), PR expectations, and a private channel for security reports.
+- **`READ_ONLY` config flag** — set `"READ_ONLY": true` in `config.json` to refuse every
+  account-mutating call outright: submitting a generation, submitting a hand/face fix,
+  deleting a task, or claiming a reward. Applies to the CLI *and* the web app, and
+  **overrides `--confirm`/`--apply`/`--yes`** rather than just changing their default — those
+  flags are for a run you already trust; `READ_ONLY` is for one you don't want to trust yet.
+  Gated at the four functions every generate/edit/enhance/fix/delete/claim path funnels
+  through (`submit_generation`, `submit_fixer`, `delete_task_gql`, `claim_reward`), so both
+  surfaces are covered from one place. Documented on the new wiki **Trust & Safety** page,
+  which also spells out precisely what this tool can and can't do to your account. Scoped to
+  the PixAI account specifically — `--organize`/`--dedup` are untouched, since they're a
+  different, already-covered trust concern that never touches the network.
 - **The Loom's two-tier project export** — one "Export ▾" menu off `ProjectSwitcher`
   (`ExportMenu`, shared by classic and V2) replaces three flat buttons: Shot list (.txt),
   Lightweight backup (.json — project + local-only thumbs, referencing your own catalog by

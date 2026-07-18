@@ -1,0 +1,50 @@
+name: Tests
+
+on:
+  push:
+    branches: [master, loom-v2]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # PySide6 (the legacy desktop GUI) is intentionally NOT installed here: no test
+      # imports pixai_gui, and pulling in Qt just to sit unused is exactly the kind of
+      # CI flakiness (headless-display system deps) worth avoiding. pixeltable is also
+      # skipped -- it's a heavy, optional, GPU-oriented dep; tests/test_similar.py skips
+      # itself cleanly without it (see its own pytest.importorskip).
+      - name: Install dependencies
+        run: pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov
+
+      - name: Run test suite
+        run: python -m pytest -q --ignore=tests/test_similar.py
+
+  loom-node-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: loom
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: loom/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the esbuild bundle
+        run: npm run build
+
+      - name: Run the Loom's pure-logic test suite
+        run: node --test

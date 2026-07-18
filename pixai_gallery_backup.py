@@ -152,6 +152,30 @@ def _load_config():
 
 
 _cfg = _load_config()
+# A trust signal for anyone nervous about handing a third-party tool spend/delete access
+# to their PixAI account: with READ_ONLY:true in config.json, every account-mutating
+# network call refuses itself -- CLI and web alike, and REGARDLESS of --confirm/--apply/
+# --yes, since those flags are the very thing a cautious first run wants to be safe to
+# pass without reading the source first. This does NOT cover purely local operations
+# (--organize, --dedup) -- those already have their own dry-run-by-default + --apply
+# gates and never touch the network; conflating "protect my files" with "protect my
+# account" would be a different, weaker promise than the one this flag makes.
+READ_ONLY = bool(_cfg.get("READ_ONLY", False))
+
+
+def _check_read_only(action):
+    """Called at the top of every function that actually fires an account-mutating
+    network call (submit_generation, submit_fixer, delete_task_gql, claim_reward) --
+    the shared choke points both the CLI and the web app's generate/edit/enhance/fix/
+    delete/claim routes all funnel through. Raising here, unconditionally, is what
+    makes READ_ONLY override --confirm/--apply/--yes rather than just changing their
+    default."""
+    if READ_ONLY:
+        raise PixAIError(
+            "READ_ONLY is set in config.json -- refusing to {}. "
+            "Remove it (or set it to false) to allow this.".format(action))
+
+
 # Persisted-query hashes are PUBLIC, non-secret identifiers of PixAI's own frontend
 # GraphQL operations (the same for every user, embedded in their JS bundle). The
 # history feed / task detail / delete operations are NOT exposed on the public API
@@ -937,6 +961,7 @@ def delete_task_gql(session, task_id):
     PixAIError with a clear message on any failure. Deliberately single-attempt (NO
     retry/backoff loop) so a flaky network can never cause a delete to fire twice.
     """
+    _check_read_only("delete a task from your PixAI account")
     # Defensive only: DELETE_TASK_HASH ships with a working built-in default, so this
     # can fire solely if that default is stripped or the hash rotates and someone blanks
     # it. It is NOT a setup gate -- --apply plus the typed "delete" confirm are what stand
@@ -3724,6 +3749,7 @@ def _bump_card_use(params):
 def submit_generation(session, params):
     """Submit a createGenerationTask and return the task id immediately -- no wait, no
     download. The card (if any) must already be attached to `params`. Raises on no id."""
+    _check_read_only("submit a generation (spends credits)")
     created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
     task_id = (created.get("createGenerationTask") or {}).get("id")
     if not task_id:
@@ -3736,6 +3762,7 @@ def submit_fixer(session, media_id, boxes):
     """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
     generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
     'hand' | 'face' (<=20). Builds a mask from the boxes and repairs those regions. Raises."""
+    _check_read_only("submit a hand/face fix (spends credits)")
     clean = []
     for b in (boxes or []):
         tag = str((b or {}).get("tag") or "").lower()
@@ -4805,6 +4832,7 @@ def claim_reward(session, claim_id):
     """Claim a reward by id via POST /v2/claim/{id}. State-changing: grants the reward to
     YOUR OWN account (a routine daily entitlement, no money moves). Returns the updated
     claim record. Raises PixAIError on error."""
+    _check_read_only("claim a reward")  # still a real account mutation, even a beneficial one
     return _rest_post(session, "/claim/" + str(claim_id), {})
 
 
