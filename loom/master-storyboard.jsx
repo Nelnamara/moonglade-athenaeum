@@ -835,11 +835,41 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     if (el && !el._mgBound) {
       el._mgBound = true;
       el.addEventListener("mg-dirty", () => { promptDirtyRef.current = true; });
+      // Fired ONLY from a direct user click on the drawer's own mode-segment buttons (see
+      // mg-generate-drawer.js's _userSetMode) -- never from the drawer re-asserting/auto-
+      // switching its mode internally (prefill()/_applyModelGating()), which would create a
+      // host<->drawer sync loop. Routes through the existing, tested setShotMode reducer so
+      // its Continuity-reset side effect (connect:"flf"->"new") keeps firing exactly as it
+      // does today via the (soon-removed) Continuity-panel MODE chips.
+      el.addEventListener("mg-mode-commit", (e) => {
+        const a = activeRef.current; if (!a) return;
+        const vmode = e.detail.vmode;
+        // Guard against a redundant click: drawerModeFor collapses BOTH R2V and V2V into the
+        // drawer's single 'r2v'/Multi-Reference display, since the drawer has no V2V concept
+        // at all. Without this guard, clicking an already-highlighted Multi-Reference button
+        // on a V2V shot (settable only via Deep Focus's surviving Mode chips) would silently
+        // overwrite the card's real V2V mode to R2V -- a genuine, durable field mutation
+        // disguised as a no-op re-click on a control that already looked selected.
+        const apply = (c) => (drawerModeFor(c.mode) === vmode) ? c : setShotMode(c, cardModeForVmode(vmode));
+        a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+      });
       el.addEventListener("mg-pick-request", (e) => {
         openPick((mid, thumb) => e.detail.respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
       });
       el.addEventListener("mg-submit", (e) => {
-        genTargetRef.current = activeRef.current.c.id;
+        const a = activeRef.current;
+        genTargetRef.current = a.c.id;
+        // The drawer may have submitted a different mode than the card believes -- e.g. a
+        // model-gating auto-switch (_applyModelGating) that never wrote back on its own (that
+        // would let casual model-browsing silently corrupt a card's real mode). Reconcile the
+        // card's durable mode field to what ACTUALLY got submitted, at the one moment it's
+        // known for certain, so badges/shotText/telemetry never permanently disagree with the
+        // render that's about to attach to this card.
+        const submitted = e.detail.payload && e.detail.payload.mode;
+        if (a && submitted && submitted !== a.c.mode) {
+          const apply = (c) => setShotMode(c, submitted);
+          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+        }
         onVideoSubmit(genTargetRef.current, e.detail);
       });
       el.addEventListener("mg-result", (e) => onVideoResult(genTargetRef.current || activeRef.current.c.id, e.detail));
@@ -896,6 +926,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // rather than hoisted -- that one lives inside a bare block for frame-handoff, this one
   // feeds a Hook, which can't live inside a block).
   const drawerModeFor = (m) => { const u = (m || "R2V").toUpperCase(); return u === "FLF" ? "flf" : u === "I2V" ? "i2v" : "r2v"; };
+  // Inverse of drawerModeFor, but NOT its exact mirror -- the drawer only ever offers 3
+  // vmodes, so its 'r2v' can only ever mean the card should become R2V, never V2V. The drawer
+  // has no UI concept of "extend/transform an existing clip" (V2V's meaning -- Continuity's
+  // "extend" chip already independently covers that idea via c.connect, orthogonal to mode),
+  // and at the real submit layer V2V/R2V already resolve to the identical generation code
+  // path (build_shot_video_params), so mapping Multi-Reference to R2V loses nothing.
+  const cardModeForVmode = (v) => v === "flf" ? "FLF" : v === "i2v" ? "I2V" : "R2V";
   const weaveSelIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
   const weavePrevEntry = weaveSelIdx > 0 ? entries[weaveSelIdx - 1] : null;
   // imgSrc mirrors useGenerationPipeline's own private helper exactly (thumbs is a prop
@@ -1127,9 +1164,6 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     let videoTrailer = null;
     if (tab === "Video") { tabBody = (
       <div>
-        <label className="lv-lab">Mode</label>
-        <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === active.c.mode ? "on" : "")}
-          onClick={() => patch((c) => setShotMode(c, m))}>{m}</span>))}</div>
         <label className="lv-lab">Continuity</label>
         <div className="lv-chips">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-chip " + (k === (active.c.connect || "new") ? "on" : "")} title={CONNECT[k].hint}
           onClick={() => patch((c) => setShotConnect(c, k))}>{CONNECT[k].label}</span>))}</div>

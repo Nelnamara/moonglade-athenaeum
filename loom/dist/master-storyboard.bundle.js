@@ -42,8 +42,10 @@ var LoomBundle = (() => {
   var nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1);
   var connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
   var flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}` })));
+  var effectivePrompt = (c) => c.promptOverride ? c.promptOverrideText || "" : c.prompt || "";
   var shotText = (entry, p) => {
     const { c, code, ai } = entry;
+    if (c.promptOverride) return effectivePrompt(c);
     const idx = flat(p).findIndex((x) => x.c.id === c.id);
     const prev = idx > 0 ? flat(p)[idx - 1] : null;
     const L = [`[${code} \u2014 "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
@@ -105,6 +107,30 @@ var LoomBundle = (() => {
       hasInput: imgs.length + vids.length > 0
     };
   };
+  var PRICE_FIELDS = ["mode", "images", "video_refs", "duration", "quality", "generate_audio", "audio_language"];
+  var priceFingerprint = (payload) => JSON.stringify(PRICE_FIELDS.map((k) => payload[k]));
+  var tallyPrices = (prices) => {
+    let free = 0, paid = 0, credits = 0, unknown = 0;
+    prices.forEach((pr) => {
+      if (pr && pr.free) free++;
+      else if (pr && pr.cost != null) {
+        paid++;
+        credits += pr.cost;
+      } else unknown++;
+    });
+    return { free, paid, credits, unknown };
+  };
+  var formatCostEstimate = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending = 0 } = {}) => {
+    const settledNone = free === 0 && paid === 0 && unknown === 0;
+    const trail = pending > 0 ? " \u27F3" : "";
+    if (settledNone && pending > 0) return "\u2026";
+    if (credits > 0) return `\u2248${credits.toLocaleString()} cr${unknown ? ` (+${unknown} unk)` : ""}${trail}`;
+    if (unknown > 0) return `${unknown} unpriced${trail}`;
+    if (free > 0) return `\u{1F3AB} free${trail}`;
+    if (paid > 0) return `0 cr${trail}`;
+    return "\u2026" + trail;
+  };
+  var costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending = 0 } = {}) => `Cost to finish: ${free} free-card, ${paid} paid (\u2248${credits.toLocaleString()} credits), ${unknown} unpriced${pending ? `, ${pending} still estimating` : ""}.`;
   var durOf = (c) => Number(c.actualDur || c.duration) || 0;
   var reelStats = (entries, target) => {
     const total = entries.reduce((s, x) => s + durOf(x.c), 0);
@@ -128,6 +154,8 @@ var LoomBundle = (() => {
       cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch })
     }))
   });
+  var setPromptOverride = (c, text) => ({ ...c, promptOverride: true, promptOverrideText: text });
+  var clearPromptOverride = (c) => ({ ...c, promptOverride: false, promptOverrideText: "" });
   var patchAct = (project, actId, patch) => ({
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch })
@@ -462,6 +490,7 @@ ${"=".repeat(48)}
   cursor:pointer;flex:none;display:grid;place-items:center;color:transparent;transition:all .12s;padding:0}
 .sb-tick.wip{border-color:var(--amber);color:var(--amber)}
 .sb-tick.done{border-color:var(--green);background:var(--green);color:var(--base)}
+.sb-tick.error{border-color:var(--coral);color:var(--coral)}
 
 .sb-body{padding:12px 13px;display:flex;flex-direction:column;gap:11px}
 .sb-frames-mini{display:flex;align-items:stretch;gap:8px}
@@ -727,6 +756,12 @@ ${"=".repeat(48)}
       discreet: false,
       trimIn: 0,
       trimOut: null,
+      // promptOverride/promptOverrideText: a hand-edit made directly in the drawer's composed-
+      // prompt box, durable across shot reselect/reload. When set, shotText() returns
+      // promptOverrideText verbatim instead of composing from camera/lighting/cast/etc --
+      // see loom-core.js's shotText() and effectivePrompt().
+      promptOverride: false,
+      promptOverrideText: "",
       ...extra
     };
   }
@@ -778,6 +813,13 @@ ${"=".repeat(48)}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
+.lv-cost-pill{opacity:.85;font-weight:600;}
+.lv-cost-pill:disabled{opacity:.5;}
+.lv-batchbar{padding:6px 20px;font-size:12px;color:var(--subtext);background:var(--surface0);border-bottom:1px solid var(--surface1);}
+.lv-batchfail{color:var(--coral);font-weight:600;}
+.lv-override-badge{color:var(--amber);font-style:normal;font-weight:600;}
+.lv-overrideflash{font-size:11px;color:var(--amber);background:rgba(0,0,0,.15);border-radius:5px;padding:3px 7px;margin-top:2px;animation:lv-flash-fade 1.6s ease-out forwards;}
+@keyframes lv-flash-fade{0%{opacity:1;}70%{opacity:1;}100%{opacity:0;}}
 /* Fixed 4-region shell: top Timeline drawer (below), then a row of left card /
    board column / right drawer -- nothing free-floating, nothing draggable. */
 .lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;}
@@ -842,7 +884,7 @@ ${"=".repeat(48)}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
-.lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}
+.lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
 .lv-seg.sel{outline:2px solid var(--accent);outline-offset:-2px;z-index:2;}
 .lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
@@ -1077,7 +1119,7 @@ ${"=".repeat(48)}
       )
     )));
   }
-  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot }) {
+  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, costEstimate, refreshEstimate, batchTally }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
@@ -1091,6 +1133,7 @@ ${"=".repeat(48)}
     const [tlDragH, setTlDragH] = useState(null);
     const [palFor, setPalFor] = useState(null);
     const [dzHover, setDzHover] = useState(false);
+    const [overrideClearedFlash, setOverrideClearedFlash] = useState(false);
     const [draftCard, setDraftCard] = useState(() => ({
       id: "__draft__",
       mode: "R2V",
@@ -1112,7 +1155,9 @@ ${"=".repeat(48)}
       cast: [],
       refs: [],
       openFrame: {},
-      closeFrame: {}
+      closeFrame: {},
+      promptOverride: false,
+      promptOverrideText: ""
     }));
     const [draftTarget, setDraftTarget] = useState("");
     const [draftAttachedInfo, setDraftAttachedInfo] = useState(null);
@@ -1142,6 +1187,55 @@ ${"=".repeat(48)}
         el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
       }
     }, [setImgModel]);
+    const activeRef = useRef(null);
+    const projectRef = useRef(project);
+    projectRef.current = project;
+    const genDrawerRef = useRef(null);
+    const promptDirtyRef = useRef(false);
+    const genTargetRef = useRef(null);
+    const lastActiveIdRef = useRef(null);
+    const bindGenDrawer = useCallback((el) => {
+      genDrawerRef.current = el;
+      if (el && !el._mgBound) {
+        el._mgBound = true;
+        el.addEventListener("mg-dirty", () => {
+          promptDirtyRef.current = true;
+        });
+        el.addEventListener("mg-mode-commit", (e) => {
+          const a = activeRef.current;
+          if (!a) return;
+          const vmode = e.detail.vmode;
+          const apply = (c) => drawerModeFor(c.mode) === vmode ? c : setShotMode(c, cardModeForVmode(vmode));
+          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+        });
+        el.addEventListener("mg-pick-request", (e) => {
+          openPick((mid, thumb) => e.detail.respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
+        });
+        el.addEventListener("mg-submit", (e) => {
+          const a = activeRef.current;
+          genTargetRef.current = a.c.id;
+          const submitted = e.detail.payload && e.detail.payload.mode;
+          if (a && submitted && submitted !== a.c.mode) {
+            const apply = (c) => setShotMode(c, submitted);
+            a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+          }
+          onVideoSubmit(genTargetRef.current, e.detail);
+        });
+        el.addEventListener("mg-result", (e) => onVideoResult(genTargetRef.current || activeRef.current.c.id, e.detail));
+        el.addEventListener("mg-error", (e) => onVideoError(genTargetRef.current || activeRef.current.c.id, e.detail));
+        el.addEventListener("mg-prompt-commit", (e) => {
+          const a = activeRef.current;
+          if (!a) return;
+          const text = e.detail.text;
+          const already = !!a.c.promptOverride;
+          const composed = already ? null : shotText(a, projectRef.current);
+          if (!already && text === composed) return;
+          const apply = (c) => setPromptOverride(c, text);
+          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+          promptDirtyRef.current = false;
+        });
+      }
+    }, [openPick, onVideoSubmit, onVideoResult, onVideoError]);
     const TL_HEIGHTS = { hidden: 0, slim: 64, full: 360 };
     const tlPointerDown = (e) => {
       tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] };
@@ -1174,6 +1268,90 @@ ${"=".repeat(48)}
     const active = sel || draftEntry;
     const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
     const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
+    activeRef.current = active;
+    const drawerModeFor = (m) => {
+      const u = (m || "R2V").toUpperCase();
+      return u === "FLF" ? "flf" : u === "I2V" ? "i2v" : "r2v";
+    };
+    const cardModeForVmode = (v) => v === "flf" ? "FLF" : v === "i2v" ? "I2V" : "R2V";
+    const weaveSelIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
+    const weavePrevEntry = weaveSelIdx > 0 ? entries[weaveSelIdx - 1] : null;
+    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
+    const asRef = (d) => ({ media_id: d, thumb: /^\d+$/.test(d) ? "/thumbs/" + d + ".jpg" : d });
+    useEffect(() => {
+      const el = genDrawerRef.current;
+      if (!el || tab !== "Video") return;
+      if (lastActiveIdRef.current !== active.c.id) {
+        if (lastActiveIdRef.current) {
+          const pending = el.flushPromptEdit();
+          if (pending != null) {
+            const outId = lastActiveIdRef.current, isDraft = outId === "__draft__";
+            const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
+            if (outEntry) {
+              const already = !!outEntry.c.promptOverride;
+              const composed = already ? null : shotText(outEntry, project);
+              if (already || pending !== composed) {
+                const apply = (c) => setPromptOverride(c, pending);
+                isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
+              }
+            }
+          }
+        }
+        promptDirtyRef.current = false;
+        lastActiveIdRef.current = active.c.id;
+      }
+      const nextMode = drawerModeFor(active.c.mode);
+      const payload = {
+        mode: nextMode,
+        duration: active.c.duration,
+        audio: !!active.c.audioGen,
+        audio_language: active.c.audioLanguage || "english",
+        quality: project.draft ? "basic" : "professional",
+        images: [],
+        video_refs: [],
+        audio_ref: null
+      };
+      if (nextMode === "i2v" && active.c.openFrame && active.c.openFrame.mediaId) {
+        payload.images = [{ media_id: active.c.openFrame.mediaId, thumb: frameSrc(active.c.openFrame) }];
+      } else if (nextMode === "flf") {
+        payload.images = [active.c.openFrame, active.c.closeFrame].filter((f) => f && f.mediaId).map((f) => ({ media_id: f.mediaId, thumb: frameSrc(f) }));
+      } else if (nextMode === "r2v") {
+        const sp = shotPayload(active, project, imgSrc);
+        payload.images = sp.images.map(asRef);
+        const vids = (sp.video_refs || []).map(asRef);
+        if (active.c.connect === "extend" && weavePrevEntry && weavePrevEntry.c.resultMid) {
+          vids.push({ media_id: weavePrevEntry.c.resultMid, thumb: "/thumbs/" + weavePrevEntry.c.resultMid + ".jpg" });
+        }
+        payload.video_refs = vids;
+      }
+      if (!promptDirtyRef.current) payload.prompt = shotText(active, project);
+      el.prefill(payload);
+    }, [
+      active.c.id,
+      active.c.mode,
+      active.c.connect,
+      active.c.duration,
+      active.c.audioGen,
+      active.c.audioLanguage,
+      active.c.prompt,
+      active.c.camera,
+      active.c.lighting,
+      active.c.transIn,
+      active.c.transOut,
+      active.c.cast,
+      active.c.refs,
+      project.assets,
+      active.c.title,
+      project.look,
+      project.draft,
+      tab,
+      active.c.promptOverride,
+      active.c.promptOverrideText
+    ]);
+    useEffect(() => {
+      const el = genDrawerRef.current;
+      if (el && el.setBusy) el.setBusy(active.c.status === "wip");
+    }, [active.c.id, active.c.status]);
     const board = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act, ai) => {
       const items = entries.filter((e) => e.ai === ai);
       return /* @__PURE__ */ React.createElement("div", { key: act.id, className: "lv-act" }, /* @__PURE__ */ React.createElement("div", { className: "lv-actrow" }, /* @__PURE__ */ React.createElement("input", { className: "lv-actname-in", value: act.name, onChange: (ev) => setAct(act.id, { name: ev.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico danger", onClick: () => delAct(act.id), title: "Delete act" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lv-cards" }, items.map((e) => {
@@ -1273,44 +1451,50 @@ ${"=".repeat(48)}
         }
       };
       let tabBody;
-      if (tab === "Video") tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, MODES.map((m) => /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          key: m,
-          className: "lv-chip " + (m === active.c.mode ? "on" : ""),
-          onClick: () => patch((c) => setShotMode(c, m))
-        },
-        m
-      ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Continuity"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          key: k,
-          className: "lv-chip " + (k === (active.c.connect || "new") ? "on" : ""),
-          title: CONNECT[k].hint,
-          onClick: () => patch((c) => setShotConnect(c, k))
-        },
-        CONNECT[k].label
-      ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement("textarea", { className: "lv-ta", value: active.c.prompt || "", onChange: (ev) => patch((c) => ({ ...c, prompt: ev.target.value })) }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Duration"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, [5, 6, 10, 15].map((d) => /* @__PURE__ */ React.createElement("span", { key: d, className: "lv-chip " + (d === active.c.duration ? "on" : ""), onClick: () => patch((c) => ({ ...c, duration: d })) }, d, "s"))), /* @__PURE__ */ React.createElement("label", { className: "lv-check" }, /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          type: "checkbox",
-          checked: !!active.c.audioGen,
-          onChange: (ev) => patch((c) => ({ ...c, audioGen: ev.target.checked }))
-        }
-      ), " Generate audio"), active.c.audioGen && /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, AUDIO_LANGUAGES.map(([v, label]) => /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          key: v,
-          className: "lv-chip " + (v === (active.c.audioLanguage || "english") ? "on" : ""),
-          onClick: () => patch((c) => ({ ...c, audioLanguage: v }))
-        },
-        label
-      ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab)")), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busy, onClick: () => generateShot(active) }, busy ? gs.msg || "generating\u2026" : "\u25B6 Generate shot"), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"), !sel && gs && gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gs.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "attach to shot \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn", disabled: !routeTarget, onClick: () => {
-        if (!routeTarget) return;
-        setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...gs.duration ? { actualDur: gs.duration } : {} }));
-        setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
-      } }, routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above")), draftAttachedInfo && draftAttachedInfo.mid === gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 attached to ", draftAttachedInfo.code, " \xB7 it's now that shot's result")));
-      else if (tab === "Image") {
+      let videoTrailer = null;
+      if (tab === "Video") {
+        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Continuity"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            key: k,
+            className: "lv-chip " + (k === (active.c.connect || "new") ? "on" : ""),
+            title: CONNECT[k].hint,
+            onClick: () => patch((c) => setShotConnect(c, k))
+          },
+          CONNECT[k].label
+        ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement("textarea", { className: "lv-ta", value: active.c.prompt || "", onChange: (ev) => {
+          if (active.c.promptOverride) {
+            setOverrideClearedFlash(true);
+            setTimeout(() => setOverrideClearedFlash(false), 1600);
+          }
+          patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
+        } }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Duration"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, [5, 6, 10, 15].map((d) => /* @__PURE__ */ React.createElement("span", { key: d, className: "lv-chip " + (d === active.c.duration ? "on" : ""), onClick: () => patch((c) => ({ ...c, duration: d })) }, d, "s"))), /* @__PURE__ */ React.createElement("label", { className: "lv-check" }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "checkbox",
+            checked: !!active.c.audioGen,
+            onChange: (ev) => patch((c) => ({ ...c, audioGen: ev.target.checked }))
+          }
+        ), " Generate audio"), active.c.audioGen && /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, AUDIO_LANGUAGES.map(([v, label]) => /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            key: v,
+            className: "lv-chip " + (v === (active.c.audioLanguage || "english") ? "on" : ""),
+            onClick: () => patch((c) => ({ ...c, audioLanguage: v }))
+          },
+          label
+        ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab; add extra image/video/audio refs directly below)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" } }, active.c.promptOverride ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-override-badge", title: "Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose." }, "\u270E override active \u2014 fields above not woven in") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2193 woven into the form below"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => {
+          promptDirtyRef.current = false;
+          const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project);
+          active.c.id === "__draft__" ? setDraftCard(clearPromptOverride) : setCard(active.a.id, active.c.id, clearPromptOverride);
+          if (genDrawerRef.current) genDrawerRef.current.prefill({ prompt: composed });
+        } }, "\u21BA re-sync from shot")), overrideClearedFlash && /* @__PURE__ */ React.createElement("div", { className: "lv-overrideflash" }, "override cleared \u2014 back to auto-compose"));
+        videoTrailer = /* @__PURE__ */ React.createElement(React.Fragment, null, sel && /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"), !sel && gs && gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gs.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "attach to shot \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn", disabled: !routeTarget, onClick: () => {
+          if (!routeTarget) return;
+          setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...gs.duration ? { actualDur: gs.duration } : {} }));
+          setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
+        } }, routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above")), draftAttachedInfo && draftAttachedInfo.mid === gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 attached to ", draftAttachedInfo.code, " \xB7 it's now that shot's result")));
+      } else if (tab === "Image") {
         const gi = genImgState[active.c.id] || {};
         const busyI = gi.phase === "submitting" || gi.phase === "running";
         tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Model ", imgModel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\xB7 ", imgModel.title) : null), /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindPicker, kind: "base" }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
@@ -1389,7 +1573,7 @@ ${"=".repeat(48)}
           openPick,
           onPatch: (p) => patchFrame("closeFrame", p)
         }
-      )), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t))), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody);
+      )), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t))), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement("mg-generate-drawer", { ref: bindGenDrawer, style: { display: tab === "Video" ? "" : "none" } }), videoTrailer);
     }
     const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), /* @__PURE__ */ React.createElement("details", { className: "lv-look", open: !!(project.look || "").trim() }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F3A8} Project look", (project.look || "").trim() ? "" : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 a style line added to every shot")), /* @__PURE__ */ React.createElement(
       "textarea",
@@ -1509,11 +1693,34 @@ ${"=".repeat(48)}
     ), /* @__PURE__ */ React.createElement(
       "button",
       {
-        onClick: () => batchGenerate(entries),
+        onClick: () => {
+          const pending = genDrawerRef.current && genDrawerRef.current.flushPromptEdit ? genDrawerRef.current.flushPromptEdit() : null;
+          let liveEntries = entries;
+          if (pending != null && activeRef.current) {
+            const a = activeRef.current;
+            const already = !!a.c.promptOverride;
+            const composed = already ? null : shotText(a, project);
+            if (already || pending !== composed) {
+              const patchedCard = setPromptOverride(a.c, pending);
+              liveEntries = entries.map((e) => e.c.id === a.c.id ? { ...e, c: patchedCard } : e);
+              a.c.id === "__draft__" ? setDraftCard(() => patchedCard) : setCard(a.a.id, a.c.id, () => patchedCard);
+            }
+          }
+          batchGenerate(liveEntries);
+        },
         disabled: batching || !entries.length,
         title: "Generate every shot that isn't done yet, one after another"
       },
-      batching ? "\u25B6 generating all\u2026" : `\u25B6 Generate all (${entries.filter((e) => e.c.status !== "done").length})`
+      batching ? "\u25B6 generating all\u2026" : `\u25B6 Generate all (${costEstimate.notDoneCount})`
+    ), costEstimate.notDoneCount > 0 && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "lv-cost-pill",
+        onClick: refreshEstimate,
+        disabled: batching,
+        title: costTooltip(costEstimate) + " \u2014 estimate reflects Generate-all composition; a shot generated by hand from its own Video-tab drawer (esp. I2V/FLF with both cast images and a frame set) may price differently. Click to refresh."
+      },
+      formatCostEstimate(costEstimate)
     ), /* @__PURE__ */ React.createElement(
       "button",
       {
@@ -1539,7 +1746,7 @@ ${"=".repeat(48)}
         bundling,
         importBackup
       }
-    ), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
+    ), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && /* @__PURE__ */ React.createElement("div", { className: "lv-batchbar" }, "Batch: ", batchTally.submitted, "/", batchTally.total, " submitted \xB7 ", batchTally.done, " done", batchTally.failed ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "lv-batchfail" }, batchTally.failed, " failed")) : null, batchTally.done + batchTally.failed < batchTally.total ? " \xB7 rendering\u2026" : ""), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
       setLeftTab("cast");
       setLeftCollapsed(false);
     } }, "\u{1F464}"), /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "footage" ? " on" : ""), title: "Footage", onClick: () => {
@@ -1573,7 +1780,7 @@ ${"=".repeat(48)}
         "button",
         {
           className: "sb-tick " + c.status,
-          title: `Status: ${c.status} (click to cycle)`,
+          title: `Status: ${c.status} (click to cycle${c.status === "error" ? " \u2014 clears the error" : ""})`,
           onClick: () => dfPatch((cc) => ({ ...cc, status: cc.status === "todo" ? "wip" : cc.status === "wip" ? "done" : "todo" }))
         },
         "\u2713"
@@ -1951,6 +2158,7 @@ Your currently-open board is left untouched.`)) return;
     const [genEditState, setGenEditState] = useState({});
     const [genRefState, setGenRefState] = useState({});
     const [batching, setBatching] = useState(false);
+    const [batchTally, setBatchTally] = useState(null);
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
     const shotPayload2 = (entry) => shotPayload(entry, project, imgSrc);
     const priceShot = async (entry) => {
@@ -1970,16 +2178,16 @@ Your currently-open board is left untouched.`)) return;
       const p = shotPayload2(entry);
       if (!p.hasInput) {
         setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } }));
-        return;
+        return { ok: false, reason: "no-input" };
       }
       if (!opts.skipConfirm) {
         const pr = await priceShot(entry);
         if (pr && !pr.free && pr.cost != null) {
           if (!window.confirm(`No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.
 
-Generate anyway?`)) return;
+Generate anyway?`)) return { ok: false, reason: "cancelled" };
         } else if (!pr || !pr.free) {
-          if (!window.confirm("Couldn't verify this shot's cost or free-card coverage \u2014 it may spend credits.\n\nGenerate anyway?")) return;
+          if (!window.confirm("Couldn't verify this shot's cost or free-card coverage \u2014 it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
         }
       }
       setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
@@ -2003,26 +2211,44 @@ Generate anyway?`)) return;
         const d = await r.json();
         if (d.error || !d.task_id) {
           setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
-          return;
+          return { ok: false, reason: "submit-failed" };
         }
         setCardStatus(c.id, { pendingTaskId: d.task_id });
         pollShot(c.id, d.task_id);
+        return { ok: true, taskId: d.task_id };
       } catch {
         setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
+        return { ok: false, reason: "network" };
       }
     };
+    const POLL_GIVE_UP_MS = 20 * 60 * 1e3;
     const pollShot = (cardId, tid) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(tid).slice(-6) + ")" } }));
+      const startedAt = Date.now();
+      const giveUp = () => {
+        setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: "timed out waiting for this render \u2014 check the task on pixai.art, or try again" } }));
+        setCardStatus(cardId, { status: "error", pendingTaskId: null });
+        setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, failed: prev.failed + 1 } : prev);
+      };
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
         const cls = classifyTaskStatus(d);
         if (cls.phase === "done") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
           setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, ...cls.duration ? { actualDur: cls.duration } : {} });
+          setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, done: prev.done + 1 } : prev);
         } else if (cls.phase === "failed") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-          setCardStatus(cardId, { pendingTaskId: null });
-        } else setTimeout(tick, 4e3);
-      }).catch(() => setTimeout(tick, 5e3));
+          setCardStatus(cardId, { status: "error", pendingTaskId: null });
+          setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, failed: prev.failed + 1 } : prev);
+        } else if (Date.now() - startedAt > POLL_GIVE_UP_MS) giveUp();
+        else setTimeout(tick, 4e3);
+      }).catch(() => {
+        if (Date.now() - startedAt > POLL_GIVE_UP_MS) {
+          giveUp();
+          return;
+        }
+        setTimeout(tick, 5e3);
+      });
       setTimeout(tick, 2500);
     };
     useEffect(() => {
@@ -2180,36 +2406,80 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       );
     };
     const batchGenerate = async (entries) => {
-      const todo = entries.filter((e) => e.c.status !== "done");
+      const todo = entries.filter((e) => e.c.status !== "done" && e.c.status !== "wip");
       if (!todo.length) return;
       setBatching(true);
       const prices = await Promise.all(todo.map((e) => priceShot(e)));
-      let free = 0, paid = 0, credits = 0, unknown = 0;
-      prices.forEach((pr) => {
-        if (pr && pr.free) free++;
-        else if (pr && pr.cost != null) {
-          paid++;
-          credits += pr.cost;
-        } else unknown++;
-      });
+      const { free, paid, credits, unknown } = tallyPrices(prices);
+      const emptyPromptShots = todo.filter((e) => !effectivePrompt(e.c).trim());
       const msg = `Generate ${todo.length} shot(s)?
 
 \u{1F3AB} ${free} covered by a free card
 \u2248 ${paid} will spend credits \u2014 about ${credits.toLocaleString()} total` + (unknown ? `
-\u26A0 ${unknown} shot(s)' cost couldn't be verified \u2014 they may also spend credits.` : ".");
+\u26A0 ${unknown} shot(s)' cost couldn't be verified \u2014 they may also spend credits.` : ".") + (emptyPromptShots.length ? `
+\u26A0 ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.map((e) => e.code).join(", ")}` : "");
       if (!window.confirm(msg)) {
         setBatching(false);
         return;
       }
+      const ids = new Set(todo.map((e) => e.c.id));
+      setBatchTally({ total: todo.length, submitted: 0, done: 0, failed: 0, ids });
       for (const e of todo) {
+        let r;
         try {
-          await generateShot(e, { skipConfirm: true });
+          r = await generateShot(e, { skipConfirm: true });
         } catch (_e) {
+          r = { ok: false };
         }
-        await new Promise((r) => setTimeout(r, 2200));
+        setBatchTally((prev) => prev && prev.ids.has(e.c.id) ? { ...prev, submitted: prev.submitted + (r.ok ? 1 : 0), failed: prev.failed + (r.ok ? 0 : 1) } : prev);
+        await new Promise((res) => setTimeout(res, 2200));
       }
       setBatching(false);
     };
+    const PRICE_DEBOUNCE_MS = 600;
+    const [priceCache, setPriceCache] = useState({});
+    const priceInFlightRef = useRef({});
+    const ensurePriced = useCallback((entry, force) => {
+      const payload = shotPayload2(entry);
+      const fp = priceFingerprint(payload);
+      const cached = priceCache[entry.c.id];
+      if (!force && cached && cached.fp === fp && !cached.loading) return;
+      if (!payload.hasInput) {
+        setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr: null, loading: false } }));
+        return;
+      }
+      if (priceInFlightRef.current[entry.c.id] === fp) return;
+      priceInFlightRef.current[entry.c.id] = fp;
+      setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr: cached && cached.fp === fp ? cached.pr : null, loading: true } }));
+      priceShot(entry).then((pr) => {
+        const stillCurrent = priceInFlightRef.current[entry.c.id] === fp;
+        if (stillCurrent) delete priceInFlightRef.current[entry.c.id];
+        if (!stillCurrent) return;
+        setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr, loading: false } }));
+      });
+    }, [project, priceCache]);
+    const { notDone, notDoneFp } = useMemo(() => {
+      const boardEntries = project ? flat(project) : [];
+      const nd = boardEntries.filter((e) => e.c.status !== "done");
+      const fp = nd.map((e) => e.c.id + ":" + priceFingerprint(shotPayload2(e))).join("|");
+      return { notDone: nd, notDoneFp: fp };
+    }, [project]);
+    const priceDebounceRef = useRef(null);
+    useEffect(() => {
+      clearTimeout(priceDebounceRef.current);
+      priceDebounceRef.current = setTimeout(() => notDone.forEach((e) => ensurePriced(e)), PRICE_DEBOUNCE_MS);
+      return () => clearTimeout(priceDebounceRef.current);
+    }, [notDoneFp]);
+    const refreshEstimate = useCallback(() => notDone.forEach((e) => ensurePriced(e, true)), [notDone, ensurePriced]);
+    const pending = notDone.filter((e) => {
+      const r = priceCache[e.c.id];
+      return !r || r.loading;
+    }).length;
+    const settled = notDone.filter((e) => {
+      const r = priceCache[e.c.id];
+      return r && !r.loading;
+    }).map((e) => priceCache[e.c.id].pr);
+    const costEstimate = { ...tallyPrices(settled), pending, notDoneCount: notDone.length };
     return {
       genState,
       setGenState,
@@ -2222,6 +2492,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       genRefState,
       setGenRefState,
       batching,
+      batchTally,
       generateShot,
       useExistingVideo,
       genImage,
@@ -2229,7 +2500,9 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       genEdit,
       genRef,
       routeGen,
-      batchGenerate
+      batchGenerate,
+      costEstimate,
+      refreshEstimate
     };
   }
   function useExportPipeline(project, thumbs) {
@@ -2408,6 +2681,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       genRefState,
       setGenRefState,
       batching,
+      batchTally,
       generateShot,
       useExistingVideo,
       genImage,
@@ -2415,8 +2689,30 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       genEdit,
       genRef,
       routeGen,
-      batchGenerate
+      batchGenerate,
+      costEstimate,
+      refreshEstimate
     } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
+    const onVideoSubmit = useCallback((cardId, detail) => {
+      setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(detail.task_id).slice(-6) + ")" } }));
+      setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id });
+    }, [setGenState, setCardStatus]);
+    const onVideoResult = useCallback((cardId, detail) => {
+      const mid = (detail.media_ids || [])[0];
+      setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
+      setCardStatus(cardId, {
+        status: "done",
+        resultMid: mid,
+        trimIn: 0,
+        trimOut: null,
+        pendingTaskId: null,
+        ...detail.duration ? { actualDur: detail.duration } : {}
+      });
+    }, [setGenState, setCardStatus]);
+    const onVideoError = useCallback((cardId, detail) => {
+      setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
+      setCardStatus(cardId, { status: "error", pendingTaskId: null });
+    }, [setGenState, setCardStatus]);
     useEffect(() => {
       const clearDraft = (s) => {
         if (!("__draft__" in s)) return s;
@@ -2511,6 +2807,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         exportCut,
         batching,
         batchGenerate,
+        batchTally,
         addRef,
         setRef,
         delRef,
@@ -2523,7 +2820,12 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         copyShot,
         setLook,
         setDraft,
-        splitShot
+        splitShot,
+        onVideoSubmit,
+        onVideoResult,
+        onVideoError,
+        costEstimate,
+        refreshEstimate
       }
     )), seq && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
