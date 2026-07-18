@@ -708,9 +708,18 @@
         .catch(function () { done(); self._renderError('network error'); });
     }
 
+    // POLL_GIVE_UP_MS mirrors the Loom's own pollShot give-up threshold (generous against
+    // the longest real clips -- 15s @ V4.0 full genuinely takes several minutes -- while
+    // still eventually freeing the Go button and marking a truly dead task, rather than
+    // polling forever with no way to retry). Found 2026-07-18 live-testing: this loop had
+    // no give-up path at all before.
     _poll(taskId, done) {
-      var self = this, res = this._result;
+      var self = this, res = this._result, startedAt = Date.now(), GIVE_UP_MS = 20 * 60 * 1000;
       clearTimeout(this._pollTimer);
+      var giveUp = function () {
+        done();
+        self._renderError('timed out waiting for this render — check the task on pixai.art, or try again');
+      };
       this._pollTimer = setTimeout(function tick() {
         fetch('/api/task-status?task_id=' + encodeURIComponent(taskId))
           .then(function (r) { return r.json(); })
@@ -726,14 +735,19 @@
             } else if (d.phase === 'failed') {
               done();
               self._renderError(d.error || ('task ' + (d.status || 'failed')));
+            } else if (Date.now() - startedAt > GIVE_UP_MS) {
+              giveUp();
             } else {
               res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Rendering under the eclipse… (task ' + esc(String(taskId).slice(-6)) + ')</span>';
               self._pollTimer = setTimeout(tick, 2000);
             }
           })
           .catch(function () {
-            // transient poll blip: the task is still running server-side -- keep polling
-            if (self.isConnected) self._pollTimer = setTimeout(tick, 2000);
+            // transient poll blip: the task is still running server-side -- keep polling,
+            // unless we're past the give-up threshold too.
+            if (!self.isConnected) return;
+            if (Date.now() - startedAt > GIVE_UP_MS) { giveUp(); return; }
+            self._pollTimer = setTimeout(tick, 2000);
           });
       }, 2000);
     }
@@ -782,17 +796,22 @@
     // ---- public host API ----
     // The lightbox / bulk-bar "Send to Video" entry (gallery addVideoRefs, sans host
     // chrome). Image refs only, as today's gallery bulk-send is -- unchanged from Phase 1.
+    // undefined/null (no array at all) is a no-op -- the caller has no opinion, leave
+    // whatever's already in the slots. An explicit EMPTY ARRAY clears the primary bank --
+    // load-bearing for prefill() below: switching the Loom to a shot/draft with zero refs
+    // used to leave the PREVIOUS shot's images sitting in the drawer, unnoticed, ready to
+    // submit against the wrong shot's generation. Found 2026-07-18 live-testing.
     setRefs(refs) {
-      refs = (refs || []).slice(0, 6);
-      if (!refs.length) return;
+      if (!Array.isArray(refs)) return;
+      refs = refs.slice(0, 6);
       if (refs.length > 1) this._setMode('r2v');
       var slots = refs.map(function (r) {
         var mid = String(r.media_id || r.mid);
         return { media_id: mid, thumb: r.thumb || ('/thumbs/' + mid + '.jpg') };
       });
       if (refs.length > 1) { this._setPrimary(slots); }
-      else if (this._mode === 'r2v') { this._setPrimary([slots[0]]); }
-      else { this._slots[0] = slots[0]; }
+      else if (this._mode === 'r2v') { this._setPrimary([slots[0] || null]); }
+      else { this._slots[0] = slots[0] || null; }
       this._renderSlots();
     }
 
@@ -810,15 +829,21 @@
       if (o.negative != null) this._neg.value = o.negative;
       if (o.refs) this.setRefs(o.refs);                    // back-compat alias for images
       if (o.images) this.setRefs(o.images);
-      if (o.video_refs && o.video_refs.length) {
+      // Array.isArray (not truthy-length) so an EXPLICIT empty array clears stale video
+      // refs from a previous shot, same reasoning as setRefs() above -- a shot with no
+      // video refs used to leave the last shot's video slots sitting there unnoticed.
+      if (Array.isArray(o.video_refs)) {
         this._vidSlots = o.video_refs.slice(0, 3).map(function (r) {
           var mid = String(r.media_id || r.mid);
           return { media_id: mid, thumb: r.thumb || ('/thumbs/' + mid + '.jpg') };
         });
         if (this._mode === 'r2v') this._renderVidSlots();
       }
-      if (o.audio_ref) {
-        this._audSlot = { media_id: String(o.audio_ref.media_id), filename: o.audio_ref.filename || 'audio ref' };
+      // undefined = caller has no opinion (leave it); explicit null = clear it. Distinct
+      // from images/video_refs above only because callers that never mention audio_ref at
+      // all (the gallery bulk-send path) still need "don't touch it" to work.
+      if (o.audio_ref !== undefined) {
+        this._audSlot = o.audio_ref ? { media_id: String(o.audio_ref.media_id), filename: o.audio_ref.filename || 'audio ref' } : null;
         if (this._mode === 'r2v') this._renderAudioRow();
       }
       if (o.prompt != null) this._promptSet(o.prompt);

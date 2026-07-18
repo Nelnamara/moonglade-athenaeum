@@ -208,6 +208,7 @@ const STYLES = `
   cursor:pointer;flex:none;display:grid;place-items:center;color:transparent;transition:all .12s;padding:0}
 .sb-tick.wip{border-color:var(--amber);color:var(--amber)}
 .sb-tick.done{border-color:var(--green);background:var(--green);color:var(--base)}
+.sb-tick.error{border-color:var(--coral);color:var(--coral)}
 
 .sb-body{padding:12px 13px;display:flex;flex-direction:column;gap:11px}
 .sb-frames-mini{display:flex;align-items:stretch;gap:8px}
@@ -487,7 +488,7 @@ const V2_STYLES = `
 .lv-st.todo{color:var(--subtext);background:var(--base);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
-.lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}
+.lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
 .lv-seg.sel{outline:2px solid var(--accent);outline-offset:-2px;z-index:2;}
 .lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
@@ -787,6 +788,25 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const activeRef = useRef(null);
   const genDrawerRef = useRef(null);
   const promptDirtyRef = useRef(false);
+  // The drawer resolves its OWN completion target via activeRef at listener-registration
+  // time -- but activeRef always points at "whatever shot is currently selected," read at
+  // whatever moment mg-result/mg-error actually FIRE, which can be minutes after submit if
+  // the owner switches shots while the render is in flight. genTargetRef freezes "which shot
+  // this drawer generation belongs to" the moment mg-submit fires (the earliest point the
+  // host can observe), so a later result/error routes to the shot that was ACTUALLY
+  // generated, not whatever happens to be selected when the poll resolves. Found 2026-07-18
+  // live-testing: switching shots mid-render silently attributed the result to the wrong
+  // card. The drawer only ever has one poll in flight at a time (its own Go button disables
+  // during a render), so a single ref -- not a task_id-keyed map -- is sufficient.
+  const genTargetRef = useRef(null);
+  // Tracks which shot the prefill effect below last ran for, so it can tell "the owner
+  // switched shots" apart from "a field on the SAME shot changed" (both re-trigger the
+  // effect, since active.c.* is in its dependency array). Only the former should clear
+  // promptDirtyRef -- without this, promptDirtyRef.current stays true forever after the
+  // FIRST hand-edit anywhere, and every other shot's drawer stops re-syncing its composed
+  // prompt: selecting shot B after hand-editing shot A leaves B's drawer showing A's stale
+  // text with no warning. Found 2026-07-18 live-testing.
+  const lastActiveIdRef = useRef(null);
   const bindGenDrawer = useCallback((el) => {
     genDrawerRef.current = el;
     if (el && !el._mgBound) {
@@ -795,9 +815,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       el.addEventListener("mg-pick-request", (e) => {
         openPick((mid, thumb) => e.detail.respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
       });
-      el.addEventListener("mg-submit", (e) => onVideoSubmit(activeRef.current.c.id, e.detail));
-      el.addEventListener("mg-result", (e) => onVideoResult(activeRef.current.c.id, e.detail));
-      el.addEventListener("mg-error", (e) => onVideoError(activeRef.current.c.id, e.detail));
+      el.addEventListener("mg-submit", (e) => {
+        genTargetRef.current = activeRef.current.c.id;
+        onVideoSubmit(genTargetRef.current, e.detail);
+      });
+      el.addEventListener("mg-result", (e) => onVideoResult(genTargetRef.current || activeRef.current.c.id, e.detail));
+      el.addEventListener("mg-error", (e) => onVideoError(genTargetRef.current || activeRef.current.c.id, e.detail));
     }
   }, [openPick, onVideoSubmit, onVideoResult, onVideoError]);
 
@@ -860,11 +883,23 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   useEffect(() => {
     const el = genDrawerRef.current;
     if (!el || tab !== "Video") return;
+    if (lastActiveIdRef.current !== active.c.id) {
+      promptDirtyRef.current = false;
+      lastActiveIdRef.current = active.c.id;
+    }
     const nextMode = drawerModeFor(active.c.mode);
+    // images/video_refs/audio_ref are ALWAYS set explicitly below, even to an empty array/
+    // null, never left out of the payload -- prefill()/setRefs() treat "key omitted" as
+    // "no opinion, leave whatever's there" but an explicit empty value as "clear it." A
+    // shot with zero refs used to leave the PREVIOUS shot's images/video/audio sitting in
+    // the drawer, unnoticed, ready to submit against the wrong shot. Found 2026-07-18
+    // live-testing (switching from a shot with an @image1 cast ref to an empty draft kept
+    // showing that same @image1 in the drawer).
     const payload = {
       mode: nextMode, duration: active.c.duration, audio: !!active.c.audioGen,
       audio_language: active.c.audioLanguage || "english",
       quality: project.draft ? "basic" : "professional",
+      images: [], video_refs: [], audio_ref: null,
     };
     if (nextMode === "i2v" && active.c.openFrame && active.c.openFrame.mediaId) {
       payload.images = [{ media_id: active.c.openFrame.mediaId, thumb: frameSrc(active.c.openFrame) }];
@@ -873,12 +908,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         .map((f) => ({ media_id: f.mediaId, thumb: frameSrc(f) }));
     } else if (nextMode === "r2v") {
       const sp = buildShotPayload(active, project, imgSrc);
-      if (sp.images.length) payload.images = sp.images.map(asRef);
+      payload.images = sp.images.map(asRef);
       const vids = (sp.video_refs || []).map(asRef);
       if (active.c.connect === "extend" && weavePrevEntry && weavePrevEntry.c.resultMid) {
         vids.push({ media_id: weavePrevEntry.c.resultMid, thumb: "/thumbs/" + weavePrevEntry.c.resultMid + ".jpg" });
       }
-      if (vids.length) payload.video_refs = vids;
+      payload.video_refs = vids;
     }
     if (!promptDirtyRef.current) payload.prompt = shotText(active, project);
     el.prefill(payload);
@@ -1011,7 +1046,17 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       }
     };
     let tabBody;
-    if (tab === "Video") tabBody = (
+    // <mg-generate-drawer> itself is NOT part of tabBody -- it's rendered once, always
+    // mounted, right below {tabBody} at the render site, and only CSS-hidden on other
+    // tabs. It used to live inside this Video-only branch, which meant switching tabs
+    // while a shot rendered unmounted the element and killed its in-flight poll outright
+    // (drawer.js disconnectedCallback clears the poll timer) -- the shot got stuck "wip"
+    // forever with no way to recover short of a full reload. videoTrailer holds the small
+    // bit of Video-tab UI that sits AFTER the drawer in the layout (no internal state of
+    // its own, safe to unmount/remount like every other tab) so the visual order is
+    // preserved once the drawer moves out. Found + fixed 2026-07-18 live-testing.
+    let videoTrailer = null;
+    if (tab === "Video") { tabBody = (
       <div>
         <label className="lv-lab">Mode</label>
         <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === active.c.mode ? "on" : "")}
@@ -1063,7 +1108,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             if (genDrawerRef.current) genDrawerRef.current.prefill({ prompt: shotText(active, project) });
           }}>&#8634; re-sync from shot</button>
         </div>
-        <mg-generate-drawer ref={bindGenDrawer}></mg-generate-drawer>
+      </div>
+    );
+    videoTrailer = (
+      <>
         {sel && <button className="lv-usevid" disabled={busy} onClick={() => useExistingVideo(sel)} title="Skip generation -- use a video you already have in your gallery as this shot's clip">
           &#128190; Use an existing video instead
         </button>}
@@ -1080,8 +1128,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             {draftAttachedInfo && draftAttachedInfo.mid === gs.mid && <div className="lv-ok2">&#10003; attached to {draftAttachedInfo.code} &middot; it's now that shot's result</div>}
           </div>
         )}
-      </div>
-    );
+      </>
+    ); }
     else if (tab === "Image") {
       const gi = genImgState[active.c.id] || {};
       const busyI = gi.phase === "submitting" || gi.phase === "running";
@@ -1197,6 +1245,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             {acct.claim_credits ? <span className="lv-balclaim"> &middot; +{acct.claim_credits} claimable</span> : null}</div>
         )}
         {tabBody}
+        {/* Always mounted (never conditionally rendered on `tab`) so switching tabs mid-
+            render can't unmount the element and kill its in-flight poll -- CSS-hidden
+            instead, exactly like every other tab's content stays out of the DOM flow
+            without losing its live state. See the videoTrailer comment above. */}
+        <mg-generate-drawer ref={bindGenDrawer} style={{ display: tab === "Video" ? "" : "none" }}></mg-generate-drawer>
+        {videoTrailer}
       </div>
     );
   }
@@ -1378,7 +1432,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <div className="lv-df-veil" onClick={(ev) => { if (ev.target === ev.currentTarget) setDeepFocus(null); }}>
             <div className="lv-df">
               <div className="lv-df-head">
-                <button className={"sb-tick " + c.status} title={`Status: ${c.status} (click to cycle)`}
+                <button className={"sb-tick " + c.status} title={`Status: ${c.status} (click to cycle${c.status === "error" ? " — clears the error" : ""})`}
                   onClick={() => dfPatch((cc) => ({ ...cc, status: cc.status === "todo" ? "wip" : cc.status === "wip" ? "done" : "todo" }))}>✓</button>
                 <span className="lv-df-code">{deepFocus.code}</span>
                 <input className="lv-df-title" value={c.title || ""} placeholder="untitled"
@@ -1740,8 +1794,21 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   // classifyTaskStatus (loom-mutations.js) is the shared, tested response classifier;
   // the recursive setTimeout tick loop around it stays here since the polling/timing
   // itself is an inherently side-effectful concern, not a pure reducer.
+  // No terminal "error" status previously existed on the card itself (only "todo"/"wip"/
+  // "done") -- a failed render cleared pendingTaskId but left status:"wip" forever, so a
+  // dead generation was indistinguishable from a live one after reload, and this loop
+  // polled forever regardless (no give-up path, no cancel button anywhere in generation).
+  // Found 2026-07-18 live-testing. POLL_GIVE_UP_MS is generous against the longest real
+  // clips (15s @ V4.0 full genuinely takes several minutes) while still eventually freeing
+  // a shot that's actually dead server-side, rather than polling it forever.
+  const POLL_GIVE_UP_MS = 20 * 60 * 1000;
   const pollShot = (cardId, tid) => {
     setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(tid).slice(-6) + ")" } }));
+    const startedAt = Date.now();
+    const giveUp = () => {
+      setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: "timed out waiting for this render — check the task on pixai.art, or try again" } }));
+      setCardStatus(cardId, { status: "error", pendingTaskId: null });
+    };
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
       if (cls.phase === "done") {
@@ -1754,9 +1821,13 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // PREVIOUS result was trimmed to, and a stale trimOut past the new clip's end can hang
         // SequencePlayer on it forever (it never reaches the advance threshold).
         setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
-      } else if (cls.phase === "failed") { setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } })); setCardStatus(cardId, { pendingTaskId: null }); }
+      } else if (cls.phase === "failed") { setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } })); setCardStatus(cardId, { status: "error", pendingTaskId: null }); }
+      else if (Date.now() - startedAt > POLL_GIVE_UP_MS) giveUp();
       else setTimeout(tick, 4000);
-    }).catch(() => setTimeout(tick, 5000));
+    }).catch(() => {
+      if (Date.now() - startedAt > POLL_GIVE_UP_MS) { giveUp(); return; }
+      setTimeout(tick, 5000);
+    });
     setTimeout(tick, 2500);
   };
   // Resume any shot whose render was interrupted by a tab close: the card kept
@@ -2029,7 +2100,10 @@ export default function App() {
   }, [setGenState, setCardStatus]);
   const onVideoError = useCallback((cardId, detail) => {
     setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
-    setCardStatus(cardId, { pendingTaskId: null });
+    // Persist the failure onto the card itself, not just the ephemeral (reload-wiped)
+    // genState -- previously only pendingTaskId cleared here, leaving status:"wip" forever,
+    // indistinguishable from a shot that's still genuinely rendering. Found 2026-07-18.
+    setCardStatus(cardId, { status: "error", pendingTaskId: null });
   }, [setGenState, setCardStatus]);
   // Draft-generation results (Image/Edit/Reference/Video) are keyed by the fixed "__draft__"
   // id, shared across every open project -- without this, a finished draft from project A
