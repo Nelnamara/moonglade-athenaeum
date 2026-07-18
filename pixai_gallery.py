@@ -9737,6 +9737,139 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
         return jsonify({"ok": True})
 
+    # Tier 2 of the two-tier project export: a self-contained zip carrying every media
+    # file a project actually references, alongside the same {project, thumbs} JSON tier 1
+    # already produces client-side (see exportJSON in master-storyboard.jsx). A real
+    # PixAI media_id is globally issued, not locally scoped, so the bundle keeps it as-is
+    # end to end -- no path-rewriting inside the project object, ever. On import, a media
+    # id already resolvable on the receiving machine is simply skipped (both sides already
+    # have it); one that isn't gets copied into imported/ and cataloged fresh. That also
+    # makes re-importing the same bundle twice a no-op the second time.
+    _BUNDLE_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}  # mirrors backup.py's
+    # _VIDEO_EXTS; not imported directly -- pixai_gallery.py is the lower module in the
+    # three-file layering (backup.py imports this file, never the reverse).
+
+    def _loom_collect_media_ids(project):
+        """Every real (catalog) media_id a project references -- resultMid, both frame
+        slots, and every cast/asset entry. thumbId references are NOT collected: they're
+        client-only (base64 in `thumbs`) and already travel inside project.json as-is."""
+        ids = set()
+        for act in (project.get("acts") or []):
+            for c in (act.get("cards") or []):
+                if c.get("resultMid"):
+                    ids.add(str(c["resultMid"]))
+                for slot in ("openFrame", "closeFrame"):
+                    f = c.get(slot) or {}
+                    if f.get("mediaId"):
+                        ids.add(str(f["mediaId"]))
+        for a in (project.get("assets") or []):
+            if a.get("mediaId"):
+                ids.add(str(a["mediaId"]))
+        return ids
+
+    def _loom_resolve_media(mid):
+        """A project can reference either an image OR a video by media_id (a shot's
+        resultMid is very often a video), but find_files_for_media_id only ever sees
+        images by design. Same fallback /api/loom/export already uses for exactly this
+        reason: catalog row -> is_video + filename -> out_dir/filename. Returns a Path
+        or None."""
+        paths = find_files_for_media_id(out_dir, mid)
+        if paths:
+            return paths[0]
+        row = get_row(db_path, mid)
+        if row and str(row.get("is_video") or "") == "1" and row.get("filename"):
+            p = out_dir / row["filename"]
+            if p.exists():
+                return p
+        return None
+
+    @app.route("/api/loom/export-bundle", methods=["POST"])
+    def api_loom_export_bundle():
+        """Full-bundle export: a zip of project.json (identical shape to the lightweight
+        Backup .json) plus every referenced media file under media/<id><ext>. Localhost-only
+        -- reads real files off disk, same trust level as /export-zip."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        import io
+        import zipfile
+        body = request.get_json(silent=True) or {}
+        project = body.get("project") or {}
+        thumbs = body.get("thumbs") or {}
+        if not project:
+            return jsonify({"error": "no project given"}), 400
+        mids = _loom_collect_media_ids(project)
+        mem = io.BytesIO()
+        missing = []
+        with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
+            z.writestr("project.json", json.dumps({"project": project, "thumbs": thumbs}))
+            for mid in mids:
+                p = _loom_resolve_media(mid)
+                if not p:
+                    missing.append(mid)
+                    continue
+                z.write(p, arcname="media/{}{}".format(mid, p.suffix.lower()))
+        mem.seek(0)
+        name = "{}_bundle.zip".format((project.get("name") or "loom_project").replace(" ", "_"))
+        resp = send_file(mem, mimetype="application/zip", as_attachment=True, download_name=name)
+        # Missing media doesn't fail the export (a partial bundle is still useful) -- the
+        # client surfaces this list so the owner knows what didn't travel.
+        resp.headers["X-Bundle-Missing-Count"] = str(len(missing))
+        return resp
+
+    @app.route("/api/loom/import-bundle", methods=["POST"])
+    def api_loom_import_bundle():
+        """Accepts a full-bundle zip (see export-bundle), catalogs any media this machine
+        doesn't already have (source='api' -- it's real PixAI media, just synced via the
+        bundle instead of --update), and returns {project, thumbs} in the exact shape
+        importJSON already expects, so both tiers share one client-side create-project path.
+        Localhost-only."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        import io
+        import time
+        import zipfile
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "no file"}), 400
+        try:
+            z = zipfile.ZipFile(io.BytesIO(f.read()))
+            data = json.loads(z.read("project.json").decode("utf-8"))
+        except Exception:
+            return jsonify({"error": "not a valid bundle (couldn't read project.json)"}), 400
+        project = data.get("project")
+        if not project:
+            return jsonify({"error": "bundle's project.json has no project"}), 400
+        imported_dir = out_dir / "imported"
+        rows = []
+        for name in z.namelist():
+            if not name.startswith("media/") or name.endswith("/"):
+                continue
+            mid = Path(name).stem
+            if _loom_resolve_media(mid):
+                continue  # already have it -- both sides share this media, nothing to do
+            ext = Path(name).suffix.lower()
+            imported_dir.mkdir(parents=True, exist_ok=True)
+            dest = imported_dir / "{}{}".format(mid, ext)
+            dest.write_bytes(z.read(name))
+            is_vid = ext in _BUNDLE_VIDEO_EXTS
+            thumb_path = thumb_dir / "{}.jpg".format(mid)
+            if is_vid:
+                make_video_thumbnail(dest, thumb_path)  # best-effort; --rebuild-thumbs backfills
+            else:
+                make_thumbnail(dest, thumb_path)
+            row = {k: "" for k in CATALOG_FIELDS}
+            row.update({
+                "media_id": mid, "filename": str(dest.relative_to(out_dir)).replace("\\", "/"),
+                "source": "api", "status": "imported",
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "prompt_preview": dest.stem[:100], "is_video": "1" if is_vid else "",
+            })
+            rows.append(row)
+        if rows:
+            save_catalog(db_path, rows)
+        return jsonify({"project": project, "thumbs": data.get("thumbs") or {},
+                        "media_added": len(rows)})
+
     @app.route("/api/task-status")
     def api_task_status():
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
