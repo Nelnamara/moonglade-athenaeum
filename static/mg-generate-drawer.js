@@ -680,7 +680,11 @@
 
     // ---- floating ref preview (own element; no host singleton coupling) ----
     _showPreview(mid, anchor) {
-      var p = this._preview; if (!p || !mid) return;
+      var p = this._preview;
+      // A prefilled slot can carry a local data-URL (a cast asset never uploaded to PixAI
+      // yet) instead of a real media_id -- /thumbs/<id>.jpg would 404 for that, so skip
+      // rather than show a broken image.
+      if (!p || !mid || !/^\d+$/.test(mid)) return;
       p.innerHTML = '<img src="/thumbs/' + esc(mid) + '.jpg" alt="">';
       p.classList.add('open'); p.setAttribute('aria-hidden', 'false');
       var r = anchor.getBoundingClientRect(), w = 300, gap = 12, x;
