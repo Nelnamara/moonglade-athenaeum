@@ -31,9 +31,10 @@ PixAI's API, and curates the archive. Two surfaces are current — the CLI
 legacy and folding into the web app. All work happens on the `loom-v2` branch; `master` has no
 commits that aren't already in `loom-v2`. Merging `loom-v2` → `master` with `--no-ff` is the
 single act that carries the Loom V2 set, the achievement system, `CHANGELOG.md` and `LICENSE`
-to master. **V2 is the live storyboard surface** and has full feature parity with classic Loom;
-whether to retire classic (delete its render tree and the `v2` toggle) is an open owner call —
-see *Open owner calls*. The repo is public and has real external users.
+to master. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
+tree, the `v2` toggle, and the `CardView`/`CardEditor` components) was retired 2026-07-17; `/loom`
+opens straight into the V2 shell with no layout switch. The repo is public and has real external
+users.
 
 **Numbers live in commands, not in this file:**
 
@@ -55,17 +56,16 @@ see *Open owner calls*. The repo is public and has real external users.
 - The top strip's **Play** button runs the sequence, disabled until a shot has a result
   (768aecf).
 - The top strip's **Export** button trims + stitches every finished shot into one mp4
-  (`exportCut`, shared with classic Loom unchanged), disabled until a shot has a result. The
-  export-status overlay renders above V2 automatically (`.sb-seq` z-index 500 vs `.lv-overlay`
-  400), same as Play's `SequencePlayer`.
-- The top strip's **Generate all** button batches every not-yet-done shot (`batchGenerate`,
-  shared with classic Loom unchanged), pricing every shot first so the confirm shows real
-  cost + free-card coverage before anything spends. Disabled while a batch is running or the
-  board is empty.
+  (`exportCut`), disabled until a shot has a result. The export-status overlay renders above the
+  shell automatically (`.sb-seq` z-index 500 vs `.lv-overlay` 400), same as Play's
+  `SequencePlayer`.
+- The top strip's **Generate all** button batches every not-yet-done shot (`batchGenerate`),
+  pricing every shot first so the confirm shows real cost + free-card coverage before anything
+  spends. Disabled while a batch is running or the board is empty.
 - **Deep Focus** (double-click a board card) is a maximized single-shot editor: title, mode,
   duration, both `FrameSlot`s, and per-shot **other references** (add/edit/remove image, video,
-  or audio refs and their `@tags`) — the same `addRef`/`setRef`/`delRef` classic Loom's
-  `CardEditor` uses, reusing its exact markup. A "Select in Generate →" button binds the shot and
+  or audio refs and their `@tags`) via `addRef`/`setRef`/`delRef`. A "Select in Generate →" button
+  binds the shot and
   closes the modal.
 - The **Timeline** is a fixed drawer with three states (hidden / slim / full), video preview
   above the scrubber, drag handle on `.lv-tlhandle`.
@@ -95,8 +95,8 @@ see *Open owner calls*. The repo is public and has real external users.
   load, so a mid-render tab close no longer strands the shot or orphans its clip.
 - Frame handoff is trim-aware — it extracts the previous shot's frame at its `trimOut`, not the
   untrimmed clip's real last frame.
-- Multiple named storyboards persist at `storyboard:v2:proj:<id>` with an active pointer; a
-  shared `ProjectSwitcher` renders in both the classic and V2 headers.
+- Multiple named storyboards persist at `storyboard:v2:proj:<id>` with an active pointer, via the
+  `ProjectSwitcher` in the top strip.
 - The state layer is four composed hooks — `useProjectStore`, `useShotMutations`,
   `useGenerationPipeline`, `useExportPipeline` — with pure reducers/classifiers/builders in
   `loom/src/loom-mutations.js` (ee4b33a).
@@ -115,7 +115,7 @@ see *Open owner calls*. The repo is public and has real external users.
 - Loom projects persist as one atomically-written file per key under `out_dir/loom/kv`, with
   the legacy `store.json` auto-migrated in on first touch (1710f04).
 - **Project export is a two-tier "Export ▾" menu** off `ProjectSwitcher` (the `ExportMenu`
-  component, shared by classic and V2): Shot list (.txt), Lightweight backup (.json — project +
+  component): Shot list (.txt), Lightweight backup (.json — project +
   local-only thumbs, referencing your own catalog by media id), and Full bundle (.zip — the
   same plus the actual referenced media files, server-built at `/api/loom/export-bundle`). A
   real PixAI media_id is globally issued, so the bundle keeps ids as-is end to end; media
@@ -210,26 +210,12 @@ see *Open owner calls*. The repo is public and has real external users.
 
 ## In flight
 
-- **The Loom's V1 → V2 feature convergence is complete** (2026-07-17) — V2 has everything
-  classic has. Classic Loom's actual retirement (deleting its render tree and the `v2` toggle)
-  is the remaining step; see *Open owner calls*.
 - Gated on nothing, ready whenever there's capacity: further V2 shell work, the Loom
-  visual-refinement pass, and the video-control base set. Render-tree unification is parked
-  (see *Later epics*) and is orthogonal to all three.
+  visual-refinement pass, and the video-control base set.
 
 ---
 
 ## Next
-
-### The Loom — V1 → V2 gap (the only copy of this list)
-
-**Empty.** Both retirement-blocking items the owner set on 2026-07-17 have landed in V2: Deep
-Focus now carries audio cue, notes, the discreet/blur toggle, manual status-cycle, and "Copy
-shot"; and V2's top strip/Cast panel now surface Export shot-list, Backup, Restore, and Import
-Collection. `ImportCollection`'s `.sb-pick-ov` overlay still shares a z-index with `.lv-overlay`
-(400, not a clean 500-over-400 hierarchy) rather than a bug — it relies on DOM paint order, which
-holds today but is worth a live look next time that stacking area changes. Classic Loom's
-retirement itself is next — see *Open owner calls*.
 
 ### The Loom — other
 
@@ -310,11 +296,6 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 
 ## Open owner calls
 
-- **Retire classic Loom?** V2 has reached full feature parity with classic (see *The Loom —
-  V1 → V2 gap*, now empty) — the condition the owner set for retirement is met. Not yet acted
-  on: removing classic's render tree, the `v2` toggle, and the classic-only code path is a
-  distinct, larger step from the parity work itself, and needs an explicit owner go before
-  any of it is deleted.
 - **Trophy Hall redesign** is blocked on the owner's own Figma frame. Ask for the frame URL; do
   not re-suggest the screenshot-decomposition checklist. The Figma plugin is live and
   authenticated. (`docs/DESIGN_WORKFLOW.md`.)
@@ -378,6 +359,9 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 
 - **No UI for removing an image from a collection.** The `/collection-remove` POST route exists
   with zero callers anywhere in the codebase. A real gap, not a design choice.
+- **`ImportCollection`'s `.sb-pick-ov` overlay shares z-index 400 with `.lv-overlay`** rather than
+  a clean 500-over-400 hierarchy — it relies on DOM paint order, which holds today. Worth a live
+  look the next time that stacking area changes. Low severity.
 - **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not roam between
   the home and work machines this project is already edited from.
 - **`master` is missing `CHANGELOG.md` and `LICENSE`**, and master's README still points at
@@ -402,12 +386,12 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 
 ## Later epics
 
-- **Render-tree unification** (merging the classic and V2 trees) is **parked, untested and
-  undecided** — it has never had the rigor the state-layer probe got. Nothing may be filed
-  under, deferred because of, or scoped relative to a "rebuild" umbrella. The genuinely
-  unsolved part is the state↔view coupling: the shared gallery-picker DOM bridge, status writes
-  mid-generation-poll, entries being per-render-derived, V2-panel-layout storage sharing,
-  per-project selection reset.
+- **Render-tree unification is done** — there is one Loom render tree (the V2 shell); the classic
+  tree it would have been merged with is gone (retired 2026-07-17). Nothing is filed under a
+  "rebuild" umbrella. Remaining Loom render-layer cleanup is ordinary dead-CSS pruning: the
+  `STYLES` block still carries classic-only `sb-*` rules (e.g. `.sb-top`, `.sb-card`) alongside the
+  live shared ones (`.sb-shotprev`, `.sb-frame*`, `ProjectSwitcher`, the export/picker overlays) —
+  safe to prune when convenient, not a blocker.
 - **Loom tooling.** React + esbuild + Vitest/RTL is the combo. Preact is an optional later
   spike; Svelte and hand-rolled vanilla+signals are rejected for a solo-dev migration of
   untested code; canvas is not needed for the reel at this scale. If docking is ever needed
