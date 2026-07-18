@@ -27,12 +27,15 @@
 </head>
 <body>
   <h1>&lt;mg-generate-drawer&gt; — standalone verification</h1>
-  <p>Isolates the shared Generate form (Option-A component #3, Video tab first) from both
-  hosts, so a component bug and a mount-bridge bug can't be confused. Serve the gallery,
-  then open this at <code>/static/mg-generate-drawer.html</code> on the same machine (it
-  calls the localhost-gated <code>/api/price</code> / <code>/api/loom/generate</code>).
-  Slot picks are serviced by <code>&lt;mg-gallery-picker&gt;</code> via the
-  <code>mg-pick-request</code> event — exactly how a real host wires it.</p>
+  <p>Isolates the shared Generate form (full-parity build: 6 image + 3 video + 1 audio ref,
+  negative prompt, Channel, full model roster) from both hosts, so a component bug and a
+  mount-bridge bug can't be confused. Serve the gallery, then open this at
+  <code>/static/mg-generate-drawer.html</code> on the same machine (it calls the
+  localhost-gated <code>/api/price</code> / <code>/api/loom/generate</code> / <code>/api/upload</code>).
+  Image and video slot picks are serviced by <code>&lt;mg-gallery-picker&gt;</code> via the
+  <code>mg-pick-request</code> event, filtered by its <code>kind</code> hint — exactly how a
+  real host wires it. Audio refs upload directly (no picker involved, matching how the
+  component itself works).</p>
 
   <div class="card">
     <mg-generate-drawer tab="video"></mg-generate-drawer>
@@ -41,10 +44,12 @@
   <div id="out">events: (none yet)</div>
 
   <ol>
-    <li>Mode buttons reshape the slots: <b>First frame</b> = 1, <b>First + last</b> = start/end, <b>Multi-ref</b> = up to 9 with <code>+ add</code>.</li>
-    <li>Clicking a slot opens the shared gallery picker (the <code>mg-pick-request</code> seam); hovering a filled slot shows the floating preview.</li>
-    <li>With a slot filled, the cost line calls the real <code>/api/price</code> — a matching free card shows the green 🎫 line; V4.0 full shows the ⚠ warn.</li>
-    <li>In Multi-ref, typing <code>@image1</code> then a space becomes a thumbnail chip; the payload log shows it serialized back to text.</li>
+    <li>Mode buttons reshape the banks: <b>First frame</b> = 1 image, <b>First + last</b> = start/end, <b>Multi-ref</b> = up to 6 image + 3 video + 1 audio.</li>
+    <li>Clicking an image or video slot opens the shared gallery picker, filtered to that kind (the <code>mg-pick-request</code> seam); hovering a filled slot shows the floating preview.</li>
+    <li><b>+ Audio</b> opens a file picker and uploads directly to <code>/api/upload</code> — a real media_id, no gallery involved.</li>
+    <li>With any reference filled, the cost line calls the real <code>/api/price</code> — a matching free card shows the green 🎫 line; V4.0 full shows the ⚠ warn.</li>
+    <li>In Multi-ref, typing <code>@image1</code>/<code>@video1</code>/<code>@audio1</code> then a space becomes a thumbnail chip; the payload log shows it serialized back to text.</li>
+    <li>Two models in the roster (V3.0 Flash, V2.7) are disabled with a tooltip — no real modelId captured yet.</li>
     <li><b>Generate video spends real credits/cards</b> — every submit/result/error lands in the event log below. Don't click it casually.</li>
   </ol>
 
@@ -60,12 +65,13 @@
       out.textContent = lines.slice(0, 30).join('\n');
     }
 
-    // Service mg-pick-request with the shared gallery picker (mount-to-open idiom).
+    // Service mg-pick-request with the shared gallery picker (mount-to-open idiom),
+    // filtered to the component's kind hint so video slots actually show videos.
     drawer.addEventListener('mg-pick-request', function (e) {
       var respond = e.detail.respond;
-      log('mg-pick-request  slot=' + e.detail.slot + ' mode=' + e.detail.mode);
+      log('mg-pick-request  bank=' + e.detail.bank + ' slot=' + e.detail.slot + ' kind=' + e.detail.kind);
       var pk = document.createElement('mg-gallery-picker');
-      pk.setAttribute('default-type', 'image');
+      pk.setAttribute('default-type', e.detail.kind === 'video' ? 'video' : 'image');
       function closePk() { if (pk.parentNode) pk.parentNode.removeChild(pk); }
       pk.addEventListener('mg-pick', function (ev) {
         respond(ev.detail.media_id, ev.detail.thumb);

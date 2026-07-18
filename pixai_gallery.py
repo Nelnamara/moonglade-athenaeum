@@ -9255,17 +9255,27 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     None if params else "pick an image to edit")
         if p.get("mode") in ("I2V", "FLF", "R2V"):
             imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
-            if not imgs:
+            vids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip()]
+            auds = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip()]
+            # I2V/FLF are image-anchored (source frame / start+end frame); R2V accepts
+            # ANY reference kind alone (e.g. a video-only Multi-ref) -- gating all three
+            # modes on `imgs` alone silently mispriced a video/audio-only R2V request as
+            # "pick a source image", found 2026-07-18 while wiring the ref-slot expansion.
+            has_ref = imgs or (p["mode"] == "R2V" and (vids or auds))
+            if not has_ref:
                 return None, bool(p.get("no_card")), "pick a source image"
             try:
                 params = core.build_shot_video_params(
                     p["mode"], (p.get("prompt") or "").strip(), image_ids=imgs,
+                    video_ids=vids, audio_ids=auds,
                     duration=p.get("duration") or 5,
                     generate_audio=bool(p.get("generate_audio") or p.get("audio")),
                     model=(p.get("video_model") or ""),
                     camera_movement=(p.get("camera_movement") or ""),
                     quality=(p.get("quality") or "professional"),
-                    audio_language=(p.get("audio_language") or "english"))
+                    audio_language=(p.get("audio_language") or "english"),
+                    negative=(p.get("negative") or "").strip(),
+                    is_private=bool(p.get("is_private")))
             except core.PixAIError as e:
                 return None, bool(p.get("no_card")), str(e)[:140]
             return params, bool(p.get("no_card")), None
@@ -9728,7 +9738,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 model=(p.get("video_model") or ""),
                 camera_movement=(p.get("camera_movement") or ""),
                 quality=(p.get("quality") or "professional"),
-                audio_language=(p.get("audio_language") or "english"))
+                audio_language=(p.get("audio_language") or "english"),
+                negative=(p.get("negative") or "").strip(),
+                is_private=bool(p.get("is_private")))
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)

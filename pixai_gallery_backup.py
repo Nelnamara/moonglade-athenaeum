@@ -3108,12 +3108,16 @@ def _snap_video_duration(d):
 def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=(),
                             *, duration=5, generate_audio=False, model="",
                             audio_language="english", camera_movement="",
-                            quality="professional"):
+                            quality="professional", negative="", is_private=False):
     """PixAI video PROVIDER ADAPTER: map a Loom shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
     i2vPro; R2V/V2V/any-with-refs -> referenceVideo. Duration snaps to PixAI's allowed
-    lengths. (Card auto-apply happens at the route: a V4.0 card makes it free.)"""
+    lengths. (Card auto-apply happens at the route: a V4.0 card makes it free.)
+
+    `negative` only reaches i2vPro (I2V/FLF) -- the referenceVideo submit shape captured
+    2026-07-02 has no negativePrompts field, a genuine PixAI API gap (see docs/STATE.md's
+    Control Panel / web parity section), not an oversight here."""
     m = (mode or "R2V").upper()
     imgs = [str(i) for i in (image_ids or []) if str(i).strip()]
     vids = [str(v) for v in (video_ids or []) if str(v).strip()]
@@ -3126,16 +3130,19 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
         return build_video_parameters(prompt, imgs[0], model=mdl, duration=dur,
                                       mode=qual, generate_audio=generate_audio,
                                       audio_language=audio_language,
-                                      camera_movement=camera_movement, model_id=mid_num)
+                                      camera_movement=camera_movement, model_id=mid_num,
+                                      negative=negative, is_private=is_private)
     if m == "FLF" and len(imgs) >= 2:
         return build_video_parameters(prompt, imgs[0], model=mdl, tail_media_id=imgs[1],
                                       duration=dur, mode=qual, generate_audio=generate_audio,
                                       audio_language=audio_language,
-                                      camera_movement=camera_movement, model_id=mid_num)
+                                      camera_movement=camera_movement, model_id=mid_num,
+                                      negative=negative, is_private=is_private)
     if imgs or vids or auds:                       # R2V / V2V / any mode carrying references
         return build_reference_video_parameters(prompt, image_media_ids=imgs,
                                                  video_media_ids=vids, audio_media_ids=auds,
                                                  model=mdl, duration=dur, mode=qual,
+                                                 is_private=is_private,
                                                  generate_audio=generate_audio,
                                                  audio_language=audio_language,
                                                  model_id=(mid_num or REFVIDEO_MODEL_ID))

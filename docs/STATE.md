@@ -251,19 +251,25 @@ users.
 Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
 - `<mg-generate-drawer>` (`static/mg-generate-drawer.js` + its harness
-  `static/mg-generate-drawer.html`) is the third shared component: the **Video tab** at full
-  gallery parity — the gallery panel is the locked standard it extracts. It owns the whole
-  lifecycle (form → `/api/price` cost → `/api/loom/generate` submit → `/api/task-status` poll
-  → result strip) and stays picker-agnostic via `mg-pick-request` (host services it with its
-  own picker; `mg-submit`/`mg-result`/`mg-error` report the run; `setRefs()`/`prefill()` are
-  the bridge/shot-context entries). **No host mounts it yet**: the gallery keeps its own
-  working Video tab (adoption is a later, live-QA'd swap, same as the model-picker precedent),
-  and the Loom mount is the next step — blocked on one owner design call (how the component's
-  form binds to shot state: the shot-composed prompt vs a free prompt box, V2V, and the
-  Continuity coupling). Until that mount lands, the Loom's `genImage` / `runGen` / `genEdit` /
-  `genRef` and its Generate-tab chrome remain hand-rolled in `master-storyboard.jsx` — the
-  duplication that let the two Video tabs ship the same audio feature with different gaps is
-  still live.
+  `static/mg-generate-drawer.html`) is the third shared component: the **Video tab**, now at
+  FULL PixAI Multi-ref parity per the locked mockup — 6 image + 3 video + 1 audio ref slot
+  (video slots show real poster thumbs; audio uploads directly via `/api/upload`, no gallery
+  picker involved since audio isn't catalogued), negative prompt (i2vPro only — referenceVideo
+  has no such field, a genuine PixAI API gap, not an oversight), Channel (Normal/Enhanced,
+  PixAI's own wording, defaults Normal), and the full 7-model roster with capability chips
+  (2 models ship disabled pending a `--dump-params` capture: V3.0 Flash, V2.7). It owns the
+  whole lifecycle (form → `/api/price` cost → `/api/loom/generate` submit → `/api/task-status`
+  poll → result strip) and stays picker-agnostic via `mg-pick-request` (carries a `kind` hint
+  so a host filters image vs. video picks; `mg-submit`/`mg-result`/`mg-error` report the run;
+  `setRefs()`/`prefill()` are the bridge/shot-context entries, `prefill()` now also taking
+  `video_refs`/`audio_ref`/`negative`/`is_private`). Server-side, `build_shot_video_params()`
+  threads `negative`/`is_private` through to both builders, and `/api/price`'s video branch
+  now accepts ANY reference kind alone for R2V (was image-only — a video- or audio-only
+  Multi-ref silently mispriced as "pick a source image" until this build). **No host mounts
+  it yet**: the gallery keeps its own working Video tab (adoption is a later, live-QA'd swap,
+  same as the model-picker precedent), and the Loom mount is next. Until that mount lands, the
+  Loom's `genImage` / `runGen` / `genEdit` / `genRef` and its Generate-tab chrome remain
+  hand-rolled in `master-storyboard.jsx`.
 - `<mg-cost-badge>` remains unbuilt. Nothing exists in `static/` for it.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
@@ -287,14 +293,13 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   non-incremental re-walk of full history, to catalog rows without downloading files (fast
   inventory pass), or to pull a handful of tasks as a quick test. Needs its own scoping pass to
   pick the UI shape (a Panel "Advanced" section vs. per-run options).
-- **Video/audio reference slots are missing from the gallery drawer's Multi-ref.** The web
-  Video tab was born "simple mode" (`d03e6c8`, 2026-07-03) with image slots only, one day
-  after the CLI shipped the full `--ref-image/--ref-video/--ref-audio` grammar — and the
-  follow-up to grow it was never tracked until 2026-07-18. The server route already accepts
-  `video_refs`/`audio_refs` from any caller, and the Loom's refs already use them; only the
-  gallery panel's UI lacks the slots. PixAI's real Multi-ref split is 6 image + 3 video
-  slots, which the current undifferentiated 9-image cap doesn't reflect. Fix lands in
-  `<mg-generate-drawer>` so both panels inherit it.
+- **Video/audio reference slots are still missing from the LIVE gallery drawer's Multi-ref**
+  (unchanged — its own hand-rolled Video tab, `#gen-mode-video`). The web Video tab was born
+  "simple mode" (`d03e6c8`, 2026-07-03) with image slots only, one day after the CLI shipped
+  the full `--ref-image/--ref-video/--ref-audio` grammar, and the follow-up was never tracked
+  until 2026-07-18. **The fix exists now** — `<mg-generate-drawer>` has the full 6 image + 3
+  video + 1 audio slot split — but nothing mounts it in the gallery yet; it only reaches the
+  live drawer once that swap happens (see Web components above).
 - **Video negative prompts** are unreachable from the web drawer and the Loom.
   `build_video_parameters()` accepts a `negative` kwarg and emits `i2v["negativePrompts"]`, but
   the shared adapter `build_shot_video_params()` — used by both surfaces — has no `negative`
