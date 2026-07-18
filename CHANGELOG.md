@@ -14,6 +14,17 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Changed
+- **Classic Loom (V1) retired — the Loom is now a single surface.** With V2 at full feature parity,
+  the classic render tree is gone: the `CardView`/`CardEditor` components, the whole classic header /
+  reel / board JSX, the `v2` layout toggle, and the "◫ V2 layout" / "← Back to classic" buttons are
+  deleted. `/loom` opens straight into the V2 shell. The shared components it relied on
+  (`ProjectSwitcher`, `FrameSlot`, `ShotPreview`, `SequencePlayer`, `ImportCollection`, the
+  `ExportMenu`) and the pure state/logic layer are untouched, so there is now one render tree instead
+  of two hand-duplicated ones. The bundle drops ~39 KB (206 → 167 KB). This is the final step of the
+  Loom architecture audit's consolidation plan; render-tree unification is complete. (Dead classic-only
+  `sb-*` CSS rules remain in the `STYLES` block — harmless, prune when convenient.)
+
 ### Added
 - **The Loom — ShotPreview editing toolset.** The V2 timeline preview gains **fast-forward /
   rewind** (step the playhead for framing), **Split** (cut a shot in two at the playhead — both
