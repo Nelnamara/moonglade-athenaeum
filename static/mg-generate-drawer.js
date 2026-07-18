@@ -29,6 +29,10 @@
                         card, Loom pendingTaskId persistence).
      mg-result       -- detail: {media_ids, is_video, duration, paid_credit}.
      mg-error        -- detail: {error}.
+     mg-dirty        -- fired the moment the user TYPES in the prompt box (not on a
+                        programmatic prefill()). Hosts that auto-recompose the prompt from
+                        other state (the Loom's shot fields) use this to know a hand-edit
+                        is in progress and should win over the next auto re-sync.
    Public API:
      setRefs([{media_id,thumb},...]) -- the lightbox/bulk "Send to Video" entry, image refs
        only (unchanged from Phase 1); >1 ref switches to multi-ref.
@@ -136,6 +140,19 @@
     { value: 'v2.7', label: 'V2.7 High Dynamics', caps: ['camera moves', 'dynamic'], disabled: true }
   ];
 
+  // Matches the server's VIDEO_DURATIONS / _snap_video_duration exactly -- prefill() snaps
+  // to the nearest of these so an out-of-range shot duration (e.g. a hand-typed "8") can
+  // never leave the <select> on a value with no matching <option>, which resolves to an
+  // empty string and silently submits duration:0. Found live 2026-07-18 wiring the Loom
+  // mount: the seed project's example shot has duration:8, composed correctly into the
+  // prompt text ("~8s") but breaking the (fixed 5/6/10/15) duration selector.
+  var DURATIONS = [5, 6, 10, 15];
+  function snapDuration(d) {
+    d = Number(d);
+    if (!isFinite(d)) return 5;
+    return DURATIONS.reduce(function (best, v) { return Math.abs(v - d) < Math.abs(best - d) ? v : best; });
+  }
+
   var CHANNEL_CAP = {
     normal: 'Please keep creations SFW',
     enhanced: '👑 Enhanced — for professional creators'
@@ -242,6 +259,7 @@
         b.addEventListener('click', function () { self._setMode(b.getAttribute('data-vmode')); });
       });
       this._ce.addEventListener('input', function () {
+        self.dispatchEvent(new CustomEvent('mg-dirty', { bubbles: true, composed: true }));
         clearTimeout(self._chipTimer);
         self._chipTimer = setTimeout(function () { self._chipify(false); self._debCost(); }, 300);
       });
@@ -685,7 +703,10 @@
       refs = (refs || []).slice(0, 6);
       if (!refs.length) return;
       if (refs.length > 1) this._setMode('r2v');
-      var slots = refs.map(function (r) { return { media_id: String(r.media_id || r.mid), thumb: r.thumb }; });
+      var slots = refs.map(function (r) {
+        var mid = String(r.media_id || r.mid);
+        return { media_id: mid, thumb: r.thumb || ('/thumbs/' + mid + '.jpg') };
+      });
       if (refs.length > 1) { this._setPrimary(slots); }
       else if (this._mode === 'r2v') { this._setPrimary([slots[0]]); }
       else { this._slots[0] = slots[0]; }
@@ -698,7 +719,7 @@
       o = o || {};
       if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) this._setMode(String(o.mode).toLowerCase());
       if (o.video_model != null) { this._model.value = o.video_model; this._renderModelCaps(); }
-      if (o.duration != null) this._dur.value = String(o.duration);
+      if (o.duration != null) this._dur.value = String(snapDuration(o.duration));
       if (o.quality != null) this._quality.value = o.quality;
       if (o.is_private != null) { this._channel.value = o.is_private ? 'enhanced' : 'normal'; this._renderChanCap(); }
       if (o.audio != null) { this._audio.checked = !!o.audio; this._audioToggle(); }
@@ -707,7 +728,10 @@
       if (o.refs) this.setRefs(o.refs);                    // back-compat alias for images
       if (o.images) this.setRefs(o.images);
       if (o.video_refs && o.video_refs.length) {
-        this._vidSlots = o.video_refs.slice(0, 3).map(function (r) { return { media_id: String(r.media_id || r.mid), thumb: r.thumb }; });
+        this._vidSlots = o.video_refs.slice(0, 3).map(function (r) {
+          var mid = String(r.media_id || r.mid);
+          return { media_id: mid, thumb: r.thumb || ('/thumbs/' + mid + '.jpg') };
+        });
         if (this._mode === 'r2v') this._renderVidSlots();
       }
       if (o.audio_ref) {
