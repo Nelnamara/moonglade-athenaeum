@@ -94,6 +94,27 @@ git tags. Full prose notes for tagged versions live on
   tab; the Loom mount is next.
 
 ### Fixed
+- **Five generation-lifecycle bugs in the Loom, found live-testing real generations (a "great
+  shakedown session").** `<mg-generate-drawer>` is now mounted once and permanently in the
+  Video tab (CSS-hidden on other tabs, never conditionally unmounted) — switching tabs
+  mid-render used to kill the drawer's in-flight poll outright and strand the shot at "wip"
+  forever, recoverable only by a full reload. A completion handler now routes results/errors
+  via the shot id captured at submit time instead of re-reading whichever shot happens to be
+  selected when the event fires — switching shots mid-render used to attribute the finished
+  clip (or failure) to the wrong card. A real terminal `status:"error"` now exists on the card
+  (previously only todo/wip/done — a failed render left status:"wip" forever, indistinguishable
+  from one still genuinely rendering, with no cancel button anywhere in generation); both poll
+  loops now give up after 20 minutes instead of retrying forever. The drawer's image/video/
+  audio reference slots now explicitly clear when a newly-selected shot or draft has none,
+  instead of only overwriting when there's something new to show — switching from a shot with
+  cast refs to an empty draft used to leave the previous shot's images sitting in the drawer,
+  unnoticed, ready to submit against the wrong generation. And `promptDirtyRef` (tracks a
+  hand-edit in the drawer's prompt box since the last auto-sync) now resets on an actual shot
+  change, not only via the manual "↺ re-sync" button — it used to latch true forever after the
+  first hand-edit anywhere in a session, freezing every other shot's drawer on stale prompt
+  text with no warning. Live-verified end to end (DOM identity checks proving the drawer
+  survives tab round-trips, real shot-switch/unbind sequences proving refs and prompt both
+  clear correctly); 554 Python + 80 Node tests green.
 - **`/api/price`'s video branch required an image even for a video- or audio-only Multi-ref.**
   Found while wiring the ref-slot expansion above: the price-preview gate checked only
   `images`, so a valid R2V request carrying nothing but a video or audio reference silently
