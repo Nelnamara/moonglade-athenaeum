@@ -82,6 +82,10 @@ export const shotText = (entry, p) => {
   }
   L.push("", c.prompt || "(prompt tbd)");
   if (c.connect === "extend" || c.connect === "flf") L.push(CONTINUITY_PHRASE);
+  // Project "Look": a style paragraph applied to every shot so the whole film reads as
+  // one visual world. Appended to each shot's own prompt (and its shot-list text, which
+  // is the same string) -- the project-level analogue of the per-shot cast block.
+  if (p.look) L.push("", `Look (consistent across the film): ${p.look}`);
   const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id));
   if (usedCast.length) { L.push("", "Keep consistent:"); usedCast.forEach((as) =>
     L.push(`  ${as.name} — ${as.lock ? "maintain exact appearance from " : "reference "}${as.tag}`)); }
@@ -113,8 +117,12 @@ export const shotPayload = (entry, project, imgSrc) => {
     const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) imgs.push({ tag: r.tag, d }); });
   const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
   imgs.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
+  // Draft mode renders every shot at the cheaper "basic" quality for blocking out an
+  // animatic; approve the cut, turn Draft off, and re-generate the keepers at pro. Carried
+  // on the payload so BOTH the price preview and the actual submit see the same quality.
   return { mode: c.mode, prompt: shotText(entry, project), images: imgs.map((x) => x.d),
-           video_refs: vids, duration: c.duration, hasInput: (imgs.length + vids.length) > 0 };
+           video_refs: vids, duration: c.duration, quality: project.draft ? "basic" : "professional",
+           hasInput: (imgs.length + vids.length) > 0 };
 };
 
 // ---------- duration / pricing math feeding the timeline reel ----------

@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   patchCard, patchCardById, patchAct, patchAssets,
-  appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard,
+  appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard, splitCardAt,
   moveCardInAct, moveCardToAct, nextActName, appendAct, removeAct, moveActInProject,
   buildNewRef, patchRef, removeRef, countShots,
   parseCastIdsFromSearch,
@@ -109,6 +109,37 @@ describe("buildDuplicateCard", () => {
     const clone = buildDuplicateCard(card, "new-id", []);
     clone.openFrame.desc = "changed";
     assert.equal(card.openFrame.desc, "d");
+  });
+});
+
+describe("splitCardAt", () => {
+  test("divides one rendered shot into two halves of the SAME clip at the playhead", () => {
+    const p = makeProject([makeAct("a1", [
+      makeCard({ id: "c1", title: "Take", status: "done", resultMid: "M9", actualDur: 8, trimIn: 1, trimOut: 7 }),
+      makeCard({ id: "c2", title: "Next" }),
+    ])]);
+    const out = splitCardAt(p, "a1", "c1", 4, "c1b");
+    const cards = out.acts[0].cards;
+    assert.deepEqual(cards.map((c) => c.id), ["c1", "c1b", "c2"]);   // new half inserted right after
+    // left half keeps the clip, trimmed to the cut
+    assert.equal(cards[0].resultMid, "M9"); assert.equal(cards[0].trimIn, 1); assert.equal(cards[0].trimOut, 4);
+    // right half is the SAME clip (not a fresh todo), picking up where the left ended
+    assert.equal(cards[1].resultMid, "M9"); assert.equal(cards[1].status, "done");
+    assert.equal(cards[1].trimIn, 4); assert.equal(cards[1].trimOut, 7);
+    assert.match(cards[1].title, /cont\./);
+  });
+  test("a null trimOut (kept to the real end) splits into [in..t] + [t..null]", () => {
+    const p = makeProject([makeAct("a1", [makeCard({ id: "c1", status: "done", resultMid: "M", trimIn: 0, trimOut: null })])]);
+    const out = splitCardAt(p, "a1", "c1", 3, "c1b");
+    assert.equal(out.acts[0].cards[0].trimOut, 3);
+    assert.equal(out.acts[0].cards[1].trimIn, 3);
+    assert.equal(out.acts[0].cards[1].trimOut, null);
+  });
+  test("no-ops when the cut would make a zero-length half (at/outside the kept range)", () => {
+    const p = makeProject([makeAct("a1", [makeCard({ id: "c1", status: "done", resultMid: "M", trimIn: 2, trimOut: 6 })])]);
+    assert.equal(splitCardAt(p, "a1", "c1", 2, "x").acts[0].cards.length, 1);   // at the in-edge
+    assert.equal(splitCardAt(p, "a1", "c1", 6, "x").acts[0].cards.length, 1);   // at the out-edge
+    assert.equal(splitCardAt(p, "a1", "c1", 9, "x").acts[0].cards.length, 1);   // past the end
   });
 });
 
@@ -304,5 +335,18 @@ describe("buildExportClips", () => {
     const { clips, total } = buildExportClips(flat(p));
     assert.equal(clips.length, 0);
     assert.equal(total, 0);
+  });
+  test("carries a meaningful crop rect, drops full-frame/tiny ones", () => {
+    const p = makeProject([makeAct("a1", [
+      makeCard({ id: "c1", resultMid: "m1", crop: { x: 0.1, y: 0.2, w: 0.5, h: 0.6 } }),   // real crop
+      makeCard({ id: "c2", resultMid: "m2", crop: { x: 0, y: 0, w: 1, h: 1 } }),           // full frame -> dropped
+      makeCard({ id: "c3", resultMid: "m3", crop: { x: 0, y: 0, w: 0.02, h: 0.9 } }),      // too tiny -> dropped
+      makeCard({ id: "c4", resultMid: "m4" }),                                              // no crop
+    ])]);
+    const { clips } = buildExportClips(flat(p));
+    assert.deepEqual(clips[0].crop, { x: 0.1, y: 0.2, w: 0.5, h: 0.6 });
+    assert.equal(clips[1].crop, undefined);
+    assert.equal(clips[2].crop, undefined);
+    assert.equal(clips[3].crop, undefined);
   });
 });

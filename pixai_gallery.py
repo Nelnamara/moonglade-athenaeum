@@ -9644,6 +9644,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         mid = str(body.get("video_media_id") or "").strip()
         if not mid:
             return jsonify({"error": "video_media_id required"}), 400
+        # Trim-aware: the previous shot's trimOut is where its cut actually ends, so hand
+        # off the frame AT that point, not the untrimmed clip's real final frame. None/absent
+        # -> the clip isn't trimmed, take the true last frame.
+        try:
+            trim_out = body.get("trim_out")
+            trim_out = float(trim_out) if trim_out is not None else None
+        except (TypeError, ValueError):
+            trim_out = None
         try:
             core, session = _gen_session()
             vid_exts = (".mp4", ".webm", ".mov", ".mkv")
@@ -9666,7 +9674,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             fdir = out_dir / "loom" / "_frames"
             fdir.mkdir(parents=True, exist_ok=True)
             png = fdir / (mid + "_last.png")
-            if not core.extract_last_frame(str(vid), str(png)):
+            if not core.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
                 return jsonify({"error": "could not extract the last frame (ffmpeg)"}), 200
             frame_mid = core.upload_media(session, str(png))
             dur = core.probe_video_duration(str(vid))
@@ -9810,7 +9818,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 co = float(co) if co not in (None, "") else None
             except (TypeError, ValueError):
                 co = None
-            segs.append((path, ci, co, probe_has_audio(path)))
+            # Optional spatial crop: {x,y,w,h} fractions of the frame. Sanitized to a valid
+            # in-bounds sub-rectangle; anything malformed or effectively full-frame -> no crop.
+            crop = None
+            cr = c.get("crop")
+            if isinstance(cr, dict):
+                try:
+                    cx, cy = float(cr.get("x") or 0), float(cr.get("y") or 0)
+                    cw, ch = float(cr.get("w") or 0), float(cr.get("h") or 0)
+                    cx = min(max(cx, 0.0), 1.0); cy = min(max(cy, 0.0), 1.0)
+                    cw = min(cw, 1.0 - cx); ch = min(ch, 1.0 - cy)
+                    if cw > 0.05 and ch > 0.05 and (cw < 0.99 or ch < 0.99 or cx > 0.01 or cy > 0.01):
+                        crop = (cx, cy, cw, ch)
+                except (TypeError, ValueError):
+                    crop = None
+            segs.append((path, ci, co, probe_has_audio(path), crop))
         if not segs:
             return jsonify({"error": "no finished shot videos found on disk to export"}), 400
         _export_dir.mkdir(parents=True, exist_ok=True)
@@ -9819,12 +9841,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         parts, labels = [], ""
         # A silent segment needs an explicit numeric span to synthesize (anullsrc has no
         # natural end); reuse the trim's own end if given, else probe the real file once.
-        need_silence = any(not ha for (_p, _ci, _co, ha) in segs)
+        need_silence = any(not ha for (_p, _ci, _co, ha, _cr) in segs)
         silence_idx = len(segs)   # the synthetic-silence input, appended after all real -i's
-        for i, (path, ci, co, has_audio) in enumerate(segs):
+        for i, (path, ci, co, has_audio, crop) in enumerate(segs):
             tr = "trim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
-            parts.append("[%d:v]%s,setpts=PTS-STARTPTS,scale=%d:%d:force_original_aspect_ratio=decrease,"
-                         "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24[v%d]" % (i, tr, W, H, W, H, i))
+            # A per-shot crop happens in SOURCE pixels (iw/ih), before the scale-to-canvas, so
+            # the kept region fills the 1280x720 frame. No crop -> the chain is unchanged.
+            crop_f = ("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f," % (crop[2], crop[3], crop[0], crop[1])) if crop else ""
+            parts.append("[%d:v]%s,setpts=PTS-STARTPTS,%sscale=%d:%d:force_original_aspect_ratio=decrease,"
+                         "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24[v%d]" % (i, tr, crop_f, W, H, W, H, i))
             if has_audio:
                 atr = "atrim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
                 parts.append("[%d:a]%s,asetpts=PTS-STARTPTS[a%d]" % (i, atr, i))
@@ -9840,7 +9865,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             labels += "[v%d][a%d]" % (i, i)
         fc = ";".join(parts) + ";" + labels + "concat=n=%d:v=1:a=1[vout][aout]" % len(segs)
         cmd = ["ffmpeg", "-y"]
-        for (path, _ci, _co, _ha) in segs:
+        for (path, _ci, _co, _ha, _cr) in segs:
             cmd += ["-i", path]
         if need_silence:
             cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]

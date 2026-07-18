@@ -268,8 +268,9 @@ def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     seen = {}
 
-    def fake_extract(vp, out):
+    def fake_extract(vp, out, at_seconds=None):
         seen["video"] = vp
+        seen["at"] = at_seconds
         with open(out, "wb") as fh:      # simulate a produced frame
             fh.write(b"png")
         return out
@@ -282,6 +283,35 @@ def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch):
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
     assert d == {"frame_media_id": "FRAME123", "duration": 5.0}
     assert seen["video"].endswith("shot_V9.mp4")
+    assert seen["at"] is None            # no trim_out -> take the clip's true last frame
+
+
+def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch):
+    """A trimmed previous shot must hand off the frame at its trimOut (the point the cut
+    ends on), not the untrimmed clip's real final frame -- else the continuity chain shows
+    a frame the edit never plays."""
+    import pixai_gallery as g
+    (tmp_path / "videos").mkdir()
+    clip = tmp_path / "videos" / "shot_V9.mp4"
+    clip.write_bytes(b"fake")
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    seen = {}
+
+    def fake_extract(vp, out, at_seconds=None):
+        seen["at"] = at_seconds
+        with open(out, "wb") as fh:
+            fh.write(b"png")
+        return out
+    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
+    monkeypatch.setattr(core, "probe_video_duration", lambda p: 5.0)
+
+    cli = _client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+                                  is_video="1", created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/loom/handoff", json={"video_media_id": "V9", "trim_out": 3.2}).get_json()
+    assert d == {"frame_media_id": "FRAME123", "duration": 5.0}
+    assert seen["at"] == 3.2             # the trimOut reached ffmpeg
 
 
 def test_loom_handoff_needs_local_clip(tmp_path, monkeypatch):
