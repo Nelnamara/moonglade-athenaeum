@@ -4446,7 +4446,7 @@ document.addEventListener('DOMContentLoaded', function(){
   </div>
   <div class="gen-body">
     <div class="gen-seg" id="gen-mode-seg" style="margin-bottom:12px;">
-      <button id="gm-generate" class="on" onclick="Gen.setMode('generate')">Generate</button>
+      <button id="gm-generate" class="on" onclick="Gen.setMode('generate')">Image</button>
       <button id="gm-edit" onclick="Gen.setMode('edit')">Edit</button>
       <button id="gm-video" onclick="Gen.setMode('video')">Video</button>
     </div>
