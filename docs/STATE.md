@@ -163,6 +163,23 @@ see *Open owner calls*. The repo is public and has real external users.
   (`D:\Moonglade Athenaeum\pixai_backup\branding\`); the pre-57 badge originals are preserved
   unserved in `badges\_pre57_backup\`.
 
+## Public repo / community
+
+- **CI** (`.github/workflows/tests.yml`) runs both suites on every push and pull request: the
+  Python suite (`--ignore=tests/test_similar.py`, no `pixeltable`/PySide6 installed — no test
+  imports either) and the Loom's `node --test` after an esbuild rebuild.
+- **`CONTRIBUTING.md`** covers setup, running tests, the invariants that matter most to an
+  outside contributor (`media_id` resolution, catalog-schema three-place changes, never
+  committing `config.json`), PR expectations, and a private channel for security reports.
+- **`READ_ONLY` in `config.json`** refuses every account-mutating call outright — submitting a
+  generation, submitting a hand/face fix, deleting a task, claiming a reward — from the CLI or
+  the web app, and regardless of `--confirm`/`--apply`/`--yes`. The four choke points
+  (`submit_generation`, `submit_fixer`, `delete_task_gql`, `claim_reward`) are the only places
+  every generate/edit/enhance/fix/delete/claim path funnels through, CLI and web alike, so
+  gating there covers both surfaces from one place. Scoped to the PixAI account specifically —
+  `--organize`/`--dedup` are untouched (already dry-run-by-default, never network). Documented
+  for users on the wiki's **Trust & Safety** page.
+
 ---
 
 ## In flight

@@ -193,6 +193,11 @@ present — fixes corporate/antivirus HTTPS interception.
 - No real credentials or user-specific values should appear in any committed file.
 - All traffic is HTTPS with verification on; do not add `verify=False` anywhere.
 - **Server page-size cap:** `last` above ~8,000–10,000 triggers a Prisma `Internal server error`. Keep download `--page-size` ≤ ~8,000.
+- **`READ_ONLY` in config.json overrides `--confirm`/`--apply`/`--yes`.** Any new code path that
+  submits a generation, submits a fix, deletes a task, or claims a reward must call
+  `_check_read_only(...)` before the network call fires — it is not optional per-path opt-in,
+  it is the contract the `Trust & Safety` wiki page makes to users. See
+  `submit_generation`/`submit_fixer`/`delete_task_gql`/`claim_reward` for the pattern.
 
 ---
 

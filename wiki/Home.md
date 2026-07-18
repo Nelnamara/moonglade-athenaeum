@@ -15,6 +15,8 @@ New here? Start with **[Setup](Setup)** — it takes one API key and about a min
 
 ## Reference
 - **[How It Works](How-It-Works)** — architecture, the API, why setup is one key.
+- **[Trust & Safety](Trust-and-Safety)** — exactly what this tool can and can't do to your
+  account, and the `READ_ONLY` flag.
 - **[Troubleshooting](Troubleshooting)** — errors and fixes (incl. recapturing a hash).
 - **[FAQ](FAQ)** — quick answers.
 
