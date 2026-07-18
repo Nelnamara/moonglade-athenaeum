@@ -197,6 +197,18 @@ describe("shotText", () => {
     const text = shotText(flat(project)[0], project);
     assert.match(text, /Nel — maintain exact appearance from @image1/);
   });
+
+  test("project 'look' appends a film-wide style line to every shot", () => {
+    const project = makeProject([{ id: "a1", name: "Act", cards: [makeCard({ prompt: "a hero walks in" })] }]);
+    project.look = "muted teal grade, 35mm grain, anamorphic flares";
+    const text = shotText(flat(project)[0], project);
+    assert.match(text, /Look \(consistent across the film\): muted teal grade, 35mm grain, anamorphic flares/);
+  });
+
+  test("no 'look' line when the project look is empty", () => {
+    const project = makeProject([{ id: "a1", name: "Act", cards: [makeCard({})] }]);
+    assert.ok(!shotText(flat(project)[0], project).includes("Look (consistent"));
+  });
 });
 
 /* ---------- shotPayload (FLF frame-tag fallback) ---------- */
@@ -204,6 +216,14 @@ describe("shotText", () => {
 describe("shotPayload", () => {
   // A fake imgSrc: any thumbId/source that isn't empty resolves to a fake data value.
   const fakeImgSrc = (thumbId, source) => thumbId || source || null;
+
+  test("quality follows the project draft flag (basic when draft, else professional)", () => {
+    const card = makeCard({ cast: [], openFrame: { thumbId: "t", source: "", desc: "", tag: "@image8" } });
+    const proj = makeProject([{ id: "a1", name: "Act", cards: [card] }]);
+    assert.equal(shotPayload(flat(proj)[0], proj, fakeImgSrc).quality, "professional");
+    proj.draft = true;
+    assert.equal(shotPayload(flat(proj)[0], proj, fakeImgSrc).quality, "basic");
+  });
 
   test("FLF shot with two UNTAGGED frames gets DISTINCT fallback tags (never the same one)", () => {
     const card = makeCard({

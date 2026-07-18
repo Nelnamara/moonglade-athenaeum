@@ -3158,17 +3158,35 @@ def probe_video_duration(path):
         return None
 
 
-def extract_last_frame(video_path, out_png):
-    """Grab a clip's FINAL frame to out_png via ffmpeg (seek to ~0.15s before end).
-    This is the frame-handoff primitive: the last frame of one shot becomes the
-    opening frame of the next, so a sequence of clips reads as one continuous scene.
-    Returns out_png on success, else None."""
+def extract_last_frame(video_path, out_png, at_seconds=None):
+    """Grab a clip's frame to out_png via ffmpeg. This is the frame-handoff primitive:
+    one shot's last frame becomes the next shot's opening frame, so a sequence reads as
+    one continuous scene.
+
+    `at_seconds` makes the handoff TRIM-AWARE: the previous shot's trimOut is the point
+    the cut actually ends on, so the handed-off frame must be the frame AT that out-point,
+    not the untrimmed clip's real final frame. When it's None (no trim) -- or past the
+    clip's real end -- fall back to seeking ~0.15s before EOF. Returns out_png or None."""
     import os
     import subprocess
+    if at_seconds is not None:
+        try:
+            dur = probe_video_duration(video_path)
+        except Exception:                              # noqa: BLE001
+            dur = None
+        # a trimOut at/after the real end is just "the last frame" -> use the EOF path
+        if not (dur and at_seconds < dur - 0.05):
+            at_seconds = None
     try:
+        if at_seconds is None:
+            seek = ["-sseof", "-0.15", "-i", str(video_path)]
+        else:
+            # -ss before -i (fast, keyframe-accurate enough for a still); back off a hair
+            # so we land ON the last kept frame, not the first discarded one.
+            seek = ["-ss", "{:.3f}".format(max(0.0, float(at_seconds) - 0.05)), "-i", str(video_path)]
         subprocess.run(
-            ["ffmpeg", "-y", "-sseof", "-0.15", "-i", str(video_path),
-             "-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
+            ["ffmpeg", "-y"] + seek +
+            ["-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=True)
         return str(out_png) if os.path.exists(out_png) and os.path.getsize(out_png) > 0 else None
     except Exception:                                  # noqa: BLE001

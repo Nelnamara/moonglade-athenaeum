@@ -83,8 +83,18 @@ see *Open owner calls*. The repo is public and has real external users.
   with no shot selected, via a `__draft__` card keyed into the same gen-state dicts real shots
   use. A route-into-a-shot picker appears only in draft mode; bound-mode generation is
   unchanged (2874850).
-- `ShotPreview` has a play/pause button that honors the trim range (pauses and rewinds to
-  `trimIn` at the trimmed-out point) and disables hover-scrub during playback.
+- `ShotPreview` (the V2 timeline preview) carries play/pause honoring the trim range, hover-scrub,
+  trim handles, and an editing toolset: fast-forward/rewind (playhead stepping), **Split**
+  (`splitCardAt` — cuts a shot in two at the playhead, both halves keeping the same clip with the
+  trim range divided, so Export plays them back-to-back), and **Crop** (drag a rect; stored per
+  shot as `{x,y,w,h}` fractions, applied at export via ffmpeg's `crop` filter). Not a full NLE.
+- A shot's **project "Look"** (a `project.look` style line, edited in Cast & Assets) is appended to
+  every shot's prompt via `shotText`, and **Draft mode** (`project.draft`, a top-strip toggle) sends
+  the cheaper `basic` quality on `shotPayload` for both the price preview and the submit.
+- An interrupted render resumes: the shot's task id is persisted (`pendingTaskId`) and re-polled on
+  load, so a mid-render tab close no longer strands the shot or orphans its clip.
+- Frame handoff is trim-aware — it extracts the previous shot's frame at its `trimOut`, not the
+  untrimmed clip's real last frame.
 - Multiple named storyboards persist at `storyboard:v2:proj:<id>` with an active pointer; a
   shared `ProjectSwitcher` renders in both the classic and V2 headers.
 - The state layer is four composed hooks — `useProjectStore`, `useShotMutations`,
@@ -223,8 +233,6 @@ retirement itself is next — see *Open owner calls*.
 
 ### The Loom — other
 
-- **`ShotPreview` base control set:** fast-forward, rewind, split (cut a clip into two), crop.
-  Play/pause and hover-scrub already ship. Explicitly not a full NLE.
 - **Export carries real audio.** Segments with a detected audio stream (`probe_has_audio`) trim
   and concat it; segments without one get matching-duration synthesized silence (`anullsrc`) so
   the track can't desync across a boundary. `ffmpeg`'s `concat` filter requires its input pads

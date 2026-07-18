@@ -15,6 +15,17 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **The Loom — ShotPreview editing toolset.** The V2 timeline preview gains **fast-forward /
+  rewind** (step the playhead for framing), **Split** (cut a shot in two at the playhead — both
+  halves keep the same clip with the trim range divided, so Export plays them back-to-back as a
+  real cut), and **Crop** (drag a rectangle over the frame; stored per shot and applied at export
+  via ffmpeg's `crop` filter). Play/pause and hover-scrub already shipped.
+- **The Loom — project "Look" block.** A project-level style line (in Cast & Assets) appended to
+  every shot's prompt, so the whole film reads as one visual world — the project-level analogue of
+  the per-shot cast block.
+- **The Loom — Draft mode.** A top-strip toggle that renders every shot at the cheaper `basic`
+  quality for blocking out an animatic; turn it off and re-generate the keepers at pro. The price
+  preview reflects the draft quality too, so the cost shown is the cost charged.
 - **First-run wizard** — the gallery's home page now guides a fresh clone from nothing to a
   working gallery without a manual `config.json` edit: no key configured shows a paste-a-key
   form (validated live against PixAI before it's saved), and a key with an empty catalog shows
@@ -118,6 +129,16 @@ git tags. Full prose notes for tagged versions live on
   grayscaled — it's meant as an intentional tease, not a disabled state). Name/description stay masked.
 
 ### Fixed
+- **The Loom no longer strands a shot when the tab closes mid-render.** `pollShot` held the task id
+  only in an in-memory loop that died with the page, leaving the shot stuck "wip" forever while its
+  finished clip landed orphaned in the gallery. The task id is now persisted on the card
+  (`pendingTaskId`) and a resume effect re-attaches the poll on load, so the clip lands where it
+  belongs. Cleared on completion/failure.
+- **The Loom's frame handoff is now trim-aware.** "Inherit prev close" extracted the *untrimmed*
+  clip's final frame, so a trimmed previous shot handed off a frame the cut never plays — the
+  continuity chain contradicted the edit. It now seeks to the previous shot's `trimOut` before
+  extracting (`extract_last_frame(..., at_seconds=)`), falling back to the true last frame when the
+  shot isn't trimmed.
 - **`--rebuild-thumbs` repairs are now actually visible in the browser** — thumbnails were served
   `Cache-Control: immutable, max-age=31536000` on the reasoning that they're "content-addressed", but
   they're keyed by **`media_id`, which is an identity, not a content hash**: `--rebuild-thumbs`
