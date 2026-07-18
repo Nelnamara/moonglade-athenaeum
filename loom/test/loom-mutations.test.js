@@ -4,7 +4,7 @@ import {
   patchCard, patchCardById, patchAct, patchAssets,
   appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard, splitCardAt,
   moveCardInAct, moveCardToAct, nextActName, appendAct, removeAct, moveActInProject,
-  buildNewRef, patchRef, removeRef, countShots,
+  buildNewRef, patchRef, removeRef, countShots, setShotMode, setShotConnect,
   parseCastIdsFromSearch,
   friendlyGenErr, classifyTaskStatus,
   buildShotListText, buildPlaySequence, buildExportClips,
@@ -41,6 +41,58 @@ describe("patchCard", () => {
     assert.equal(out.acts[1].cards[0].title, "three");
     // original untouched (immutability)
     assert.equal(p.acts[0].cards[1].title, "two");
+  });
+});
+
+describe("setShotMode / setShotConnect (FLF coupling)", () => {
+  // Regression coverage for a confirmed production bug: Continuity's "First->Last" chip
+  // (connect:"flf") and Mode's "FLF" chip both read as "First->Last" to a user, but only
+  // mode gates whether the close frame reaches the real generation (shotPayload /
+  // build_shot_video_params check mode==="FLF" alone). Left uncoupled, a shot could show
+  // connect:"flf" with mode:"I2V" -- both frames filled in on screen, the generation submits
+  // and finishes with no error, and the close frame is silently never used.
+
+  test("selecting First->Last Continuity forces Mode to FLF", () => {
+    const c = makeCard({ mode: "I2V", connect: "new" });
+    const out = setShotConnect(c, "flf");
+    assert.equal(out.connect, "flf");
+    assert.equal(out.mode, "FLF");
+  });
+
+  test("selecting a non-FLF Continuity leaves Mode alone", () => {
+    const c = makeCard({ mode: "R2V", connect: "new" });
+    const out = setShotConnect(c, "extend");
+    assert.equal(out.connect, "extend");
+    assert.equal(out.mode, "R2V");
+  });
+
+  test("moving Mode away from FLF clears a 'First->Last' Continuity that can no longer be true", () => {
+    const c = makeCard({ mode: "FLF", connect: "flf" });
+    const out = setShotMode(c, "I2V");
+    assert.equal(out.mode, "I2V");
+    assert.equal(out.connect, "new");
+  });
+
+  test("moving Mode to FLF doesn't force Continuity (only the dangerous direction is guarded)", () => {
+    const c = makeCard({ mode: "I2V", connect: "new" });
+    const out = setShotMode(c, "FLF");
+    assert.equal(out.mode, "FLF");
+    assert.equal(out.connect, "new");
+  });
+
+  test("moving Mode between two non-FLF values never touches an unrelated Continuity", () => {
+    const c = makeCard({ mode: "I2V", connect: "extend" });
+    const out = setShotMode(c, "R2V");
+    assert.equal(out.connect, "extend");
+  });
+
+  test("the exact reported failure state is unreachable through either setter", () => {
+    // Continuity="First->Last" with Mode stuck on something other than FLF must never occur.
+    let c = makeCard({ mode: "I2V", connect: "new" });
+    c = setShotConnect(c, "flf");
+    assert.ok(!(c.connect === "flf" && c.mode !== "FLF"));
+    c = setShotMode(c, "R2V");
+    assert.ok(!(c.connect === "flf" && c.mode !== "FLF"));
   });
 });
 

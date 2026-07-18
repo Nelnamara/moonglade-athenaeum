@@ -18,7 +18,7 @@ import {
   patchCard, patchCardById, patchAct, patchAssets,
   appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard, splitCardAt,
   moveCardInAct, moveCardToAct as mvCardToAct, nextActName, appendAct, removeAct, moveActInProject,
-  buildNewRef, patchRef, removeRef, countShots,
+  buildNewRef, patchRef, removeRef, countShots, setShotMode, setShotConnect,
   parseCastIdsFromSearch,
   friendlyGenErr, classifyTaskStatus,
   buildShotListText, buildPlaySequence, buildExportClips,
@@ -304,6 +304,10 @@ const STYLES = `
 `;
 
 const MODES = ["I2V", "R2V", "V2V", "FLF"];   // T2V retired: these video models need an input frame/ref
+// PixAI's real audio-language enum (private/GENERATOR_SURFACE.md, VIDEO_MODELS.md) --
+// "none" is not "no audio", it's PixAI's own SE-Only value: generate sound effects/ambience
+// with no spoken language. Actual silence is the Generate-audio checkbox being off.
+const AUDIO_LANGUAGES = [["english", "EN"], ["japanese", "JA"], ["chinese", "ZH"], ["korean", "KO"], ["none", "SE only"]];
 const MODE_HINT = {
   T2V: "Text only — describe the whole scene",
   I2V: "Image-to-video — ref is first frame; prompt only motion",
@@ -365,6 +369,13 @@ function newCard(extra = {}) {
     id: uid(), title: "", status: "todo", mode: "I2V", duration: 8, connect: "cut",
     prompt: "", openFrame: emptyFrame(), closeFrame: emptyFrame(),
     cast: [], refs: [], camera: "", lighting: "", audioCue: "",
+    // audioGen/audioLanguage are the actual generation request (does PixAI render sound at
+    // all, and in what language) -- distinct from audioCue above, which is prompt TEXT
+    // ("ambient room tone") that only ever influences wording, never the real generateAudio/
+    // audioLanguage params. Neither surface exposed this until now (private/GENERATOR_SURFACE.md
+    // had it reverse-engineered but never wired to a control): the server already accepts
+    // generate_audio/audio_language on /api/loom/generate, this was purely a missing control.
+    audioGen: false, audioLanguage: "english",
     transIn: "", transOut: "", notes: "", discreet: false, trimIn: 0, trimOut: null, ...extra,
   };
 }
@@ -495,6 +506,8 @@ const V2_STYLES = `
 .lv-framehandoff .sb-tagin{width:62px;}
 .lv-framehandoff .sb-frameprev{height:64px;}
 .lv-lab{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);display:block;margin:9px 0 5px;}
+.lv-check{display:flex;align-items:center;gap:6px;font:600 11px/1 system-ui;color:var(--text);margin:9px 0 5px;cursor:pointer;user-select:none;}
+.lv-check input{margin:0;cursor:pointer;}
 .lv-chips{display:flex;gap:5px;flex-wrap:wrap;}
 .lv-chip{background:var(--surface1);border:1px solid var(--surface1);color:var(--subtext);border-radius:6px;padding:3px 9px;font:600 10px/1 system-ui;cursor:pointer;}
 .lv-chip.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
@@ -729,6 +742,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const [draftCard, setDraftCard] = useState(() => ({
     id: "__draft__", mode: "R2V", duration: 5, connect: "new", title: "", prompt: "",
     camera: "", lighting: "", transIn: "", transOut: "", audioCue: "", notes: "",
+    audioGen: false, audioLanguage: "english",
     imgPrompt: "", editPrompt: "", refPrompt: "",
     cast: [], refs: [], openFrame: {}, closeFrame: {},
   }));
@@ -917,13 +931,22 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     if (tab === "Video") tabBody = (
       <div>
         <label className="lv-lab">Mode</label>
-        <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === active.c.mode ? "on" : "")} onClick={() => patch((c) => ({ ...c, mode: m }))}>{m}</span>))}</div>
+        <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === active.c.mode ? "on" : "")}
+          onClick={() => patch((c) => setShotMode(c, m))}>{m}</span>))}</div>
         <label className="lv-lab">Continuity</label>
-        <div className="lv-chips">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-chip " + (k === (active.c.connect || "new") ? "on" : "")} title={CONNECT[k].hint} onClick={() => patch((c) => ({ ...c, connect: k }))}>{CONNECT[k].label}</span>))}</div>
+        <div className="lv-chips">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-chip " + (k === (active.c.connect || "new") ? "on" : "")} title={CONNECT[k].hint}
+          onClick={() => patch((c) => setShotConnect(c, k))}>{CONNECT[k].label}</span>))}</div>
         <label className="lv-lab">Prompt</label>
         <textarea className="lv-ta" value={active.c.prompt || ""} onChange={(ev) => patch((c) => ({ ...c, prompt: ev.target.value }))} />
         <label className="lv-lab">Duration</label>
         <div className="lv-chips">{[5, 6, 10, 15].map((d) => (<span key={d} className={"lv-chip " + (d === active.c.duration ? "on" : "")} onClick={() => patch((c) => ({ ...c, duration: d }))}>{d}s</span>))}</div>
+        <label className="lv-check"><input type="checkbox" checked={!!active.c.audioGen}
+          onChange={(ev) => patch((c) => ({ ...c, audioGen: ev.target.checked }))} /> Generate audio</label>
+        {active.c.audioGen && (
+          <div className="lv-chips">{AUDIO_LANGUAGES.map(([v, label]) => (
+            <span key={v} className={"lv-chip " + (v === (active.c.audioLanguage || "english") ? "on" : "")}
+              onClick={() => patch((c) => ({ ...c, audioLanguage: v }))}>{label}</span>))}</div>
+        )}
         <label className="lv-lab">Camera <button className="lv-termsbtn" onClick={() => togglePal("camera")}>+ terms</button></label>
         <input className="lv-in" value={active.c.camera || ""} placeholder="e.g. slow push in, shallow DoF" onChange={(ev) => patch((c) => ({ ...c, camera: ev.target.value }))} />
         {palFor === "camera" && (
@@ -1275,7 +1298,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               <div className="lv-df-row">
                 <div className="lv-field"><label className="lv-lab">Mode</label>
                   <div className="lv-chips">{MODES.map((m) => (<span key={m} className={"lv-chip " + (m === c.mode ? "on" : "")}
-                    onClick={() => dfPatch((cc) => ({ ...cc, mode: m }))}>{m}</span>))}</div></div>
+                    // Deep Focus has no Continuity control of its own, but a shot can arrive here
+                    // already set to connect:"flf" from the Generate-drawer editor -- setShotMode
+                    // (loom-mutations.js) keeps the two fields coupled regardless of which surface
+                    // touches them; see its comment for the bug this prevents.
+                    onClick={() => dfPatch((cc) => setShotMode(cc, m))}>{m}</span>))}</div></div>
                 <div className="lv-field narrow"><label className="lv-lab">Duration (s)</label>
                   <input className="lv-in" type="number" min="1" value={c.duration}
                     onChange={(ev) => dfPatch((cc) => ({ ...cc, duration: Number(ev.target.value) }))} /></div>
@@ -1608,7 +1635,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     try {
       const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: p.mode, prompt: p.prompt, images: p.images,
-          video_refs: p.video_refs, duration: p.duration, quality: p.quality, origin: "loom-shot" }) });
+          video_refs: p.video_refs, duration: p.duration, quality: p.quality,
+          generate_audio: p.generate_audio, audio_language: p.audio_language, origin: "loom-shot" }) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       // Persist the task id on the card so a mid-render tab close is recoverable: the
