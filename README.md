@@ -90,9 +90,9 @@ A PySide6 GUI (`pixai_gui.py`) wraps the whole workflow — Download, Generate, 
 
 Everything deep lives in the **[Wiki](../../wiki)**:
 
-[Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Troubleshooting](../../wiki/Troubleshooting) · [How It Works](../../wiki/How-It-Works)
+[Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Troubleshooting](../../wiki/Troubleshooting) · [Trust & Safety](../../wiki/Trust-and-Safety) · [FAQ](../../wiki/FAQ) · [How It Works](../../wiki/How-It-Works)
 
-In-repo: [`docs/architecture.md`](docs/architecture.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+In-repo: [`docs/architecture.md`](docs/architecture.md) (how it's built), [`docs/LOOM.md`](docs/LOOM.md) (the Loom's manual), [`docs/STATE.md`](docs/STATE.md) (current project state), [`docs/STANDARDS.md`](docs/STANDARDS.md) (house standards), [`docs/ART.md`](docs/ART.md) (art direction), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 

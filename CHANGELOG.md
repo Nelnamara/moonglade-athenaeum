@@ -14,6 +14,32 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Docs
+- **A second audit found the first consolidation's own gaps.** A 27-agent pass covering every
+  live doc (root, `docs/`, and the whole wiki — 23 files) for renewed drift found 23 more
+  false/stale claims, most concentrated in `docs/LOOM.md` (never updated for the classic-Loom
+  retirement or the two-tier export/Draft/Look/ShotPreview-toolset work that shipped after it)
+  and a `docs/STANDARDS.md` merge recommended 2026-07-16 that was never executed — the two
+  originals sat standalone for a day and one of them (`DESIGN_WORKFLOW.md`) visibly drifted from
+  its own merged copy in the meantime. Fixed: `docs/LOOM.md` decontaminated (wrong button glyph,
+  a stale frame-handoff description, a removed "open full ↗" link, the old 2-tier export claim,
+  and two real content gaps — the multi-storyboard switcher and the Footage tab were entirely
+  undocumented); `docs/CURATION_STANDARD.md` + `docs/DESIGN_WORKFLOW.md` merged into
+  `docs/STANDARDS.md` and the two originals frozen under `docs/archive/`; five dangling
+  cross-references to the archived filenames fixed (`CLAUDE.md`, `docs/STATE.md` ×3); `CLAUDE.md`'s
+  documented `build_video_parameters()` submit shape corrected (no top-level `channel` field —
+  that's `isPrivate`); `README.md`'s in-repo-doc and wiki-page lists brought current;
+  `CONTRIBUTING.md`'s "three main files" corrected to the real five modules; a broken
+  `CHANGELOG.md` cross-reference and a self-contradicting dated entry fixed; five wiki pages
+  corrected (`Generating.md`'s stale classic/V2 claim, `Troubleshooting.md`'s unscoped
+  `inferenceProfile` auto-fallback claim, `FAQ.md`/`Home.md`'s false "Troubleshooting covers hash
+  recapture" claim, and — highest priority — `Trust-and-Safety.md`'s incorrect claim that
+  `--organize` is dry-run-by-default like `--dedup`; it isn't, it runs live by default and is
+  opted out via `--dry-run`). `docs/` maintained files: 6 → 5. Flagged, not executed: a further
+  ~234-line trim of `CLAUDE.md` (migrating its function tables and feature-description sections to
+  `docs/architecture.md`/`docs/STATE.md`, per its own hierarchy rule) — the daily-driver doc every
+  session loads first, held for explicit review before landing.
+
 ### Changed
 - **Classic Loom (V1) retired — the Loom is now a single surface.** With V2 at full feature parity,
   the classic render tree is gone: the `CardView`/`CardEditor` components, the whole classic header /
@@ -194,7 +220,8 @@ git tags. Full prose notes for tagged versions live on
   the exact inverse of the original diff) — every commit between the two touched only docs, so no
   conflicts. 478 tests still pass. **This time actually confirmed with a real rendered screenshot**
   (Summary + All tabs, rewards back in the rail, no carousel), not just computed-style assertions —
-  see `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` §2b. A ground-truth audit (10-agent read-only pass over the
+  see `docs/archive/ROADMAP_LOOM_ACHIEVEMENTS_2026-07-16.md` §2b (frozen 2026-07-16; live state is
+  `docs/STATE.md`). A ground-truth audit (10-agent read-only pass over the
   whole repo) preceded this: full doc-vs-code reconciliation, a CLI command map, a PySide6 removal
   recommendation, and a Loom consolidation verdict — see that section for the follow-up plan.
 
@@ -219,7 +246,8 @@ git tags. Full prose notes for tagged versions live on
 - **Real playback controls in both Loom layouts** — V2's Timeline/Deep-Focus preview
   (`ShotPreview`) gained a play/pause button (honors the trim range); classic Loom's
   sequence player had a missing `muted` attribute fixed (could silently block autoplay).
-  Scrub/fast-forward/rewind/split/crop remain a modest follow-on set, not yet built.
+  Scrub/fast-forward/rewind/split/crop were banked as a modest follow-on set at the time —
+  since shipped; see the "ShotPreview editing toolset" entry above.
 - **Gallery search now matches task id / media id**, not just prompt text — paste an id
   from PixAI's site (or `--dump-params` output) to jump straight to that generation.
 - **Play sequence wired into V2** — the first item off the V1→V2 convergence punch list.

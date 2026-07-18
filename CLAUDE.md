@@ -60,8 +60,9 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
 4. **Visual builds require a PIXEL source of truth** (a Figma frame via the Figma plugin's MCP,
    a Claude Design project via DesignSync, or a locked mockup artifact) — never prose alone —
    and the verify pass compares against that source. Restyling a shipped, owner-approved surface
-   needs an explicit owner go. See `docs/DESIGN_WORKFLOW.md` (added 2026-07-15, `6a0f99d`, after the
-   Trophy Hall reformat landed off-target from prose notes).
+   needs an explicit owner go. See `docs/STANDARDS.md` Part 2 (originally `docs/DESIGN_WORKFLOW.md`,
+   added 2026-07-15 `6a0f99d` after the Trophy Hall reformat landed off-target from prose notes;
+   merged into STANDARDS.md 2026-07-17).
 5. **Hierarchy when sources disagree:** for a measurable fact (test count, version, branch lead,
    release status) the **code/git/pytest/gh answer wins over every doc** — never trust a number a
    command can answer. For project state, `docs/STATE.md` wins. For how it works, the code, then
@@ -123,7 +124,7 @@ present — fixes corporate/antivirus HTTPS interception.
 | `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error |
 | `account_info()` / `run_account_info()` | Read-only account dashboard (credits/membership/subscription) via `gql_adhoc`. **Never moves money** — no payment/subscription mutations are implemented, by design |
 | `run_generate()` | `--generate`: create images via `createGenerationTask` (ad-hoc POST), poll, download, catalog as `source='api'`. Preview unless `--confirm`. `--task-id` recovers an already-created task for free |
-| `build_video_parameters()` / `run_generate_video()` | `--generate-video`: image-to-video (`i2vPro`) — VERIFIED submit `{channel, i2vPro:{model,mediaId,[tailMediaId],mode,duration,generateAudio,audioLanguage,[cameraMovement]…}}`. Enums banked (`--camera-movement`, `--video-channel`, duration 5/6/10/15). Preview unless `--confirm`; captures `paidCredit`; downloads mp4 into `videos/` |
+| `build_video_parameters()` / `run_generate_video()` | `--generate-video`: image-to-video (`i2vPro`) — VERIFIED submit `{priority, i2vPro:{model,mediaId,[tailMediaId],mode,duration,generateAudio,audioLanguage,[cameraMovement]…}, isPrivate, enablePreview, hidePrompts, modelId}`. **No top-level `channel` field** — `--video-channel` maps to the boolean `isPrivate`, not a `channel` key. Enums banked (`--camera-movement`, `--video-channel`, duration 5/6/10/15). Preview unless `--confirm`; captures `paidCredit`; downloads mp4 into `videos/` |
 | `build_reference_video_parameters()` / `run_reference_video()` | `--reference-video`: multi-image/video/audio reference — VERIFIED **top-level `referenceVideo`** block (NOT i2vPro): `{priority, referenceVideo:{model,prompt,duration(int),referenceImageMediaIds/…VideoMediaIds/…AudioMediaIds}, isPrivate, modelId}`. `--ref-image/--ref-video/--ref-audio` (media_id OR local file, auto-uploaded), cited in `--prompt` as `@image1/@video1/@audio1`. Preview unless `--confirm` |
 | `_download_video_task()` | Shared video download+catalog (used by both i2v and reference-video): `video_outputs` → `media_file_gql.fileUrl` → `download` → catalog `is_video='1'` + poster thumbnail |
 | `_maybe_dump_params()` | `--dump-params`: print a task's full submit `parameters` (esp. on `--task-id` recovery) — bank any shape (multiRef/referenceVideo/…) with NO browser capture |
@@ -240,7 +241,7 @@ differing only in the `parameters` object. **Every credit-spending path is previ
 recovered task's full submit shape (bank any param shape with no browser capture).
 
 - `--generate` → image (`parameters` = the image params).
-- `--generate-video --image <media_id>` → i2vPro video (`{channel, i2vPro:{…, [tailMediaId], [cameraMovement]}}`);
+- `--generate-video --image <media_id>` → i2vPro video (`{priority, i2vPro:{…, [tailMediaId], [cameraMovement]}, isPrivate, modelId}`);
   first/last-frame via `--tail`, enums via `--camera-movement`/`--video-channel`, duration 5/6/10/15.
 - `--reference-video --ref-image/--ref-video/--ref-audio` → multi-reference video (top-level `referenceVideo`
   block, distinct from i2vPro); cite refs in `--prompt` as `@image1/@video1/@audio1`; local files auto-upload.
