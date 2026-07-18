@@ -14,6 +14,31 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **The Loom silently dropped a shot's end frame from real generations.** Continuity's
+  "First→Last" chip (its own hint: "land on an exact end frame") and Mode's separate `FLF`
+  chip both read as the same thing to a user, but only `mode==="FLF"` actually made the close
+  frame reach PixAI — `shotPayload` and the server's `build_shot_video_params` both check mode
+  alone, with no fallback to Continuity. Setting Continuity to First→Last with Mode left on
+  I2V (the default) generated normally, completed normally, and silently used only the open
+  frame — confirmed against a real spent generation. Mode and Continuity are now coupled in
+  both directions (`setShotMode`/`setShotConnect`, `loom/src/loom-mutations.js`): selecting
+  First→Last forces Mode to FLF, and moving Mode away from FLF clears a Continuity claim that
+  can no longer be true. This exact bug was found in the original Loom architecture audit and
+  filed as "later phase" — it never got tracked past that now-archived doc. Live-verified: the
+  failure state is unreachable through the UI in either direction.
+
+### Added
+- **Video generation gained audio controls, on both surfaces.** PixAI's real audio-language
+  options (English/Japanese/Chinese/Korean/**SE only** — sound effects with no spoken
+  dialogue, not silence) were reverse-engineered in `private/GENERATOR_SURFACE.md` well before
+  today but never reached a control anywhere. The Loom's Video tab had **no audio UI at all**;
+  the main gallery's Video tab had a checkbox + 4-language picker but was missing SE-only. The
+  Loom now has the same checkbox + 5-option language picker, threaded through `shotPayload` →
+  `/api/loom/generate` and `/api/price` (the price preview previously only read the gallery's
+  `audio` key, not the Loom's `generate_audio` — fixed so both surfaces' previews reflect the
+  real cost). The gallery's picker gained the missing SE-only option.
+
 ### Docs
 - **A second audit found the first consolidation's own gaps.** A 27-agent pass covering every
   live doc (root, `docs/`, and the whole wiki — 23 files) for renewed drift found 23 more

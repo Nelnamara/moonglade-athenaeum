@@ -225,6 +225,21 @@ describe("shotPayload", () => {
     assert.equal(shotPayload(flat(proj)[0], proj, fakeImgSrc).quality, "basic");
   });
 
+  test("carries the shot's audio request (generate_audio/audio_language) onto the payload", () => {
+    const base = { cast: [], openFrame: { thumbId: "t", source: "", desc: "", tag: "@image8" } };
+    const off = makeCard(base);
+    const proj1 = makeProject([{ id: "a1", name: "Act", cards: [off] }]);
+    const p1 = shotPayload(flat(proj1)[0], proj1, fakeImgSrc);
+    assert.equal(p1.generate_audio, false);
+    assert.equal(p1.audio_language, "english");   // default even when off, matches the server's own default
+
+    const on = makeCard({ ...base, audioGen: true, audioLanguage: "none" });   // "none" = SE-only, not silence
+    const proj2 = makeProject([{ id: "a1", name: "Act", cards: [on] }]);
+    const p2 = shotPayload(flat(proj2)[0], proj2, fakeImgSrc);
+    assert.equal(p2.generate_audio, true);
+    assert.equal(p2.audio_language, "none");
+  });
+
   test("FLF shot with two UNTAGGED frames gets DISTINCT fallback tags (never the same one)", () => {
     const card = makeCard({
       mode: "FLF",

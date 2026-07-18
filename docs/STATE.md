@@ -53,6 +53,20 @@ users.
 - V2 is the live storyboard surface: a fixed four-region shell — top strip, left card, center
   board, right Generate drawer (`.lv-top`, `.lv-side`, `.lv-board`). Nothing in V2 is
   draggable, resizable, or x/y/w/h-persisted (c0c7399).
+- **Mode and Continuity's "First→Last" chip are coupled** (`setShotMode`/`setShotConnect`,
+  loom-mutations.js) — a shot can no longer show Continuity "First→Last" while Mode is
+  something other than `FLF`. Only `mode==="FLF"` ever made the close frame reach the real
+  generation (`shotPayload`, `build_shot_video_params`); left uncoupled this silently dropped
+  the close frame with no error, confirmed in a real production generation. A known defect
+  since the original Loom audit, never tracked past the old roadmap doc — fixed 2026-07-18.
+- **Video shots can request generated audio.** A Generate-audio checkbox + language chips
+  (English/Japanese/Chinese/Korean/**SE only** — PixAI's real sound-effects-only value, not
+  silence) sit under Duration in the Generate drawer's Video tab, threaded through
+  `shotPayload` → `/api/loom/generate` and `/api/price`. Reverse-engineered in
+  `private/GENERATOR_SURFACE.md` well before this; the gap was purely a missing control — the
+  server already accepted `generate_audio`/`audio_language`. The main gallery's own Video tab
+  had the same control already (checkbox + a 4-language `#video-lang` select) but was missing
+  the SE-only option; both surfaces now expose the same five choices.
 - The top strip's **Play** button runs the sequence, disabled until a shot has a result
   (768aecf).
 - The top strip's **Export** button trims + stitches every finished shot into one mp4
@@ -240,7 +254,11 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 - `<mg-generate-drawer>` is what would make "same component as the gallery" literally true for
   the Loom's Generate panel. The Loom's `genImage` / `runGen` / `genEdit` / `genRef` and
   all Generate-tab chrome are hand-rolled in `master-storyboard.jsx`; `<mg-model-picker>` is
-  the only thing actually shared with the gallery's drawer.
+  the only thing actually shared with the gallery's drawer. Concrete cost of staying
+  hand-duplicated, found 2026-07-18: the two Video tabs' audio control didn't exist at all in
+  the Loom and was missing an option in the gallery — the same feature landed on the two
+  surfaces at different times with different gaps, because they're two independent
+  implementations, not one shared one.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
 

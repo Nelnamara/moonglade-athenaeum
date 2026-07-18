@@ -130,6 +130,22 @@ export const moveActInProject = (project, idx, dir) => {
 };
 
 // addRef(aId, card, kind) core: the new-ref object, given a caller-supplied id.
+// Mode ("I2V"/"R2V"/"V2V"/"FLF") and Continuity's "First->Last" chip (connect:"flf") both mean
+// FLF, but only `mode` actually controls whether the close frame reaches the real generation --
+// shotPayload (loom-core.js) and the server's build_shot_video_params both gate strictly on
+// mode==="FLF" alone, with no fallback to connect. Left uncoupled, a shot could show Continuity
+// "First->Last" (whose own hint promises "land on an exact end frame") with Mode left on I2V:
+// both frames stay filled in on screen, generation submits and completes normally, and the close
+// frame is silently dropped with no error anywhere -- confirmed in production, a real spent
+// generation that silently used only the open frame. These two setters keep the fields coupled
+// in both directions so that state can no longer be reached through the UI.
+export const setShotMode = (c, mode) => ({
+  ...c, mode, connect: (mode !== "FLF" && c.connect === "flf") ? "new" : c.connect,
+});
+export const setShotConnect = (c, connect) => ({
+  ...c, connect, mode: connect === "flf" ? "FLF" : c.mode,
+});
+
 export const buildNewRef = (kind, id) => ({ id, kind, tag: "", role: "", source: "", thumbId: "" });
 
 export const patchRef = (project, actId, cardId, refId, patch) =>

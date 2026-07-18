@@ -122,6 +122,7 @@ export const shotPayload = (entry, project, imgSrc) => {
   // on the payload so BOTH the price preview and the actual submit see the same quality.
   return { mode: c.mode, prompt: shotText(entry, project), images: imgs.map((x) => x.d),
            video_refs: vids, duration: c.duration, quality: project.draft ? "basic" : "professional",
+           generate_audio: !!c.audioGen, audio_language: c.audioLanguage || "english",
            hasInput: (imgs.length + vids.length) > 0 };
 };
 
