@@ -15,6 +15,20 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **First-run wizard** — the gallery's home page now guides a fresh clone from nothing to a
+  working gallery without a manual `config.json` edit: no key configured shows a paste-a-key
+  form (validated live against PixAI before it's saved), and a key with an empty catalog shows
+  a "Sync now" button that runs the existing `--sync` Panel job and reloads when it finishes.
+  Neither banner shows once the catalog has rows, or for a LAN request — this is an owner-only
+  action. Fixed a real blocker found while verifying this live: `pixai_gallery.py`'s CLI entry
+  point used to exit with a console error if the (git-ignored) output folder or `catalog.db`
+  didn't exist yet, so the wizard could never render on an actual fresh clone; it now creates
+  the folder and an empty catalog and starts normally. Also fixed, found the same way: the new
+  save-key endpoint's first draft validated a freshly-pasted key by reusing the app's normal
+  session-building path, which prefers an already-loaded in-memory key over a fresh file read
+  — so a garbage key was silently "verified" against the real cached one instead. It now
+  builds a throwaway session from the submitted key alone and only writes `config.json` after
+  that call genuinely succeeds.
 - **CI** (`.github/workflows/tests.yml`) — the Python suite and the Loom's `node --test` now
   run on every push and pull request, so "all tests must pass before merging" is enforced
   rather than trusted. PySide6 and `pixeltable` are deliberately not installed in CI: no test
