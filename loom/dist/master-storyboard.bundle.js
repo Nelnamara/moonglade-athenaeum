@@ -40,7 +40,6 @@ var LoomBundle = (() => {
     }, 0);
   };
   var nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1);
-  var frameLinked = (a, b) => !!a && !!b && (!!a.mediaId && !!b.mediaId && a.mediaId === b.mediaId || !!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId);
   var connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
   var flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}` })));
   var shotText = (entry, p) => {
@@ -546,13 +545,6 @@ ${"=".repeat(48)}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 `;
   var MODES = ["I2V", "R2V", "V2V", "FLF"];
-  var MODE_HINT = {
-    T2V: "Text only \u2014 describe the whole scene",
-    I2V: "Image-to-video \u2014 ref is first frame; prompt only motion",
-    R2V: "Reference-to-video \u2014 lock identity/style/motion via @tags",
-    V2V: "Video edit / extend an existing clip",
-    FLF: "First & last frame \u2014 interpolate between two images"
-  };
   var CAM_PALETTE = {
     "Shot size": ["EWS", "WS", "MLS", "MS", "MCU", "CU", "ECU", "OTS", "two-shot", "insert", "POV"],
     "Movement": [
@@ -982,7 +974,7 @@ ${"=".repeat(48)}
       return { err: e };
     }
     render() {
-      if (this.state.err) return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("div", { className: "lv-err" }, /* @__PURE__ */ React.createElement("p", null, "The V2 layout hit an error \u2014 your classic Loom is completely safe."), /* @__PURE__ */ React.createElement("pre", null, String(this.state.err && this.state.err.stack || this.state.err)), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: this.props.onClose }, "\u2190 Back to classic Loom")));
+      if (this.state.err) return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("div", { className: "lv-err" }, /* @__PURE__ */ React.createElement("p", null, "The Loom hit a render error. Your storyboards are saved and safe \u2014 reload to recover."), /* @__PURE__ */ React.createElement("pre", null, String(this.state.err && this.state.err.stack || this.state.err)), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: () => window.location.reload() }, "\u21BB Reload the Loom"), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Back to the gallery")));
       return this.props.children;
     }
   };
@@ -1062,7 +1054,7 @@ ${"=".repeat(48)}
       )
     )));
   }
-  function LoomV2({ onClose, project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot }) {
+  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
@@ -1490,7 +1482,7 @@ ${"=".repeat(48)}
         bundling,
         importBackup
       }
-    ), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: onClose }, "\u2190 Back to classic Loom")), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
+    ), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
       setLeftTab("cast");
       setLeftCollapsed(false);
     } }, "\u{1F464}"), /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "footage" ? " on" : ""), title: "Footage", onClick: () => {
@@ -2320,7 +2312,6 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
     const [pickKind, setPickKind] = useState("image");
     const [pickAllowType, setPickAllowType] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
-    const [v2, setV2] = useState(false);
     const [showHelp, setShowHelp] = useState(false);
     const [showGuide, setShowGuide] = useState(() => {
       try {
@@ -2418,10 +2409,9 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
     const anyDone = entries.some((e) => e.c.resultMid);
     const { total, scale, over } = reelStats(entries, project.target);
     const done = entries.filter((x) => x.c.status === "done").length;
-    return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), v2 && /* @__PURE__ */ React.createElement(V2Boundary, { onClose: () => setV2(false) }, /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
       LoomV2,
       {
-        onClose: () => setV2(false),
         project,
         setCard,
         setAssets,
@@ -2478,163 +2468,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       }
     )), seq && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
-    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), pickCb && (pickAllowType ? /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind, "show-type": true }) : /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind })), importOpen && /* @__PURE__ */ React.createElement(ImportCollection, { onClose: () => setImportOpen(false), onImport: importCollection }), /* @__PURE__ */ React.createElement("header", { className: "sb-top" }, /* @__PURE__ */ React.createElement("div", { className: "sb-topgrid" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement(
-      "a",
-      {
-        href: "/",
-        className: "sb-btn ghost sm",
-        title: "Back to the gallery",
-        style: { textDecoration: "none", flexShrink: 0 }
-      },
-      "\u2190 Gallery"
-    ), /* @__PURE__ */ React.createElement("h1", { className: "sb-disp" }, /* @__PURE__ */ React.createElement("span", { className: "sb-clap" }, "\u25B0"), " The Loom"), /* @__PURE__ */ React.createElement("input", { className: "sb-projname", value: project.name, onChange: (e) => setProject((p) => ({ ...p, name: e.target.value })), "aria-label": "Project name" }), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "sb-btn",
-        onClick: () => batchGenerate(entries),
-        disabled: batching || !entries.length,
-        title: "Generate every shot that isn't done yet, one after another"
-      },
-      batching ? "\u25B6 generating all\u2026" : `\u25B6 Generate all (${entries.filter((e) => e.c.status !== "done").length})`
-    ), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "sb-btn amber",
-        onClick: () => playSequence(entries),
-        disabled: !anyDone,
-        title: "Play every finished shot back-to-back, honoring trims \u2014 a rough cut, no rendering"
-      },
-      "\u25B6\u25B6 Play"
-    ), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "sb-btn",
-        onClick: () => exportCut(entries),
-        disabled: !anyDone,
-        title: "Trim + stitch every finished shot into one mp4 (ffmpeg)"
-      },
-      "\u21E9 Export"
-    ), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "sb-btn ghost sm",
-        onClick: () => setV2(true),
-        title: "Switch to the V2 layout (non-destructive \u2014 your board is untouched)"
-      },
-      "\u25EB V2 layout"
-    )), /* @__PURE__ */ React.createElement("div", { className: "sb-stat" }, /* @__PURE__ */ React.createElement("b", null, done, "/", entries.length), /* @__PURE__ */ React.createElement("span", null, "shots done")), /* @__PURE__ */ React.createElement("div", { className: "sb-stat" }, /* @__PURE__ */ React.createElement("b", { style: { color: over > 0 ? "var(--coral)" : "var(--ink)" } }, fmt(total)), /* @__PURE__ */ React.createElement("span", null, "of ", fmt(project.target), over > 0 ? ` \xB7 +${fmt(over)} over` : "")), /* @__PURE__ */ React.createElement("div", { className: "sb-saved", title: hasStore ? "Saved to this browser" : "In-memory only \u2014 export to keep" }, /* @__PURE__ */ React.createElement("span", { className: "sb-dot" + (busy ? " busy" : "") }), " ", hasStore ? busy ? "saving" : "saved" : "session only")), /* @__PURE__ */ React.createElement("div", { className: "sb-reel-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "sb-reel" }, entries.map((x, i) => /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        key: i,
-        className: "sb-seg " + x.c.status,
-        style: { width: `${durOf(x.c) / scale * 100}%` },
-        title: `${x.code} ${x.c.title || ""} \xB7 ${durOf(x.c)}s${x.c.actualDur ? " (rendered)" : ""}`
-      }
-    )), /* @__PURE__ */ React.createElement("div", { className: "sb-target", style: { left: `${project.target / scale * 100}%` } })), /* @__PURE__ */ React.createElement("div", { className: "sb-reel-legend" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { style: { background: "var(--surface1)" } }), "to do"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { style: { background: "var(--amber)" } }), "in progress"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { style: { background: "var(--green)" } }), "done"), /* @__PURE__ */ React.createElement("span", { style: { marginLeft: "auto" } }, entries.length, " clips \xB7 target 8:00")))), /* @__PURE__ */ React.createElement("div", { className: "sb-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "sb-toolbar" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: () => setShowGuide((s) => !s) }, showGuide ? "Hide guide" : "? How it works"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => setShowHelp((s) => !s) }, showHelp ? "Hide cheat-sheet" : "Continuity cheat-sheet"), /* @__PURE__ */ React.createElement("div", { className: "sb-divider" }), /* @__PURE__ */ React.createElement(
-      ExportMenu,
-      {
-        exportAll,
-        exportJSON,
-        exportBundle,
-        bundling,
-        importBackup
-      }
-    )), showGuide && /* @__PURE__ */ React.createElement("div", { className: "sb-helpbox", style: { borderColor: "var(--amber-d)" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 10 } }, /* @__PURE__ */ React.createElement("h4", { style: { marginTop: 0 } }, "What the Loom is"), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "sb-btn ghost sm",
-        style: { marginLeft: "auto" },
-        onClick: () => {
-          setShowGuide(false);
-          try {
-            localStorage.setItem("loom_guide_seen", "1");
-          } catch (e) {
-          }
-        }
-      },
-      "Got it"
-    )), "The ", /* @__PURE__ */ React.createElement("b", null, "Generate"), " card makes ", /* @__PURE__ */ React.createElement("b", null, "one"), " clip. The Loom is where you ", /* @__PURE__ */ React.createElement("b", null, "direct a sequence"), " \u2014 plan a multi-shot video, generate each shot on PixAI, then trim and stitch them into one cut. Camera vs. editing suite.", /* @__PURE__ */ React.createElement("h4", null, "The flow, top to bottom"), /* @__PURE__ */ React.createElement("b", null, "1 \xB7 Cast & Assets"), " \u2014 build a pool of reusable people / places / refs. ", /* @__PURE__ */ React.createElement("code", null, "\u25A4 Pick from gallery"), " or ", /* @__PURE__ */ React.createElement("code", null, "\u21AF Import collection"), " to fill it fast; each keeps its media_id, so referencing it is free.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("b", null, "2 \xB7 Shots"), " \u2014 add cards. Per shot: write the prompt, attach cast + open/close frames, set the mode (I2V / First\u2192Last / R2V) and duration (5/10/15s).", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("b", null, "3 \xB7 Generate shot"), " \u2014 renders on PixAI (free with a V4.0 card). The clip lands in your gallery and appears on the card.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("b", null, "4 \xB7 Trim"), " \u2014 drag the amber in/out handles on each clip to keep only the good seconds.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("b", null, "5 \xB7 Play & Export"), " \u2014 ", /* @__PURE__ */ React.createElement("code", null, "\u25B6\u25B6 Play"), " watches the rough cut back-to-back; ", /* @__PURE__ */ React.createElement("code", null, "\u21E9 Export"), " stitches it into one mp4.", /* @__PURE__ */ React.createElement("h4", null, "Chaining shots so cuts flow"), "Frame handoff, ", /* @__PURE__ */ React.createElement("code", null, "@tags"), ", and cast lock keep continuity across shots \u2014 open the ", /* @__PURE__ */ React.createElement("b", null, "Continuity cheat-sheet"), " for those."), showHelp && /* @__PURE__ */ React.createElement("div", { className: "sb-helpbox" }, /* @__PURE__ */ React.createElement("h4", null, "@references in plain terms"), "An ", /* @__PURE__ */ React.createElement("code", null, "@tag"), " is a name for a file you upload, numbered in upload order: the first image is ", /* @__PURE__ */ React.createElement("code", null, "@image1"), ", the first video ", /* @__PURE__ */ React.createElement("code", null, "@video1"), ", first audio ", /* @__PURE__ */ React.createElement("code", null, "@audio1"), ". In the prompt you say what each one is ", /* @__PURE__ */ React.createElement("b", null, "for"), " \u2014 identity, the opening frame, camera motion, the beat.", /* @__PURE__ */ React.createElement("h4", null, "Three ways to keep clips flowing"), /* @__PURE__ */ React.createElement("b", null, "Extend"), " \u2014 feed the previous clip as ", /* @__PURE__ */ React.createElement("code", null, "@video1"), "; the model anchors to its final frames and continues forward. Keep each extension ~5\u201310s.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("b", null, "First\u2192Last"), " \u2014 give the shot a start image and an end image; prompt the ", /* @__PURE__ */ React.createElement("b", null, "motion between them"), ', not the stills, with "', CONTINUITY_PHRASE, '" Keep the two frames similar in composition or the subject warps.', /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("b", null, "Cast lock"), " \u2014 define each recurring person/place once in ", /* @__PURE__ */ React.createElement("b", null, "Cast & Assets"), " and reuse the same ", /* @__PURE__ */ React.createElement("code", null, "@tag"), ' everywhere; the assembled prompt writes "maintain exact appearance from @image1" for you.', /* @__PURE__ */ React.createElement("h4", null, "The drift rule"), "Consistency fades the further you chain. Re-anchor to your original Cast reference every ", /* @__PURE__ */ React.createElement("b", null, "4\u20135 shots"), ", and your closing frame of one shot should be the opening frame of the next \u2014 that's the chain the board tracks.")), /* @__PURE__ */ React.createElement("div", { className: "sb-wrap", style: { paddingTop: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "sb-panel" }, /* @__PURE__ */ React.createElement("div", { className: "sb-panelhead", onClick: () => setShowCast((s) => !s) }, /* @__PURE__ */ React.createElement("span", { className: "sb-ico" }, showCast ? "\u25BE" : "\u25B8"), /* @__PURE__ */ React.createElement("h3", { className: "sb-disp" }, "Cast & Assets"), /* @__PURE__ */ React.createElement("span", { className: "sb-hint", style: { marginLeft: "auto" } }, (project.assets || []).length, " reusable refs \u2014 define once, reuse everywhere")), showCast && /* @__PURE__ */ React.createElement("div", { className: "sb-panelbody" }, (project.assets || []).map((as) => {
-      const prev = as.thumbId ? thumbs[as.thumbId] : as.mediaId ? "/thumbs/" + as.mediaId + ".jpg" : as.kind === "image" && as.source.startsWith("http") ? as.source : null;
-      return /* @__PURE__ */ React.createElement("div", { className: "sb-assetrow", key: as.id }, as.kind === "image" ? /* @__PURE__ */ React.createElement("label", { className: "sb-assetprev", title: "Attach image" }, prev ? /* @__PURE__ */ React.createElement("img", { src: prev, alt: as.name }) : "\uFF0B", /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          type: "file",
-          accept: "image/*",
-          style: { display: "none" },
-          onChange: async (e) => {
-            const f = e.target.files[0];
-            if (!f) return;
-            const id = await storeThumb(f);
-            setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" }));
-          }
-        }
-      )) : /* @__PURE__ */ React.createElement("div", { className: "sb-assetprev" }, as.kind === "video" ? "\u{1F39E}" : "\u266A"), as.kind === "image" && /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          className: "sb-ico",
-          title: "Pick from the gallery",
-          onClick: () => openPick((mid) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, mediaId: mid, thumbId: "", source: "" })))
-        },
-        "\u25A4"
-      ), /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          className: "sb-in",
-          style: { flex: "1 1 120px" },
-          value: as.name,
-          placeholder: "name (Her, Me, the room\u2026)",
-          onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, name: e.target.value }))
-        }
-      ), /* @__PURE__ */ React.createElement("input", { className: "sb-tagin sb-mono", value: as.tag, onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, tag: e.target.value })) }), /* @__PURE__ */ React.createElement("select", { className: "sb-sel", style: { width: "auto" }, value: as.kind, onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, kind: e.target.value })) }, /* @__PURE__ */ React.createElement("option", { value: "image" }, "image"), /* @__PURE__ */ React.createElement("option", { value: "video" }, "video"), /* @__PURE__ */ React.createElement("option", { value: "audio" }, "audio")), /* @__PURE__ */ React.createElement("label", { className: "sb-toggle", title: "Write 'maintain exact appearance' in prompts" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: as.lock, onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, lock: e.target.checked })) }), "lock"), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", onClick: () => setAssets((a) => a.filter((x) => x.id !== as.id)), title: "Remove" }, "\u2715"));
-    }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignSelf: "flex-start" } }, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "sb-btn ghost sm",
-        onClick: () => setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", lock: true }])
-      },
-      "+ Add reference"
-    ), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "sb-btn ghost sm",
-        onClick: () => setImportOpen(true),
-        title: "Pull a whole gallery collection in as reusable @image references"
-      },
-      "\u21AF Import collection"
-    ))))), /* @__PURE__ */ React.createElement("main", { className: "sb-main" }, project.acts.map((act, ai) => {
-      const sub = act.cards.reduce((s, c) => s + (Number(c.duration) || 0), 0);
-      return /* @__PURE__ */ React.createElement("section", { className: "sb-act", key: act.id }, /* @__PURE__ */ React.createElement("div", { className: "sb-acthead" }, /* @__PURE__ */ React.createElement("button", { className: "sb-ico", onClick: () => setAct(act.id, { collapsed: !act.collapsed }) }, act.collapsed ? "\u25B8" : "\u25BE"), /* @__PURE__ */ React.createElement("span", { className: "sb-actcode sb-mono" }, actLetter(ai)), /* @__PURE__ */ React.createElement("input", { className: "sb-actname", value: act.name, onChange: (e) => setAct(act.id, { name: e.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("span", { className: "sb-actmeta" }, act.cards.length, " \xB7 ", fmt(sub)), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", onClick: () => delAct(act.id), title: "Delete act" }, "\u2715")), !act.collapsed && /* @__PURE__ */ React.createElement("div", { className: "sb-grid" }, act.cards.map((card, ci) => {
-        const code = `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}`;
-        const gIdx = entries.findIndex((x) => x.c.id === card.id);
-        const prev = gIdx > 0 ? entries[gIdx - 1] : null;
-        return /* @__PURE__ */ React.createElement(CardView, { key: card.id, ...{
-          act,
-          card,
-          ci,
-          ai,
-          code,
-          prev,
-          project,
-          thumbs,
-          open,
-          setOpen,
-          setCard,
-          addRef,
-          setRef,
-          delRef,
-          storeThumb,
-          dupCard,
-          delCard,
-          moveCard,
-          moveCardToAct: moveCardToAct2,
-          copyShot,
-          generateShot,
-          genState,
-          entries,
-          openPick
-        } });
-      }), /* @__PURE__ */ React.createElement("button", { className: "sb-add", onClick: () => addCard(act.id) }, "+ Add shot to ", act.name)));
-    }), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost", onClick: addAct, style: { marginTop: 6 } }, "+ Add act")));
+    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), pickCb && (pickAllowType ? /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind, "show-type": true }) : /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind })), importOpen && /* @__PURE__ */ React.createElement(ImportCollection, { onClose: () => setImportOpen(false), onImport: importCollection }));
   }
   function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
     const vidRef = useRef(null), trackRef = useRef(null);
@@ -2880,24 +2714,6 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       else onClose();
     } }, "next \u25B6"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: onClose }, "\u2715 close"))));
   }
-  function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpen, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, copyShot, generateShot, genState, entries, openPick }) {
-    const isOpen = open[card.id];
-    const framePrev = (f) => f.thumbId ? thumbs[f.thumbId] : f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : f.source && f.source.startsWith("http") ? f.source : null;
-    const openImg = framePrev(card.openFrame), closeImg = framePrev(card.closeFrame);
-    const prevClose = prev ? prev.c.closeFrame : null;
-    const linked = prev && frameLinked(card.openFrame, prevClose);
-    const needsLink = prev && (card.connect === "extend" || card.connect === "flf" || card.connect === "cut");
-    const entry = { c: card, code, ai, ci };
-    return /* @__PURE__ */ React.createElement("article", { className: "sb-card" + (isOpen ? " open" : "") }, prev && card.connect !== "new" && /* @__PURE__ */ React.createElement("div", { className: "sb-fromstrip" }, /* @__PURE__ */ React.createElement("span", { className: "sb-linkdot " + (linked ? "sb-link-ok" : needsLink ? "sb-link-warn" : "") }, linked ? "\u2713" : needsLink ? "\u26A0" : "\xB7"), linked ? `opens on ${prev.code}'s closing frame` : needsLink ? `open frame \u2260 ${prev.code} close \u2014 link it` : `from ${prev.code}`, /* @__PURE__ */ React.createElement("span", { className: "sb-connbadge" }, connectMeta(card.connect).label)), /* @__PURE__ */ React.createElement("div", { className: "sb-slate" }, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "sb-tick " + card.status,
-        title: `Status: ${card.status} (click to cycle)`,
-        onClick: () => setCard(act.id, card.id, (c) => ({ ...c, status: c.status === "todo" ? "wip" : c.status === "wip" ? "done" : "todo" }))
-      },
-      "\u2713"
-    ), /* @__PURE__ */ React.createElement("span", { className: "sb-code" }, code), /* @__PURE__ */ React.createElement("input", { className: "sb-ctitle", placeholder: "shot title\u2026", value: card.title, onChange: (e) => setCard(act.id, card.id, (c) => ({ ...c, title: e.target.value })) }), /* @__PURE__ */ React.createElement("span", { className: "sb-mode" }, card.mode), /* @__PURE__ */ React.createElement("span", { className: "sb-tc" }, card.duration, "s"), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", onClick: () => setOpen((o) => ({ ...o, [card.id]: !isOpen })), title: isOpen ? "Collapse" : "Edit" }, isOpen ? "\u25BE" : "\u270E")), !isOpen ? /* @__PURE__ */ React.createElement("div", { className: "sb-body" }, /* @__PURE__ */ React.createElement("div", { className: "sb-frames-mini" }, /* @__PURE__ */ React.createElement("div", { className: "sb-fm" }, /* @__PURE__ */ React.createElement("div", { className: "sb-fmlab" }, /* @__PURE__ */ React.createElement("span", null, "open")), /* @__PURE__ */ React.createElement("div", { className: "sb-fmbox" + (card.discreet ? " discreet" : "") }, openImg ? /* @__PURE__ */ React.createElement("img", { src: openImg, alt: "open" }) : card.openFrame.desc || "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "sb-arrowmid" }, "\u2192"), /* @__PURE__ */ React.createElement("div", { className: "sb-fm" }, /* @__PURE__ */ React.createElement("div", { className: "sb-fmlab" }, /* @__PURE__ */ React.createElement("span", null, "close")), /* @__PURE__ */ React.createElement("div", { className: "sb-fmbox" + (card.discreet ? " discreet" : "") }, closeImg ? /* @__PURE__ */ React.createElement("img", { src: closeImg, alt: "close" }) : card.closeFrame.desc || "\u2014"))), /* @__PURE__ */ React.createElement("div", { className: "sb-prompt-mini" + (card.prompt ? "" : " empty"), onClick: () => setOpen((o) => ({ ...o, [card.id]: true })) }, card.prompt || "no prompt yet \u2014 tap to write"), /* @__PURE__ */ React.createElement("div", { className: "sb-minimeta" }, card.camera && /* @__PURE__ */ React.createElement("span", { className: "sb-chip" }, /* @__PURE__ */ React.createElement("b", null, "cam"), " ", card.camera), card.cast.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "sb-chip" }, /* @__PURE__ */ React.createElement("b", null, "cast"), " ", card.cast.length))) : /* @__PURE__ */ React.createElement(CardEditor, { ...{ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, copyShot, generateShot, genState, entry, framePrev, openPick } }));
-  }
   function ImportCollection({ onImport, onClose }) {
     const [colls, setColls] = useState([]);
     const [sel, setSel] = useState("");
@@ -2948,133 +2764,6 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         }
       }
     )), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "describe this frame (composition, subject position, light)", value: frame.desc, onChange: (e) => onPatch({ desc: e.target.value }) }), extraBtn);
-  }
-  function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, copyShot, generateShot, genState, entry, framePrev, openPick }) {
-    const [palFor, setPalFor] = useState(null);
-    const setF = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: val }));
-    const append = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: c[field] ? `${c[field]}, ${val}` : val }));
-    const patchFrame = (key, patch) => setCard(act.id, card.id, (c) => ({ ...c, [key]: { ...c[key], ...patch } }));
-    const [handoff, setHandoff] = useState("");
-    const inheritPrev = () => {
-      if (!prev) return;
-      const rmid = prev.c.resultMid;
-      if (rmid) {
-        setHandoff("wip");
-        fetch("/api/loom/handoff", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ video_media_id: rmid, trim_out: prev.c.trimOut })
-        }).then((r) => r.json()).then((d) => {
-          if (d.error || !d.frame_media_id) {
-            setHandoff("err");
-            return;
-          }
-          setHandoff("");
-          patchFrame("openFrame", {
-            mediaId: d.frame_media_id,
-            thumbId: "",
-            source: "",
-            desc: "handed off from " + (prev.code || "prev shot")
-          });
-        }).catch(() => setHandoff("err"));
-      } else {
-        patchFrame("openFrame", { ...prev.c.closeFrame });
-      }
-    };
-    const toggleCast = (id) => setCard(act.id, card.id, (c) => ({ ...c, cast: c.cast.includes(id) ? c.cast.filter((x) => x !== id) : [...c.cast, id] }));
-    return /* @__PURE__ */ React.createElement("div", { className: "sb-edit" }, /* @__PURE__ */ React.createElement("div", { className: "sb-row" }, /* @__PURE__ */ React.createElement("div", { className: "sb-field", style: { flex: "0 0 110px" } }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Mode"), /* @__PURE__ */ React.createElement("select", { className: "sb-sel", value: card.mode, onChange: (e) => setF("mode", e.target.value) }, MODES.map((m) => /* @__PURE__ */ React.createElement("option", { key: m }, m))), /* @__PURE__ */ React.createElement("span", { className: "sb-hint" }, MODE_HINT[card.mode])), /* @__PURE__ */ React.createElement("div", { className: "sb-field", style: { flex: "0 0 150px" } }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Joins previous via"), /* @__PURE__ */ React.createElement("select", { className: "sb-sel", value: card.connect, onChange: (e) => setF("connect", e.target.value) }, Object.entries(CONNECT).map(([k, v]) => /* @__PURE__ */ React.createElement("option", { key: k, value: k }, v.label))), /* @__PURE__ */ React.createElement("span", { className: "sb-hint" }, connectMeta(card.connect).hint)), /* @__PURE__ */ React.createElement("div", { className: "sb-field", style: { flex: "0 0 90px" } }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Duration (s)"), /* @__PURE__ */ React.createElement("input", { className: "sb-in", type: "number", min: "1", value: card.duration, onChange: (e) => setF("duration", Number(e.target.value)) })), /* @__PURE__ */ React.createElement("div", { className: "sb-field", style: { flex: "0 0 auto", justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Discreet"), /* @__PURE__ */ React.createElement("label", { className: "sb-toggle", title: "Blur this shot's frames/refs on the board" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: card.discreet, onChange: (e) => setF("discreet", e.target.checked) }), "blur previews"))), /* @__PURE__ */ React.createElement("div", { className: "sb-section" }, /* @__PURE__ */ React.createElement("h5", null, "Frame handoff \u2014 close of one shot opens the next"), /* @__PURE__ */ React.createElement("div", { className: "sb-twoframes" }, /* @__PURE__ */ React.createElement(
-      FrameSlot,
-      {
-        which: "open",
-        frame: card.openFrame,
-        discreet: card.discreet,
-        framePrev,
-        storeThumb,
-        openPick,
-        onPatch: (p) => patchFrame("openFrame", p),
-        extraBtn: prev ? /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            className: "sb-btn ghost sm",
-            onClick: inheritPrev,
-            disabled: handoff === "wip",
-            title: prev.c.resultMid ? `Splice in ${prev.code}'s generated clip's last frame` : `Copy ${prev.code}'s closing frame here`
-          },
-          handoff === "wip" ? "\u2702 splicing\u2026" : handoff === "err" ? "\u2702 splice failed \u2014 retry" : prev.c.resultMid ? `\u2702 splice ${prev.code}'s last frame` : `\u21B3 inherit ${prev.code} close`
-        ) : /* @__PURE__ */ React.createElement("span", { className: "sb-hint" }, "first shot \u2014 no previous frame")
-      }
-    ), /* @__PURE__ */ React.createElement("div", { className: "sb-conn-mid" }, "\u2192"), /* @__PURE__ */ React.createElement(
-      FrameSlot,
-      {
-        which: "close",
-        frame: card.closeFrame,
-        discreet: card.discreet,
-        framePrev,
-        storeThumb,
-        openPick,
-        onPatch: (p) => patchFrame("closeFrame", p)
-      }
-    )), /* @__PURE__ */ React.createElement("span", { className: "sb-hint", style: { marginTop: 6 } }, "For First\u2192Last shots, prompt the motion between these two \u2014 not the stills. Keep them close in composition so the subject doesn't warp.")), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Prompt \u2014 lead with subject + action"), /* @__PURE__ */ React.createElement(
-      "textarea",
-      {
-        className: "sb-ta big",
-        value: card.prompt,
-        onChange: (e) => setF("prompt", e.target.value),
-        placeholder: card.connect === "extend" ? "What happens next as the previous clip continues (motion only)\u2026" : "Who/what is in frame and what they're doing first; then environment, then style\u2026"
-      }
-    )), (project.assets || []).length > 0 && /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Cast in this shot \u2014 keeps them consistent"), /* @__PURE__ */ React.createElement("div", { className: "sb-casttoggle" }, project.assets.map((as) => /* @__PURE__ */ React.createElement("button", { key: as.id, className: "sb-castchip" + (card.cast.includes(as.id) ? " on" : ""), onClick: () => toggleCast(as.id) }, as.name || "(unnamed)", " ", /* @__PURE__ */ React.createElement("span", { className: "sb-ct" }, as.tag), as.lock ? " \u{1F512}" : "")))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Other references & @tags"), card.refs.map((r) => {
-      const preview = r.thumbId ? thumbs[r.thumbId] : r.kind === "image" && r.source.startsWith("http") ? r.source : null;
-      return /* @__PURE__ */ React.createElement("div", { className: "sb-ref", key: r.id }, r.kind === "image" ? /* @__PURE__ */ React.createElement("label", { className: "sb-refprev" + (card.discreet ? " discreet" : ""), title: "Attach image" }, preview ? /* @__PURE__ */ React.createElement("img", { src: preview, alt: r.tag }) : "\uFF0B", /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          type: "file",
-          accept: "image/*",
-          style: { display: "none" },
-          onChange: async (e) => {
-            const f = e.target.files[0];
-            if (!f) return;
-            const id = await storeThumb(f);
-            setRef(act.id, card.id, r.id, { thumbId: id, source: r.source || f.name });
-          }
-        }
-      )) : /* @__PURE__ */ React.createElement("div", { className: "sb-refprev" }, r.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement("div", { className: "sb-refbody" }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("input", { className: "sb-tagin sb-mono", value: r.tag, onChange: (e) => setRef(act.id, card.id, r.id, { tag: e.target.value }) }), /* @__PURE__ */ React.createElement("span", { className: "sb-hint" }, r.kind), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { marginLeft: "auto" }, onClick: () => delRef(act.id, card.id, r) }, "\u2715")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "what to use it for (motion / camera / mood\u2026)", value: r.role, onChange: (e) => setRef(act.id, card.id, r.id, { role: e.target.value }) }), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "file name or URL", value: r.source, onChange: (e) => setRef(act.id, card.id, r.id, { source: e.target.value }) })));
-    }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 7, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(act.id, card, "image") }, "+ Image"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(act.id, card, "video") }, "+ Video"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(act.id, card, "audio") }, "+ Audio"))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { fontSize: 11 }, onClick: () => setPalFor(palFor === "camera" ? null : "camera") }, "\uFF0Bterms")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", value: card.camera, onChange: (e) => setF("camera", e.target.value), placeholder: "e.g. CU, slow push in, shallow depth of field" }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "sb-pal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement(React.Fragment, { key: grp }, /* @__PURE__ */ React.createElement("div", { className: "sb-palgrp" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("button", { key: t, className: "sb-pchip sb-mono", onClick: () => append("camera", t) }, t)))))), /* @__PURE__ */ React.createElement("div", { className: "sb-row" }, /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Lighting & mood ", /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { fontSize: 11 }, onClick: () => setPalFor(palFor === "lighting" ? null : "lighting") }, "\uFF0Bterms")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", value: card.lighting, onChange: (e) => setF("lighting", e.target.value), placeholder: "golden hour, low-key, warm haze\u2026" }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "sb-pal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("button", { key: t, className: "sb-pchip sb-mono", onClick: () => append("lighting", t) }, t)))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Music / audio cue ", /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { fontSize: 11 }, onClick: () => setPalFor(palFor === "audio" ? null : "audio") }, "\uFF0Bterms")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", value: card.audioCue, onChange: (e) => setF("audioCue", e.target.value), placeholder: "track, beat sync, room tone\u2026" }), palFor === "audio" && /* @__PURE__ */ React.createElement("div", { className: "sb-pal" }, AUDIO_PALETTE.map((t) => /* @__PURE__ */ React.createElement("button", { key: t, className: "sb-pchip sb-mono", onClick: () => append("audioCue", t) }, t))))), /* @__PURE__ */ React.createElement("div", { className: "sb-row" }, /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { fontSize: 11 }, onClick: () => setPalFor(palFor === "in" ? null : "in") }, "\uFF0B")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", value: card.transIn, onChange: (e) => setF("transIn", e.target.value), placeholder: "cut, fade in\u2026" }), palFor === "in" && /* @__PURE__ */ React.createElement("div", { className: "sb-pal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("button", { key: t, className: "sb-pchip sb-mono", onClick: () => setF("transIn", t) }, t)))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { fontSize: 11 }, onClick: () => setPalFor(palFor === "out" ? null : "out") }, "\uFF0B")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", value: card.transOut, onChange: (e) => setF("transOut", e.target.value), placeholder: "cut, dissolve\u2026" }), palFor === "out" && /* @__PURE__ */ React.createElement("div", { className: "sb-pal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("button", { key: t, className: "sb-pchip sb-mono", onClick: () => setF("transOut", t) }, t))))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Notes"), /* @__PURE__ */ React.createElement("textarea", { className: "sb-ta", value: card.notes, onChange: (e) => setF("notes", e.target.value), placeholder: "blocking, continuity reminders\u2026" })), /* @__PURE__ */ React.createElement("div", { className: "sb-toolbar" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn amber sm", onClick: () => copyShot(entry) }, "Copy shot"), (() => {
-      const g = genState[card.id] || {};
-      const busy = g.phase === "submitting" || g.phase === "running";
-      return /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          className: "sb-btn sm",
-          disabled: busy,
-          onClick: () => generateShot(entry),
-          title: "Render this shot on PixAI (free with a V4.0 card)"
-        },
-        busy ? "Generating\u2026" : "\u25B6 Generate shot"
-      );
-    })(), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => moveCard(act.id, ci, -1) }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => moveCard(act.id, ci, 1) }, "\u2193"), /* @__PURE__ */ React.createElement("select", { className: "sb-sel sm", style: { width: "auto", fontSize: 12, padding: "6px 8px" }, value: "", onChange: (e) => e.target.value && moveCardToAct2(act.id, card, e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "move to act\u2026"), project.acts.filter((a) => a.id !== act.id).map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name))), /* @__PURE__ */ React.createElement("div", { className: "sb-divider" }), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => dupCard(act.id, card) }, "Duplicate"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm danger", onClick: () => delCard(act.id, card) }, "Delete")), (() => {
-      const g = genState[card.id];
-      if (!g) return null;
-      const col = g.phase === "done" ? "var(--green)" : g.phase === "error" ? "var(--coral)" : "var(--amber)";
-      return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: col, display: "flex", alignItems: "center", gap: 10, marginTop: 2 } }, /* @__PURE__ */ React.createElement("span", null, g.phase === "done" ? "\u2713 " : g.phase === "error" ? "\u26A0 " : "\u2026 ", g.msg), g.phase === "done" && g.mid && /* @__PURE__ */ React.createElement(
-        "a",
-        {
-          className: "sb-mono",
-          href: "/image/" + g.mid,
-          target: "_blank",
-          rel: "noreferrer",
-          style: { color: "var(--cyan)" }
-        },
-        "open full \u2197"
-      )));
-    })(), card.resultMid && /* @__PURE__ */ React.createElement(
-      ShotPreview,
-      {
-        mid: card.resultMid,
-        trimIn: card.trimIn,
-        trimOut: card.trimOut,
-        onTrim: (i, o) => setCard(act.id, card.id, (c) => ({ ...c, trimIn: i, trimOut: o }))
-      }
-    ));
   }
   return __toCommonJS(master_storyboard_exports);
 })();

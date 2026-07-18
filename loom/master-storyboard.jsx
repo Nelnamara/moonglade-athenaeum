@@ -626,9 +626,10 @@ class V2Boundary extends React.Component {
   render() {
     if (this.state.err) return (
       <div className="lv-overlay"><div className="lv-err">
-        <p>The V2 layout hit an error — your classic Loom is completely safe.</p>
+        <p>The Loom hit a render error. Your storyboards are saved and safe — reload to recover.</p>
         <pre>{String((this.state.err && this.state.err.stack) || this.state.err)}</pre>
-        <button className="lv-close" onClick={this.props.onClose}>← Back to classic Loom</button>
+        <button className="lv-close" onClick={() => window.location.reload()}>↻ Reload the Loom</button>
+        <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Back to the gallery</a>
       </div></div>
     );
     return this.props.children;
@@ -704,7 +705,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -1206,7 +1207,7 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
           title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Export</button>
         <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
           bundling={bundling} importBackup={importBackup} />
-        <button className="lv-close" onClick={onClose}>← Back to classic Loom</button>
+        <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
       {timelineDrawer}
       <div className="lv-shell">
@@ -1341,8 +1342,8 @@ function LoomV2({ onClose, project, setCard, setAssets, entries, durOf, scale, s
    decomposed by RESPONSIBILITY into four focused hooks instead of one
    monolithic one, each thin-wrapping the pure reducers/classifiers imported
    from ./src/loom-mutations.js above. App() composes them back together;
-   every prop name a child component (CardView, CardEditor, LoomV2, ...)
-   already expects is preserved unchanged below.
+   every prop name a child component (LoomV2 and its subtree) already expects
+   is preserved unchanged below.
 
      useProjectStore        -- multi-project CRUD + window.storage persistence
      useShotMutations        -- act/card/ref CRUD on the open project
@@ -1871,7 +1872,6 @@ export default function App() {
   const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
   const [pickAllowType, setPickAllowType] = useState(false);  // show the Image/Video/All filter?
   const [importOpen, setImportOpen] = useState(false);  // import-collection dialog
-  const [v2, setV2] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showGuide, setShowGuide] = useState(() => {
     try { return !localStorage.getItem("loom_guide_seen"); } catch (e) { return true; } });
@@ -1937,7 +1937,7 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
-      {v2 && <V2Boundary onClose={() => setV2(false)}><LoomV2 onClose={() => setV2(false)}
+      <V2Boundary><LoomV2
         project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
         selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} useExistingVideo={useExistingVideo} genState={genState}
         thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
@@ -1949,7 +1949,7 @@ export default function App() {
         batching={batching} batchGenerate={batchGenerate}
         addRef={addRef} setRef={setRef} delRef={delRef}
         exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
-        importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot} /></V2Boundary>}
+        importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot} /></V2Boundary>
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
@@ -1978,167 +1978,6 @@ export default function App() {
         : <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind}></mg-gallery-picker>)}
       {importOpen && <ImportCollection onClose={() => setImportOpen(false)} onImport={importCollection} />}
 
-      <header className="sb-top">
-        <div className="sb-topgrid">
-          <div className="sb-brand">
-            <a href="/" className="sb-btn ghost sm" title="Back to the gallery"
-              style={{ textDecoration: "none", flexShrink: 0 }}>← Gallery</a>
-            <h1 className="sb-disp"><span className="sb-clap">▰</span> The Loom</h1>
-            <input className="sb-projname" value={project.name} onChange={(e) => setProject((p) => ({ ...p, name: e.target.value }))} aria-label="Project name" />
-            <ProjectSwitcher api={projectApi} />
-            <button className="sb-btn" onClick={() => batchGenerate(entries)} disabled={batching || !entries.length}
-              title="Generate every shot that isn't done yet, one after another">
-              {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
-            <button className="sb-btn amber" onClick={() => playSequence(entries)} disabled={!anyDone}
-              title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
-            <button className="sb-btn" onClick={() => exportCut(entries)} disabled={!anyDone}
-              title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Export</button>
-            <button className="sb-btn ghost sm" onClick={() => setV2(true)}
-              title="Switch to the V2 layout (non-destructive — your board is untouched)">&#9707; V2 layout</button>
-          </div>
-          <div className="sb-stat"><b>{done}/{entries.length}</b><span>shots done</span></div>
-          <div className="sb-stat"><b style={{ color: over > 0 ? "var(--coral)" : "var(--ink)" }}>{fmt(total)}</b>
-            <span>of {fmt(project.target)}{over > 0 ? ` · +${fmt(over)} over` : ""}</span></div>
-          <div className="sb-saved" title={hasStore ? "Saved to this browser" : "In-memory only — export to keep"}>
-            <span className={"sb-dot" + (busy ? " busy" : "")} /> {hasStore ? (busy ? "saving" : "saved") : "session only"}</div>
-        </div>
-        <div className="sb-reel-wrap">
-          <div className="sb-reel">
-            {entries.map((x, i) => (<div key={i} className={"sb-seg " + x.c.status}
-              style={{ width: `${(durOf(x.c) / scale) * 100}%` }}
-              title={`${x.code} ${x.c.title || ""} · ${durOf(x.c)}s${x.c.actualDur ? " (rendered)" : ""}`} />))}
-            <div className="sb-target" style={{ left: `${(project.target / scale) * 100}%` }} />
-          </div>
-          <div className="sb-reel-legend">
-            <span><i style={{ background: "var(--surface1)" }} />to do</span>
-            <span><i style={{ background: "var(--amber)" }} />in progress</span>
-            <span><i style={{ background: "var(--green)" }} />done</span>
-            <span style={{ marginLeft: "auto" }}>{entries.length} clips · target 8:00</span>
-          </div>
-        </div>
-      </header>
-
-      <div className="sb-wrap">
-        <div className="sb-toolbar">
-          <button className="sb-btn sm" onClick={() => setShowGuide((s) => !s)}>{showGuide ? "Hide guide" : "? How it works"}</button>
-          <button className="sb-btn ghost sm" onClick={() => setShowHelp((s) => !s)}>{showHelp ? "Hide cheat-sheet" : "Continuity cheat-sheet"}</button>
-          <div className="sb-divider" />
-          <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
-            bundling={bundling} importBackup={importBackup} />
-        </div>
-        {showGuide && (
-          <div className="sb-helpbox" style={{ borderColor: "var(--amber-d)" }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-              <h4 style={{ marginTop: 0 }}>What the Loom is</h4>
-              <button className="sb-btn ghost sm" style={{ marginLeft: "auto" }}
-                onClick={() => { setShowGuide(false); try { localStorage.setItem("loom_guide_seen", "1"); } catch (e) {} }}>Got it</button>
-            </div>
-            The <b>Generate</b> card makes <b>one</b> clip. The Loom is where you <b>direct a sequence</b> &mdash; plan a multi-shot video, generate each shot on PixAI, then trim and stitch them into one cut. Camera vs. editing suite.
-            <h4>The flow, top to bottom</h4>
-            <b>1 &middot; Cast &amp; Assets</b> — build a pool of reusable people / places / refs. <code>&#9636; Pick from gallery</code> or <code>&#8623; Import collection</code> to fill it fast; each keeps its media_id, so referencing it is free.<br />
-            <b>2 &middot; Shots</b> — add cards. Per shot: write the prompt, attach cast + open/close frames, set the mode (I2V / First&rarr;Last / R2V) and duration (5/10/15s).<br />
-            <b>3 &middot; Generate shot</b> — renders on PixAI (free with a V4.0 card). The clip lands in your gallery and appears on the card.<br />
-            <b>4 &middot; Trim</b> — drag the amber in/out handles on each clip to keep only the good seconds.<br />
-            <b>5 &middot; Play &amp; Export</b> — <code>&#9654;&#9654; Play</code> watches the rough cut back-to-back; <code>&#8681; Export</code> stitches it into one mp4.
-            <h4>Chaining shots so cuts flow</h4>
-            Frame handoff, <code>@tags</code>, and cast lock keep continuity across shots &mdash; open the <b>Continuity cheat-sheet</b> for those.
-          </div>
-        )}
-        {showHelp && (
-          <div className="sb-helpbox">
-            <h4>@references in plain terms</h4>
-            An <code>@tag</code> is a name for a file you upload, numbered in upload order: the first image is <code>@image1</code>, the first video <code>@video1</code>, first audio <code>@audio1</code>. In the prompt you say what each one is <b>for</b> — identity, the opening frame, camera motion, the beat.
-            <h4>Three ways to keep clips flowing</h4>
-            <b>Extend</b> — feed the previous clip as <code>@video1</code>; the model anchors to its final frames and continues forward. Keep each extension ~5–10s.<br />
-            <b>First→Last</b> — give the shot a start image and an end image; prompt the <b>motion between them</b>, not the stills, with "{CONTINUITY_PHRASE}" Keep the two frames similar in composition or the subject warps.<br />
-            <b>Cast lock</b> — define each recurring person/place once in <b>Cast &amp; Assets</b> and reuse the same <code>@tag</code> everywhere; the assembled prompt writes "maintain exact appearance from @image1" for you.
-            <h4>The drift rule</h4>
-            Consistency fades the further you chain. Re-anchor to your original Cast reference every <b>4–5 shots</b>, and your closing frame of one shot should be the opening frame of the next — that's the chain the board tracks.
-          </div>
-        )}
-      </div>
-
-      {/* CAST & ASSETS */}
-      <div className="sb-wrap" style={{ paddingTop: 0 }}>
-        <div className="sb-panel">
-          <div className="sb-panelhead" onClick={() => setShowCast((s) => !s)}>
-            <span className="sb-ico">{showCast ? "▾" : "▸"}</span>
-            <h3 className="sb-disp">Cast &amp; Assets</h3>
-            <span className="sb-hint" style={{ marginLeft: "auto" }}>{(project.assets || []).length} reusable refs — define once, reuse everywhere</span>
-          </div>
-          {showCast && (
-            <div className="sb-panelbody">
-              {(project.assets || []).map((as) => {
-                const prev = as.thumbId ? thumbs[as.thumbId]
-                  : (as.mediaId ? "/thumbs/" + as.mediaId + ".jpg"
-                    : (as.kind === "image" && as.source.startsWith("http") ? as.source : null));
-                return (
-                  <div className="sb-assetrow" key={as.id}>
-                    {as.kind === "image" ? (
-                      <label className="sb-assetprev" title="Attach image">
-                        {prev ? <img src={prev} alt={as.name} /> : "＋"}
-                        <input type="file" accept="image/*" style={{ display: "none" }}
-                          onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f);
-                            setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" })); }} /></label>
-                    ) : <div className="sb-assetprev">{as.kind === "video" ? "🎞" : "♪"}</div>}
-                    {as.kind === "image" && <button className="sb-ico" title="Pick from the gallery"
-                      onClick={() => openPick((mid) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, mediaId: mid, thumbId: "", source: "" })))}>▤</button>}
-                    <input className="sb-in" style={{ flex: "1 1 120px" }} value={as.name} placeholder="name (Her, Me, the room…)"
-                      onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, name: e.target.value }))} />
-                    <input className="sb-tagin sb-mono" value={as.tag} onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, tag: e.target.value }))} />
-                    <select className="sb-sel" style={{ width: "auto" }} value={as.kind} onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, kind: e.target.value }))}>
-                      <option value="image">image</option><option value="video">video</option><option value="audio">audio</option></select>
-                    <label className="sb-toggle" title="Write 'maintain exact appearance' in prompts">
-                      <input type="checkbox" checked={as.lock} onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, lock: e.target.checked }))} />lock</label>
-                    <button className="sb-ico" onClick={() => setAssets((a) => a.filter((x) => x.id !== as.id))} title="Remove">✕</button>
-                  </div>
-                );
-              })}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignSelf: "flex-start" }}>
-                <button className="sb-btn ghost sm"
-                  onClick={() => setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", lock: true }])}>+ Add reference</button>
-                <button className="sb-btn ghost sm" onClick={() => setImportOpen(true)}
-                  title="Pull a whole gallery collection in as reusable @image references">&#8623; Import collection</button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ACTS */}
-      <main className="sb-main">
-        {project.acts.map((act, ai) => {
-          const sub = act.cards.reduce((s, c) => s + (Number(c.duration) || 0), 0);
-          return (
-            <section className="sb-act" key={act.id}>
-              <div className="sb-acthead">
-                <button className="sb-ico" onClick={() => setAct(act.id, { collapsed: !act.collapsed })}>{act.collapsed ? "▸" : "▾"}</button>
-                <span className="sb-actcode sb-mono">{actLetter(ai)}</span>
-                <input className="sb-actname" value={act.name} onChange={(e) => setAct(act.id, { name: e.target.value })} aria-label="Act name" />
-                <span className="sb-actmeta">{act.cards.length} · {fmt(sub)}</span>
-                <button className="sb-ico" onClick={() => moveAct(ai, -1)} title="Move act up">↑</button>
-                <button className="sb-ico" onClick={() => moveAct(ai, 1)} title="Move act down">↓</button>
-                <button className="sb-ico" onClick={() => delAct(act.id)} title="Delete act">✕</button>
-              </div>
-              {!act.collapsed && (
-                <div className="sb-grid">
-                  {act.cards.map((card, ci) => {
-                    const code = `${actLetter(ai)}·${String(ci + 1).padStart(2, "0")}`;
-                    const gIdx = entries.findIndex((x) => x.c.id === card.id);
-                    const prev = gIdx > 0 ? entries[gIdx - 1] : null;
-                    return (
-                      <CardView key={card.id} {...{ act, card, ci, ai, code, prev, project, thumbs, open, setOpen,
-                        setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries, openPick }} />
-                    );
-                  })}
-                  <button className="sb-add" onClick={() => addCard(act.id)}>+ Add shot to {act.name}</button>
-                </div>
-              )}
-            </section>
-          );
-        })}
-        <button className="sb-btn ghost" onClick={addAct} style={{ marginTop: 6 }}>+ Add act</button>
-      </main>
     </div>
   );
 }
@@ -2334,62 +2173,6 @@ function SequencePlayer({ clips, onClose }) {
   );
 }
 
-function CardView({ act, card, ci, ai, code, prev, project, thumbs, open, setOpen, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entries, openPick }) {
-  const isOpen = open[card.id];
-  const framePrev = (f) => f.thumbId ? thumbs[f.thumbId]
-    : (f.mediaId ? "/thumbs/" + f.mediaId + ".jpg"
-      : (f.source && f.source.startsWith("http") ? f.source : null));
-  const openImg = framePrev(card.openFrame), closeImg = framePrev(card.closeFrame);
-  const prevClose = prev ? prev.c.closeFrame : null;
-  const linked = prev && frameLinked(card.openFrame, prevClose);
-  const needsLink = prev && (card.connect === "extend" || card.connect === "flf" || card.connect === "cut");
-  const entry = { c: card, code, ai, ci };
-
-  return (
-    <article className={"sb-card" + (isOpen ? " open" : "")}>
-      {prev && card.connect !== "new" && (
-        <div className="sb-fromstrip">
-          <span className={"sb-linkdot " + (linked ? "sb-link-ok" : needsLink ? "sb-link-warn" : "")}>{linked ? "✓" : needsLink ? "⚠" : "·"}</span>
-          {linked ? `opens on ${prev.code}'s closing frame` : needsLink ? `open frame ≠ ${prev.code} close — link it` : `from ${prev.code}`}
-          <span className="sb-connbadge">{connectMeta(card.connect).label}</span>
-        </div>
-      )}
-      <div className="sb-slate">
-        <button className={"sb-tick " + card.status} title={`Status: ${card.status} (click to cycle)`}
-          onClick={() => setCard(act.id, card.id, (c) => ({ ...c, status: c.status === "todo" ? "wip" : c.status === "wip" ? "done" : "todo" }))}>✓</button>
-        <span className="sb-code">{code}</span>
-        <input className="sb-ctitle" placeholder="shot title…" value={card.title} onChange={(e) => setCard(act.id, card.id, (c) => ({ ...c, title: e.target.value }))} />
-        <span className="sb-mode">{card.mode}</span>
-        <span className="sb-tc">{card.duration}s</span>
-        <button className="sb-ico" onClick={() => setOpen((o) => ({ ...o, [card.id]: !isOpen }))} title={isOpen ? "Collapse" : "Edit"}>{isOpen ? "▾" : "✎"}</button>
-      </div>
-
-      {!isOpen ? (
-        <div className="sb-body">
-          <div className="sb-frames-mini">
-            <div className="sb-fm">
-              <div className="sb-fmlab"><span>open</span></div>
-              <div className={"sb-fmbox" + (card.discreet ? " discreet" : "")}>{openImg ? <img src={openImg} alt="open" /> : (card.openFrame.desc || "—")}</div>
-            </div>
-            <div className="sb-arrowmid">→</div>
-            <div className="sb-fm">
-              <div className="sb-fmlab"><span>close</span></div>
-              <div className={"sb-fmbox" + (card.discreet ? " discreet" : "")}>{closeImg ? <img src={closeImg} alt="close" /> : (card.closeFrame.desc || "—")}</div>
-            </div>
-          </div>
-          <div className={"sb-prompt-mini" + (card.prompt ? "" : " empty")} onClick={() => setOpen((o) => ({ ...o, [card.id]: true }))}>
-            {card.prompt || "no prompt yet — tap to write"}</div>
-          <div className="sb-minimeta">
-            {card.camera && <span className="sb-chip"><b>cam</b> {card.camera}</span>}
-            {card.cast.length > 0 && <span className="sb-chip"><b>cast</b> {card.cast.length}</span>}
-          </div>
-        </div>
-      ) : (
-        <CardEditor {...{ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev, openPick }} />
-      )}
-    </article>
-  );
-}
 
 /* ===================== EDITOR ===================== */
 /* The gallery picker used to be a self-contained component (GalleryPick) here; it's now
@@ -2462,185 +2245,6 @@ function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, ope
           onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); onPatch({ thumbId: id, source: frame.source || f.name, mediaId: "" }); }} /></label>
       <input className="sb-in" placeholder="describe this frame (composition, subject position, light)" value={frame.desc} onChange={(e) => onPatch({ desc: e.target.value })} />
       {extraBtn}
-    </div>
-  );
-}
-
-function CardEditor({ act, card, ci, ai, prev, project, thumbs, setCard, addRef, setRef, delRef, storeThumb, dupCard, delCard, moveCard, moveCardToAct, copyShot, generateShot, genState, entry, framePrev, openPick }) {
-  const [palFor, setPalFor] = useState(null);
-  const setF = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: val }));
-  const append = (field, val) => setCard(act.id, card.id, (c) => ({ ...c, [field]: c[field] ? `${c[field]}, ${val}` : val }));
-  const patchFrame = (key, patch) => setCard(act.id, card.id, (c) => ({ ...c, [key]: { ...c[key], ...patch } }));
-  const [handoff, setHandoff] = useState("");   // '', 'wip', 'err'
-  const inheritPrev = () => {
-    if (!prev) return;
-    // Frame handoff: if the previous shot was actually GENERATED, pull its clip's real
-    // last frame; otherwise fall back to copying its planned closing frame.
-    const rmid = prev.c.resultMid;
-    if (rmid) {
-      setHandoff("wip");
-      fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_media_id: rmid, trim_out: prev.c.trimOut }) })
-        .then((r) => r.json()).then((d) => {
-          if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
-          setHandoff("");
-          patchFrame("openFrame", { mediaId: d.frame_media_id, thumbId: "", source: "",
-            desc: "handed off from " + (prev.code || "prev shot") });
-        }).catch(() => setHandoff("err"));
-    } else {
-      patchFrame("openFrame", { ...prev.c.closeFrame });
-    }
-  };
-  const toggleCast = (id) => setCard(act.id, card.id, (c) => ({ ...c, cast: c.cast.includes(id) ? c.cast.filter((x) => x !== id) : [...c.cast, id] }));
-
-  return (
-    <div className="sb-edit">
-      <div className="sb-row">
-        <div className="sb-field" style={{ flex: "0 0 110px" }}>
-          <label className="sb-lab">Mode</label>
-          <select className="sb-sel" value={card.mode} onChange={(e) => setF("mode", e.target.value)}>{MODES.map((m) => <option key={m}>{m}</option>)}</select>
-          <span className="sb-hint">{MODE_HINT[card.mode]}</span>
-        </div>
-        <div className="sb-field" style={{ flex: "0 0 150px" }}>
-          <label className="sb-lab">Joins previous via</label>
-          <select className="sb-sel" value={card.connect} onChange={(e) => setF("connect", e.target.value)}>
-            {Object.entries(CONNECT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
-          <span className="sb-hint">{connectMeta(card.connect).hint}</span>
-        </div>
-        <div className="sb-field" style={{ flex: "0 0 90px" }}>
-          <label className="sb-lab">Duration (s)</label>
-          <input className="sb-in" type="number" min="1" value={card.duration} onChange={(e) => setF("duration", Number(e.target.value))} />
-        </div>
-        <div className="sb-field" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
-          <label className="sb-lab">Discreet</label>
-          <label className="sb-toggle" title="Blur this shot's frames/refs on the board">
-            <input type="checkbox" checked={card.discreet} onChange={(e) => setF("discreet", e.target.checked)} />blur previews</label>
-        </div>
-      </div>
-
-      {/* FRAME HANDOFF */}
-      <div className="sb-section">
-        <h5>Frame handoff — close of one shot opens the next</h5>
-        <div className="sb-twoframes">
-          <FrameSlot which="open" frame={card.openFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb} openPick={openPick}
-            onPatch={(p) => patchFrame("openFrame", p)}
-            extraBtn={prev ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
-                title={prev.c.resultMid ? `Splice in ${prev.code}'s generated clip's last frame` : `Copy ${prev.code}'s closing frame here`}>
-                {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
-                  : prev.c.resultMid ? `✂ splice ${prev.code}'s last frame` : `↳ inherit ${prev.code} close`}</button>
-              : <span className="sb-hint">first shot — no previous frame</span>} />
-          <div className="sb-conn-mid">→</div>
-          <FrameSlot which="close" frame={card.closeFrame} discreet={card.discreet} framePrev={framePrev} storeThumb={storeThumb} openPick={openPick}
-            onPatch={(p) => patchFrame("closeFrame", p)} />
-        </div>
-        <span className="sb-hint" style={{ marginTop: 6 }}>For First→Last shots, prompt the motion between these two — not the stills. Keep them close in composition so the subject doesn't warp.</span>
-      </div>
-
-      <div className="sb-field">
-        <label className="sb-lab">Prompt — lead with subject + action</label>
-        <textarea className="sb-ta big" value={card.prompt} onChange={(e) => setF("prompt", e.target.value)}
-          placeholder={card.connect === "extend" ? "What happens next as the previous clip continues (motion only)…" : "Who/what is in frame and what they're doing first; then environment, then style…"} />
-      </div>
-
-      {/* CAST */}
-      {(project.assets || []).length > 0 && (
-        <div className="sb-field">
-          <label className="sb-lab">Cast in this shot — keeps them consistent</label>
-          <div className="sb-casttoggle">
-            {project.assets.map((as) => (
-              <button key={as.id} className={"sb-castchip" + (card.cast.includes(as.id) ? " on" : "")} onClick={() => toggleCast(as.id)}>
-                {as.name || "(unnamed)"} <span className="sb-ct">{as.tag}</span>{as.lock ? " 🔒" : ""}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* EXTRA REFS */}
-      <div className="sb-field">
-        <label className="sb-lab">Other references &amp; @tags</label>
-        {card.refs.map((r) => {
-          const preview = r.thumbId ? thumbs[r.thumbId] : (r.kind === "image" && r.source.startsWith("http") ? r.source : null);
-          return (
-            <div className="sb-ref" key={r.id}>
-              {r.kind === "image" ? (
-                <label className={"sb-refprev" + (card.discreet ? " discreet" : "")} title="Attach image">
-                  {preview ? <img src={preview} alt={r.tag} /> : "＋"}
-                  <input type="file" accept="image/*" style={{ display: "none" }}
-                    onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); setRef(act.id, card.id, r.id, { thumbId: id, source: r.source || f.name }); }} /></label>
-              ) : <div className="sb-refprev">{r.kind === "video" ? "🎞" : "♪"}</div>}
-              <div className="sb-refbody">
-                <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
-                  <input className="sb-tagin sb-mono" value={r.tag} onChange={(e) => setRef(act.id, card.id, r.id, { tag: e.target.value })} />
-                  <span className="sb-hint">{r.kind}</span>
-                  <button className="sb-ico" style={{ marginLeft: "auto" }} onClick={() => delRef(act.id, card.id, r)}>✕</button>
-                </div>
-                <input className="sb-in" placeholder="what to use it for (motion / camera / mood…)" value={r.role} onChange={(e) => setRef(act.id, card.id, r.id, { role: e.target.value })} />
-                <input className="sb-in" placeholder="file name or URL" value={r.source} onChange={(e) => setRef(act.id, card.id, r.id, { source: e.target.value })} />
-              </div>
-            </div>
-          );
-        })}
-        <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-          <button className="sb-btn sm ghost" onClick={() => addRef(act.id, card, "image")}>+ Image</button>
-          <button className="sb-btn sm ghost" onClick={() => addRef(act.id, card, "video")}>+ Video</button>
-          <button className="sb-btn sm ghost" onClick={() => addRef(act.id, card, "audio")}>+ Audio</button>
-        </div>
-      </div>
-
-      <div className="sb-field">
-        <label className="sb-lab">Camera <button className="sb-ico" style={{ fontSize: 11 }} onClick={() => setPalFor(palFor === "camera" ? null : "camera")}>＋terms</button></label>
-        <input className="sb-in" value={card.camera} onChange={(e) => setF("camera", e.target.value)} placeholder="e.g. CU, slow push in, shallow depth of field" />
-        {palFor === "camera" && (<div className="sb-pal">{Object.entries(CAM_PALETTE).map(([grp, items]) => (
-          <React.Fragment key={grp}><div className="sb-palgrp">{grp}</div>
-            {items.map((t) => <button key={t} className="sb-pchip sb-mono" onClick={() => append("camera", t)}>{t}</button>)}</React.Fragment>))}</div>)}
-      </div>
-
-      <div className="sb-row">
-        <div className="sb-field"><label className="sb-lab">Lighting &amp; mood <button className="sb-ico" style={{ fontSize: 11 }} onClick={() => setPalFor(palFor === "lighting" ? null : "lighting")}>＋terms</button></label>
-          <input className="sb-in" value={card.lighting} onChange={(e) => setF("lighting", e.target.value)} placeholder="golden hour, low-key, warm haze…" />
-          {palFor === "lighting" && <div className="sb-pal">{LIGHTING_PALETTE.map((t) => <button key={t} className="sb-pchip sb-mono" onClick={() => append("lighting", t)}>{t}</button>)}</div>}</div>
-        <div className="sb-field"><label className="sb-lab">Music / audio cue <button className="sb-ico" style={{ fontSize: 11 }} onClick={() => setPalFor(palFor === "audio" ? null : "audio")}>＋terms</button></label>
-          <input className="sb-in" value={card.audioCue} onChange={(e) => setF("audioCue", e.target.value)} placeholder="track, beat sync, room tone…" />
-          {palFor === "audio" && <div className="sb-pal">{AUDIO_PALETTE.map((t) => <button key={t} className="sb-pchip sb-mono" onClick={() => append("audioCue", t)}>{t}</button>)}</div>}</div>
-      </div>
-
-      <div className="sb-row">
-        <div className="sb-field"><label className="sb-lab">Transition in <button className="sb-ico" style={{ fontSize: 11 }} onClick={() => setPalFor(palFor === "in" ? null : "in")}>＋</button></label>
-          <input className="sb-in" value={card.transIn} onChange={(e) => setF("transIn", e.target.value)} placeholder="cut, fade in…" />
-          {palFor === "in" && <div className="sb-pal">{TRANS_PALETTE.map((t) => <button key={t} className="sb-pchip sb-mono" onClick={() => setF("transIn", t)}>{t}</button>)}</div>}</div>
-        <div className="sb-field"><label className="sb-lab">Transition out <button className="sb-ico" style={{ fontSize: 11 }} onClick={() => setPalFor(palFor === "out" ? null : "out")}>＋</button></label>
-          <input className="sb-in" value={card.transOut} onChange={(e) => setF("transOut", e.target.value)} placeholder="cut, dissolve…" />
-          {palFor === "out" && <div className="sb-pal">{TRANS_PALETTE.map((t) => <button key={t} className="sb-pchip sb-mono" onClick={() => setF("transOut", t)}>{t}</button>)}</div>}</div>
-      </div>
-
-      <div className="sb-field"><label className="sb-lab">Notes</label>
-        <textarea className="sb-ta" value={card.notes} onChange={(e) => setF("notes", e.target.value)} placeholder="blocking, continuity reminders…" /></div>
-
-      <div className="sb-toolbar">
-        <button className="sb-btn amber sm" onClick={() => copyShot(entry)}>Copy shot</button>
-        {(() => { const g = genState[card.id] || {}; const busy = g.phase === "submitting" || g.phase === "running";
-          return <button className="sb-btn sm" disabled={busy} onClick={() => generateShot(entry)}
-            title="Render this shot on PixAI (free with a V4.0 card)">{busy ? "Generating…" : "▶ Generate shot"}</button>; })()}
-        <button className="sb-btn ghost sm" onClick={() => moveCard(act.id, ci, -1)}>↑</button>
-        <button className="sb-btn ghost sm" onClick={() => moveCard(act.id, ci, 1)}>↓</button>
-        <select className="sb-sel sm" style={{ width: "auto", fontSize: 12, padding: "6px 8px" }} value="" onChange={(e) => e.target.value && moveCardToAct(act.id, card, e.target.value)}>
-          <option value="">move to act…</option>{project.acts.filter((a) => a.id !== act.id).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
-        <div className="sb-divider" />
-        <button className="sb-btn ghost sm" onClick={() => dupCard(act.id, card)}>Duplicate</button>
-        <button className="sb-btn ghost sm danger" onClick={() => delCard(act.id, card)}>Delete</button>
-      </div>
-      {(() => { const g = genState[card.id]; if (!g) return null;
-        const col = g.phase === "done" ? "var(--green)" : g.phase === "error" ? "var(--coral)" : "var(--amber)";
-        return (<>
-        <div style={{ fontSize: 12, color: col, display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
-          <span>{g.phase === "done" ? "✓ " : g.phase === "error" ? "⚠ " : "… "}{g.msg}</span>
-          {g.phase === "done" && g.mid && (<a className="sb-mono" href={"/image/" + g.mid} target="_blank" rel="noreferrer"
-            style={{ color: "var(--cyan)" }}>open full ↗</a>)}
-        </div>
-        </>); })()}
-      {card.resultMid &&
-        <ShotPreview mid={card.resultMid} trimIn={card.trimIn} trimOut={card.trimOut}
-          onTrim={(i, o) => setCard(act.id, card.id, (c) => ({ ...c, trimIn: i, trimOut: o }))} />}
     </div>
   );
 }
