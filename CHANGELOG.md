@@ -29,16 +29,24 @@ git tags. Full prose notes for tagged versions live on
   `onVideoError`), so the board card's live status badge, tab-close resume (`pendingTaskId`),
   and the finished clip landing on the shot all keep working identically to every other
   generation path — the component now owns the actual network calls, the Loom still owns what
-  a submit/result means for that shot. Deliberately deferred: shot cast/other-refs are not
-  auto-populated into the drawer's video/audio banks (the owner fills those via the drawer's
-  own slot UI now, same as the gallery) except Continuity "extend", which still auto-prefills
-  `@video1` from the previous shot's clip. Found and fixed live while wiring this: an
+  a submit/result means for that shot. R2V's image/video banks auto-populate from the shot's
+  cast and other refs via `buildShotPayload` (loom-core.js) — the same tag-sorted composition
+  `shotText()`'s `@imageN` citations are written against, so a resolvable cast member lands in
+  the slot position its prompt citation actually references. (An initial version of this build
+  left the banks empty for hand-filling, which silently broke those citations — a hand-picked
+  slot order that doesn't match the text's tag numbering binds `@image1` to the wrong image or
+  to nothing at all, wrong output with no error. Caught and fixed same day.) Continuity
+  "extend" adds the previous shot's clip as an extra video ref on top; unresolvable placeholder
+  cast (no image ever attached) is correctly excluded from the array while staying in the
+  prompt text, matching the pre-existing system's own behavior. Audio refs remain the one gap
+  `buildShotPayload` never covered, before or since. Found and fixed live while wiring this: an
   out-of-range shot duration (8s, no matching `<option>` in the drawer's fixed 5/6/10/15 list)
   silently resolved to no selection and submitted `duration:0` — `prefill()` now snaps to the
   nearest valid duration, matching the server's own `_snap_video_duration`. Live-verified
   against a real project end to end (mode/duration sync incl. the snap fix, hand-edit-wins +
-  re-sync, a real type-filtered pick landing in a slot, and the submit/result event chain
-  correctly updating the board card's status/thumbnail/duration), zero console errors, 549
+  re-sync, cast auto-population landing in the correct tag-matching slot, a real type-filtered
+  pick landing in a slot, and the submit/result event chain correctly updating the board card's
+  status/thumbnail/duration), zero console errors, 549
   Python + 80 Node tests still green. The gallery keeps its own working Video tab — that swap
   is next, live-QA'd.
 - **`<mg-generate-drawer>` reaches full PixAI Multi-ref parity.** Extends the Phase 1 Video
