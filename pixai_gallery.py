@@ -2513,6 +2513,7 @@ __BABEL_LIB_TAG__
 <script src="/static/picker-core.js"></script>
 <script src="/static/mg-model-picker.js"></script>
 <script src="/static/mg-gallery-picker.js"></script>
+<script src="/static/mg-generate-drawer.js"></script>
 </head><body>
 <div id="root"></div>
 <script>

@@ -15,6 +15,32 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **The Loom's Video tab now mounts `<mg-generate-drawer>`** — the same shared component the
+  gallery panel's full-parity build produced, replacing the hand-rolled Generate button + bare
+  prompt textarea. Mode, Continuity, the raw prompt, Duration, and Camera/Lighting/Transition
+  in/out stay Loom-native fields (unchanged — still feed the reel, export, and the FLF-
+  continuity coupling exactly as before) sitting above the drawer as a weave strip; the
+  drawer's prompt box shows `shotText()`'s live composition and auto-re-syncs on any
+  weave-field change unless the owner has hand-typed in the box since (tracked via the
+  component's new `mg-dirty` event), with an explicit "↺ re-sync from shot" override. The
+  drawer's own `mg-pick-request` (type-filtered), `mg-submit`, `mg-result`, and `mg-error`
+  events bridge into the Loom's existing `genState`/`setCardStatus` machinery via two new
+  handlers threaded down from the parent component (`onVideoSubmit`/`onVideoResult`/
+  `onVideoError`), so the board card's live status badge, tab-close resume (`pendingTaskId`),
+  and the finished clip landing on the shot all keep working identically to every other
+  generation path — the component now owns the actual network calls, the Loom still owns what
+  a submit/result means for that shot. Deliberately deferred: shot cast/other-refs are not
+  auto-populated into the drawer's video/audio banks (the owner fills those via the drawer's
+  own slot UI now, same as the gallery) except Continuity "extend", which still auto-prefills
+  `@video1` from the previous shot's clip. Found and fixed live while wiring this: an
+  out-of-range shot duration (8s, no matching `<option>` in the drawer's fixed 5/6/10/15 list)
+  silently resolved to no selection and submitted `duration:0` — `prefill()` now snaps to the
+  nearest valid duration, matching the server's own `_snap_video_duration`. Live-verified
+  against a real project end to end (mode/duration sync incl. the snap fix, hand-edit-wins +
+  re-sync, a real type-filtered pick landing in a slot, and the submit/result event chain
+  correctly updating the board card's status/thumbnail/duration), zero console errors, 549
+  Python + 80 Node tests still green. The gallery keeps its own working Video tab — that swap
+  is next, live-QA'd.
 - **`<mg-generate-drawer>` reaches full PixAI Multi-ref parity.** Extends the Phase 1 Video
   form (2026-07-18 earlier today) to match the owner-locked "Video Tab — Full Parity Mockup
   v1": 6 image + 3 video + 1 audio reference slot (video slots show real poster thumbnails
