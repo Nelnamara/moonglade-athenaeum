@@ -46,6 +46,13 @@ export const patchCardById = (project, cardId, patch) => ({
   })),
 });
 
+// Pure reducers for the prompt-override mechanism -- kept here (not inlined at each call
+// site) so the shape can't drift between the several places that set/clear it (the drawer's
+// commit listener, the toolbar's flush-before-batch, the native Prompt textarea, the
+// re-sync button).
+export const setPromptOverride = (c, text) => ({ ...c, promptOverride: true, promptOverrideText: text });
+export const clearPromptOverride = (c) => ({ ...c, promptOverride: false, promptOverrideText: "" });
+
 export const patchAct = (project, actId, patch) => ({
   ...project,
   acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch }),

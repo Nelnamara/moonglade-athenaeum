@@ -8,6 +8,7 @@ import {
   parseCastIdsFromSearch,
   friendlyGenErr, classifyTaskStatus,
   buildShotListText, buildPlaySequence, buildExportClips,
+  setPromptOverride, clearPromptOverride,
 } from "../src/loom-mutations.js";
 import { flat, shotText, actLetter } from "../src/loom-core.js";
 
@@ -106,6 +107,32 @@ describe("patchCardById", () => {
     assert.equal(out.acts[0].cards[0].status, "todo");
     assert.equal(out.acts[1].cards[0].status, "done");
     assert.equal(out.acts[1].cards[0].resultMid, "m1");
+  });
+});
+
+describe("setPromptOverride / clearPromptOverride", () => {
+  test("setPromptOverride sets both fields and leaves everything else untouched", () => {
+    const c = makeCard({ camera: "dolly out", prompt: "raw" });
+    const out = setPromptOverride(c, "hand-edited text");
+    assert.equal(out.promptOverride, true);
+    assert.equal(out.promptOverrideText, "hand-edited text");
+    assert.equal(out.camera, "dolly out");
+    assert.equal(out.prompt, "raw");   // raw prompt field is untouched, only the override fields change
+    assert.equal(c.promptOverride, undefined);   // original object not mutated
+  });
+  test("clearPromptOverride resets both fields to their off state", () => {
+    const c = setPromptOverride(makeCard(), "some text");
+    const out = clearPromptOverride(c);
+    assert.equal(out.promptOverride, false);
+    assert.equal(out.promptOverrideText, "");
+  });
+  test("round-trips: set then clear then set again produces the latest text only", () => {
+    let c = makeCard();
+    c = setPromptOverride(c, "first");
+    c = clearPromptOverride(c);
+    c = setPromptOverride(c, "second");
+    assert.equal(c.promptOverride, true);
+    assert.equal(c.promptOverrideText, "second");
   });
 });
 

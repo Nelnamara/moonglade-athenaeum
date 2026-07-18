@@ -2563,7 +2563,7 @@ LOOM_PAGE = (_LOOM_SHELL
     .replace("__BABEL_LIB_TAG__", '<script src="/loom/vendor/babel.min.js"></script>')
     .replace("__RUNTIME_SCRIPT_BLOCK__",
              '<script type="text/babel" data-presets="react">\n'
-             'const { useState, useEffect, useRef, useCallback } = React;\n'
+             'const { useState, useEffect, useRef, useCallback, useMemo } = React;\n'
              '__JSX__\n'
              'ReactDOM.createRoot(document.getElementById("root")).render(<App />);\n'
              '</script>')

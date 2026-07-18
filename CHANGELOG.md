@@ -15,6 +15,37 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Standing cost-to-finish pill + durable prompt overrides + batch-generate hardening**
+  ("Batch 2" of the generation-flow shakedown, 2026-07-18). Three items, each designed then
+  independently adversarially reviewed before any code was written (one design agent's first
+  attempt came back as an unusable placeholder stub; the rescue plan written to replace it
+  was itself given a second, independent review before being trusted) — both review passes
+  caught real bugs that would have shipped otherwise: stale React closures that would have
+  made a tally silently never update, a busy-guard wired to an effect dependency array that
+  would never actually fire, and an empty-prompt check written against the always-non-empty
+  COMPOSED prompt string instead of the shot's real raw field (structurally incapable of ever
+  triggering).
+  - **Cost-to-finish pill**: a live free/paid/credits/unpriced estimate next to
+    "Generate all (N)", not gated behind the confirm dialog. A per-shot price cache
+    fingerprints only the fields that actually affect `/api/price` (verified against the
+    server's own price allowlist — prompt/camera/lighting never do), so editing prose never
+    triggers a re-price; refreshes on a 600ms board debounce plus click-to-force.
+  - **Durable prompt overrides**: hand-editing the drawer's composed-prompt box now persists
+    (`c.promptOverride`/`c.promptOverrideText`) across a shot deselect/reselect and reload,
+    instead of only affecting one immediate Generate click. `shotText()` returns it verbatim
+    (never merged with Camera/Lighting/cast composition — merging would duplicate that
+    scaffolding deeper into the text on every re-sync). The toolbar's "Generate all" button
+    now flushes a pending edit and locally patches it in before submitting, since React
+    defers re-rendering past the same synchronous click that would otherwise read stale data.
+  - **Batch hardening**: `batchGenerate` now excludes already-"wip" shots (not just "done")
+    from resubmission, flags empty-prompt shots in its confirm text, and drives a live
+    "N submitted, M done, K failed" banner via a `batchTally` scoped to that run's own card
+    ids and written exclusively through React's functional setState form (a plain read/write
+    would silently corrupt under the submit-loop and poll-loop writing concurrently).
+  Live-verified end to end against a real project (override surviving a real shot-switch
+  round trip, the empty-prompt flag firing correctly in a real batch confirm, the cost pill
+  computing a real estimate for an attached shot) — not just code review. 93 Node
+  (+13 new) + 554 Python tests green.
 - **`<mg-generate-drawer>` gets per-model mode gating**, off the newly-completed 7-model video
   capability matrix (`private/GENERATOR_SURFACE.md`, owner screenshots): the First
   Frame / First & Last Frames / Multi-Reference mode buttons now show only what the selected
