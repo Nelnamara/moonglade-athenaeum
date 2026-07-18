@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 // Pure, framework-agnostic logic (tag numbering, continuity checks, shot-text
 // assembly, reel duration/pricing math) lives in ./src/loom-core.js so it can
 // be unit-tested under `node --test` outside React. `shotPayload` is imported
@@ -7,7 +7,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta,
-  flat, shotText, durOf, reelStats,
+  flat, shotText, durOf, reelStats, effectivePrompt,
+  priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
@@ -22,6 +23,7 @@ import {
   parseCastIdsFromSearch,
   friendlyGenErr, classifyTaskStatus,
   buildShotListText, buildPlaySequence, buildExportClips,
+  setPromptOverride, clearPromptOverride,
 } from "./src/loom-mutations.js";
 
 /* =========================================================================
@@ -377,7 +379,13 @@ function newCard(extra = {}) {
     // had it reverse-engineered but never wired to a control): the server already accepts
     // generate_audio/audio_language on /api/loom/generate, this was purely a missing control.
     audioGen: false, audioLanguage: "english",
-    transIn: "", transOut: "", notes: "", discreet: false, trimIn: 0, trimOut: null, ...extra,
+    transIn: "", transOut: "", notes: "", discreet: false, trimIn: 0, trimOut: null,
+    // promptOverride/promptOverrideText: a hand-edit made directly in the drawer's composed-
+    // prompt box, durable across shot reselect/reload. When set, shotText() returns
+    // promptOverrideText verbatim instead of composing from camera/lighting/cast/etc --
+    // see loom-core.js's shotText() and effectivePrompt().
+    promptOverride: false, promptOverrideText: "",
+    ...extra,
   };
 }
 function seedProject() {
@@ -424,6 +432,13 @@ const V2_STYLES = `
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
+.lv-cost-pill{opacity:.85;font-weight:600;}
+.lv-cost-pill:disabled{opacity:.5;}
+.lv-batchbar{padding:6px 20px;font-size:12px;color:var(--subtext);background:var(--surface0);border-bottom:1px solid var(--surface1);}
+.lv-batchfail{color:var(--coral);font-weight:600;}
+.lv-override-badge{color:var(--amber);font-style:normal;font-weight:600;}
+.lv-overrideflash{font-size:11px;color:var(--amber);background:rgba(0,0,0,.15);border-radius:5px;padding:3px 7px;margin-top:2px;animation:lv-flash-fade 1.6s ease-out forwards;}
+@keyframes lv-flash-fade{0%{opacity:1;}70%{opacity:1;}100%{opacity:0;}}
 /* Fixed 4-region shell: top Timeline drawer (below), then a row of left card /
    board column / right drawer -- nothing free-floating, nothing draggable. */
 .lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;}
@@ -719,7 +734,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, costEstimate, refreshEstimate, batchTally }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -737,6 +752,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const [tlDragH, setTlDragH] = useState(null);          // live px height while dragging the handle, else null
   const [palFor, setPalFor] = useState(null);            // which field's "+ terms" popover is open, or null
   const [dzHover, setDzHover] = useState(false);          // footage drop-zone hover feedback
+  const [overrideClearedFlash, setOverrideClearedFlash] = useState(false);   // brief notice when the native Prompt field destroys an active override
   // Draft generation: the Generate drawer works with no shot selected, exactly like the
   // main gallery's own drawer -- a "card" that lives in component state instead of the
   // project, generation-state dicts keyed by its "__draft__" id right alongside real shots'.
@@ -746,6 +762,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     audioGen: false, audioLanguage: "english",
     imgPrompt: "", editPrompt: "", refPrompt: "",
     cast: [], refs: [], openFrame: {}, closeFrame: {},
+    promptOverride: false, promptOverrideText: "",
   }));
   const [draftTarget, setDraftTarget] = useState("");              // shot id chosen to route/attach a draft result into
   const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
@@ -786,6 +803,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // setter, so the actual state writes stay owned one level up, same layering as
   // generateShot/useExistingVideo already crossing this same boundary.
   const activeRef = useRef(null);
+  // mg-prompt-commit's listener (below) is bound once and needs the CURRENT project to
+  // compute "did this hand-edit actually change anything from the auto-composed text" --
+  // a plain closure over the `project` param from whichever render bindGenDrawer's callback
+  // last ran on would go stale the moment the project changes without a re-bind.
+  const projectRef = useRef(project);
+  projectRef.current = project;
   const genDrawerRef = useRef(null);
   const promptDirtyRef = useRef(false);
   // The drawer resolves its OWN completion target via activeRef at listener-registration
@@ -821,6 +844,21 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       });
       el.addEventListener("mg-result", (e) => onVideoResult(genTargetRef.current || activeRef.current.c.id, e.detail));
       el.addEventListener("mg-error", (e) => onVideoError(genTargetRef.current || activeRef.current.c.id, e.detail));
+      // Durably persists a hand-edit made while typing normally (NOT switching shots or
+      // batch-generating -- those paths call flushPromptEdit() directly, see below and the
+      // toolbar button). A no-op if the committed text is identical to what auto-compose
+      // would already produce (round-tripping back to the composed text shouldn't flip a
+      // shot into "override" mode).
+      el.addEventListener("mg-prompt-commit", (e) => {
+        const a = activeRef.current; if (!a) return;
+        const text = e.detail.text;
+        const already = !!a.c.promptOverride;
+        const composed = already ? null : shotText(a, projectRef.current);
+        if (!already && text === composed) return;
+        const apply = (c) => setPromptOverride(c, text);
+        a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+        promptDirtyRef.current = false;
+      });
     }
   }, [openPick, onVideoSubmit, onVideoResult, onVideoError]);
 
@@ -884,6 +922,25 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const el = genDrawerRef.current;
     if (!el || tab !== "Video") return;
     if (lastActiveIdRef.current !== active.c.id) {
+      // Flush a pending (not-yet-debounced) hand-edit on the OUTGOING shot before this
+      // effect overwrites the drawer with the newly-active shot's content -- otherwise an
+      // edit landing inside the drawer's 300ms commit debounce right as the owner switches
+      // shots is silently discarded (never gets the chance to fire its own mg-prompt-commit).
+      if (lastActiveIdRef.current) {
+        const pending = el.flushPromptEdit();
+        if (pending != null) {
+          const outId = lastActiveIdRef.current, isDraft = outId === "__draft__";
+          const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
+          if (outEntry) {
+            const already = !!outEntry.c.promptOverride;
+            const composed = already ? null : shotText(outEntry, project);
+            if (already || pending !== composed) {
+              const apply = (c) => setPromptOverride(c, pending);
+              isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
+            }
+          }
+        }
+      }
       promptDirtyRef.current = false;
       lastActiveIdRef.current = active.c.id;
     }
@@ -921,7 +978,19 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   }, [active.c.id, active.c.mode, active.c.connect, active.c.duration, active.c.audioGen, active.c.audioLanguage,
       active.c.prompt, active.c.camera, active.c.lighting, active.c.transIn, active.c.transOut,
       active.c.cast, active.c.refs, project.assets,
-      active.c.title, project.look, project.draft, tab]);
+      active.c.title, project.look, project.draft, tab,
+      active.c.promptOverride, active.c.promptOverrideText]);
+  // Isolated, narrow busy-guard effect -- deliberately NOT folded into the big prefill
+  // effect above (which re-runs the FULL prefill on any of a dozen fields and does not
+  // track active.c.status at all). This one keys ONLY on id+status so a shot flipping
+  // wip/done/error re-fires it without re-running mode/image/prompt resync, and setBusy()
+  // itself no-ops while the drawer's own submit is what's driving the button (see
+  // mg-generate-drawer.js). Closes the double-submit gap where a batch run (or a resumed
+  // poll) marks the active shot "wip" but the drawer's own Go button stayed clickable.
+  useEffect(() => {
+    const el = genDrawerRef.current;
+    if (el && el.setBusy) el.setBusy(active.c.status === "wip");
+  }, [active.c.id, active.c.status]);
   const board = (
     <div className="lv-board">
       {project.acts.map((act, ai) => {
@@ -1065,7 +1134,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <div className="lv-chips">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-chip " + (k === (active.c.connect || "new") ? "on" : "")} title={CONNECT[k].hint}
           onClick={() => patch((c) => setShotConnect(c, k))}>{CONNECT[k].label}</span>))}</div>
         <label className="lv-lab">Prompt</label>
-        <textarea className="lv-ta" value={active.c.prompt || ""} onChange={(ev) => patch((c) => ({ ...c, prompt: ev.target.value }))} />
+        <textarea className="lv-ta" value={active.c.prompt || ""} onChange={(ev) => {
+          // Typing here always means "auto-compose, using this text" -- clears an active
+          // override immediately (matches the drawer's own "your edit wins" rule, just
+          // from the other surface). Destructive with no undo, same as every other text
+          // field here, but silent-until-you-notice is the actual hazard (found in review):
+          // flash a brief, self-clearing notice at the moment it happens.
+          if (active.c.promptOverride) { setOverrideClearedFlash(true); setTimeout(() => setOverrideClearedFlash(false), 1600); }
+          patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
+        }} />
         <label className="lv-lab">Duration</label>
         <div className="lv-chips">{[5, 6, 10, 15].map((d) => (<span key={d} className={"lv-chip " + (d === active.c.duration ? "on" : "")} onClick={() => patch((c) => ({ ...c, duration: d }))}>{d}s</span>))}</div>
         <label className="lv-check"><input type="checkbox" checked={!!active.c.audioGen}
@@ -1102,12 +1179,22 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         )}
         <div className="lv-refline">{(active.c.cast || []).length} cast &middot; {(active.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast &amp; assets tab; add extra image/video/audio refs directly below)</span></div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" }}>
-          <span className="lv-dim">&#8595; woven into the form below</span>
+          {active.c.promptOverride
+            ? <span className="lv-dim lv-override-badge" title="Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose.">&#9998; override active &mdash; fields above not woven in</span>
+            : <span className="lv-dim">&#8595; woven into the form below</span>}
           <button className="lv-mini2" onClick={() => {
             promptDirtyRef.current = false;
-            if (genDrawerRef.current) genDrawerRef.current.prefill({ prompt: shotText(active, project) });
+            // Compute the composed text from a LOCALLY patched copy, not the async
+            // setCard/setDraftCard queued just below -- reading shotText(active, project)
+            // straight after queuing that update would still see the old promptOverride:true
+            // and return stale (override) text, since the queued state write hasn't
+            // committed yet at this point in the same synchronous handler.
+            const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project);
+            active.c.id === "__draft__" ? setDraftCard(clearPromptOverride) : setCard(active.a.id, active.c.id, clearPromptOverride);
+            if (genDrawerRef.current) genDrawerRef.current.prefill({ prompt: composed });
           }}>&#8634; re-sync from shot</button>
         </div>
+        {overrideClearedFlash && <div className="lv-overrideflash">override cleared &mdash; back to auto-compose</div>}
       </div>
     );
     videoTrailer = (
@@ -1365,9 +1452,36 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <label className={"lv-draft" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
           <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />⚡ Draft</label>
-        <button onClick={() => batchGenerate(entries)} disabled={batching || !entries.length}
+        <button onClick={() => {
+          // Flush+locally-patch BEFORE calling batchGenerate -- do not trust that a hand-
+          // edit committed via blur (the button stealing focus fires the drawer's blur
+          // handler synchronously) is already reflected in `entries`. It isn't: React
+          // defers re-rendering until this whole synchronous click dispatch finishes, so
+          // `entries` here is still the closure captured at the LAST render, before this
+          // click. Found in review -- a fix that reasoned "blur fires before click, so
+          // it's safe" was wrong once traced against exactly when React commits state.
+          const pending = genDrawerRef.current && genDrawerRef.current.flushPromptEdit ? genDrawerRef.current.flushPromptEdit() : null;
+          let liveEntries = entries;
+          if (pending != null && activeRef.current) {
+            const a = activeRef.current;
+            const already = !!a.c.promptOverride;
+            const composed = already ? null : shotText(a, project);
+            if (already || pending !== composed) {
+              const patchedCard = setPromptOverride(a.c, pending);
+              liveEntries = entries.map((e) => (e.c.id === a.c.id ? { ...e, c: patchedCard } : e));
+              a.c.id === "__draft__" ? setDraftCard(() => patchedCard) : setCard(a.a.id, a.c.id, () => patchedCard);
+            }
+          }
+          batchGenerate(liveEntries);
+        }} disabled={batching || !entries.length}
           title="Generate every shot that isn't done yet, one after another">
-          {batching ? "▶ generating all…" : `▶ Generate all (${entries.filter((e) => e.c.status !== "done").length})`}</button>
+          {batching ? "▶ generating all…" : `▶ Generate all (${costEstimate.notDoneCount})`}</button>
+        {costEstimate.notDoneCount > 0 && (
+          <button className="lv-cost-pill" onClick={refreshEstimate} disabled={batching}
+            title={costTooltip(costEstimate) + " — estimate reflects Generate-all composition; a shot generated by hand from its own Video-tab drawer (esp. I2V/FLF with both cast images and a frame set) may price differently. Click to refresh."}>
+            {formatCostEstimate(costEstimate)}
+          </button>
+        )}
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
           title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
@@ -1376,6 +1490,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           bundling={bundling} importBackup={importBackup} />
         <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
+      {batchTally && (
+        <div className="lv-batchbar">
+          Batch: {batchTally.submitted}/{batchTally.total} submitted &middot; {batchTally.done} done
+          {batchTally.failed ? <> &middot; <span className="lv-batchfail">{batchTally.failed} failed</span></> : null}
+          {/* A shot reaches a terminal outcome via exactly one of two paths: fails at
+              submit time (counted once, directly into `failed`, never touching `submitted`)
+              or is submitted successfully and later resolves via poll into done/failed --
+              so done+failed only ever reaches `total` once every launched shot has actually
+              finished one way or another, regardless of which path each one took. */}
+          {batchTally.done + batchTally.failed < batchTally.total ? " · rendering…" : ""}
+        </div>
+      )}
       {timelineDrawer}
       <div className="lv-shell">
         <div className={"lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "")}>
@@ -1740,6 +1866,15 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
   const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
   const [batching, setBatching] = useState(false);
+  // batchTally: { total, submitted, done, failed, ids: Set } for the CURRENTLY OPEN batch
+  // run, or null between runs. Distinct from tallyPrices()'s free/paid/credits/unknown --
+  // this tracks submit/render OUTCOMES, not cost. Every mutation below uses the functional
+  // setState form and checks membership against the CURRENT `prev` value inside the
+  // updater, never a `batchTally` variable closed over by generateShot/pollShot -- those
+  // closures are captured once (at the render active when the batch's button was clicked)
+  // and never see later updates, exactly the same stale-closure trap generateShot's own
+  // return-value fix above exists to avoid.
+  const [batchTally, setBatchTally] = useState(null);
 
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
     : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
@@ -1756,11 +1891,20 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       return await r.json();   // {cost, free, cards, note}
     } catch { return null; }
   };
+  // Returns an explicit outcome ({ok:true,taskId} | {ok:false,reason}) instead of only
+  // writing state -- batchGenerate's own submit-time tally needs a value it can read
+  // immediately after await, not genState (a React state variable batchGenerate's closure
+  // captured once at render time; setGenState calls here only SCHEDULE an update, they
+  // never retroactively change what that already-captured closure sees -- confirmed the
+  // hard way tonight: two independent adversarial reviews both caught a first-draft tally
+  // design that read genState right after this call and found it silently always stale).
   const generateShot = async (entry, opts = {}) => {
     const c = entry.c;
     const p = shotPayload(entry);
     if (!p.hasInput) {
-      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } })); return; }
+      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } }));
+      return { ok: false, reason: "no-input" };
+    }
     // GUARDRAIL: never spend credits silently. Check cost + free-card, confirm any credit spend.
     // Must fail CLOSED: priceShot swallows its own errors and returns null, and the server's
     // own /api/price returns HTTP 200 with cost:null on any exception -- either one used to
@@ -1769,9 +1913,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     if (!opts.skipConfirm) {
       const pr = await priceShot(entry);
       if (pr && !pr.free && pr.cost != null) {
-        if (!window.confirm(`No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.\n\nGenerate anyway?`)) return;
+        if (!window.confirm(`No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.\n\nGenerate anyway?`)) return { ok: false, reason: "cancelled" };
       } else if (!pr || !pr.free) {
-        if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return;
+        if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
       }
     }
     setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
@@ -1782,14 +1926,21 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
           video_refs: p.video_refs, duration: p.duration, quality: p.quality,
           generate_audio: p.generate_audio, audio_language: p.audio_language, origin: "loom-shot" }) });
       const d = await r.json();
-      if (d.error || !d.task_id) { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
+      if (d.error || !d.task_id) {
+        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } }));
+        return { ok: false, reason: "submit-failed" };
+      }
       // Persist the task id on the card so a mid-render tab close is recoverable: the
       // in-memory pollShot loop dies with the page, but a resume effect re-attaches it
       // from pendingTaskId on next load (otherwise the shot is stuck "wip" forever while
       // its clip lands orphaned in the gallery). Cleared on done/fail.
       setCardStatus(c.id, { pendingTaskId: d.task_id });
       pollShot(c.id, d.task_id);
-    } catch { setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
+      return { ok: true, taskId: d.task_id };
+    } catch {
+      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
+      return { ok: false, reason: "network" };
+    }
   };
   // classifyTaskStatus (loom-mutations.js) is the shared, tested response classifier;
   // the recursive setTimeout tick loop around it stays here since the polling/timing
@@ -1808,6 +1959,11 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const giveUp = () => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: "timed out waiting for this render — check the task on pixai.art, or try again" } }));
       setCardStatus(cardId, { status: "error", pendingTaskId: null });
+      // giveUp() is a THIRD, distinct completion path from cls.phase==="failed" below (a
+      // genuine timeout, not a server-reported failure) -- both must count toward the
+      // batch tally or a batch shot that hangs rather than errors would show as forever
+      // "still rendering" in the summary banner.
+      setBatchTally((prev) => (prev && prev.ids.has(cardId) ? { ...prev, failed: prev.failed + 1 } : prev));
     };
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
@@ -1821,7 +1977,12 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // PREVIOUS result was trimmed to, and a stale trimOut past the new clip's end can hang
         // SequencePlayer on it forever (it never reaches the advance threshold).
         setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
-      } else if (cls.phase === "failed") { setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } })); setCardStatus(cardId, { status: "error", pendingTaskId: null }); }
+        setBatchTally((prev) => (prev && prev.ids.has(cardId) ? { ...prev, done: prev.done + 1 } : prev));
+      } else if (cls.phase === "failed") {
+        setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+        setCardStatus(cardId, { status: "error", pendingTaskId: null });
+        setBatchTally((prev) => (prev && prev.ids.has(cardId) ? { ...prev, failed: prev.failed + 1 } : prev));
+      }
       else if (Date.now() - startedAt > POLL_GIVE_UP_MS) giveUp();
       else setTimeout(tick, 4000);
     }).catch(() => {
@@ -1946,36 +2107,107 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   // Takes `entries` as a call-site argument (computed by App() from the current
   // project) rather than closing over it, since this hook has no `entries` of its own.
   const batchGenerate = async (entries) => {
-    const todo = entries.filter((e) => e.c.status !== "done");
+    // Exclude "wip" alongside "done" -- a shot already mid-render (started individually via
+    // the drawer, or reattached by the resume-on-load effect) must not be resubmitted just
+    // because it isn't finished yet. Found in review: the batching flag only guards the
+    // TOOLBAR button, not this filter, so a batch launched while some other shot happens to
+    // already be rendering used to fire a second, duplicate /api/loom/generate for it.
+    const todo = entries.filter((e) => e.c.status !== "done" && e.c.status !== "wip");
     if (!todo.length) return;
     // Price every shot FIRST so the confirm shows real cost + card coverage — no silent spend.
     setBatching(true);
     const prices = await Promise.all(todo.map((e) => priceShot(e)));
-    // A failed price check (pr null, or cost null despite not being free) must not silently
-    // count as "0 credits" in the total shown below -- same fail-closed fix as generateShot's
-    // own guardrail, just for the batch total instead of a single-shot confirm.
-    let free = 0, paid = 0, credits = 0, unknown = 0;
-    prices.forEach((pr) => {
-      if (pr && pr.free) free++;
-      else if (pr && pr.cost != null) { paid++; credits += pr.cost; }
-      else unknown++;
-    });
+    // tallyPrices (loom-core.js) fails closed the same way this loop always did (a failed
+    // price check buckets as "unknown", never a false "0 credits") -- now the one shared
+    // implementation instead of a copy hand-rolled here.
+    const { free, paid, credits, unknown } = tallyPrices(prices);
+    // Soft warning, not a hard filter -- flagged shots still generate (matches generateShot's
+    // own !hasInput behavior: a visible per-card error at submit time, not silently vanishing
+    // from the count). Checked against the shot's own freeform field via effectivePrompt(),
+    // NOT shotPayload().prompt/shotText() -- that composed string always starts with a
+    // non-empty bracketed header before c.prompt is even appended, so a check against it
+    // can never fire regardless of whether the shot's real prompt is blank (found in review).
+    const emptyPromptShots = todo.filter((e) => !effectivePrompt(e.c).trim());
     const msg = `Generate ${todo.length} shot(s)?\n\n` +
       `🎫 ${free} covered by a free card\n` +
       `≈ ${paid} will spend credits — about ${credits.toLocaleString()} total` +
-      (unknown ? `\n⚠ ${unknown} shot(s)' cost couldn't be verified — they may also spend credits.` : ".");
+      (unknown ? `\n⚠ ${unknown} shot(s)' cost couldn't be verified — they may also spend credits.` : ".") +
+      (emptyPromptShots.length ? `\n⚠ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.map((e) => e.code).join(", ")}` : "");
     if (!window.confirm(msg)) { setBatching(false); return; }
+    // Reset ONLY after the confirm is accepted -- resetting before it and leaving batchTally
+    // non-null on Cancel would freeze a permanent "0 submitted" banner on screen forever,
+    // since nothing else would ever touch it again.
+    const ids = new Set(todo.map((e) => e.c.id));
+    setBatchTally({ total: todo.length, submitted: 0, done: 0, failed: 0, ids });
     for (const e of todo) {
-      try { await generateShot(e, { skipConfirm: true }); } catch (_e) { /* keep going */ }
-      await new Promise((r) => setTimeout(r, 2200));
+      // generateShot never throws (every failure path returns {ok:false,...}), so this
+      // try/catch is defensive only -- the tally itself is driven by the return value, not
+      // by whether an exception escaped (a first-draft design tried the latter and, since
+      // generateShot swallows every failure internally, it never actually caught anything).
+      let r;
+      try { r = await generateShot(e, { skipConfirm: true }); } catch (_e) { r = { ok: false }; }
+      setBatchTally((prev) => (prev && prev.ids.has(e.c.id)
+        ? { ...prev, submitted: prev.submitted + (r.ok ? 1 : 0), failed: prev.failed + (r.ok ? 0 : 1) }
+        : prev));
+      await new Promise((res) => setTimeout(res, 2200));
     }
     setBatching(false);
   };
 
+  // ---- Standing cost-to-finish estimate: a per-shot price CACHE, warm without gating on
+  // the batch confirm dialog. Distinct from priceShot/batchGenerate's own one-shot,
+  // no-caching, must-be-fresh-right-before-spending pricing pass -- that one keeps its own
+  // Promise.all right before the irreversible confirm, deliberately not sharing this cache
+  // (different timing/staleness contract). Only the pure tally math (tallyPrices) is shared.
+  const PRICE_DEBOUNCE_MS = 600;
+  const [priceCache, setPriceCache] = useState({});          // cardId -> {fp, pr, loading}
+  const priceInFlightRef = useRef({});                       // cardId -> fp currently being fetched
+  const ensurePriced = useCallback((entry, force) => {
+    const payload = shotPayload(entry);
+    const fp = priceFingerprint(payload);
+    const cached = priceCache[entry.c.id];
+    if (!force && cached && cached.fp === fp && !cached.loading) return;
+    if (!payload.hasInput) { setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr: null, loading: false } })); return; }
+    if (priceInFlightRef.current[entry.c.id] === fp) return;
+    priceInFlightRef.current[entry.c.id] = fp;
+    setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr: (cached && cached.fp === fp ? cached.pr : null), loading: true } }));
+    priceShot(entry).then((pr) => {
+      // Clear the in-flight marker on completion regardless of outcome -- leaving it set
+      // forever (found in review) silently blocks BOTH the manual force-refresh AND the
+      // ordinary case of a field changing away from and back to a previously-seen
+      // fingerprint, since the guard above never sees priceInFlightRef clear to retry.
+      const stillCurrent = priceInFlightRef.current[entry.c.id] === fp;
+      if (stillCurrent) delete priceInFlightRef.current[entry.c.id];
+      if (!stillCurrent) return;   // a newer edit superseded this fetch; don't clobber its slot
+      setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr, loading: false } }));
+    });
+  }, [project, priceCache]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Memoized on `project` alone -- without this, genState updates (a poll tick fires every
+  // 2.5-4s per actively-rendering shot, and lives in this same hook) would rebuild the
+  // whole not-done board's shotText/fingerprint composition on every tick, precisely when
+  // the board is busiest (found in review).
+  const { notDone, notDoneFp } = useMemo(() => {
+    const boardEntries = project ? flat(project) : [];
+    const nd = boardEntries.filter((e) => e.c.status !== "done");
+    const fp = nd.map((e) => e.c.id + ":" + priceFingerprint(shotPayload(e))).join("|");
+    return { notDone: nd, notDoneFp: fp };
+  }, [project]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const priceDebounceRef = useRef(null);
+  useEffect(() => {
+    clearTimeout(priceDebounceRef.current);
+    priceDebounceRef.current = setTimeout(() => notDone.forEach((e) => ensurePriced(e)), PRICE_DEBOUNCE_MS);
+    return () => clearTimeout(priceDebounceRef.current);
+  }, [notDoneFp]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const refreshEstimate = useCallback(() => notDone.forEach((e) => ensurePriced(e, true)), [notDone, ensurePriced]);
+  const pending = notDone.filter((e) => { const r = priceCache[e.c.id]; return !r || r.loading; }).length;
+  const settled = notDone.filter((e) => { const r = priceCache[e.c.id]; return r && !r.loading; }).map((e) => priceCache[e.c.id].pr);
+  const costEstimate = { ...tallyPrices(settled), pending, notDoneCount: notDone.length };
+
   return {
     genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel, genEditState, setGenEditState,
-    genRefState, setGenRefState, batching,
+    genRefState, setGenRefState, batching, batchTally,
     generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+    costEstimate, refreshEstimate,
   };
 }
 
@@ -2081,8 +2313,9 @@ export default function App() {
   }, [pickCb]);
 
   const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel, genEditState, setGenEditState,
-    genRefState, setGenRefState, batching,
-    generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate }
+    genRefState, setGenRefState, batching, batchTally,
+    generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+    costEstimate, refreshEstimate }
     = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
   // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
   // three mirror exactly what generateShot/pollShot already write for every OTHER path, so
@@ -2156,11 +2389,12 @@ export default function App() {
         genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg}
         genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
         projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
-        batching={batching} batchGenerate={batchGenerate}
+        batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
         addRef={addRef} setRef={setRef} delRef={delRef}
         exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
         importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
-        onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError} /></V2Boundary>
+        onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
+        costEstimate={costEstimate} refreshEstimate={refreshEstimate} /></V2Boundary>
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
