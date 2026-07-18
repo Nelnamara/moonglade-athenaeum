@@ -75,7 +75,30 @@ users.
   `SequencePlayer`.
 - The top strip's **Generate all** button batches every not-yet-done shot (`batchGenerate`),
   pricing every shot first so the confirm shows real cost + free-card coverage before anything
-  spends. Disabled while a batch is running or the board is empty.
+  spends (fails CLOSED on a bad price check, same guardrail as the single-shot path). Disabled
+  while a batch is running or the board is empty. It is a genuinely SEPARATE submission path
+  from `<mg-generate-drawer>`'s own per-shot Generate button — both hit `/api/loom/generate`,
+  but `batchGenerate`/`generateShot` always recompute the prompt fresh from the card's own
+  fields (`shotPayload`/`shotText`), never from whatever the drawer currently has typed.
+- **Generation-lifecycle correctness fixes, 2026-07-18 (live-tested against a real project):**
+  `<mg-generate-drawer>` is now mounted once, permanently, in the Video tab's DOM (CSS-hidden
+  on other tabs instead of conditionally unmounted) — switching tabs mid-render used to kill
+  the drawer's in-flight poll outright, stranding the shot at "wip" forever. A completion
+  handler now routes via the shot id captured at submit time, not whichever shot happens to be
+  selected when the result/error event actually fires (switching shots mid-render used to
+  attribute the finished clip to the wrong card). A real terminal `status:"error"` now exists
+  on the card (previously only "todo"/"wip"/"done" — a failed render left `status:"wip"`
+  forever, indistinguishable from one still genuinely rendering); both poll loops (the Loom's
+  own and the drawer's internal one) give up after 20 minutes instead of retrying forever, with
+  no cancel button anywhere in generation before this. The drawer's prompt/image/video/audio
+  reference slots now clear (not just overwrite) when the newly-selected shot/draft has none —
+  switching from a shot with cast refs to an empty draft used to leave the previous shot's
+  images sitting in the drawer, ready to submit against the wrong generation. And
+  `promptDirtyRef` (tracks "the owner hand-edited the drawer's prompt since the last sync") now
+  resets on an actual shot change, not just the manual "↺ re-sync" button — it used to latch
+  true forever after the first hand-edit anywhere, freezing every other shot's drawer on stale
+  text. None of these were introduced by the per-model-gating pass earlier the same day; all
+  predate it and were found live-testing real generations.
 - **Deep Focus** (double-click a board card) is a maximized single-shot editor: title, mode,
   duration, both `FrameSlot`s, and per-shot **other references** (add/edit/remove image, video,
   or audio refs and their `@tags`) via `addRef`/`setRef`/`delRef`. A "Select in Generate →" button
