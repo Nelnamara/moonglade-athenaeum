@@ -279,16 +279,25 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   finished clip landing on the shot) via two new handlers (`onVideoSubmit`/`onVideoResult`/
   `onVideoError`) threaded down from the parent component, mirroring exactly what
   `generateShot`/`pollShot` already write for every other generation path — same board/resume
-  behavior regardless of which UI submitted. **Deliberately deferred**: the shot's cast images
-  and other `c.refs` are NOT auto-populated into the drawer's image/video/audio banks — the
-  owner fills those via the drawer's own slot-click UI now (same interactive model as the
-  gallery), except Continuity "extend" still auto-prefills `@video1` from the previous shot's
-  clip. Live-verified against a real project: mode/duration sync (incl. the out-of-range-
-  duration snap bug found and fixed live), prompt composition + hand-edit-wins + re-sync, the
-  real picker bridge (type-filtered, real pick landed in the slot), and the submit/result event
-  chain correctly updating the board card (status badge, thumbnail, duration) — all with zero
-  console errors. **The gallery keeps its own working Video tab** — adoption there is a later,
-  live-QA'd swap, same as the model-picker precedent.
+  behavior regardless of which UI submitted. **R2V's image/video banks auto-populate from the
+  shot's cast + other refs**, via `buildShotPayload` (loom-core.js) — the exact tag-sorted
+  composition `shotText()`'s "@imageN" / "Keep consistent" citations are written against. This
+  is load-bearing, not a convenience: an initial build left these banks empty for the owner to
+  fill by hand, which silently broke the citations already in the composed prompt (a hand-filled
+  slot order that doesn't match the text's tag numbering binds "@image1" to the wrong image, or
+  to nothing — wrong output with no error, found and fixed same day, 2026-07-18). Continuity
+  "extend" adds the previous shot's clip as an extra video ref on top. Audio refs are the one
+  gap `buildShotPayload` never covered, before or now — that's pre-existing, not new. Live-
+  verified against a real project with real cast: a resolvable cast member (real `mediaId`)
+  correctly lands in slot 1 matching the prompt's `@image1`; an unresolvable placeholder cast
+  member (no image ever attached) is correctly excluded from the image array while still
+  listed in the prompt text, matching the old system's own behavior exactly. Also verified:
+  mode/duration sync (incl. the out-of-range-duration snap bug found and fixed live), prompt
+  composition + hand-edit-wins + re-sync, the real picker bridge (type-filtered, real pick
+  landed in the slot), and the submit/result event chain correctly updating the board card
+  (status badge, thumbnail, duration) — all with zero console errors. **The gallery keeps its
+  own working Video tab** — adoption there is a later, live-QA'd swap, same as the model-picker
+  precedent.
 - `<mg-cost-badge>` remains unbuilt. Nothing exists in `static/` for it.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.

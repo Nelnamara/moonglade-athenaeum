@@ -837,14 +837,26 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const drawerModeFor = (m) => { const u = (m || "R2V").toUpperCase(); return u === "FLF" ? "flf" : u === "I2V" ? "i2v" : "r2v"; };
   const weaveSelIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
   const weavePrevEntry = weaveSelIdx > 0 ? entries[weaveSelIdx - 1] : null;
+  // imgSrc mirrors useGenerationPipeline's own private helper exactly (thumbs is a prop
+  // here too) -- needed to call buildShotPayload directly from this scope.
+  const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
+    : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
+  const asRef = (d) => ({ media_id: d, thumb: /^\d+$/.test(d) ? ("/thumbs/" + d + ".jpg") : d });
   // Feed the shot's structured fields into the mounted <mg-generate-drawer> whenever they
   // change -- mode/duration/audio/quality sync unconditionally (structural, not a "hand-edit"
   // concern); the composed PROMPT only re-syncs while the owner hasn't typed in the drawer's
-  // own prompt box since the last sync (promptDirtyRef, set by the mg-dirty event). Cast/
-  // other-refs are NOT auto-populated into the video/audio ref banks -- deliberately deferred
-  // (see docs/STATE.md), the owner fills those via the drawer's own slot-click UI, same as
-  // the gallery. The one exception: Continuity "extend" prefills @video1 from the previous
-  // shot's clip, mirroring the explicit line shotText() already puts in the composed prompt.
+  // own prompt box since the last sync (promptDirtyRef, set by the mg-dirty event).
+  //
+  // R2V's image/video banks are seeded from buildShotPayload -- the SAME tag-sorted
+  // composition shotText()'s "@imageN"/"Keep consistent" lines are written against. This is
+  // load-bearing, not a convenience: the composed prompt cites @image1/@image2/... by
+  // POSITION, and the drawer renumbers whatever sits in its own slots by position too: if the
+  // banks were left for the owner to fill by hand, in any order other than this exact one, a
+  // citation like "maintain exact appearance from @image1" would silently bind to whatever
+  // unrelated image happened to land in slot 1 -- wrong output with no error, not just a
+  // missing one. (Audio refs were never part of buildShotPayload's composition, before or
+  // now -- that gap is pre-existing, not introduced here.) Continuity "extend" still adds the
+  // previous shot's clip as an extra video ref, on top of whatever the shot's own refs supply.
   useEffect(() => {
     const el = genDrawerRef.current;
     if (!el || tab !== "Video") return;
@@ -859,14 +871,21 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     } else if (nextMode === "flf") {
       payload.images = [active.c.openFrame, active.c.closeFrame].filter((f) => f && f.mediaId)
         .map((f) => ({ media_id: f.mediaId, thumb: frameSrc(f) }));
-    } else if (nextMode === "r2v" && active.c.connect === "extend" && weavePrevEntry && weavePrevEntry.c.resultMid) {
-      payload.video_refs = [{ media_id: weavePrevEntry.c.resultMid, thumb: "/thumbs/" + weavePrevEntry.c.resultMid + ".jpg" }];
+    } else if (nextMode === "r2v") {
+      const sp = buildShotPayload(active, project, imgSrc);
+      if (sp.images.length) payload.images = sp.images.map(asRef);
+      const vids = (sp.video_refs || []).map(asRef);
+      if (active.c.connect === "extend" && weavePrevEntry && weavePrevEntry.c.resultMid) {
+        vids.push({ media_id: weavePrevEntry.c.resultMid, thumb: "/thumbs/" + weavePrevEntry.c.resultMid + ".jpg" });
+      }
+      if (vids.length) payload.video_refs = vids;
     }
     if (!promptDirtyRef.current) payload.prompt = shotText(active, project);
     el.prefill(payload);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.c.id, active.c.mode, active.c.connect, active.c.duration, active.c.audioGen, active.c.audioLanguage,
       active.c.prompt, active.c.camera, active.c.lighting, active.c.transIn, active.c.transOut,
+      active.c.cast, active.c.refs, project.assets,
       active.c.title, project.look, project.draft, tab]);
   const board = (
     <div className="lv-board">
