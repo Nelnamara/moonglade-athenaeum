@@ -13,6 +13,7 @@
 
 **Reference**
 - [How It Works](How-It-Works)
+- [Trust & Safety](Trust-and-Safety)
 - [Troubleshooting](Troubleshooting)
 - [FAQ](FAQ)
 

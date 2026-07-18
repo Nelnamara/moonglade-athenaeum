@@ -15,6 +15,9 @@
   "MODEL_DETAIL_HASH": "",
   "DELETE_TASK_HASH": "",
 
+  "_comment_read_only": "Set true to refuse every credit-spending or account-deleting call outright -- CLI or web, and even with --confirm/--apply/--yes passed. A safety net for a first run, testing, or handing the tool to someone else. See the Trust & Safety wiki page.",
+  "READ_ONLY": false,
+
   "_comment_legacy": "DEPRECATED legacy fallback for users WITHOUT an API key. U3T is the 'u3t' field from a graphql request Payload; the short-lived Bearer token then goes in token.txt / PIXAI_TOKEN / --token and must be re-captured every few hours. Leave blank when using PIXAI_API_KEY (recommended).",
   "U3T": ""
 }
