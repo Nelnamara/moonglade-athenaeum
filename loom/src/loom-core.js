@@ -70,8 +70,20 @@ export const connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
 
 export const flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}·${String(ci + 1).padStart(2, "0")}` })));
 
+// effectivePrompt: the prompt text a shot actually means, honoring a hand-edited override
+// over the raw field. A card in "override" mode has promptOverride:true and
+// promptOverrideText holding VERBATIM text the owner typed directly into the drawer's
+// composed-prompt box (Camera/Lighting/cast/etc already folded in by hand, not re-composed).
+export const effectivePrompt = (c) => (c.promptOverride ? (c.promptOverrideText || "") : (c.prompt || ""));
+
 export const shotText = (entry, p) => {
   const { c, code, ai } = entry;
+  // Hard early-return, never merged with the composition below -- a promptOverride is the
+  // owner's own final word on this shot's text. Composing Camera/Lighting/cast INTO an
+  // already-hand-edited override on every re-sync would duplicate that scaffolding deeper
+  // into the text on each cycle (the override IS usually that same composed text with one
+  // clause nudged, so it already contains its own Camera/Lighting/etc lines).
+  if (c.promptOverride) return effectivePrompt(c);
   const idx = flat(p).findIndex((x) => x.c.id === c.id);
   const prev = idx > 0 ? flat(p)[idx - 1] : null;
   const L = [`[${code} — "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
@@ -125,6 +137,48 @@ export const shotPayload = (entry, project, imgSrc) => {
            generate_audio: !!c.audioGen, audio_language: c.audioLanguage || "english",
            hasInput: (imgs.length + vids.length) > 0 };
 };
+
+// ---------- cost-to-finish pricing (shared by the toolbar's standing estimate and
+// batchGenerate's own price-confirm dialog) ----------
+
+// The only shotPayload fields the server's price math actually reads (verified against
+// pixai_gallery_backup.py's price_task/_PRICE_SCALARS/_PRICE_NESTED allowlist) -- prompt
+// text, camera, lighting, notes, title never affect cost, so a fingerprint built from just
+// these fields lets a cost-estimate cache skip re-pricing on every keystroke elsewhere.
+export const PRICE_FIELDS = ["mode", "images", "video_refs", "duration", "quality", "generate_audio", "audio_language"];
+export const priceFingerprint = (payload) => JSON.stringify(PRICE_FIELDS.map((k) => payload[k]));
+
+// {free,paid,credits,unknown} over a list of /api/price responses (nulls = failed/unknown
+// price checks, counted honestly rather than as a false "0 credits"). Shared verbatim by
+// batchGenerate's confirm dialog and the toolbar's standing cost-to-finish pill so there is
+// exactly one place this math lives.
+export const tallyPrices = (prices) => {
+  let free = 0, paid = 0, credits = 0, unknown = 0;
+  prices.forEach((pr) => {
+    if (pr && pr.free) free++;
+    else if (pr && pr.cost != null) { paid++; credits += pr.cost; }
+    else unknown++;
+  });
+  return { free, paid, credits, unknown };
+};
+
+// formatCostEstimate/costTooltip: pure string formatters for {free,paid,credits,unknown,pending}.
+// Hard rule: a displayed "0 cr"/"free" must only ever mean a genuinely settled, zero-cost
+// result -- never "not yet priced" or "failed to price". Priority order is exhaustive: every
+// combination of the four settled buckets plus pending maps to exactly one branch below.
+export const formatCostEstimate = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending = 0 } = {}) => {
+  const settledNone = free === 0 && paid === 0 && unknown === 0;
+  const trail = pending > 0 ? " ⟳" : "";
+  if (settledNone && pending > 0) return "…";
+  if (credits > 0) return `≈${credits.toLocaleString()} cr${unknown ? ` (+${unknown} unk)` : ""}${trail}`;
+  if (unknown > 0) return `${unknown} unpriced${trail}`;
+  if (free > 0) return `🎫 free${trail}`;
+  if (paid > 0) return `0 cr${trail}`;     // settled, genuinely zero-cost, not free-card-covered
+  return "…" + trail;
+};
+export const costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending = 0 } = {}) =>
+  `Cost to finish: ${free} free-card, ${paid} paid (≈${credits.toLocaleString()} credits), ` +
+  `${unknown} unpriced${pending ? `, ${pending} still estimating` : ""}.`;
 
 // ---------- duration / pricing math feeding the timeline reel ----------
 

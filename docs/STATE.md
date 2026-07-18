@@ -73,13 +73,54 @@ users.
   (`exportCut`), disabled until a shot has a result. The export-status overlay renders above the
   shell automatically (`.sb-seq` z-index 500 vs `.lv-overlay` 400), same as Play's
   `SequencePlayer`.
-- The top strip's **Generate all** button batches every not-yet-done shot (`batchGenerate`),
-  pricing every shot first so the confirm shows real cost + free-card coverage before anything
-  spends (fails CLOSED on a bad price check, same guardrail as the single-shot path). Disabled
-  while a batch is running or the board is empty. It is a genuinely SEPARATE submission path
-  from `<mg-generate-drawer>`'s own per-shot Generate button — both hit `/api/loom/generate`,
-  but `batchGenerate`/`generateShot` always recompute the prompt fresh from the card's own
-  fields (`shotPayload`/`shotText`), never from whatever the drawer currently has typed.
+- The top strip's **Generate all** button batches every not-yet-done, non-"wip" shot
+  (`batchGenerate`), pricing every shot first so the confirm shows real cost + free-card
+  coverage before anything spends (fails CLOSED on a bad price check, same guardrail as the
+  single-shot path) and flags any shot with no real prompt text yet by code. Disabled while a
+  batch is running or the board is empty. It is a genuinely SEPARATE submission path from
+  `<mg-generate-drawer>`'s own per-shot Generate button — both hit `/api/loom/generate`, and
+  `batchGenerate`/`generateShot` always recompute the prompt fresh from the card's own fields
+  (`shotPayload`/`shotText`), never reading the drawer's live DOM directly — but its onClick
+  flushes and locally patches a pending drawer hand-edit into a promptOverride first, so a
+  shot mid-edit still generates with the latest text regardless of React's render timing (see
+  the prompt-override bullet below). A live-updating `batchTally` (submitted/done/failed,
+  scoped to that run's own card ids via `Set` membership, written exclusively through React's
+  functional setState form to survive concurrent submit-loop + poll-loop writes) drives a
+  status banner while shots are still rendering, since the submit loop itself finishes long
+  before the actual renders do.
+- **Standing cost-to-finish estimate:** a pill next to "Generate all (N)" shows a live
+  free/paid/credits/unpriced tally over every not-done shot, kept warm by a per-shot price
+  cache (`priceCache`/`ensurePriced`) fingerprinted on only the fields that actually affect
+  `/api/price` (mode/images/video_refs/duration/quality/audio — never prompt/camera/lighting,
+  verified against the server's own price allowlist), refreshed on a 600ms board-debounce plus
+  click-to-force. Deliberately NOT shared with `batchGenerate`'s own one-shot, must-be-fresh
+  pricing pass right before the irreversible confirm — different staleness contracts, same
+  pure tally math (`tallyPrices`, loom-core.js) underneath both.
+- **Prompt override:** a hand-edit made directly in `<mg-generate-drawer>`'s composed-prompt
+  box now durably persists (`c.promptOverride`/`c.promptOverrideText`), surviving a shot
+  deselect/reselect and a reload — previously a hand-edit only affected that one immediate
+  Generate click and was silently discarded the moment the owner looked at a different shot.
+  `shotText()` returns the override verbatim instead of composing from Camera/Lighting/cast
+  when one is active (never merged — composing scaffolding INTO an already-hand-edited
+  override would duplicate it deeper on every re-sync cycle). Committed on a debounce/blur
+  (`mg-prompt-commit`, distinct from the pre-existing per-keystroke `mg-dirty`) or flushed
+  synchronously (`flushPromptEdit()`) whenever the host is about to read committed state
+  faster than the debounce allows (a shot switch, or the toolbar's Generate-all button).
+  Typing in the Loom's own native Prompt textarea clears an active override immediately
+  (visibly — a brief self-clearing flash notice, not silent) since it means the same thing
+  from the other surface. The "↺ re-sync from shot" button clears it and forces a fresh
+  auto-compose. A visible badge distinguishes override-active from auto-composed.
+  **All three of the above were designed, then independently adversarially reviewed twice**
+  (one design agent's first attempt for the batch-hardening item came back as an unusable
+  placeholder stub; the rescue plan a reviewer wrote to replace it was itself reviewed a
+  second time before anything was implemented) — both passes caught real, since-fixed
+  correctness bugs: stale React closures that would have made the tally never update, a
+  busy-guard wired to an effect dependency array that would never fire, and an empty-prompt
+  check against the always-non-empty COMPOSED string (structurally incapable of ever
+  triggering) rather than the shot's actual raw prompt field. Live-verified end to end
+  (override persisting across a real shot-switch round trip, the empty-prompt flag firing
+  correctly in the batch confirm, the cost pill computing a real estimate), 93 Node + 554
+  Python tests green.
 - **Generation-lifecycle correctness fixes, 2026-07-18 (live-tested against a real project):**
   `<mg-generate-drawer>` is now mounted once, permanently, in the Video tab's DOM (CSS-hidden
   on other tabs instead of conditionally unmounted) — switching tabs mid-render used to kill

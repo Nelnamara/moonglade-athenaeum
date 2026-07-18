@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta,
-  flat, shotText, shotPayload, durOf, reelStats,
+  flat, shotText, shotPayload, durOf, reelStats, effectivePrompt,
+  priceFingerprint, tallyPrices, formatCostEstimate,
 } from "../src/loom-core.js";
 
 /* ---------- fixtures ---------- */
@@ -208,6 +209,68 @@ describe("shotText", () => {
   test("no 'look' line when the project look is empty", () => {
     const project = makeProject([{ id: "a1", name: "Act", cards: [makeCard({})] }]);
     assert.ok(!shotText(flat(project)[0], project).includes("Look (consistent"));
+  });
+
+  test("a promptOverride returns VERBATIM, ignoring camera/lighting/cast/notes entirely", () => {
+    const asset = { id: "as1", name: "Nel", tag: "@image1", lock: true };
+    const card = makeCard({
+      cast: ["as1"], camera: "slow push in", lighting: "golden hour", notes: "important beat",
+      promptOverride: true, promptOverrideText: "exactly this and nothing else",
+    });
+    const project = makeProject([{ id: "a1", name: "Act", cards: [card] }], [asset]);
+    const text = shotText(flat(project)[0], project);
+    assert.equal(text, "exactly this and nothing else");
+  });
+
+  test("promptOverride survives a second shotText() call unchanged (no compounding)", () => {
+    const card = makeCard({ camera: "dolly out", promptOverride: true, promptOverrideText: "static override text" });
+    const project = makeProject([{ id: "a1", name: "Act", cards: [card] }]);
+    const entry = flat(project)[0];
+    const first = shotText(entry, project);
+    const second = shotText(entry, project);
+    assert.equal(first, "static override text");
+    assert.equal(second, first);   // repeated calls must not append camera/lighting on each cycle
+  });
+});
+
+describe("effectivePrompt", () => {
+  test("returns promptOverrideText when promptOverride is set", () => {
+    const card = makeCard({ prompt: "raw prompt", promptOverride: true, promptOverrideText: "override wins" });
+    assert.equal(effectivePrompt(card), "override wins");
+  });
+  test("falls back to raw prompt when no override is active", () => {
+    const card = makeCard({ prompt: "raw prompt", promptOverride: false });
+    assert.equal(effectivePrompt(card), "raw prompt");
+  });
+  test("never returns null/undefined even with missing fields", () => {
+    assert.equal(effectivePrompt({}), "");
+    assert.equal(effectivePrompt({ promptOverride: true }), "");
+  });
+});
+
+describe("priceFingerprint / tallyPrices / formatCostEstimate", () => {
+  test("fingerprint is stable for identical priceable fields", () => {
+    const a = { mode: "R2V", images: ["1"], video_refs: [], duration: 5, quality: "basic", generate_audio: false, audio_language: "english", prompt: "A" };
+    const b = { ...a, prompt: "totally different text" };   // prompt is NOT a priceable field
+    assert.equal(priceFingerprint(a), priceFingerprint(b));
+  });
+  test("fingerprint changes when a priceable field changes", () => {
+    const a = { mode: "R2V", images: ["1"], video_refs: [], duration: 5, quality: "basic", generate_audio: false, audio_language: "english" };
+    const b = { ...a, duration: 10 };
+    assert.notEqual(priceFingerprint(a), priceFingerprint(b));
+  });
+  test("tallyPrices buckets free/paid/unknown and sums credits, failing closed on null", () => {
+    const t = tallyPrices([{ free: true }, { free: false, cost: 500 }, { free: false, cost: 250 }, null]);
+    assert.deepEqual(t, { free: 1, paid: 2, credits: 750, unknown: 1 });
+  });
+  test("formatCostEstimate never shows a bare 0/free for an unsettled or unpriced result", () => {
+    assert.equal(formatCostEstimate({ pending: 3 }), "…");
+    assert.equal(formatCostEstimate({ unknown: 2, pending: 0 }), "2 unpriced");
+    assert.notEqual(formatCostEstimate({ unknown: 2 }), "0 cr");
+  });
+  test("formatCostEstimate distinguishes a settled zero-cost paid shot from 'nothing settled'", () => {
+    assert.equal(formatCostEstimate({ paid: 1, credits: 0 }), "0 cr");
+    assert.equal(formatCostEstimate({}), "…");
   });
 });
 

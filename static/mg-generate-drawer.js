@@ -33,13 +33,25 @@
                         programmatic prefill()). Hosts that auto-recompose the prompt from
                         other state (the Loom's shot fields) use this to know a hand-edit
                         is in progress and should win over the next auto re-sync.
+     mg-prompt-commit -- detail: {text}. Fired once per edit "session" -- 300ms after the
+                        last keystroke, or immediately on blur, whichever comes first.
+                        Distinct from mg-dirty (which fires every keystroke for cheap live
+                        tracking): a host that wants to DURABLY PERSIST a hand-edit (not
+                        just know one is in progress) listens for this instead.
    Public API:
      setRefs([{media_id,thumb},...]) -- the lightbox/bulk "Send to Video" entry, image refs
        only (unchanged from Phase 1); >1 ref switches to multi-ref.
      prefill({prompt,mode,duration,audio,audio_language,video_model,quality,negative,
        is_private,images,video_refs,audio_ref}) -- the Loom's shot-context entry. images/
        video_refs are arrays of {media_id,thumb}; audio_ref is {media_id,filename}|null.
-     payload() -- inspection; the exact object POSTed to /api/price and /api/loom/generate. */
+     payload() -- inspection; the exact object POSTed to /api/price and /api/loom/generate.
+     flushPromptEdit() -- synchronously commits a pending (not-yet-debounced) hand-edit and
+       returns its text, or null if nothing was pending. For a host about to overwrite this
+       drawer with different content, or about to read committed state faster than the
+       300ms debounce would otherwise allow.
+     setBusy(bool) -- disables/enables the Go button for a generation this drawer did NOT
+       itself start (e.g. a batch run elsewhere submitted the active shot). No-ops while
+       this drawer's OWN submit/poll is in flight -- that lifecycle owns the button then. */
 (function () {
   'use strict';
   if (window.customElements && customElements.get('mg-generate-drawer')) return;
@@ -261,6 +273,8 @@
       this._costTimer = null;
       this._chipTimer = null;
       this._pollTimer = null;
+      this._dirty = false;       // true from the first keystroke since the last commit/sync
+      this._rendering = false;   // true while THIS drawer's own submit/poll is in flight
       this.innerHTML = MARKUP;
       this._slotsLbl = this.querySelector('.mgd-slots-lbl');
       this._slotsWrap = this.querySelector('.mgd-imgslots');
@@ -293,11 +307,12 @@
         b.addEventListener('click', function () { self._setMode(b.getAttribute('data-vmode')); });
       });
       this._ce.addEventListener('input', function () {
+        self._dirty = true;
         self.dispatchEvent(new CustomEvent('mg-dirty', { bubbles: true, composed: true }));
         clearTimeout(self._chipTimer);
-        self._chipTimer = setTimeout(function () { self._chipify(false); self._debCost(); }, 300);
+        self._chipTimer = setTimeout(function () { self._chipify(false); self._debCost(); self._emitCommitIfDirty(); }, 300);
       });
-      this._ce.addEventListener('blur', function () { self._chipify(true); });
+      this._ce.addEventListener('blur', function () { self._chipify(true); self._emitCommitIfDirty(); });
       this._neg.addEventListener('input', function () { self._debCost(); });
       this._model.addEventListener('change', function () { self._renderModelCaps(); self._applyModelGating(); self._debCost(); });
       this._dur.addEventListener('change', function () { self._debCost(); });
@@ -603,6 +618,18 @@
       this._ce.textContent = v || '';
       this._chipify(true);
       this._debCost();
+      this._dirty = false;   // programmatic sync, not a pending hand-edit
+    }
+
+    // Fires mg-prompt-commit once per genuine edit "session" (debounced 300ms after the
+    // last keystroke, or immediately on blur, whichever comes first) -- distinct from
+    // mg-dirty, which fires on every keystroke for cheap "something changed" tracking.
+    // A host that wants to durably persist a hand-edit (vs. just knowing one is in
+    // progress) listens for this instead.
+    _emitCommitIfDirty() {
+      if (!this._dirty) return;
+      this._dirty = false;
+      this.dispatchEvent(new CustomEvent('mg-prompt-commit', { bubbles: true, composed: true, detail: { text: this._promptText() } }));
     }
 
     // ---- model / channel capability captions ---------------------------------------
@@ -695,8 +722,9 @@
       }
       res.style.display = 'block';
       res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Submitting…</span>';
+      this._rendering = true;
       this._go.disabled = true; this._go.textContent = 'Rendering…';
-      function done() { self._go.disabled = false; self._go.textContent = 'Generate video'; }
+      function done() { self._rendering = false; self._go.disabled = false; self._go.textContent = 'Generate video'; }
       fetch('/api/loom/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -794,6 +822,32 @@
     }
 
     // ---- public host API ----
+    // Synchronously flushes a pending (not-yet-debounced) hand-edit and returns its text,
+    // or null if there was nothing pending. For a host about to overwrite this drawer with
+    // a DIFFERENT shot's content (prefill()) or about to read committed state for a
+    // generate call that can't wait out the 300ms debounce (the toolbar's "Generate all"
+    // button) -- both cases where a real edit sitting in the debounce window would
+    // otherwise be silently dropped, since the pending mg-prompt-commit that debounce was
+    // going to fire never gets the chance to.
+    flushPromptEdit() {
+      clearTimeout(this._chipTimer);
+      this._chipify(true);
+      if (!this._dirty) return null;
+      this._dirty = false;
+      return this._promptText();
+    }
+
+    // Lets a host (the Loom) disable this drawer's own Go button when ITS OWN card state
+    // says a generation is already in flight for the active shot -- covers the case where
+    // some OTHER path (a toolbar batch run) submitted this exact shot, not this drawer.
+    // No-ops while _rendering is true: this drawer's OWN _generate()/done() lifecycle
+    // already owns _go.disabled/text for a submit IT started, and must not be fought by a
+    // host-driven call that doesn't know that submit is in flight.
+    setBusy(isBusy) {
+      if (this._rendering) return;
+      this._go.disabled = !!isBusy;
+    }
+
     // The lightbox / bulk-bar "Send to Video" entry (gallery addVideoRefs, sans host
     // chrome). Image refs only, as today's gallery bulk-send is -- unchanged from Phase 1.
     // undefined/null (no array at all) is a no-op -- the caller has no opinion, leave
