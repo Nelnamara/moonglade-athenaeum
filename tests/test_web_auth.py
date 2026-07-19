@@ -745,7 +745,6 @@ _PREVIOUSLY_UNGATED_HTML_GET = [
     "/img/does-not-exist.png",
     "/video-file/does-not-exist",
     "/full/does-not-exist",
-    "/branding/does-not-exist.png",
     "/badge-thumb/does-not-exist.png",
     "/manifest.webmanifest",
     "/sw.js",
@@ -811,3 +810,16 @@ def test_previously_ungated_get_route_now_denied_from_localhost_too(tmp_path, pa
     else:
         assert r.status_code in (301, 302, 303, 307, 308)
         assert r.headers["Location"].startswith("/login")
+
+
+@pytest.mark.parametrize("remote_addr", [LAN, "127.0.0.1"])
+def test_branding_stays_public_unauthenticated(tmp_path, remote_addr):
+    """Unlike every other previously-ungated route above, /branding/ was
+    deliberately put back on the public allowlist (see _PUBLIC_PREFIXES in
+    _enforce_front_door()): it's static cosmetic art, not gallery content, and
+    the login page itself needs it to render for a not-yet-authenticated
+    visitor. A missing file still 404s (never redirects to /login) from LAN
+    or localhost, with or without a session."""
+    cli = _client(tmp_path).test_client()
+    r = cli.get("/branding/does-not-exist.png", environ_overrides={"REMOTE_ADDR": remote_addr})
+    assert r.status_code == 404
