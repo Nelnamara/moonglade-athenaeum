@@ -6825,7 +6825,7 @@ function removeUser(btn){
   // templated/interpolated JS argument -- see the comment in addUser() above.
   var row=btn.closest('.u-row');
   var username=row.getAttribute('data-username');
-  if(!confirm('Remove account "'+username+'"?\n\nThis cannot be undone.')) return;
+  if(!confirm('Remove account "'+username+'"?\\n\\nThis cannot be undone.')) return;
   var st=el('add-user-status');
   fetch('/api/users/remove',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:username, csrf:CSRF})})

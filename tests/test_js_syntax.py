@@ -37,7 +37,7 @@ def _scripts(html):
 
 
 @pytest.mark.skipif(NODE is None, reason="node not installed")
-@pytest.mark.parametrize("path", ["/", "/image/1", "/health", "/duplicates"])
+@pytest.mark.parametrize("path", ["/", "/image/1", "/health", "/duplicates", "/panel", "/login"])
 def test_embedded_js_is_valid(client, tmp_path, path):
     html = client.get(path).get_data(as_text=True)
     blocks = _scripts(html)
