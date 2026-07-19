@@ -15,6 +15,38 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Job Tracker + achievement toasts, now shared with the Loom** (2026-07-18, `static/mg-notify.js`
+  — the fifth shared file, and now the single source: the gallery's own inline copies are
+  deleted). Extracted `Ach` (the achievement modal + celebration toasts), `Toast` (general
+  corner notices), and `Jobs`/`JobsCard` (the activity tracker) verbatim out of the gallery's
+  inline `<script>`; both the gallery and the Loom now load one `<script src>`. The Loom's own
+  shell gained the two DOM anchors (`#jobs-fab`/`#jobs-tray`) the visible tracker card needs —
+  the achievement-toast path needs no anchor at all, since it builds its own DOM from scratch.
+  `Ach.open()`/`close()` gained a null-guard (a global Escape-key listener calls `close()` on
+  every keypress app-wide; the original was unguarded and would have thrown in any host without
+  the Achievements modal). `Jobs` gained a new `register(id,label)` entry point — logs the
+  generation into the shared activity card without starting a redundant second poll loop, for
+  hosts whose own generation flow already owns a hardened, independently-completing poller
+  (the Loom's `pollShot`/`<mg-generate-drawer>`'s `_poll`); both the board's `generateShot` and
+  the drawer's submit path (via the Loom's own `onVideoSubmit`) now call it, closing the
+  confirmed gap where `/api/loom/generate` never showed up in the activity log until caught
+  after the fact by the orphan-job reconciler. `.ach-m2`/`#mg-toasts` z-index raised so a
+  celebration or completion toast is never silently swallowed by the Loom's own full-screen
+  overlays (Deep Focus, the Sequence Player) — both common Loom interactions the gallery
+  doesn't have an equivalent of. The Job Tracker's default bottom-left position was confirmed
+  (via live measurement, not assumption) to collide with the Loom's own left Cast panel once
+  scrolled to its end — fixed with a small, Loom-scoped position override. Designed then
+  adversarially reviewed (Workflow tool) before shipping — the review moved the drawer-side
+  wiring off the host-agnostic `<mg-generate-drawer>` component onto the Loom's own code,
+  caught a missing de-dupe guard on the new `register()`, flagged a shared CSS rule
+  (`.ach-modal`, base chrome for three different modals, not achievement-exclusive) that needed
+  an explicit "don't scope this independently" comment, and caught that the tray-collision risk
+  was asserted but never actually measured — it turned out to be real. 555 Python + 111 Node
+  tests green (+1 new Python smoke test). Live-verified on both surfaces: Trophy Hall and the
+  Contests/YourArt modals render correctly on the gallery with zero regressions, a real
+  `Jobs.register()` call round-trips through `/api/jobs` into a rendered tray row, the
+  tray-collision fix measures clean, z-index values sit above the Loom's overlay ceiling, zero
+  console errors anywhere.
 - **Design-mockup pass: cast-row gallery picker, wider Generate panel, Duration/Audio dedup**
   (2026-07-18, owner-approved against a locked interactive Artifact mockup before
   implementation). Three bundled pieces:

@@ -158,9 +158,9 @@ users.
   time-label helper, and the missing `genStartedAt` persistence — all fixed pre-ship. Flagged,
   not yet acted on: `/api/task-status`'s exception handler returns HTTP 200 `{phase:"failed"}`
   for a transient local blip, indistinguishable from a genuine PixAI failure to either poll
-  loop — an owner decision on whether to change that endpoint's error shape. 111 Node tests
-  green (+18, a permanent parity test guarding the drawer's local `friendlyGenErr` copy against
-  drift). Live-verified: no console errors on load, normal wip/done badges unaffected by the
+  loop — an owner decision on whether to change that endpoint's error shape. Node tests green,
+  incl. a new permanent parity test guarding the drawer's local `friendlyGenErr` copy against
+  drift. Live-verified: no console errors on load, normal wip/done badges unaffected by the
   new paused-aware busy-guards. The actual multi-hour tier escalation was verified via code
   review + the adversarial-review pass, not literally clocked in real time.
 - **Drawer error-friendliness, 2026-07-18(pm):** `<mg-generate-drawer>`'s own error rendering
@@ -479,6 +479,49 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 - `<mg-cost-badge>` remains unbuilt. Nothing exists in `static/` for it.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
+- **`static/mg-notify.js` (2026-07-18, the fifth shared file)** carries the achievement-toast
+  celebration system (`Ach`), the general-purpose corner `Toast`, and the Job activity tracker
+  (`Jobs` + `JobsCard`) — extracted verbatim from the gallery's own inline `<script>`, now the
+  **single source** for all three (the gallery's inline copies were deleted; both surfaces load
+  `<script src="/static/mg-notify.js">`). Unlike the other four shared files this isn't a
+  custom element — `Ach`/`Toast`/`Jobs`/`JobsCard` are plain global IIFEs operating on
+  `document.body`/`getElementById`, matching exactly what they were inline; it self-injects one
+  `<style>` tag so a single script tag carries both behavior and styling. The Loom's shell now
+  carries `#jobs-fab`/`#jobs-tray` anchors (the achievement-toast path needs no anchor at all —
+  `_mkMoment`/`celebrate` build their own DOM from scratch, confirmed by reading `render()`'s
+  own defensive `if(el)` guards; only the VISIBLE Job Tracker card needs somewhere to render
+  into). `Ach.open()`/`close()` gained a null-guard (the original was unguarded, and a global
+  Escape-key listener calls `close()` on every keypress app-wide — would have thrown in any
+  host without the Achievements modal, found live-testing before it shipped). `Jobs` gained a
+  new `register(id,label)` — registers with the server activity log without starting a second
+  polling loop, for hosts (the Loom) whose own generation flow already owns a hardened,
+  independently-completing poll loop (`pollShot`/`_poll`) and would otherwise double-poll the
+  same task; both `generateShot` and the Loom's `onVideoSubmit` (the drawer's `mg-submit`
+  handler) now call it, closing the confirmed gap that `/api/loom/generate` never logged a job
+  at submission time on its own (client-side only, by this app's own architecture — the Python
+  route itself was never the gap). `.ach-m2`/`#mg-toasts` z-index raised (430/420 → 520/510) so
+  a celebration or completion toast is never silently swallowed by the Loom's own full-screen
+  overlays (Deep Focus veil z-index 450, Sequence Player z-index 500 — both everyday
+  interactions the gallery doesn't have). The Job Tracker's default bottom-left position
+  collides with the Loom's own left Cast panel (confirmed via live measurement: an open tray
+  covers the top of the "+ add from gallery"/"Import collection" buttons once that panel is
+  scrolled to its end) — fixed with a `!important`-scoped `bottom:88px` override living in
+  `_LOOM_SHELL`'s own `<style>` block (an ID-selector tie against the script's JS-injected
+  style otherwise silently loses regardless of source order, confirmed by trying the
+  non-`!important` version first and finding it did nothing); the gallery's own position is
+  untouched. `.ach-modal` is shared base chrome for THREE modals (`#ach-modal`/
+  `#contest-modal`/`#art-modal`, not achievement-exclusive) — flagged with an explicit comment
+  so a future edit doesn't scope or drop it independently of Contests/YourArt. Designed then
+  adversarially reviewed (Workflow tool) before shipping; the review caught the drawer-wiring
+  location (moved off `mg-generate-drawer.js`, which must stay host-agnostic, onto the Loom's
+  own `onVideoSubmit`), the missing `seen{}` de-dupe guard on `register()`, the shared
+  `.ach-modal` coupling, and the untested tray-collision claim (which turned out to be real).
+  555 Python + 111 Node tests green (+1 Python smoke test asserting the Loom shell carries the
+  script tag and both anchors). Live-verified: Trophy Hall + Contests/YourArt modals render
+  correctly on the gallery with zero regressions, `Jobs.register()` round-trips through the
+  real `/api/jobs` endpoint into a rendered tray row, the tray-collision fix measured clean
+  (0px overlap, was 12.7px), z-index values confirmed above the Loom's overlay ceiling, zero
+  console errors anywhere.
 
 ### Achievements
 

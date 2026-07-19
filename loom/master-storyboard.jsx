@@ -2044,6 +2044,13 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       const startedAt = Date.now();
       setCardStatus(c.id, { pendingTaskId: d.task_id, genStartedAt: startedAt });
       pollShot(c.id, d.task_id, startedAt);
+      // Registers this generation in the shared Job Tracker (static/mg-notify.js) so it shows
+      // up in the activity card no matter which surface is watching -- register-ONLY (no
+      // poll loop of its own), since pollShot above already owns real completion handling;
+      // Jobs.track()'s own polling would be redundant for a submission this file already
+      // tracks. window.Jobs is guaranteed loaded here (mg-notify.js is always included in the
+      // Loom's own shell), unlike a host-agnostic shared component that can't assume it.
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, entry.code + " · " + (c.title || "untitled"));
       return { ok: true, taskId: d.task_id };
     } catch {
       setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
@@ -2478,6 +2485,13 @@ export default function App() {
     // still-pending drawer-submitted shot would resume with no persisted start time, silently
     // re-arming a full 6h give-up budget on every reload (found while implementing).
     setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
+    // Registers with the shared Job Tracker (static/mg-notify.js), mirroring generateShot's
+    // own registration -- deliberately done HERE (the Loom's own host code), not inside
+    // mg-generate-drawer.js itself, so the shared drawer component stays genuinely
+    // host-agnostic (its own documented contract) rather than assuming window.Jobs exists.
+    // "Rendered" matches the gallery's own existing label for this same /api/loom/generate
+    // endpoint (Gen.videoGenerate()'s runTask call).
+    if (window.Jobs && window.Jobs.register) window.Jobs.register(detail.task_id, "Rendered");
   }, [setGenState, setCardStatus]);
   const onVideoResult = useCallback((cardId, detail) => {
     const mid = (detail.media_ids || [])[0];
