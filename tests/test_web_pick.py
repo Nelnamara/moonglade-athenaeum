@@ -20,17 +20,30 @@ def _client(tmp_path, rows):
     return create_app(tmp_path).test_client()
 
 
-def test_gallery_images_works_from_lan_address(tmp_path):
-    """The picker source must NOT be localhost-gated: a 0.0.0.0 server browsed via a
-    LAN address (non-loopback remote_addr) still returns the catalog. This is the bug
-    that made the picker show 'No images found' while the gallery was full."""
+def test_gallery_images_requires_login_over_lan_but_then_works(tmp_path):
+    """/api/gallery-images used to be deliberately exempted from EVERY gate (its own
+    docstring: 'NOT localhost-gated ... the gate added no protection while breaking
+    the picker for the owner on a --host 0.0.0.0 server accessed via a LAN address') --
+    a 0.0.0.0 server browsed via a LAN address with no login at all could still pull
+    the catalog. The front-door rewrite (2026-07-19) retires that exemption: `/api/`
+    now carries no allowlist entry of its own, so a LAN request with no session is
+    refused like every other route, and the regression this test guards becomes 'the
+    picker still works over LAN for a signed-in user' -- not 'works over LAN with no
+    auth at all', which was the whole security gap this rewrite closed."""
+    core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path, [
         _row(media_id="1", filename="a_1.png", prompt_preview="p",
              created_at="2025-01-01T00:00:00"),
     ])
-    d = cli.get("/api/gallery-images",
-                environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_json()
-    assert len(d["images"]) == 1 and d["total"] == 1
+    LAN = "192.168.1.50"
+    r = cli.get("/api/gallery-images", environ_overrides={"REMOTE_ADDR": LAN})
+    assert r.status_code == 401                        # no session -> refused
+
+    html = cli.get("/login").get_data(as_text=True)
+    csrf = re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": csrf})
+    d = cli.get("/api/gallery-images", environ_overrides={"REMOTE_ADDR": LAN}).get_json()
+    assert len(d["images"]) == 1 and d["total"] == 1    # same LAN address, now logged in
 
 
 def test_gallery_images_prefers_full_prompt(tmp_path):
@@ -551,26 +564,48 @@ def test_artwork_views_route(tmp_path, monkeypatch):
     assert cli.get("/api/artwork-views").get_json()["views"] is None   # missing id -> 400/null
 
 
-def test_lan_view_hides_owner_only_controls(tmp_path):
-    """On a LAN-served instance, owner-only controls (Generate / The Loom / Panel / balance chip)
-    are localhost-gated -> the header hides them and shows a read-only note instead of dead buttons.
-    Browse + community surfaces (Contests / My Art / Achievements / Health) stay."""
+def test_unauthenticated_lan_request_to_index_is_redirected_to_login(tmp_path):
+    """Before the LAN-auth front-door rewrite (2026-07-19), an unauthenticated LAN
+    request to `/` rendered a stripped-down 'read-only LAN view' (owner-only controls
+    hidden, a small banner shown instead) -- `/` had no gate of its own at all back
+    then. That whole in-between tier is retired: `/` now carries no allowlist
+    exemption from the global front-door hook (_enforce_front_door(), see
+    pixai_gallery.py's docstring), so an unauthenticated LAN request never reaches
+    index() at all -- it's redirected to /login instead of rendering anything."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    r = cli.get("/", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
+    assert r.status_code in (301, 302, 303, 307, 308)
+    assert "/login" in r.headers["Location"]
+
+
+def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
+    """A LAN request carrying a valid login session is authorized exactly like the
+    local owner -- the same Generate/Loom/Panel controls, no read-only banner. There
+    is only ONE access tier once you're behind the front door (localhost, or a
+    logged-in session) -- see index()'s `is_local=True` comment for why that
+    template flag is now a hardcoded constant rather than a live check. Community +
+    browse surfaces (Contests / My Art) render either way, as before."""
+    core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     localhost = cli.get("/").get_data(as_text=True)
+    html = cli.get("/login").get_data(as_text=True)
+    csrf = re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": csrf})
     lan = cli.get("/", environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_data(as_text=True)
-    # The Generate button (btn-primary) + The Loom header link are owner-only -> localhost only.
+    # The Generate button (btn-primary) + The Loom header link are owner-level controls.
     _loom = "video storyboard, where shots"   # unique to the header Loom link title (owner-only)
     assert _loom in localhost and "read-only LAN view" not in localhost
-    assert _loom not in lan and "read-only LAN view" in lan
-    # community + browse surfaces survive on both
+    assert _loom in lan and "read-only LAN view" not in lan
+    # community + browse surfaces render on both
     for html in (localhost, lan):
         assert "Contests.open()" in html and "YourArt.open()" in html
 
 
 def test_export_csv_downloads_as_attachment(tmp_path):
     """The web export is a real browser DOWNLOAD (attachment), not a file written into the
-    backup folder. Localhost-only (owner data)."""
+    backup folder. Authorized only (owner data)."""
     cli = _client(tmp_path, [
         _row(media_id="1", filename="a_1.png", prompt_preview="p1", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", filename="b_2.png", prompt_preview="p2", created_at="2025-01-02T00:00:00"),
@@ -582,9 +617,12 @@ def test_export_csv_downloads_as_attachment(tmp_path):
     lines = r.get_data(as_text=True).splitlines()
     assert "media_id" in lines[0]                        # header row present
     assert sum(1 for ln in lines[1:] if ln.strip()) == 2  # both rows exported
-    # a LAN device can't pull the owner's catalog
-    assert cli.get("/export-csv",
-                   environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 403
+    # An unauthorized LAN device can't pull the owner's catalog -- sent to /login
+    # (an HTML page route, so a redirect there rather than a bare 403 lets normal
+    # browser navigation work cleanly).
+    r2 = cli.get("/export-csv", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r2.status_code == 302
+    assert r2.headers["Location"].startswith("/login")
 
 
 def test_branding_absent_is_404(tmp_path):
@@ -759,7 +797,7 @@ def test_import_task_by_id(tmp_path, monkeypatch):
                         lambda s, tid, out, **k: called.update(tid=tid) or {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     assert cli.post("/api/import-task", json={"task_id": "123"},
-                    environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 403   # LAN refused
+                    environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 401   # LAN refused
     d = cli.post("/api/import-task", json={"task_id": "nope"}).get_json()
     assert d.get("error") and "tid" not in called                          # non-numeric rejected, no collect
     d = cli.post("/api/import-task", json={"task_id": "2030585251815688815"}).get_json()
@@ -802,7 +840,7 @@ def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "claim_reward", lambda s, cid: claimed.append(cid))
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     # LAN request refused (claiming is on the owner's account)
-    assert cli.post("/api/claim", environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 403
+    assert cli.post("/api/claim", environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 401
     d = cli.post("/api/claim").get_json()
     assert d["claimed"] == 1 and d["credits"] == 30000       # only the ready credit reward
     assert claimed == ["pixai-daily-credits"]

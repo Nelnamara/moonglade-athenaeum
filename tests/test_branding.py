@@ -2,9 +2,16 @@
 All hermetic -- fake mark assets are written into tmp, subprocess is mocked, and
 nothing touches a real Desktop or PowerShell."""
 import json
+import re
 
 import pixai_gallery as g
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+
+
+def _csrf(html):
+    m = re.search(r'name="csrf" value="([^"]+)"', html)
+    assert m, "login page did not render a csrf hidden field"
+    return m.group(1)
 
 
 def _row(**kw):
@@ -61,7 +68,7 @@ def test_branding_validation_and_lan_gate(tmp_path):
     assert cli.post("/api/branding", json={"mark": "mark_99"}).status_code == 400
     r = cli.post("/api/branding", json={"anim": "glow"},
                  environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 403           # LAN can't restyle the owner's gallery
+    assert r.status_code == 401           # LAN can't restyle the owner's gallery
 
 
 def test_shortcut_writes_lnk_via_powershell(tmp_path, monkeypatch):
@@ -84,9 +91,44 @@ def test_shortcut_writes_lnk_via_powershell(tmp_path, monkeypatch):
     assert argv[0] == "powershell"
     assert "CreateShortcut" in argv[-1] and "mark_4.ico" in argv[-1]
     assert "Serve Gallery.pyw" in argv[-1]
-    # LAN can't write shortcuts onto the owner's Desktop
+    # LAN can't write shortcuts onto the owner's Desktop -- caught by the global
+    # front-door hook before this route's own _is_local_request() re-check even runs
+    # (see test_shortcut_refuses_authenticated_lan_session below for the case where a
+    # LAN request DOES pass the front door via a valid login, and is still refused).
     r = cli.post("/api/branding/shortcut", json={"mark": "mark_4"},
                  environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r.status_code == 401
+
+
+def test_shortcut_refuses_authenticated_lan_session(tmp_path, monkeypatch):
+    """A logged-in LAN account must NOT be able to trigger the Desktop-shortcut
+    writer -- unlike ordinary app-data writes (POST /api/branding above), this
+    shells out to PowerShell/WScript.Shell COM on the SERVER's own machine
+    (make_launcher_shortcut's docstring: "caller must gate to localhost"). A
+    LAN login is meant to unlock spend-the-owner's-credits generation features,
+    not host-machine execution -- a materially different trust boundary.
+    Regression test: the LAN-auth conversion pass had broadened this route's
+    gate from _is_local_request() to the wider _is_authorized_request(),
+    flagged and reverted 2026-07-19."""
+    import subprocess
+    import pixai_gallery_backup as core
+    _cut_fake_marks(tmp_path)
+
+    class R:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+    core.add_or_update_web_user("alice", "hunter2")
+    cli = _app(tmp_path).test_client()
+    LAN = "203.0.113.5"
+    html = cli.get("/login").get_data(as_text=True)
+    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
+    # Prove the session really is authenticated (it can reach an ordinary
+    # authorized-LAN route) before proving it still can't reach this one.
+    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
+    r = cli.post("/api/branding/shortcut", json={"mark": "mark_4"},
+                 environ_overrides={"REMOTE_ADDR": LAN})
     assert r.status_code == 403
 
 

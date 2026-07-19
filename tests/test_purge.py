@@ -113,7 +113,14 @@ def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch):
 
 
 def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
-    """A LAN request must NOT be able to delete from the owner's PixAI account."""
+    """A LAN request must NOT be able to delete from the owner's PixAI account.
+
+    Before the global front-door hook existed, this route's own defense-in-depth
+    check redirected back to the gallery with a `delerr` banner; now the global
+    hook (_enforce_front_door(), see pixai_gallery.py) denies the request before
+    this route's body ever runs, redirecting to /login instead -- the
+    security-relevant invariants below (nothing fired, nothing deleted) are
+    unchanged."""
     import time
     import pixai_gallery_backup as core
     db = _seed(tmp_path, [_row(media_id="z1", task_id="TZ", filename="z1.png")], {"z1.png": b"x"})
@@ -124,7 +131,8 @@ def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
     client = create_app(tmp_path).test_client()
     r = client.post("/delete-tasks-bulk", data={"media_ids": ["z1"], "back": "/"},
                     environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert "delerr" in r.headers["Location"]        # refused with an error, not a delete
+    assert r.status_code in (301, 302, 303, 307, 308)
+    assert "/login" in r.headers["Location"]        # refused before the handler ran, not a delete
     time.sleep(0.1)                                  # give any wrongly-spawned thread a beat
     assert fired == []                               # nothing deleted from the cloud
     assert {x["media_id"] for x in load_catalog(db)} == {"z1"}   # row intact
