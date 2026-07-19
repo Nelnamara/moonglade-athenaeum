@@ -38,6 +38,14 @@ try:
 except ImportError:
     Image = None  # thumbnails will be skipped with a warning
 
+# Windows-only: every subprocess this app spawns (ffmpeg/ffprobe thumbnail work,
+# the PowerShell shortcut writer, git for the build stamp, the Panel's CLI jobs)
+# would otherwise briefly flash a console window into view. 0x08000000 is the
+# stable Win32 CREATE_NO_WINDOW value (same constant subprocess.CREATE_NO_WINDOW
+# exposes on Windows) -- hardcoded so this doesn't need `subprocess` imported at
+# module scope just for this. Evaluates to 0 (no-op) on non-Windows platforms.
+_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
 
 # ---------------------------------------------------------------------------
 # Catalog helpers
@@ -1367,7 +1375,8 @@ def make_launcher_shortcut(out_dir, mark_id):
               _ps_quote(lnk), _ps_quote(target), _ps_quote('"%s"' % pyw),
               _ps_quote(repo), _ps_quote(str(ico) + ",0")))
     r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                       capture_output=True, text=True, timeout=30)
+                       capture_output=True, text=True, timeout=30,
+                       creationflags=_NO_WINDOW)
     if r.returncode != 0:
         raise RuntimeError((r.stderr or "PowerShell failed").strip()[:200])
     return str(lnk)
@@ -2303,13 +2312,13 @@ def make_video_thumbnail(video_path, thumb_path):
         r = subprocess.run(
             ["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5",
              "-i", str(video_path), "-frames:v", "1", tmp],
-            capture_output=True, timeout=90)
+            capture_output=True, timeout=90, creationflags=_NO_WINDOW)
         if r.returncode != 0 or not os.path.getsize(tmp):
             # clips shorter than the seek point: take the literal first frame
             r = subprocess.run(
                 ["ffmpeg", "-y", "-loglevel", "error",
                  "-i", str(video_path), "-frames:v", "1", tmp],
-                capture_output=True, timeout=60)
+                capture_output=True, timeout=60, creationflags=_NO_WINDOW)
         if r.returncode != 0 or not os.path.getsize(tmp):
             return False
         return make_thumbnail(Path(tmp), thumb_path)
@@ -2335,7 +2344,8 @@ def probe_has_audio(path, timeout=15):
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
              "stream=index", "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True, timeout=timeout)
+            capture_output=True, text=True, timeout=timeout,
+            creationflags=_NO_WINDOW)
         return bool(r.stdout.strip())
     except Exception:
         return False
@@ -2352,7 +2362,8 @@ def probe_duration(path, timeout=15):
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True, timeout=timeout)
+            capture_output=True, text=True, timeout=timeout,
+            creationflags=_NO_WINDOW)
         return float(r.stdout.strip())
     except (subprocess.SubprocessError, OSError, ValueError):
         return None
@@ -2617,7 +2628,8 @@ def _build_stamp():
         sha = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=str(Path(__file__).resolve().parent),
-            stderr=subprocess.DEVNULL, timeout=4).decode().strip()
+            stderr=subprocess.DEVNULL, timeout=4,
+            creationflags=_NO_WINDOW).decode().strip()
     except Exception:
         sha = ""
     return "v{}".format(ver) + (" · {}".format(sha) if sha else "")
@@ -2785,7 +2797,8 @@ def create_app(out_dir: Path):
         env = dict(os.environ, MOONGLADE_PROGRESS="1")
         proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1,
-                                encoding="utf-8", errors="replace", env=env)
+                                encoding="utf-8", errors="replace", env=env,
+                                creationflags=_NO_WINDOW)
         import uuid
         job_id = "panel-" + uuid.uuid4().hex[:12]
         with _panel_lock:
@@ -9604,7 +9617,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         tpat = _re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                    text=True, bufsize=1, encoding="utf-8", errors="replace")
+                                    text=True, bufsize=1, encoding="utf-8", errors="replace",
+                                    creationflags=_NO_WINDOW)
             with _export_lock:
                 _export_job["proc"] = proc
             for line in iter(proc.stderr.readline, ""):
