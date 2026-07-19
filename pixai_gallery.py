@@ -6364,7 +6364,7 @@ function savePrompt() {
     {% if bootstrap_mode %}
     <div class="setup-step" id="login-bootstrap">
       <b>First run:</b> there's no login account yet on this install. Create the
-      first account below -- from then on, sign in with it from any device.
+      first account below &mdash; from then on, sign in with it from any device.
       <form method="post" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="mode" value="create">
@@ -6379,12 +6379,12 @@ function savePrompt() {
     </div>
     {% elif no_accounts %}
     <div class="setup-step" id="login-no-accounts-remote">
-      <b>No account has been set up yet.</b> Ask whoever runs this server to sign
-      in from the machine itself first.
+      <b>No account has been set up yet.</b> Ask whoever runs this server to
+      create the first account from the server machine.
     </div>
     {% else %}
     <div class="setup-step">
-      <b>Sign in</b> to open this gallery from another device.
+      <b>Sign in</b> to open the Athenaeum.
       <form method="post" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <div class="setup-row login-fields">
@@ -6764,7 +6764,7 @@ function savePrompt() {
       </div>
     </form>
     <div id="add-user-status" style="margin-top:8px;"></div>
-    <div class="p-note">Every account here has equal access to this gallery (generate, browse, maintenance) -- there's no separate admin tier.</div>
+    <div class="p-note">Every account here has equal access to this gallery (generate, browse, maintenance) &mdash; there's no separate admin tier.</div>
   </div>
   </div>
 </div>
@@ -6825,7 +6825,7 @@ function removeUser(btn){
   // templated/interpolated JS argument -- see the comment in addUser() above.
   var row=btn.closest('.u-row');
   var username=row.getAttribute('data-username');
-  if(!confirm('Remove account "'+username+'"?\\n\\nThis cannot be undone.')) return;
+  if(!confirm('Remove account "'+username+'"?\\n\\nThey will be signed out on every device immediately.')) return;
   var st=el('add-user-status');
   fetch('/api/users/remove',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:username, csrf:CSRF})})
@@ -7199,7 +7199,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 error = ("Too many failed attempts from this address. "
                         "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
             elif not (live_csrf and secrets.compare_digest(submitted_csrf, live_csrf)):
-                error = "Your session expired -- please try again."
+                error = "Your session expired. Reload the page and try again."
             elif wants_create and not bootstrap_mode:
                 # Defense in depth: honor a create-account submission ONLY while
                 # bootstrap_mode is true for THIS request -- a remote requester
@@ -7233,10 +7233,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     username = (request.form.get("username") or "").strip()
                     password = request.form.get("password") or ""
                     confirm = request.form.get("confirm") or ""
+                    pw_problem = core.password_problem(password)
                     if not username:
                         error = "Username is required."
-                    elif len(password) < 4:
-                        error = "Password must be at least 4 characters."
+                    elif pw_problem:
+                        error = pw_problem
                     elif password != confirm:
                         error = "Passwords do not match."
                     else:
@@ -7421,17 +7422,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         /api/users/remove's last-account race, see that route's docstring)."""
         body = request.get_json(silent=True) or {}
         if not _check_panel_csrf(body):
-            return jsonify({"error": "Your session expired -- refresh the page and try again."}), 400
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import pixai_gallery_backup as core
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
         confirm = str(body.get("confirm") or "")
         if not username:
             return jsonify({"error": "Username is required."}), 400
-        if len(password) < 4:
-            return jsonify({"error": "Password must be at least 4 characters."}), 400
+        # Same core.password_problem() the /login bootstrap form and the
+        # --add-web-user CLI call -- one policy, three entry points, no drift.
+        pw_problem = core.password_problem(password)
+        if pw_problem:
+            return jsonify({"error": pw_problem}), 400
         if password != confirm:
             return jsonify({"error": "Passwords do not match."}), 400
-        import pixai_gallery_backup as core
         if not core.add_web_user_if_new(username, password):
             return jsonify({"error": "That username already exists."}), 400
         return jsonify({"ok": True, "username": username})
@@ -7456,7 +7460,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         AUTH_USERS empty, the exact self-lockout this guard exists to prevent."""
         body = request.get_json(silent=True) or {}
         if not _check_panel_csrf(body):
-            return jsonify({"error": "Your session expired -- refresh the page and try again."}), 400
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         username = str(body.get("username") or "").strip()
         import pixai_gallery_backup as core
         result = core.remove_web_user_guarded(username)
