@@ -14,7 +14,41 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Changed
+- **Web-login password policy raised from 4 to 8 characters, with a weak-password blocklist**
+  (2026-07-19, `pixai_gallery_backup.py`, `pixai_gallery.py`, `tests/`). The old rule advertised
+  a 4-character minimum on a LAN-reachable app in a public repo — owner's call: "everyone is
+  just gonna use 1111." New policy lives in one place, `core.password_problem()`, called by all
+  three paths that can create an account (the `/login` first-run form, the Panel's Users tab, and
+  the `--add-web-user` CLI recovery flag) — the previous rule was written out separately in two
+  of them, so tightening it in one would have silently left the other weak. Deliberately shaped
+  after NIST SP 800-63B: **length is the control, composition rules are not enforced** (forcing
+  a symbol measurably pushes people toward `P@ssw0rd1` rather than toward entropy). What is
+  rejected beyond length: one repeated character (`11111111`), a single ascending/descending run
+  (`12345678`, `abcdefgh`), and a small common-password list, all case-insensitive. The low-level
+  `add_or_update_web_user()` primitive is deliberately left unvalidated — policy belongs at the
+  three human entry points, not the storage helper. Existing accounts are unaffected (the rule
+  applies at creation, not at verification). 10 new tests, including the parametrized weak-password
+  matrix and a guard that the policy is genuinely shared rather than re-duplicated. Also fixed a
+  test that would have silently stopped testing what it claimed: the CLI mismatch test used a
+  password that now trips the policy check first, so it would still have passed — for the wrong
+  reason.
+
 ### Fixed
+- **Four user-facing copy defects on the auth surface, two of them factually wrong**
+  (2026-07-19, `pixai_gallery.py`). Found by a `/ux-copy` review pass. (1) `/login`'s sign-in
+  state said *"Sign in to open this gallery from another device"* — false since the localhost
+  bypass was removed, because the owner at the server keyboard now sees that exact line; now
+  *"Sign in to open the Athenaeum."* (2) The zero-accounts message shown to LAN devices said to
+  ask the owner to *"sign in from the machine itself"* — the wrong action, since there is no
+  account to sign into; the owner must **create** the first one. (3) The same condition produced
+  two different instructions — `/login` said *"session expired, please try again"* (advice that
+  cannot work; the user already did) while the Users endpoints said *"refresh the page"*; both
+  now say *"Your session expired. Reload the page and try again."* (4) The remove-account confirm
+  warned *"This cannot be undone"*, which is both untrue (re-add the account) and less useful
+  than the real consequence: it now says the person will be signed out on every device
+  immediately, which is what session-epoch revocation actually does. Also replaced the ASCII `--`
+  em-dash stand-ins with `&mdash;` in the two rendered strings that carried them.
 - **The entire Control Panel's JS silently failed to parse, breaking everything on the page at
   once: no skins in the Skins grid, and clicking the Users tab did nothing** (2026-07-19,
   `pixai_gallery.py`, `tests/test_js_syntax.py`). Owner report: "All the skins are gone from the

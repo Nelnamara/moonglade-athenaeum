@@ -69,9 +69,11 @@ def test_add_user_validates_password_length_and_confirm(tmp_path):
     csrf = _panel_csrf(html)
     r = cli.post("/api/users/add", json={
         "username": "short", "password": "ab", "confirm": "ab", "csrf": csrf})
-    assert "at least 4 characters" in r.get_json()["error"]
+    assert "at least 8 characters" in r.get_json()["error"]
+    # The mismatch case needs a password that CLEARS the policy, or it would trip
+    # the length check first and never reach the confirm comparison this asserts.
     r = cli.post("/api/users/add", json={
-        "username": "mismatch", "password": "abcdef", "confirm": "different",
+        "username": "mismatch", "password": "a-valid-password", "confirm": "different",
         "csrf": csrf})
     assert "do not match" in r.get_json()["error"]
     assert core.list_web_users() == [{"username": "tester"}]

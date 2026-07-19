@@ -96,18 +96,32 @@ def test_verify_web_user_checks_hash(tmp_path):
 
 def test_cli_add_web_user_prompts_hashes_and_persists(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
-    monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": "hunter2")
+    monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": "hunter2-valid-pw")
     monkeypatch.setattr(sys, "argv", ["pixai_gallery_backup.py", "--add-web-user"])
     core.main()
     users = core.list_web_users()
     assert users == [{"username": "alice"}]
-    assert core.verify_web_user("alice", "hunter2") is True
+    assert core.verify_web_user("alice", "hunter2-valid-pw") is True
 
 
 def test_cli_add_web_user_rejects_mismatched_confirmation(tmp_path, monkeypatch):
+    # Both entries must CLEAR the password policy, otherwise this exits on the
+    # policy check and silently stops testing the mismatch path it names.
     monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
-    passwords = iter(["hunter2", "totally-different"])
+    passwords = iter(["hunter2-valid-pw", "totally-different"])
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": next(passwords))
+    monkeypatch.setattr(sys, "argv", ["pixai_gallery_backup.py", "--add-web-user"])
+    import pytest
+    with pytest.raises(SystemExit):
+        core.main()
+    assert core.list_web_users() == []
+
+
+def test_cli_add_web_user_enforces_the_same_password_policy(tmp_path, monkeypatch):
+    """The CLI is the documented recovery path, not a back door around the rules
+    the web forms enforce -- a weak password must be refused here too."""
+    monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
+    monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": "1111")
     monkeypatch.setattr(sys, "argv", ["pixai_gallery_backup.py", "--add-web-user"])
     import pytest
     with pytest.raises(SystemExit):
@@ -177,7 +191,7 @@ def test_login_page_shows_safe_message_for_lan_request_when_no_accounts(tmp_path
     assert 'name="username"' not in html and 'name="password"' not in html
     assert "No account has been set up yet" in html
     normalized = " ".join(html.lower().split())
-    assert "sign in from the machine itself" in normalized
+    assert "create the first account from the server machine" in normalized
     # Once an account exists, a LAN request goes right back to the ordinary form.
     core.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
@@ -250,12 +264,52 @@ def test_bootstrap_form_validates_like_the_mock(tmp_path):
     html = cli.get("/login").get_data(as_text=True)
     r = cli.post("/login", data={"username": "alice", "password": "ab",
                                  "confirm": "ab", "mode": "create", "csrf": _csrf(html)})
-    assert "at least 4 characters" in r.get_data(as_text=True)
+    assert "at least 8 characters" in r.get_data(as_text=True)
     html = cli.get("/login").get_data(as_text=True)
     r = cli.post("/login", data={"username": "alice", "password": "hunter22",
                                  "confirm": "totally-different", "mode": "create",
                                  "csrf": _csrf(html)})
     assert "Passwords do not match" in r.get_data(as_text=True)
+    assert core.list_web_users() == []
+
+
+@pytest.mark.parametrize("password, expected", [
+    ("short1", "at least 8 characters"),          # under the length floor
+    ("11111111", "one character repeated"),       # the exact "everyone will use 1111" case
+    ("aaaaaaaaaa", "one character repeated"),
+    ("12345678", "too common"),                   # in the common list AND a run; common wins
+    ("abcdefgh", "sequential characters"),        # long enough, but a straight keyboard walk
+    ("87654321", "sequential characters"),        # descending counts too
+    ("password", "too common"),
+    ("PASSWORD", "too common"),                   # the common check is case-insensitive
+])
+def test_bootstrap_rejects_weak_passwords(tmp_path, password, expected):
+    """Length alone is not the policy: a password can clear 8 characters and still
+    be trivially guessable. Guards core.password_problem() through the real
+    bootstrap form, since that is the path a first-run owner actually uses."""
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    r = cli.post("/login", data={"username": "alice", "password": password,
+                                 "confirm": password, "mode": "create",
+                                 "csrf": _csrf(html)})
+    assert expected in r.get_data(as_text=True)
+    assert core.list_web_users() == []   # nothing was created
+
+
+def test_password_policy_is_shared_by_login_and_users_tab(tmp_path):
+    """Regression guard for the duplication that used to exist: the 4-character
+    rule was written out separately in login() and api_users_add(), so tightening
+    it in one place would silently leave the other weak. Both must now refuse the
+    same password via the same core.password_problem()."""
+    weak = "11111111"
+    assert core.password_problem(weak)                    # the shared helper refuses it
+    assert core.password_problem("a-valid-password") is None
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    r = cli.post("/login", data={"username": "alice", "password": weak,
+                                 "confirm": weak, "mode": "create",
+                                 "csrf": _csrf(html)})
+    assert "one character repeated" in r.get_data(as_text=True)
     assert core.list_web_users() == []
 
 

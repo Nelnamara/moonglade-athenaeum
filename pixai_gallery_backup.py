@@ -242,6 +242,57 @@ def list_web_users():
                 if isinstance(u, dict) and u.get("username")]
 
 
+# --- Web-login password policy -------------------------------------------
+# ONE source of truth, called by every path that can create an account: the
+# first-run bootstrap form on /login, the Control Panel's Users tab, and the
+# --add-web-user CLI recovery flag. It lives here, next to the account model,
+# rather than in the web layer specifically so those three can't drift apart --
+# the previous 4-character rule was duplicated across two call sites and would
+# have had to be corrected in both.
+#
+# Deliberately shaped after NIST SP 800-63B: LENGTH is the control that matters,
+# and composition rules ("must contain a symbol") are NOT enforced, because they
+# measurably push people toward predictable mutations like "P@ssw0rd1" instead
+# of toward real entropy. What we DO reject is the small set of passwords that
+# stay trivially guessable at any length: one repeated character, a straight run
+# off the keyboard, and the perennial favourites.
+MIN_WEB_PASSWORD_LEN = 8
+
+_COMMON_PASSWORDS = frozenset({
+    "password", "password1", "passw0rd", "12345678", "123456789", "1234567890",
+    "qwertyui", "qwerty123", "letmein1", "welcome1", "iloveyou", "admin123",
+    "administrator", "changeme", "trustno1", "sunshine", "princess", "football",
+    "baseball", "superman", "dragon123", "monkey123", "abc12345", "starwars",
+})
+
+
+def _is_single_run(s):
+    """True if `s` is one unbroken ascending or descending character run
+    ("12345678", "abcdefgh", "87654321") -- a keyboard-walk shape long enough to
+    sail past a length check while carrying almost no entropy."""
+    if len(s) < 3:
+        return False
+    deltas = {ord(b) - ord(a) for a, b in zip(s, s[1:])}
+    return deltas == {1} or deltas == {-1}
+
+
+def password_problem(password):
+    """Return a human-readable reason `password` is unacceptable for a web-login
+    account, or None if it passes. Every caller renders the returned string to
+    the user verbatim, so each one names what to do next, not just what's wrong."""
+    pw = password or ""
+    if len(pw) < MIN_WEB_PASSWORD_LEN:
+        return "Password must be at least {} characters.".format(MIN_WEB_PASSWORD_LEN)
+    if pw.lower() in _COMMON_PASSWORDS:
+        return "That password is too common to be safe. Pick something less guessable."
+    if len(set(pw)) == 1:
+        return "Password can't be one character repeated. Pick something less guessable."
+    if _is_single_run(pw.lower()):
+        return ("Password can't be a single run of sequential characters. "
+                "Pick something less guessable.")
+    return None
+
+
 def add_or_update_web_user(username, password):
     """Hash `password` (werkzeug, scrypt) and add/update `username` in config.json's
     AUTH_USERS. Only the hash ever touches disk -- the plaintext password passed in
@@ -6182,6 +6233,11 @@ def run_add_web_user(args):
     password = getpass.getpass("Password: ")
     if not password:
         sys.exit("Password must not be empty. Nothing was saved.")
+    problem = password_problem(password)
+    if problem:
+        # Same policy the web forms enforce -- this is the recovery path, not a
+        # back door around the rules the Users tab applies.
+        sys.exit("{} Nothing was saved.".format(problem))
     confirm = getpass.getpass("Confirm password: ")
     if password != confirm:
         sys.exit("Passwords did not match. Nothing was saved.")
