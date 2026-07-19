@@ -6389,7 +6389,13 @@ function savePrompt() {
   .login-wrap { min-height: 78vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
   .login-card { width: 100%; max-width: 380px; }
   .login-card .login-fields { flex-direction: column; align-items: stretch; }
-  .login-card .login-fields input { width: 100%; }
+  .login-card .login-fields input {
+    width: 100%; background: var(--mantle); border: 1px solid var(--surface1);
+    border-radius: 6px; color: var(--text); font: inherit; font-size: 14px;
+    padding: 10px 12px; box-sizing: border-box;
+  }
+  .login-card .login-fields input:focus { outline: none; border-color: var(--accent); }
+  .login-card .login-fields input::placeholder { color: var(--overlay0); }
   .login-card .login-fields button { width: 100%; justify-content: center; margin-top: 4px; }
 </style>
 """)
