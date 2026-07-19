@@ -586,7 +586,6 @@ ${"=".repeat(48)}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 `;
   var MODES = ["I2V", "R2V", "V2V", "FLF"];
-  var AUDIO_LANGUAGES = [["english", "EN"], ["japanese", "JA"], ["chinese", "ZH"], ["korean", "KO"], ["none", "SE only"]];
   var CAM_PALETTE = {
     "Shot size": ["EWS", "WS", "MLS", "MS", "MCU", "CU", "ECU", "OTS", "two-shot", "insert", "POV"],
     "Movement": [
@@ -829,7 +828,7 @@ ${"=".repeat(48)}
   transition:width .18s ease;overflow-x:hidden;}
 .lv-side.left{width:280px;border-right:1px solid var(--surface1);}
 .lv-side.left.wide{width:560px;}
-.lv-side.right{width:380px;border-left:1px solid var(--surface1);}
+.lv-side.right{width:560px;border-left:1px solid var(--surface1);}
 .lv-side.collapsed{width:52px;}
 .lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
 .lv-sidetabs{flex:1;min-width:0;margin-bottom:0;}
@@ -945,6 +944,10 @@ ${"=".repeat(48)}
 .lv-assetprev{width:38px;height:32px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);
   flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;overflow:hidden;}
 .lv-assetprev img{width:100%;height:100%;object-fit:cover;}
+.lv-pickico{width:38px;height:32px;flex:none;border-radius:6px;border:1px dashed var(--surface1);
+  background:transparent;color:var(--subtext);font-size:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;}
+.lv-pickico:hover{color:var(--accent);border-color:var(--accent);}
 .lv-tagin{width:76px;flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;
   color:var(--accent);font:11px/1.3 ui-monospace,monospace;padding:6px 7px;}
 .lv-tagin:focus{outline:0;border-color:var(--accent);}
@@ -1209,6 +1212,20 @@ ${"=".repeat(48)}
           if (!a) return;
           const vmode = e.detail.vmode;
           const apply = (c) => drawerModeFor(c.mode) === vmode ? c : setShotMode(c, cardModeForVmode(vmode));
+          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+        });
+        el.addEventListener("mg-duration-commit", (e) => {
+          const a = activeRef.current;
+          if (!a) return;
+          const d = e.detail.duration;
+          const apply = (c) => ({ ...c, duration: d });
+          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+        });
+        el.addEventListener("mg-audio-commit", (e) => {
+          const a = activeRef.current;
+          if (!a) return;
+          const { audioGen, audioLanguage } = e.detail;
+          const apply = (c) => ({ ...c, audioGen, audioLanguage });
           a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
         });
         el.addEventListener("mg-pick-request", (e) => {
@@ -1488,22 +1505,7 @@ ${"=".repeat(48)}
             setTimeout(() => setOverrideClearedFlash(false), 1600);
           }
           patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
-        } }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Duration"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, [5, 6, 10, 15].map((d) => /* @__PURE__ */ React.createElement("span", { key: d, className: "lv-chip " + (d === active.c.duration ? "on" : ""), onClick: () => patch((c) => ({ ...c, duration: d })) }, d, "s"))), /* @__PURE__ */ React.createElement("label", { className: "lv-check" }, /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            type: "checkbox",
-            checked: !!active.c.audioGen,
-            onChange: (ev) => patch((c) => ({ ...c, audioGen: ev.target.checked }))
-          }
-        ), " Generate audio"), active.c.audioGen && /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, AUDIO_LANGUAGES.map(([v, label]) => /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            key: v,
-            className: "lv-chip " + (v === (active.c.audioLanguage || "english") ? "on" : ""),
-            onClick: () => patch((c) => ({ ...c, audioLanguage: v }))
-          },
-          label
-        ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab; add extra image/video/audio refs directly below)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" } }, active.c.promptOverride ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-override-badge", title: "Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose." }, "\u270E override active \u2014 fields above not woven in") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2193 woven into the form below"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => {
+        } }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab; add extra image/video/audio refs directly below)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" } }, active.c.promptOverride ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-override-badge", title: "Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose." }, "\u270E override active \u2014 fields above not woven in") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2193 woven into the form below"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => {
           promptDirtyRef.current = false;
           const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project);
           active.c.id === "__draft__" ? setDraftCard(clearPromptOverride) : setCard(active.a.id, active.c.id, clearPromptOverride);
@@ -1608,7 +1610,15 @@ ${"=".repeat(48)}
       const inShot = sel && (sel.c.cast || []).includes(as.id);
       const toggleInShot = () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...c.cast || [], as.id] }));
       const src = frameSrc(as);
-      return /* @__PURE__ */ React.createElement("div", { key: as.id, className: "lv-assetrow" }, as.kind === "image" ? /* @__PURE__ */ React.createElement("label", { className: "lv-assetprev", title: "Attach image" }, src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : "\uFF0B", /* @__PURE__ */ React.createElement(
+      return /* @__PURE__ */ React.createElement("div", { key: as.id, className: "lv-assetrow" }, as.kind !== "audio" && /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          className: "lv-pickico",
+          title: "Pick from your gallery",
+          onClick: () => openPick((mid) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: "", source: "", mediaId: mid })), as.kind === "video" ? "video" : "image")
+        },
+        "\u{1F5BC}"
+      ), as.kind === "image" ? /* @__PURE__ */ React.createElement("label", { className: "lv-assetprev", title: "Attach image" }, src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : "\uFF0B", /* @__PURE__ */ React.createElement(
         "input",
         {
           type: "file",
