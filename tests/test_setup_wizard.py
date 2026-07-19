@@ -32,8 +32,9 @@ def _client(tmp_path, rows=()):
 
 
 def _authed_client(tmp_path, rows=()):
-    """Like _client(), but logged in for real -- for every test below EXCEPT
-    test_localhost_only (which deliberately stays anonymous to test the gate itself)."""
+    """Like _client(), but logged in for real. Used by EVERY test below, including
+    test_localhost_only -- an anonymous client cannot test a localhost gate, because the
+    front door refuses it first and the handler never runs. See that test's docstring."""
     if rows:
         save_catalog(tmp_path / "catalog.db", list(rows))
     return login_client(tmp_path)
@@ -54,11 +55,24 @@ class TestSaveKeyEndpoint:
         assert r.status_code == 400
 
     def test_localhost_only(self, tmp_path):
-        cli = _client(tmp_path)
+        """AUTHENTICATED but non-local. The front door admits this request (the login is
+        genuinely valid), so a 403 here can ONLY come from the handler's own
+        _is_local_request() check -- which is the thing this test claims to cover.
+
+        It previously drove an ANONYMOUS client and asserted 401. That 401 is answered by
+        _enforce_front_door() before the handler body ever runs, so the test passed
+        identically whether or not the localhost check existed. It did not exist: a
+        route-gating audit on 2026-07-19 found this route had never had one, while this
+        very docstring's route claimed 'Localhost-only', and reproduced a LAN session
+        overwriting PIXAI_API_KEY in the same config.json that holds AUTH_SECRET_KEY and
+        AUTH_USERS. Anonymous refusal is still covered, by the front-door suite in
+        tests/test_web_auth.py -- it does not need to be re-asserted here."""
+        cli = _authed_client(tmp_path)
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "sk-real"}),
                      content_type="application/json",
                      environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-        assert r.status_code == 401
+        assert r.status_code == 403
+        assert "localhost" in r.get_json()["error"]
 
     def test_writes_config_only_after_successful_validation(self, tmp_path, monkeypatch):
         _redirect_config_to(monkeypatch, tmp_path)
