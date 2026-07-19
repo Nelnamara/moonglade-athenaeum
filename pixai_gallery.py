@@ -7265,15 +7265,22 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # THE front door: DEFAULT-DENY for every request, enforced in one place.
     # ------------------------------------------------------------------
     # Allowlist is intentionally tiny -- /login (GET, to render the form; POST,
-    # to submit it) and /logout. Nothing else. LOGIN_HTML is BASE_HTML with
-    # fully inline CSS (__DESIGN_TOKENS__ is a Python string substituted at
-    # import time via .replace(), never a fetched stylesheet) and no
-    # <link>/<script src> to a /static/ file is load-bearing for it to render
-    # or submit -- the one <img> it has (the brand mark) already carries
-    # onerror="this.remove()", so blocking it just drops a logo, never breaks
-    # the form. That means no static-asset entry needs to sit in this allowlist
-    # alongside the two routes above.
+    # to submit it) and /logout. LOGIN_HTML is BASE_HTML with fully inline CSS
+    # (__DESIGN_TOKENS__ is a Python string substituted at import time via
+    # .replace(), never a fetched stylesheet) and no <link>/<script src> to a
+    # /static/ file is load-bearing for it to render or submit -- the mark
+    # <img> already carries onerror="this.remove()" as a safety net either way.
+    # /branding/ IS additionally public (see _PUBLIC_PREFIXES below): it was
+    # briefly left gated on the theory that a missing logo is a harmless
+    # degrade, but the actual effect was the real chosen mark/banner/favicon
+    # never rendering on the one page every visitor -- including a
+    # not-yet-authenticated LAN device -- is guaranteed to see. That route
+    # only serves static drop-in art (banner/logo/marks/mascots) with path
+    # traversal already rejected (see branding()); there's no user data,
+    # credential, or spend behind it, so it carries the same public trust
+    # tier as /login itself, not a re-opened security gap.
     _PUBLIC_PATHS = frozenset({"/login", "/logout"})
+    _PUBLIC_PREFIXES = ("/branding/",)
     # Routes whose EXISTING contract (long before this hook existed) was JSON,
     # not an HTML page -- these get a JSON 401 instead of a login redirect, so a
     # fetch(...).then(r => r.json()) caller still gets parseable JSON instead
@@ -7294,12 +7301,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         `/delete/<id>`, `/delete-bulk`, `/rate/<id>`, `/edit-prompt/<id>`,
         `/collection-add`, `/collection-remove`, `/bulk-replace-prompt`,
         `/panel`, `/duplicates`, `/health`, the raw asset routes (`/thumbs/`,
-        `/img/`, `/video-file/`, `/full/`, `/branding/`, `/badge-thumb/`,
+        `/img/`, `/video-file/`, `/full/`, `/badge-thumb/`,
         `/contact-sheet`), `/export-zip`, `/manifest.webmanifest`, `/sw.js`, and
         `/api/gallery-images`, `/api/similar`, `/api/collections`,
         `/api/contests`, `/api/achievements`, `/api/skin`, `/api/ach-event`,
         `/api/your-art`, `/api/loom/export-status`, `/api/loom/export-file`,
         `/api/ping` had NO auth check of any kind before this hook existed.
+        `/branding/` is in that same "previously wide open" list, and
+        deliberately went back to public (see `_PUBLIC_PREFIXES`) rather than
+        joining the rest: it's static cosmetic art (logo/marks/mascots), not
+        gallery content, and the login page itself needs to render it for a
+        visitor who by definition isn't authenticated yet.
 
         `/api/branding/shortcut` is deliberately NOT loosened by this hook
         passing a logged-in remote session through as "authorized": its own
@@ -7308,7 +7320,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         SERVER process runs on -- a categorically different trust tier than
         "browse the library" or "spend the owner's credits". See that route's
         docstring."""
-        if request.path in _PUBLIC_PATHS:
+        if request.path in _PUBLIC_PATHS or request.path.startswith(_PUBLIC_PREFIXES):
             return None
         if _is_authorized_request():
             return None
