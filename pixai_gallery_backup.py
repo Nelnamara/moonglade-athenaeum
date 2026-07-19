@@ -48,6 +48,7 @@ import os
 import re
 import secrets
 import sys
+import threading
 import time
 from collections import defaultdict, Counter
 from pathlib import Path
@@ -180,12 +181,29 @@ def _save_config(cfg):
 # PIXAI_API_KEY): AUTH_SECRET_KEY signs the Flask session cookie, AUTH_USERS is a
 # list of {"username", "password_hash"} (werkzeug.security -- scrypt as of modern
 # werkzeug, timing-safe compare built in; no new pip install, werkzeug already
-# ships with Flask). Account lifecycle is CLI-only (--add-web-user /
-# --remove-web-user / --list-web-users below) BY DESIGN: there is no "create
-# account" form reachable over the network, so there's no unauthenticated path to
-# minting a login. If AUTH_USERS is empty, logging in from the LAN is simply
-# impossible -- there is no default/backdoor account, ever.
+# ships with Flask). Account lifecycle used to be CLI-only; as of the web-based
+# bootstrap + Panel Users tab (2026-07-19) it's also reachable from the browser
+# (see pixai_gallery.py's /login bootstrap POST and /api/users/add|remove) --
+# --add-web-user / --remove-web-user / --list-web-users remain a valid recovery
+# path. If AUTH_USERS is empty, logging in from the LAN is simply impossible --
+# there is no default/backdoor account, ever.
+#
+# _accounts_lock serializes every read-modify-write of AUTH_USERS (and the
+# atomic check-and-mutate helpers below) against every OTHER thread doing the
+# same, within this one process. pixai_gallery.py runs `app.run(...,
+# threaded=True)`, so two browser tabs/devices hitting /login's bootstrap POST
+# (or the Panel's Add/Remove-user endpoints) concurrently used to run
+# add_or_update_web_user()/remove_web_user()'s _load_config -> mutate ->
+# _save_config sequence unlocked and interleaved -- a real, reproduced lost-
+# update: two concurrent bootstrap creates for DIFFERENT usernames could both
+# return a 302 "success" to their own browser while only the second write
+# actually landed on disk, silently discarding the first account (adversarial
+# review, 2026-07-19). Does NOT protect against a separate CLI invocation
+# editing config.json while the server is also running -- that's a distinct,
+# pre-existing, cross-PROCESS assumption (_save_config's docstring), not what
+# this lock is for.
 # ---------------------------------------------------------------------------
+_accounts_lock = threading.Lock()
 
 def get_or_create_secret_key():
     """Return config.json's AUTH_SECRET_KEY, generating + persisting a fresh
@@ -217,9 +235,10 @@ def _find_web_user(cfg, username):
 def list_web_users():
     """Return [{"username": ...}, ...] from config.json's AUTH_USERS -- USERNAMES
     ONLY, never password hashes. Used by --list-web-users."""
-    cfg = _load_config()
-    return [{"username": u["username"]} for u in (cfg.get("AUTH_USERS") or [])
-            if isinstance(u, dict) and u.get("username")]
+    with _accounts_lock:
+        cfg = _load_config()
+        return [{"username": u["username"]} for u in (cfg.get("AUTH_USERS") or [])
+                if isinstance(u, dict) and u.get("username")]
 
 
 def add_or_update_web_user(username, password):
@@ -230,38 +249,101 @@ def add_or_update_web_user(username, password):
 
     Also stamps/bumps `sess_epoch` -- see get_web_user_session_epoch()'s docstring
     for why: a password change must invalidate any session cookie issued under the
-    old password immediately, not just future ones."""
+    old password immediately, not just future ones.
+
+    The whole read-modify-write runs under `_accounts_lock` -- see that lock's
+    docstring for the concurrent-bootstrap lost-update it closes."""
     from werkzeug.security import generate_password_hash
     username = (username or "").strip()
     if not username:
         raise ValueError("username must not be empty")
     if not password:
         raise ValueError("password must not be empty")
-    cfg = _load_config()
-    users = cfg.get("AUTH_USERS") or []
-    existing = _find_web_user(cfg, username)
-    replaced = existing is not None
-    next_epoch = int(existing.get("sess_epoch", 0)) + 1 if replaced else 0
-    new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
-    new_users.append({"username": username, "password_hash": generate_password_hash(password),
-                       "sess_epoch": next_epoch})
-    cfg["AUTH_USERS"] = new_users
-    _save_config(cfg)
-    return replaced
+    with _accounts_lock:
+        cfg = _load_config()
+        users = cfg.get("AUTH_USERS") or []
+        existing = _find_web_user(cfg, username)
+        replaced = existing is not None
+        next_epoch = int(existing.get("sess_epoch", 0)) + 1 if replaced else 0
+        new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
+        new_users.append({"username": username, "password_hash": generate_password_hash(password),
+                           "sess_epoch": next_epoch})
+        cfg["AUTH_USERS"] = new_users
+        _save_config(cfg)
+        return replaced
+
+
+def add_web_user_if_new(username, password):
+    """Atomic check-and-add: like add_or_update_web_user(), but refuses outright
+    (returns False, writes nothing) if `username` already exists, instead of
+    resetting a stranger's password -- the whole "does it exist" check and the
+    write happen under ONE `_accounts_lock` acquisition, so two concurrent
+    requests trying to claim the same brand-new username can never both
+    succeed. Used by the Panel's /api/users/add (pixai_gallery.py); the plain
+    add_or_update_web_user()'s update-or-add semantics stay reserved for the
+    CLI's --add-web-user recovery case. Returns True if added, False if the
+    username was already taken (nothing written)."""
+    from werkzeug.security import generate_password_hash
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("username must not be empty")
+    if not password:
+        raise ValueError("password must not be empty")
+    with _accounts_lock:
+        cfg = _load_config()
+        if _find_web_user(cfg, username) is not None:
+            return False
+        users = cfg.get("AUTH_USERS") or []
+        users.append({"username": username, "password_hash": generate_password_hash(password),
+                       "sess_epoch": 0})
+        cfg["AUTH_USERS"] = users
+        _save_config(cfg)
+        return True
 
 
 def remove_web_user(username):
     """Remove `username` from config.json's AUTH_USERS. Returns True if an account
-    was actually removed, False if no such username existed."""
+    was actually removed, False if no such username existed. Runs under
+    `_accounts_lock` -- see that lock's docstring."""
     username = (username or "").strip()
-    cfg = _load_config()
-    users = cfg.get("AUTH_USERS") or []
-    new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
-    removed = len(new_users) != len(users)
-    if removed:
-        cfg["AUTH_USERS"] = new_users
+    with _accounts_lock:
+        cfg = _load_config()
+        users = cfg.get("AUTH_USERS") or []
+        new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
+        removed = len(new_users) != len(users)
+        if removed:
+            cfg["AUTH_USERS"] = new_users
+            _save_config(cfg)
+        return removed
+
+
+def remove_web_user_guarded(username, min_remaining=1):
+    """Atomic check-and-remove: refuses to remove `username` if doing so would
+    leave fewer than `min_remaining` accounts, checked under the SAME
+    `_accounts_lock` acquisition as the mutation itself -- closes a TOCTOU race
+    where the Panel's /api/users/remove used to read list_web_users() (a
+    "how many accounts are there" snapshot), THEN separately call
+    remove_web_user() to mutate, with nothing stopping two concurrent removals
+    of two DIFFERENT accounts from each observing "more than one left" via
+    their own stale snapshot before either write landed, and both proceeding --
+    reproduced live against the real Flask route (adversarial review,
+    2026-07-19): exactly 2 accounts, two concurrent removes of two different
+    usernames, both return 200 {"ok": true}, AUTH_USERS ends up empty --
+    the self-lockout this guard exists to prevent, achieved anyway.
+
+    Returns one of "removed", "not_found", "last_account"."""
+    username = (username or "").strip()
+    with _accounts_lock:
+        cfg = _load_config()
+        users = cfg.get("AUTH_USERS") or []
+        if _find_web_user(cfg, username) is None:
+            return "not_found"
+        if len(users) <= min_remaining:
+            return "last_account"
+        cfg["AUTH_USERS"] = [u for u in users
+                              if not (isinstance(u, dict) and u.get("username") == username)]
         _save_config(cfg)
-    return removed
+        return "removed"
 
 
 def get_web_user_session_epoch(username):

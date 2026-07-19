@@ -15,6 +15,60 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Web-based first-account bootstrap + a Users tab on the Panel: no more CLI-only account
+  creation** (2026-07-19, `pixai_gallery.py`, `tests/test_web_auth.py`,
+  `tests/test_panel_users.py`). Owner directive, in reaction to the localhost-bypass removal
+  just below making `--add-web-user` briefly the ONLY way into a fresh clone: "NO CLI first
+  login bullshit... its why I built a fucking login screen in figma." Design source:
+  `static/_mockup_login_panel.html` (also published as a Claude Artifact) -- its
+  FieldSet/SubmitButton/ErrorLine components and two login states (normal / first-run) are now
+  server-rendered in `LOGIN_HTML` instead of being a client-side mock, using this app's existing
+  `.setup-step`/`.setup-row`/`.btn`/`.btn-primary` classes rather than a second style system.
+  `/login`'s old CLI-pointing banner is gone entirely, replaced by three real states: (1) accounts
+  exist -> the ordinary two-field sign-in form, unchanged; (2) zero accounts AND the request is
+  from the machine the server itself runs on (`_is_local_request()`) -> the SAME form doubles as
+  an account-creation form (username/password/confirm, a hidden `mode=create` field) that
+  validates like the mock (non-empty username, password >= 4 chars, confirm match), creates the
+  account via the existing `add_or_update_web_user()`, and signs the new owner in immediately via
+  a new shared `_establish_session()` helper (factored out of the normal-login success path so
+  both routes set up a session identically); (3) zero accounts AND the request is from a LAN
+  address -> a plain "No account has been set up yet. Ask whoever runs this server to sign in
+  from the machine itself first." message, no form, no CLI mention. `bootstrap_mode` (`no_accounts
+  and is_local`, recomputed fresh every request) is the REAL race-condition guard, not just the
+  template branch that hides the form: a hand-crafted `mode=create` POST from a LAN address is
+  refused server-side even though it can carry a technically-valid CSRF token for its own session
+  (a LAN device can legitimately GET `/login` and receive one) -- confirmed by a regression test
+  that does exactly that. Same CSRF-token + per-IP rate-limiter infrastructure `/login` already
+  had is reused as-is for the bootstrap path, not reimplemented.
+
+  The Control Panel (`/panel`) gained a **Users tab** alongside the existing Maintenance content
+  (now wrapped, unchanged, in its own tab pane) via a `.htab`/`.hall-tabs` tab bar matching the
+  Trophy Hall's Summary/All/Statistics tabs (copied as plain CSS rather than loading
+  `static/mg-notify.js` on this page, which would also drag in the Jobs tray/Achievement modals
+  this page doesn't use). Lists accounts (`list_web_users()`, usernames only); an Add User form
+  (mirroring the mock's validation, plus a "that username already exists" check so it can never
+  silently overwrite a stranger's password -- `add_or_update_web_user()`'s update-or-add semantics
+  stay reserved for the CLI recovery case) posts to new `/api/users/add`; each row's Remove button
+  posts to new `/api/users/remove`, confirmed via the same native `confirm()` dialog the Panel's
+  own Run-job/Stop-job buttons already use (not a new inline-confirm UI). Both endpoints require
+  nothing beyond the existing front-door login (every account has equal trust in this app's model
+  -- no admin tier was invented) and check the same session-based CSRF token pattern via a new
+  `_check_panel_csrf()` helper. `/api/users/remove` refuses to remove the last remaining account
+  (a real self-lockout risk -- zero accounts re-triggers the local-only bootstrap state and locks
+  out every remote device until someone bootstraps a new one from the server machine). Usernames
+  are rendered via `data-username` attributes and read back client-side with
+  `element.closest('.u-row')` rather than being templated into inline `onclick="fn('...')"`
+  strings -- an early draft did the latter and, despite HTML-escaping, was a JS-string-breakout/
+  stored-injection risk for any username containing a quote or backslash; fixed before it shipped.
+  The pre-existing `--add-web-user`/`--remove-web-user`/`--list-web-users` CLI flags are
+  untouched and remain a valid recovery path (e.g. resetting access if the web form is somehow
+  unreachable) -- just no longer the only path, and no longer advertised as the primary one.
+  `tests/test_web_auth.py`'s old CLI-banner assertions were rewritten for the new bootstrap
+  states; new tests cover the local-vs-LAN split, the direct-POST race guard, end-to-end bootstrap
+  login, mock-parity validation, and a missing-field POST that must not crash. New
+  `tests/test_panel_users.py` covers the Users tab end-to-end (list, add, duplicate-name refusal,
+  CSRF enforcement on both endpoints, last-account refusal, 404 on an unknown username, front-door
+  gating). Full suite green (669 tests).
 - **Universal login required: the localhost bypass is gone** (2026-07-19, `pixai_gallery.py`).
   Owner directive: "I would expect to require login via any path with this new setup whether
   localhost hostname or IP." `_is_authorized_request()` -- the canonical gate the front-door hook
@@ -911,6 +965,65 @@ git tags. Full prose notes for tagged versions live on
   `node --test` (66/66); full Python suite green (509 passing). **Both items the owner promoted
   to retirement-blockers on 2026-07-17 are now landed — V2 has full feature parity with classic
   Loom. Retiring classic Loom itself is a separate step, open for the owner to call.**
+
+### Fixed
+- **Two concurrency bugs in the new web-based account bootstrap + Users tab, found by two
+  independent adversarial reviews** (2026-07-19, `pixai_gallery_backup.py`, `pixai_gallery.py`,
+  `tests/test_web_auth.py`, `tests/test_panel_users.py`). Both reviews were verified against the
+  current code before anything was changed; three of their five combined confirmed-real findings
+  needed a fix, two were confirmed clean (no change).
+  - **Lost-update race in account create/remove** (both reviews, same root cause): `_load_config()`
+    → mutate → `_save_config()` in `add_or_update_web_user()`/`remove_web_user()` was unlocked, so
+    two threads (`app.run(..., threaded=True)`) could each read the pre-write state and the later
+    write would silently clobber the earlier one — reproduced live as two concurrent local
+    bootstrap POSTs for *different* usernames that both returned a 302 "success" redirect while
+    only one username actually landed in `AUTH_USERS`. Fixed with a new module-level
+    `_accounts_lock` (`pixai_gallery_backup.py`) serializing every read-modify-write of
+    `AUTH_USERS`. New regression test
+    `test_web_auth.py::test_concurrent_add_or_update_web_user_does_not_lose_either_account` forces
+    the interleaving with a real delay + real threads (not just sequential calls) and confirms
+    both accounts now survive.
+  - **TOCTOU on "can't remove the last account"** (Users-tab review, Finding 2): `/api/users/remove`
+    read `list_web_users()` as a snapshot, then separately called `remove_web_user()` to mutate —
+    with exactly 2 accounts, two concurrent removes of two *different* usernames could each pass
+    the "more than one left" check off their own stale snapshot and both proceed, leaving
+    `AUTH_USERS` **empty** (reproduced live against the real Flask route). Fixed with new atomic
+    helpers that do the check-and-mutate under one `_accounts_lock` acquisition:
+    `remove_web_user_guarded()` (returns `"removed"`/`"not_found"`/`"last_account"`, replacing
+    `/api/users/remove`'s separate read+write) and `add_web_user_if_new()` (closes the same class
+    of race for `/api/users/add`'s duplicate-username check, hardening it proactively — not itself
+    a reviewer-confirmed finding). New regression test
+    `test_panel_users.py::test_concurrent_remove_of_two_different_accounts_cannot_empty_the_list`
+    confirms at least one account always survives and exactly one of the two concurrent removes is
+    turned away.
+  - **`/login`'s `mode=create` bypassed the IP lockout and CSRF checks** (Bootstrap-race review,
+    Finding 2): the `wants_create and not bootstrap_mode` guard used to run *ahead of* both
+    `_login_seconds_locked()` and the CSRF compare, so a hand-crafted `mode=create` POST from an
+    already-locked-out address (or with a forged CSRF token) sailed through with neither check
+    applied — reproduced live. Reordered so the lockout check and the CSRF check run first,
+    identically to an ordinary credential POST; the create/bootstrap-mode gate still runs before
+    any account is ever created, just after those two, not before them. New regression tests
+    `test_lockout_applies_uniformly_to_mode_create_requests` and
+    `test_csrf_applies_uniformly_to_mode_create_requests`.
+  - **`_is_local_request()` fail-open on missing/empty `remote_addr`** (Bootstrap-race review,
+    Finding 3; pre-existing, not introduced by the bootstrap diff, but now backs the bootstrap
+    gate too): `ra in ("127.0.0.1", "::1", "localhost", "")` treated an empty/`None` remote address
+    as local. Safe under this app's actual deployment (Werkzeug's dev server always populates a
+    real TCP peer address), but a fail-open default in a function multiple security boundaries now
+    depend on — changed to fail closed (dropped the trailing `""`). New regression test
+    `test_bootstrap_treats_empty_or_missing_remote_addr_as_not_local`.
+  - **Confirmed NOT bugs (no change made)**: the Users-tab review's CSRF-bypass question (clean —
+    `_check_panel_csrf()` is independent of auth and a cross-site form can't send the required
+    `application/json` body at all); its self-removal-mid-session question (clean —
+    `_is_authorized_request()` re-validates against `config.json` every request, so a graceful
+    401/redirect follows, never a crash); its password-hash-leak question (clean —
+    `list_web_users()` never even reads `password_hash` off the config dicts); and its
+    Maintenance-tab-content question (clean — confirmed via `git diff` that the tab-bar refactor
+    added only two wrapper `<div>`s around the untouched section). The Bootstrap-race review's
+    "critical property" verdict (a LAN device cannot create the first account, via the form or a
+    direct POST) was independently re-verified against the current code and stands confirmed.
+  Full suite green: **674 passed** (`python -m pytest -q`; the 5 new regression tests above, on top
+  of the reviews' reported 669).
 
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 

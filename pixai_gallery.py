@@ -6348,17 +6348,28 @@ function savePrompt() {
         <span class="tagline">a library against the Void</span>
       </div>
     </div>
-    {% if no_accounts %}
-    <div class="setup-step" id="login-no-accounts" style="margin-bottom:14px;">
-      <b>First run:</b> there's no login account yet, so this form can't succeed --
-      account creation is deliberately CLI-only (kept off the web surface for security).
-      On the server machine, open a terminal in this folder and run:
-      <div class="setup-row">
-        <code>python pixai_gallery_backup.py --add-web-user</code>
-      </div>
-      Follow the prompts to set a username and password, then sign in below.
+    {% if bootstrap_mode %}
+    <div class="setup-step" id="login-bootstrap">
+      <b>First run:</b> there's no login account yet on this install. Create the
+      first account below -- from then on, sign in with it from any device.
+      <form method="post" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="mode" value="create">
+        <div class="setup-row login-fields">
+          <input type="text" name="username" placeholder="Username" autocomplete="username" autofocus required>
+          <input type="password" name="password" placeholder="Password" autocomplete="new-password" required>
+          <input type="password" name="confirm" placeholder="Confirm password" autocomplete="new-password" required>
+          <button type="submit" class="btn btn-primary">Create account</button>
+        </div>
+      </form>
+      {% if error %}<div class="setup-msg err">{{ error }}</div>{% endif %}
     </div>
-    {% endif %}
+    {% elif no_accounts %}
+    <div class="setup-step" id="login-no-accounts-remote">
+      <b>No account has been set up yet.</b> Ask whoever runs this server to sign
+      in from the machine itself first.
+    </div>
+    {% else %}
     <div class="setup-step">
       <b>Sign in</b> to open this gallery from another device.
       <form method="post" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
@@ -6371,6 +6382,7 @@ function savePrompt() {
       </form>
       {% if error %}<div class="setup-msg err">{{ error }}</div>{% endif %}
     </div>
+    {% endif %}
   </div>
 </div>
 <style>
@@ -6554,6 +6566,20 @@ function savePrompt() {
   .jp-bar{height:10px;border-radius:6px;background:var(--surface1);overflow:hidden;}
   .jp-bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-soft));transition:width .4s ease;}
   .jp-txt{font-size:11.5px;color:var(--subtext);margin-top:5px;font-variant-numeric:tabular-nums;}
+  /* Panel tab bar -- same .htab/.htab.on visual language as the Trophy Hall's
+     Summary/All/Statistics tabs (static/mg-notify.js's injected styles), copied
+     rather than shared via a <script src> because mg-notify.js also wires up the
+     Jobs tray/Achievement modals that this page doesn't otherwise use; see
+     panel()'s docstring. Do not restyle these independently of that source. */
+  .p-tabs{display:flex;gap:4px;padding:0 0 10px;border-bottom:1px solid var(--surface0);margin-bottom:16px;}
+  .htab{background:none;border:none;color:var(--subtext);font-size:13px;font-weight:600;cursor:pointer;padding:8px 14px;border-radius:8px 8px 0 0;border-bottom:2px solid transparent;}
+  .htab:hover{color:var(--text);}
+  .htab.on{color:var(--lavender);border-bottom-color:var(--lavender);background:rgba(182,146,230,.06);}
+  .ptab-view{display:none;}
+  .ptab-view.on{display:block;}
+  .u-row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--surface0);border-radius:8px;border:1px solid var(--surface1);}
+  .u-row + .u-row{margin-top:6px;}
+  .u-you{font-size:11px;color:var(--accent);margin-left:8px;}
 </style>
 <header>
   <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
@@ -6561,6 +6587,11 @@ function savePrompt() {
   <a class="btn" href="{{ url_for('index') }}">↑ Back to gallery</a>
 </header>
 <div class="panel">
+  <div class="p-tabs" id="panel-tabs">
+    <button type="button" class="htab on" data-tab="maintenance" onclick="setPanelTab('maintenance')">Maintenance</button>
+    <button type="button" class="htab" data-tab="users" onclick="setPanelTab('users')">Users</button>
+  </div>
+  <div id="ptab-maintenance" class="ptab-view on">
   <div class="p-sec">
     <h2>Library at a glance</h2>
     <div class="p-grid">
@@ -6671,6 +6702,35 @@ function savePrompt() {
     <div style="font-size:13px;color:var(--subtext);">Running <b style="color:var(--text);">{{ build_stamp }}</b> &middot; library at <code>{{ out_dir }}</code></div>
     <div class="p-note">More settings (default workers, page size, verbose) land here next. Deleting from your PixAI account stays CLI-only, behind its typed confirm &mdash; on purpose.</div>
   </div>
+  </div>
+  <div id="ptab-users" class="ptab-view">
+  <div class="p-sec">
+    <h2>Accounts</h2>
+    <div id="users-list">
+      {% for u in web_users %}
+      <div class="u-row" data-username="{{ u.username }}">
+        <span style="font-size:13.5px;color:var(--text);">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
+        <button type="button" class="btn btn-danger" onclick="removeUser(this)">Remove</button>
+      </div>
+      {% else %}
+      <div class="p-note" id="users-empty">No accounts.</div>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="p-sec">
+    <h2>Add user</h2>
+    <form id="add-user-form" onsubmit="return addUser(event)">
+      <div class="setup-row login-fields" style="max-width:380px;">
+        <input type="text" id="new-username" placeholder="Username" autocomplete="off" required>
+        <input type="password" id="new-password" placeholder="Password" autocomplete="new-password" required>
+        <input type="password" id="new-confirm" placeholder="Confirm password" autocomplete="new-password" required>
+        <button type="submit" class="btn btn-primary">Add user</button>
+      </div>
+    </form>
+    <div id="add-user-status" style="margin-top:8px;"></div>
+    <div class="p-note">Every account here has equal access to this gallery (generate, browse, maintenance) -- there's no separate admin tier.</div>
+  </div>
+  </div>
 </div>
 <div id="srv-overlay">
   <div class="srv-box"><div class="srv-spin" id="srv-spin"></div>
@@ -6689,7 +6749,59 @@ function savePrompt() {
 <script>
 var ACTIONS = {{ actions_json|safe }};       // Maintenance buttons -- panel_visible only
 var ALL_ACTIONS = {{ all_actions_json|safe }};  // scheduler dropdown -- includes background-only jobs
+var CSRF = "{{ csrf }}";   // same session-based token every other mutating form in this app uses
 function el(i){return document.getElementById(i);}
+// --- Panel tab bar (Maintenance / Users) -----------------------------------
+function setPanelTab(tab){
+  document.querySelectorAll('#panel-tabs .htab').forEach(function(b){
+    b.classList.toggle('on', b.getAttribute('data-tab') === tab); });
+  el('ptab-maintenance').classList.toggle('on', tab === 'maintenance');
+  el('ptab-users').classList.toggle('on', tab === 'users');
+}
+// --- Users tab: add / remove gallery web-login accounts --------------------
+function escH2(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function addUser(evt){
+  evt.preventDefault();
+  var u=el('new-username').value.trim(), p=el('new-password').value, c=el('new-confirm').value;
+  var st=el('add-user-status');
+  fetch('/api/users/add',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:u, password:p, confirm:c, csrf:CSRF})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ st.innerHTML='<span class="st-failed">⚠ '+escH2(d.error)+'</span>'; return; }
+      var empty=el('users-empty'); if(empty) empty.remove();
+      // Built via DOM APIs (not innerHTML string concatenation) so an arbitrary
+      // username can never be interpreted as HTML or JS -- the same reason the
+      // server-rendered row below passes `this` to removeUser() instead of
+      // templating the username into an inline onclick string.
+      var row=document.createElement('div'); row.className='u-row'; row.setAttribute('data-username', d.username);
+      var span=document.createElement('span'); span.style.cssText='font-size:13.5px;color:var(--text);'; span.textContent=d.username;
+      var btn=document.createElement('button'); btn.type='button'; btn.className='btn btn-danger'; btn.textContent='Remove';
+      btn.onclick=function(){ removeUser(btn); };
+      row.appendChild(span); row.appendChild(btn);
+      el('users-list').appendChild(row);
+      el('new-username').value=''; el('new-password').value=''; el('new-confirm').value='';
+      st.innerHTML='<span class="st-done">✓ Account "'+escH2(d.username)+'" created.</span>';
+    }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
+  return false;
+}
+function removeUser(btn){
+  // Read the username back off the row's data attribute rather than a
+  // templated/interpolated JS argument -- see the comment in addUser() above.
+  var row=btn.closest('.u-row');
+  var username=row.getAttribute('data-username');
+  if(!confirm('Remove account "'+username+'"?\n\nThis cannot be undone.')) return;
+  var st=el('add-user-status');
+  fetch('/api/users/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:username, csrf:CSRF})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ st.innerHTML='<span class="st-failed">⚠ '+escH2(d.error)+'</span>'; return; }
+      row.remove();
+      if(!el('users-list').querySelector('.u-row')){
+        var e=document.createElement('div'); e.className='p-note'; e.id='users-empty'; e.textContent='No accounts.';
+        el('users-list').appendChild(e);
+      }
+    }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
+}
 function renderJobs(){
   var safe=el('jobs-safe'), danger=el('jobs-danger');
   ACTIONS.forEach(function(a){
@@ -6986,6 +7098,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return url
         return None
 
+    def _establish_session(username):
+        """Populate a freshly-authenticated session for `username` -- the ONE place
+        that decides what "you are now logged in" means, shared by BOTH a normal
+        /login credential POST and the local-only first-account bootstrap POST
+        below (factored out per owner directive 2026-07-19's web-based bootstrap
+        flow, so the two paths can never drift apart on what a session looks
+        like)."""
+        import pixai_gallery_backup as core
+        session.clear()
+        session["user"] = username
+        session["sess_epoch"] = core.get_web_user_session_epoch(username)
+        session["csrf"] = secrets.token_hex(16)
+        session.permanent = True
+
     @app.route("/login", methods=["GET", "POST"])
     def login():
         """Session-based login gate for every non-localhost request (see
@@ -6993,20 +7119,61 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         CSRF token, then credentials, then signs in. Any failure (rate-limited,
         bad CSRF, bad credentials) re-renders the SAME form with one generic
         "invalid username or password" message -- never which field was wrong --
-        and a freshly rotated CSRF token."""
+        and a freshly rotated CSRF token.
+
+        Local-only first-account bootstrap (owner directive 2026-07-19: "NO CLI
+        first login bullshit... its why I built a fucking login screen in
+        figma" -- the design is static/_mockup_login_panel.html): while NO
+        accounts exist yet, a request from the machine the server itself runs on
+        (_is_local_request()) gets this SAME form doubling as an account-creation
+        form (a hidden mode=create field) instead of a banner pointing at
+        --add-web-user. A request for that same zero-accounts state from a LAN
+        address never even sees that form -- and `bootstrap_mode` below is the
+        REAL race-condition guard, not just the template branch that hides the
+        form from it: a hand-crafted mode=create POST from a non-local address,
+        or one that arrives after the first account already exists, is refused
+        before add_or_update_web_user is ever called, regardless of what HTML
+        was ever rendered to that requester.
+
+        The lockout check and the CSRF check run FIRST, ahead of that
+        wants_create/bootstrap_mode gate, exactly like an ordinary credential
+        POST -- a mode=create POST is not a different, lesser-checked request
+        shape (adversarial-review fix, 2026-07-19: the gate used to sit ahead of
+        both, so a mode=create POST from an already-lockout-triggering IP sailed
+        through with neither the lockout message nor any CSRF requirement,
+        confirmed reproducible). Reordering does NOT weaken the bootstrap
+        boundary itself: passing the lockout/CSRF checks only earns a request
+        the SAME generic error the old ordering gave it once bootstrap_mode is
+        false -- create still never proceeds without bootstrap_mode true,
+        checked explicitly right below, not inferred from CSRF validity."""
         error = None
         next_url = _safe_next(request.values.get("next", "")) or ""
+        import pixai_gallery_backup as core
+        no_accounts = not core.list_web_users()
+        is_local = _is_local_request()
+        bootstrap_mode = no_accounts and is_local
         if request.method == "POST":
             ip = _client_ip()
             locked_for = _login_seconds_locked(ip)
             submitted_csrf = request.form.get("csrf", "")
             live_csrf = session.get("csrf", "") or ""
+            wants_create = request.form.get("mode") == "create"
             if locked_for is not None:
                 mins = max(1, (locked_for + 59) // 60)
                 error = ("Too many failed attempts from this address. "
                         "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
             elif not (live_csrf and secrets.compare_digest(submitted_csrf, live_csrf)):
                 error = "Your session expired -- please try again."
+            elif wants_create and not bootstrap_mode:
+                # Defense in depth: honor a create-account submission ONLY while
+                # bootstrap_mode is true for THIS request -- a remote requester
+                # can legitimately hold a valid csrf token for ITSELF (nothing
+                # stops a LAN device from GETting /login and receiving one), so
+                # csrf validity alone must never be read as "this create
+                # request is allowed".
+                error = ("No account has been set up yet. Ask whoever runs this "
+                        "server to sign in from the machine itself first.") if no_accounts \
+                        else "Invalid username or password."
             else:
                 # Reserve this attempt atomically, immediately before the slow
                 # password-hash comparison below runs. Closes a TOCTOU race:
@@ -7016,40 +7183,46 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 # while each was still inside its own verify_web_user() call, so
                 # the counter wouldn't reflect any of them until the whole burst
                 # finished -- N free guesses per lockout cycle instead of 5. See
-                # _login_try_acquire's docstring.
-                import pixai_gallery_backup as core
+                # _login_try_acquire's docstring. Applied identically to the
+                # bootstrap create path (below) as to a normal credential guess --
+                # same infrastructure, same reuse principle as the CSRF check.
                 relocked_for = _login_try_acquire(ip)
                 if relocked_for is not None:
                     mins = max(1, (relocked_for + 59) // 60)
                     error = ("Too many failed attempts from this address. "
                             "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
+                elif wants_create:
+                    # bootstrap_mode is guaranteed True here -- the guard above
+                    # already rejected wants_create whenever it's False.
+                    username = (request.form.get("username") or "").strip()
+                    password = request.form.get("password") or ""
+                    confirm = request.form.get("confirm") or ""
+                    if not username:
+                        error = "Username is required."
+                    elif len(password) < 4:
+                        error = "Password must be at least 4 characters."
+                    elif password != confirm:
+                        error = "Passwords do not match."
+                    else:
+                        core.add_or_update_web_user(username, password)
+                        _login_clear(ip)
+                        _establish_session(username)
+                        return redirect(_safe_next(next_url) or url_for("index"))
                 else:
                     username = (request.form.get("username") or "").strip()
                     password = request.form.get("password") or ""
                     if username and core.verify_web_user(username, password):
                         _login_clear(ip)
-                        session.clear()
-                        session["user"] = username
-                        session["sess_epoch"] = core.get_web_user_session_epoch(username)
-                        session["csrf"] = secrets.token_hex(16)
-                        session.permanent = True
+                        _establish_session(username)
                         return redirect(_safe_next(next_url) or url_for("index"))
                     error = "Invalid username or password."
         # GET, or a POST that fell through to an error above: always hand back a
         # FRESH CSRF token -- one that was just consumed or never matched must
         # never be resubmittable.
         session["csrf"] = secrets.token_hex(16)
-        import pixai_gallery_backup as _core
-        # Fresh-install guidance: with zero accounts configured, this form can NEVER
-        # succeed (there is no account to log into, and account creation is
-        # deliberately CLI-only -- see add_or_update_web_user's docstring). Before the
-        # local-request bypass was removed (owner directive 2026-07-19) this was an
-        # edge case nobody but the owner ever hit; now it's the default state for
-        # EVERY fresh clone, on every machine, so the login page must say so instead
-        # of silently presenting a form that can only ever fail.
-        no_accounts = not _core.list_web_users()
         return render_template_string(LOGIN_HTML, error=error, csrf=session["csrf"],
-                                      next_url=next_url, no_accounts=no_accounts)
+                                      next_url=next_url, no_accounts=no_accounts,
+                                      bootstrap_mode=bootstrap_mode)
 
     @app.route("/logout")
     def logout():
@@ -7134,11 +7307,99 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                        for k, v in PANEL_ACTIONS.items()]
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
                   if v.get("panel_visible", True)]
+        import pixai_gallery_backup as core
+        # Reuse whatever csrf token this session already carries (set at login
+        # time by _establish_session) -- only mint one here if it's somehow
+        # missing. Unlike /login's form, the Users tab's Add/Remove actions are
+        # fired via fetch() without a full page reload in between, so the token
+        # must stay valid across multiple calls on the same page, not rotate
+        # after each one.
+        session.setdefault("csrf", secrets.token_hex(16))
         return render_template_string(
             PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
             all_actions_json=json.dumps(all_actions),
             out_dir=str(out_dir), actions_json=json.dumps(actions),
-            supervised=_supervised())
+            supervised=_supervised(),
+            web_users=core.list_web_users(), csrf=session["csrf"],
+            current_username=session.get("user"))
+
+    def _check_panel_csrf(body):
+        """Shared CSRF check for the Users tab's mutating endpoints -- the exact
+        same session-based token pattern /login's form uses (see that route's
+        docstring), reused here rather than reinvented: every state-changing form
+        in this app is meant to carry one."""
+        submitted_csrf = str((body or {}).get("csrf") or "")
+        live_csrf = session.get("csrf", "") or ""
+        return bool(live_csrf) and secrets.compare_digest(submitted_csrf, live_csrf)
+
+    @app.route("/api/users/add", methods=["POST"])
+    def api_users_add():
+        """Add a new gallery web-login account from the Panel's Users tab. Gated
+        by nothing beyond the front door (_enforce_front_door()) -- every account
+        in this app's model already carries equal trust, so any logged-in session
+        (local or LAN) may manage accounts, same as the rest of the Panel. Refuses
+        a duplicate username outright rather than silently resetting a stranger's
+        password (that's still what add_or_update_web_user itself does, and stays
+        available for the owner via --add-web-user for exactly that recovery
+        case) -- mirrors static/_mockup_login_panel.html's Add User validation.
+
+        The exists-check and the write happen in ONE call to
+        core.add_web_user_if_new() (a single _accounts_lock acquisition), not a
+        separate list_web_users() read followed by a separate
+        add_or_update_web_user() write -- the latter shape was a TOCTOU: two
+        concurrent requests claiming the same brand-new username could both pass
+        the "doesn't exist yet" check before either write landed, and the second
+        write would silently reset the first request's just-created password.
+        Adversarial-review hardening, 2026-07-19 (same root cause as
+        /api/users/remove's last-account race, see that route's docstring)."""
+        body = request.get_json(silent=True) or {}
+        if not _check_panel_csrf(body):
+            return jsonify({"error": "Your session expired -- refresh the page and try again."}), 400
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        confirm = str(body.get("confirm") or "")
+        if not username:
+            return jsonify({"error": "Username is required."}), 400
+        if len(password) < 4:
+            return jsonify({"error": "Password must be at least 4 characters."}), 400
+        if password != confirm:
+            return jsonify({"error": "Passwords do not match."}), 400
+        import pixai_gallery_backup as core
+        if not core.add_web_user_if_new(username, password):
+            return jsonify({"error": "That username already exists."}), 400
+        return jsonify({"ok": True, "username": username})
+
+    @app.route("/api/users/remove", methods=["POST"])
+    def api_users_remove():
+        """Remove a gallery web-login account from the Panel's Users tab. Refuses
+        to remove the LAST remaining account: that would leave zero accounts,
+        re-triggering the local-only bootstrap state and effectively locking out
+        every remote LAN user until someone re-bootstraps from the server
+        machine itself -- a real self-lockout risk, guarded against explicitly
+        rather than left as a footgun.
+
+        The "how many accounts exist" check and the removal happen in ONE call
+        to core.remove_web_user_guarded() (a single _accounts_lock acquisition),
+        not a separate list_web_users() read followed by a separate
+        remove_web_user() write -- the latter shape was a TOCTOU race,
+        reproduced live against this real route (adversarial review,
+        2026-07-19): with exactly 2 accounts, two concurrent removes of two
+        DIFFERENT usernames could each read "2 accounts, safe to proceed" before
+        either write landed, and both writes would go through -- leaving
+        AUTH_USERS empty, the exact self-lockout this guard exists to prevent."""
+        body = request.get_json(silent=True) or {}
+        if not _check_panel_csrf(body):
+            return jsonify({"error": "Your session expired -- refresh the page and try again."}), 400
+        username = str(body.get("username") or "").strip()
+        import pixai_gallery_backup as core
+        result = core.remove_web_user_guarded(username)
+        if result == "not_found":
+            return jsonify({"error": "No such account."}), 404
+        if result == "last_account":
+            return jsonify({"error": "Can't remove the last remaining account -- "
+                                     "that would lock every remote device out until "
+                                     "someone signs in locally to bootstrap a new one."}), 400
+        return jsonify({"ok": True, "username": username})
 
     @app.route("/api/ping")
     def api_ping():
@@ -7852,9 +8113,19 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # claimed every generation endpoint was local-only, which stopped being true
     # once the LAN-auth pass landed; fixed per an adversarial-review finding that
     # it would otherwise mislead the next reader (2026-07-19).
+    #
+    # FAILS CLOSED on a missing/empty remote_addr (adversarial-review fix,
+    # 2026-07-19): a prior version treated "" as local, which is safe under
+    # THIS app's actual deployment (app.run() -> Werkzeug's dev server always
+    # populates remote_addr from the real TCP peer, never blank/None -- a plain
+    # HTTP client cannot spoof it), but is a fail-OPEN default in a function
+    # that now also gates the first-account bootstrap form/POST (above) plus
+    # destructive Panel actions and /api/branding/shortcut (below) -- worth
+    # being fail-closed on principle given how much rides on it, in case this
+    # app is ever run behind a proxy/WSGI shim that doesn't populate the key.
     def _is_local_request():
         ra = (request.remote_addr or "").strip()
-        return ra in ("127.0.0.1", "::1", "localhost", "")
+        return ra in ("127.0.0.1", "::1", "localhost")
 
     def _is_authorized_request():
         """THE canonical authorization gate for every network-originated request:

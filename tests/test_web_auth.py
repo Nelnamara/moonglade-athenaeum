@@ -143,20 +143,203 @@ def test_login_page_renders_form_with_csrf(tmp_path):
     assert _csrf(html)   # a token is present
 
 
-def test_login_page_shows_first_run_guidance_until_an_account_exists(tmp_path):
-    """With zero AUTH_USERS configured (the fresh-clone default now that the
-    local-request bypass is gone), /login must tell the visitor how to create the
-    first account (--add-web-user) instead of silently presenting a form that can
-    never succeed. The banner disappears -- and the ordinary sign-in form keeps
-    working -- the moment a real account exists."""
+def test_login_page_shows_bootstrap_form_locally_until_an_account_exists(tmp_path):
+    """With zero AUTH_USERS configured (the fresh-clone default), a LOCAL request to
+    /login gets a real, functional account-creation form (owner directive
+    2026-07-19: "NO CLI first login bullshit... its why I built a fucking login
+    screen in figma" -- design at static/_mockup_login_panel.html) -- never a
+    banner pointing at --add-web-user. The bootstrap form (with its extra confirm
+    field) disappears -- and the ordinary two-field sign-in form takes its place --
+    the moment a real account exists."""
     cli = _client(tmp_path).test_client()
     html = cli.get("/login").get_data(as_text=True)
-    assert "--add-web-user" in html
-    assert 'name="username"' in html and 'name="password"' in html   # form still present/functional
+    assert "--add-web-user" not in html
+    assert 'name="username"' in html and 'name="password"' in html
+    assert 'name="confirm"' in html                          # bootstrap-only field
+    assert 'name="mode" value="create"' in html
     core.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login").get_data(as_text=True)
     assert "--add-web-user" not in html2
     assert 'name="username"' in html2 and 'name="password"' in html2
+    assert 'name="confirm"' not in html2                      # ordinary sign-in form now
+    assert 'name="mode" value="create"' not in html2
+
+
+def test_login_page_shows_safe_message_for_lan_request_when_no_accounts(tmp_path):
+    """The exact same zero-accounts state, but requested from a LAN address, must
+    NEVER show (or accept) the bootstrap form -- only a plain message with no CLI
+    mention and no way to submit credentials. This is the race-condition guard's
+    visible half; test_lan_direct_post_cannot_create_first_account below is the
+    server-side enforcement half."""
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    assert "--add-web-user" not in html
+    assert 'name="username"' not in html and 'name="password"' not in html
+    assert "No account has been set up yet" in html
+    normalized = " ".join(html.lower().split())
+    assert "sign in from the machine itself" in normalized
+    # Once an account exists, a LAN request goes right back to the ordinary form.
+    core.add_or_update_web_user("alice", "hunter2")
+    html2 = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    assert 'name="username"' in html2 and 'name="password"' in html2
+    assert "No account has been set up yet" not in html2
+
+
+def test_bootstrap_treats_empty_or_missing_remote_addr_as_not_local(tmp_path):
+    """Adversarial-review regression: _is_local_request() used to treat a
+    missing/empty remote_addr as local (`ra in (..., "")`) -- a fail-OPEN
+    default in a function that gates the first-account bootstrap form (and
+    destructive Panel actions). It must now fail CLOSED: an empty or None
+    remote_addr is refused exactly like a real LAN address in the
+    zero-accounts state -- no account-creation form, no CLI mention, and a
+    hand-crafted mode=create POST under the same condition is still refused
+    server-side."""
+    cli = _client(tmp_path).test_client()
+    for blank in ("", None):
+        html = cli.get("/login", environ_overrides={"REMOTE_ADDR": blank}).get_data(as_text=True)
+        # The "no accounts, non-local" state renders NO form at all (see
+        # LOGIN_HTML's {% elif no_accounts %} branch) -- so there is no
+        # hidden csrf input to scrape; pull the one GET already stashed in
+        # the session instead, same as test_lan_direct_post_cannot_create_first_account.
+        assert 'name="mode" value="create"' not in html
+        assert 'name="username"' not in html   # no ordinary sign-in form either
+        assert "No account has been set up yet" in html
+        with cli.session_transaction() as sess:
+            csrf = sess["csrf"]
+        r = cli.post("/login", environ_overrides={"REMOTE_ADDR": blank},
+                     data={"username": "mallory", "password": "pw123456",
+                           "confirm": "pw123456", "mode": "create", "csrf": csrf})
+        assert "No account has been set up yet" in r.get_data(as_text=True)
+    assert core.list_web_users() == []
+
+
+def test_bootstrap_form_creates_account_and_logs_in_immediately(tmp_path):
+    """The local bootstrap POST must both create the account AND establish a
+    session in one step (redirect straight past a second login) -- the same
+    session-setting path a normal /login POST uses (_establish_session)."""
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    r = cli.post("/login", data={"username": "alice", "password": "hunter22",
+                                 "confirm": "hunter22", "mode": "create",
+                                 "csrf": _csrf(html)})
+    assert r.status_code in (301, 302, 303, 307, 308)
+    assert core.verify_web_user("alice", "hunter22")
+    # The session this redirect set really did authenticate -- a LAN request
+    # against the SAME client now succeeds.
+    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
+    # And logging out + back in with the same credentials works normally --
+    # bootstrap didn't leave the account in some special state.
+    cli.get("/logout")
+    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 401
+    html2 = cli.get("/login").get_data(as_text=True)
+    r2 = cli.post("/login", data={"username": "alice", "password": "hunter22",
+                                  "csrf": _csrf(html2)})
+    assert r2.status_code in (301, 302, 303, 307, 308)
+    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
+
+
+def test_bootstrap_form_validates_like_the_mock(tmp_path):
+    """Mirror static/_mockup_login_panel.html's client-side validation, now enforced
+    server-side: empty username, too-short password, mismatched confirm."""
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    csrf = _csrf(html)
+    r = cli.post("/login", data={"username": "", "password": "hunter22",
+                                 "confirm": "hunter22", "mode": "create", "csrf": csrf})
+    assert "Username is required" in r.get_data(as_text=True)
+    html = cli.get("/login").get_data(as_text=True)
+    r = cli.post("/login", data={"username": "alice", "password": "ab",
+                                 "confirm": "ab", "mode": "create", "csrf": _csrf(html)})
+    assert "at least 4 characters" in r.get_data(as_text=True)
+    html = cli.get("/login").get_data(as_text=True)
+    r = cli.post("/login", data={"username": "alice", "password": "hunter22",
+                                 "confirm": "totally-different", "mode": "create",
+                                 "csrf": _csrf(html)})
+    assert "Passwords do not match" in r.get_data(as_text=True)
+    assert core.list_web_users() == []
+
+
+def test_bootstrap_form_missing_confirm_field_does_not_crash(tmp_path):
+    """A malformed/short-circuited POST (e.g. a client that dropped the confirm
+    field entirely, not just sent it empty) must be handled as a validation
+    failure, never a 500."""
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    r = cli.post("/login", data={"username": "alice", "password": "hunter22",
+                                 "mode": "create", "csrf": _csrf(html)})
+    assert r.status_code == 200
+    assert "Passwords do not match" in r.get_data(as_text=True)
+    assert core.list_web_users() == []
+
+
+def test_lan_direct_post_cannot_create_first_account(tmp_path):
+    """Defense in depth for the race guard: a hand-crafted mode=create POST from a
+    LAN address must be refused even though it carries a technically-valid csrf
+    token for ITS OWN session (nothing stops a LAN device from GETting /login and
+    receiving one) -- the real gate is `bootstrap_mode` (no_accounts AND
+    is_local), not csrf validity."""
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    with cli.session_transaction() as sess:
+        csrf = sess["csrf"]
+    r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
+                 data={"username": "mallory", "password": "pw123456",
+                       "confirm": "pw123456", "mode": "create", "csrf": csrf})
+    assert r.status_code == 200
+    assert "No account has been set up yet" in r.get_data(as_text=True)
+    assert core.list_web_users() == []
+    # And still refused with a session already logged in from elsewhere? No --
+    # simpler and sufficient: confirm no account was ever created and the LAN
+    # request never got authorized.
+    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 401
+
+
+def test_direct_post_create_mode_ignored_once_an_account_exists(tmp_path):
+    """A mode=create POST that arrives after the first account already exists
+    (whether from local or LAN) must never be treated as account creation --
+    bootstrap_mode is false the moment ANY account exists, from ANY path."""
+    core.add_or_update_web_user("alice", "hunter2")
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    r = cli.post("/login", data={"username": "mallory", "password": "pw123456",
+                                 "confirm": "pw123456", "mode": "create",
+                                 "csrf": _csrf(html)})
+    assert "Invalid username or password" in r.get_data(as_text=True)
+    assert {u["username"] for u in core.list_web_users()} == {"alice"}
+
+
+def test_concurrent_add_or_update_web_user_does_not_lose_either_account(tmp_path, monkeypatch):
+    """TOCTOU/lost-update regression: add_or_update_web_user() used to do an
+    unlocked _load_config() -> mutate -> _save_config() -- two concurrent calls
+    for DIFFERENT usernames could both read the pre-write state, so the second
+    write would silently clobber the first's on disk (adversarial review,
+    2026-07-19: reproduced live via two concurrent local /login bootstrap
+    POSTs that both returned a 302 "success" redirect to their own browser,
+    while only one of the two usernames actually ended up in AUTH_USERS).
+    Force the interleaving with a real delay + real threads (not just
+    sequential calls, which would never expose the race) and confirm
+    _accounts_lock now serializes the two full read-modify-write cycles --
+    BOTH accounts survive, regardless of which thread's write lands first."""
+    import threading
+    import time as _time
+
+    real_save = core._save_config
+
+    def slow_save(cfg):
+        _time.sleep(0.1)
+        real_save(cfg)
+    monkeypatch.setattr(core, "_save_config", slow_save)
+
+    def create(name):
+        core.add_or_update_web_user(name, "hunter2222")
+
+    t1 = threading.Thread(target=create, args=("alice",))
+    t2 = threading.Thread(target=create, args=("bob",))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    # Neither write was lost -- both accounts are actually on disk.
+    assert {u["username"] for u in core.list_web_users()} == {"alice", "bob"}
 
 
 def test_login_success_sets_session_and_redirects(tmp_path):
@@ -227,6 +410,46 @@ def test_login_rate_limit_locks_out_after_five_failures(tmp_path):
     assert "too many failed attempts" in body.lower()
     r2 = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
     assert r2.status_code == 401   # correct password during lockout still does not authorize
+
+
+def test_lockout_applies_uniformly_to_mode_create_requests(tmp_path):
+    """Adversarial-review regression: mode=create used to be checked BEFORE the
+    lockout/CSRF gates, so a crafted mode=create POST from an already-locked-out
+    address sailed through with neither the lockout message nor any CSRF
+    requirement -- a mode=create POST is not a lesser-checked request shape.
+    Lock out an address via 5 failed ORDINARY logins (an account already
+    exists, so bootstrap_mode is false throughout -- mode=create can never
+    succeed here regardless), then confirm a 6th request carrying mode=create
+    from that SAME address gets the lockout message, not the create-specific
+    "invalid" text."""
+    core.add_or_update_web_user("alice", "hunter2")
+    cli = _client(tmp_path).test_client()
+    for _ in range(5):
+        html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+        cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
+                 data={"username": "alice", "password": "wrong", "csrf": _csrf(html)})
+    html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
+                 data={"username": "mallory", "password": "pw123456",
+                       "confirm": "pw123456", "mode": "create", "csrf": _csrf(html)})
+    assert "too many failed attempts" in r.get_data(as_text=True).lower()
+    assert core.list_web_users() == [{"username": "alice"}]   # still refused, nothing created
+
+
+def test_csrf_applies_uniformly_to_mode_create_requests(tmp_path):
+    """Companion to the lockout regression above: a mode=create POST carrying a
+    forged/stale CSRF token must get the same "session expired" message an
+    ordinary login POST would, not skip straight to the create-specific
+    "invalid" text."""
+    core.add_or_update_web_user("alice", "hunter2")
+    cli = _client(tmp_path).test_client()
+    cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN})   # establishes a session/csrf we ignore
+    r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
+                 data={"username": "mallory", "password": "pw123456",
+                       "confirm": "pw123456", "mode": "create",
+                       "csrf": "forged-token-not-in-session"})
+    assert "expired" in r.get_data(as_text=True).lower()
+    assert core.list_web_users() == [{"username": "alice"}]
 
 
 def test_login_rate_limit_clears_on_success(tmp_path):
