@@ -15,6 +15,188 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Default-deny "front door": one global gate replaces 43 scattered per-route checks,
+  and closes every route that had never had one** (2026-07-19, `pixai_gallery.py`). The
+  LAN-auth work above converted existing `_is_local_request()` checks to the broader
+  `_is_authorized_request()`, but a route was only ever gated if someone remembered to add
+  the check when writing it -- exactly the model the owner rejected ("Gate delete and all
+  critical functions behind login. It should just have a front door login screen in
+  general for LAN access"). New `app.before_request`-registered `_enforce_front_door()` now
+  runs `_is_authorized_request()` for EVERY request by default; the allowlist is just
+  `/login` and `/logout` (LOGIN_HTML is fully inline CSS off `BASE_HTML`/`DESIGN_TOKENS_CSS`
+  with no `/static/` dependency, so nothing else needs to be exempted). An unauthorized
+  request gets a JSON `401 {"error": "authentication required"}` for `/api/*` (plus the two
+  legacy non-`/api/` JSON routes, `/rate/<id>` and `/edit-prompt/<id>`), or a redirect to
+  `/login?next=<path>` (via the existing `_safe_next()` open-redirect guard) for everything
+  else. This closes every route a prior adversarial review found with **zero** auth check at
+  all: `/`, `/image/<id>`, `/delete/<id>`, `/delete-bulk`, `/rate/<id>`, `/edit-prompt/<id>`,
+  `/collection-add`, `/collection-remove`, `/bulk-replace-prompt`, `/panel`, `/duplicates`,
+  `/health`, `/contact-sheet`, `/export-zip`, `/manifest.webmanifest`, `/sw.js`, the raw asset
+  routes (`/thumbs/`, `/img/`, `/video-file/`, `/full/`, `/branding/`, `/badge-thumb/`), and
+  `/api/gallery-images`, `/api/similar`, `/api/collections`, `/api/contests`,
+  `/api/achievements`, `/api/skin`, `/api/ach-event`, `/api/your-art`,
+  `/api/loom/export-status`, `/api/loom/export-file`, `/api/ping` -- the exact gap flagged as
+  "pending an explicit owner decision" in the hardening entry below, now resolved by making
+  login required everywhere rather than picking which of those stayed open.
+  All 43 individual `if not _is_authorized_request(): ...` blocks were deleted as dead code
+  now that the hook runs first for every request; `/api/branding/shortcut` is the one
+  exception, kept gated on `_is_local_request()` specifically (layered underneath the global
+  hook) since it shells out to the SERVER machine's own PowerShell/COM -- a categorically
+  different trust tier than "browse the library" or "spend the owner's credits" that a LAN
+  login is meant to unlock. `index()`'s `needs_key`/`catalog_empty`/`is_local` template flags
+  and `/api/your-art`'s enrichment branch dropped their now-always-true
+  `_is_authorized_request()` conjuncts, since reaching those lines at all now guarantees it;
+  the "read-only LAN view" UI tier they used to gate is retired along with the last route
+  that could show it to someone unauthenticated. `tests/test_web_auth.py` gained a
+  parametrized regression suite (one case per previously-ungated route, denied from a LAN
+  address + confirmed still working from localhost) plus `tests/test_web_pick.py` and
+  `tests/test_purge.py` updates for routes whose real behavior changed (login-gated instead
+  of silently open, or a login redirect instead of an in-app error banner); every other
+  existing test that asserted the OLD per-route 403 was updated to the new global-hook 401.
+  Full suite green (646 tests).
+
+- **Real session-based web login, gating every non-localhost request** (2026-07-19,
+  `pixai_gallery.py` + `pixai_gallery_backup.py`). The gallery is public code with real external
+  users running their own instances -- LAN "read-only browsing" was never meant to mean
+  "any-network-device browsing" once a mobile route lands, so this adds proper auth ahead of
+  that. `config.json` gains `AUTH_SECRET_KEY` (generated once via `secrets.token_hex(32)`,
+  persisted so sessions survive a restart) and `AUTH_USERS` (a list of
+  `{username, password_hash}`, hashed with `werkzeug.security` -- scrypt as of modern werkzeug,
+  timing-safe compare). Account lifecycle is CLI-only, by design: `--add-web-user` (interactive,
+  `getpass` -- password never echoed/printed), `--remove-web-user <username>`,
+  `--list-web-users` (usernames only, never hashes). No account ever exists by default -- an
+  empty `AUTH_USERS` makes LAN login impossible until one is added.
+  New `/login` (GET renders a themed form reusing `DESIGN_TOKENS_CSS`; POST verifies a
+  session-bound CSRF token via `secrets.compare_digest`, then credentials) and `/logout`.
+  Failed logins always show the same generic "Invalid username or password" regardless of which
+  field was wrong. An in-memory per-IP counter locks out 15 minutes after 5 failures in 5
+  minutes (documented as single-process-only -- resets on restart, doesn't share state across
+  gunicorn/uwsgi workers). Session cookie is `HttpOnly` + `SameSite=Lax`; `Secure` stays off on
+  purpose (this app is typically plain-HTTP LAN, not HTTPS -- a documented, accepted tradeoff,
+  not an oversight). New canonical gate `_is_authorized_request()` = local request OR a logged-in
+  session; every genuine `_is_local_request()` access-control site (44 of them, across the panel,
+  generation surface, The Loom, snippets/presets, branding writes, jobs, account/claims, etc.)
+  now uses it instead, preserving each route's existing response contract (JSON API routes still
+  return their same JSON 401/403 shape; the two real HTML page routes, `/export-csv` and
+  `/loom`, now redirect to `/login?next=...` instead of a bare 403 so browser navigation works).
+  Four purely-informational uses (`needs_key`/`catalog_empty`/the `is_local` template flag, and
+  `/api/your-art`'s live-views enrichment) were deliberately broadened to the same rule too, so
+  an authenticated remote session gets the identical experience a local owner already had,
+  instead of the UI silently hiding controls whose endpoints now accept that session. A handful
+  of pre-existing routes with **no** `_is_local_request()` gate at all (`/`, `/image/<id>`,
+  `/panel`, `/delete/<id>`, `/delete-bulk`, `/duplicates`, `/api/gallery-images`,
+  `/api/contests`, `/api/achievements`) were left untouched -- out of this pass's explicit scope
+  (converting existing gates, not inventing new ones on routes that never had one) and flagged
+  as a known gap for a deliberate follow-up decision, since two of those (`/delete/<id>`,
+  `/delete-bulk`) delete local backup files with no gate at all today. New
+  `tests/test_web_auth.py` (21 tests): login success/failure/CSRF/rate-limit(+clear-on-success),
+  the gate itself (local/LAN/authenticated-LAN), account CRUD + hashing, and the CLI flags. Full
+  suite green (586 tests). `config.example.json` documents the two new fields with placeholders.
+- **LAN-auth security hardening, from three independent adversarial reviews** (2026-07-19,
+  `pixai_gallery.py` + `pixai_gallery_backup.py`), fixing three confirmed gaps in the pass above:
+  - **Session revocation.** The plain Flask session is a stateless, client-side signed cookie --
+    there was nothing server-side to revoke, so a cookie captured off plain-HTTP LAN traffic (the
+    documented, accepted tradeoff of `SESSION_COOKIE_SECURE=False`) kept full account access
+    after the real user signed out, and even after `--remove-web-user` deleted their account
+    outright. AUTH_USERS entries now carry a `sess_epoch`; a session embeds the epoch current at
+    login and `_is_authorized_request()` re-validates it (and that the account still exists) on
+    every request. `/logout` bumps the epoch before clearing its own session, so signing out
+    revokes every outstanding cookie for that identity, not just the browser that clicked it;
+    removing an account or changing its password does the same. Exploit-confirmed via a real
+    two-client PoC (a "stolen cookie" client kept 200ing after the victim's own logout) before the
+    fix, 403 after -- see `tests/test_web_auth.py`'s
+    `test_logout_revokes_a_stolen_cookie_on_another_client` /
+    `test_removed_user_loses_access_via_old_session` / `test_password_change_revokes_old_session`.
+  - **Login rate-limiter TOCTOU race.** The lockout check (fast, lock-protected) and the failure
+    counter (also fast, lock-protected) sandwiched `verify_web_user()`'s slow, deliberately
+    UNLOCKED scrypt comparison in between, so N concurrent requests from one IP (the dev server
+    runs `threaded=True`) could all read "not locked yet" before any of them recorded a failure --
+    N free guesses per 15-minute lockout cycle instead of 5. Replaced `_login_record_failure` with
+    `_login_try_acquire`, which checks-and-reserves the attempt in the SAME critical section,
+    before the slow call runs. `tests/test_web_auth.py::test_login_rate_limit_race_does_not_grant_extra_guesses`
+    reproduces the race with real threads + an artificial delay and fails against the old code
+    (confirmed by temporarily reverting the fix and re-running it) -- no more than 5 of 10
+    concurrent guesses are ever evaluated now. The same reservation point also sweeps stale
+    sub-threshold entries for other IPs, closing a minor unbounded-growth gap in the same dict.
+  - **`/api/branding/shortcut` wrongly broadened.** This route shells out to PowerShell/
+    `WScript.Shell` COM to write a `.lnk` onto the SERVER machine's own Desktop --
+    `make_launcher_shortcut()`'s own docstring says "caller must gate to localhost." The 44-site
+    conversion above swept it into the broader `_is_authorized_request()` along with the rest of
+    "branding writes," but unlike its sibling (`POST /api/branding`, which only writes
+    `out_dir/branding.json`), this one lets any authenticated LAN account trigger host-machine
+    PowerShell execution -- a materially different trust boundary than the credit-spending
+    features LAN login is meant to unlock. Reverted to `_is_local_request()`. New regression test
+    `tests/test_branding.py::test_shortcut_refuses_authenticated_lan_session`.
+
+  **Reviewed and confirmed NOT a bug in this pass** (left as-is, with the reasoning captured
+  here rather than re-litigated later): plaintext-password storage, hash strength, secret-key
+  generation, session fixation, session-data template escaping, cookie flags, CSRF-token
+  handling on `/login` itself, brute-force IP keying (not header-spoofable), and timing-safe
+  comparisons everywhere they matter -- all independently checked against the actual code and
+  found correct. **Flagged but deliberately NOT changed, pending an explicit owner decision:**
+  (1) CSRF tokens exist only for `/login`; every other mutating endpoint relies on
+  `SameSite=Lax` alone -- a real inconsistency, but closing it means wiring a double-submit
+  token through ~35 routes and their JS call sites, a scoped feature decision rather than a
+  bug fix. (2) `/delete/<id>` and `/delete-bulk` still have no auth gate at all (pre-existing,
+  called out in the entry above as a known follow-up) -- the header explicitly tells
+  unauthenticated LAN visitors they have "read-only LAN view," which this contradicts, so it
+  reads more like an oversight than the deliberate "curate stays open" tier the comments
+  elsewhere suggest; needs a go/no-go rather than a silent change to the access model.
+- **Front-door hardening, from two independent adversarial reviews** (2026-07-19,
+  `pixai_gallery.py`), fixing one confirmed bug in the front-door gate above:
+  - **Open redirect via TAB/CR/LF-smuggled `next=`.** `_safe_next()` blocked a literal leading
+    `//` (scheme-relative) and a literal backslash, but not an embedded `\t`/`\r`/`\n`.
+    Werkzeug's own `Response.get_wsgi_headers()` strips those control characters back out of a
+    `Location` header value (via `iri_to_uri`) before it reaches the socket, so
+    `next=/%09/evil.example` sailed past the `//`-prefix check here, yet Werkzeug itself rewrote
+    it into a literal `//evil.example` scheme-relative redirect -- handed to a user immediately
+    after they entered real credentials. The `\r`/`\n` variants didn't even reach a response:
+    `redirect()` raised an unhandled `ValueError` ("Header values must not contain newline
+    characters"), turning a real login into a 500 instead. Both reproduced end-to-end against
+    the real `/login` flow before the fix (confirmed via a throwaway script against the actually-
+    installed Flask 3.1.3 / Werkzeug 3.1.8). Fixed by rejecting any embedded TAB/CR/LF in
+    `_safe_next()`, not just a leading `//`. New regression tests in `tests/test_web_auth.py`
+    (`test_login_next_tab_bypass_no_longer_open_redirects`,
+    `test_login_next_newline_bypass_no_longer_500s`, plus baseline coverage for the
+    already-safe `//` case and confirming a normal `next=/loom` still redirects correctly) --
+    `_safe_next()` had zero test coverage before this pass. Full suite green (650 tests).
+  - **Stale comment fixed (not a code bug).** The comment above `_is_local_request()` still said
+    "every generation endpoint is gated to local requests" -- true before the LAN-auth pass
+    above, false since it landed (every generation/panel/Loom/snippets/branding-write/jobs/
+    account/claims site was deliberately broadened to `_is_authorized_request()`, see that entry).
+    Updated to state the real rule and point at `/api/branding/shortcut` as the one deliberate
+    exception, so it stops misleading the next reader.
+
+  **Reviewed and confirmed NOT a bug in this pass:** the allowlist-completeness sweep (no
+  `Blueprint`/second Flask app/custom `static_folder`/reloader to route around the single
+  `before_request` hook; `//login`, `/Login`, and double-slash API paths all still fall into the
+  deny branch, just with an HTML-vs-JSON content-type wrinkle on the double-slash case, not an
+  auth hole); `/api/branding/shortcut` staying local-only for a logged-in remote session (its own
+  inner `_is_local_request()` check, confirmed live); and the LAN-auth broadening itself (~44
+  sites moved from `_is_local_request()` to `_is_authorized_request()`, including the panel and
+  server-stop/restart) -- that broadening is this project's own deliberate, already-documented
+  design (see the "Real session-based web login" entry above), not something the front-door hook
+  introduced. Also reviewed: an owner visiting their own box via its LAN IP/hostname (not literal
+  `127.0.0.1`) with zero `AUTH_USERS` configured now hits a hard login wall instead of the old
+  "no gate at all" degrade-gracefully behavior on routes like `/` and `/panel` -- this is the
+  direct, intended effect of building the front door the owner explicitly asked for ("It should
+  just have a front door login screen in general for LAN access"), already covered by
+  `tests/test_web_auth.py::test_empty_auth_users_makes_lan_login_impossible`, not a regression to
+  fix. Documentation-hygiene item, left as-is: ~30 route docstrings elsewhere in the file still
+  say "Localhost-only" despite calling `_is_authorized_request()` (the broader LAN-login check),
+  a leftover from the same LAN-auth pass -- cosmetically stale but not misleading about an actual
+  gate the way the `_is_local_request()` comment fixed above was, and touching ~30 docstrings is
+  a separate cleanup pass, not a security fix.
+
+  **Owner decision (2026-07-19):** `/api/server/stop`/`/api/server/restart` stay in the
+  broader "any logged-in LAN session" tier, unchanged. Destructive Panel actions (the
+  `--dedup --apply --dedup-delete`/organize/rebuild-thumbnails class, reachable via
+  `/api/panel/run`) get the same carve-out `/api/branding/shortcut` already has: gated on
+  `_is_local_request()` in addition to the existing `confirm=true` requirement, so a logged-in
+  LAN account can generate and browse but not run destructive maintenance on the owner's local
+  files. New regression test `tests/test_panel.py::test_destructive_action_refuses_authenticated_lan_session`
+  (proves a logged-in remote session gets 403 while the same account from the real local machine
+  still works). Full suite green (651 tests).
 - **Job Tracker Step 2 complete: the CLI now logs to the same activity feed** (2026-07-19,
   `pixai_gallery_backup.py`). Closes the last of the three original Step 2 sources — Control
   Panel actions and bulk cloud-delete were already wired; running the CLI bare from a terminal

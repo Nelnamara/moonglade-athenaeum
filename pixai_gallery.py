@@ -20,6 +20,7 @@ import argparse
 import csv
 import json
 import os
+import secrets
 import sqlite3
 import sys
 import threading
@@ -27,7 +28,7 @@ from pathlib import Path
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
-                       send_file, send_from_directory, url_for)
+                       send_file, send_from_directory, session, url_for)
 except ImportError:
     sys.exit("Flask is required for the gallery server.\n"
              "Install it with:  pip install flask")
@@ -2641,6 +2642,26 @@ def _schedule_server_exit(code):
 
 def create_app(out_dir: Path):
     app = Flask(__name__)
+
+    # ---- Session-based auth: secret key + cookie hardening ------------------
+    # AUTH_SECRET_KEY is generated once (secrets.token_hex(32)) and persisted to
+    # config.json by get_or_create_secret_key() -- reused on every subsequent start
+    # so restarting the server doesn't silently log everyone out. See
+    # _is_authorized_request() below for the gate this session backs, and
+    # /login /logout for the routes that populate it.
+    import pixai_gallery_backup as _core_auth
+    app.secret_key = _core_auth.get_or_create_secret_key()
+    app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS can never read the session cookie
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # blocks cross-site POST/nav CSRF vectors
+    # SESSION_COOKIE_SECURE is deliberately left False: this app is typically served
+    # over plain HTTP on a LAN (`python pixai_gallery.py`, no TLS terminator). A Secure
+    # cookie would just get silently dropped by the browser over http:// and break
+    # login entirely. Real hardening of this flag needs HTTPS, which means putting a
+    # reverse proxy (nginx/Caddy) in front of this process -- out of scope for a
+    # LAN-only tool. This is a known, accepted tradeoff, not an oversight.
+    import datetime as _dt
+    app.permanent_session_lifetime = _dt.timedelta(days=30)
+
     db_path = out_dir / "catalog.db"
     build_stamp = _build_stamp()
     init_db(db_path)
@@ -3506,9 +3527,10 @@ document.addEventListener('DOMContentLoaded', function() {
     <span id="gen-live" class="gen-live" style="display:none;"></span>
   </span>
   <div class="head-nav">
-    {# Owner-only surfaces (generation, The Loom, Panel, balance) are localhost-gated -- on a
-       LAN-served instance they'd 403 for other devices, so hide them there and show a small
-       read-only note instead of dead buttons. Browse/curate + community stay available. #}
+    {# Owner-level surfaces (generation, The Loom, Panel, balance) are gated to
+       _is_authorized_request() -- localhost, OR a logged-in session (see /login).
+       Hide them for anyone else and show a small read-only note instead of dead
+       buttons. Browse/curate + community stay available to everyone. #}
     {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
@@ -3521,9 +3543,12 @@ document.addEventListener('DOMContentLoaded', function() {
     {% if is_local %}
     <a class="btn b-panel" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
     {% else %}
-    <span class="lan-note" title="Creation &amp; maintenance tools live on the owner's machine (localhost).">&#128065; read-only LAN view</span>
+    <span class="lan-note" title="Creation &amp; maintenance tools live on the owner's machine, or need you to sign in.">&#128065; read-only LAN view</span>
     {% endif %}
     <a class="btn b-health" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
+    {% if logged_in_user %}
+    <a class="btn" href="{{ url_for('logout') }}" title="Signed in as {{ logged_in_user }} — sign out">&#128274; Sign out</a>
+    {% endif %}
   </div>
 </header>
 
@@ -6310,6 +6335,39 @@ function savePrompt() {
 </script>
 """)
 
+    LOGIN_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="brand" style="justify-content:center;">
+      <span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span>
+      <div class="brand-txt">
+        <h1 style="border:none;">Moonglade Athenaeum</h1>
+        <span class="tagline">a library against the Void</span>
+      </div>
+    </div>
+    <div class="setup-step">
+      <b>Sign in</b> to open this gallery from another device.
+      <form method="post" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <div class="setup-row login-fields">
+          <input type="text" name="username" placeholder="Username" autocomplete="username" autofocus required>
+          <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+          <button type="submit" class="btn btn-primary">Sign in</button>
+        </div>
+      </form>
+      {% if error %}<div class="setup-msg err">{{ error }}</div>{% endif %}
+    </div>
+  </div>
+</div>
+<style>
+  .login-wrap { min-height: 78vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .login-card { width: 100%; max-width: 380px; }
+  .login-card .login-fields { flex-direction: column; align-items: stretch; }
+  .login-card .login-fields input { width: 100%; }
+  .login-card .login-fields button { width: 100%; justify-content: center; margin-top: 4px; }
+</style>
+""")
+
     HEALTH_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 {% macro stat(label, value, flag='') %}
 <div style="background:var(--mantle);border-radius:8px;padding:14px 16px;">
@@ -6891,6 +6949,153 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # ------------------------------------------------------------------
     # Routes
     # ------------------------------------------------------------------
+    def _safe_next(url):
+        """Only ever redirect to a same-site PATH after login -- ?next=https://evil.example
+        or ?next=//evil.example (scheme-relative) must never be honored, or /login becomes
+        an open redirect. A bare local path ('/loom', '/export-csv', ...) is the only
+        shape every caller of this actually needs (redirect(url_for('login', next=request.path))
+        is the only producer of a real `next`).
+
+        Also rejects any embedded TAB/CR/LF control characters, not just a leading "//":
+        Werkzeug's own Response.get_wsgi_headers() strips those control characters back out
+        of a Location header value before writing it to the socket (via iri_to_uri), so a
+        value like "/<TAB>/evil.example" sails past the plain "//" prefix check here yet
+        gets rewritten by Werkzeug itself into a literal "//evil.example" scheme-relative
+        redirect -- confirmed against the installed Flask/Werkzeug via a throwaway
+        reproduction. The CR/LF variants don't even get that far: redirect() raises an
+        unhandled ValueError ("Header values must not contain newline characters") instead,
+        turning a real login into a 500. Adversarial-review regression -- see
+        tests/test_web_auth.py's safe-next tests."""
+        _UNSAFE_NEXT_CHARS = ("\\", "\t", "\r", "\n")
+        if (url and url.startswith("/") and not url.startswith("//")
+                and not any(c in url for c in _UNSAFE_NEXT_CHARS)):
+            return url
+        return None
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        """Session-based login gate for every non-localhost request (see
+        _is_authorized_request() above). GET renders the form; POST verifies the
+        CSRF token, then credentials, then signs in. Any failure (rate-limited,
+        bad CSRF, bad credentials) re-renders the SAME form with one generic
+        "invalid username or password" message -- never which field was wrong --
+        and a freshly rotated CSRF token."""
+        error = None
+        next_url = _safe_next(request.values.get("next", "")) or ""
+        if request.method == "POST":
+            ip = _client_ip()
+            locked_for = _login_seconds_locked(ip)
+            submitted_csrf = request.form.get("csrf", "")
+            live_csrf = session.get("csrf", "") or ""
+            if locked_for is not None:
+                mins = max(1, (locked_for + 59) // 60)
+                error = ("Too many failed attempts from this address. "
+                        "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
+            elif not (live_csrf and secrets.compare_digest(submitted_csrf, live_csrf)):
+                error = "Your session expired -- please try again."
+            else:
+                # Reserve this attempt atomically, immediately before the slow
+                # password-hash comparison below runs. Closes a TOCTOU race:
+                # `locked_for` above is a fast, lock-protected READ taken before
+                # verify_web_user()'s slow (unlocked) scrypt comparison: many
+                # concurrent requests from the same IP could all pass that read
+                # while each was still inside its own verify_web_user() call, so
+                # the counter wouldn't reflect any of them until the whole burst
+                # finished -- N free guesses per lockout cycle instead of 5. See
+                # _login_try_acquire's docstring.
+                import pixai_gallery_backup as core
+                relocked_for = _login_try_acquire(ip)
+                if relocked_for is not None:
+                    mins = max(1, (relocked_for + 59) // 60)
+                    error = ("Too many failed attempts from this address. "
+                            "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
+                else:
+                    username = (request.form.get("username") or "").strip()
+                    password = request.form.get("password") or ""
+                    if username and core.verify_web_user(username, password):
+                        _login_clear(ip)
+                        session.clear()
+                        session["user"] = username
+                        session["sess_epoch"] = core.get_web_user_session_epoch(username)
+                        session["csrf"] = secrets.token_hex(16)
+                        session.permanent = True
+                        return redirect(_safe_next(next_url) or url_for("index"))
+                    error = "Invalid username or password."
+        # GET, or a POST that fell through to an error above: always hand back a
+        # FRESH CSRF token -- one that was just consumed or never matched must
+        # never be resubmittable.
+        session["csrf"] = secrets.token_hex(16)
+        return render_template_string(LOGIN_HTML, error=error, csrf=session["csrf"],
+                                      next_url=next_url)
+
+    @app.route("/logout")
+    def logout():
+        # Bump this identity's sess_epoch BEFORE clearing the local session, so
+        # signing out revokes every outstanding session cookie for this username
+        # (e.g. one captured off plain-HTTP LAN traffic before the click), not
+        # just this one browser's copy -- see get_web_user_session_epoch()'s
+        # docstring and _is_authorized_request() below, which re-checks it.
+        import pixai_gallery_backup as core
+        user = session.get("user")
+        if user:
+            core.bump_web_user_session_epoch(user)
+        session.clear()
+        return redirect(url_for("login"))
+
+    # ------------------------------------------------------------------
+    # THE front door: DEFAULT-DENY for every request, enforced in one place.
+    # ------------------------------------------------------------------
+    # Allowlist is intentionally tiny -- /login (GET, to render the form; POST,
+    # to submit it) and /logout. Nothing else. LOGIN_HTML is BASE_HTML with
+    # fully inline CSS (__DESIGN_TOKENS__ is a Python string substituted at
+    # import time via .replace(), never a fetched stylesheet) and no
+    # <link>/<script src> to a /static/ file is load-bearing for it to render
+    # or submit -- the one <img> it has (the brand mark) already carries
+    # onerror="this.remove()", so blocking it just drops a logo, never breaks
+    # the form. That means no static-asset entry needs to sit in this allowlist
+    # alongside the two routes above.
+    _PUBLIC_PATHS = frozenset({"/login", "/logout"})
+    # Routes whose EXISTING contract (long before this hook existed) was JSON,
+    # not an HTML page -- these get a JSON 401 instead of a login redirect, so a
+    # fetch(...).then(r => r.json()) caller still gets parseable JSON instead
+    # of choking on the login page's HTML. Everything under /api/, plus the two
+    # legacy non-/api/ JSON routes (/rate/<id>, /edit-prompt/<id>) match this.
+    _JSON_GATE_PREFIXES = ("/api/", "/rate/", "/edit-prompt/")
+
+    @app.before_request
+    def _enforce_front_door():
+        """THE gate: every request must satisfy _is_authorized_request() (localhost,
+        or a logged-in session -- see that function's docstring further down) to
+        reach anything beyond the tiny allowlist above. This replaced 43
+        individual, easy-to-forget `if not _is_authorized_request(): ...` blocks
+        that used to sit one-per-route (see CHANGELOG.md for the full list) with
+        one place that can't be skipped when a new route is added later --
+        exactly the gap a prior adversarial review flagged: `/`, `/image/<id>`,
+        `/delete/<id>`, `/delete-bulk`, `/rate/<id>`, `/edit-prompt/<id>`,
+        `/collection-add`, `/collection-remove`, `/bulk-replace-prompt`,
+        `/panel`, `/duplicates`, `/health`, the raw asset routes (`/thumbs/`,
+        `/img/`, `/video-file/`, `/full/`, `/branding/`, `/badge-thumb/`,
+        `/contact-sheet`), `/export-zip`, `/manifest.webmanifest`, `/sw.js`, and
+        `/api/gallery-images`, `/api/similar`, `/api/collections`,
+        `/api/contests`, `/api/achievements`, `/api/skin`, `/api/ach-event`,
+        `/api/your-art`, `/api/loom/export-status`, `/api/loom/export-file`,
+        `/api/ping` had NO auth check of any kind before this hook existed.
+
+        `/api/branding/shortcut` is deliberately NOT loosened by this hook
+        passing a logged-in remote session through as "authorized": its own
+        handler re-checks the stricter `_is_local_request()` underneath,
+        because it shells out to a host-local admin API on the machine the
+        SERVER process runs on -- a categorically different trust tier than
+        "browse the library" or "spend the owner's credits". See that route's
+        docstring."""
+        if request.path in _PUBLIC_PATHS:
+            return None
+        if _is_authorized_request():
+            return None
+        if request.path.startswith(_JSON_GATE_PREFIXES):
+            return jsonify({"error": "authentication required"}), 401
+        return redirect(url_for("login", next=_safe_next(request.path) or ""))
+
     @app.route("/health")
     def health():
         return render_template_string(
@@ -6920,8 +7125,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_server_stop():
         """Shut the server down cleanly from the browser (Homebridge-style) instead of Task
         Manager. Localhost-only. Under the managed launcher this ends the whole app."""
-        if not _is_local_request():
-            return jsonify({"error": "server control is localhost-only"}), 403
         _schedule_server_exit(0)
         return jsonify({"ok": True, "action": "stop"})
 
@@ -6929,8 +7132,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_server_restart():
         """Restart the server from the browser. Needs the managed launcher (Serve Gallery),
         which relaunches on exit code 42; otherwise the process would just stop. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"error": "server control is localhost-only"}), 403
         if not _supervised():
             return jsonify({"error": "Restart needs the managed launcher — start via "
                                      "'Serve Gallery'. (Stop still works.)"}), 409
@@ -6940,10 +7141,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/export-csv")
     def export_csv_download():
         """Download the catalog as a CSV -- from the browser you get a real file (Downloads),
-        not a copy silently written into the backup folder. Built in memory. Localhost-only.
+        not a copy silently written into the backup folder. Built in memory. Authorized only.
         (The CLI --export-csv still writes to disk on purpose, for scripting.)"""
-        if not _is_local_request():
-            return "localhost-only", 403
         import io
         import datetime
         buf = io.StringIO()
@@ -6959,15 +7158,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/panel/run", methods=["POST"])
     def api_panel_run():
-        """Start a whitelisted maintenance job as a background subprocess. Destructive
-        actions require confirm=true. One job at a time. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"error": "control panel is localhost-only"}), 403
+        """Start a whitelisted maintenance job as a background subprocess. Safe/read-only
+        actions are open to any authorized session (local or logged-in LAN); destructive
+        actions (file-changing -- organize, dedup --apply, rebuild-thumbnails) additionally
+        require the request to be from the local machine itself, same trust tier as
+        /api/branding/shortcut -- a logged-in LAN account can generate and browse, but not
+        run destructive maintenance on the owner's local files. Destructive actions also
+        require confirm=true."""
         body = request.get_json(silent=True) or {}
         action = str(body.get("action") or "").strip()
         spec = PANEL_ACTIONS.get(action)
         if not spec:
             return jsonify({"error": "unknown action"}), 400
+        if spec["destructive"] and not _is_local_request():
+            return jsonify({"error": "this action changes files; localhost-only"}), 403
         if spec["destructive"] and not body.get("confirm"):
             return jsonify({"error": "this action changes files; confirm required"}), 400
         with _panel_lock:
@@ -6985,8 +7189,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         edits + anything stuck in Favorites that --update's listing skips (edits aren't in that
         listing). Downloads the owner's OWN finished media; spends nothing. Localhost-only.
         Logs to the Activity card. Returns {saved, media_ids, is_video} or {error}."""
-        if not _is_local_request():
-            return jsonify({"error": "import is localhost-only"}), 403
         tid = str((request.get_json(silent=True) or {}).get("task_id") or "").strip()
         if not tid.isdigit():
             return jsonify({"error": "enter a numeric task id"}), 200
@@ -7016,8 +7218,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/panel/status")
     def api_panel_status():
-        if not _is_local_request():
-            return jsonify({"status": "idle"}), 403
         with _panel_lock:
             return jsonify({"status": _panel_job["status"], "action": _panel_job["action"],
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
@@ -7028,8 +7228,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_watch_status():
         """Live-mirror watcher health: is the push WebSocket connected right now, when
         did it last see an event, how many gens has it mirrored this server run."""
-        if not _is_local_request():
-            return jsonify({"connected": False}), 403
         with _watch_lock:
             return jsonify(dict(_watch_status))
 
@@ -7039,8 +7237,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         subprocess; the reader marks it 'cancelled'. Safe: dry-runs/backups do nothing to undo,
         and organize/dedup are reversible (organize writes an undo manifest, dedup quarantines).
         Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         with _panel_lock:
             proc = _panel_job.get("proc")
             running = _panel_job["status"] == "running"
@@ -7060,8 +7256,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         returns the current settings; POST MERGES only the fields present (so the schedule
         toggle and the workers selector -- two separate controls writing this one file --
         never wipe each other). Only non-destructive actions are schedulable. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({}), 403
         with _sched_lock:
             s = _load_sched()
             if request.method == "POST":
@@ -7201,11 +7395,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # core._cfg -- someone who just pasted a key via the wizard needs this to flip on
         # the very next page load, not after a process restart. Real catalog size (not the
         # current search/filter's `total`) is what decides "never synced yet".
+        #
+        # needs_key/catalog_empty no longer AND against _is_authorized_request(): reaching
+        # this line at all now guarantees it -- the global _enforce_front_door() hook (see
+        # its docstring) already enforced it for this exact request, since `/` carries no
+        # allowlist exemption. Before that hook existed, `/` had NO gate of its own, so an
+        # unauthenticated LAN viewer could land here and see the "paste your API key" setup
+        # wizard; that conjunct hid it from them. That viewer can no longer reach this line.
+        # `is_local` below (the header template's flag for showing the owner-only
+        # Generate/Loom/Panel controls vs. the read-only note) is hardcoded True for the
+        # identical reason -- same call site, same guarantee.
         import pixai_gallery_backup as _core
         _fresh_cfg = _core._load_config()
-        needs_key = _is_local_request() and not bool(
-            _fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
-        catalog_empty = _is_local_request() and not needs_key and (stats["images"] + stats["videos"]) == 0
+        needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
+        catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
 
         return render_template_string(
             INDEX_HTML,
@@ -7214,7 +7417,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             collection=collection, collections=collections,
             rows=page_rows, total=total, page=page, stats=stats,
             needs_key=needs_key, catalog_empty=catalog_empty,
-            build_stamp=build_stamp, is_local=_is_local_request(),
+            build_stamp=build_stamp, is_local=True,
+            logged_in_user=session.get("user"),
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
             date_from=date_from,
@@ -7328,10 +7532,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             sep = "&" if "?" in back else "?"
             return redirect(back + sep + urllib.parse.urlencode(params))
 
-        # Defense-in-depth: the UI hides this for LAN viewers, but the endpoint itself
-        # must refuse a non-local request -- it deletes from the owner's PixAI account.
-        if not _is_local_request():
-            return _back(delerr="deleting from PixAI is localhost-only")
         sel = request.form.getlist("media_ids")
         if not sel:
             return redirect(back)
@@ -7597,14 +7797,151 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return send_file(mem, mimetype="application/zip", as_attachment=True,
                          download_name="pixai_selection_{}.zip".format(n))
 
-    # --- Generation surface (localhost-gated) --------------------------------
+    # --- Generation surface (owner-only: local, or a logged-in LAN session) --
     # The Generate drawer talks to PixAI with the OWNER's API key and can spend
-    # credits. So every generation endpoint is gated to local requests: exposing the
-    # gallery on the LAN (--host 0.0.0.0) must never let another device use the key or
-    # spend credits. Read-only browsing stays open; generation is owner-only.
+    # credits. Every generation endpoint (and the rest of the ~44-site LAN-auth
+    # conversion -- panel, Loom, snippets/presets, branding writes, jobs,
+    # account/claims) is gated to _is_authorized_request(), NOT this narrower
+    # _is_local_request() -- exposing the gallery on the LAN (--host 0.0.0.0)
+    # must never let an UNAUTHENTICATED device use the key or spend credits, but
+    # a logged-in LAN session is deliberately trusted the same as the owner at
+    # the keyboard (see CHANGELOG.md's "Real session-based web login" entry).
+    # _is_local_request() itself now backs only the one deliberately-narrower
+    # exception (/api/branding/shortcut, which shells out to the SERVER machine's
+    # own PowerShell/COM) -- see that route's docstring. This comment previously
+    # claimed every generation endpoint was local-only, which stopped being true
+    # once the LAN-auth pass landed; fixed per an adversarial-review finding that
+    # it would otherwise mislead the next reader (2026-07-19).
     def _is_local_request():
         ra = (request.remote_addr or "").strip()
         return ra in ("127.0.0.1", "::1", "localhost", "")
+
+    def _is_authorized_request():
+        """THE canonical authorization gate for every network-originated request:
+        true for a localhost request (unchanged -- always trusted, no login needed
+        at the keyboard) OR a request carrying a valid logged-in session (see
+        /login below). Every genuine access-control gate that used to read
+        `_is_local_request()` was converted to this; a few purely-informational
+        uses (a template flag, an enrichment branch) were also broadened here for
+        consistency with the gates they mirror -- see CHANGELOG.md for the
+        site-by-site list. It's a plain function closed over this app's
+        `session`, so any FUTURE route added inside this same create_app() (e.g. a
+        mobile view) can call it directly -- that's the whole point of factoring
+        it out instead of inlining the check.
+
+        A session is re-validated against config.json's AUTH_USERS on every call
+        (not just trusted because `session.get("user")` is set): the plain Flask
+        session is a stateless, client-side signed cookie with nothing server-side
+        to revoke, so without this re-check a cookie captured off plain-HTTP LAN
+        traffic would keep working forever -- surviving both the real user
+        signing out (/logout bumps their sess_epoch) and the account being removed
+        (get_web_user_session_epoch returns None once it's gone). See that
+        function's docstring for the fuller writeup."""
+        if _is_local_request():
+            return True
+        user = session.get("user")
+        if user is None:
+            return False
+        import pixai_gallery_backup as core
+        current_epoch = core.get_web_user_session_epoch(user)
+        if current_epoch is None or current_epoch != session.get("sess_epoch"):
+            session.clear()   # stale/revoked -- drop it so later requests short-circuit above
+            return False
+        return True
+
+    # ---- Login rate limiting: in-memory per-IP failed-attempt counter ----------
+    # Lives in this closure (one dict per running server PROCESS), not config.json
+    # or a database -- it exists to blunt casual brute force, not to be a durable
+    # security ledger. Known, deliberate limitations (spelled out rather than
+    # silently assumed away): (1) resets to empty on every server restart; (2) if
+    # this app is ever run under a multi-worker server (gunicorn/uwsgi with >1
+    # worker process), each worker process keeps its OWN counter, so the effective
+    # lockout threshold becomes (workers x _LOGIN_MAX_FAILS) instead of the real
+    # one -- a genuine multi-worker deployment would need a shared store (Redis, a
+    # DB table) instead. Fine as-is for this app's normal deployment: one process,
+    # `python pixai_gallery.py`.
+    _login_lock = threading.Lock()
+    _login_attempts = {}   # ip -> {"fails": int, "first_fail": epoch, "locked_until": epoch|None}
+    _LOGIN_MAX_FAILS = 5
+    _LOGIN_WINDOW_S = 5 * 60     # failed attempts must land within this window to count together
+    _LOGIN_LOCKOUT_S = 15 * 60   # lockout duration once max fails is hit within the window
+
+    def _client_ip():
+        return (request.remote_addr or "").strip() or "unknown"
+
+    def _login_seconds_locked(ip):
+        """None if `ip` may attempt a login right now; otherwise seconds remaining
+        on its current lockout."""
+        import time as _time
+        with _login_lock:
+            rec = _login_attempts.get(ip)
+            if not rec or not rec.get("locked_until"):
+                return None
+            remaining = rec["locked_until"] - _time.time()
+            if remaining <= 0:
+                _login_attempts.pop(ip, None)   # lockout expired -- clean slate
+                return None
+            return int(remaining)
+
+    def _login_try_acquire(ip):
+        """Atomically re-check `ip`'s lockout status AND reserve/record this
+        attempt as a (provisional) failure, in the SAME critical section --
+        closes a TOCTOU race in the old check-then-act pattern (a fast, lock-
+        protected `locked_for` read, then verify_web_user()'s slow -- and
+        UNLOCKED -- scrypt comparison, then a separate fast, lock-protected write
+        after). Under that old pattern, many concurrent requests from one IP each
+        pass the early read before any of them reaches the write, so a burst of
+        arbitrarily many guesses lands "free" before the counter reflects more
+        than zero fails -- only the NEXT burst gets locked out, buying N guesses
+        per 15-minute cycle instead of the intended 5. Reserving the attempt here,
+        before the slow call runs, means the fail count (and therefore the lock)
+        is committed atomically at admission time, not completion time. A
+        genuinely correct login calls _login_clear() right after, which erases
+        this reservation along with the rest of the counter, so a real user's own
+        correct password is never penalized by it.
+
+        Also opportunistically sweeps any OTHER address's record whose failure
+        window has fully expired without ever reaching a lockout -- otherwise an
+        IP that fails 1-4 times and never returns sits in this dict forever (no
+        other code path ever removes it), an unbounded-growth vector from many
+        distinct real source addresses (no header-spoofing needed: IPv6 privacy
+        rotation or any real botnet/proxy pool). Low severity for a genuinely
+        LAN-only deployment, real the moment --host 0.0.0.0 sits behind a
+        port-forward or other routable path.
+
+        Returns None if the attempt may proceed, else seconds remaining on the
+        lockout that was already in effect (or was just now triggered)."""
+        import time as _time
+        now = _time.time()
+        with _login_lock:
+            stale = [k for k, r in _login_attempts.items()
+                     if k != ip and not r.get("locked_until")
+                     and now - r["first_fail"] > _LOGIN_WINDOW_S]
+            for k in stale:
+                _login_attempts.pop(k, None)
+
+            rec = _login_attempts.get(ip)
+            if rec and rec.get("locked_until"):
+                remaining = rec["locked_until"] - now
+                if remaining > 0:
+                    return int(remaining)
+                _login_attempts.pop(ip, None)   # lockout expired -- clean slate
+
+            rec = _login_attempts.setdefault(
+                ip, {"fails": 0, "first_fail": now, "locked_until": None})
+            if now - rec["first_fail"] > _LOGIN_WINDOW_S:   # window expired -- start fresh
+                rec["fails"] = 0
+                rec["first_fail"] = now
+            rec["fails"] += 1
+            if rec["fails"] >= _LOGIN_MAX_FAILS:
+                rec["locked_until"] = now + _LOGIN_LOCKOUT_S
+            return None
+
+    def _login_clear(ip):
+        """Called on a successful login -- a real owner/user typing their own
+        password correctly should never stay throttled by earlier typos."""
+        with _login_lock:
+            _login_attempts.pop(ip, None)
 
     def _gen_session():
         import pixai_gallery_backup as core
@@ -7620,8 +7957,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         `generationModels` connection actually honors category + a Newest sort but has leaner
         rows. So we use GraphQL ONLY when a category or Newest is requested, REST otherwise --
         the card renders both (leaner rows just hide the missing fields)."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only", "results": []}), 403
         q = (request.args.get("q") or "").strip()
         usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
         category = (request.args.get("category") or "").strip().lower()
@@ -7648,8 +7983,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         metadata the picker needs: model_type (for LoRA↔base compat), lora_base_model_type,
         trigger_words (to offer inserting into the prompt), and the author's tuned preset.
         Localhost-only; read-only, one API call."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only", "version_id": ""}), 403
         mid = (request.args.get("model_id") or "").strip()
         if not mid:
             return jsonify({"error": "model_id required", "version_id": ""}), 400
@@ -7882,8 +8215,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_account():
         """Credits + free-card balance for the header chip. Read-only, localhost-only.
         Fails soft to nulls so the header never breaks."""
-        if not _is_local_request():
-            return jsonify({}), 403
         try:
             core, session = _gen_session()
             me = core.account_info(session)
@@ -7950,8 +8281,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         live: a garbage key was reported as verified because the real cached key answered
         instead. Building the session by hand with the submitted key as the sole credential
         avoids that entirely. Localhost-only: makes a live network call with a pasted key."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         key = (body.get("api_key") or "").strip()
         if not key:
@@ -7994,8 +8323,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Claim ready daily rewards (free credits/stamina to the owner's OWN account -- no
         money moves). Localhost-only; the header click IS the confirmation. One bad claim
         doesn't abort the rest. Returns {claimed, credits}."""
-        if not _is_local_request():
-            return jsonify({"error": "claiming is localhost-only"}), 403
         try:
             core, session = _gen_session()
             claimed, credits = 0, 0
@@ -8021,8 +8348,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_snippets():
         """Prompt snippets/favorites, stored server-side (out_dir/prompt_snippets.json) so
         they persist with the backup and sync across the owner's machines. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"snippets": []}), 403
         path = out_dir / "prompt_snippets.json"
         with _snips_lock:
             if request.method == "POST":
@@ -8063,8 +8388,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_artwork_views():
         """Live view count for one published artwork -> the detail page's Views metric.
         Localhost-only (owner key). ?id=<artwork_id>."""
-        if not _is_local_request():
-            return jsonify({"views": None}), 403
         aid = (request.args.get("id") or "").strip()
         if not aid:
             return jsonify({"views": None}), 400
@@ -8077,12 +8400,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/your-art")
     def api_your_art():
         """'Your Art' panel: the owner's top published works ranked by likes (from the catalog,
-        so it works over LAN) enriched with LIVE view counts (fetched per artwork_id, localhost
-        only since that uses the owner key). Read-only, no spend."""
+        so it works over LAN) enriched with LIVE view counts (fetched per artwork_id, using the
+        owner's key -- same trust level as /api/artwork-views, which this loop is really just a
+        batched version of). Read-only, no spend.
+
+        No `_is_authorized_request()` conjunct here: this whole route is now covered by the
+        global front-door hook (see _enforce_front_door()'s docstring), so reaching this line
+        already guarantees it -- an explicit re-check here would be dead-always-true, the same
+        class of redundant check removed from the 43 individually-gated routes."""
         top = top_published_rows(db_path, 12)
         totals = published_totals(db_path)
         views_synced = False
-        if top and _is_local_request():
+        if top:
             try:
                 core, session = _gen_session()
                 import concurrent.futures as _cf
@@ -8221,8 +8550,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             cfg = load_branding(out_dir)
             return jsonify({"mark": cfg["mark"], "anim": cfg["anim"],
                             "anims": MARK_ANIMS, "marks": list_marks(out_dir)})
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
         have = {m["id"] for m in list_marks(out_dir)}
@@ -8247,7 +8574,19 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_branding_shortcut():
         """Write/refresh the Desktop launcher shortcut with the chosen mark's
         .ico. A .pyw can't carry an icon; the .lnk can -- this IS the app icon.
-        Machine-local action -> owner-only."""
+        Machine-local action -> owner-only.
+
+        Deliberately gated to _is_local_request(), NOT the broader
+        _is_authorized_request(): this calls make_launcher_shortcut(), which
+        shells out to PowerShell/WScript.Shell COM to write to the Desktop of the
+        machine the SERVER process runs on -- see that function's own docstring
+        ("caller must gate to localhost"). A logged-in LAN account is meant to
+        unlock spend-the-owner's-credits generation features, not trigger
+        PowerShell execution / filesystem writes on the host -- a materially
+        different trust boundary, so this one route was NOT broadened along with
+        the rest of the branding-writes group during the LAN-auth conversion
+        pass (unlike GET/POST /api/branding just above, which only writes
+        out_dir/branding.json -- ordinary app data, correctly broadened)."""
         if not _is_local_request():
             return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
@@ -8266,8 +8605,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_suggest_prompt():
         """Image-to-prompt for the gallery's 'Suggest prompt' button: PixAI's tag list +
         NL description for a media_id. Read-only, free, localhost-only. ?media_id="""
-        if not _is_local_request():
-            return jsonify({"suggestions": []}), 403
         mid = (request.args.get("media_id") or "").strip()
         if not mid:
             return jsonify({"suggestions": [], "error": "media_id required"}), 400
@@ -8281,8 +8618,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_tag_suggest():
         """Tag autocomplete for the drawer's prompt boxes (the site's Tag Suggestions
         dropdown). Read-only, free, localhost-only. ?q=<prefix>."""
-        if not _is_local_request():
-            return jsonify({"tags": []}), 403
         q = (request.args.get("q") or "").strip()
         if len(q) < 2:
             return jsonify({"tags": []})
@@ -8297,8 +8632,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Upload a local file from the picker -> PixAI media_id (the same free
         3-step S3 handshake as the CLI's --upload). Owner-only: localhost-gated,
         spends nothing."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "no file"}), 400
@@ -8416,8 +8749,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         bodies). POST {task_id, label?} imports one from a task the owner ran on the
         site: fetches the task, extracts chat.prompts + sceneId + modelId, saves it.
         Localhost-only (uses the owner's key on import)."""
-        if not _is_local_request():
-            return jsonify({"presets": {}}), 403
         with _presets_lock:
             presets = _load_presets()
             if request.method == "GET":
@@ -8505,8 +8836,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_price():
         """Live cost + free-card check for the drawer's current settings (generate OR
         edit). Read-only (no spend). Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only", "cost": None}), 403
         try:
             core, session = _gen_session()
             params, no_card, note = _params_and_nocard(core, request.get_json(silent=True) or {})
@@ -8526,8 +8855,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Submit a generation from the drawer, wait, and catalog it into THIS gallery's
         backup. Localhost-only (spends the owner's credits/cards). A matching free card is
         auto-applied unless no_card is set. Returns {task_id, media_ids, paid_credit}."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         try:
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
@@ -8568,8 +8895,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Instruct-edit an existing gallery image ('make it night'). Localhost-gated;
         auto-applies an Edit-Pro card unless no_card. Catalogs the result into this
         backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         try:
             from types import SimpleNamespace
             core, session = _gen_session()
@@ -8593,8 +8918,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """One-click enhance (panelplugin) on the Edit tab's source image. Localhost-gated;
         auto-applies a card if one matches. A rejected/unknown workflow just errors (no
         credits spent). Returns {task_id, media_ids, paid_credit}."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         try:
             from types import SimpleNamespace
             core, session = _gen_session()
@@ -8628,8 +8951,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_fix():
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
         pixel coords. Localhost-gated; returns {task_id} for the async poller."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
@@ -8702,8 +9023,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def loom_vendor(fname):
         """Serve the Loom's vendored JS (React/ReactDOM/Babel UMD builds) from
         loom/vendor/ so the page paints with zero network calls. Path-safe; absent
-        files 404. Not gated by _is_local_request -- these are static library files,
-        not gallery data, and /loom itself already enforces localhost-only above."""
+        files 404. Not gated by _is_authorized_request() -- these are static library
+        files, not gallery data, and /loom itself already enforces authorization above."""
         from flask import send_from_directory, abort
         vdir = (Path(__file__).resolve().parent / "loom" / "vendor").resolve()
         try:
@@ -8737,15 +9058,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/loom")
     def loom():
         """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
-        backend (window.storage swapped for /api/loom/*). Localhost-only.
+        backend (window.storage swapped for /api/loom/*). Authorized only.
 
         Two delivery paths (see LOOM_PAGE / LOOM_PAGE_BUNDLE above):
         default is the in-browser Babel-standalone transpile (unchanged); passing
         ?bundle=1 opts into the pre-built esbuild bundle IF loom/dist/ actually has
         one, else it quietly falls back to the default so a fresh checkout that
         hasn't run `npm run build` yet never breaks."""
-        if not _is_local_request():
-            return "The Loom is localhost-only.", 403
         import re as _re
         loom_dir = Path(__file__).resolve().parent / "loom"
         src = loom_dir / "master-storyboard.jsx"
@@ -8802,16 +9121,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/loom/get")
     def loom_get():
-        if not _is_local_request():
-            return jsonify({"value": None}), 403
         with _loom_lock:
             _loom_migrate()
             return jsonify({"value": _loom_kv_read(request.args.get("key") or "")})
 
     @app.route("/api/loom/set", methods=["POST"])
     def loom_set():
-        if not _is_local_request():
-            return jsonify({"ok": False}), 403
         p = request.get_json(silent=True) or {}
         k = p.get("key")
         if not k:
@@ -8826,8 +9141,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/loom/list")
     def loom_list():
-        if not _is_local_request():
-            return jsonify({"keys": []}), 403
         from urllib.parse import unquote
         pre = request.args.get("prefix") or ""
         with _loom_lock:
@@ -8837,8 +9150,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/loom/delete", methods=["POST"])
     def loom_delete():
-        if not _is_local_request():
-            return jsonify({"ok": False}), 403
         k = (request.get_json(silent=True) or {}).get("key")
         with _loom_lock:
             _loom_migrate()
@@ -8856,8 +9167,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         next shot's opening frame, chaining clips into one continuous scene. The clip must
         already be downloaded locally (it is, right after Generate-shot cataloged it).
         Localhost-only; the upload is free."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         mid = str(body.get("video_media_id") or "").strip()
         if not mid:
@@ -8905,8 +9214,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
         Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
         video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Localhost."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         try:
             import base64
             import hashlib
@@ -9003,8 +9310,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         segments with no audio stream (e.g. rendered without the "Generate audio" toggle)
         get matching-duration silence synthesized (anullsrc) so the concatenated audio
         track never desyncs across a segment boundary. body: {clips:[{mid,in,out}], total_seconds}"""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         import shutil
         if not shutil.which("ffmpeg"):
             return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
@@ -9114,8 +9419,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/loom/export-cancel", methods=["POST"])
     def api_loom_export_cancel():
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         with _export_lock:
             proc = _export_job.get("proc")
             if _export_job["status"] == "running" and proc is not None:
@@ -9178,8 +9481,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Full-bundle export: a zip of project.json (identical shape to the lightweight
         Backup .json) plus every referenced media file under media/<id><ext>. Localhost-only
         -- reads real files off disk, same trust level as /export-zip."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         import io
         import zipfile
         body = request.get_json(silent=True) or {}
@@ -9213,8 +9514,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         bundle instead of --update), and returns {project, thumbs} in the exact shape
         importJSON already expects, so both tiers share one client-side create-project path.
         Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         import io
         import time
         import zipfile
@@ -9265,8 +9564,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
         catalogs the result into this backup and returns media_ids + paid_credit. Read-only
         until done; localhost-only."""
-        if not _is_local_request():
-            return jsonify({"phase": "failed", "error": "localhost-only"}), 403
         tid = (request.args.get("task_id") or "").strip()
         if not tid:
             return jsonify({"phase": "failed", "error": "task_id required"}), 400
@@ -9300,8 +9597,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_jobs():
         """Reconstructed job list for the Jobs card (newest-first) -- the paper trail that
         survives a reload. The card polls this. Localhost-only, like the creation suite."""
-        if not _is_local_request():
-            return jsonify({"jobs": []}), 403
         import pixai_gallery_backup as core
         try:
             jobs = core.read_jobs(out_dir)
@@ -9315,8 +9610,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Register/update a job in the log. The Jobs card calls this the moment a gen is
         submitted (status=running) so it shows immediately; the authoritative done/failed
         events are written server-side by /api/task-status. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"ok": False}), 403
         body = request.get_json(silent=True) or {}
         jid = str(body.get("job_id") or "").strip()
         if not jid:
@@ -9331,8 +9624,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_jobs_dismiss():
         """Dismiss one job (job_id) or every finished job (finished:true) from the card --
         this is how a sticky failure gets cleared. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"ok": False}), 403
         import pixai_gallery_backup as core
         body = request.get_json(silent=True) or {}
         if body.get("finished"):
@@ -9353,8 +9644,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_workflows():
         """Live enhance-workflow catalog (id + name + type) for the Edit tab picker.
         Read-only; localhost-only (owner key)."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only", "workflows": []}), 403
         try:
             core, session = _gen_session()
             return jsonify({"workflows": core.workflow_catalog(session)})

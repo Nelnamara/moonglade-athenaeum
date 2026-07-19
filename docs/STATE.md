@@ -320,10 +320,13 @@ users.
   gating there covers both surfaces from one place. Scoped to the PixAI account specifically —
   `--organize`/`--dedup` are untouched (already dry-run-by-default, never network). Documented
   for users on the wiki's **Trust & Safety** page.
-- **A first-run wizard banner** appears on the gallery's home page for the owner only,
-  gating on a fresh (not module-cached) read of `config.json` and the true unfiltered catalog
-  count: no key configured → paste-a-key form; key present but zero rows → a "Sync now"
-  button. Neither shows once the catalog has real rows, or for a LAN request.
+- **A first-run wizard banner** appears on the gallery's home page, gated only on a fresh
+  (not module-cached) read of `config.json` and the true unfiltered catalog count: no key
+  configured → paste-a-key form; key present but zero rows → a "Sync now" button. Neither
+  shows once the catalog has real rows. There is no separate local-vs-LAN check on the
+  banner itself -- reaching `/` at all already requires `_is_authorized_request()` (the
+  front-door login gate), so any authorized viewer (the owner at the keyboard, or a
+  logged-in LAN account) sees it under the identical `needs_key`/`catalog_empty` condition.
   `/api/setup/save-key` validates the submitted key by hand-building a session with it as the
   sole credential — deliberately NOT via `core._make_session()`/`load_token()`, which prefer
   the module-cached `core._cfg` over a fresh file read (correct for normal operation, wrong

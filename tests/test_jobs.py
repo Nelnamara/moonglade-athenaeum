@@ -259,11 +259,12 @@ def test_resolve_orphan_jobs_survives_lookup_errors(tmp_path):
 def test_jobs_endpoints_are_localhost_only(tmp_path):
     cli = _client(tmp_path)
     core.append_job_event(tmp_path, "j1", status="running")
-    # GET from the LAN reveals nothing and 403s
+    # GET from the LAN reveals nothing and 401s (the global front-door hook, not
+    # api_jobs()'s own body -- see pixai_gallery.py's _enforce_front_door())
     r = _lan(cli, "get", "/api/jobs")
-    assert r.status_code == 403 and r.get_json()["jobs"] == []
+    assert r.status_code == 401 and "jobs" not in r.get_json()
     # register + dismiss are refused from the LAN
-    assert _lan(cli, "post", "/api/jobs", json={"job_id": "x"}).status_code == 403
-    assert _lan(cli, "post", "/api/jobs/dismiss", json={"job_id": "j1"}).status_code == 403
+    assert _lan(cli, "post", "/api/jobs", json={"job_id": "x"}).status_code == 401
+    assert _lan(cli, "post", "/api/jobs/dismiss", json={"job_id": "j1"}).status_code == 401
     # ...and nothing was written by those rejected calls
     assert [j["job_id"] for j in core.read_jobs(tmp_path)] == ["j1"]

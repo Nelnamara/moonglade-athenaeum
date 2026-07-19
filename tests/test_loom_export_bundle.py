@@ -127,7 +127,7 @@ def test_export_bundle_localhost_only(tmp_path):
     r_lan = cli.post("/api/loom/export-bundle", data=json.dumps({"project": _project()}),
                       content_type="application/json", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
     assert r.status_code == 200
-    assert r_lan.status_code == 403
+    assert r_lan.status_code == 401
 
 
 # --- import-bundle -----------------------------------------------------------------
@@ -209,4 +209,4 @@ def test_import_bundle_localhost_only(tmp_path):
     zip_bytes = _make_bundle(_project())
     r = cli.post("/api/loom/import-bundle", data={"file": (io.BytesIO(zip_bytes), "b.zip")},
                  content_type="multipart/form-data", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    assert r.status_code == 403
+    assert r.status_code == 401

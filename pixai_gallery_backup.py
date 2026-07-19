@@ -41,10 +41,12 @@ __version__ = "1.11.0"
 import argparse
 import csv
 import datetime
+import getpass
 import json
 import mimetypes
 import os
 import re
+import secrets
 import sys
 import time
 from collections import defaultdict, Counter
@@ -134,14 +136,23 @@ OPERATION_NAME = "listUserTaskSummaries"
 CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
 
 
+def _config_path():
+    """Resolve config.json's path: prefer a copy next to the script file, then the
+    current working directory (same order _load_config() has always read in). If
+    neither exists yet (first run / a fresh write), default to creating it next to
+    the script -- the natural "this install's config" location."""
+    for cfg_path in (Path(__file__).resolve().parent / "config.json", Path("config.json")):
+        if cfg_path.exists():
+            return cfg_path
+    return Path(__file__).resolve().parent / "config.json"
+
+
 def _load_config():
     """Read config.json. Returns {} quietly if absent so --help and offline modes
     (--organize, --catalog-stats) work without it; main() validates before API calls.
     Looks next to the script file first, then the current working directory."""
-    for cfg_path in (Path(__file__).resolve().parent / "config.json", Path("config.json")):
-        if cfg_path.exists():
-            break
-    else:
+    cfg_path = _config_path()
+    if not cfg_path.exists():
         return {}
     try:
         with open(cfg_path, encoding="utf-8") as f:
@@ -149,6 +160,174 @@ def _load_config():
     except (ValueError, OSError) as e:
         print("Warning: could not read config.json: {}".format(e))
         return {}
+
+
+def _save_config(cfg):
+    """Write config.json back to disk (indent=2, matching the file's existing style --
+    see api_setup_save_key's read-modify-write in pixai_gallery.py for the same idiom).
+    Used for one-time AUTH_SECRET_KEY generation (get_or_create_secret_key, called from
+    create_app) and --add-web-user/--remove-web-user (CLI, run by the owner, never over
+    the network). Not atomic-tmp-swapped: config.json is small and single-owner (either
+    the one running gallery process, or a CLI invocation you run yourself) -- the extra
+    machinery isn't worth it here, matching the existing api_setup_save_key precedent."""
+    _config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Web gallery login accounts -- session-based auth for pixai_gallery.py's Flask
+# app (gates every non-localhost request; see _is_authorized_request() there).
+# Stored in config.json (the existing convention for secrets -- it already holds
+# PIXAI_API_KEY): AUTH_SECRET_KEY signs the Flask session cookie, AUTH_USERS is a
+# list of {"username", "password_hash"} (werkzeug.security -- scrypt as of modern
+# werkzeug, timing-safe compare built in; no new pip install, werkzeug already
+# ships with Flask). Account lifecycle is CLI-only (--add-web-user /
+# --remove-web-user / --list-web-users below) BY DESIGN: there is no "create
+# account" form reachable over the network, so there's no unauthenticated path to
+# minting a login. If AUTH_USERS is empty, logging in from the LAN is simply
+# impossible -- there is no default/backdoor account, ever.
+# ---------------------------------------------------------------------------
+
+def get_or_create_secret_key():
+    """Return config.json's AUTH_SECRET_KEY, generating + persisting a fresh
+    secrets.token_hex(32) the first time this ever runs. Persisting it is what lets
+    Flask sessions (and therefore logins) survive a server restart -- without this,
+    every restart would silently log everyone out, which is a usability bug, not
+    just a security nitpick."""
+    cfg = _load_config()
+    key = (cfg.get("AUTH_SECRET_KEY") or "").strip()
+    if key:
+        return key
+    key = secrets.token_hex(32)
+    cfg["AUTH_SECRET_KEY"] = key
+    try:
+        _save_config(cfg)
+    except OSError as e:
+        print("Warning: could not persist AUTH_SECRET_KEY to config.json: {}. "
+              "Sessions will not survive a restart this run.".format(e))
+    return key
+
+
+def _find_web_user(cfg, username):
+    for u in (cfg.get("AUTH_USERS") or []):
+        if isinstance(u, dict) and u.get("username") == username:
+            return u
+    return None
+
+
+def list_web_users():
+    """Return [{"username": ...}, ...] from config.json's AUTH_USERS -- USERNAMES
+    ONLY, never password hashes. Used by --list-web-users."""
+    cfg = _load_config()
+    return [{"username": u["username"]} for u in (cfg.get("AUTH_USERS") or [])
+            if isinstance(u, dict) and u.get("username")]
+
+
+def add_or_update_web_user(username, password):
+    """Hash `password` (werkzeug, scrypt) and add/update `username` in config.json's
+    AUTH_USERS. Only the hash ever touches disk -- the plaintext password passed in
+    here is never written anywhere. Returns True if this replaced an existing
+    account's password, False if the account is new.
+
+    Also stamps/bumps `sess_epoch` -- see get_web_user_session_epoch()'s docstring
+    for why: a password change must invalidate any session cookie issued under the
+    old password immediately, not just future ones."""
+    from werkzeug.security import generate_password_hash
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("username must not be empty")
+    if not password:
+        raise ValueError("password must not be empty")
+    cfg = _load_config()
+    users = cfg.get("AUTH_USERS") or []
+    existing = _find_web_user(cfg, username)
+    replaced = existing is not None
+    next_epoch = int(existing.get("sess_epoch", 0)) + 1 if replaced else 0
+    new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
+    new_users.append({"username": username, "password_hash": generate_password_hash(password),
+                       "sess_epoch": next_epoch})
+    cfg["AUTH_USERS"] = new_users
+    _save_config(cfg)
+    return replaced
+
+
+def remove_web_user(username):
+    """Remove `username` from config.json's AUTH_USERS. Returns True if an account
+    was actually removed, False if no such username existed."""
+    username = (username or "").strip()
+    cfg = _load_config()
+    users = cfg.get("AUTH_USERS") or []
+    new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
+    removed = len(new_users) != len(users)
+    if removed:
+        cfg["AUTH_USERS"] = new_users
+        _save_config(cfg)
+    return removed
+
+
+def get_web_user_session_epoch(username):
+    """Current `sess_epoch` for `username`, or None if the account doesn't exist
+    (e.g. removed via --remove-web-user). A session's cookie embeds the epoch that
+    was current at login time; pixai_gallery.py's _is_authorized_request()
+    re-checks it against this on every request, so:
+      - removing the account invalidates any outstanding session for it immediately
+        (this returns None -> no epoch can ever match again), and
+      - /logout can revoke every outstanding session for that identity (not just
+        the browser that clicked it) by calling bump_web_user_session_epoch()
+        before clearing its own session.
+    Without this, a stolen session cookie (plain-HTTP LAN, packet capture) would
+    keep working after the legitimate user signs out or the account is removed,
+    since the stock Flask session is a stateless, client-side signed cookie with
+    nothing server-side to revoke -- see CHANGELOG.md for the fuller writeup."""
+    cfg = _load_config()
+    user = _find_web_user(cfg, (username or "").strip())
+    if user is None:
+        return None
+    return int(user.get("sess_epoch", 0))
+
+
+def bump_web_user_session_epoch(username):
+    """Increment `username`'s sess_epoch, invalidating every outstanding session
+    cookie for that identity in one move (used by /logout). No-op (returns False)
+    if the account no longer exists."""
+    username = (username or "").strip()
+    cfg = _load_config()
+    user = _find_web_user(cfg, username)
+    if user is None:
+        return False
+    user["sess_epoch"] = int(user.get("sess_epoch", 0)) + 1
+    _save_config(cfg)
+    return True
+
+
+_dummy_hash_cache = {}
+
+
+def _dummy_password_hash():
+    """A real (valid-format) werkzeug hash of a password nobody will ever type,
+    computed lazily and cached for this process. verify_web_user() runs a check
+    against this for an UNKNOWN username so an unknown-username login takes about
+    the same time as a known-username-wrong-password one -- no username enumeration
+    via response timing. Lazy + cached so a plain CLI run that never touches web
+    auth never pays scrypt's cost, and a running server pays it at most once."""
+    if "h" not in _dummy_hash_cache:
+        from werkzeug.security import generate_password_hash
+        _dummy_hash_cache["h"] = generate_password_hash("no-such-account-#dummy-timing-guard")
+    return _dummy_hash_cache["h"]
+
+
+def verify_web_user(username, password):
+    """Check username/password against config.json's AUTH_USERS. True only on an
+    exact match against a KNOWN username, via werkzeug's timing-safe
+    check_password_hash. An unknown username still runs a (dummy) hash check
+    instead of returning immediately, so response timing doesn't leak which
+    usernames exist."""
+    from werkzeug.security import check_password_hash
+    cfg = _load_config()
+    user = _find_web_user(cfg, (username or "").strip())
+    if user is None:
+        check_password_hash(_dummy_password_hash(), password or "")
+        return False
+    return check_password_hash(user.get("password_hash", ""), password or "")
 
 
 _cfg = _load_config()
@@ -5899,6 +6078,51 @@ def run_rebuild_thumbs(args):
     return {"swept": swept, "rows": len(rows)}
 
 
+# ---------------------------------------------------------------------------
+# Web gallery login account management (CLI-only -- see the module note above
+# get_or_create_secret_key). Deliberately interactive-only (no --password flag):
+# a password never belongs in shell history, a saved script, or a process list.
+# ---------------------------------------------------------------------------
+
+def run_add_web_user(args):
+    """CLI: add or update one gallery web-login account. Prompts for username
+    (plain input -- not secret) and password (getpass.getpass -- never echoed to
+    the terminal, never printed, never logged), then hashes and persists it via
+    add_or_update_web_user. Refuses to save on a blank entry or a confirmation
+    mismatch."""
+    username = input("Username: ").strip()
+    if not username:
+        sys.exit("Username must not be empty. Nothing was saved.")
+    password = getpass.getpass("Password: ")
+    if not password:
+        sys.exit("Password must not be empty. Nothing was saved.")
+    confirm = getpass.getpass("Confirm password: ")
+    if password != confirm:
+        sys.exit("Passwords did not match. Nothing was saved.")
+    replaced = add_or_update_web_user(username, password)
+    print("{} web-login account '{}'.".format("Updated" if replaced else "Added", username))
+
+
+def run_remove_web_user(args):
+    """CLI: remove one gallery web-login account by username."""
+    username = args.remove_web_user
+    if remove_web_user(username):
+        print("Removed web-login account '{}'.".format(username))
+    else:
+        print("No web-login account named '{}'.".format(username))
+
+
+def run_list_web_users(args):
+    """CLI: list gallery web-login USERNAMES only -- never prints password hashes."""
+    users = list_web_users()
+    if not users:
+        print("No web-login accounts yet. Add one with --add-web-user.")
+        return
+    print("Web-login accounts ({}):".format(len(users)))
+    for u in users:
+        print("  " + u["username"])
+
+
 def main():
     ap = argparse.ArgumentParser(description="Back up your own PixAI gallery.")
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
@@ -6207,6 +6431,17 @@ def main():
                     help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
                          "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
                          "named index. ~decode-bound, no network. Needs torch/pixeltable.")
+    webauth = ap.add_argument_group("web gallery login accounts (session-based auth)")
+    webauth.add_argument("--add-web-user", action="store_true",
+                    help="add or update a gallery web-login account: interactively prompts "
+                         "for a username and password (getpass -- never echoed/printed), "
+                         "hashes the password, and saves it to config.json's AUTH_USERS. "
+                         "Deliberately CLI-only -- no account-creation form is ever reachable "
+                         "over the network")
+    webauth.add_argument("--remove-web-user", default="", metavar="USERNAME",
+                    help="remove a gallery web-login account by username")
+    webauth.add_argument("--list-web-users", action="store_true",
+                    help="list gallery web-login usernames (never password hashes), then exit")
     args = ap.parse_args()
     set_verbose(getattr(args, "verbose", False))
     # Give every command a progress callback (terminal bar, or Control Panel markers under
@@ -6218,6 +6453,18 @@ def main():
         print("Note: --probe exits before --count runs. Run them separately:\n"
               "  python pixai_gallery_backup.py --count\n"
               "Continuing with --probe only.\n")
+
+    # Web-login account management: no PixAI token/network/out-dir needed at all,
+    # so these run before anything else touches --out.
+    if getattr(args, "list_web_users", False):
+        run_list_web_users(args)
+        return
+    if getattr(args, "remove_web_user", ""):
+        run_remove_web_user(args)
+        return
+    if getattr(args, "add_web_user", False):
+        run_add_web_user(args)
+        return
 
     out = Path(args.out)
     img_dir = out / "images"

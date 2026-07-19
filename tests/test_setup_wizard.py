@@ -48,7 +48,7 @@ class TestSaveKeyEndpoint:
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "sk-real"}),
                      content_type="application/json",
                      environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-        assert r.status_code == 403
+        assert r.status_code == 401
 
     def test_writes_config_only_after_successful_validation(self, tmp_path, monkeypatch):
         _redirect_config_to(monkeypatch, tmp_path)
@@ -63,7 +63,10 @@ class TestSaveKeyEndpoint:
 
     def test_does_not_write_config_when_validation_fails(self, tmp_path, monkeypatch):
         """The property that actually matters: a bad key must never even land on disk --
-        not written-then-rolled-back, never written at all."""
+        not written-then-rolled-back, never written at all. (config.json itself may now
+        exist by this point -- create_app() persists a session AUTH_SECRET_KEY into it on
+        startup, unrelated to this endpoint -- so the real assertion is that PIXAI_API_KEY
+        specifically was never added, not that the file is absent.)"""
         _redirect_config_to(monkeypatch, tmp_path)
         cfg_path = tmp_path / "config.json"
 
@@ -76,7 +79,8 @@ class TestSaveKeyEndpoint:
         d = r.get_json()
         assert "error" in d
         assert "rejected" in d["error"].lower()
-        assert not cfg_path.exists()
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+        assert "PIXAI_API_KEY" not in cfg
 
     def test_validates_the_submitted_key_not_a_cached_one(self, tmp_path, monkeypatch):
         """Regression test for the exact live bug: core._cfg (module-cached at import time)
@@ -96,7 +100,12 @@ class TestSaveKeyEndpoint:
                      content_type="application/json")
         assert "error" in r.get_json()
         assert seen_auth == ["Bearer brand-new-bogus-key"]  # never the cached old key
-        assert not (tmp_path / "config.json").exists()
+        # config.json may now exist (create_app() persists a session AUTH_SECRET_KEY on
+        # startup, unrelated to this endpoint) -- what must never happen is the bogus key
+        # landing in it.
+        cfg_path = tmp_path / "config.json"
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+        assert "PIXAI_API_KEY" not in cfg
 
     def test_preserves_other_config_fields(self, tmp_path, monkeypatch):
         _redirect_config_to(monkeypatch, tmp_path)
