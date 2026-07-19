@@ -6,6 +6,8 @@ import pixai_gallery as g
 from pixai_gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
                            purge_media_local, create_app)
 
+from tests.conftest import login_client
+
 
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
@@ -73,7 +75,7 @@ def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypat
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
 
-    client = create_app(tmp_path).test_client()
+    client = login_client(tmp_path)
     r = client.post("/delete-tasks-bulk", data={"media_ids": ["100", "200"], "back": "/"})
     assert "bulkdel=started" in r.headers["Location"]            # async now: kicks off + reports to the card
 
@@ -99,7 +101,7 @@ def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: None)
 
-    client = create_app(tmp_path).test_client()
+    client = login_client(tmp_path)
     client.post("/delete-tasks-bulk", data={"media_ids": ["a1"], "back": "/"})
 
     job = None
@@ -136,3 +138,41 @@ def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
     time.sleep(0.1)                                  # give any wrongly-spawned thread a beat
     assert fired == []                               # nothing deleted from the cloud
     assert {x["media_id"] for x in load_catalog(db)} == {"z1"}   # row intact
+
+
+def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypatch):
+    """A logged-in LAN account must NOT be able to trigger /delete-tasks-bulk --
+    same trust tier as /api/branding/shortcut and destructive Panel actions: this
+    destroys on the owner's real PixAI account, irreversibly. A LAN login unlocks
+    browsing and spending the owner's credits, not deleting the owner's cloud
+    generations. Regression test: this route's own _is_local_request() re-check
+    was dropped during the LAN-auth conversion pass (0fd8cee) and never replaced
+    -- the global front-door hook alone let ANY logged-in LAN session through,
+    unlike its siblings test_panel.py::test_destructive_action_refuses_authenticated_lan_session
+    and test_branding.py::test_shortcut_refuses_authenticated_lan_session, which
+    already covered this shape. Flagged by adversarial review and fixed 2026-07-19."""
+    import time
+    import pixai_gallery_backup as core
+    db = _seed(tmp_path, [_row(media_id="z2", task_id="TZ2", filename="z2.png")], {"z2.png": b"x"})
+    fired = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.append(tid))
+
+    client = login_client(tmp_path)
+    LAN = "203.0.113.5"
+    # Prove the session really is authenticated (it can reach an ordinary
+    # authorized-LAN route) before proving it still can't reach this one.
+    assert client.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
+    r = client.post("/delete-tasks-bulk", data={"media_ids": ["z2"], "back": "/"},
+                    environ_overrides={"REMOTE_ADDR": LAN})
+    assert r.status_code in (301, 302, 303, 307, 308)
+    assert "delerr=" in r.headers["Location"]        # refused by the route itself (delerr banner),
+    assert "/login" not in r.headers["Location"]     # NOT the front door (would be a /login redirect)
+    time.sleep(0.1)                                   # give any wrongly-spawned thread a beat
+    assert fired == []                                # nothing deleted from the cloud
+    assert {x["media_id"] for x in load_catalog(db)} == {"z2"}   # row intact
+
+    # The same account, from the actual local machine, still works (this isn't
+    # broken for the owner -- just not exposed to remote LAN sessions).
+    r2 = client.post("/delete-tasks-bulk", data={"media_ids": ["z2"], "back": "/"})
+    assert "bulkdel=started" in r2.headers["Location"]

@@ -15,6 +15,40 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Universal login required: the localhost bypass is gone** (2026-07-19, `pixai_gallery.py`).
+  Owner directive: "I would expect to require login via any path with this new setup whether
+  localhost hostname or IP." `_is_authorized_request()` -- the canonical gate the front-door hook
+  and every owner-level surface below call -- no longer short-circuits true for a request from
+  `127.0.0.1`/`::1`/`localhost`; a valid logged-in session is now the ONLY way in, from any
+  address, including the machine the server itself runs on. `_is_local_request()` still exists
+  and is still called, but now ONLY as an independent, STRICTER, additional requirement on the
+  couple of routes that must never run for a remote session even when logged in
+  (`/api/branding/shortcut`, destructive Panel actions -- see those entries below). A fresh
+  clone/install therefore has no way in at all until an account exists, so `/login` now detects
+  the zero-`AUTH_USERS` case (a fresh, uncached read of `list_web_users()`) and renders first-run
+  guidance above the sign-in form -- run `python pixai_gallery_backup.py --add-web-user` on the
+  server machine, then sign in -- so a confused first-time visitor sees why the form in front of
+  them can't succeed yet. Account creation stays deliberately CLI-only; `list_web_users()` returns
+  usernames only, never hashes, so the guidance can't leak anything.
+
+  **Adversarial review of this exact change** (2026-07-19) found one confirmed regression that
+  predates this pass but is exposed by it: `POST /delete-tasks-bulk` (irreversibly deletes tasks
+  from the owner's real PixAI cloud account) had lost its own `_is_local_request()` re-check
+  during the earlier LAN-auth conversion (`0fd8cee`) and was relying solely on the front door --
+  meaning any logged-in LAN account, not just the owner at the keyboard, could trigger it once
+  this pass made LAN logins reachable everywhere. Restored the check (same trust tier as
+  `/api/branding/shortcut` and destructive Panel actions); the "Delete from PixAI" bulk-action
+  button is now also hidden server-side for non-local sessions (new `can_delete_cloud` template
+  flag, computed from a real `_is_local_request()`, not the always-true `is_local` the header nav
+  uses) instead of rendering unconditionally for anyone who can reach the page. New regression
+  test `tests/test_purge.py::test_bulk_delete_cloud_refuses_authenticated_lan_session` (logs in
+  from a LAN address, asserts refusal + nothing fired/deleted, then confirms the same account
+  still works from localhost) -- the pre-existing `test_bulk_delete_cloud_is_localhost_only` only
+  ever exercised an *unauthenticated* remote client, so it was satisfied by the front door alone
+  regardless of whether this route's own gate existed, which is exactly why the regression shipped
+  unnoticed. Two stale docstrings/comments that still described localhost as an alternate path
+  into `_is_authorized_request()` (`_enforce_front_door()`'s docstring and a template comment above
+  the header nav) were corrected to match. Full suite green (653 tests).
 - **Default-deny "front door": one global gate replaces 43 scattered per-route checks,
   and closes every route that had never had one** (2026-07-19, `pixai_gallery.py`). The
   LAN-auth work above converted existing `_is_local_request()` checks to the broader

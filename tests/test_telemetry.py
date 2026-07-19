@@ -11,6 +11,8 @@ from unittest import mock
 import pixai_gallery as g
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
+from tests.conftest import login_client
+
 
 class _FixedNoon(_dt.datetime):
     """Freeze the wall clock at noon so /api/achievements never flags the 2-4am
@@ -110,7 +112,7 @@ def test_completionist_requires_every_non_feat():
 
 def _client(tmp_path, rows):
     save_catalog(tmp_path / "catalog.db", rows)
-    return create_app(tmp_path).test_client(), tmp_path
+    return login_client(tmp_path), tmp_path
 
 
 def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):

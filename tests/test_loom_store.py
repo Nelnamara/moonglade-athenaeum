@@ -4,11 +4,11 @@ legacy single store.json. The React app's window.storage API is unchanged; this
 tests the server backend underneath it."""
 import json
 
-from pixai_gallery import create_app
+from tests.conftest import login_client
 
 
 def _client(tmp_path):
-    return create_app(tmp_path).test_client()
+    return login_client(tmp_path)
 
 
 def test_set_get_roundtrip_and_isolation(tmp_path):

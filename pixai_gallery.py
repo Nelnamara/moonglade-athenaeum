@@ -3528,9 +3528,10 @@ document.addEventListener('DOMContentLoaded', function() {
   </span>
   <div class="head-nav">
     {# Owner-level surfaces (generation, The Loom, Panel, balance) are gated to
-       _is_authorized_request() -- localhost, OR a logged-in session (see /login).
-       Hide them for anyone else and show a small read-only note instead of dead
-       buttons. Browse/curate + community stay available to everyone. #}
+       _is_authorized_request() -- a logged-in session ONLY, no localhost bypass
+       (see /login and that function's docstring). Hide them for anyone else and
+       show a small read-only note instead of dead buttons. Browse/curate +
+       community stay available to everyone. #}
     {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
@@ -3782,7 +3783,9 @@ document.addEventListener('DOMContentLoaded', function() {
       <button onclick="bulkReplacePrompt();closeActionsMenu()">Find / replace in prompts</button>
       <div class="am-div"></div>
       <button class="am-danger" onclick="confirmBulkDelete();closeActionsMenu()" title="Remove from this local catalog only (keeps the cloud task)">Delete locally</button>
+      {% if can_delete_cloud %}
       <button class="am-danger" onclick="confirmBulkDeleteCloud();closeActionsMenu()" title="Delete the whole TASK from your PixAI account AND locally (irreversible)">Delete from PixAI</button>
+      {% endif %}
     </div>
   </div>
   <!-- View controls (right) -->
@@ -6345,6 +6348,17 @@ function savePrompt() {
         <span class="tagline">a library against the Void</span>
       </div>
     </div>
+    {% if no_accounts %}
+    <div class="setup-step" id="login-no-accounts" style="margin-bottom:14px;">
+      <b>First run:</b> there's no login account yet, so this form can't succeed --
+      account creation is deliberately CLI-only (kept off the web surface for security).
+      On the server machine, open a terminal in this folder and run:
+      <div class="setup-row">
+        <code>python pixai_gallery_backup.py --add-web-user</code>
+      </div>
+      Follow the prompts to set a username and password, then sign in below.
+    </div>
+    {% endif %}
     <div class="setup-step">
       <b>Sign in</b> to open this gallery from another device.
       <form method="post" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
@@ -7025,8 +7039,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # FRESH CSRF token -- one that was just consumed or never matched must
         # never be resubmittable.
         session["csrf"] = secrets.token_hex(16)
+        import pixai_gallery_backup as _core
+        # Fresh-install guidance: with zero accounts configured, this form can NEVER
+        # succeed (there is no account to log into, and account creation is
+        # deliberately CLI-only -- see add_or_update_web_user's docstring). Before the
+        # local-request bypass was removed (owner directive 2026-07-19) this was an
+        # edge case nobody but the owner ever hit; now it's the default state for
+        # EVERY fresh clone, on every machine, so the login page must say so instead
+        # of silently presenting a form that can only ever fail.
+        no_accounts = not _core.list_web_users()
         return render_template_string(LOGIN_HTML, error=error, csrf=session["csrf"],
-                                      next_url=next_url)
+                                      next_url=next_url, no_accounts=no_accounts)
 
     @app.route("/logout")
     def logout():
@@ -7064,9 +7087,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.before_request
     def _enforce_front_door():
-        """THE gate: every request must satisfy _is_authorized_request() (localhost,
-        or a logged-in session -- see that function's docstring further down) to
-        reach anything beyond the tiny allowlist above. This replaced 43
+        """THE gate: every request must satisfy _is_authorized_request() (a
+        logged-in session ONLY -- no localhost bypass, see that function's
+        docstring further down) to reach anything beyond the tiny allowlist
+        above. This replaced 43
         individual, easy-to-forget `if not _is_authorized_request(): ...` blocks
         that used to sit one-per-route (see CHANGELOG.md for the full list) with
         one place that can't be skipped when a new route is added later --
@@ -7404,11 +7428,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # wizard; that conjunct hid it from them. That viewer can no longer reach this line.
         # `is_local` below (the header template's flag for showing the owner-only
         # Generate/Loom/Panel controls vs. the read-only note) is hardcoded True for the
-        # identical reason -- same call site, same guarantee.
+        # identical reason -- same call site, same guarantee. `can_delete_cloud` is a
+        # DIFFERENT, narrower flag: it drives whether the "Delete from PixAI" bulk-action
+        # button renders at all. That button posts to /delete-tasks-bulk, which is gated
+        # to the stricter _is_local_request() (irreversible cloud deletion, same trust
+        # tier as /api/branding/shortcut) -- a real, un-hardcoded check, so a logged-in
+        # LAN session sees "Delete locally" but not "Delete from PixAI".
         import pixai_gallery_backup as _core
         _fresh_cfg = _core._load_config()
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
         catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
+        can_delete_cloud = _is_local_request()
 
         return render_template_string(
             INDEX_HTML,
@@ -7417,7 +7447,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             collection=collection, collections=collections,
             rows=page_rows, total=total, page=page, stats=stats,
             needs_key=needs_key, catalog_empty=catalog_empty,
-            build_stamp=build_stamp, is_local=True,
+            build_stamp=build_stamp, is_local=True, can_delete_cloud=can_delete_cloud,
             logged_in_user=session.get("user"),
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
@@ -7522,7 +7552,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         them locally, so cloud and catalog never drift. Task-level: deleting any
         image deletes its whole task (all batch images), cloud + local. Imports
         with no task id are purged locally only. Runs OFF-THREAD and reports progress
-        to the Activity card; localhost-only (this destroys on the owner's account)."""
+        to the Activity card; localhost-only (this destroys on the owner's account) --
+        same trust tier as /api/branding/shortcut and destructive Panel actions, gated
+        to the stricter _is_local_request(), NOT the broader _is_authorized_request()
+        that the front-door hook enforces for everything else. A logged-in LAN session
+        unlocks browsing and spending the owner's credits, not irreversible deletion
+        from the owner's real cloud account. (This check was dropped during the
+        LAN-auth conversion pass and restored 2026-07-19 per adversarial review --
+        see CHANGELOG.md.)"""
         import urllib.parse
         import uuid
         import pixai_gallery_backup as core   # lazy: avoid import cycle
@@ -7531,6 +7568,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         def _back(**params):
             sep = "&" if "?" in back else "?"
             return redirect(back + sep + urllib.parse.urlencode(params))
+
+        if not _is_local_request():
+            return _back(delerr="deleting from PixAI is localhost-only")
 
         sel = request.form.getlist("media_ids")
         if not sel:
@@ -7818,10 +7858,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     def _is_authorized_request():
         """THE canonical authorization gate for every network-originated request:
-        true for a localhost request (unchanged -- always trusted, no login needed
-        at the keyboard) OR a request carrying a valid logged-in session (see
-        /login below). Every genuine access-control gate that used to read
-        `_is_local_request()` was converted to this; a few purely-informational
+        true ONLY for a request carrying a valid logged-in session (see /login
+        below). Deliberately has NO localhost/loopback bypass -- owner directive
+        2026-07-19: "I would expect to require login via any path with this new
+        setup whether localhost hostname or IP." A fresh install therefore MUST
+        run `python pixai_gallery_backup.py --add-web-user` once (account creation
+        is deliberately CLI-only, kept off the web surface) before the web app is
+        reachable at all, from any address including 127.0.0.1 -- there is no
+        bootstrap/first-run bypass. `_is_local_request()` still exists and is still
+        used, but ONLY as an independent, stricter, ADDITIONAL requirement on the
+        couple of routes that must never run for a remote session even when
+        logged in (/api/branding/shortcut, destructive Panel actions) -- it is no
+        longer consulted here.
+
+        Every genuine access-control gate that used to read `_is_local_request()`
+        was converted to this during the LAN-auth pass; a few purely-informational
         uses (a template flag, an enrichment branch) were also broadened here for
         consistency with the gates they mirror -- see CHANGELOG.md for the
         site-by-site list. It's a plain function closed over this app's
@@ -7837,8 +7888,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         signing out (/logout bumps their sess_epoch) and the account being removed
         (get_web_user_session_epoch returns None once it's gone). See that
         function's docstring for the fuller writeup."""
-        if _is_local_request():
-            return True
         user = session.get("user")
         if user is None:
             return False
