@@ -18,6 +18,8 @@ import pytest
 import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
+from tests.conftest import login_client
+
 
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
@@ -29,6 +31,14 @@ def _client(tmp_path, rows=()):
     return create_app(tmp_path).test_client()
 
 
+def _authed_client(tmp_path, rows=()):
+    """Like _client(), but logged in for real -- for every test below EXCEPT
+    test_localhost_only (which deliberately stays anonymous to test the gate itself)."""
+    if rows:
+        save_catalog(tmp_path / "catalog.db", list(rows))
+    return login_client(tmp_path)
+
+
 def _redirect_config_to(monkeypatch, tmp_path):
     """core.__file__'s directory is where config.json is read/written. Point it at a
     throwaway tmp_path directory so a test can never touch the real one."""
@@ -38,7 +48,7 @@ def _redirect_config_to(monkeypatch, tmp_path):
 
 class TestSaveKeyEndpoint:
     def test_rejects_empty_key(self, tmp_path):
-        cli = _client(tmp_path)
+        cli = _authed_client(tmp_path)
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "  "}),
                      content_type="application/json")
         assert r.status_code == 400
@@ -54,7 +64,7 @@ class TestSaveKeyEndpoint:
         _redirect_config_to(monkeypatch, tmp_path)
         cfg_path = tmp_path / "config.json"
         monkeypatch.setattr(core, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 500})
-        cli = _client(tmp_path)
+        cli = _authed_client(tmp_path)
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "sk-real-key"}),
                      content_type="application/json")
         d = r.get_json()
@@ -73,7 +83,7 @@ class TestSaveKeyEndpoint:
         def _reject(session, raise_on_error=False):
             raise core.PixAIError("HTTP 401 Unauthorized")
         monkeypatch.setattr(core, "account_info", _reject)
-        cli = _client(tmp_path)
+        cli = _authed_client(tmp_path)
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "totally-bogus"}),
                      content_type="application/json")
         d = r.get_json()
@@ -95,7 +105,7 @@ class TestSaveKeyEndpoint:
             seen_auth.append(session.headers.get("Authorization"))
             raise core.PixAIError("401 Unauthorized")  # the NEW key is bogus; must be rejected
         monkeypatch.setattr(core, "account_info", _capture)
-        cli = _client(tmp_path)
+        cli = _authed_client(tmp_path)
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "brand-new-bogus-key"}),
                      content_type="application/json")
         assert "error" in r.get_json()
@@ -112,7 +122,7 @@ class TestSaveKeyEndpoint:
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text(json.dumps({"READ_ONLY": True, "USER_ID": "123"}))
         monkeypatch.setattr(core, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 0})
-        cli = _client(tmp_path)
+        cli = _authed_client(tmp_path)
         cli.post("/api/setup/save-key", data=json.dumps({"api_key": "sk-new"}),
                  content_type="application/json")
         cfg = json.loads(cfg_path.read_text())
@@ -122,25 +132,30 @@ class TestSaveKeyEndpoint:
 
 
 class TestWizardBannerGating:
-    def test_needs_key_banner_when_no_key_configured(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(core, "_load_config", lambda: {})
-        cli = _client(tmp_path)
+    def test_needs_key_banner_when_no_key_configured(self, tmp_path):
+        cli = _authed_client(tmp_path)
         html = cli.get("/").get_data(as_text=True)
         assert 'id="setup-wizard"' in html
         assert "Paste your PixAI API key" in html
         assert "Run your first sync" not in html
 
-    def test_catalog_empty_banner_when_key_present_but_no_rows(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(core, "_load_config", lambda: {"PIXAI_API_KEY": "sk-x"})
-        cli = _client(tmp_path)  # zero rows
+    def test_catalog_empty_banner_when_key_present_but_no_rows(self, tmp_path):
+        cli = _authed_client(tmp_path)  # zero rows
+        cfg_path = tmp_path / "config.json"
+        cfg = json.loads(cfg_path.read_text())
+        cfg["PIXAI_API_KEY"] = "sk-x"
+        cfg_path.write_text(json.dumps(cfg))
         html = cli.get("/").get_data(as_text=True)
         assert "Run your first sync" in html
         assert "Paste your PixAI API key" not in html
 
-    def test_no_banner_once_catalog_has_rows(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(core, "_load_config", lambda: {"PIXAI_API_KEY": "sk-x"})
-        cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                       created_at="2025-01-01T00:00:00")])
+    def test_no_banner_once_catalog_has_rows(self, tmp_path):
+        cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                             created_at="2025-01-01T00:00:00")])
+        cfg_path = tmp_path / "config.json"
+        cfg = json.loads(cfg_path.read_text())
+        cfg["PIXAI_API_KEY"] = "sk-x"
+        cfg_path.write_text(json.dumps(cfg))
         html = cli.get("/").get_data(as_text=True)
         assert 'id="setup-wizard"' not in html
 

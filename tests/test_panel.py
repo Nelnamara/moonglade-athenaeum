@@ -6,6 +6,8 @@ import pixai_gallery as g
 import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
+from tests.conftest import login_test_client, login_existing_client
+
 
 def _csrf(html):
     m = re.search(r'name="csrf" value="([^"]+)"', html)
@@ -23,8 +25,16 @@ def _client(tmp_path):
     return create_app(tmp_path)
 
 
+def _authed_client(tmp_path):
+    """Like _client(tmp_path).test_client(), but logged in for real -- for every test
+    below EXCEPT test_destructive_action_refuses_authenticated_lan_session (which does
+    its own explicit login inline) and test_cancel_is_localhost_only (which deliberately
+    stays anonymous to prove the gate itself)."""
+    return login_test_client(_client(tmp_path))
+
+
 def test_panel_page_renders_with_actions(tmp_path):
-    html = _client(tmp_path).test_client().get("/panel").get_data(as_text=True)
+    html = _authed_client(tmp_path).get("/panel").get_data(as_text=True)
     assert "Control Panel" in html
     assert "Sync now" in html
     # ACTIONS drives the Maintenance BUTTONS (panel_visible only); ALL_ACTIONS drives the
@@ -43,7 +53,7 @@ def test_panel_page_renders_with_actions(tmp_path):
 
 
 def test_run_rejects_unknown_action(tmp_path):
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     assert cli.post("/api/panel/run", json={"action": "rm -rf"}).status_code == 400
 
 
@@ -52,7 +62,7 @@ def test_run_destructive_needs_confirm(tmp_path, monkeypatch):
     spawned = {"n": 0}
     monkeypatch.setattr(subprocess, "Popen",
                         lambda *a, **k: spawned.update(n=spawned["n"] + 1))
-    cli = _client(tmp_path).test_client()      # create_app's build-stamp may spawn git
+    cli = _authed_client(tmp_path)      # create_app's build-stamp may spawn git
     base = spawned["n"]
     r = cli.post("/api/panel/run", json={"action": "dedup-apply"})   # no confirm
     assert r.status_code == 400 and "confirm" in r.get_json()["error"]
@@ -65,10 +75,24 @@ def test_destructive_action_refuses_authenticated_lan_session(tmp_path, monkeypa
     actions, these change local files on the SERVER's own machine, same trust tier as
     /api/branding/shortcut. A LAN login unlocks spend-the-owner's-credits generation
     features, not host-filesystem mutation."""
-    import subprocess
+    import subprocess, io
     spawned = {"n": 0}
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda *a, **k: spawned.update(n=spawned["n"] + 1))
+
+    class FakeProc:
+        """A real Popen-alike: the final call in this test succeeds (localhost),
+        so _panel_run really does spawn the reader thread on whatever Popen
+        returns -- it needs .stdout (iterable) and .wait(), unlike a plain
+        counter callback that returns None and crashes that thread."""
+        def __init__(self):
+            self.stdout = io.StringIO("")
+        def wait(self):
+            return 0
+
+    def fake_popen(*a, **k):
+        spawned["n"] += 1
+        return FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     LAN = "203.0.113.5"
@@ -101,8 +125,7 @@ def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
             return 0
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: FakeProc())
 
-    app = _client(tmp_path)
-    cli = app.test_client()
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/panel/run", json={"action": "sync"})
     assert r.get_json()["ok"] is True
     # reader thread is a daemon; poll status until it finishes
@@ -117,7 +140,7 @@ def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
 
 
 def test_schedule_roundtrip_and_safe_only(tmp_path):
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     # default: disabled
     assert cli.get("/api/panel/schedule").get_json()["enabled"] is False
     # save a valid safe schedule -- sync-videos has NO panel button anymore (it's
@@ -153,7 +176,7 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
         return FakeProc()
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     cli.post("/api/panel/run", json={"action": "audit"})
     import time
     time.sleep(0.05)
@@ -168,7 +191,7 @@ def test_workers_setting_persists_merges_and_reaches_argv(tmp_path, monkeypatch)
     the scheduled run use it, is injected as --workers N into the spawned argv, and its
     partial POST merges (doesn't wipe the schedule fields the other control wrote)."""
     import subprocess
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
 
     # seed a schedule, then a workers-ONLY post must not wipe it (merge, not replace)
     cli.post("/api/panel/schedule", json={"enabled": True, "action": "sync", "interval_hours": 12})
@@ -207,13 +230,19 @@ def test_watch_status_default_shape(tmp_path):
     """conftest sets MOONGLADE_DISABLE_WATCH=1 for every test (see its docstring --
     without it, create_app() would open a real WebSocket to PixAI using whatever real
     credentials happen to be on this machine, on every single test in the suite).
-    /api/watch/status must still answer safely with the never-started default shape,
-    and stay localhost-gated like every other panel status endpoint."""
-    cli = _client(tmp_path).test_client()
+    /api/watch/status must still answer safely with the never-started default shape.
+    It's NOT actually localhost-only (api_watch_status() has no _is_local_request()
+    check of its own, just ordinary read data) -- an authenticated LAN session can
+    read it too, same as most routes here. The anonymous check below proves an
+    UNauthenticated request is still refused outright, using a still-anonymous
+    client off the same app rather than claiming address alone gates this route."""
+    app = _client(tmp_path)
+    anon = app.test_client()
+    r = anon.get("/api/watch/status", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r.status_code == 401
+    cli = login_test_client(app)
     d = cli.get("/api/watch/status").get_json()
     assert d["connected"] is False and d["mirrored"] == 0 and d["events_seen"] == 0
-    r = cli.get("/api/watch/status", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 401
 
 
 def test_watch_autostarts_unless_disabled(tmp_path, monkeypatch):
@@ -254,7 +283,7 @@ def test_run_sync_action_spawns_sync_flag(tmp_path, monkeypatch):
         return FakeProc()
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/panel/run", json={"action": "sync"})
     assert r.get_json()["ok"] is True
     import time
@@ -265,25 +294,38 @@ def test_run_sync_action_spawns_sync_flag(tmp_path, monkeypatch):
 # --- Server control: stop / restart from the browser (Homebridge-style) ---
 
 def test_ping_is_open(tmp_path):
-    cli = _client(tmp_path).test_client()
+    """Despite api_ping()'s own "Open" docstring, the global front door (added after
+    that comment was written) now gates it like every other /api/ route -- it's listed
+    among the previously-fully-ungated routes in _enforce_front_door()'s docstring and
+    covered by tests/test_web_auth.py's parametrized denial tests. This just needs a
+    logged-in session like everything else here."""
+    cli = _authed_client(tmp_path)
     assert cli.get("/api/ping").get_json() == {"ok": True}
 
 
 def test_server_stop_schedules_exit_0(tmp_path, monkeypatch):
+    """Per the LAN-auth pass's commit message ("/api/server/stop ... stay open to any
+    logged-in LAN session" -- owner decision), this is trusted for ANY authenticated
+    session, not localhost-only -- api_server_stop() has no _is_local_request() check
+    of its own. The anonymous check below proves an unauthenticated request is
+    refused regardless of address; the authenticated checks after prove a logged-in
+    session can stop it from either address."""
     codes = []
     monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
     cli = _client(tmp_path).test_client()
+    r0 = cli.post("/api/server/stop", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r0.status_code == 401 and codes == []
+    cli = login_existing_client(cli)
     d = cli.post("/api/server/stop").get_json()
     assert d == {"ok": True, "action": "stop"} and codes == [0]      # stop -> exit 0
-    # LAN device can't stop the owner's server
-    r = cli.post("/api/server/stop", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 401 and codes == [0]                     # unchanged
+    d2 = cli.post("/api/server/stop", environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).get_json()
+    assert d2 == {"ok": True, "action": "stop"} and codes == [0, 0]  # LAN session: also trusted
 
 
 def test_server_restart_needs_supervisor(tmp_path, monkeypatch):
     codes = []
     monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     # not supervised -> refused (409), no exit scheduled
     monkeypatch.setattr(g, "_supervised", lambda: False)
     r = cli.post("/api/server/restart")
@@ -296,14 +338,14 @@ def test_server_restart_needs_supervisor(tmp_path, monkeypatch):
 
 def test_panel_shows_restart_state(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_supervised", lambda: True)
-    html = _client(tmp_path).test_client().get("/panel").get_data(as_text=True)
+    html = _authed_client(tmp_path).get("/panel").get_data(as_text=True)
     assert "Restart server" in html and "Stop server" in html
 
 
 # --- Cancel a running maintenance job from the browser (no Task Manager) ---
 
 def test_cancel_with_no_job_is_a_noop(tmp_path):
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/panel/cancel")
     assert r.get_json() == {"ok": False, "error": "no job is running"}
 
@@ -343,7 +385,7 @@ def test_cancel_terminates_running_job(tmp_path, monkeypatch):
     proc = CancelableProc()
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: proc)
 
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     assert cli.post("/api/panel/run", json={"action": "dedup-dry"}).get_json()["ok"] is True
 
     # wait for the job to actually be 'running' (reader thread picked up the proc)
@@ -392,6 +434,13 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: FakeProc(argv))
 
     cli = create_app(tmp_path).test_client()
+    # An unauthenticated LAN request can't kick off exports -- checked FIRST, while
+    # `cli` is still anonymous (api_loom_export() has no extra _is_local_request()
+    # check of its own; once logged in, a LAN session is trusted the same as the owner).
+    r = cli.post("/api/loom/export", json={"clips": []},
+                 environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r.status_code == 401
+    cli = login_existing_client(cli)
     r = cli.post("/api/loom/export",
                  json={"clips": [{"mid": "v1", "in": 0, "out": 2}], "total_seconds": 2})
     assert r.get_json().get("ok") is True
@@ -402,16 +451,12 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
         time.sleep(0.02)
     assert d["status"] == "done" and d["progress"] == 100
     assert cli.get("/api/loom/export-file").status_code == 200
-    # LAN can't kick off exports
-    r = cli.post("/api/loom/export", json={"clips": []},
-                 environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 401
 
 
 def test_loom_export_needs_a_video(tmp_path, monkeypatch):
     import shutil
     monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg")
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [{"mid": "nope", "in": 0}]})
     assert r.status_code == 400 and "no finished shot" in r.get_json()["error"]
 
@@ -483,7 +528,7 @@ def _two_video_client(tmp_path):
              created_at="2025-01-01T00:00:00"),
         _row(media_id="v2", filename="videos/shot_v2.mp4", is_video="1",
              created_at="2025-01-01T00:00:00")])
-    return create_app(tmp_path).test_client()
+    return login_test_client(create_app(tmp_path))
 
 
 def _ffmpeg_call(captured):

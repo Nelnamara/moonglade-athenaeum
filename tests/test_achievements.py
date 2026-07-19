@@ -4,6 +4,8 @@ read-only catalog data (no network, no spend)."""
 import pixai_gallery as g
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
+from tests.conftest import login_client
+
 
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
@@ -78,7 +80,7 @@ def test_state_roundtrip_and_soft_fail(tmp_path):
 
 def _client(tmp_path, rows):
     save_catalog(tmp_path / "catalog.db", rows)
-    return create_app(tmp_path).test_client(), tmp_path
+    return login_client(tmp_path), tmp_path
 
 
 def test_api_achievements_marks_seen_once(tmp_path):

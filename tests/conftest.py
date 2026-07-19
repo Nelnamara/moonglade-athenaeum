@@ -1,5 +1,7 @@
 """Shared fixtures for the pixai-gallery-backup test suite."""
 import os
+import re
+
 import pytest
 
 import pixai_gallery_backup as core
@@ -62,3 +64,66 @@ def mock_session(mocker):
     """Return a MagicMock that quacks like a requests.Session."""
     session = mocker.MagicMock()
     return session
+
+
+# ---------------------------------------------------------------------------
+# Real-login test helpers
+# ---------------------------------------------------------------------------
+# pixai_gallery.py's _is_authorized_request() (owner directive 2026-07-19: "I would
+# expect to require login via any path with this new setup whether localhost
+# hostname or IP") has NO localhost bypass anymore -- true only for a request
+# carrying a valid logged-in session. Every test that just needs to be past the
+# front door (not testing the gate itself) should log in for real through these
+# helpers rather than relying on the test client's default REMOTE_ADDR=127.0.0.1,
+# which no longer buys anything. Tests whose entire point IS the gate/boundary
+# itself (tests/test_web_auth.py, the "refuses authenticated LAN session" tests,
+# anything asserting a 401/403/redirect-to-login) should keep hand-rolling an
+# unauthenticated (or deliberately-still-anonymous) client instead -- see
+# tests/test_branding.py::test_shortcut_refuses_authenticated_lan_session and
+# tests/test_panel.py::test_destructive_action_refuses_authenticated_lan_session,
+# which already do the same GET-csrf-then-POST dance these helpers wrap.
+_TEST_USERNAME = "tester"
+_TEST_PASSWORD = "a-real-test-password-1"
+
+
+def _do_login(cli, username, password):
+    """Perform the real GET (csrf) + POST /login flow against `cli` and return it,
+    now authenticated. Asserts the login actually redirected (succeeded) rather
+    than silently leaving callers with a still-anonymous client on a typo/regression."""
+    html = cli.get("/login").get_data(as_text=True)
+    m = re.search(r'name="csrf" value="([^"]+)"', html)
+    assert m, "login page did not render a csrf hidden field"
+    r = cli.post("/login", data={"username": username, "password": password,
+                                 "csrf": m.group(1)})
+    assert r.status_code in (301, 302, 303, 307, 308), (
+        "test login helper failed to authenticate: {}".format(
+            r.get_data(as_text=True)[:300]))
+    return cli
+
+
+def login_existing_client(cli, username=_TEST_USERNAME, password=_TEST_PASSWORD):
+    """Authenticate an ALREADY-BUILT test client IN PLACE: create a real account (via
+    core.add_or_update_web_user) then log `cli` itself in. Use this when a test needs
+    to make some calls anonymously first (e.g. to prove an unauthenticated/LAN request
+    is refused) and then continue as a logged-in session against the very same client/
+    app instance."""
+    core.add_or_update_web_user(username, password)
+    return _do_login(cli, username, password)
+
+
+def login_test_client(app, username=_TEST_USERNAME, password=_TEST_PASSWORD):
+    """Given an already-built create_app(tmp_path) app (e.g. one a test file's own
+    helper seeded with a catalog), create a real account and return a FRESH,
+    now-authenticated test_client() for it."""
+    core.add_or_update_web_user(username, password)
+    return _do_login(app.test_client(), username, password)
+
+
+def login_client(tmp_path, username=_TEST_USERNAME, password=_TEST_PASSWORD):
+    """The common one-liner: build create_app(tmp_path) AND log into it in one call.
+    Returns the authenticated test client, ready to use exactly like
+    create_app(tmp_path).test_client() used to be before the local-request bypass
+    was removed."""
+    from pixai_gallery import create_app
+    return login_test_client(create_app(tmp_path), username=username, password=password)
+

@@ -132,7 +132,8 @@ def test_similar_excludes_self_and_limits_k(monkeypatch):
 def test_api_similar_route(tmp_path, monkeypatch):
     """Hydrates neighbours like /api/gallery-images, drops ids no longer in the catalog,
     and soft-404s an unknown media_id — the sidecar itself is mocked."""
-    from pixai_gallery import create_app, save_catalog, CATALOG_FIELDS
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    from tests.conftest import login_client
 
     def row(**kw):
         return {f: "" for f in CATALOG_FIELDS} | kw
@@ -147,7 +148,7 @@ def test_api_similar_route(tmp_path, monkeypatch):
     monkeypatch.setattr(pixai_similar, "similar",
                         lambda p, k=24, exclude_media_id=None: [("n1", 0.9), ("gone", 0.8)])
 
-    cli = create_app(tmp_path).test_client()
+    cli = login_client(tmp_path)
     d = cli.get("/api/similar/q").get_json()
     assert d["query"] == "q"
     assert [i["media_id"] for i in d["images"]] == ["n1"]        # "gone" not in catalog -> dropped

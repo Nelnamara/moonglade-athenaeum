@@ -143,6 +143,22 @@ def test_login_page_renders_form_with_csrf(tmp_path):
     assert _csrf(html)   # a token is present
 
 
+def test_login_page_shows_first_run_guidance_until_an_account_exists(tmp_path):
+    """With zero AUTH_USERS configured (the fresh-clone default now that the
+    local-request bypass is gone), /login must tell the visitor how to create the
+    first account (--add-web-user) instead of silently presenting a form that can
+    never succeed. The banner disappears -- and the ordinary sign-in form keeps
+    working -- the moment a real account exists."""
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    assert "--add-web-user" in html
+    assert 'name="username"' in html and 'name="password"' in html   # form still present/functional
+    core.add_or_update_web_user("alice", "hunter2")
+    html2 = cli.get("/login").get_data(as_text=True)
+    assert "--add-web-user" not in html2
+    assert 'name="username"' in html2 and 'name="password"' in html2
+
+
 def test_login_success_sets_session_and_redirects(tmp_path):
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
@@ -320,11 +336,17 @@ def test_logout_clears_session(tmp_path):
 # _is_authorized_request() gate itself
 # ---------------------------------------------------------------------------
 
-def test_local_request_authorized_without_any_session(tmp_path):
-    """A local request is never blocked, even with zero login accounts configured
-    and no session at all -- the owner at the keyboard is always trusted."""
+def test_local_request_without_session_is_now_denied_too(tmp_path):
+    """Owner directive 2026-07-19: "I would expect to require login via any path with
+    this new setup whether localhost hostname or IP." Local (127.0.0.1) is NO LONGER
+    trusted by default -- this is the direct behavioral flip of the old
+    _is_local_request() bypass this test used to assert (see
+    test_nonlocal_request_without_session_is_denied for the LAN-side twin of this
+    same rule, which never changed)."""
     cli = _client(tmp_path).test_client()
-    assert cli.get("/api/jobs").status_code == 200   # default test-client REMOTE_ADDR is 127.0.0.1
+    r = cli.get("/api/jobs")   # default test-client REMOTE_ADDR is 127.0.0.1
+    assert r.status_code == 401
+    assert r.get_json() == {"error": "authentication required"}
 
 
 def test_nonlocal_request_without_session_is_denied(tmp_path):
@@ -548,14 +570,21 @@ def test_previously_ungated_html_post_route_now_redirects_to_login(tmp_path, pat
 
 
 @pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_JSON_GET + _PREVIOUSLY_UNGATED_HTML_GET)
-def test_previously_ungated_get_route_still_works_from_localhost(tmp_path, path):
-    """The owner's own machine must keep working exactly as before with zero
-    accounts configured -- these routes gaining a gate must never block a
-    request whose REMOTE_ADDR is the loopback address (the test client's
-    default). A 404/other non-2xx for a deliberately-nonexistent id is fine;
-    only a login redirect or a 401 would mean localhost got wrongly gated."""
+def test_previously_ungated_get_route_now_denied_from_localhost_too(tmp_path, path):
+    """Owner directive 2026-07-19 retired the loopback bypass entirely -- localhost is
+    NOT special anymore, so every one of these previously-fully-ungated routes must
+    deny an anonymous LOCAL request (default test-client REMOTE_ADDR=127.0.0.1)
+    exactly the same as the LAN-address versions above
+    (test_previously_ungated_json_get_route_now_denied /
+    test_previously_ungated_html_get_route_now_redirects_to_login). This is the
+    direct behavioral flip of what this test used to assert (that localhost was
+    always exempt) -- proving the bypass's removal actually took effect everywhere,
+    not just for routes exercised via an explicit LAN REMOTE_ADDR override."""
     cli = _client(tmp_path).test_client()
-    r = cli.get(path)
-    assert r.status_code != 401
-    assert not (r.status_code in (301, 302, 303, 307, 308)
-               and r.headers.get("Location", "").startswith("/login"))
+    r = cli.get(path)   # default test-client REMOTE_ADDR is 127.0.0.1 -- deliberately no override
+    if path in _PREVIOUSLY_UNGATED_JSON_GET:
+        assert r.status_code == 401
+        assert r.get_json() == {"error": "authentication required"}
+    else:
+        assert r.status_code in (301, 302, 303, 307, 308)
+        assert r.headers["Location"].startswith("/login")
