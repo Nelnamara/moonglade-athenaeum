@@ -15,6 +15,22 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Job Tracker Step 2 complete: the CLI now logs to the same activity feed** (2026-07-19,
+  `pixai_gallery_backup.py`). Closes the last of the three original Step 2 sources — Control
+  Panel actions and bulk cloud-delete were already wired; running the CLI bare from a terminal
+  (`--sync`, `--update`, `--generate`, `--generate-video`, plain download) now also writes to
+  `out_dir/jobs.jsonl`, each run getting a `cli-<uuid>` job id (mirroring the existing
+  `panel-`/`bulkdel-` convention). Logging is fail-soft (wrapped so a logging error can never
+  break the actual command) and a no-op when spawned by the panel (`MOONGLADE_PROGRESS=1`), so a
+  panel-run job still logs exactly once, never twice. New `tests/test_cli_job_logging.py` (10
+  tests) covers start→done, failure→`failed`+error+re-raise, progress-heartbeat collapsing into
+  one job entry, and the panel-parity no-duplicate case. Full suite green.
+- **Mobile polish: three popups no longer run off a 320px-wide screen** (2026-07-19). The Job
+  Tracker/Activity tray (`#jobs-tray`) and the snippet/tag popups (`#snip-menu`, `#tag-suggest`)
+  had flat `max-width`s that could exceed the viewport itself on the narrowest real phone widths
+  (confirmed live at 320px: the tray hung 60px off the right edge). All three now clamp to
+  `min(<old-max>, calc(100vw - Npx))`; desktop/tablet sizing is unchanged. Live-verified at
+  320px.
 - **Job Tracker + achievement toasts, now shared with the Loom** (2026-07-18, `static/mg-notify.js`
   — the fifth shared file, and now the single source: the gallery's own inline copies are
   deleted). Extracted `Ach` (the achievement modal + celebration toasts), `Toast` (general

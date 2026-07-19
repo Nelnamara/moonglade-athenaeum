@@ -274,11 +274,38 @@ def _progress_line(done, total, new=0, width=40):
 PANEL_PROGRESS_PREFIX = "~=MGPROG=~"
 
 
-def _make_progress():
+def _make_progress(out_dir=None, job_id=None):
     """Return a progress(done, total, new=0) callback. Under the Control Panel
     (env MOONGLADE_PROGRESS=1) it emits newline-terminated machine markers the panel parses into
     a live bar; in a terminal it draws the \\r-overwriting bar. So long jobs (dedup/audit/sync)
-    show real progress in BOTH places instead of just spinning silently."""
+    show real progress in BOTH places instead of just spinning silently.
+
+    When `out_dir` + `job_id` are BOTH given, the terminal-bar callback ALSO appends a
+    throttled 'running' progress heartbeat (~once per 1% tick, same throttling as the
+    Control Panel's own _panel_reader) to out_dir/jobs.jsonl via append_job_event. This is
+    purely additive -- a side-channel log write -- and never changes what gets printed to
+    stdout; it's what lets a bare-terminal run build the same jobs.jsonl activity trail a
+    panel-spawned subprocess already gets (the panel logs its OWN job by parsing the
+    MOONGLADE_PROGRESS markers below, so that branch deliberately does NOT also log here --
+    doing so would double the Jobs card entry for one real run)."""
+    _last_pct = {"v": -1}
+
+    def _log_tick(done, total):
+        if not (out_dir and job_id and total):
+            return
+        try:
+            pct = int(min(done / total, 1.0) * 100)
+        except (TypeError, ZeroDivisionError):
+            return
+        if pct == _last_pct["v"]:
+            return
+        _last_pct["v"] = pct
+        try:
+            append_job_event(out_dir, job_id, status="running",
+                             done=int(done), total=int(total))
+        except Exception:                                  # noqa: BLE001 -- fail-soft logging
+            pass
+
     if os.environ.get("MOONGLADE_PROGRESS") == "1":
         def _cb(done, total, new=0):
             print("{}{}|{}|{}".format(PANEL_PROGRESS_PREFIX,
@@ -288,6 +315,7 @@ def _make_progress():
     def _cb(done, total, new=0):
         sys.stdout.write(_progress_line(done, total, new))
         sys.stdout.flush()
+        _log_tick(done, total)
     return _cb
 
 
@@ -329,6 +357,46 @@ def append_job_event(out_dir, job_id, status=None, **fields):
         with _jobs_path(out_dir).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
     except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# CLI-side job logging: gives a command run straight from a terminal
+# (python pixai_gallery_backup.py --sync / --update / --generate / ...) the SAME
+# jobs.jsonl activity trail a panel-spawned subprocess already gets from
+# pixai_gallery.py's _panel_run/_panel_reader (job_id "panel-<uuid>") and
+# delete_tasks_bulk (job_id "bulkdel-<uuid>") -- this is the "cli-<uuid>" flavor.
+# Deliberately a no-op under the Control Panel itself (MOONGLADE_PROGRESS=1): the
+# panel already logs its OWN "panel-<uuid>" job for that exact subprocess, so
+# creating a second "cli-<uuid>" job here would just double the Jobs card entry
+# for one real run. Every call is fail-soft -- a logging problem must NEVER
+# crash, block, or change the outcome of the real command.
+# ---------------------------------------------------------------------------
+
+def _cli_job_start(out_dir, label):
+    """Start a 'cli-<uuid>' job for a bare-terminal run. Returns the job_id, or None
+    when under the panel (see module note above) or if logging itself fails."""
+    if os.environ.get("MOONGLADE_PROGRESS") == "1":
+        return None
+    try:
+        import uuid
+        job_id = "cli-" + uuid.uuid4().hex[:12]
+        append_job_event(out_dir, job_id, status="running", type="cli", label=label)
+        return job_id
+    except Exception:                                       # noqa: BLE001 -- fail-soft logging
+        return None
+
+
+def _cli_job_finish(out_dir, job_id, error=None):
+    """Terminal event for a _cli_job_start job. No-op if no job was started."""
+    if not job_id:
+        return
+    try:
+        if error is not None:
+            append_job_event(out_dir, job_id, status="failed", error=str(error))
+        else:
+            append_job_event(out_dir, job_id, status="done")
+    except Exception:                                       # noqa: BLE001 -- fail-soft logging
         pass
 
 
@@ -6212,10 +6280,22 @@ def main():
             run_list_models(args)
             return
         if args.generate:
-            run_generate(args)
+            _job = _cli_job_start(out, "generate")
+            try:
+                run_generate(args)
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job)
             return
         if getattr(args, "generate_video", False):
-            run_generate_video(args)
+            _job = _cli_job_start(out, "generate-video")
+            try:
+                run_generate_video(args)
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job)
             return
         if getattr(args, "reference_video", False):
             run_reference_video(args)
@@ -6257,34 +6337,46 @@ def main():
             # re-running --sync on a clean catalog costs almost nothing extra.
             args.update = True
             args.full_meta = True
-            # run_download uses its `progress` PARAM (not args.progress), so hand it over
-            # explicitly -- otherwise the panel's progress bar is blank during the
-            # download step (fix_models/backfill already read args.progress themselves).
-            run_download(args, progress=getattr(args, "progress", None))
-            print("\nSync: resolving any unlabeled model names...")
-            run_fix_models(args)
-            print("Sync: filling any rows still missing metadata...")
-            run_backfill_full_meta(args)
-            print("Sync: building any missing preview thumbnails...")
-            thumb_dir = out / "gallery" / "thumbs"
-            thumb_dir.mkdir(parents=True, exist_ok=True)
-            # build_thumbnails reports progress_cb(done, total, pct); our shared progress
-            # callback expects (done, total, new-count), so adapt -- forward only done/total
-            # (new defaults to 0) rather than mislabel the percentage as a "new items" count.
-            _prog = getattr(args, "progress", None)
-            build_thumbnails(load_catalog(db_path), out, thumb_dir,
-                             progress_cb=((lambda d, t, _pct: _prog(d, t)) if _prog else None))
-            # Reconcile is advisory (it only FLAGS cloud-deleted rows) and runs its own live
-            # feed scan, so a failure here must NOT discard the successful backup above. Catch
-            # BROADLY on purpose: that scan goes through gql(), which re-raises bare requests
-            # network/HTTP errors that are NOT PixAIError -- a narrow catch would let a
-            # transient blip crash the whole sync after everything else already succeeded.
-            print("Sync: reconciling rows deleted on PixAI...")
+            # cli-<uuid> job: parity with the Control Panel's own panel-<uuid> logging for
+            # a --sync run spawned as a subprocess. Also re-point args.progress at a
+            # job-aware callback so the download/thumbnail progress ticks below feed
+            # throttled heartbeats into the same job (purely additive -- see _make_progress).
+            _job = _cli_job_start(out, "sync")
+            if _job:
+                args.progress = _make_progress(out, _job)
             try:
-                run_reconcile_deleted(args)
-            except Exception as e:                       # noqa: BLE001 -- advisory step, never fatal
-                print("  reconcile skipped: {}".format(e))
-            print("Sync complete.")
+                # run_download uses its `progress` PARAM (not args.progress), so hand it over
+                # explicitly -- otherwise the panel's progress bar is blank during the
+                # download step (fix_models/backfill already read args.progress themselves).
+                run_download(args, progress=getattr(args, "progress", None))
+                print("\nSync: resolving any unlabeled model names...")
+                run_fix_models(args)
+                print("Sync: filling any rows still missing metadata...")
+                run_backfill_full_meta(args)
+                print("Sync: building any missing preview thumbnails...")
+                thumb_dir = out / "gallery" / "thumbs"
+                thumb_dir.mkdir(parents=True, exist_ok=True)
+                # build_thumbnails reports progress_cb(done, total, pct); our shared progress
+                # callback expects (done, total, new-count), so adapt -- forward only done/total
+                # (new defaults to 0) rather than mislabel the percentage as a "new items" count.
+                _prog = getattr(args, "progress", None)
+                build_thumbnails(load_catalog(db_path), out, thumb_dir,
+                                 progress_cb=((lambda d, t, _pct: _prog(d, t)) if _prog else None))
+                # Reconcile is advisory (it only FLAGS cloud-deleted rows) and runs its own live
+                # feed scan, so a failure here must NOT discard the successful backup above. Catch
+                # BROADLY on purpose: that scan goes through gql(), which re-raises bare requests
+                # network/HTTP errors that are NOT PixAIError -- a narrow catch would let a
+                # transient blip crash the whole sync after everything else already succeeded.
+                print("Sync: reconciling rows deleted on PixAI...")
+                try:
+                    run_reconcile_deleted(args)
+                except Exception as e:                   # noqa: BLE001 -- advisory step, never fatal
+                    print("  reconcile skipped: {}".format(e))
+                print("Sync complete.")
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job)
             return
         if args.backfill_meta:
             run_backfill_meta(args)
@@ -6307,7 +6399,19 @@ def main():
         if args.count:
             run_count(args)
             return
-        run_download(args)
+        # Plain full download, or --update (an incremental run of the same code path) --
+        # cli-<uuid> job, same parity rationale as --sync above. Deliberately does NOT
+        # thread a job-aware progress callback through run_download here: that call
+        # passes no `progress` kwarg today, so run_download's own `sys.stdout.isatty()`
+        # fallback draws the \r bar directly -- wiring progress in would change that
+        # existing terminal-output behavior (it would print unconditionally, tty or not).
+        _job = _cli_job_start(out, "update" if getattr(args, "update", False) else "download")
+        try:
+            run_download(args)
+        except Exception as e:                           # noqa: BLE001 -- re-raised below unchanged
+            _cli_job_finish(out, _job, error=e)
+            raise
+        _cli_job_finish(out, _job)
     except PixAIError as e:
         sys.exit(str(e))
 
