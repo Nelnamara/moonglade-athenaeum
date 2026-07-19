@@ -187,11 +187,20 @@ users.
   Legend panel anywhere.
 - **Footage** is a second tab inside the left card beside Cast & assets, not a fourth region.
 - The left card widens to 560px only when the Cast tab is on Detailed density; Simple mode and
-  the Footage tab stay 280px. The Generate drawer is 380px. Both side rails collapse to 52px
-  icon strips.
+  the Footage tab stay 280px. **The Generate drawer is 560px** (widened from 380px 2026-07-18,
+  design-mockup pass — the exact point all 6 Multi-Reference image-ref slots fit in one row is
+  500px; 560px leaves real breathing room past that bare minimum, owner's explicit pick over a
+  live slider mockup). Both side rails collapse to 52px icon strips.
 - Detailed cast rows are fully editable (name / tag / kind / lock / remove) and share state
   with Simple mode; Simple cards dim, drop the pointer cursor, and carry an explanatory
   tooltip when no shot is selected (ba1c82e, 48ac4dd).
+- **Each detailed cast row has its own gallery-picker icon** (38×32px, matching the thumbnail
+  slot's own size, sitting FIRST in the row — 2026-07-18 design-mockup pass, owner-approved
+  against a locked interactive Artifact mockup). Opens the shared gallery picker filtered to
+  the row's own kind (image or video; audio rows have none — there's no gallery of audio
+  clips anywhere in the app) and sets that row's `mediaId` directly, no new row created. This
+  is IN ADDITION to the existing local-file-upload thumbnail (image rows) and the two
+  unchanged bottom buttons ("+ add from gallery" / "⇣ Import collection").
 - **Draft generation:** all four Generate-drawer tabs (Image / Edit / Reference / Video) work
   with no shot selected, via a `__draft__` card keyed into the same gen-state dicts real shots
   use. A route-into-a-shot picker appears only in draft mode; bound-mode generation is
@@ -434,22 +443,34 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   card believes, with no write-back at change-time (browsing models must not silently corrupt a
   card's real mode) — closed by reconciling `card.mode` from the actually-submitted payload's
   mode in the existing `mg-submit` listener, the one moment the true mode is known for certain.
-  **Duration chips / Prompt textarea / audio checkbox+language chips are still duplicated** —
-  traced first (Explore agent, full file read of `master-storyboard.jsx`/`loom-core.js`) and
-  found a second, separate generation path: the toolbar's "▶ Generate all" batch button →
-  `batchGenerate` → `generateShot` → `shotPayload()` (loom-core.js) reads `c.duration`/
-  `c.prompt` (via `shotText()`, which **concatenates** the stored prompt, not recomputes it)
-  /`c.audioGen`/`c.audioLanguage` **directly off the shot card**, completely bypassing
-  `<mg-generate-drawer>`. The Video tab's prompt textarea is the **only write site for
-  `c.prompt` in the entire app** (no Deep Focus equivalent); audio fields have no fallback
-  surface either. Deleting those controls as designed would freeze `.prompt`/`.audioGen`/
-  `.audioLanguage` at whatever value each shot last had while Generate-all kept submitting real
-  paid generations off the stale/empty data — for a NEW shot, `c.prompt` is empty, so
-  `shotText()`'s own fallback (`c.prompt || "(prompt tbd)"`) would submit that literal
-  placeholder string. Needs its own design pass (most likely: make the drawer write back into
-  the card on change, mirroring Mode's fix, so Generate-all and the drawer share one source of
-  truth) before the mockup's control removal can ship for these remaining fields — NOT a
-  JSX-deletion task.
+  **Duration + audio also resolved 2026-07-18 (design-mockup pass):** the Continuity panel's
+  Duration chips and Generate-audio checkbox + Audio-language chips are deleted outright —
+  the drawer's own Duration select and Generate-audio/Audio-language controls are now the
+  single source of truth, mirroring Mode's exact pattern. A new `mg-duration-commit` event
+  (fired only from a real user change on the drawer's Duration `<select>`, never from
+  `prefill()`'s plain `.value=` assignment, which never fires a native `change` event) and a
+  shared `mg-audio-commit` event (fired from a new `_userToggleAudioGen()` wrapper around the
+  Generate-audio checkbox, mirroring `_setMode()`/`_userSetMode()`'s split so `prefill()`'s
+  own programmatic sync can't re-dispatch, plus a brand-new change listener on the
+  Audio-language select which previously had none at all) write straight onto `c.duration`/
+  `c.audioGen`/`c.audioLanguage` as plain field patches — confirmed via full grep that neither
+  field has any cross-field coupling the way Mode/Connect or the prompt override do, so no new
+  reducer was needed. `shotPayload`/`shotText`/`generateShot`/`batchGenerate` needed zero
+  changes (verified, not assumed): they already read these fields directly off the card. The
+  dead `AUDIO_LANGUAGES` const was deleted alongside its only remaining reference. Designed
+  then adversarially reviewed (Workflow tool) before shipping.
+  **The Prompt textarea is the one piece deliberately held back, owner's explicit call
+  2026-07-18:** it is still the **only write site for `c.prompt` in the entire app** (no Deep
+  Focus equivalent) — a "base" string `shotText()` keeps recomposing alongside every later
+  Camera/Lighting/cast edit. The drawer's own composed-prompt box only ever writes
+  `c.promptOverride`/`c.promptOverrideText` (a frozen, never-re-woven verbatim replacement,
+  by that feature's own explicit design) — deleting the native textarea would make every
+  hand-typed prompt an override going forward, silently retiring the compose-from-fields
+  machinery for any shot ever hand-touched. Owner chose to hold this out rather than decide
+  yet; two live options if/when revisited: ship the override-only model as a deliberate
+  simplification, or give base-prompt editing a new home in Deep Focus (mirroring exactly how
+  Deep Focus stayed the sole remaining way to set a card to V2V after Mode's own chips were
+  deleted). Not a blocker on anything else shipping.
 - The opt-in pre-built Loom bundle (`/loom?bundle=1`, `loom/dist/master-storyboard.bundle.js`,
   `npm run build` in `loom/`) must be rebuilt whenever `master-storyboard.jsx` changes, or that
   path keeps serving whatever bug the default Babel-in-browser path already fixed — flagged by
@@ -728,7 +749,8 @@ surface: no visual build from prose alone.
 |---|---|---|
 | [The Loom — Shell Mockup v1](https://claude.ai/code/artifact/e41a3020-32fb-4baa-ae81-69814d5ee4c9) | Interactive pixel source of truth for the V2 shell | **LOCKED** — matches the shipped shell |
 | [Video Tab — Full Parity Mockup v1](https://claude.ai/code/artifact/74ad3fd0-ff82-4430-bfe5-275194afa556) | Pixel source of truth for the `<mg-generate-drawer>` Video form, both mounts: 6 image + 3 video + audio ref slots, negative prompt, channel (ships default Normal, persisted), full roster w/ capability tags, Loom shot-weave | **LOCKED** 2026-07-18 (owner-approved) — the full-parity build verifies against it |
-| [Loom Convergence Mockup v3](https://claude.ai/code/artifact/e6659d99-8376-400a-a4e5-04a3419d4ca4) | Side-by-side Gallery\|Loom source of truth: one shared drawer, Loom-only shot chrome (Continuity/Camera/Lighting/Transitions/Cast) kept, live per-model mode-gating demo, Camera+Basic/Professional hidden in the Loom (owned by the shot Camera field + Draft toggle) | **LOCKED** 2026-07-18 (owner-approved, interactively verified) — component-side fixes (gating, labels, model order) shipped from it; the Loom-side control-removal half is blocked, see the Generate-all finding above |
+| [Loom Convergence Mockup v3](https://claude.ai/code/artifact/e6659d99-8376-400a-a4e5-04a3419d4ca4) | Side-by-side Gallery\|Loom source of truth: one shared drawer, Loom-only shot chrome (Continuity/Camera/Lighting/Transitions/Cast) kept, live per-model mode-gating demo, Camera+Basic/Professional hidden in the Loom (owned by the shot Camera field + Draft toggle) | **LOCKED** 2026-07-18 (owner-approved, interactively verified) — component-side fixes (gating, labels, model order) + Mode/Duration/Audio control-removal all shipped from it; only the Prompt textarea half remains, held back by owner choice (see "The Loom" section) |
+| [Cast-row picker + panel width](https://claude.ai/code/artifact/d868e4fe-a376-4886-bd5e-1efa4c667472) | Interactive mock (real tokens/components): per-row gallery-picker icon on Cast & Assets rows, Generate panel width slider showing the 6-slot ref grid reflow | **LOCKED** 2026-07-18 (owner-approved: icon 38×32px matching the thumbnail slot, first in row; 560px width) — shipped |
 | [toast_mockup](https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3) | The unlock-moment design (the real toast is `.ach-m2`) | **LOCKED** — shipped, `077e1f0` |
 | [loom_selectshot](https://claude.ai/code/artifact/0d9c4e02-200e-44f9-982c-e3add482b905) | Selected-shot interaction model | **LOCKED** — shipped in V2 |
 | [Moonglade — Finalists In Action](https://claude.ai/code/artifact/b45a39a3-b6a8-4e73-9f62-e03cb390bd00) | Finalists in context: frames wrapping a real unlock, bars filling live, claim icons in the header chip | Current — pairs with `docs/ART.md` §3 (picks ledger) |

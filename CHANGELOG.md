@@ -15,6 +15,39 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Added
+- **Design-mockup pass: cast-row gallery picker, wider Generate panel, Duration/Audio dedup**
+  (2026-07-18, owner-approved against a locked interactive Artifact mockup before
+  implementation). Three bundled pieces:
+  - **Cast & Assets per-row gallery picker**: each detailed cast row (image or video kind —
+    audio has no gallery to pick from) gets an icon, sized to match the existing thumbnail
+    slot (38×32px) and placed first in the row, that opens the shared gallery picker and sets
+    that row's media directly — previously the only way to pick from your own gallery was the
+    bottom "+ add from gallery" button, which always created a brand-new row. The existing
+    local-file-upload thumbnail and both bottom buttons are unchanged.
+  - **Generate panel widened 380px → 560px**: the old width forced the Multi-Reference
+    image-ref grid (6 slots × 72px + gaps) to wrap into an uneven 4+2 layout; 560px is well
+    past the 500px point where all 6 fit in a single row.
+  - **Duration + Generate-audio/Audio-language write-back, mirroring Mode-sync's pattern**:
+    new `mg-duration-commit` and `mg-audio-commit` drawer events (fired only from a real user
+    change, never from `prefill()`'s programmatic writes) let the host durably persist these
+    fields onto the card, so the Continuity panel's duplicate Duration chips and
+    Generate-audio checkbox + Audio-language chips are deleted outright — no reducer needed,
+    since neither field has any cross-field coupling (confirmed by full grep, unlike Mode/
+    Connect or the prompt override). `shotPayload`/`shotText`/`generateShot`/`batchGenerate`
+    needed zero changes — verified, not assumed, that they already read these fields directly
+    off the card. The dead `AUDIO_LANGUAGES` const was removed alongside its only reference.
+  - **The Prompt textarea is deliberately NOT touched this pass** — it's the only write site
+    for a shot's *base* prompt (the string `shotText()` keeps recomposing alongside later
+    Camera/Lighting/cast edits); the drawer's own prompt box only ever writes a frozen
+    override that's never re-woven. Flagged by adversarial review as a real capability loss,
+    not a mechanical dedup — owner chose to hold it out pending a separate decision (ship the
+    override-only model, or give base-prompt editing a new home in Deep Focus, mirroring how
+    Deep Focus stayed the sole way to set V2V after Mode's chips were deleted).
+  Both the Duration/Audio dedup and the cast-row picker + panel width were designed (and the
+  dedup piece independently adversarially reviewed) before implementation. 111 Node tests
+  green, live-verified against a real project: the picker opens correctly filtered by row
+  kind, and duration/audioGen/audioLanguage all persisted correctly through a full
+  unbind/reselect (fresh prefill from the card), zero console errors.
 - **Drawer↔card Mode-sync fix + legacy Mode-chip removal** (2026-07-18, found live-testing a
   real multi-reference shot: the drawer's mode segment kept visibly "bouncing back" to First
   Frame). Root cause: the drawer's mode-segment click handler called its internal `_setMode()`

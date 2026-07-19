@@ -308,9 +308,6 @@ const STYLES = `
 
 const MODES = ["I2V", "R2V", "V2V", "FLF"];   // T2V retired: these video models need an input frame/ref
 // PixAI's real audio-language enum (private/GENERATOR_SURFACE.md, VIDEO_MODELS.md) --
-// "none" is not "no audio", it's PixAI's own SE-Only value: generate sound effects/ambience
-// with no spoken language. Actual silence is the Generate-audio checkbox being off.
-const AUDIO_LANGUAGES = [["english", "EN"], ["japanese", "JA"], ["chinese", "ZH"], ["korean", "KO"], ["none", "SE only"]];
 const MODE_HINT = {
   T2V: "Text only — describe the whole scene",
   I2V: "Image-to-video — ref is first frame; prompt only motion",
@@ -450,7 +447,7 @@ const V2_STYLES = `
   transition:width .18s ease;overflow-x:hidden;}
 .lv-side.left{width:280px;border-right:1px solid var(--surface1);}
 .lv-side.left.wide{width:560px;}
-.lv-side.right{width:380px;border-left:1px solid var(--surface1);}
+.lv-side.right{width:560px;border-left:1px solid var(--surface1);}
 .lv-side.collapsed{width:52px;}
 .lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
 .lv-sidetabs{flex:1;min-width:0;margin-bottom:0;}
@@ -566,6 +563,10 @@ const V2_STYLES = `
 .lv-assetprev{width:38px;height:32px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);
   flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;overflow:hidden;}
 .lv-assetprev img{width:100%;height:100%;object-fit:cover;}
+.lv-pickico{width:38px;height:32px;flex:none;border-radius:6px;border:1px dashed var(--surface1);
+  background:transparent;color:var(--subtext);font-size:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;}
+.lv-pickico:hover{color:var(--accent);border-color:var(--accent);}
 .lv-tagin{width:76px;flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;
   color:var(--accent);font:11px/1.3 ui-monospace,monospace;padding:6px 7px;}
 .lv-tagin:focus{outline:0;border-color:var(--accent);}
@@ -856,6 +857,25 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         // overwrite the card's real V2V mode to R2V -- a genuine, durable field mutation
         // disguised as a no-op re-click on a control that already looked selected.
         const apply = (c) => (drawerModeFor(c.mode) === vmode) ? c : setShotMode(c, cardModeForVmode(vmode));
+        a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+      });
+      // Duration has no cross-field coupling the way Mode/Connect do (grepping every
+      // c.duration read across loom-core.js/loom-mutations.js turned up nothing that
+      // transforms it alongside another field -- Deep Focus's own separate duration input
+      // is equally uncoupled), so unlike mode this is a plain field write, no reducer.
+      el.addEventListener("mg-duration-commit", (e) => {
+        const a = activeRef.current; if (!a) return;
+        const d = e.detail.duration;
+        const apply = (c) => ({ ...c, duration: d });
+        a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+      });
+      // Same reasoning as duration: audioGen/audioLanguage are independent scalar fields (no
+      // must-change-together invariant the way promptOverride/promptOverrideText have), so a
+      // plain write covering both fields off the drawer's one shared commit event is correct.
+      el.addEventListener("mg-audio-commit", (e) => {
+        const a = activeRef.current; if (!a) return;
+        const { audioGen, audioLanguage } = e.detail;
+        const apply = (c) => ({ ...c, audioGen, audioLanguage });
         a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
       });
       el.addEventListener("mg-pick-request", (e) => {
@@ -1206,15 +1226,6 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           if (active.c.promptOverride) { setOverrideClearedFlash(true); setTimeout(() => setOverrideClearedFlash(false), 1600); }
           patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
         }} />
-        <label className="lv-lab">Duration</label>
-        <div className="lv-chips">{[5, 6, 10, 15].map((d) => (<span key={d} className={"lv-chip " + (d === active.c.duration ? "on" : "")} onClick={() => patch((c) => ({ ...c, duration: d }))}>{d}s</span>))}</div>
-        <label className="lv-check"><input type="checkbox" checked={!!active.c.audioGen}
-          onChange={(ev) => patch((c) => ({ ...c, audioGen: ev.target.checked }))} /> Generate audio</label>
-        {active.c.audioGen && (
-          <div className="lv-chips">{AUDIO_LANGUAGES.map(([v, label]) => (
-            <span key={v} className={"lv-chip " + (v === (active.c.audioLanguage || "english") ? "on" : "")}
-              onClick={() => patch((c) => ({ ...c, audioLanguage: v }))}>{label}</span>))}</div>
-        )}
         <label className="lv-lab">Camera <button className="lv-termsbtn" onClick={() => togglePal("camera")}>+ terms</button></label>
         <input className="lv-in" value={active.c.camera || ""} placeholder="e.g. slow push in, shallow DoF" onChange={(ev) => patch((c) => ({ ...c, camera: ev.target.value }))} />
         {palFor === "camera" && (
@@ -1423,6 +1434,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         const src = frameSrc(as);
         return (
           <div key={as.id} className="lv-assetrow">
+            {as.kind !== "audio" && <button className="lv-pickico" title="Pick from your gallery"
+              onClick={() => openPick((mid) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: "", source: "", mediaId: mid })), as.kind === "video" ? "video" : "image")}>🖼</button>}
             {as.kind === "image" ? (
               <label className="lv-assetprev" title="Attach image">
                 {src ? <img src={src} alt="" /> : "＋"}

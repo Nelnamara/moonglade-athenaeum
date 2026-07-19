@@ -57,6 +57,16 @@
                         field) owns that mapping entirely -- this drawer has no concept of the
                         host's mode values at all (stays host-agnostic, per this file's own
                         contract).
+     mg-duration-commit -- detail: {duration}. Fired ONLY from a direct user change on this
+                        drawer's own Duration <select> -- never from prefill() (a plain
+                        .value= assignment doesn't fire 'change'). No override-vs-base
+                        distinction the way prompt has, so a host durably persisting this
+                        writes it straight onto the shot's duration field.
+     mg-audio-commit -- detail: {audioGen, audioLanguage}. Fired from a direct user change on
+                        either the Generate-audio checkbox or the Audio-language select
+                        (never from prefill()'s programmatic .checked/.value writes) --
+                        reads both controls' live values at dispatch time so either control
+                        changing alone still reports a complete, current pair.
    Public API:
      setRefs([{media_id,thumb},...]) -- the lightbox/bulk "Send to Video" entry, image refs
        only (unchanged from Phase 1); >1 ref switches to multi-ref.
@@ -359,9 +369,18 @@
       this._ce.addEventListener('blur', function () { self._chipify(true); self._emitCommitIfDirty(); });
       this._neg.addEventListener('input', function () { self._debCost(); });
       this._model.addEventListener('change', function () { self._renderModelCaps(); self._applyModelGating(); self._debCost(); });
-      this._dur.addEventListener('change', function () { self._debCost(); });
+      this._dur.addEventListener('change', function () {
+        self._debCost();
+        // Fired only from a real user change on this <select> -- prefill() sets
+        // this._dur.value directly (a property assignment, not user input), which never
+        // fires a native 'change' event, so there is no host<->drawer sync-loop risk here
+        // (same guarantee mg-mode-commit relies on for _setMode() vs _userSetMode()).
+        self.dispatchEvent(new CustomEvent('mg-duration-commit', { bubbles: true, composed: true,
+          detail: { duration: +self._dur.value } }));
+      });
       this._channel.addEventListener('change', function () { self._renderChanCap(); self._debCost(); });
-      this._audio.addEventListener('change', function () { self._audioToggle(); });
+      this._audio.addEventListener('change', function () { self._userToggleAudioGen(); });
+      this._lang.addEventListener('change', function () { self._emitAudioCommit(); self._debCost(); });
       this._audFile.addEventListener('change', function () {
         var f = self._audFile.files[0]; self._audFile.value = '';
         if (f) self._uploadAudio(f);
@@ -732,6 +751,25 @@
     _audioToggle() {
       this._langWrap.style.display = this._audio.checked ? '' : 'none';
       this._debCost();
+    }
+
+    // Called ONLY from a direct user change on the Generate-audio checkbox -- never from
+    // prefill()'s own `this._audio.checked = ...; this._audioToggle();` (a programmatic sync
+    // that must not re-dispatch, mirroring _setMode()/_userSetMode()'s split).
+    _userToggleAudioGen() {
+      this._audioToggle();
+      this._emitAudioCommit();
+    }
+
+    // Shared by both audio controls -- one event carries both fields (mirrors
+    // mg-prompt-commit's own "one event, several firing triggers" shape: the debounce
+    // timeout OR blur there; checkbox-change OR language-select-change here), since a host
+    // durably persisting audio settings wants both written together. Reads live DOM state at
+    // dispatch time, not cached values, so a language-only change (checkbox untouched) still
+    // reports the checkbox's current state correctly.
+    _emitAudioCommit() {
+      this.dispatchEvent(new CustomEvent('mg-audio-commit', { bubbles: true, composed: true,
+        detail: { audioGen: this._audio.checked, audioLanguage: this._lang.value } }));
     }
 
     _debCost() {
