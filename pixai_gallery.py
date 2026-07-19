@@ -6399,8 +6399,12 @@ function savePrompt() {
   </div>
 </div>
 <style>
-  .login-wrap { min-height: 78vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  .login-card { width: 100%; max-width: 380px; }
+  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
+  .login-card {
+    width: 100%; max-width: 380px; background: color-mix(in srgb, var(--surface0) 82%, transparent);
+    border: 1px solid color-mix(in srgb, var(--surface1) 70%, transparent); border-radius: 14px;
+    padding: 36px 32px; box-shadow: 0 32px 80px rgba(0,0,0,.6); box-sizing: border-box;
+  }
   .login-card .login-fields { flex-direction: column; align-items: stretch; }
   .login-card .login-fields input {
     width: 100%; background: var(--mantle); border: 1px solid var(--surface1);
