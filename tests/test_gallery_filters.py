@@ -225,7 +225,7 @@ def test_catalog_model_options_most_used_first(tmp_path):
 
 
 def test_source_badges_render(tmp_path):
-    from pixai_gallery import create_app
+    from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         _row(media_id="g1", filename="a.png", source="api"),
@@ -234,7 +234,7 @@ def test_source_badges_render(tmp_path):
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "a.png").write_bytes(b"x")
     (tmp_path / "images" / "b.png").write_bytes(b"x")
-    data = create_app(tmp_path).test_client().get("/").data
+    data = login_client(tmp_path).get("/").data
     assert b"sbadge gen" in data and b"sbadge loc" in data
 
 
@@ -270,13 +270,14 @@ def test_collections_add_remove_filter(tmp_path):
 
 
 def test_collection_add_route(tmp_path):
-    from pixai_gallery import create_app, load_catalog
+    from pixai_gallery import load_catalog
+    from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", filename="a.png"), _row(media_id="m2", filename="b.png")])
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "a.png").write_bytes(b"x")
     (tmp_path / "images" / "b.png").write_bytes(b"x")
-    client = create_app(tmp_path).test_client()
+    client = login_client(tmp_path)
     r = client.post("/collection-add", data={"media_ids": ["m1", "m2"], "name": "Moonlit", "back": "/"})
     assert r.status_code == 302 and "collected=2" in r.headers["Location"]
     by = {x["media_id"]: x for x in load_catalog(db)}
@@ -306,12 +307,12 @@ def test_lora_filter(tmp_path):
 def test_full_image_and_export_zip_routes(tmp_path):
     import io
     import zipfile
-    from pixai_gallery import create_app
+    from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="111", filename="a_111.png", prompt_preview="p")])
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "a_111.png").write_bytes(b"\x89PNG\r\n\x1a\nfakeimage")
-    client = create_app(tmp_path).test_client()
+    client = login_client(tmp_path)
 
     r = client.get("/full/111")
     assert r.status_code == 200
@@ -382,7 +383,7 @@ def test_duplicate_groups_ignores_gallery_and_quarantine(tmp_path):
 
 
 def test_video_row_renders_and_serves(tmp_path):
-    from pixai_gallery import create_app
+    from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         _row(media_id="VID", filename="videos/dance_VID.mp4", is_video="1",
@@ -394,7 +395,7 @@ def test_video_row_renders_and_serves(tmp_path):
     (tmp_path / "videos" / "dance_VID.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42FAKEMP4")
     (tmp_path / "gallery" / "thumbs").mkdir(parents=True)
     (tmp_path / "gallery" / "thumbs" / "POSTER.jpg").write_bytes(b"\xff\xd8\xff\xe0jpegposter")
-    client = create_app(tmp_path).test_client()
+    client = login_client(tmp_path)
 
     # grid: shows the play badge and points the thumb at the poster media id
     idx = client.get("/").data
@@ -418,7 +419,8 @@ def test_video_row_renders_and_serves(tmp_path):
 
 def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypatch):
     import pixai_gallery_backup as core
-    from pixai_gallery import create_app, load_catalog
+    from pixai_gallery import load_catalog
+    from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         _row(media_id="m1", filename="images/a_m1.png", task_id="T1"),
@@ -434,7 +436,7 @@ def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypat
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: calls.append(tid))
-    client = create_app(tmp_path).test_client()
+    client = login_client(tmp_path)
 
     # select ONE image of task T1, plus the local-only import
     r = client.post("/delete-tasks-bulk", data={"media_ids": ["m1", "loc"], "back": "/"})
@@ -454,7 +456,8 @@ def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypat
 
 
 def test_edit_prompt_and_bulk_replace_routes(tmp_path):
-    from pixai_gallery import create_app, load_catalog
+    from pixai_gallery import load_catalog
+    from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         _row(media_id="m1", filename="a_m1.png", prompt_full="red cat"),
@@ -463,7 +466,7 @@ def test_edit_prompt_and_bulk_replace_routes(tmp_path):
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "a_m1.png").write_bytes(b"x")
     (tmp_path / "images" / "b_m2.png").write_bytes(b"x")
-    client = create_app(tmp_path).test_client()
+    client = login_client(tmp_path)
 
     r = client.post("/edit-prompt/m1", json={"prompt": "blue cat"})
     assert r.status_code == 200 and r.get_json()["ok"] is True

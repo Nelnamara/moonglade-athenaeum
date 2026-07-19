@@ -12,6 +12,8 @@ import pytest
 
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
+from tests.conftest import login_client
+
 NODE = shutil.which("node")
 
 
@@ -27,7 +29,7 @@ def client(tmp_path):
         _row(media_id="2", filename="b_2.png", prompt_preview="y",
              created_at="2025-01-02T00:00:00"),
     ])
-    return create_app(tmp_path).test_client()
+    return login_client(tmp_path)
 
 
 def _scripts(html):

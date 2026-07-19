@@ -11,6 +11,8 @@ from PIL import Image
 
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
+from tests.conftest import login_existing_client, login_test_client
+
 
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
@@ -26,6 +28,14 @@ def _client(tmp_path, rows=()):
     if rows:
         save_catalog(tmp_path / "catalog.db", list(rows))
     return create_app(tmp_path).test_client()
+
+
+def _authed_client(tmp_path, rows=()):
+    """Like _client(), but logged in for real -- for every test below EXCEPT the
+    "localhost_only" pair (which deliberately stay anonymous to test the gate itself)."""
+    if rows:
+        save_catalog(tmp_path / "catalog.db", list(rows))
+    return login_test_client(create_app(tmp_path))
 
 
 def _project(**overrides):
@@ -63,7 +73,7 @@ def _make_bundle(project, thumbs=None, media=()):
 
 def test_export_bundle_includes_referenced_image(tmp_path):
     (tmp_path / "a_100.png").write_bytes(_png_bytes())
-    cli = _client(tmp_path, [_row(media_id="100", filename="a_100.png")])
+    cli = _authed_client(tmp_path, [_row(media_id="100", filename="a_100.png")])
     project = _project(assets=[{"id": "as1", "mediaId": "100", "thumbId": ""}])
     r = _post_json(cli, "/api/loom/export-bundle", {"project": project, "thumbs": {}})
     assert r.status_code == 200
@@ -80,7 +90,7 @@ def test_export_bundle_resolves_video_via_catalog_row_not_find_files(tmp_path):
     without the /api/loom/export fallback: catalog row -> is_video + filename."""
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v_200.mp4").write_bytes(b"not a real mp4 but a real file")
-    cli = _client(tmp_path, [_row(media_id="200", filename="videos/v_200.mp4", is_video="1")])
+    cli = _authed_client(tmp_path, [_row(media_id="200", filename="videos/v_200.mp4", is_video="1")])
     project = _project(assets=[{"id": "as1", "mediaId": "200", "thumbId": ""}])
     r = _post_json(cli, "/api/loom/export-bundle", {"project": project, "thumbs": {}})
     assert r.headers.get("X-Bundle-Missing-Count") == "0"
@@ -92,7 +102,7 @@ def test_export_bundle_resolves_video_via_catalog_row_not_find_files(tmp_path):
 def test_export_bundle_reports_missing_media_but_still_succeeds(tmp_path):
     """A referenced media_id with no file on disk doesn't fail the whole export -- a
     partial bundle is still useful, and the client surfaces what didn't travel."""
-    cli = _client(tmp_path, [])
+    cli = _authed_client(tmp_path, [])
     project = _project(assets=[{"id": "as1", "mediaId": "does-not-exist", "thumbId": ""}])
     r = _post_json(cli, "/api/loom/export-bundle", {"project": project, "thumbs": {}})
     assert r.status_code == 200
@@ -106,7 +116,7 @@ def test_export_bundle_collects_every_reference_shape(tmp_path):
     are deliberately excluded (client-only, already travel inside project.json)."""
     for mid in ("1", "2", "3", "4"):
         (tmp_path / "a_{}.png".format(mid)).write_bytes(_png_bytes())
-    cli = _client(tmp_path, [_row(media_id=m, filename="a_{}.png".format(m)) for m in ("1", "2", "3", "4")])
+    cli = _authed_client(tmp_path, [_row(media_id=m, filename="a_{}.png".format(m)) for m in ("1", "2", "3", "4")])
     project = _project(
         acts=[{"id": "a1", "name": "Act 1", "cards": [{
             "id": "c1", "resultMid": "1",
@@ -122,18 +132,23 @@ def test_export_bundle_collects_every_reference_shape(tmp_path):
 
 
 def test_export_bundle_localhost_only(tmp_path):
+    """An unauthenticated request is refused regardless of address -- checked FIRST,
+    while `cli` is still anonymous (api_loom_export_bundle() has no extra
+    _is_local_request() check of its own, so once logged in a LAN session is trusted
+    the same as the owner, same as most of this LAN-auth pass's other routes)."""
     cli = _client(tmp_path, [])
-    r = _post_json(cli, "/api/loom/export-bundle", {"project": _project()})
     r_lan = cli.post("/api/loom/export-bundle", data=json.dumps({"project": _project()}),
                       content_type="application/json", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    assert r.status_code == 200
     assert r_lan.status_code == 401
+    cli = login_existing_client(cli)
+    r = _post_json(cli, "/api/loom/export-bundle", {"project": _project()})
+    assert r.status_code == 200
 
 
 # --- import-bundle -----------------------------------------------------------------
 
 def test_import_bundle_catalogs_new_media_and_returns_project(tmp_path):
-    cli = _client(tmp_path, [])
+    cli = _authed_client(tmp_path, [])
     project = _project(assets=[{"id": "as1", "mediaId": "new-1", "thumbId": ""}])
     zip_bytes = _make_bundle(project, media=[("new-1", ".png", _png_bytes((10, 200, 90)))])
     r = _post_zip(cli, "/api/loom/import-bundle", zip_bytes)
@@ -149,7 +164,7 @@ def test_import_bundle_catalogs_new_media_and_returns_project(tmp_path):
 
 
 def test_import_bundle_catalog_row_shape(tmp_path):
-    cli = _client(tmp_path, [])
+    cli = _authed_client(tmp_path, [])
     project = _project(assets=[{"id": "as1", "mediaId": "new-2", "thumbId": ""}])
     zip_bytes = _make_bundle(project, media=[("new-2", ".png", _png_bytes())])
     _post_zip(cli, "/api/loom/import-bundle", zip_bytes)
@@ -164,7 +179,7 @@ def test_import_bundle_skips_media_already_present(tmp_path):
     """Idempotent both ways: media the receiving machine already has (by id) is left
     alone -- no duplicate file, no catalog write, no re-import work."""
     (tmp_path / "a_100.png").write_bytes(_png_bytes())
-    cli = _client(tmp_path, [_row(media_id="100", filename="a_100.png")])
+    cli = _authed_client(tmp_path, [_row(media_id="100", filename="a_100.png")])
     project = _project(assets=[{"id": "as1", "mediaId": "100", "thumbId": ""}])
     zip_bytes = _make_bundle(project, media=[("100", ".png", _png_bytes((1, 1, 1)))])
     r = _post_zip(cli, "/api/loom/import-bundle", zip_bytes)
@@ -173,7 +188,7 @@ def test_import_bundle_skips_media_already_present(tmp_path):
 
 
 def test_reimporting_the_same_bundle_twice_is_a_noop_the_second_time(tmp_path):
-    cli = _client(tmp_path, [])
+    cli = _authed_client(tmp_path, [])
     project = _project(assets=[{"id": "as1", "mediaId": "new-3", "thumbId": ""}])
     zip_bytes = _make_bundle(project, media=[("new-3", ".png", _png_bytes())])
     d1 = _post_zip(cli, "/api/loom/import-bundle", zip_bytes).get_json()
@@ -183,7 +198,7 @@ def test_reimporting_the_same_bundle_twice_is_a_noop_the_second_time(tmp_path):
 
 
 def test_import_bundle_rejects_a_zip_with_no_project_json(tmp_path):
-    cli = _client(tmp_path, [])
+    cli = _authed_client(tmp_path, [])
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w") as z:
         z.writestr("not_project.json", "{}")
@@ -193,13 +208,13 @@ def test_import_bundle_rejects_a_zip_with_no_project_json(tmp_path):
 
 
 def test_import_bundle_rejects_a_non_zip_file(tmp_path):
-    cli = _client(tmp_path, [])
+    cli = _authed_client(tmp_path, [])
     r = _post_zip(cli, "/api/loom/import-bundle", b"this is not a zip file at all", filename="bundle.zip")
     assert r.status_code == 400
 
 
 def test_import_bundle_requires_a_file(tmp_path):
-    cli = _client(tmp_path, [])
+    cli = _authed_client(tmp_path, [])
     r = cli.post("/api/loom/import-bundle", data={}, content_type="multipart/form-data")
     assert r.status_code == 400
 

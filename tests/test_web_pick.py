@@ -10,6 +10,8 @@ from pathlib import Path
 import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
+from tests.conftest import login_client, login_existing_client
+
 
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
@@ -18,6 +20,17 @@ def _row(**kw):
 def _client(tmp_path, rows):
     save_catalog(tmp_path / "catalog.db", rows)
     return create_app(tmp_path).test_client()
+
+
+def _authed_client(tmp_path, rows):
+    """Like _client(), but logged in for real -- for every test below EXCEPT the
+    handful that specifically test the unauthenticated/LAN boundary itself
+    (test_gallery_images_requires_login_over_lan_but_then_works,
+    test_unauthenticated_lan_request_to_index_is_redirected_to_login, and the "mixed"
+    tests that check an anonymous request first before logging the SAME client in via
+    login_existing_client())."""
+    save_catalog(tmp_path / "catalog.db", rows)
+    return login_client(tmp_path)
 
 
 def test_gallery_images_requires_login_over_lan_but_then_works(tmp_path):
@@ -47,7 +60,7 @@ def test_gallery_images_requires_login_over_lan_but_then_works(tmp_path):
 
 
 def test_gallery_images_prefers_full_prompt(tmp_path):
-    cli = _client(tmp_path, [
+    cli = _authed_client(tmp_path, [
         _row(media_id="1", filename="a_1.png", prompt_preview="short...",
              prompt_full="the full glorious prompt", created_at="2025-01-01T00:00:00"),
     ])
@@ -61,7 +74,7 @@ def test_gallery_images_type_filter_and_paging(tmp_path):
                  created_at="2025-01-{:02d}T00:00:00".format(i)) for i in range(1, 6)]
     rows.append(_row(media_id="9", filename="v_9.mp4", is_video="1",
                      created_at="2025-02-01T00:00:00"))
-    cli = _client(tmp_path, rows)
+    cli = _authed_client(tmp_path, rows)
     # default type=image: the video is filtered in SQL, so total reflects ONLY the
     # pickable images (5) -- the old behavior counted 6 then hid one (bad counter).
     d1 = cli.get("/api/gallery-images?limit=2&page=1").get_json()
@@ -85,7 +98,7 @@ def test_collections_endpoint(tmp_path):
                  created_at="2025-01-01T00:00:00"),
             _row(media_id="2", filename="b_2.png", collections="Banners",
                  created_at="2025-01-02T00:00:00")]
-    cli = _client(tmp_path, rows)
+    cli = _authed_client(tmp_path, rows)
     d = cli.get("/api/collections").get_json()
     assert set(d["collections"]) == {"Banners", "Faves"}
 
@@ -100,7 +113,7 @@ def test_upload_returns_media_id_and_cleans_temp(tmp_path, monkeypatch):
 
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "upload_media", fake_upload)
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     resp = cli.post("/api/upload", data={
         "file": (io.BytesIO(b"\x89PNG fake"), "pic.png"),
@@ -110,7 +123,7 @@ def test_upload_returns_media_id_and_cleans_temp(tmp_path, monkeypatch):
 
 
 def test_upload_requires_a_file(tmp_path):
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.post("/api/upload", data={}).status_code == 400
 
@@ -135,7 +148,7 @@ def test_tag_suggest_route_short_prefix_is_free(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise AssertionError("must not touch the network for short prefixes")
     monkeypatch.setattr(core, "_make_session", boom)
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/tag-suggest?q=n").get_json() == {"tags": []}
 
@@ -143,7 +156,7 @@ def test_tag_suggest_route_short_prefix_is_free(tmp_path, monkeypatch):
 def test_tag_suggest_route_returns_tags(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "tag_search_gql", lambda s, q, first=8: ["no humans"])
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/tag-suggest?q=no hu").get_json() == {"tags": ["no humans"]}
 
@@ -156,7 +169,7 @@ def test_price_route_video_mode(tmp_path, monkeypatch):
                         lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, enrich=False: {"id": "c1", "total": 9, "expiresAt": 1})
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "I2V", "images": ["55"], "prompt": "pan",
                                      "duration": 5, "video_model": "v3.2",
@@ -179,7 +192,7 @@ def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch):
                         lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken",
                         lambda s, params, enrich=False: {"id": "c1", "total": 9, "expiresAt": 1})
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "I2V", "images": ["55"], "prompt": "pan",
                                      "duration": 5, "video_model": "v3.2",
@@ -195,7 +208,7 @@ def test_price_route_video_needs_an_image(tmp_path, monkeypatch):
         raise AssertionError("no pricing without a source image")
     monkeypatch.setattr(core, "price_task", boom)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "R2V", "images": []}).get_json()
     assert d["cost"] is None and "source image" in d["note"]
@@ -208,7 +221,7 @@ def test_price_route_i2v_still_needs_an_image_even_with_video_refs(tmp_path, mon
         raise AssertionError("no pricing without a source frame")
     monkeypatch.setattr(core, "price_task", boom)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "I2V", "images": [], "video_refs": ["9"]}).get_json()
     assert d["cost"] is None and "source image" in d["note"]
@@ -223,7 +236,7 @@ def test_price_route_r2v_prices_video_only_multiref(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "R2V", "images": [], "video_refs": ["9"],
                                      "prompt": "@video1 dances"}).get_json()
@@ -242,7 +255,7 @@ def test_price_route_threads_negative_and_channel(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "I2V", "images": ["55"], "negative": "blurry",
                                  "is_private": True})
@@ -257,7 +270,7 @@ def test_account_route_sums_cards_and_coverage(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "list_kaisuukens",
                         lambda s: [{"count": 16}, {"count": 34}, {"count": None}])
     # 2 distinct local tasks (tA on two media, tB) out of 4 on the server -> 50% coverage
-    cli = _client(tmp_path, [
+    cli = _authed_client(tmp_path, [
         _row(media_id="1", task_id="tA", filename="a_1.png", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", task_id="tA", filename="b_2.png", created_at="2025-01-02T00:00:00"),
         _row(media_id="3", task_id="tB", filename="c_3.png", created_at="2025-01-03T00:00:00"),
@@ -270,7 +283,7 @@ def test_account_route_sums_cards_and_coverage(tmp_path, monkeypatch):
 
 def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/snippets").get_json() == {"snippets": []}
     saved = cli.post("/api/snippets",
@@ -281,7 +294,7 @@ def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch):
 
 
 def test_snippets_rejects_non_list(tmp_path):
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.post("/api/snippets", json={"snippets": "nope"}).status_code == 400
 
@@ -289,7 +302,7 @@ def test_snippets_rejects_non_list(tmp_path):
 def test_suggest_prompt_route(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "suggest_prompt", lambda s, mid: ["1girl, night", "a girl at night"])
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/suggest-prompt?media_id=55").get_json() == {
         "suggestions": ["1girl, night", "a girl at night"]}
@@ -314,7 +327,7 @@ def test_rows_for_media_ids_preserves_order_drops_missing():
 
 
 def test_contact_sheet_renders_selection(tmp_path):
-    cli = _client(tmp_path, [
+    cli = _authed_client(tmp_path, [
         _row(media_id="1", filename="a_1.png", created_at="2025-01-02T00:00:00", rating="3"),
         _row(media_id="2", filename="b_2.png", created_at="2025-01-01T00:00:00"),
     ])
@@ -332,7 +345,7 @@ def test_contact_sheet_captions_off(tmp_path):
 
 
 def test_contact_sheet_photo_and_strip(tmp_path):
-    cli = _client(tmp_path, [
+    cli = _authed_client(tmp_path, [
         _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", filename="b_2.png", created_at="2025-01-02T00:00:00"),
     ])
@@ -364,7 +377,7 @@ def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
     monkeypatch.setattr(core, "probe_video_duration", lambda p: 5.0)
 
-    cli = _client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+    cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
     assert d == {"frame_media_id": "FRAME123", "duration": 5.0}
@@ -393,7 +406,7 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
     monkeypatch.setattr(core, "probe_video_duration", lambda p: 5.0)
 
-    cli = _client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+    cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9", "trim_out": 3.2}).get_json()
     assert d == {"frame_media_id": "FRAME123", "duration": 5.0}
@@ -402,7 +415,7 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch):
 
 def test_loom_handoff_needs_local_clip(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    cli = _client(tmp_path, [_row(media_id="X", filename="a_x.png",
+    cli = _authed_client(tmp_path, [_row(media_id="X", filename="a_x.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "nope"}).get_json()
     assert "not downloaded" in d["error"]
@@ -439,7 +452,7 @@ def test_presets_import_and_use(tmp_path, monkeypatch):
         "parameters": {"sceneId": "character-card",
                        "chat": {"prompts": "BIG CANNED PROMPT",
                                 "modelId": "1948514378441961474"}}})
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/presets", json={"task_id": "2030050946353349700"}).get_json()
     assert d["imported"] == "character-card"
@@ -525,7 +538,7 @@ def test_api_contests_route(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_rest_get",
                         lambda s, path, params=None, **k: _CONTEST_PAGES[params["page"]])
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/contests").get_json()             # default = active only
     assert d["official"] == 1 and d["community"] == 2   # 1 official + 2 running community
@@ -537,7 +550,7 @@ def test_your_art_ranks_published_and_enriches_views(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     # views come from a per-artwork call; mock it deterministically off the artwork_id
     monkeypatch.setattr(core, "artwork_views", lambda s, aid: {"aw1": 500, "aw2": 90}.get(aid, 0))
-    cli = _client(tmp_path, [
+    cli = _authed_client(tmp_path, [
         _row(media_id="1", artwork_id="aw1", filename="a_1.png", is_published="1",
              liked_count="4", comment_count="2", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", artwork_id="aw2", filename="b_2.png", is_published="1",
@@ -558,7 +571,7 @@ def test_your_art_ranks_published_and_enriches_views(tmp_path, monkeypatch):
 def test_artwork_views_route(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "artwork_views", lambda s, aid: 174)
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/artwork-views?id=aw9").get_json() == {"views": 174}
     assert cli.get("/api/artwork-views").get_json()["views"] is None   # missing id -> 400/null
@@ -582,17 +595,22 @@ def test_unauthenticated_lan_request_to_index_is_redirected_to_login(tmp_path):
 def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
     """A LAN request carrying a valid login session is authorized exactly like the
     local owner -- the same Generate/Loom/Panel controls, no read-only banner. There
-    is only ONE access tier once you're behind the front door (localhost, or a
-    logged-in session) -- see index()'s `is_local=True` comment for why that
-    template flag is now a hardcoded constant rather than a live check. Community +
-    browse surfaces (Contests / My Art) render either way, as before."""
+    is only ONE access tier once you're behind the front door (a logged-in session --
+    see index()'s `is_local=True` comment for why that template flag is now a
+    hardcoded constant rather than a live check). Both views below are captured
+    AFTER logging in: an unauthenticated LOCAL request no longer gets the full owner
+    UI either (owner directive 2026-07-19 removed the loopback bypass), so the only
+    real distinction left to prove is authenticated-vs-not, never the request's
+    address -- see test_unauthenticated_lan_request_to_index_is_redirected_to_login
+    for that side of the boundary. Community + browse surfaces (Contests / My Art)
+    render either way, as before."""
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
-    localhost = cli.get("/").get_data(as_text=True)
     html = cli.get("/login").get_data(as_text=True)
     csrf = re.search(r'name="csrf" value="([^"]+)"', html).group(1)
     cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": csrf})
+    localhost = cli.get("/").get_data(as_text=True)
     lan = cli.get("/", environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_data(as_text=True)
     # The Generate button (btn-primary) + The Loom header link are owner-level controls.
     _loom = "video storyboard, where shots"   # unique to the header Loom link title (owner-only)
@@ -610,6 +628,13 @@ def test_export_csv_downloads_as_attachment(tmp_path):
         _row(media_id="1", filename="a_1.png", prompt_preview="p1", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", filename="b_2.png", prompt_preview="p2", created_at="2025-01-02T00:00:00"),
     ])
+    # An unauthorized LAN device can't pull the owner's catalog -- sent to /login
+    # (an HTML page route, so a redirect there rather than a bare 403 lets normal
+    # browser navigation work cleanly). Checked FIRST, while `cli` is still anonymous.
+    r2 = cli.get("/export-csv", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r2.status_code == 302
+    assert r2.headers["Location"].startswith("/login")
+    cli = login_existing_client(cli)
     r = cli.get("/export-csv")
     assert r.status_code == 200 and r.mimetype == "text/csv"
     cd = r.headers.get("Content-Disposition", "")
@@ -617,16 +642,10 @@ def test_export_csv_downloads_as_attachment(tmp_path):
     lines = r.get_data(as_text=True).splitlines()
     assert "media_id" in lines[0]                        # header row present
     assert sum(1 for ln in lines[1:] if ln.strip()) == 2  # both rows exported
-    # An unauthorized LAN device can't pull the owner's catalog -- sent to /login
-    # (an HTML page route, so a redirect there rather than a bare 403 lets normal
-    # browser navigation work cleanly).
-    r2 = cli.get("/export-csv", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r2.status_code == 302
-    assert r2.headers["Location"].startswith("/login")
 
 
 def test_branding_absent_is_404(tmp_path):
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/branding/banner.png").status_code == 404      # onerror removes the img
     assert cli.get("/branding/../catalog.db").status_code == 404    # traversal rejected
@@ -636,7 +655,7 @@ def test_enhance_shelf_promotes_official_tools(tmp_path):
     """The Enhance sub-tab leads with a grouped shelf of curated one-click official tools
     (Upscale / Cleanup / Convert / Light) above the flat 140+ community list — so real
     tools aren't buried among junk workflows. Each card fires Gen.enhance(<workflow_id>)."""
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert 'class="enh-shelf"' in html
@@ -669,7 +688,7 @@ def test_edit_price_uses_selected_model(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "edit", "edit_model": "reference-pro", "source": "55",
                                  "resolution": "4K", "quality": "", "aspect": "21:9"})
     chat = seen["p"]["chat"]
@@ -684,7 +703,7 @@ def test_edit_price_uses_selected_model(tmp_path, monkeypatch):
 
 
 def test_edit_card_has_model_picker(tmp_path):
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert 'id="em-edit-pro"' in html and 'id="em-reference-pro"' in html
     assert "Gen.setEditModel('reference-pro')" in html
@@ -708,7 +727,7 @@ def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "edit", "edit_model": "reference-pro", "source": "55",
                                  "resolution": "1K", "quality": "medium", "aspect": "3:4"})
     mc = seen["p"]["chat"]["modelConfig"]
@@ -721,7 +740,7 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "edit", "edit_model": "edit-pro", "source": "100",
                                  "sources": ["100", "200", "300"], "resolution": "1K",
                                  "quality": "medium", "aspect": "3:4"})
@@ -739,7 +758,7 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
 def test_portrait_mobile_pass(tmp_path):
     """The <=480px portrait pass: 2-up grid, header nav swipe strip, full-width drawer +
     centered model flyout, lightbox arrows moved off the image."""
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert "@media (max-width: 480px)" in html
     assert "repeat(2, minmax(0, 1fr)) !important" in html           # 2-up grid, ignores saved --thumb
@@ -750,7 +769,7 @@ def test_portrait_mobile_pass(tmp_path):
 def test_video_v40_full_cost_warning(tmp_path):
     """The Video card hard-warns when the pricier v4.0 full model is picked (14k/s vs
     Lite's 5.5k -- a 15s clip is 210k credits), so it's never a silent surprise."""
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert ".gen-cost.warn" in html                 # the warn style
     assert "V4.0 full" in html and "2.5" in html      # the ~2.5x-Lite warning text
@@ -761,7 +780,7 @@ def test_toasts_anchored_top_right(tmp_path):
     Loom) -- it's injected client-side, not present in the server-rendered HTML, so this now
     checks the page loads the shared script and that the script's own CSS still positions
     toasts top-right (unchanged) at the z-index raised above the Loom's own overlays."""
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert '<script src="/static/mg-notify.js"></script>' in html
     notify_js = (Path(__file__).resolve().parents[1] / "static" / "mg-notify.js").read_text(encoding="utf-8")
@@ -769,7 +788,7 @@ def test_toasts_anchored_top_right(tmp_path):
 
 
 def test_generate_card_has_seed_field(tmp_path):
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert 'id="gen-seed"' in html and "seed:(el('gen-seed')" in html   # UI + payload wire the seed
 
@@ -780,7 +799,7 @@ def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch
     seen = {}
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli.post("/api/price", json={"mode": "enhance", "source": "55",
                                  "workflow_id": "1794855217667308480"})
     assert seen["p"]["model"] == "pixai-panelplugin"
@@ -798,6 +817,7 @@ def test_import_task_by_id(tmp_path, monkeypatch):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     assert cli.post("/api/import-task", json={"task_id": "123"},
                     environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 401   # LAN refused
+    cli = login_existing_client(cli)
     d = cli.post("/api/import-task", json={"task_id": "nope"}).get_json()
     assert d.get("error") and "tid" not in called                          # non-numeric rejected, no collect
     d = cli.post("/api/import-task", json={"task_id": "2030585251815688815"}).get_json()
@@ -824,7 +844,7 @@ def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "list_claims", lambda s: [
         {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
         {"id": "agent-daily-stamina", "amount": 20, "canClaim": True}])
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/account").get_json()
     assert d["credits"] == 140 and d["cards"] == 22
     assert d["card_expiry"] == "2026-07-17" and len(d["cards_by"]) == 2
@@ -839,15 +859,17 @@ def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
     claimed = []
     monkeypatch.setattr(core, "claim_reward", lambda s, cid: claimed.append(cid))
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    # LAN request refused (claiming is on the owner's account)
+    # An unauthenticated LAN request is refused -- checked first, while `cli` is still
+    # anonymous, then logged in for the real claim below.
     assert cli.post("/api/claim", environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 401
+    cli = login_existing_client(cli)
     d = cli.post("/api/claim").get_json()
     assert d["claimed"] == 1 and d["credits"] == 30000       # only the ready credit reward
     assert claimed == ["pixai-daily-credits"]
 
 
 def test_edit_card_has_reference_slots(tmp_path):
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert 'id="edit-refs"' in html and 'id="edit-ref-cap"' in html
     assert "renderEditRefs" in html and "editRefs" in html
@@ -857,7 +879,7 @@ def test_generate_card_has_size_and_custom_dimensions(tmp_path):
     """The Generate card must expose real dimensions — size presets + custom W/H + a wider
     aspect set — not the old 5 hardcoded ~512px buttons. The API has no size cap (backend
     _dim only floors to /8), so the card shouldn't self-throttle to half a megapixel."""
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert 'id="gen-size"' in html and 'id="gen-cw"' in html and 'id="gen-ch"' in html
@@ -870,7 +892,7 @@ def test_lightbox_video_uses_load_not_premature_seek(tmp_path):
     """Mobile (iOS Safari) fix: after changing the lightbox <video> src we must call
     load() and must NOT seek currentTime before metadata loads (that throws on iOS and
     aborts playback). Guards against reintroducing the desktop-only-works regression."""
-    cli = _client(tmp_path, [_row(media_id="9", filename="v_9.mp4", is_video="1",
+    cli = _authed_client(tmp_path, [_row(media_id="9", filename="v_9.mp4", is_video="1",
                                   created_at="2025-02-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert "vid.load()" in html                       # explicit reload after src change
@@ -890,7 +912,7 @@ def test_service_worker_never_caches_misses(tmp_path):
     that was the 'blank video tile until a hard-refresh' bug. It must only cache OK
     responses, use a cache name bumped past every known-poisoned generation, and delete the
     old cache on activate so existing clients self-heal without Ctrl+Shift+R."""
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     sw = cli.get("/sw.js").get_data(as_text=True)
     assert "resp.ok" in sw and "c.put" in sw                # caches only successful fetches
@@ -910,7 +932,7 @@ def test_service_worker_revalidates_thumbnails(tmp_path):
     Cache-Control, so a cache-first hit pins the broken poster the rebuild was meant to
     repair -- for the life of the cache. Thumbs get stale-while-revalidate (paint from
     cache, refresh behind it); only write-once originals stay cache-first."""
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     sw = cli.get("/sw.js").get_data(as_text=True)
     # /thumbs/ is handled on its own branch, separate from the originals' cache-first one
