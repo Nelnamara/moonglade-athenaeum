@@ -15,8 +15,31 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Fixed
+- **First-account creation on `/login` was completely broken: "Your session expired" on every
+  attempt, surviving a cookie clear and a full server restart** (2026-07-19, `pixai_gallery.py`,
+  `tests/test_web_auth.py`). Root cause: `_enforce_front_door()` redirects every unauthenticated
+  request to `/login?next=<path>` — including background requests a browser fires on its own the
+  instant the page loads (`favicon.ico`, `sw.js`, `manifest.webmanifest`, `/branding/*` images
+  before that route went public, above). Each one is a real GET that lands on `login()`'s own GET
+  branch, which used to unconditionally mint a fresh `session["csrf"]` on every single GET —
+  silently orphaning the token already baked into the hidden input of whichever real, visible
+  create-account/sign-in form the human had open, before they ever clicked submit. Reproduced
+  deterministically via `fetch()`: load `/login`, let one incidental GET land, submit the
+  *original* token — rejected, every time, which is exactly why clearing cookies or restarting the
+  server never helped (the race re-fires on the very next page load, since a real browser tab
+  always fires several of these background requests automatically). Fixed by only rotating the
+  token unconditionally on a POST that falls through to an error (a consumed/bad token must never
+  be resubmittable — unchanged); a GET now reuses the session's existing token via
+  `session.setdefault("csrf", ...)`, only minting one the first time a session has none. Adversarially
+  reviewed (Workflow tool, 4 independent passes): confirmed no other route has the same
+  rotate-on-GET anti-pattern (`/panel` already used `setdefault`; `_check_panel_csrf` never writes
+  the token at all), and confirmed the change introduces no new fixation/replay risk — the token
+  was always session-scoped by design, "always mint fresh on GET" was never a deliberate security
+  control, just the accidental cause of this bug. Two regression tests added
+  (`test_incidental_get_does_not_invalidate_pending_csrf_token`,
+  `test_failed_post_still_rotates_csrf_token`).
 - **The new `/login` page didn't visually match its locked mock (`static/_mockup_login_panel.html`)
-  in three separate, sequential ways** (2026-07-19, `pixai_gallery.py`, `tests/test_web_auth.py`).
+  in four separate, sequential ways** (2026-07-19, `pixai_gallery.py`, `tests/test_web_auth.py`).
   (1) Inputs had zero styling beyond `width:100%` — bare browser-default text fields on a dark
   page — fixed with real `--mantle` background/`--surface1` border/focus-ring CSS
   (`b03426f`). (2) `.login-card` itself had no background, border, radius, or shadow at all (just
@@ -27,14 +50,20 @@ git tags. Full prose notes for tagged versions live on
   reduced to its bare "M" fallback on `/login` specifically: the front-door gate's allowlist never
   included `/branding/`, so an unauthenticated request for the image got a 302-to-`/login` instead
   of the PNG, tripped the image's own `onerror="this.remove()"`, and quietly dropped the real logo
-  — invisible in the server logs unless you were watching for it. All three were only caught by
-  live-rendering the page and comparing against the mock/computed styles, not by reading the
-  template. Fixed by adding `/branding/` back to `_enforce_front_door()`'s public allowlist
-  (`_PUBLIC_PREFIXES`) — it's static cosmetic art (logo/marks/mascots) with path traversal already
-  rejected in `branding()`, not gallery content, so it carries the same public trust tier as
-  `/login` itself; a missing file still 404s, it just no longer redirects first. Regression test
-  added (`test_branding_stays_public_unauthenticated`, both LAN and localhost) alongside removing
-  `/branding/does-not-exist.png` from the "must be gated" parametrized list it used to sit in.
+  — invisible in the server logs unless you were watching for it. Fixed by adding `/branding/` back
+  to `_enforce_front_door()`'s public allowlist (`_PUBLIC_PREFIXES`) — it's static cosmetic art
+  (logo/marks/mascots) with path traversal already rejected in `branding()`, not gallery content, so
+  it carries the same public trust tier as `/login` itself; a missing file still 404s, it just no
+  longer redirects first. Regression test added (`test_branding_stays_public_unauthenticated`, both
+  LAN and localhost) alongside removing `/branding/does-not-exist.png` from the "must be gated"
+  parametrized list it used to sit in. (4) The "Moonglade Athenaeum" wordmark had no font styling of
+  its own (not inside a `<header>`, so `header h1`'s rule never applied) and rendered as a plain
+  bold browser-default sans H1, instead of the mock's deliberate editorial serif treatment —
+  `Georgia,'Times New Roman',serif`, weight 400, 22px, `.04em` letter-spacing, plus an uppercase
+  `.12em`-tracked tagline. Both are standard system serifs, no webfont needed. Scoped to
+  `.login-card .brand-txt h1`/`.login-card .tagline` rather than editing the shared `.tagline` class
+  every other page's header also uses. All four were only caught by live-rendering the page and
+  comparing computed styles against the mock, never by reading the template.
 
 ### Added
 - **Web-based first-account bootstrap + a Users tab on the Panel: no more CLI-only account

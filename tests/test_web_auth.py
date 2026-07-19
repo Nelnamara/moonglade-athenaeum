@@ -393,6 +393,58 @@ def test_login_csrf_mismatch_rejected(tmp_path):
     assert r2.status_code == 401
 
 
+def test_incidental_get_does_not_invalidate_pending_csrf_token(tmp_path):
+    """Real regression, reported directly by the owner: "CANT CREATE ACCOUNT --
+    Stuck on Session Expired" even after clearing cookies and restarting the
+    server. Root cause: the front door (_enforce_front_door()) redirects EVERY
+    unauthenticated request to /login?next=<path> -- including background
+    requests a browser fires the instant the page loads (favicon.ico, sw.js,
+    manifest.webmanifest, /branding/* images before that route went public).
+    Each of those landed on login()'s own GET branch, which used to
+    unconditionally mint a FRESH session["csrf"] on every GET -- silently
+    orphaning the token already rendered into the hidden input of whatever
+    real, visible login/bootstrap form the human had open. The very next real
+    submit then failed with "Your session expired," deterministically, no
+    matter how many times cookies were cleared or the server restarted (the
+    race re-fires on the very next page load). Reproduce exactly that
+    sequence -- grab a token, let unrelated GETs land on /login in between
+    (simulating the front door redirecting incidental asset requests here),
+    then submit the ORIGINAL token -- and confirm it still works."""
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    original_csrf = _csrf(html)
+    # Simulate the front door redirecting a handful of incidental background
+    # requests here (what favicon.ico/sw.js/manifest.webmanifest actually do)
+    # before the human ever touches the visible form.
+    cli.get("/login", query_string={"next": "/favicon.ico"})
+    cli.get("/login", query_string={"next": "/sw.js"})
+    cli.get("/login", query_string={"next": "/manifest.webmanifest"})
+    r = cli.post("/login", data={
+        "username": "nel", "password": "pw123456", "confirm": "pw123456",
+        "mode": "create", "csrf": original_csrf})
+    assert r.status_code == 302   # succeeds and redirects, not a re-rendered error form
+    assert core.list_web_users() == [{"username": "nel"}]
+
+
+def test_failed_post_still_rotates_csrf_token(tmp_path):
+    """The fix must not throw out the OTHER half of the token lifecycle: a
+    token that was just used in a failed POST (wrong password, bad create
+    input, etc.) must still be rotated out from under a follow-up attempt --
+    otherwise a consumed/known-bad token would stay silently resubmittable
+    forever. Only GETs became "reuse the existing token"; a POST that falls
+    through to any error must keep unconditionally minting a fresh one."""
+    core.add_or_update_web_user("alice", "hunter2")
+    cli = _client(tmp_path).test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    csrf = _csrf(html)
+    r1 = cli.post("/login", data={"username": "alice", "password": "wrong", "csrf": csrf})
+    assert "Invalid username or password" in r1.get_data(as_text=True)
+    # Reusing that SAME (now-stale) token again must be rejected as expired,
+    # not silently accepted a second time.
+    r2 = cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": csrf})
+    assert "expired" in r2.get_data(as_text=True).lower()
+
+
 def test_login_rate_limit_locks_out_after_five_failures(tmp_path):
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()

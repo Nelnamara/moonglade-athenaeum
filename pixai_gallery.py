@@ -6414,6 +6414,19 @@ function savePrompt() {
   .login-card .login-fields input:focus { outline: none; border-color: var(--accent); }
   .login-card .login-fields input::placeholder { color: var(--overlay0); }
   .login-card .login-fields button { width: 100%; justify-content: center; margin-top: 4px; }
+  /* Editorial serif wordmark, matching static/_mockup_login_panel.html's
+     splash treatment -- scoped to .login-card only. Georgia/Times New Roman
+     are standard system serifs (no webfont to fetch); .tagline is a shared
+     header class used on every other page, so it's overridden here rather
+     than edited globally. */
+  .login-card .brand-txt h1 {
+    font-family: Georgia, 'Times New Roman', serif; font-size: 22px;
+    font-weight: 400; letter-spacing: .04em; margin: 0 0 6px;
+  }
+  .login-card .tagline {
+    font-style: normal; font-size: 12px; letter-spacing: .12em;
+    text-transform: uppercase;
+  }
 </style>
 """)
 
@@ -7239,10 +7252,29 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         _establish_session(username)
                         return redirect(_safe_next(next_url) or url_for("index"))
                     error = "Invalid username or password."
-        # GET, or a POST that fell through to an error above: always hand back a
-        # FRESH CSRF token -- one that was just consumed or never matched must
-        # never be resubmittable.
-        session["csrf"] = secrets.token_hex(16)
+        if request.method == "POST":
+            # A POST that fell through to an error above: always hand back a
+            # FRESH CSRF token -- one that was just consumed or never matched
+            # must never be resubmittable.
+            session["csrf"] = secrets.token_hex(16)
+        else:
+            # GET: reuse whatever token this session already holds rather than
+            # unconditionally minting a new one. The front door redirects EVERY
+            # unauthenticated request here, including ones a browser fires on
+            # its own the instant this page loads (favicon.ico, sw.js,
+            # manifest.webmanifest, apple-touch-icon, ...) via next=<asset
+            # path> -- each of those is a real GET that used to silently
+            # overwrite session["csrf"] before the human ever touched the
+            # form, orphaning the token already baked into the visible page's
+            # hidden input. Reproduced: load /login, let one such incidental
+            # GET land, then submit the original form -- "Your session
+            # expired" every time, unconditionally, no matter how many times
+            # cookies are cleared or the server restarted (the bug re-fires
+            # instantly on the very next page load). setdefault leaves an
+            # existing token alone and only mints one the first time this
+            # session has none, so the visible form's token stays valid
+            # across any number of these background hits.
+            session.setdefault("csrf", secrets.token_hex(16))
         return render_template_string(LOGIN_HTML, error=error, csrf=session["csrf"],
                                       next_url=next_url, no_accounts=no_accounts,
                                       bootstrap_mode=bootstrap_mode)
