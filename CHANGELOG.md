@@ -14,6 +14,28 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **The new `/login` page didn't visually match its locked mock (`static/_mockup_login_panel.html`)
+  in three separate, sequential ways** (2026-07-19, `pixai_gallery.py`, `tests/test_web_auth.py`).
+  (1) Inputs had zero styling beyond `width:100%` — bare browser-default text fields on a dark
+  page — fixed with real `--mantle` background/`--surface1` border/focus-ring CSS
+  (`b03426f`). (2) `.login-card` itself had no background, border, radius, or shadow at all (just
+  plain text floating on the page), and `.login-wrap` used `min-height:78vh` instead of the full
+  viewport, pushing the card up off-center — fixed with the frosted-card treatment from the mock
+  (`surface0`/`surface1` `color-mix`, 14px radius, real shadow) and a full-viewport centered wrap
+  (`6578cbb`). (3) The shared brand mark's logo `<img>` (`/branding/logo.png`) was silently
+  reduced to its bare "M" fallback on `/login` specifically: the front-door gate's allowlist never
+  included `/branding/`, so an unauthenticated request for the image got a 302-to-`/login` instead
+  of the PNG, tripped the image's own `onerror="this.remove()"`, and quietly dropped the real logo
+  — invisible in the server logs unless you were watching for it. All three were only caught by
+  live-rendering the page and comparing against the mock/computed styles, not by reading the
+  template. Fixed by adding `/branding/` back to `_enforce_front_door()`'s public allowlist
+  (`_PUBLIC_PREFIXES`) — it's static cosmetic art (logo/marks/mascots) with path traversal already
+  rejected in `branding()`, not gallery content, so it carries the same public trust tier as
+  `/login` itself; a missing file still 404s, it just no longer redirects first. Regression test
+  added (`test_branding_stays_public_unauthenticated`, both LAN and localhost) alongside removing
+  `/branding/does-not-exist.png` from the "must be gated" parametrized list it used to sit in.
+
 ### Added
 - **Web-based first-account bootstrap + a Users tab on the Panel: no more CLI-only account
   creation** (2026-07-19, `pixai_gallery.py`, `tests/test_web_auth.py`,
