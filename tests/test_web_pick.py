@@ -5,6 +5,7 @@ monkeypatched so nothing touches the network."""
 import io
 import os
 import re
+from pathlib import Path
 
 import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
@@ -718,9 +719,15 @@ def test_video_v40_full_cost_warning(tmp_path):
 
 
 def test_toasts_anchored_top_right(tmp_path):
+    """Toast/Jobs/Achievement CSS moved into static/mg-notify.js (2026-07-18, shared with the
+    Loom) -- it's injected client-side, not present in the server-rendered HTML, so this now
+    checks the page loads the shared script and that the script's own CSS still positions
+    toasts top-right (unchanged) at the z-index raised above the Loom's own overlays."""
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
-    assert "#mg-toasts{position:fixed;right:16px;top:64px" in html   # top-right, clear of the header
+    assert '<script src="/static/mg-notify.js"></script>' in html
+    notify_js = (Path(__file__).resolve().parents[1] / "static" / "mg-notify.js").read_text(encoding="utf-8")
+    assert "#mg-toasts{position:fixed;right:16px;top:64px" in notify_js   # top-right, clear of the header
 
 
 def test_generate_card_has_seed_field(tmp_path):

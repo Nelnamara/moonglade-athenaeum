@@ -2253,6 +2253,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         const startedAt = Date.now();
         setCardStatus(c.id, { pendingTaskId: d.task_id, genStartedAt: startedAt });
         pollShot(c.id, d.task_id, startedAt);
+        if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, entry.code + " \xB7 " + (c.title || "untitled"));
         return { ok: true, taskId: d.task_id };
       } catch {
         setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
@@ -2760,6 +2761,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
     const onVideoSubmit = useCallback((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(detail.task_id).slice(-6) + ")" } }));
       setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(detail.task_id, "Rendered");
     }, [setGenState, setCardStatus]);
     const onVideoResult = useCallback((cardId, detail) => {
       const mid = (detail.media_ids || [])[0];
