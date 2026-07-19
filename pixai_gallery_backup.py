@@ -55,7 +55,8 @@ from pathlib import Path
 
 from pixai_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
                             save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
-                            media_id_of, find_files_for_media_id, build_thumbnails)
+                            media_id_of, find_files_for_media_id, build_thumbnails,
+                            _NO_WINDOW)
 
 
 def _ensure_db(out):
@@ -3067,7 +3068,8 @@ def video_faststart(path):
     try:
         r = subprocess.run([ff, "-y", "-v", "error", "-i", str(p),
                             "-c", "copy", "-movflags", "+faststart", str(tmp)],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300,
+                           creationflags=_NO_WINDOW)
         if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
             os.replace(str(tmp), str(p))            # atomic swap
             return True
@@ -3488,7 +3490,8 @@ def probe_video_duration(path):
         out = subprocess.check_output(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            stderr=subprocess.DEVNULL, timeout=20).decode().strip()
+            stderr=subprocess.DEVNULL, timeout=20,
+            creationflags=_NO_WINDOW).decode().strip()
         return round(float(out), 2)
     except Exception:                                  # noqa: BLE001
         return None
@@ -3523,7 +3526,8 @@ def extract_last_frame(video_path, out_png, at_seconds=None):
         subprocess.run(
             ["ffmpeg", "-y"] + seek +
             ["-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=True)
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=True,
+            creationflags=_NO_WINDOW)
         return str(out_png) if os.path.exists(out_png) and os.path.getsize(out_png) > 0 else None
     except Exception:                                  # noqa: BLE001
         return None
