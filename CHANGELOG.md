@@ -15,6 +15,23 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Fixed
+- **The entire Control Panel's JS silently failed to parse, breaking everything on the page at
+  once: no skins in the Skins grid, and clicking the Users tab did nothing** (2026-07-19,
+  `pixai_gallery.py`, `tests/test_js_syntax.py`). Owner report: "All the skins are gone from the
+  panel. Clicking the users tab does nothing." Root cause: `removeUser()`'s confirm-dialog string
+  had a single-escaped `\n\n` instead of the double-escaped `\\n\\n` every other `confirm()` call in
+  this file correctly uses — since the whole page is a Python triple-quoted string (not a raw
+  string), Python's own lexer collapsed that `\n` into a real newline byte at *module load time*,
+  before Jinja or the browser ever touched it. A JS single-quoted string literal can't contain a
+  literal, un-escaped newline, so the browser's parser hit an unterminated string and refused to
+  parse the *entire* `<script>` block — not just `removeUser()`. Every function it defines
+  (`setPanelTab`, `loadSkins`, `renderJobs`, `loadAcct`, `loadBrand`, ...) silently never existed,
+  and the tab buttons' inline `onclick` handlers failed with a swallowed `ReferenceError`. Pinned
+  the exact line with `node --check` against the live-rendered page. One-character-class fix
+  (`\n\n` → `\\n\\n`). The regression-guard test that exists precisely for this bug class
+  (`tests/test_js_syntax.py`, Node-syntax-checks every embedded `<script>` block) never actually
+  covered `/panel` — its parametrized path list predates the Users tab. Added `/panel` and `/login`
+  to it so this class of bug can't silently ship again.
 - **First-account creation on `/login` was completely broken: "Your session expired" on every
   attempt, surviving a cookie clear and a full server restart** (2026-07-19, `pixai_gallery.py`,
   `tests/test_web_auth.py`). Root cause: `_enforce_front_door()` redirects every unauthenticated
