@@ -263,7 +263,16 @@ users.
   showing a note row with a "↺ reset" button. A model with no tuned preset leaves the fields
   alone (f1e35d1).
 - The Loom nav button is hidden below 480px and visible from tablet up; the gallery's filters
-  become a bottom sheet at the same breakpoint.
+  become a bottom sheet at the same breakpoint. The Job Tracker/Activity tray (`#jobs-tray`,
+  `static/mg-notify.js`) and the snippet/tag popups (`#snip-menu`, `#tag-suggest`,
+  `pixai_gallery.py`) clamp their `max-width` to `calc(100vw - Npx)` so none of them run off a
+  320px-wide screen (below their previous flat max-widths).
+- **All three Job Tracker sources now log to the same `out_dir/jobs.jsonl` activity feed**:
+  Control Panel actions and bulk cloud-delete (already wired), and now a bare CLI run from a
+  terminal too (`--sync`, `--update`, `--generate`, `--generate-video`, plain download) — each
+  gets a `cli-<uuid>` job id (mirroring `panel-`/`bulkdel-`), logged fail-soft so a logging hiccup
+  can never break the actual command. A panel-spawned subprocess still logs exactly once (no
+  duplicate entry) via the existing `MOONGLADE_PROGRESS=1` path.
 - The Generate drawer's Edit ▸ Enhance sub-tab promotes ten one-click PixAI workflows
   (upscale / upscale 2×2 / upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art
   / sketch-colorize / relight-sun / relight-backlight), each firing `Gen.enhance(<workflow_id>)`
@@ -516,8 +525,8 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   location (moved off `mg-generate-drawer.js`, which must stay host-agnostic, onto the Loom's
   own `onVideoSubmit`), the missing `seen{}` de-dupe guard on `register()`, the shared
   `.ach-modal` coupling, and the untested tray-collision claim (which turned out to be real).
-  555 Python + 111 Node tests green (+1 Python smoke test asserting the Loom shell carries the
-  script tag and both anchors). Live-verified: Trophy Hall + Contests/YourArt modals render
+  Full suite green (`python -m pytest -q`), including a new Python smoke test asserting the
+  Loom shell carries the script tag and both anchors. Live-verified: Trophy Hall + Contests/YourArt modals render
   correctly on the gallery with zero regressions, `Jobs.register()` round-trips through the
   real `/api/jobs` endpoint into a rendered tray row, the tray-collision fix measured clean
   (0px overlap, was 12.7px), z-index values confirmed above the Loom's overlay ceiling, zero
