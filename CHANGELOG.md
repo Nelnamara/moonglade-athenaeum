@@ -155,6 +155,65 @@ git tags. Full prose notes for tagged versions live on
   tab; the Loom mount is next.
 
 ### Fixed
+- **Give-up-timer softening: a slow-but-live render was being punished identically to a real
+  server failure** (2026-07-18(pm)). The 20-minute give-up timer shipped earlier the same day
+  fixed a real bug (a dead generation polling forever, indistinguishable from a live one) but
+  traded it for an opposite one: at 20 minutes elapsed with no result, it wrote a REAL
+  terminal `status:"error"` and severed `pendingTaskId`, unrecoverable short of a fresh submit
+  — even though the owner's own motivating "lost generation" turned out to be a late-surfacing
+  content-moderation rejection, not an actual timeout. Elapsed time alone no longer ends a shot
+  in failure in either poll loop (the Loom's own `pollShot` or `<mg-generate-drawer>`'s
+  independent `_poll` — both load-bearing, tracking different submission paths). Three tiers
+  instead: 20min downshifts the poll cadence and shows "Taking longer than expected"; 90min
+  downshifts further and shows "Still going after Nh — unusual"; a 6h ceiling stops this tab's
+  own network polling (protects against a permanently wedged/deleted task) but leaves
+  `status`/`pendingTaskId` untouched — a reload, or clicking the card's own "paused" badge,
+  always gives it a completely fresh budget. Only a genuine server-reported failure
+  (`classifyTaskStatus`'s `"failed"` phase, unchanged) can still end a shot in real error.
+  `genStartedAt` is now persisted on the card (both submission paths) so the 6h ceiling means
+  something across a reload — without it, every reload would silently re-arm a full fresh
+  budget regardless of true elapsed time. `batchTally` gained a `stale` outcome, tracked via an
+  `outcomes: {[cardId]: "done"|"failed"|"stale"}` map rather than flat counters, so a batch
+  shot that later resolves after being marked stale doesn't double-count. Designed then
+  independently adversarially reviewed (Workflow tool) before implementation — the review
+  caught a Critical bug in the first draft (two new callbacks referenced in a dependency array
+  without being threaded through `LoomV2`'s own props, which would have thrown
+  `ReferenceError` on the very first render and replaced the entire Loom UI with its error
+  boundary fallback), plus the stale-batchTally double-count, a scope bug in a shared time-
+  formatting helper, and the missing `genStartedAt` persistence — all fixed before shipping.
+  Also flagged, not yet acted on: `/api/task-status`'s exception handler returns HTTP 200
+  `{phase:"failed"}` for a transient local blip, which both poll loops currently can't
+  distinguish from a genuine PixAI-reported failure — a decision for the owner on whether to
+  change that endpoint's error-branch shape. 111 Node tests green (+18 new, a permanent parity
+  test guarding `<mg-generate-drawer>`'s local `friendlyGenErr` copy against silent drift from
+  `loom-mutations.js`'s real one). Live-verified: no console errors on load (the fix for the
+  Critical threading bug), normal wip/done card badges unaffected.
+- **Timeline drawer's video preview was too small and left-justified** instead of centered —
+  CSS-only: `.sb-shotprev`/`.sb-shotprev-wrap`'s `max-width` raised 340px→460px with
+  `margin:auto` centering, and the preview zone/drawer's "full" height grown proportionally
+  (280px→362px zone, 360px→442px drawer) so the larger preview doesn't overflow into the reel
+  scrubber below it. Live-verified via direct DOM measurement (both centers align, an 11px
+  safety margin below the preview, zero console errors) — the `computer` tool's screenshot
+  capability was unreliable this session, so exact pixel geometry was confirmed via
+  `getBoundingClientRect()` instead of a visual screenshot.
+- **`<mg-generate-drawer>`'s own error rendering didn't recognize a content-moderation
+  rejection** ("Sensitive content." from a real submit) and showed the raw server string
+  instead of a friendly message — even though the Loom's own poll path
+  (`loom/src/loom-mutations.js`'s `friendlyGenErr`/`classifyTaskStatus`) already had this
+  mapping. The drawer is a plain host-agnostic `<script>` with no build step and
+  deliberately can't import that ES module, so the fix is a local, verbatim port of
+  `friendlyGenErr` (same regex patterns, same replacement text) inside
+  `static/mg-generate-drawer.js`, wired into only the two call sites that carry a genuine
+  raw server string — the submit-failure branch (`_generate()`) and the poll
+  task-failure branch (`_poll()`) — not the audio-upload/network/timeout call sites,
+  which are already hand-written friendly text. `esc()` still runs on the mapped message
+  same as before, so no XSS regression. Flagged as a duplication risk (same
+  acknowledgment style as `GIVE_UP_MS` mirroring the Loom's `POLL_GIVE_UP_MS`): if
+  `friendlyGenErr` in `loom-mutations.js` ever changes wording, this copy needs a matching
+  hand-edit. Because the component is shared, this also fixes the Loom's own Video-tab
+  mount (`onVideoError` previously showed the same raw string) for free, and will cover
+  the plain gallery's own Video tab automatically once it's swapped onto
+  `<mg-generate-drawer>` (still pending — see "Web components" above).
 - **Five generation-lifecycle bugs in the Loom, found live-testing real generations (a "great
   shakedown session").** `<mg-generate-drawer>` is now mounted once and permanently in the
   Video tab (CSS-hidden on other tabs, never conditionally unmounted) — switching tabs

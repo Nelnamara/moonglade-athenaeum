@@ -28,7 +28,17 @@
                         hosts may ALSO track the task in their own infra (gallery Jobs
                         card, Loom pendingTaskId persistence).
      mg-result       -- detail: {media_ids, is_video, duration, paid_credit}.
-     mg-error        -- detail: {error}.
+     mg-error        -- detail: {error}. Only fires on a REAL server-reported failure -- an
+                        elapsed-time-alone timeout never dispatches this (see mg-slow/
+                        mg-paused instead); the render is still genuinely in flight, just slow.
+     mg-slow         -- detail: {tier: 'slow'|'stale', elapsed, task_id}. Fired when the poll's
+                        cadence downshifts (20min, then 90min) with no result yet -- a host
+                        whose own board-grid card reads from its own state (not this drawer's
+                        inline result div) needs this to keep that card's badge in sync.
+     mg-paused       -- detail: {task_id}. Fired when the poll hits its 6h ceiling and stops
+                        scheduling further calls for this task -- NOT a failure (status/
+                        pendingTaskId are the host's to leave untouched); a reload or a fresh
+                        _poll() call for the same task_id always gets a completely new budget.
      mg-dirty        -- fired the moment the user TYPES in the prompt box (not on a
                         programmatic prefill()). Hosts that auto-recompose the prompt from
                         other state (the Loom's shot fields) use this to know a hand-edit
@@ -266,6 +276,31 @@
     var box = document.createElement('div');
     box.style.cssText = 'position:relative;width:72px;height:72px;border-radius:8px;border:1px solid var(--surface1,#3a3460);background:var(--surface0,#211f3a);cursor:pointer;overflow:hidden;display:grid;place-items:center;color:var(--subtext,#9a93ab);font-size:10.5px;text-align:center;' + (cssText || '');
     return box;
+  }
+
+  // LOCAL PORT of loom/src/loom-mutations.js's friendlyGenErr(raw) -- same regex patterns,
+  // same replacement text, verbatim -- so a generation rejected by PixAI's content filter
+  // (or stopped short on insufficient balance) reads IDENTICALLY whether it surfaced via
+  // the Loom's own poll path (classifyTaskStatus -> friendlyGenErr, an ES module built by
+  // esbuild) or via THIS drawer's independent submit/poll cycle below. This file must stay
+  // a plain global <script> with no build step (see the top-of-file doc comment) and so
+  // must NOT import loom-mutations.js -- the mapping logic is intentionally duplicated
+  // here instead of shared.
+  // DUPLICATION RISK, same acknowledgment as the poll-tier constants (SLOW_AT/STALE_AT/
+  // CEILING) mirroring the Loom's own POLL_SLOW_AT_MS/POLL_STALE_AT_MS/POLL_CEILING_MS below:
+  // if loom-mutations.js's friendlyGenErr ever gets new/changed
+  // regexes or replacement wording, THIS copy must be updated to match by hand, or the
+  // Loom's own generation path and this drawer's silently drift out of sync with each
+  // other on the exact same class of error. There is no shared-module fix available here
+  // (that's the whole reason this is a local copy) -- a code-search for "friendlyGenErr"
+  // is the only guard against drift on a future edit.
+  function friendlyGenErr(raw) {
+    var s = String(raw || '');
+    if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
+      return 'Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
+    if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
+      return "PixAI's content filter blocked this generation — that's decided on PixAI's side, not in the Loom.";
+    return s || 'generation failed';
   }
 
   class MgGenerateDrawerEl extends HTMLElement {
@@ -750,7 +785,7 @@
       fetch('/api/loom/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) })
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (d.error || !d.task_id) { done(); self._renderError(d.error || 'submit failed'); return; }
+          if (d.error || !d.task_id) { done(); self._renderError(friendlyGenErr(d.error || 'submit failed')); return; }
           self.dispatchEvent(new CustomEvent('mg-submit', { bubbles: true, composed: true, detail: { task_id: d.task_id, payload: p } }));
           res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Queued — running…</span>';
           self._poll(d.task_id, done);
@@ -758,23 +793,45 @@
         .catch(function () { done(); self._renderError('network error'); });
     }
 
-    // POLL_GIVE_UP_MS mirrors the Loom's own pollShot give-up threshold (generous against
-    // the longest real clips -- 15s @ V4.0 full genuinely takes several minutes -- while
-    // still eventually freeing the Go button and marking a truly dead task, rather than
-    // polling forever with no way to retry). Found 2026-07-18 live-testing: this loop had
-    // no give-up path at all before.
+    // These three thresholds mirror the Loom's own pollShot tiers exactly
+    // (master-storyboard.jsx: POLL_SLOW_AT_MS/POLL_STALE_AT_MS/POLL_CEILING_MS) -- a literal
+    // duplicate on purpose, same as GIVE_UP_MS was before it (no module system here to share
+    // a constant from). KEEP THESE THREE NUMBERS IN SYNC if either file's tiers change.
+    //
+    // Softened 2026-07-18(pm): elapsed time alone no longer ends a render in failure -- the
+    // old GIVE_UP_MS called done()+_renderError() at 20min, indistinguishable from a real
+    // server failure (the owner's own motivating case was a late-surfacing content-moderation
+    // rejection, not a timeout). Now elapsed time only slows the poll cadence and escalates
+    // the message; only a real d.phase==='failed' response still calls _renderError(). At the
+    // 6h ceiling this tab stops scheduling calls for this task (protects against polling a
+    // permanently-wedged or deleted task forever) but that is NOT the old giveUp() either --
+    // see _pause below.
     _poll(taskId, done) {
-      var self = this, res = this._result, startedAt = Date.now(), GIVE_UP_MS = 20 * 60 * 1000;
+      var self = this, res = this._result, startedAt = Date.now();
+      var SLOW_AT = 20 * 60 * 1000, SLOW_MS = 20 * 1000;
+      var STALE_AT = 90 * 60 * 1000, STALE_MS = 3 * 60 * 1000;
+      var CEILING = 6 * 60 * 60 * 1000;
       clearTimeout(this._pollTimer);
-      var giveUp = function () {
+      function label(ms) { return ms < 3600000 ? (Math.round(ms / 60000) + 'm') : ((Math.round(ms / 360000) / 10) + 'h'); }
+      // Ceiling reached: stop polling THIS session. done() DOES fire here (unlike the
+      // slow/stale downgrades below) so the Go button frees up rather than staying disabled
+      // indefinitely against a task this tab has stopped actively tracking -- but there is NO
+      // _renderError() and NO 'failed' framing. pendingTaskId on the card (written by the
+      // host's onVideoSubmit at submit time) is untouched by this -- a reload's resume effect,
+      // or clicking the card's own "paused" status badge, gives it a fresh poll budget rather
+      // than abandoning it.
+      var pause = function () {
         done();
-        self._renderError('timed out waiting for this render — check the task on pixai.art, or try again');
+        res.innerHTML = '<span style="color:var(--subtext,#9a93ab);font-size:12px;">Paused auto-checking after ' + label(CEILING) +
+          ' with no result — check pixai.art, or reopen this shot to check again (task ' + esc(String(taskId).slice(-6)) + ')</span>';
+        self.dispatchEvent(new CustomEvent('mg-paused', { bubbles: true, composed: true, detail: { task_id: taskId } }));
       };
       this._pollTimer = setTimeout(function tick() {
         fetch('/api/task-status?task_id=' + encodeURIComponent(taskId))
           .then(function (r) { return r.json(); })
           .then(function (d) {
             if (!self.isConnected) return;
+            var elapsed = Date.now() - startedAt;
             if (d.phase === 'done') {
               done();
               self._renderResult(d);
@@ -784,20 +841,29 @@
               }));
             } else if (d.phase === 'failed') {
               done();
-              self._renderError(d.error || ('task ' + (d.status || 'failed')));
-            } else if (Date.now() - startedAt > GIVE_UP_MS) {
-              giveUp();
+              self._renderError(friendlyGenErr(d.error || ('task ' + (d.status || 'failed'))));
+            } else if (elapsed > CEILING) {
+              pause();
+            } else if (elapsed > STALE_AT) {
+              res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--amber,#f9d38c);font-size:12px;">Still going after ' + label(elapsed) +
+                ' — unusual. Check pixai.art, or keep waiting (task ' + esc(String(taskId).slice(-6)) + ')</span>';
+              self.dispatchEvent(new CustomEvent('mg-slow', { bubbles: true, composed: true, detail: { tier: 'stale', elapsed: elapsed, task_id: taskId } }));
+              self._pollTimer = setTimeout(tick, STALE_MS);
+            } else if (elapsed > SLOW_AT) {
+              res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--amber,#f9d38c);font-size:12px;">Taking longer than expected (' + label(elapsed) +
+                ', task ' + esc(String(taskId).slice(-6)) + ')</span>';
+              self.dispatchEvent(new CustomEvent('mg-slow', { bubbles: true, composed: true, detail: { tier: 'slow', elapsed: elapsed, task_id: taskId } }));
+              self._pollTimer = setTimeout(tick, SLOW_MS);
             } else {
               res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Rendering under the eclipse… (task ' + esc(String(taskId).slice(-6)) + ')</span>';
               self._pollTimer = setTimeout(tick, 2000);
             }
           })
           .catch(function () {
-            // transient poll blip: the task is still running server-side -- keep polling,
-            // unless we're past the give-up threshold too.
             if (!self.isConnected) return;
-            if (Date.now() - startedAt > GIVE_UP_MS) { giveUp(); return; }
-            self._pollTimer = setTimeout(tick, 2000);
+            var elapsed = Date.now() - startedAt;
+            if (elapsed > CEILING) { pause(); return; }
+            self._pollTimer = setTimeout(tick, elapsed > STALE_AT ? STALE_MS : elapsed > SLOW_AT ? SLOW_MS : 2000);
           });
       }, 2000);
     }

@@ -133,7 +133,7 @@ const STYLES = `
 .sb-card.open{box-shadow:var(--shadow);border-color:var(--amber-d);grid-column:1/-1}
 
 .sb-shotprev{position:relative;margin-top:8px;border-radius:8px;overflow:hidden;
-  background:#000;cursor:col-resize;max-width:340px}
+  background:#000;cursor:col-resize;max-width:460px}
 .sb-shotprev video{width:100%;display:block;aspect-ratio:16/9;object-fit:contain;background:#000}
 .sb-shotprev-hint{position:absolute;right:7px;bottom:6px;font-size:10.5px;color:rgba(255,255,255,.75);
   background:rgba(0,0,0,.5);border-radius:5px;padding:2px 7px;pointer-events:none;
@@ -143,7 +143,7 @@ const STYLES = `
   background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:4px 7px;
   cursor:pointer;}
 .sb-shotprev-play:hover{background:rgba(0,0,0,.75);border-color:var(--amber);}
-.sb-shotprev-wrap{margin-top:8px;max-width:340px}
+.sb-shotprev-wrap{margin:8px auto 0;max-width:460px}
 .sb-shotprev-ctrls{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
 .sb-shotprev-ctrls button{font:600 11px/1 system-ui;color:var(--ink2);background:var(--panel2);
   border:1px solid var(--line);border-radius:6px;padding:5px 8px;cursor:pointer}
@@ -335,6 +335,9 @@ const AUDIO_PALETTE = ["no music", "room tone", "ambient hum", "soft breathing",
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+// Module scope (not a local inside useGenerationPipeline) because both pollShot (inside that
+// hook) and onVideoSlow/onVideoPaused (inside App(), a different function entirely) need it.
+const elapsedLabel = (ms) => ms < 3600000 ? Math.round(ms / 60000) + "m" : (Math.round(ms / 360000) / 10) + "h";
 const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
 // CONNECT, CONTINUITY_PHRASE, actLetter, maxTagNum/nextTag, frameLinked, and
 // connectMeta now live in ./src/loom-core.js (imported above) -- Phase 1
@@ -436,6 +439,7 @@ const V2_STYLES = `
 .lv-cost-pill:disabled{opacity:.5;}
 .lv-batchbar{padding:6px 20px;font-size:12px;color:var(--subtext);background:var(--surface0);border-bottom:1px solid var(--surface1);}
 .lv-batchfail{color:var(--coral);font-weight:600;}
+.lv-batchstale{color:var(--subtext);font-weight:600;}
 .lv-override-badge{color:var(--amber);font-style:normal;font-weight:600;}
 .lv-overrideflash{font-size:11px;color:var(--amber);background:rgba(0,0,0,.15);border-radius:5px;padding:3px 7px;margin-top:2px;animation:lv-flash-fade 1.6s ease-out forwards;}
 @keyframes lv-flash-fade{0%{opacity:1;}70%{opacity:1;}100%{opacity:0;}}
@@ -464,7 +468,7 @@ const V2_STYLES = `
    the preview sits ABOVE the scrubber, only rendered once mostly expanded. */
 .lv-tldrawer{flex:none;position:relative;background:var(--surface0);border-bottom:1px solid var(--surface1);}
 .lv-tlcontent{overflow:hidden;position:relative;}
-.lv-tlpreviewzone{padding:10px 14px 4px;height:280px;box-sizing:border-box;}
+.lv-tlpreviewzone{padding:10px 14px 4px;height:362px;box-sizing:border-box;}
 .lv-tlpreviewbox{height:100%;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
   display:flex;align-items:center;justify-content:center;text-align:center;}
 .lv-tlreelzone{padding:8px 14px 10px;}
@@ -501,6 +505,7 @@ const V2_STYLES = `
 .lv-st.done{color:var(--green);background:color-mix(in srgb,var(--green) 16%,transparent);}
 .lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
+.lv-st.paused{color:var(--subtext);background:var(--base);border:1px dashed var(--subtext);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
@@ -734,7 +739,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, costEstimate, refreshEstimate, batchTally }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -874,6 +879,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       });
       el.addEventListener("mg-result", (e) => onVideoResult(genTargetRef.current || activeRef.current.c.id, e.detail));
       el.addEventListener("mg-error", (e) => onVideoError(genTargetRef.current || activeRef.current.c.id, e.detail));
+      el.addEventListener("mg-slow", (e) => onVideoSlow(genTargetRef.current || activeRef.current.c.id, e.detail));
+      el.addEventListener("mg-paused", (e) => onVideoPaused(genTargetRef.current || activeRef.current.c.id, e.detail));
       // Durably persists a hand-edit made while typing normally (NOT switching shots or
       // batch-generating -- those paths call flushPromptEdit() directly, see below and the
       // toolbar button). A no-op if the committed text is identical to what auto-compose
@@ -890,12 +897,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         promptDirtyRef.current = false;
       });
     }
-  }, [openPick, onVideoSubmit, onVideoResult, onVideoError]);
+  }, [openPick, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused]);
 
   // Fixed Timeline drawer: hidden(0) / slim(default, scrubber only) / full(preview above
   // scrubber, real 16:9). The handle drags freely between 0 and TL_HEIGHTS.full, snapping
   // to the nearest named state on release -- same mechanic as the owner-approved mockup.
-  const TL_HEIGHTS = { hidden: 0, slim: 64, full: 360 };
+  const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 };
   const tlPointerDown = (e) => { tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] }; e.currentTarget.setPointerCapture(e.pointerId); };
   const tlPointerMove = (e) => {
     if (!tlDrag.current.dragging) return;
@@ -1024,10 +1031,17 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // itself no-ops while the drawer's own submit is what's driving the button (see
   // mg-generate-drawer.js). Closes the double-submit gap where a batch run (or a resumed
   // poll) marks the active shot "wip" but the drawer's own Go button stayed clickable.
+  // "paused" carve-out (2026-07-18(pm)): a give-up-timer ceiling leaves status:"wip" but
+  // frees the drawer's own Go button (see mg-generate-drawer.js's _poll pause()) -- without
+  // this, reselecting a paused shot re-evaluates status==="wip" (still true by design) and
+  // silently re-disables the Go button the drawer just freed, with no visible reason why
+  // (found in review).
   useEffect(() => {
+    const gs = genState[active.c.id];
+    const stillBusy = active.c.status === "wip" && !(gs && gs.phase === "paused");
     const el = genDrawerRef.current;
-    if (el && el.setBusy) el.setBusy(active.c.status === "wip");
-  }, [active.c.id, active.c.status]);
+    if (el && el.setBusy) el.setBusy(stillBusy);
+  }, [active.c.id, active.c.status, genState[active.c.id] && genState[active.c.id].phase]);
   const board = (
     <div className="lv-board">
       {project.acts.map((act, ai) => {
@@ -1043,7 +1057,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <div className="lv-cards">
               {items.map((e) => {
                 const gs = genState[e.c.id];
-                const st = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
+                // "paused" is its own visual state (auto-checking genuinely stopped);
+                // running/slow/stale/submitting all still just read as the ordinary amber
+                // "wip" look -- the escalating MESSAGE is the signal (gs.msg above), not a
+                // color change, so a slow shot never looks alarming but also never looks
+                // silently identical to a normal render. Clicking the badge while paused
+                // re-polls the same pendingTaskId fresh -- the manual-recheck counterpart to
+                // the reload-time resume effect.
+                const paused = gs && gs.phase === "paused";
+                const st = paused ? "paused" : (gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status);
                 return (
                   <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}
                     onDoubleClick={() => setDeepFocus(e)} title="Double-click to open in Deep Focus">
@@ -1051,7 +1073,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     <div className="lv-code">{e.code}</div>
                     <div className="lv-ctitle">{e.c.title || "untitled"}</div>
                     <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
-                      <span className={"lv-st " + st}>{gs && gs.msg ? gs.msg : st}</span></div>
+                      <span className={"lv-st " + st}
+                        onClick={paused ? (ev) => { ev.stopPropagation(); pollShot(e.c.id, e.c.pendingTaskId); } : undefined}
+                        style={paused ? { cursor: "pointer" } : undefined}
+                        title={paused ? "Click to check again" : undefined}>
+                        {gs && gs.msg ? gs.msg : st}</span></div>
                     <div className="lv-crow" onClick={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, -1)} title="Move up">&#8593;</button>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, 1)} title="Move down">&#8595;</button>
@@ -1122,7 +1148,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   let gen;
   {
     const gs = genState[active.c.id];
-    const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error";
+    // "paused" no longer counts as busy -- the auto-poll has genuinely stopped, so a manual
+    // "use existing video" attach isn't racing a live network call anymore. running/slow/
+    // stale (still actively polling) still block it, same as before.
+    const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" && gs.phase !== "paused";
     // Writes into the selected shot when bound, or the draft card when not -- everything
     // below (tab bodies, frame slots) reads/writes through this one function either way.
     const patch = (fn) => { if (sel) setCard(sel.a.id, sel.c.id, fn); else setDraftCard(fn); };
@@ -1524,18 +1553,32 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           bundling={bundling} importBackup={importBackup} />
         <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
-      {batchTally && (
-        <div className="lv-batchbar">
-          Batch: {batchTally.submitted}/{batchTally.total} submitted &middot; {batchTally.done} done
-          {batchTally.failed ? <> &middot; <span className="lv-batchfail">{batchTally.failed} failed</span></> : null}
-          {/* A shot reaches a terminal outcome via exactly one of two paths: fails at
-              submit time (counted once, directly into `failed`, never touching `submitted`)
-              or is submitted successfully and later resolves via poll into done/failed --
-              so done+failed only ever reaches `total` once every launched shot has actually
-              finished one way or another, regardless of which path each one took. */}
-          {batchTally.done + batchTally.failed < batchTally.total ? " · rendering…" : ""}
-        </div>
-      )}
+      {batchTally && (() => {
+        // done/failed/stale are DERIVED from the outcomes map every render, never stored as
+        // separate counters -- see batchTally's own doc comment (useGenerationPipeline) for
+        // why: a card's outcome can be reassigned (a `stale` shot resolving `done` later via
+        // a manual recheck) by simply overwriting its one map entry, which self-corrects
+        // instead of requiring manual decrement bookkeeping across two mutation sites.
+        const outs = Object.values(batchTally.outcomes);
+        const done = outs.filter((o) => o === "done").length;
+        const failed = outs.filter((o) => o === "failed").length;
+        const stale = outs.filter((o) => o === "stale").length;
+        return (
+          <div className="lv-batchbar">
+            Batch: {batchTally.submitted}/{batchTally.total} submitted &middot; {done} done
+            {failed ? <> &middot; <span className="lv-batchfail">{failed} failed</span></> : null}
+            {stale ? <> &middot; <span className="lv-batchstale">{stale} paused (check manually)</span></> : null}
+            {/* A shot settles via one of three paths: fails at submit time (recorded directly
+                as an outcome, never touching `submitted`); is submitted then resolves via
+                poll into done/failed; or is submitted and its poll hits the give-up timer's
+                6h ceiling with neither -- `stale`. done+failed+stale reaching `total` means
+                "nothing in this batch is being actively checked anymore," NOT "everything
+                succeeded" -- that's why `stale` gets its own visible count instead of folding
+                into `done` or `failed`. */}
+            {done + failed + stale < batchTally.total ? " · rendering…" : ""}
+          </div>
+        );
+      })()}
       {timelineDrawer}
       <div className="lv-shell">
         <div className={"lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "")}>
@@ -1900,15 +1943,28 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
   const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
   const [batching, setBatching] = useState(false);
-  // batchTally: { total, submitted, done, failed, ids: Set } for the CURRENTLY OPEN batch
-  // run, or null between runs. Distinct from tallyPrices()'s free/paid/credits/unknown --
-  // this tracks submit/render OUTCOMES, not cost. Every mutation below uses the functional
-  // setState form and checks membership against the CURRENT `prev` value inside the
-  // updater, never a `batchTally` variable closed over by generateShot/pollShot -- those
-  // closures are captured once (at the render active when the batch's button was clicked)
-  // and never see later updates, exactly the same stale-closure trap generateShot's own
-  // return-value fix above exists to avoid.
+  // batchTally: { total, submitted, ids: Set, outcomes: {[cardId]: "done"|"failed"|"stale"} }
+  // for the CURRENTLY OPEN batch run, or null between runs. Distinct from tallyPrices()'s
+  // free/paid/credits/unknown -- this tracks submit/render OUTCOMES, not cost. `submitted`
+  // is a flat counter (incremented once per card, at launch, by batchGenerate's own loop --
+  // immune to double-counting since that loop visits each card exactly once). Every other
+  // outcome lives in `outcomes`, a MAP keyed by card id, not separate done/failed/stale
+  // counters -- a card's outcome can be REASSIGNED later (e.g. the give-up-timer's "stale"
+  // pause() eventually resolves into "done" via a manual recheck) by simply overwriting its
+  // one entry, which is naturally self-correcting. Flat increment-only counters for
+  // done/failed/stale were tried first and rejected in review: they double-count the instant
+  // any shot's outcome changes after first being recorded (a `stale` shot that later resolves
+  // `done` left `done+1` while `stale` stayed put, so the tally could sum to MORE than
+  // `total`). Displayed counts are always DERIVED from this map (see the batch banner below),
+  // never stored redundantly. Every mutation below uses the functional setState form and
+  // checks membership against the CURRENT `prev` value inside the updater, never a
+  // `batchTally` variable closed over by generateShot/pollShot -- those closures are captured
+  // once (at the render active when the batch's button was clicked) and never see later
+  // updates, exactly the same stale-closure trap generateShot's own return-value fix above
+  // exists to avoid.
   const [batchTally, setBatchTally] = useState(null);
+  const setBatchOutcome = (cardId, outcome) => setBatchTally((prev) =>
+    (prev && prev.ids.has(cardId)) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
 
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
     : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
@@ -1968,8 +2024,13 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       // in-memory pollShot loop dies with the page, but a resume effect re-attaches it
       // from pendingTaskId on next load (otherwise the shot is stuck "wip" forever while
       // its clip lands orphaned in the gallery). Cleared on done/fail.
-      setCardStatus(c.id, { pendingTaskId: d.task_id });
-      pollShot(c.id, d.task_id);
+      // genStartedAt is ALSO persisted (not just held in pollShot's own closure) so the
+      // give-up-timer's tiers survive a reload -- without a durable timestamp, a resumed
+      // poll would compute elapsed from a fresh Date.now() every time, silently re-arming a
+      // full 6h ceiling on every reload regardless of true elapsed time (found in review).
+      const startedAt = Date.now();
+      setCardStatus(c.id, { pendingTaskId: d.task_id, genStartedAt: startedAt });
+      pollShot(c.id, d.task_id, startedAt);
       return { ok: true, taskId: d.task_id };
     } catch {
       setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
@@ -1983,24 +2044,48 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   // "done") -- a failed render cleared pendingTaskId but left status:"wip" forever, so a
   // dead generation was indistinguishable from a live one after reload, and this loop
   // polled forever regardless (no give-up path, no cancel button anywhere in generation).
-  // Found 2026-07-18 live-testing. POLL_GIVE_UP_MS is generous against the longest real
-  // clips (15s @ V4.0 full genuinely takes several minutes) while still eventually freeing
-  // a shot that's actually dead server-side, rather than polling it forever.
-  const POLL_GIVE_UP_MS = 20 * 60 * 1000;
-  const pollShot = (cardId, tid) => {
+  // Found 2026-07-18 live-testing.
+  //
+  // Softened 2026-07-18(pm): that fix's own give-up traded the bug for an opposite one -- at
+  // 20min elapsed with neither done nor failed reported, it wrote a REAL terminal
+  // status:"error" and severed pendingTaskId, indistinguishable from a genuine server failure
+  // and unrecoverable short of a fresh submit. The owner's own motivating case (a render that
+  // LOOKED lost) turned out to be a content-moderation rejection surfacing late, not an actual
+  // timeout -- so a merely-slow shot was being punished identically to one PixAI actually
+  // killed. Elapsed time alone now only ever downgrades the poll cadence and escalates
+  // genState's message; only a REAL server response (cls.phase==="failed", below, unchanged)
+  // can still end a shot in "error". Three thresholds: two cadence downgrades that keep
+  // polling (so a shot that eventually finishes still lands its result), then a hard ceiling
+  // that stops THIS TAB's own network calls against a task that may be permanently wedged or
+  // deleted server-side -- without ever writing status:"error" or clearing pendingTaskId, so a
+  // reload (resume effect below, now passing the persisted genStartedAt) or a manual recheck
+  // (the card's own status badge, once it reads "paused") always gives it a completely fresh
+  // budget rather than abandoning it. Mirrored in mg-generate-drawer.js's _poll -- KEEP THE
+  // THREE NUMBERS BELOW IN SYNC with that file.
+  const POLL_SLOW_AT_MS   = 20 * 60 * 1000;      // 20min: was the old hard give-up point
+  const POLL_SLOW_MS      = 20 * 1000;           // slow-tier cadence
+  const POLL_STALE_AT_MS  = 90 * 60 * 1000;      // 90min: second, slower downshift
+  const POLL_STALE_MS     = 3 * 60 * 1000;       // stale-tier cadence
+  const POLL_CEILING_MS   = 6 * 60 * 60 * 1000;  // 6h: stop auto-polling THIS tab; status untouched
+  // existingStartedAt lets the resume-on-reload effect (and a manual "paused" recheck) hand
+  // pollShot the card's real, PERSISTED start time instead of a fresh Date.now() -- without
+  // this, every reload would silently re-arm a full 6h budget regardless of true elapsed
+  // time, reintroducing (on a per-reload cadence) the exact "dead generation indistinguishable
+  // from a live one" symptom this whole softening exists to fix (found in review).
+  const pollShot = (cardId, tid, existingStartedAt) => {
     setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(tid).slice(-6) + ")" } }));
-    const startedAt = Date.now();
-    const giveUp = () => {
-      setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: "timed out waiting for this render — check the task on pixai.art, or try again" } }));
-      setCardStatus(cardId, { status: "error", pendingTaskId: null });
-      // giveUp() is a THIRD, distinct completion path from cls.phase==="failed" below (a
-      // genuine timeout, not a server-reported failure) -- both must count toward the
-      // batch tally or a batch shot that hangs rather than errors would show as forever
-      // "still rendering" in the summary banner.
-      setBatchTally((prev) => (prev && prev.ids.has(cardId) ? { ...prev, failed: prev.failed + 1 } : prev));
+    const startedAt = existingStartedAt || Date.now();
+    const pause = () => {
+      // NOT a giveUp() -- status stays "wip", pendingTaskId stays set, and batchTally
+      // records this card's outcome as "stale" (not "failed") so a batch banner never has to
+      // lie about a shot this tab has genuinely stopped checking.
+      setGenState((s) => ({ ...s, [cardId]: { phase: "paused",
+        msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS) + " with no result — click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")" } }));
+      setBatchOutcome(cardId, "stale");
     };
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
+      const elapsed = Date.now() - startedAt;
       if (cls.phase === "done") {
         // duration is stashed here too (not just via setCardStatus below) so a draft
         // generation -- with no real card for setCardStatus to find -- still has it
@@ -2010,18 +2095,27 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // Reset trims too -- a re-roll's new clip is a different length than whatever the
         // PREVIOUS result was trimmed to, and a stale trimOut past the new clip's end can hang
         // SequencePlayer on it forever (it never reaches the advance threshold).
-        setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
-        setBatchTally((prev) => (prev && prev.ids.has(cardId) ? { ...prev, done: prev.done + 1 } : prev));
+        setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
+        setBatchOutcome(cardId, "done");
       } else if (cls.phase === "failed") {
         setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        setCardStatus(cardId, { status: "error", pendingTaskId: null });
-        setBatchTally((prev) => (prev && prev.ids.has(cardId) ? { ...prev, failed: prev.failed + 1 } : prev));
-      }
-      else if (Date.now() - startedAt > POLL_GIVE_UP_MS) giveUp();
-      else setTimeout(tick, 4000);
+        setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
+        setBatchOutcome(cardId, "failed");
+      } else if (elapsed > POLL_CEILING_MS) {
+        pause();
+      } else if (elapsed > POLL_STALE_AT_MS) {
+        setGenState((s) => ({ ...s, [cardId]: { phase: "stale",
+          msg: "Still going after " + elapsedLabel(elapsed) + " — unusual. Check pixai.art, or keep waiting (task " + String(tid).slice(-6) + ")" } }));
+        setTimeout(tick, POLL_STALE_MS);
+      } else if (elapsed > POLL_SLOW_AT_MS) {
+        setGenState((s) => ({ ...s, [cardId]: { phase: "slow",
+          msg: "Taking longer than expected (" + elapsedLabel(elapsed) + ", task " + String(tid).slice(-6) + ")" } }));
+        setTimeout(tick, POLL_SLOW_MS);
+      } else setTimeout(tick, 4000);
     }).catch(() => {
-      if (Date.now() - startedAt > POLL_GIVE_UP_MS) { giveUp(); return; }
-      setTimeout(tick, 5000);
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > POLL_CEILING_MS) { pause(); return; }
+      setTimeout(tick, elapsed > POLL_STALE_AT_MS ? POLL_STALE_MS : elapsed > POLL_SLOW_AT_MS ? POLL_SLOW_MS : 5000);
     });
     setTimeout(tick, 2500);
   };
@@ -2035,7 +2129,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
       if (c.status === "wip" && c.pendingTaskId && !resumedRef.current[c.pendingTaskId]) {
         resumedRef.current[c.pendingTaskId] = true;
-        pollShot(c.id, c.pendingTaskId);
+        pollShot(c.id, c.pendingTaskId, c.genStartedAt);
       }
     }));
   }, [activeId]);   // eslint-disable-line
@@ -2046,7 +2140,11 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     openPick((mid, thumb, isVideo, duration) => {
       const dur = parseFloat(duration);
       setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-      setCardStatus(entry.c.id, { status: "done", resultMid: mid, trimIn: 0, trimOut: null,
+      // pendingTaskId/genStartedAt cleared too, same as every other status:"done" write in
+      // this file -- newly reachable while a generation is "paused" (Deep Focus's busy-guard
+      // now lets a paused shot through) but was previously left stale/live here, unlike every
+      // other done path (found in review).
+      setCardStatus(entry.c.id, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
         ...(dur > 0 ? { actualDur: dur } : {}) });
     }, "video");
   };
@@ -2172,7 +2270,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     // non-null on Cancel would freeze a permanent "0 submitted" banner on screen forever,
     // since nothing else would ever touch it again.
     const ids = new Set(todo.map((e) => e.c.id));
-    setBatchTally({ total: todo.length, submitted: 0, done: 0, failed: 0, ids });
+    setBatchTally({ total: todo.length, submitted: 0, ids, outcomes: {} });
     for (const e of todo) {
       // generateShot never throws (every failure path returns {ok:false,...}), so this
       // try/catch is defensive only -- the tally itself is driven by the return value, not
@@ -2180,9 +2278,12 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       // generateShot swallows every failure internally, it never actually caught anything).
       let r;
       try { r = await generateShot(e, { skipConfirm: true }); } catch (_e) { r = { ok: false }; }
-      setBatchTally((prev) => (prev && prev.ids.has(e.c.id)
-        ? { ...prev, submitted: prev.submitted + (r.ok ? 1 : 0), failed: prev.failed + (r.ok ? 0 : 1) }
-        : prev));
+      // A successful submit only bumps `submitted` -- its eventual done/failed/stale outcome
+      // is recorded later by pollShot via setBatchOutcome. An immediate submit-time failure
+      // (r.ok===false) never gets a pollShot at all, so it records its own "failed" outcome
+      // right here, the one place that will ever happen for this card.
+      if (r.ok) setBatchTally((prev) => (prev && prev.ids.has(e.c.id) ? { ...prev, submitted: prev.submitted + 1 } : prev));
+      else setBatchOutcome(e.c.id, "failed");
       await new Promise((res) => setTimeout(res, 2200));
     }
     setBatching(false);
@@ -2240,7 +2341,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   return {
     genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel, genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
-    generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+    generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate,
   };
 }
@@ -2348,21 +2449,27 @@ export default function App() {
 
   const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel, genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
-    generateShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+    generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate }
     = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
   // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
-  // three mirror exactly what generateShot/pollShot already write for every OTHER path, so
-  // the board card's live status badge, tab-close resume (pendingTaskId), and the finished
-  // clip landing on the shot all keep working identically regardless of which UI submitted.
+  // mirror exactly what generateShot/pollShot already write for every OTHER path, so the
+  // board card's live status badge, tab-close resume (pendingTaskId), and the finished clip
+  // landing on the shot all keep working identically regardless of which UI submitted.
   const onVideoSubmit = useCallback((cardId, detail) => {
     setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(detail.task_id).slice(-6) + ")" } }));
-    setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id });
+    // genStartedAt persisted here too, not just in generateShot's own submit site -- the
+    // resume-on-reload effect (useGenerationPipeline) resumes ANY wip+pendingTaskId card via
+    // pollShot regardless of which path originally submitted it (the drawer's own in-memory
+    // poll dies with the page same as pollShot's would). Without this, reloading a page with a
+    // still-pending drawer-submitted shot would resume with no persisted start time, silently
+    // re-arming a full 6h give-up budget on every reload (found while implementing).
+    setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
   }, [setGenState, setCardStatus]);
   const onVideoResult = useCallback((cardId, detail) => {
     const mid = (detail.media_ids || [])[0];
     setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
-    setCardStatus(cardId, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null,
+    setCardStatus(cardId, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
       ...(detail.duration ? { actualDur: detail.duration } : {}) });
   }, [setGenState, setCardStatus]);
   const onVideoError = useCallback((cardId, detail) => {
@@ -2370,8 +2477,31 @@ export default function App() {
     // Persist the failure onto the card itself, not just the ephemeral (reload-wiped)
     // genState -- previously only pendingTaskId cleared here, leaving status:"wip" forever,
     // indistinguishable from a shot that's still genuinely rendering. Found 2026-07-18.
-    setCardStatus(cardId, { status: "error", pendingTaskId: null });
+    // NOTE (2026-07-18(pm)): this now only ever fires on a REAL d.phase==='failed' from the
+    // drawer's own poll -- elapsed-time-alone timeouts route through onVideoSlow/onVideoPaused
+    // below instead, and never touch card.status at all.
+    setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
   }, [setGenState, setCardStatus]);
+  // mg-slow: the drawer's poll downshifted cadence without a real result. Board-grid cards
+  // read their badge text from genState, not the drawer's own inline `res` div (only visible
+  // while this shot's Video tab is open) -- this is the mirror write that keeps them in sync.
+  // Never touches setCardStatus or batchTally: status stays "wip", and drawer-submitted shots
+  // are never part of a batch run (batchGenerate only ever calls generateShot/pollShot
+  // directly, never the drawer).
+  const onVideoSlow = useCallback((cardId, detail) => {
+    setGenState((s) => ({ ...s, [cardId]: {
+      phase: detail.tier,
+      msg: detail.tier === "stale"
+        ? "Still going after " + elapsedLabel(detail.elapsed) + " — unusual. Check pixai.art, or keep waiting (task " + String(detail.task_id).slice(-6) + ")"
+        : "Taking longer than expected (" + elapsedLabel(detail.elapsed) + ", task " + String(detail.task_id).slice(-6) + ")",
+    } }));
+  }, [setGenState]);
+  // mg-paused: the drawer's poll hit its 6h ceiling and stopped scheduling calls for this
+  // task. Same non-verdict as pollShot's own pause() -- status/pendingTaskId untouched.
+  const onVideoPaused = useCallback((cardId, detail) => {
+    setGenState((s) => ({ ...s, [cardId]: { phase: "paused",
+      msg: "Paused auto-checking with no result — click to check again, or check pixai.art (task " + String(detail.task_id).slice(-6) + ")" } }));
+  }, [setGenState]);
   // Draft-generation results (Image/Edit/Reference/Video) are keyed by the fixed "__draft__"
   // id, shared across every open project -- without this, a finished draft from project A
   // resurfaces in project B's drawer (still-live thumbnail + a working attach button that
@@ -2428,6 +2558,7 @@ export default function App() {
         exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
         importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
         onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
+        onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
         costEstimate={costEstimate} refreshEstimate={refreshEstimate} /></V2Boundary>
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (

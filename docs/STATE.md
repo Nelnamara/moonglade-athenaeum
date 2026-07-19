@@ -129,9 +129,9 @@ users.
   selected when the result/error event actually fires (switching shots mid-render used to
   attribute the finished clip to the wrong card). A real terminal `status:"error"` now exists
   on the card (previously only "todo"/"wip"/"done" — a failed render left `status:"wip"`
-  forever, indistinguishable from one still genuinely rendering); both poll loops (the Loom's
-  own and the drawer's internal one) give up after 20 minutes instead of retrying forever, with
-  no cancel button anywhere in generation before this. The drawer's prompt/image/video/audio
+  forever, indistinguishable from one still genuinely rendering — a real server-reported failure
+  still writes this status; elapsed time alone no longer does, see the give-up-timer softening
+  below). The drawer's prompt/image/video/audio
   reference slots now clear (not just overwrite) when the newly-selected shot/draft has none —
   switching from a shot with cast refs to an empty draft used to leave the previous shot's
   images sitting in the drawer, ready to submit against the wrong generation. And
@@ -140,6 +140,41 @@ users.
   true forever after the first hand-edit anywhere, freezing every other shot's drawer on stale
   text. None of these were introduced by the per-model-gating pass earlier the same day; all
   predate it and were found live-testing real generations.
+- **Give-up-timer softening, 2026-07-18(pm):** elapsed time alone no longer ends a shot in
+  `status:"error"` — only a real server-reported failure does. Both poll loops (the Loom's own
+  `pollShot` and `<mg-generate-drawer>`'s independent `_poll`, tracking different submission
+  paths) now escalate through three tiers instead: 20min downshifts cadence + shows "Taking
+  longer than expected"; 90min downshifts further + shows "Still going after Nh — unusual"; a
+  6h ceiling stops this tab's own polling (protects against a permanently wedged/deleted task)
+  but leaves `status`/`pendingTaskId` untouched, genState phase `"paused"`. A reload (the
+  resume effect, now passed a durably-persisted `c.genStartedAt` so the ceiling means something
+  across reloads) or clicking the card's own "paused" badge always gives it a fresh budget.
+  `batchTally` now tracks outcomes via a `{[cardId]: "done"|"failed"|"stale"}` map (not flat
+  counters) so a batch shot that resolves after being marked stale doesn't double-count.
+  Designed then adversarially reviewed (Workflow tool) before shipping — the review caught a
+  Critical bug (two new callbacks used in a dependency array without being threaded through
+  `LoomV2`'s props, which would have thrown on the very first render and blanked the whole Loom
+  behind `V2Boundary`'s fallback), the batchTally double-count, a scope bug in a shared
+  time-label helper, and the missing `genStartedAt` persistence — all fixed pre-ship. Flagged,
+  not yet acted on: `/api/task-status`'s exception handler returns HTTP 200 `{phase:"failed"}`
+  for a transient local blip, indistinguishable from a genuine PixAI failure to either poll
+  loop — an owner decision on whether to change that endpoint's error shape. 111 Node tests
+  green (+18, a permanent parity test guarding the drawer's local `friendlyGenErr` copy against
+  drift). Live-verified: no console errors on load, normal wip/done badges unaffected by the
+  new paused-aware busy-guards. The actual multi-hour tier escalation was verified via code
+  review + the adversarial-review pass, not literally clocked in real time.
+- **Drawer error-friendliness, 2026-07-18(pm):** `<mg-generate-drawer>`'s own error rendering
+  (`_renderError`) now recognizes a content-moderation rejection the same way the Loom's own
+  poll path already did — a local, verbatim port of `friendlyGenErr` (the drawer can't import
+  `loom-mutations.js`, an ES module, and must stay a build-free `<script>`), wired into the two
+  call sites that carry a genuine raw server string (submit failure, poll task failure). Fixes
+  the Loom's own Video-tab mount for free (shared component) and will cover the gallery's own
+  Video tab once it adopts `<mg-generate-drawer>` (still pending).
+- **Timeline drawer's video preview was too small and left-justified** instead of centered —
+  `.sb-shotprev`/`.sb-shotprev-wrap` max-width 340px→460px with `margin:auto` centering, the
+  preview zone/drawer's "full" height grown proportionally (280px→362px / 360px→442px) so the
+  larger preview doesn't overflow into the reel scrubber. Live-verified via direct DOM
+  measurement (the `computer` tool's screenshot capability was unreliable this session).
 - **Deep Focus** (double-click a board card) is a maximized single-shot editor: title, mode,
   duration, both `FrameSlot`s, and per-shot **other references** (add/edit/remove image, video,
   or audio refs and their `@tags`) via `addRef`/`setRef`/`delRef`. A "Select in Generate →" button
