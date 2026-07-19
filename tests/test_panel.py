@@ -408,9 +408,37 @@ def test_cancel_terminates_running_job(tmp_path, monkeypatch):
 
 
 def test_cancel_is_localhost_only(tmp_path):
-    cli = _client(tmp_path).test_client()
+    """AUTHENTICATED but non-local, so a 403 can only come from the handler's own
+    _is_local_request() check. This previously drove an anonymous client asserting 401 --
+    the front door's answer, returned before the handler runs -- so it passed whether or
+    not the check existed. It did not: commit 0fd8cee deleted it (in the very commit that
+    built the two-tier model for the sibling route /api/panel/run) while leaving the
+    'Localhost-only' docstring in place. Restored 2026-07-19."""
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/panel/cancel", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 401
+    assert r.status_code == 403
+    assert "localhost" in r.get_json()["error"]
+
+
+def test_schedule_write_is_localhost_only_but_read_is_not(tmp_path):
+    """The schedule endpoint is deliberately SPLIT: GET stays login-only so a LAN
+    session's Panel can still render current settings, while POST is localhost-only.
+    Its check was dropped in the same commit as cancel's. Writing matters more than
+    'it's only settings' suggests -- sync-videos is a real PANEL_ACTIONS key with
+    destructive=False and panel_visible=False, so a LAN caller could schedule a
+    full-history sync at 16 workers hourly, forever, via a job with no Panel button;
+    and `workers` is read by _panel_run for EVERY run, including the owner's own local
+    ones."""
+    cli = _authed_client(tmp_path)
+    lan = {"REMOTE_ADDR": "192.168.1.9"}
+    assert cli.get("/api/panel/schedule", environ_overrides=lan).status_code == 200
+    r = cli.post("/api/panel/schedule", json={"action": "sync-videos", "enabled": True,
+                                              "interval_hours": 1, "workers": 16},
+                 environ_overrides=lan)
+    assert r.status_code == 403
+    assert "localhost" in r.get_json()["error"]
+    # and the write really did not land
+    assert cli.get("/api/panel/schedule").get_json().get("enabled") is not True
 
 
 # --- The Loom: ffmpeg export of the rough cut (mocked -- no real ffmpeg) ---

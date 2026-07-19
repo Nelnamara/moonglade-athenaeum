@@ -7590,9 +7590,19 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/panel/cancel", methods=["POST"])
     def api_panel_cancel():
         """Stop the running maintenance job from the browser (no Task Manager). Terminates the
-        subprocess; the reader marks it 'cancelled'. Safe: dry-runs/backups do nothing to undo,
-        and organize/dedup are reversible (organize writes an undo manifest, dedup quarantines).
-        Localhost-only."""
+        subprocess; the reader marks it 'cancelled'.
+
+        LOCALHOST-ONLY, and the check below is load-bearing: it was silently deleted in
+        commit 0fd8cee -- the very commit that built the two-tier model for the sibling
+        route /api/panel/run -- while this docstring's "Localhost-only" claim survived.
+        Restored 2026-07-19 after a route-gating audit. This is the paired STOP control
+        for jobs whose START requires loopback, so admitting a LAN caller here is the
+        same trust violation from the other end: organize flushes its undo manifest per
+        row but only writes catalog_updates via save_catalog() AFTER the loop, so a
+        mid-run terminate leaves files physically moved on disk while catalog.db still
+        points at their old paths. Undo survives; catalog/disk coherence does not."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
         with _panel_lock:
             proc = _panel_job.get("proc")
             running = _panel_job["status"] == "running"
@@ -7611,7 +7621,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Panel settings: the automated-task schedule + the download-workers count. GET
         returns the current settings; POST MERGES only the fields present (so the schedule
         toggle and the workers selector -- two separate controls writing this one file --
-        never wipe each other). Only non-destructive actions are schedulable. Localhost-only."""
+        never wipe each other). Only non-destructive actions are schedulable.
+
+        GET is login-only so a LAN session's Panel still renders the current settings.
+        WRITING is LOCALHOST-ONLY -- that check was silently dropped in commit 0fd8cee
+        while this docstring's claim survived; restored 2026-07-19 after a route-gating
+        audit. It matters more than "it's only settings" suggests: `sync-videos` is a
+        real PANEL_ACTIONS key with destructive=False AND panel_visible=False, so a LAN
+        caller could schedule a full-history feed sync at 16 workers, hourly, forever,
+        surviving restarts -- via a background-only job with no Panel button, so the
+        owner would never see it configured. And `workers` is not schedule-scoped:
+        _panel_run reads it for EVERY run including the owner's own local button
+        clicks, so this endpoint also sets the concurrency of local maintenance jobs."""
+        if request.method == "POST" and not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
         with _sched_lock:
             s = _load_sched()
             if request.method == "POST":
@@ -8671,7 +8694,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         whatever key was cached at process start, not the one just pasted here. Confirmed
         live: a garbage key was reported as verified because the real cached key answered
         instead. Building the session by hand with the submitted key as the sole credential
-        avoids that entirely. Localhost-only: makes a live network call with a pasted key."""
+        avoids that entirely.
+
+        LOCALHOST-ONLY, enforced below -- this docstring has claimed it since the route
+        was written, but the check itself was never actually present; a route-gating
+        audit found and reproduced it 2026-07-19. It belongs in the same trust class as
+        /api/branding/shortcut: it rewrites config.json, the file that also holds
+        AUTH_SECRET_KEY and AUTH_USERS. Without the check, any logged-in LAN session
+        could point the owner's generations at a foreign API key -- on a server started
+        without a key (the exact first-run state this endpoint exists for) load_token's
+        fresh-disk fallback picks it up on the very next spend."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         key = (body.get("api_key") or "").strip()
         if not key:
@@ -8694,15 +8728,22 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return jsonify({"error": "That key was rejected by PixAI -- double-check it."}), 200
             return jsonify({"error": "Couldn't verify that key (temporary connection issue) -- try again."}), 200
         cfg_path = Path(core.__file__).resolve().parent / "config.json"
-        try:
-            cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
-        except (ValueError, OSError):
-            cfg = {}
-        cfg["PIXAI_API_KEY"] = key
-        try:
-            cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-        except OSError as e:
-            return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(e)}), 200
+        # Serialize against the account writers on core._accounts_lock. This is the only
+        # config.json read-modify-write in the app that doesn't go through core's account
+        # helpers (deliberately -- see the note above about the module-cached _cfg), which
+        # made it the one writer that could lost-update: /api/users/add commits a new
+        # account between this read and this write, and the write puts back a snapshot
+        # that never had it, silently erasing the account. Same lock, so same queue.
+        with core._accounts_lock:
+            try:
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+            except (ValueError, OSError):
+                cfg = {}
+            cfg["PIXAI_API_KEY"] = key
+            try:
+                cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+            except OSError as e:
+                return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(e)}), 200
         try:
             credits = int(me.get("quotaAmount") or 0)
         except (TypeError, ValueError):
