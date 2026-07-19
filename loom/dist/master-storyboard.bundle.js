@@ -413,7 +413,7 @@ ${"=".repeat(48)}
 .sb-card.open{box-shadow:var(--shadow);border-color:var(--amber-d);grid-column:1/-1}
 
 .sb-shotprev{position:relative;margin-top:8px;border-radius:8px;overflow:hidden;
-  background:#000;cursor:col-resize;max-width:340px}
+  background:#000;cursor:col-resize;max-width:460px}
 .sb-shotprev video{width:100%;display:block;aspect-ratio:16/9;object-fit:contain;background:#000}
 .sb-shotprev-hint{position:absolute;right:7px;bottom:6px;font-size:10.5px;color:rgba(255,255,255,.75);
   background:rgba(0,0,0,.5);border-radius:5px;padding:2px 7px;pointer-events:none;
@@ -423,7 +423,7 @@ ${"=".repeat(48)}
   background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:4px 7px;
   cursor:pointer;}
 .sb-shotprev-play:hover{background:rgba(0,0,0,.75);border-color:var(--amber);}
-.sb-shotprev-wrap{margin-top:8px;max-width:340px}
+.sb-shotprev-wrap{margin:8px auto 0;max-width:460px}
 .sb-shotprev-ctrls{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
 .sb-shotprev-ctrls button{font:600 11px/1 system-ui;color:var(--ink2);background:var(--panel2);
   border:1px solid var(--line);border-radius:6px;padding:5px 8px;cursor:pointer}
@@ -665,6 +665,7 @@ ${"=".repeat(48)}
     s = Math.max(0, Math.round(s || 0));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
+  var elapsedLabel = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
   var emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
   var hasStore = typeof window !== "undefined" && window.storage;
   var PKEY = "storyboard:v2:project";
@@ -817,6 +818,7 @@ ${"=".repeat(48)}
 .lv-cost-pill:disabled{opacity:.5;}
 .lv-batchbar{padding:6px 20px;font-size:12px;color:var(--subtext);background:var(--surface0);border-bottom:1px solid var(--surface1);}
 .lv-batchfail{color:var(--coral);font-weight:600;}
+.lv-batchstale{color:var(--subtext);font-weight:600;}
 .lv-override-badge{color:var(--amber);font-style:normal;font-weight:600;}
 .lv-overrideflash{font-size:11px;color:var(--amber);background:rgba(0,0,0,.15);border-radius:5px;padding:3px 7px;margin-top:2px;animation:lv-flash-fade 1.6s ease-out forwards;}
 @keyframes lv-flash-fade{0%{opacity:1;}70%{opacity:1;}100%{opacity:0;}}
@@ -845,7 +847,7 @@ ${"=".repeat(48)}
    the preview sits ABOVE the scrubber, only rendered once mostly expanded. */
 .lv-tldrawer{flex:none;position:relative;background:var(--surface0);border-bottom:1px solid var(--surface1);}
 .lv-tlcontent{overflow:hidden;position:relative;}
-.lv-tlpreviewzone{padding:10px 14px 4px;height:280px;box-sizing:border-box;}
+.lv-tlpreviewzone{padding:10px 14px 4px;height:362px;box-sizing:border-box;}
 .lv-tlpreviewbox{height:100%;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
   display:flex;align-items:center;justify-content:center;text-align:center;}
 .lv-tlreelzone{padding:8px 14px 10px;}
@@ -882,6 +884,7 @@ ${"=".repeat(48)}
 .lv-st.done{color:var(--green);background:color-mix(in srgb,var(--green) 16%,transparent);}
 .lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
+.lv-st.paused{color:var(--subtext);background:var(--base);border:1px dashed var(--subtext);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
@@ -1119,7 +1122,7 @@ ${"=".repeat(48)}
       )
     )));
   }
-  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, costEstimate, refreshEstimate, batchTally }) {
+  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
@@ -1223,6 +1226,8 @@ ${"=".repeat(48)}
         });
         el.addEventListener("mg-result", (e) => onVideoResult(genTargetRef.current || activeRef.current.c.id, e.detail));
         el.addEventListener("mg-error", (e) => onVideoError(genTargetRef.current || activeRef.current.c.id, e.detail));
+        el.addEventListener("mg-slow", (e) => onVideoSlow(genTargetRef.current || activeRef.current.c.id, e.detail));
+        el.addEventListener("mg-paused", (e) => onVideoPaused(genTargetRef.current || activeRef.current.c.id, e.detail));
         el.addEventListener("mg-prompt-commit", (e) => {
           const a = activeRef.current;
           if (!a) return;
@@ -1235,8 +1240,8 @@ ${"=".repeat(48)}
           promptDirtyRef.current = false;
         });
       }
-    }, [openPick, onVideoSubmit, onVideoResult, onVideoError]);
-    const TL_HEIGHTS = { hidden: 0, slim: 64, full: 360 };
+    }, [openPick, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused]);
+    const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 };
     const tlPointerDown = (e) => {
       tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] };
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -1349,14 +1354,17 @@ ${"=".repeat(48)}
       active.c.promptOverrideText
     ]);
     useEffect(() => {
+      const gs = genState[active.c.id];
+      const stillBusy = active.c.status === "wip" && !(gs && gs.phase === "paused");
       const el = genDrawerRef.current;
-      if (el && el.setBusy) el.setBusy(active.c.status === "wip");
-    }, [active.c.id, active.c.status]);
+      if (el && el.setBusy) el.setBusy(stillBusy);
+    }, [active.c.id, active.c.status, genState[active.c.id] && genState[active.c.id].phase]);
     const board = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act, ai) => {
       const items = entries.filter((e) => e.ai === ai);
       return /* @__PURE__ */ React.createElement("div", { key: act.id, className: "lv-act" }, /* @__PURE__ */ React.createElement("div", { className: "lv-actrow" }, /* @__PURE__ */ React.createElement("input", { className: "lv-actname-in", value: act.name, onChange: (ev) => setAct(act.id, { name: ev.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico danger", onClick: () => delAct(act.id), title: "Delete act" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lv-cards" }, items.map((e) => {
         const gs = genState[e.c.id];
-        const st = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
+        const paused = gs && gs.phase === "paused";
+        const st = paused ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
         return /* @__PURE__ */ React.createElement(
           "div",
           {
@@ -1372,7 +1380,19 @@ ${"=".repeat(48)}
           })()),
           /* @__PURE__ */ React.createElement("div", { className: "lv-code" }, e.code),
           /* @__PURE__ */ React.createElement("div", { className: "lv-ctitle" }, e.c.title || "untitled"),
-          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), /* @__PURE__ */ React.createElement("span", { className: "lv-st " + st }, gs && gs.msg ? gs.msg : st)),
+          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), /* @__PURE__ */ React.createElement(
+            "span",
+            {
+              className: "lv-st " + st,
+              onClick: paused ? (ev) => {
+                ev.stopPropagation();
+                pollShot(e.c.id, e.c.pendingTaskId);
+              } : void 0,
+              style: paused ? { cursor: "pointer" } : void 0,
+              title: paused ? "Click to check again" : void 0
+            },
+            gs && gs.msg ? gs.msg : st
+          )),
           /* @__PURE__ */ React.createElement("div", { className: "lv-crow", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act.id, e.ci, -1), title: "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act.id, e.ci, 1), title: "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => dupCard(act.id, e.c), title: "Duplicate" }, "\u29C9"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs danger", onClick: () => delCard(act.id, e.c), title: "Delete" }, "\u2715"), project.acts.length > 1 && /* @__PURE__ */ React.createElement(
             "select",
             {
@@ -1415,7 +1435,7 @@ ${"=".repeat(48)}
     let gen;
     {
       const gs = genState[active.c.id];
-      const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error";
+      const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" && gs.phase !== "paused";
       const patch = (fn) => {
         if (sel) setCard(sel.a.id, sel.c.id, fn);
         else setDraftCard(fn);
@@ -1746,7 +1766,13 @@ ${"=".repeat(48)}
         bundling,
         importBackup
       }
-    ), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && /* @__PURE__ */ React.createElement("div", { className: "lv-batchbar" }, "Batch: ", batchTally.submitted, "/", batchTally.total, " submitted \xB7 ", batchTally.done, " done", batchTally.failed ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "lv-batchfail" }, batchTally.failed, " failed")) : null, batchTally.done + batchTally.failed < batchTally.total ? " \xB7 rendering\u2026" : ""), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
+    ), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
+      const outs = Object.values(batchTally.outcomes);
+      const done = outs.filter((o) => o === "done").length;
+      const failed = outs.filter((o) => o === "failed").length;
+      const stale = outs.filter((o) => o === "stale").length;
+      return /* @__PURE__ */ React.createElement("div", { className: "lv-batchbar" }, "Batch: ", batchTally.submitted, "/", batchTally.total, " submitted \xB7 ", done, " done", failed ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "lv-batchfail" }, failed, " failed")) : null, stale ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "lv-batchstale" }, stale, " paused (check manually)")) : null, done + failed + stale < batchTally.total ? " \xB7 rendering\u2026" : "");
+    })(), timelineDrawer, /* @__PURE__ */ React.createElement("div", { className: "lv-shell" }, /* @__PURE__ */ React.createElement("div", { className: "lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, !leftCollapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: () => setLeftCollapsed((v) => !v), title: "collapse" }, leftCollapsed ? "\u25B8" : "\u25C2")), leftCollapsed ? /* @__PURE__ */ React.createElement("div", { className: "lv-railicons" }, /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "cast" ? " on" : ""), title: "Cast & assets", onClick: () => {
       setLeftTab("cast");
       setLeftCollapsed(false);
     } }, "\u{1F464}"), /* @__PURE__ */ React.createElement("button", { className: "lv-railbtn" + (leftTab === "footage" ? " on" : ""), title: "Footage", onClick: () => {
@@ -2159,6 +2185,7 @@ Your currently-open board is left untouched.`)) return;
     const [genRefState, setGenRefState] = useState({});
     const [batching, setBatching] = useState(false);
     const [batchTally, setBatchTally] = useState(null);
+    const setBatchOutcome = (cardId, outcome) => setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
     const shotPayload2 = (entry) => shotPayload(entry, project, imgSrc);
     const priceShot = async (entry) => {
@@ -2213,41 +2240,63 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
           return { ok: false, reason: "submit-failed" };
         }
-        setCardStatus(c.id, { pendingTaskId: d.task_id });
-        pollShot(c.id, d.task_id);
+        const startedAt = Date.now();
+        setCardStatus(c.id, { pendingTaskId: d.task_id, genStartedAt: startedAt });
+        pollShot(c.id, d.task_id, startedAt);
         return { ok: true, taskId: d.task_id };
       } catch {
         setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
         return { ok: false, reason: "network" };
       }
     };
-    const POLL_GIVE_UP_MS = 20 * 60 * 1e3;
-    const pollShot = (cardId, tid) => {
+    const POLL_SLOW_AT_MS = 20 * 60 * 1e3;
+    const POLL_SLOW_MS = 20 * 1e3;
+    const POLL_STALE_AT_MS = 90 * 60 * 1e3;
+    const POLL_STALE_MS = 3 * 60 * 1e3;
+    const POLL_CEILING_MS = 6 * 60 * 60 * 1e3;
+    const pollShot = (cardId, tid, existingStartedAt) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(tid).slice(-6) + ")" } }));
-      const startedAt = Date.now();
-      const giveUp = () => {
-        setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: "timed out waiting for this render \u2014 check the task on pixai.art, or try again" } }));
-        setCardStatus(cardId, { status: "error", pendingTaskId: null });
-        setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, failed: prev.failed + 1 } : prev);
+      const startedAt = existingStartedAt || Date.now();
+      const pause = () => {
+        setGenState((s) => ({ ...s, [cardId]: {
+          phase: "paused",
+          msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS) + " with no result \u2014 click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")"
+        } }));
+        setBatchOutcome(cardId, "stale");
       };
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
         const cls = classifyTaskStatus(d);
+        const elapsed = Date.now() - startedAt;
         if (cls.phase === "done") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
-          setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, ...cls.duration ? { actualDur: cls.duration } : {} });
-          setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, done: prev.done + 1 } : prev);
+          setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...cls.duration ? { actualDur: cls.duration } : {} });
+          setBatchOutcome(cardId, "done");
         } else if (cls.phase === "failed") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-          setCardStatus(cardId, { status: "error", pendingTaskId: null });
-          setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, failed: prev.failed + 1 } : prev);
-        } else if (Date.now() - startedAt > POLL_GIVE_UP_MS) giveUp();
-        else setTimeout(tick, 4e3);
+          setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
+          setBatchOutcome(cardId, "failed");
+        } else if (elapsed > POLL_CEILING_MS) {
+          pause();
+        } else if (elapsed > POLL_STALE_AT_MS) {
+          setGenState((s) => ({ ...s, [cardId]: {
+            phase: "stale",
+            msg: "Still going after " + elapsedLabel(elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + String(tid).slice(-6) + ")"
+          } }));
+          setTimeout(tick, POLL_STALE_MS);
+        } else if (elapsed > POLL_SLOW_AT_MS) {
+          setGenState((s) => ({ ...s, [cardId]: {
+            phase: "slow",
+            msg: "Taking longer than expected (" + elapsedLabel(elapsed) + ", task " + String(tid).slice(-6) + ")"
+          } }));
+          setTimeout(tick, POLL_SLOW_MS);
+        } else setTimeout(tick, 4e3);
       }).catch(() => {
-        if (Date.now() - startedAt > POLL_GIVE_UP_MS) {
-          giveUp();
+        const elapsed = Date.now() - startedAt;
+        if (elapsed > POLL_CEILING_MS) {
+          pause();
           return;
         }
-        setTimeout(tick, 5e3);
+        setTimeout(tick, elapsed > POLL_STALE_AT_MS ? POLL_STALE_MS : elapsed > POLL_SLOW_AT_MS ? POLL_SLOW_MS : 5e3);
       });
       setTimeout(tick, 2500);
     };
@@ -2256,7 +2305,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
         if (c.status === "wip" && c.pendingTaskId && !resumedRef.current[c.pendingTaskId]) {
           resumedRef.current[c.pendingTaskId] = true;
-          pollShot(c.id, c.pendingTaskId);
+          pollShot(c.id, c.pendingTaskId, c.genStartedAt);
         }
       }));
     }, [activeId]);
@@ -2269,6 +2318,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           resultMid: mid,
           trimIn: 0,
           trimOut: null,
+          pendingTaskId: null,
+          genStartedAt: null,
           ...dur > 0 ? { actualDur: dur } : {}
         });
       }, "video");
@@ -2423,7 +2474,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         return;
       }
       const ids = new Set(todo.map((e) => e.c.id));
-      setBatchTally({ total: todo.length, submitted: 0, done: 0, failed: 0, ids });
+      setBatchTally({ total: todo.length, submitted: 0, ids, outcomes: {} });
       for (const e of todo) {
         let r;
         try {
@@ -2431,7 +2482,8 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         } catch (_e) {
           r = { ok: false };
         }
-        setBatchTally((prev) => prev && prev.ids.has(e.c.id) ? { ...prev, submitted: prev.submitted + (r.ok ? 1 : 0), failed: prev.failed + (r.ok ? 0 : 1) } : prev);
+        if (r.ok) setBatchTally((prev) => prev && prev.ids.has(e.c.id) ? { ...prev, submitted: prev.submitted + 1 } : prev);
+        else setBatchOutcome(e.c.id, "failed");
         await new Promise((res) => setTimeout(res, 2200));
       }
       setBatching(false);
@@ -2494,6 +2546,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       batching,
       batchTally,
       generateShot,
+      pollShot,
       useExistingVideo,
       genImage,
       routeImg,
@@ -2683,6 +2736,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
       batching,
       batchTally,
       generateShot,
+      pollShot,
       useExistingVideo,
       genImage,
       routeImg,
@@ -2695,7 +2749,7 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
     } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
     const onVideoSubmit = useCallback((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(detail.task_id).slice(-6) + ")" } }));
-      setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id });
+      setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
     }, [setGenState, setCardStatus]);
     const onVideoResult = useCallback((cardId, detail) => {
       const mid = (detail.media_ids || [])[0];
@@ -2706,13 +2760,26 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         trimIn: 0,
         trimOut: null,
         pendingTaskId: null,
+        genStartedAt: null,
         ...detail.duration ? { actualDur: detail.duration } : {}
       });
     }, [setGenState, setCardStatus]);
     const onVideoError = useCallback((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
-      setCardStatus(cardId, { status: "error", pendingTaskId: null });
+      setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
     }, [setGenState, setCardStatus]);
+    const onVideoSlow = useCallback((cardId, detail) => {
+      setGenState((s) => ({ ...s, [cardId]: {
+        phase: detail.tier,
+        msg: detail.tier === "stale" ? "Still going after " + elapsedLabel(detail.elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + String(detail.task_id).slice(-6) + ")" : "Taking longer than expected (" + elapsedLabel(detail.elapsed) + ", task " + String(detail.task_id).slice(-6) + ")"
+      } }));
+    }, [setGenState]);
+    const onVideoPaused = useCallback((cardId, detail) => {
+      setGenState((s) => ({ ...s, [cardId]: {
+        phase: "paused",
+        msg: "Paused auto-checking with no result \u2014 click to check again, or check pixai.art (task " + String(detail.task_id).slice(-6) + ")"
+      } }));
+    }, [setGenState]);
     useEffect(() => {
       const clearDraft = (s) => {
         if (!("__draft__" in s)) return s;
@@ -2824,6 +2891,9 @@ A Reference-Pro card auto-applies; otherwise it spends credits.`
         onVideoSubmit,
         onVideoResult,
         onVideoError,
+        onVideoSlow,
+        onVideoPaused,
+        pollShot,
         costEstimate,
         refreshEstimate
       }
