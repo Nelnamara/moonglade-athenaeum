@@ -19,5 +19,11 @@
   "READ_ONLY": false,
 
   "_comment_legacy": "DEPRECATED legacy fallback for users WITHOUT an API key. U3T is the 'u3t' field from a graphql request Payload; the short-lived Bearer token then goes in token.txt / PIXAI_TOKEN / --token and must be re-captured every few hours. Leave blank when using PIXAI_API_KEY (recommended).",
-  "U3T": ""
+  "U3T": "",
+
+  "_comment_auth": "Session-based login for the web gallery (gates every non-localhost request -- see docs/architecture.md). Neither field is something you type in by hand.",
+  "_comment_auth_secret": "AUTH_SECRET_KEY signs the Flask session cookie. Auto-generated (secrets.token_hex(32)) and written here the first time the gallery server starts if this is blank/absent -- never set it yourself.",
+  "AUTH_SECRET_KEY": "",
+  "_comment_auth_users": "AUTH_USERS is a list of {\"username\": ..., \"password_hash\": ...} accounts for logging into the gallery from another device on your LAN. Managed ONLY via the CLI -- never edit this by hand and never paste a plaintext password here: python pixai_gallery_backup.py --add-web-user (interactive, hashes with werkzeug) / --remove-web-user <username> / --list-web-users. Empty (the default) means LAN login is impossible until you add an account.",
+  "AUTH_USERS": []
 }

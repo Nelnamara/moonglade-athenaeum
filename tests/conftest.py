@@ -12,6 +12,26 @@ def _no_pixai_token(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_auth_config(tmp_path, monkeypatch):
+    """Web-login auth (AUTH_SECRET_KEY/AUTH_USERS) lives in config.json.
+    pixai_gallery.create_app() -- called by ~every test in this suite -- now
+    generates + PERSISTS a session secret key via get_or_create_secret_key() the
+    first time it runs if config.json has none. Without this fixture, that write
+    would land in the REAL, git-ignored config.json next to the checkout (the one
+    holding the developer's actual PIXAI_API_KEY), the moment any test calls
+    create_app(). Redirect _config_path() to THIS test's own tmp_path instead, so
+    the whole suite never reads or mutates the real file.
+
+    Deliberately named plain "config.json" (not some other throwaway name): this
+    is the SAME path tests/test_filesystem.py's test_load_config_reads_file /
+    test_load_config_missing_returns_empty already write to / expect via their own
+    tmp_path, so this fixture is a no-op improvement for them (it just replaces
+    their __file__-based resolution with an equivalent tmp_path-based one) rather
+    than a second, conflicting source of truth."""
+    monkeypatch.setattr(core, "_config_path", lambda: tmp_path / "config.json")
+
+
+@pytest.fixture(autouse=True)
 def _no_live_watch(monkeypatch):
     """create_app() is called by ~every test in this suite. Without this, its
     live-mirror watcher thread would call _make_session(None), which re-reads THIS

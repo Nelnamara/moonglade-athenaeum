@@ -1,8 +1,16 @@
 """Control Panel: maintenance-job runner. Whitelist-only actions, destructive ones
 gated behind confirm, one at a time. The subprocess spawn is monkeypatched so no CLI
 actually runs."""
+import re
 import pixai_gallery as g
+import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+
+
+def _csrf(html):
+    m = re.search(r'name="csrf" value="([^"]+)"', html)
+    assert m, "login page did not render a csrf hidden field"
+    return m.group(1)
 
 
 def _row(**kw):
@@ -49,6 +57,37 @@ def test_run_destructive_needs_confirm(tmp_path, monkeypatch):
     r = cli.post("/api/panel/run", json={"action": "dedup-apply"})   # no confirm
     assert r.status_code == 400 and "confirm" in r.get_json()["error"]
     assert spawned["n"] == base                # the panel run itself spawned nothing
+
+
+def test_destructive_action_refuses_authenticated_lan_session(tmp_path, monkeypatch):
+    """A logged-in LAN account must NOT be able to trigger a destructive maintenance
+    job (organize / dedup --apply / rebuild-thumbnails) -- unlike safe read-only panel
+    actions, these change local files on the SERVER's own machine, same trust tier as
+    /api/branding/shortcut. A LAN login unlocks spend-the-owner's-credits generation
+    features, not host-filesystem mutation."""
+    import subprocess
+    spawned = {"n": 0}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda *a, **k: spawned.update(n=spawned["n"] + 1))
+    core.add_or_update_web_user("alice", "hunter2")
+    cli = _client(tmp_path).test_client()
+    LAN = "203.0.113.5"
+    html = cli.get("/login").get_data(as_text=True)
+    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
+    # Prove the session really is authenticated (it can reach an ordinary
+    # authorized-LAN route) before proving it still can't reach this one.
+    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
+    base = spawned["n"]
+    r = cli.post("/api/panel/run", json={"action": "dedup-apply", "confirm": True},
+                 environ_overrides={"REMOTE_ADDR": LAN})
+    assert r.status_code == 403 and "localhost-only" in r.get_json()["error"]
+    assert spawned["n"] == base   # nothing was spawned
+
+    # The same account, from the actual local machine, still works (destructive
+    # actions aren't broken for the owner -- just not exposed to remote sessions).
+    r2 = cli.post("/api/panel/run", json={"action": "dedup-apply", "confirm": True})
+    assert r2.status_code == 200
+    assert spawned["n"] == base + 1
 
 
 def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
@@ -174,7 +213,7 @@ def test_watch_status_default_shape(tmp_path):
     d = cli.get("/api/watch/status").get_json()
     assert d["connected"] is False and d["mirrored"] == 0 and d["events_seen"] == 0
     r = cli.get("/api/watch/status", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 403
+    assert r.status_code == 401
 
 
 def test_watch_autostarts_unless_disabled(tmp_path, monkeypatch):
@@ -238,7 +277,7 @@ def test_server_stop_schedules_exit_0(tmp_path, monkeypatch):
     assert d == {"ok": True, "action": "stop"} and codes == [0]      # stop -> exit 0
     # LAN device can't stop the owner's server
     r = cli.post("/api/server/stop", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 403 and codes == [0]                     # unchanged
+    assert r.status_code == 401 and codes == [0]                     # unchanged
 
 
 def test_server_restart_needs_supervisor(tmp_path, monkeypatch):
@@ -329,7 +368,7 @@ def test_cancel_terminates_running_job(tmp_path, monkeypatch):
 def test_cancel_is_localhost_only(tmp_path):
     cli = _client(tmp_path).test_client()
     r = cli.post("/api/panel/cancel", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 403
+    assert r.status_code == 401
 
 
 # --- The Loom: ffmpeg export of the rough cut (mocked -- no real ffmpeg) ---
@@ -366,7 +405,7 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
     # LAN can't kick off exports
     r = cli.post("/api/loom/export", json={"clips": []},
                  environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 403
+    assert r.status_code == 401
 
 
 def test_loom_export_needs_a_video(tmp_path, monkeypatch):
