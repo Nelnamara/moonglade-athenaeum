@@ -342,6 +342,42 @@ users.
 
 ---
 
+## Access & accounts
+
+The gallery is **default-deny**. One `@app.before_request` hook (`_enforce_front_door()`)
+gates every route; the public surface is exactly three things — `/login`, `/logout`, and
+`/branding/` (static cosmetic art the login page itself needs). There is **no localhost
+bypass**: login is required from `127.0.0.1` exactly as from a LAN address.
+
+**Three tiers.** PUBLIC (the three above) · LOGIN (everything else — any signed-in session,
+local or LAN; this is what makes tablet generation work) · LOCALHOST (a signed-in session
+*and* a loopback address). Only five routes are LOCALHOST, and each acts on the server's own
+files or deletes irreversibly from PixAI: `api_panel_run` (destructive actions only),
+`api_panel_cancel`, `api_panel_schedule` POST, `api_setup_save_key`, `api_branding_shortcut`.
+`/api/server/stop` and `/restart` are deliberately LOGIN, by owner decision.
+
+The tier table is **enforced, not documented**: `tests/test_route_tiers.py` enumerates
+`app.url_map`, fails any route that declares no tier, and — critically — asserts a LOCALHOST
+route refuses an *authenticated non-local* session. That last assertion's absence is what let
+three gate regressions ship in one week. Verified to fail when the gate is broken.
+
+**First run** creates the first account through the login page itself, offered only to a
+loopback request while zero accounts exist, so a LAN device can never claim it. Ongoing
+management is **Panel → Users**. `--add-web-user` remains a recovery path only.
+
+**Passwords:** 8-character minimum with a weak-password blocklist (repeated characters,
+sequential runs, common list), NIST-shaped — length is the control, no composition rules.
+One helper, `core.password_problem()`, serves all three creation paths.
+
+**Revocation** rides an install-wide monotonic counter, `AUTH_EPOCH_SEQ` in `config.json`,
+not a per-account one — a per-account counter died with the account, so re-creating a username
+reset it to the value stale cookies carried and un-revoked them. A legacy config gets a
+1,000,000 margin on first mint so an account removed *before* the upgrade can't be walked back
+through. `_save_config` is atomic (tmp + `os.replace`), because a torn read returns `{}`, which
+reads as zero accounts and drops the install into bootstrap mode.
+
+---
+
 ## In flight
 
 - Gated on nothing, ready whenever there's capacity: further V2 shell work, the Loom
@@ -654,6 +690,59 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 ---
 
 ## Known defects
+
+*Found 2026-07-19 by a Playwright browser crawl (185 controls, 60 screenshots reviewed by eye).
+None of these produce a console error or a wrong HTTP response, which is why the suite was fully
+green throughout. Ranked; the V1-cluster CSS bug they were found alongside is already fixed.*
+
+- **The `Serve Gallery` launcher can start a second server on one port.** Its single-instance
+  guard probes `/api/ping` unauthenticated; that route is now gated and answers 401, the bare
+  `except` swallows it, and it launches anyway. Observed for real during development — three
+  Python processes shared port 5077 via Windows `SO_REUSEADDR`, serving stale code and costing
+  four rounds of misdiagnosis. Fix: treat 401 as "ours, already running".
+- **The search wildcard makes searches *stricter*, usually to zero.** The placeholder advertises
+  `night*`; typing the app's own example returns nothing. `sample` → 24 results, `sampl*` → 0.
+  With a wildcard present the term becomes the whole LIKE pattern, anchored to the start of the
+  entire prompt, instead of being wrapped as a substring. `_like_pattern()`.
+- **`/logout` is a CSRF-able GET that revokes globally.** No token, and it bumps `sess_epoch`,
+  so any page with `<img src=".../logout">` signs the user out on every device. Denial of
+  convenience only. *Not* closed by the revocation fix — the victim's cookie is still valid, so
+  the bump proceeds legitimately. Fix is a POST + CSRF, or splitting local sign-out from global
+  revocation.
+- **Escape doesn't close the Loom's project or Export menus**, and their backdrop is a
+  full-viewport `pointer-events:auto` veil — so the entire app is unclickable until the user
+  happens to click outside. Deep Focus's own Escape handler works correctly in the same app.
+- **The rate-limit lockout is off by one and locks silently.** The 5th failure sets
+  `locked_until` but still returns the ordinary "Invalid username or password", so the user is
+  locked without being told, then the *correct* password is refused for 15 minutes.
+- **Service-worker registration fails on the login page.** `/sw.js` is gated, so a signed-out
+  page gets a redirect and Chrome refuses a redirected worker script. It registers on the next
+  navigation after signing in; the thumbnail cache simply arms late.
+- **Native form controls are unstyled in three inconsistent flavours** — 24 white OS checkboxes
+  over artwork on the default grid, native-grey selects beside custom purple ones, and checked
+  states rendering Chrome blue *and* app purple on the same page. The Loom has no `accent-color`
+  rule anywhere.
+- **Two Loom widgets are invisible but report as visible.** The help FAB and Activity chip have
+  real bounding rects and `visibility: visible` — a DOM crawler marks them healthy — but a
+  `z-index:400` overlay paints over them. The Activity chip is also a genuine 79×31 dead zone
+  over a grid card's link.
+- **A 300-char username breaks the account row ~980px outside its card**, putting a live
+  **Remove** button outside its container. No server-side length limit. Output escaping held —
+  markup rendered as literal text — so this is input hygiene, not XSS.
+- **Smaller, all confirmed visually:** locked skin cards fail WCAG AA badly (1.88:1 on the
+  "locked" label) · the "← Gallery" link is unstyled browser blue at 1.69:1 · a duplicate tab
+  strip renders twice bound to one state · the month select clips "Mon" to "Moı" · the Loom's
+  cost pill is dead while its tooltip says "Click to refresh" · "Set launcher icon" is offered
+  enabled and always 400s · locked skins are inert under a *stale success message* · the
+  schedule confirms "every 168h" beside a dropdown reading "1 week" · raw upstream exceptions
+  print verbatim into the UI · dead `#del-modal` markup sits beside a live destructive control
+  (it is what a crawl agent's XPath matched, deleting three accounts by mistake).
+- **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
+  is unreachable dead markup and the variable name is a misnomer for "authorized". Behaviour is
+  correct; it will mislead the next reader.
+- **`mg-notify.js` requests `/branding/gen_nel.png` at two call sites and
+  `/branding/mascots/gen_nel.png` at another.** One of the two is wrong regardless of which art
+  exists.
 
 - **No UI for removing an image from a collection.** The `/collection-remove` POST route exists
   with zero callers anywhere in the codebase. A real gap, not a design choice.
