@@ -15,6 +15,16 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Added
+
+- **Advanced sync options in the Control Panel** (web parity step 2). A collapsed "Advanced"
+  section exposes the three sync variants the incremental "Sync now" can't do: a full
+  non-incremental re-walk of all history (`--full-meta`), a read-only inventory count
+  (`--count`, no download), and a test pull of the N most-recent tasks (`--max N`). Each is its
+  own whitelisted action key; the test-pull's N is a single integer clamped server-side to
+  [1, 200], so the panel's "whitelisted argv, never an arbitrary command" guarantee holds with a
+  parameter in play. All three are read/append (never destructive) and kept off the scheduler.
+
 ### Security
 
 - **Error text is no longer an HTML-injection seam.** Several UI sinks concatenated a
