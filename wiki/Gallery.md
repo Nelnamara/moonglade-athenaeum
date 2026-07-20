@@ -28,9 +28,14 @@ A row of frosted glow-pill buttons, one hue per destination:
   the scheduler, server Stop/Restart, branding.
 - **♡ Health** — the [collection health](Health) dashboard.
 
-**Generate**, **The Loom**, **Panel** and the balance chip are **localhost-only**. Served over
-the LAN they're hidden and the header shows a *👁 read-only LAN view* note instead — so you can
-browse and curate from a tablet while only your own machine can spend credits.
+**Everything here needs a login as of v2.0.0**, including on the machine running the server.
+Once signed in, **Generate**, **The Loom**, **Panel** and the balance chip are available from
+any device — generating from a tablet is exactly what the login was built for.
+
+The stricter tier is narrower than it used to be: the destructive Panel jobs (organize,
+dedup-apply, rebuild-thumbnails, cancel, schedule), cloud bulk-delete, and setting the API
+key or launcher icon still require a request from the server's own machine, because they
+touch local files or delete from PixAI irreversibly.
 
 ## Browsing & filtering
 

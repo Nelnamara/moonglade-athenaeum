@@ -6,7 +6,9 @@ in the gallery:
 - **Delete locally** — removes from your local catalog only (the cloud task is
   untouched).
 - **Delete from PixAI** — deletes the whole **task** from your account *and* removes it
-  locally, so they never drift. Localhost-only — hidden for LAN viewers.
+  locally, so they never drift. Requires a request from the machine running the server, even
+  for a signed-in account on another device: this one is irreversible on PixAI's side, so it
+  stays stricter than "signed in".
 
 > 🛟 **Local files are recoverable.** Both buttons *move* your files to a `_deleted/`
 > folder inside your backup rather than destroying them, and clear the catalog row. If
