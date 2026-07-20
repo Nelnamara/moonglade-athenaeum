@@ -28,6 +28,19 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Usernames are length-bounded.** A 300-char username pushed a live **Remove** button ~980px
+  outside its card, and there was no server-side limit anywhere. New `username_problem()` caps
+  at 64 characters and rejects control characters — one policy shared by the `/login` bootstrap
+  form, the Panel's Add-User, and `--add-web-user` — with a hard backstop in both account
+  writers so even the CLI can't persist an over-long name. The account row now truncates the
+  name with the Remove button pinned, so a legacy over-long name is contained too.
+- **The skin-picker confirmation no longer lingers.** "✓ skin applied suite-wide" was written to
+  the status line and never cleared, so it stayed on screen — and since a locked skin card is
+  inert, a later click on one left the stale success showing, reading as though it had applied.
+  The confirmation now clears after a few seconds.
+- **The Loom's right rail no longer shows the tab strip twice.** Image/Edit/Reference/Video was
+  rendered both in the rail header and again inside the generate panel, stacking a duplicate
+  whenever the rail was expanded. It now lives only in the header, matching the left rail.
 - **The `Serve Gallery` launcher no longer starts a second server on a port already in use.**
   Its single-instance guard bowed out only on a `200` from `/api/ping`, but that route now
   sits behind the login gate and answers an unauthenticated probe with `401`, which `urllib`
