@@ -4794,7 +4794,13 @@ document.addEventListener('DOMContentLoaded', function(){
             <option value="roll">Roll</option><option value="horizontal">Horizontal</option>
             <option value="vertical-pan">Vertical pan</option>
           </select></div>
-        <div style="flex:1;"><div class="gen-lbl">Priority</div>
+        {# PixAI calls this control "Basic / Professional"; mirror their wording so
+           someone moving between the two apps recognises it. It was labelled
+           "Priority", which is a DIFFERENT PixAI setting -- the real one is the
+           "High priority - Turbo" checkbox above (priority=1000). Two controls
+           reading as priority, one of which wasn't. <mg-generate-drawer> already
+           labels it correctly; this is the gallery's own drawer, not yet migrated. #}
+        <div style="flex:1;"><div class="gen-lbl">Basic / Professional</div>
           <select id="video-vmode" class="gen-sel"><option value="professional">Professional</option><option value="basic">Basic (cheaper)</option></select></div>
       </div>
       <label class="gen-check"><input type="checkbox" id="video-audio" onchange="Gen.videoAudioToggle()"> Generate audio <span style="color:var(--overlay0);">(V4.0 / V3.2 &middot; spoken lines in the prompt become voiceover)</span></label>
