@@ -770,13 +770,16 @@ def test_portrait_mobile_pass(tmp_path):
     assert "#gen-drawer.wide { width: 100%" in html or "#gen-drawer.wide" in html  # full-width sheet
 
 
-def test_video_v40_full_cost_warning(tmp_path):
-    """The Video card hard-warns when the pricier v4.0 full model is picked (14k/s vs
-    Lite's 5.5k -- a 15s clip is 210k credits), so it's never a silent surprise."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/").get_data(as_text=True)
-    assert ".gen-cost.warn" in html                 # the warn style
-    assert "V4.0 full" in html and "2.5" in html      # the ~2.5x-Lite warning text
+def test_video_v40_full_cost_warning():
+    """The Video form hard-warns when the pricier v4.0 full model is picked (14k/s vs Lite's
+    5.5k -- a 15s clip is 210k credits), so it's never a silent surprise. Since the drawer
+    swap the Video form IS the shared <mg-generate-drawer> component, so the warning lives in
+    that file (mgd-cost.warn), not the gallery's own inline HTML."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
+    assert ".mgd-cost.warn" in src                  # the warn style
+    assert "V4.0 full" in src and "2.5" in src        # the ~2.5x-Lite warning text
 
 
 def test_toasts_anchored_top_right(tmp_path):
@@ -887,6 +890,25 @@ def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
     d = cli.post("/api/claim").get_json()
     assert d["claimed"] == 1 and d["credits"] == 30000       # only the ready credit reward
     assert claimed == ["pixai-daily-credits"]
+
+
+def test_gallery_video_tab_is_the_shared_drawer_component(tmp_path):
+    """Web parity step 2 (the drawer swap): the gallery's Video tab is the shared
+    <mg-generate-drawer> web component now -- the same element the Loom mounts, giving the
+    gallery the full-parity Video form (6 image + 3 video + 1 audio refs, negative prompt,
+    Channel, full model roster) over the proven /api/loom/generate submit path. Pins the
+    script include, the mount point, and the host's mg-pick-request wiring, and asserts the
+    old hand-rolled form (9 image slots, 5-model select, no video/audio/negative/channel)
+    is gone -- so the swap can't silently regress back to simple mode."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "/static/mg-generate-drawer.js" in html              # component script on the gallery
+    assert "<mg-generate-drawer></mg-generate-drawer>" in html  # mounted in the Video tab
+    assert "mg-pick-request" in html                            # host wires the gallery Picker
+    # the old hand-rolled video form is gone
+    assert 'id="video-slots"' not in html
+    assert 'id="video-model"' not in html
+    assert "Gen.videoGenerate()" not in html
 
 
 def test_edit_card_has_reference_slots(tmp_path):
