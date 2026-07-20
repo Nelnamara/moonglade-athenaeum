@@ -585,13 +585,6 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   CLI-only maintenance actions. (`sync-artworks` / `sync-videos` / `reconcile-deleted` run via
   `/api/panel/run` and the scheduler but render no button by design, `panel_visible: False`.)
   (`PANEL_ACTIONS` in `pixai_gallery.py`.)
-- **Convert-and-download.** `/export-zip` streams selected full-res files with `ZIP_STORED` —
-  no format conversion, no metadata embedding, no whole-collection scope. Decided shape: the
-  catalog stays exactly as PixAI delivers it; conversion is an export-time transform only and
-  never re-enters the catalog as a new row. An "embed metadata" checkbox (prompt / task-id /
-  media-id into a PNG text chunk or JPEG EXIF) belongs on this same export flow — that is where
-  `--embed-metadata` gets a web home, not a bulk Organize checkbox. CLI-side machinery already
-  exists (`embed_metadata()`, `--embed-metadata`, `convert_image()`).
 - **Web import into the catalog.** `--import-local [DIR]` is CLI-only and a blind scan-and-add
   with no preview or confirm step. No web route imports into the catalog (`/api/upload` sends a
   file to PixAI for use as a generation reference; `/api/import-task` banks a Toolbox task id).
@@ -608,9 +601,9 @@ owner pointed out that **web parity gates GUI removal** — anything only reacha
 PySide6 GUI or the CLI needs a web equivalent *before* that GUI can go.
 
 1. **Web parity** — ✅ force-full-resync (Advanced Panel) · ✅ video/audio reference slots in the
-   live gallery drawer's Multi-ref (the `<mg-generate-drawer>` swap) · **remaining:**
-   convert-and-download for `/export-zip` · web import into the catalog. Unblocks the PySide6
-   removal below, which is decided but cannot execute until the last two land.
+   live gallery drawer's Multi-ref (the `<mg-generate-drawer>` swap) · ✅ convert-and-download for
+   `/export-zip` · **remaining: web import into the catalog** (needs a locked drop-zone mockup
+   first — net-new UI). That last item is all that stands between here and the PySide6 removal.
 2. **Gallery QoL easy wins** — chiefly the collection-remove UI: `/collection-remove` exists
    with **zero callers**, so the route is already written and only the UI is missing.
 3. **The 401 batch and the search wildcard** — ✅ both shipped 2026-07-19. What remains of
