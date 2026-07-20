@@ -14,6 +14,25 @@ def _no_pixai_token(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_ambient_api_key(monkeypatch):
+    """Force core._cfg (the import-time config cache) empty for every test, so a
+    developer machine behaves exactly like CI.
+
+    CI has no config.json, so at import core._cfg is {}. A developer machine loads
+    the real PIXAI_API_KEY into it, and _make_session() falls back to that cache --
+    so any test that reaches _make_session() WITHOUT stubbing it passes locally
+    (silently borrowing the developer's key) and fails in CI with "No API key
+    found." That gap hid eleven such tests until CI caught them. Making the cache
+    empty here means local == CI: a test that needs a session must stub
+    core._make_session, which is already this suite's convention (test_claims,
+    test_jobs, test_kaisuuken, test_generate_model_id, ...). test_filesystem.py did
+    exactly this by hand for the same reason before it was generalized here. The
+    delenv stops an exported key from re-opening the same hole."""
+    monkeypatch.setattr(core, "_cfg", {})
+    monkeypatch.delenv("PIXAI_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_auth_config(tmp_path, monkeypatch):
     """Web-login auth (AUTH_SECRET_KEY/AUTH_USERS) lives in config.json.
     pixai_gallery.create_app() -- called by ~every test in this suite -- now
