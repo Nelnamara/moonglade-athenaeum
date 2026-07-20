@@ -20,6 +20,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import secrets
 import sqlite3
 import sys
@@ -347,17 +348,33 @@ _DEFAULT_SORT_SQL = "created_at DESC"
 def _like_pattern(term):
     r"""Translate a user search term into a SQL LIKE pattern.
 
-    * `*` -> `%` (any run) and `?` -> `_` (single char), so `night*` matches
-      anything starting with "night".
-    * A term with NO wildcard is treated as a substring (wrapped in `%...%`),
-      preserving the old broad-search behavior.
+    * `*` -> `%` (any run) and `?` -> `_` (single char).
+    * EVERY term is matched as a substring (wrapped in `%...%`), wildcard or not.
     * Literal `%`/`_`/`\` the user typed are escaped (LIKE uses ESCAPE '\').
+
+    A wildcard must never make a search return FEWER results than the same term
+    without it. That invariant is pinned by a test, and it used not to hold:
+    a term containing a wildcard became the WHOLE pattern, so `night*` compiled
+    to `night%` -- anchored to the start of the entire prompt string, not to a
+    word. So the app's own placeholder ("words, night* wildcard, or an id")
+    advertised a syntax that returned nothing on most libraries, and adding a
+    `*` to a working search silently emptied it: `sample` matched 24 rows,
+    `sampl*` matched 0. Found by a browser crawl typing the advertised example.
+
+    Interior wildcards still do real work, which is where they earn their keep:
+    `moon*light` -> `%moon%light%` matches "moonlight" and "moon and starlight"
+    alike, and `n?ght` -> `%n_ght%` still constrains a single character. A
+    leading or trailing star now simply collapses into the surrounding wrap, so
+    `night*` and `night` mean the same thing rather than opposite things.
     """
     t = term.strip().lower()
-    has_wild = "*" in t or "?" in t
     t = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     t = t.replace("*", "%").replace("?", "_")
-    return t if has_wild else "%" + t + "%"
+    # Collapse runs of % left by a leading/trailing star meeting the wrap. Purely
+    # cosmetic ('%%' and '%' match identically) but keeps logged queries readable.
+    # An escaped literal '\%' is not a run and is left alone by the negative
+    # lookbehind -- a user searching "50%" must still match a literal percent.
+    return re.sub(r"(?<!\\)%{2,}", "%", "%" + t + "%")
 
 
 def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
