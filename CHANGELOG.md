@@ -15,7 +15,28 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Security
+
+- **Error text is no longer an HTML-injection seam.** Several UI sinks concatenated a
+  server-side `str(e)[:200]` exception string — plus job labels and a reflected task id —
+  raw into `innerHTML`. The image detail page's "Suggest prompt" error now builds a text
+  node (that page has no escaper in scope); the Control Panel's job-status and import sinks
+  route every dynamic value through the `escH2` escaper. Proven in a browser: a crafted
+  `<img src=x onerror=…>` returned as the API error renders as literal text with the handler
+  never firing, and reverting the sink to `innerHTML` makes the same payload execute — so the
+  fix genuinely neutralises a live payload. (`mg-notify.js` was already clean.)
+
 ### Fixed
+
+- **The `Serve Gallery` launcher no longer starts a second server on a port already in use.**
+  Its single-instance guard bowed out only on a `200` from `/api/ping`, but that route now
+  sits behind the login gate and answers an unauthenticated probe with `401`, which `urllib`
+  raises — the bare `except` swallowed it and launched a second server every time (on Windows
+  `SO_REUSEADDR` lets both bind the port and fight). Every response now carries an
+  `X-Moonglade` marker (including the gated `401`, which runs no view), and the launcher keys
+  off that: answered-with-marker → ours, connection-refused → nothing there. The browser-open
+  poller shared the same blind spot and opened ~2 minutes late; it now uses the same check.
+  No auth-boundary change — `/api/ping` stays gated.
 
 - **The login lockout no longer locks you out silently.** The 5th failed attempt set
   `locked_until` but still rendered the ordinary "Invalid username or password", so you were

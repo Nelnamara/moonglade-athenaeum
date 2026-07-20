@@ -730,11 +730,6 @@ marks 4/12/62/63/74; and **`mg-notify.js`'s mascot paths are consistent** — al
 `/branding/mascots/`. The genuine gap there is that no `login_nel.png` art exists, so the login
 page's `onerror` chain degrades to `gen_nel.png` as designed.*
 
-- **The `Serve Gallery` launcher can start a second server on one port.** Its single-instance
-  guard probes `/api/ping` unauthenticated; that route is now gated and answers 401, the bare
-  `except` swallows it, and it launches anyway. Observed for real during development — three
-  Python processes shared port 5077 via Windows `SO_REUSEADDR`, serving stale code and costing
-  four rounds of misdiagnosis. Fix: treat 401 as "ours, already running".
 - **A 300-char username breaks the account row ~980px outside its card**, putting a live
   **Remove** button outside its container. No server-side length limit anywhere
   (`add_or_update_web_user`, `add_web_user_if_new`, `/api/users/add`), no `maxlength` on
@@ -773,8 +768,9 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   (`.lv-sidehead` and the `gen` rail both map the same array over the same `setTab`) · locked
   skins are inert under a *stale success message* — `pickSkin` writes "✓ skin applied
   suite-wide" into `#skin-status` and nothing ever clears it, while `loadSkins()` rebuilds only
-  `#skin-grid` · raw upstream exceptions print verbatim into the UI (34 `str(e)` sites;
-  `/api/suggest-prompt`'s is injected *unescaped* into `innerHTML`).
+  `#skin-grid` · upstream exceptions still print verbatim into the UI as a minor UX nit (34
+  `str(e)` sites) — but they are no longer an injection seam: the `innerHTML` sinks now escape
+  (`escH2`) or build text nodes, verified in a browser (see CHANGELOG).
 - **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
   is unreachable and the variable name is a misnomer for "authorized". This is *deliberate and
   documented* at the call site — the front-door hook guarantees an authorized request reaches
