@@ -427,7 +427,15 @@ const V2_STYLES = `
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
-.lv-top button,.lv-top label{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+/* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
+   anchor, not a button, so a button-only selector left it as an unstyled browser link --
+   rgb(0,0,238) on the dark bar, a measured 1.69:1 against a 4.5:1 floor, and the only way
+   out of the Loom. Found by a browser crawl; invisible to any DOM/network check because
+   the link works perfectly, it is just illegible.
+   NB: this whole block is a JS template literal -- no backticks in these comments. */
+.lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+.lv-top a{text-decoration:none;display:inline-block;}
+.lv-top a:hover{border-color:var(--accent);}
 .lv-top .lv-close{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
