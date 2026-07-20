@@ -31,11 +31,18 @@ def test_like_plain_word_is_substring():
 
 
 def test_like_star_becomes_percent():
-    assert _like_pattern("night*") == "night%"
+    # A trailing star collapses into the substring wrap rather than anchoring the
+    # pattern to the start of the whole prompt. This assertion is the inverse of
+    # what it used to be ("night%") -- see _like_pattern's docstring: the old
+    # prefix semantics meant adding a wildcard could EMPTY a working search.
+    assert _like_pattern("night*") == "%night%"
+    assert _like_pattern("*night") == "%night%"
 
 
-def test_like_question_becomes_underscore():
-    assert _like_pattern("a?c") == "a_c"
+def test_like_interior_wildcards_still_constrain():
+    """Wildcards keep their power in the middle, which is where they're useful."""
+    assert _like_pattern("moon*light") == "%moon%light%"
+    assert _like_pattern("a?c") == "%a_c%"
 
 
 def test_like_escapes_literal_percent():
@@ -50,9 +57,25 @@ def test_substring_search_matches_both_night(db):
     assert total == 2  # "night elf" and "nighttime"
 
 
-def test_wildcard_prefix_search(db):
+def test_wildcard_search_matches_substring(db):
     rows, total = query_catalog(db, q="night*")
     assert total == 2
+
+
+def test_a_wildcard_never_narrows_a_search(db):
+    """THE invariant, and the one that was violated. Users expect a wildcard to
+    broaden a search or leave it alone -- never to shrink it. Previously a
+    wildcard turned the term into the whole pattern, anchored to the start of the
+    prompt, so `sample` matched 24 rows in the crawl fixture while `sampl*`
+    matched 0. Property-checked rather than spot-checked so a future change to
+    the pattern builder has to preserve it for every one of these shapes."""
+    for bare, wild in [("night", "night*"), ("night", "*night"), ("night", "nigh?"),
+                       ("elf", "elf*"), ("druid", "*druid*")]:
+        _, bare_total = query_catalog(db, q=bare)
+        _, wild_total = query_catalog(db, q=wild)
+        assert wild_total >= bare_total, (
+            "'{}' returned {} rows but '{}' returned only {} -- a wildcard must "
+            "never narrow a search".format(bare, bare_total, wild, wild_total))
 
 
 def test_multiword_is_anded(db):
