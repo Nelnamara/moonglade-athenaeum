@@ -707,6 +707,77 @@ def test_new_parity_actions_spawn_the_right_whitelisted_argv(tmp_path, monkeypat
             assert "--no-content" not in argv
 
 
+def _run_and_capture_argv(cli, monkeypatch, body):
+    """POST an action, capture the spawned argv, wait for the one-at-a-time job to
+    finish. Returns the argv list. Shared by the advanced-action tests below."""
+    import subprocess, io, time
+    captured = []
+
+    class FakeProc:
+        def __init__(self): self.stdout = io.StringIO("")
+        def wait(self): return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: captured.append(argv) or FakeProc())
+    r = cli.post("/api/panel/run", json=body)
+    assert r.status_code == 200, "{} -> {}".format(body, r.get_data(as_text=True))
+    for _ in range(50):
+        if cli.get("/api/panel/status").get_json()["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert captured, "{} spawned nothing".format(body)
+    return captured[0]
+
+
+def test_advanced_sync_actions_spawn_correct_argv(tmp_path, monkeypatch):
+    """Web parity step 2: the Advanced section's three sync variants each map to a fixed
+    whitelisted flag set -- a full re-walk (--full-meta, non-incremental), a read-only
+    inventory (--count), and the test pull (--max, covered below)."""
+    cli = _authed_client(tmp_path)
+    assert "--full-meta" in _run_and_capture_argv(cli, monkeypatch, {"action": "resync-full"})
+    assert "--count" in _run_and_capture_argv(cli, monkeypatch, {"action": "inventory"})
+
+
+def test_test_pull_clamps_n_and_never_passes_a_raw_string(tmp_path, monkeypatch):
+    """THE security-critical part of the parameterised action. test-pull is the one panel
+    action that carries a value, so the value must be proven to reach argv only as a
+    bounded integer -- clamped into [1,200], defaulted on garbage/absence -- never a raw
+    client string. This is what keeps _panel_run's "a WHITELISTED argv, never an arbitrary
+    command" true even with a parameter in play."""
+    cli = _authed_client(tmp_path)
+
+    def n_after_max(body):
+        argv = _run_and_capture_argv(cli, monkeypatch, dict(body, action="test-pull"))
+        assert "--max" in argv, argv
+        val = argv[argv.index("--max") + 1]
+        assert val.lstrip("-").isdigit(), "N reached argv as a non-integer: {!r}".format(val)
+        return int(val)
+
+    assert n_after_max({"n": 5}) == 5                 # in range -> passed through
+    assert n_after_max({"n": 999999}) == 200          # over max -> clamped to hi
+    assert n_after_max({"n": 0}) == 1                 # under min -> clamped to lo
+    assert n_after_max({"n": -50}) == 1               # negative -> clamped to lo
+    assert n_after_max({"n": "20; rm -rf /"}) == 20   # injection attempt -> default, never in argv
+    assert n_after_max({"n": "abc"}) == 20            # garbage -> default
+    assert n_after_max({}) == 20                       # absent -> default
+
+
+def test_advanced_actions_are_flagged_and_kept_off_the_scheduler(tmp_path):
+    """The panel hands the client an `advanced` flag per action (so they render in the
+    Advanced section, not the main button rows) and the scheduler dropdown filters on it.
+    Server-side backstop: the scheduler LOOP also skips advanced actions, so even a
+    hand-edited schedule naming one never fires. Here we pin the flag the client keys on."""
+    import json
+    cli = _authed_client(tmp_path)
+    html = cli.get("/panel").get_data(as_text=True)
+    m = re.search(r"var ALL_ACTIONS = (\[.*?\]);", html)
+    assert m, "ALL_ACTIONS not found on the panel page"
+    by_action = {a["action"]: a for a in json.loads(m.group(1))}
+    for adv in ("resync-full", "inventory", "test-pull"):
+        assert by_action[adv]["advanced"] is True
+    assert by_action["test-pull"]["int_param"] is True
+    assert by_action["sync"]["advanced"] is False      # an ordinary action is not advanced
+
+
 def test_dedup_delete_refuses_without_confirm(tmp_path, monkeypatch):
     """It deletes outright with no _duplicates/ safety net, so it must be gated at
     least as hard as dedup-apply -- confirm required, and (covered by
