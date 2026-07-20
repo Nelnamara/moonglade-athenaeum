@@ -4858,53 +4858,16 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
     </div>
     <div id="gen-mode-video" style="display:none;">
-      <div class="gen-seg" style="margin-bottom:10px;">
-        <button id="vm-i2v" class="on" onclick="Gen.setVideoMode('i2v')">First frame</button>
-        <button id="vm-flf" onclick="Gen.setVideoMode('flf')">First + last</button>
-        <button id="vm-r2v" onclick="Gen.setVideoMode('r2v')">Multi-ref</button>
-      </div>
-      <div class="gen-lbl" id="video-slots-lbl">Source image (first frame)</div>
-      <div id="video-slots"></div>
-      <div style="display:flex;justify-content:flex-end;margin-top:8px;">
-        <button type="button" class="snip-btn" onclick="Snips.open(this, {get:Gen.videoPromptText, set:Gen.videoPromptSet})">&#9733; Snippets</button>
-      </div>
-      <div id="video-prompt" class="gen-ta gen-ce" contenteditable="true"
-           data-placeholder="Describe the motion &mdash; &lsquo;slow cinematic pan right, gentle waves&hellip;&rsquo;"></div>
-      <div class="gen-row" style="margin-top:8px;">
-        <div style="flex:1.4;"><div class="gen-lbl">Model</div>
-          <select id="video-model" class="gen-sel" onchange="Gen.videoCost()">
-            <option value="v4.0.1" selected>V4.0 Lite Preview &middot; multi-ref &middot; 15s &middot; audio</option>
-            <option value="v4.0">V4.0 Preview (full) &middot; top quality &middot; pricier</option>
-            <option value="v3.2">V3.2 &middot; audio &middot; prompt-following</option>
-            <option value="v3.0.2">V3.0 Lite &middot; complex motion</option>
-            <option value="v3.0">V3.0 &middot; high consistency</option>
-          </select></div>
-        <div style="flex:1;"><div class="gen-lbl">Duration (s)</div>
-          <select id="video-dur" class="gen-sel" onchange="Gen.videoCost()"><option>5</option><option>6</option><option>10</option><option>15</option></select></div>
-      </div>
-      <div class="gen-row" style="margin-top:8px;">
-        <div id="video-cam-wrap" style="flex:1;"><div class="gen-lbl">Camera</div>
-          <select id="video-cam" class="gen-sel">
-            <option value="unset">Auto</option><option value="zoom">Zoom</option>
-            <option value="pan">Pan</option><option value="tilt">Tilt</option>
-            <option value="roll">Roll</option><option value="horizontal">Horizontal</option>
-            <option value="vertical-pan">Vertical pan</option>
-          </select></div>
-        {# PixAI calls this control "Basic / Professional"; mirror their wording so
-           someone moving between the two apps recognises it. It was labelled
-           "Priority", which is a DIFFERENT PixAI setting -- the real one is the
-           "High priority - Turbo" checkbox above (priority=1000). Two controls
-           reading as priority, one of which wasn't. <mg-generate-drawer> already
-           labels it correctly; this is the gallery's own drawer, not yet migrated. #}
-        <div style="flex:1;"><div class="gen-lbl">Basic / Professional</div>
-          <select id="video-vmode" class="gen-sel"><option value="professional">Professional</option><option value="basic">Basic (cheaper)</option></select></div>
-      </div>
-      <label class="gen-check"><input type="checkbox" id="video-audio" onchange="Gen.videoAudioToggle()"> Generate audio <span style="color:var(--overlay0);">(V4.0 / V3.2 &middot; spoken lines in the prompt become voiceover)</span></label>
-      <div id="video-lang-wrap" style="display:none;margin-top:4px;"><div class="gen-lbl">Audio language</div>
-        <select id="video-lang" class="gen-sel"><option value="english">English</option><option value="japanese">Japanese</option><option value="chinese">Chinese</option><option value="korean">Korean</option><option value="none">SE only (no dialogue)</option></select></div>
-      <div class="gen-cost" id="video-cost" style="margin-top:10px;">Pick a source image to see the cost.</div>
-      <button id="video-go" class="gen-go" onclick="Gen.videoGenerate()">Generate video</button>
-      <div id="video-result" class="gen-result" style="display:none;"></div>
+      {# Migrated to the shared <mg-generate-drawer> web component (static/mg-generate-drawer.js) --
+         the SAME element the Loom already mounts in production. It renders the full-parity Video
+         form (6 image + 3 video + 1 audio refs, negative prompt, Channel, the full model roster
+         with capability gating) and owns its own submit/poll/result/pricing over
+         /api/loom/generate. NO data-loom-ctx here, so Camera + Basic/Professional show -- the
+         gallery mount, per the LOCKED artifact 74ad3fd0. The host wires the gallery Picker to the
+         element's mg-pick-request event, and Gen.addVideoRefs feeds picked images via prefill()
+         -- see Gen.init below. The old hand-rolled #gen-mode-video form (9 undifferentiated image
+         slots, 5-model select, no video/audio refs, no negative, no channel) is gone. #}
+      <mg-generate-drawer></mg-generate-drawer>
     </div>
   </div>
   <div id="model-flyout" aria-hidden="true" aria-label="Models and LoRAs">
@@ -5086,6 +5049,11 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script src="/static/picker-core.js"></script>
+<!-- The shared <mg-generate-drawer> now mounts in the gallery's Video tab too (not just the
+     Loom, which loads it in _LOOM_SHELL). It's picker-agnostic -- no mg-model-picker /
+     mg-gallery-picker dependency -- so this one script is all the gallery mount needs; the
+     host wires its mg-pick-request to the gallery Picker in the inline JS below. -->
+<script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
 var Contests = (function(){
@@ -5196,7 +5164,7 @@ var Picker = (function(){
   // Browse/filter/page/infinite-scroll logic lives in PickerCore now (shared with the
   // Loom's GalleryPick); this IIFE is a thin DOM-binding shim over it -- same ids, same
   // CSS, same 3 call sites, same behavior as before the refactor.
-  var cb=null, core=null;
+  var cb=null, core=null, forcedType='';   // forcedType: a caller-forced media filter for one open session (e.g. 'video')
   function el(id){return document.getElementById(id);}
   function readFilters(){
     var v=function(id){ var e=el(id); return e?e.value:''; };
@@ -5228,14 +5196,15 @@ var Picker = (function(){
     });
     return core;
   }
-  function open(callback){ cb=callback; el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
+  function open(callback, opts){ cb=callback; forcedType=(opts&&opts.type)||'';
+    el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
     el('pick-q').value=''; markLoading();
-    ensureCore().setFilters(Object.assign({q:''}, readFilters()));
+    ensureCore().setFilters(Object.assign({q:''}, readFilters(), {type:forcedType}));
     setTimeout(function(){el('pick-q').focus();},120);
     try{ el('pick-copy').checked = localStorage.getItem('pick-copyprompt')==='1'; }catch(e){} }
-  function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; }
+  function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; forcedType=''; }
   function onInput(){ ensureCore().setQuery(el('pick-q').value.trim()); }
-  function onFilter(){ markLoading(); ensureCore().setFilters(readFilters()); }
+  function onFilter(){ markLoading(); ensureCore().setFilters(Object.assign(readFilters(), {type:forcedType})); }
   function pick(m, thumb){
     try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
     var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'');
@@ -5754,7 +5723,8 @@ var Gen = (function(){
       var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
     el('gen-drawer').classList.toggle('wide', m==='video'||m==='edit');
     if(m==='edit'){ setEditModel(editModel); loadWorkflows().then(renderWorkflows); if(!presetsLoaded) loadPresets(); }
-    if(m==='video') renderVideoSlots();
+    // Video is the <mg-generate-drawer> web component now -- it self-renders on connect and
+    // owns its own state; nothing to (re)build here (the old renderVideoSlots is gone).
   }
   function setEditSub(s){
     ['edit','enhance','fix'].forEach(function(x){
@@ -5944,164 +5914,44 @@ var Gen = (function(){
         if(window.confirm('Run this Enhance tool? It spends credits (free cards do not cover Enhance workflows).')) run();
       });
   }
-  var vmode='i2v', vslots=[null];
-  function setVideoMode(m){
-    vmode=m;
-    ['i2v','flf','r2v'].forEach(function(x){ var b=el('vm-'+x); if(b) b.classList.toggle('on',x===m); });
-    var vp=el('video-prompt');
-    if(m==='i2v'){ vslots=[vslots[0]||null]; el('video-slots-lbl').textContent='Source image (first frame)';
-      vp.setAttribute('data-placeholder','Describe the motion \\u2014 \\u2018slow cinematic pan right, gentle waves\\u2026\\u2019'); }
-    else if(m==='flf'){ vslots=[vslots[0]||null,vslots[1]||null]; el('video-slots-lbl').textContent='Start & end frame';
-      vp.setAttribute('data-placeholder','Describe the transition from start frame to end frame\\u2026'); }
-    else { if(!vslots.length) vslots=[null]; el('video-slots-lbl').textContent='Reference images';
-      vp.setAttribute('data-placeholder','Type @image1 to cite a ref \\u2014 it becomes a chip \\u2014 \\u2018the girl from @image1 walks the pier\\u2026\\u2019'); }
-    var cam=el('video-cam-wrap'); if(cam) cam.style.visibility=(m==='r2v')?'hidden':'visible';
-    renderVideoSlots();
-  }
-  function renderVideoSlots(){
-    var wrap=el('video-slots'); if(!wrap) return; wrap.innerHTML=''; wrap.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
-    var refN=0;
-    vslots.forEach(function(s,i){
-      var box=document.createElement('div');
-      box.style.cssText='position:relative;width:78px;height:78px;border-radius:8px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;overflow:hidden;display:grid;place-items:center;color:var(--subtext);font-size:11px;text-align:center;';
-      if(s){
-        refN++;
-        var tag=(vmode==='flf'?(i===0?'start':'end'):'@image'+refN);
-        box.innerHTML='<img src="'+s.thumb+'" style="width:100%;height:100%;object-fit:cover;">'
-          +'<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.85);color:var(--lavender);font-size:9.5px;padding:1px 5px;border-radius:4px;">'+tag+'</span>'
-          +'<button type="button" class="vs-x" style="position:absolute;top:2px;right:2px;width:17px;height:17px;border-radius:50%;border:none;background:rgba(21,19,28,.85);color:var(--subtext);font-size:11px;line-height:1;cursor:pointer;padding:0;">&times;</button>';
-        box.querySelector('.vs-x').onclick=function(ev){ ev.stopPropagation(); hidePreview();
-          if(vmode==='r2v'){ vslots.splice(i,1); if(!vslots.length) vslots=[null]; } else vslots[i]=null;
-          renderVideoSlots(); };
-        box.onmouseenter=function(){ showRefPreview(s.media_id, box); };
-        box.onmouseleave=hidePreview;
-      }
-      else { box.textContent=(vmode==='flf'?(i===0?'+ start':'+ end'):'+ pick'); }
-      box.onclick=function(){ Picker.open(function(mid,thumb){ vslots[i]={media_id:mid,thumb:thumb}; renderVideoSlots(); }); };
-      wrap.appendChild(box);
-    });
-    if(vmode==='r2v' && vslots.length<9){
-      var add=document.createElement('button'); add.type='button'; add.textContent='+ add';
-      add.style.cssText='width:78px;height:78px;border-radius:8px;border:1px dashed var(--surface1);background:transparent;color:var(--subtext);cursor:pointer;font-size:11px;';
-      add.onclick=function(){ vslots.push(null); renderVideoSlots(); }; wrap.appendChild(add);
-    }
-    videoCost();
-  }
-  var vcostTimer=null, vpTimer=null;
-  function vpRefs(){
-    var map={}, n=0;
-    vslots.forEach(function(s){ if(s&&s.media_id){ n++; map['@image'+n]={thumb:s.thumb, mid:s.media_id}; } });
-    return map;
-  }
-  function vpMakeChip(tag, info){
-    var c=document.createElement('span'); c.className='vp-chip'; c.contentEditable='false';
-    c.setAttribute('data-ref', tag);
-    c.innerHTML=(info&&info.thumb?'<img src="'+info.thumb+'" alt="">':'')+tag;
-    if(info&&info.mid){ c.onmouseenter=function(){ showRefPreview(info.mid, c); }; c.onmouseleave=hidePreview; }
-    return c;
-  }
-  function vpChipify(final){
-    var vp=el('video-prompt'); if(!vp) return;
-    var map=vpRefs(), sel=window.getSelection();
-    var walker=document.createTreeWalker(vp, NodeFilter.SHOW_TEXT), nodes=[], tn;
-    while((tn=walker.nextNode())) nodes.push(tn);
-    var re=/@image\\d+/g;
-    nodes.forEach(function(node){
-      var t=node.nodeValue, m, found=[];
-      re.lastIndex=0;
-      while((m=re.exec(t))!==null){
-        if(!map[m[0]]) continue;
-        if(!final && m.index+m[0].length===t.length) continue;  // still typing at the end
-        found.push({i:m.index, tag:m[0]});
-      }
-      if(!found.length) return;
-      var caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer===node;
-      var frag=document.createDocumentFragment(), pos=0;
-      found.forEach(function(f){
-        if(f.i>pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
-        frag.appendChild(vpMakeChip(f.tag, map[f.tag]));
-        pos=f.i+f.tag.length;
-      });
-      var tail=document.createTextNode(t.slice(pos)); frag.appendChild(tail);
-      node.parentNode.replaceChild(frag, node);
-      if(caretHere){ var r=document.createRange(); r.setStart(tail, tail.length); r.collapse(true);
-        sel.removeAllRanges(); sel.addRange(r); }
-    });
-  }
-  function vpText(){
-    var vp=el('video-prompt'), out='';
-    (function walk(n){ n.childNodes.forEach(function(c){
-      if(c.nodeType===3) out+=c.nodeValue;
-      else if(c.classList&&c.classList.contains('vp-chip')) out+=c.getAttribute('data-ref');
-      else if(c.nodeName==='BR') out+='\\n';
-      else walk(c);
-    });})(vp);
-    return out.replace(/\\u00a0/g,' ').trim();
-  }
-  function videoPromptSet(v){ var vp=el('video-prompt'); if(!vp) return; vp.textContent=v||''; vpChipify(true); videoCost(); }
-  function vpOnInput(){ clearTimeout(vpTimer); vpTimer=setTimeout(function(){ vpChipify(false); videoCost(); }, 300); }
-  function videoPayload(){
-    return { mode:vmode.toUpperCase(), prompt:vpText(),
-      images:vslots.filter(function(s){return s&&s.media_id;}).map(function(s){return s.media_id;}),
-      duration:+el('video-dur').value, audio:el('video-audio').checked,
-      video_model:el('video-model').value,
-      camera_movement:(vmode!=='r2v'?el('video-cam').value:''),
-      quality:el('video-vmode').value,
-      audio_language:el('video-lang').value };
-  }
-  function videoAudioToggle(){ el('video-lang-wrap').style.display=el('video-audio').checked?'':'none'; videoCost(); }
-  function videoCost(){ clearTimeout(vcostTimer); vcostTimer=setTimeout(videoCostNow, 250); }
-  function videoCostNow(){
-    var cost=el('video-cost'); if(!cost) return;
-    var p=videoPayload();
-    if(!p.images.length){ cost.className='gen-cost'; cost.textContent='Pick a source image to see the cost.'; return; }
-    cost.className='gen-cost'; cost.textContent='Checking cost\\u2026'; var mine=++costSeq;
-    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
-      .then(function(r){return r.json();})
-      .then(function(d){ if(mine!==costSeq)return;
-        if(d.note){ cost.textContent=d.note; return; }
-        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
-        var n=d.cost!=null?d.cost.toLocaleString():'?';
-        if(d.free){ cost.className='gen-cost free';
-          cost.textContent='\\ud83c\\udfab FREE \\u2014 '+(d.card_name||'a video card')+' covers this'+(d.cards?' ('+d.cards+' left)':'')+' \\u00b7 saves ~'+n+' credits'; }
-        else { var big=(p.video_model==='v4.0');   // v4.0 full is ~2.5x Lite (14k/s -> 210k for 15s)
-          cost.className='gen-cost'+(big?' warn':'');
-          cost.textContent=(big?'\\u26a0 V4.0 full \\u2014 ~2.5\\u00d7 Lite \\u00b7 ':'')+'\\u2248 '+n+' credits'; }
-      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
-  }
+  function genDrawerEl(){ var w=el('gen-mode-video'); return w?w.querySelector('mg-generate-drawer'):null; }
   function addVideoRefs(refs){
-    refs=(refs||[]).slice(0,9); if(!refs.length) return;
+    // Gallery bulk-send ("make a video from these"): feed the picked images straight into
+    // the <mg-generate-drawer> via its prefill() -- the same shot-context entry the Loom
+    // uses. Image bank is 6 now (the full-parity split), not the old 9. >1 image -> Multi-ref.
+    refs=(refs||[]).slice(0,6); if(!refs.length) return;
     open(); setMode('video');
-    if(refs.length>1) setVideoMode('r2v');
-    var slots=refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; });
-    if(refs.length>1){ vslots=slots; }
-    else if(vmode==='r2v'){ vslots=[slots[0]]; }
-    else { vslots[0]=slots[0]; }
-    renderVideoSlots();
-  }
-  function videoGenerate(){
-    var p=videoPayload(), res=el('video-result');
-    if(!p.images.length){ res.style.display='block'; res.innerHTML='<span style="color:var(--red);font-size:12px;">Pick a source image first.</span>'; return; }
-    runTask('/api/loom/generate', p,
-            res, {past:'Rendered', btn:el('video-go'), busy:'Rendering\\u2026', idle:'Generate video'});
+    var drawer=genDrawerEl(); if(!drawer) return;
+    drawer.prefill({ mode: refs.length>1?'r2v':'i2v',
+                     images: refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; }) });
   }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
           renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
-          setVideoMode:setVideoMode, videoGenerate:videoGenerate, renderVideoSlots:renderVideoSlots,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           insertTriggers:insertTriggers, setSort:setSort, setCat:setCat,
-          setEditSub:setEditSub, setEditModel:setEditModel, addVideoRefs:addVideoRefs, videoCost:videoCost,
-          videoAudioToggle:videoAudioToggle,
-          vpOnInput:vpOnInput, vpChipify:vpChipify,
-          videoPromptText:vpText, videoPromptSet:videoPromptSet,
+          // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
+          // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
+          // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
+          // gone -- the component owns all of that now.
+          setEditSub:setEditSub, setEditModel:setEditModel, addVideoRefs:addVideoRefs,
           resetModelDefaults:resetModelDefaults,
           get selected(){return selected;}};
 })();
+// Gallery mount wiring for <mg-generate-drawer>: the component is picker-agnostic and fires
+// mg-pick-request (bubbling + composed) whenever a slot's "+ pick" is clicked. Open the
+// gallery Picker filtered to the requested kind (image | video -> /api/gallery-images type)
+// and hand the choice back through respond(media_id, thumb). Audio refs never arrive here --
+// the component uploads those directly (there is no gallery/catalog concept for a raw audio
+// file). One document-level listener; the drawer is the only source of this event.
+document.addEventListener('mg-pick-request', function(e){
+  var d=e.detail; if(!d||typeof d.respond!=='function') return;
+  Picker.open(function(mid, thumb){ d.respond(mid, thumb); }, d.kind==='video'?{type:'video'}:null);
+});
 var Tags = (function(){
   var items=[], hot=0, ta=null, timer=null, seq=0;
   function box(){ return document.getElementById('tag-suggest'); }
@@ -6238,9 +6088,8 @@ document.addEventListener('DOMContentLoaded', function(){
     var i=0; setInterval(function(){ i=(i+1)%lines.length; tl.style.opacity=0;
       setTimeout(function(){ tl.textContent=lines[i]; tl.style.opacity=1; }, 500); }, 9000); })();
   ['gen-prompt','gen-neg','edit-ins'].forEach(Tags.attach);
-  var vp=document.getElementById('video-prompt');
-  if(vp){ vp.addEventListener('input', Gen.vpOnInput);
-          vp.addEventListener('blur', function(){ Gen.vpChipify(true); }); }
+  // (#video-prompt + its chipify listeners are gone -- the <mg-generate-drawer> component
+  // owns the video prompt box and its own @ref chip handling now.)
   var asp=document.getElementById('gen-aspects');
   if(asp) asp.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b)return;
     asp.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
