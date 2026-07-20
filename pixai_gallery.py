@@ -7427,15 +7427,28 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/logout")
     def logout():
-        # Bump this identity's sess_epoch BEFORE clearing the local session, so
-        # signing out revokes every outstanding session cookie for this username
-        # (e.g. one captured off plain-HTTP LAN traffic before the click), not
-        # just this one browser's copy -- see get_web_user_session_epoch()'s
-        # docstring and _is_authorized_request() below, which re-checks it.
         import pixai_gallery_backup as core
         user = session.get("user")
-        if user:
+        # A DEAD cookie must not be allowed to REVOKE. /logout is in _PUBLIC_PATHS so
+        # _enforce_front_door() never runs here, and app.secret_key persists across
+        # restarts -- so an already-revoked cookie still DESERIALIZES, and without
+        # this check it stayed a valid "log this identity out" token forever.
+        # Replayed in a loop it bumped the epoch on every hit, kicking the real user
+        # off the instant they signed back in: no credential needed, and recoverable
+        # only by rotating AUTH_SECRET_KEY, which the owner has no signal to do.
+        #
+        # The bump still happens BEFORE the local clear, so signing out revokes EVERY
+        # outstanding cookie for this username -- e.g. one captured off plain-HTTP LAN
+        # traffic before the click -- not just this browser's copy.
+        #
+        # ORDER MATTERS: read `user` BEFORE calling _is_authorized_request(), which
+        # calls session.clear() on the stale path. Swapping these two lines silently
+        # disables the bump for everyone.
+        if user and _is_authorized_request():
             core.bump_web_user_session_epoch(user)
+        # Unconditional and outside the guard: whoever holds an already-invalid cookie
+        # must still be able to shed it locally. Client-side only, touches no server
+        # state, and leaves the anonymous case a plain 302 no-op.
         session.clear()
         return redirect(url_for("login"))
 
@@ -8882,8 +8895,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         with core._accounts_lock:
             try:
                 cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
-            except (ValueError, OSError):
-                cfg = {}
+            except ValueError:
+                # Present but unparseable -- REFUSE rather than overwrite. The old
+                # bare `cfg = {}` fallback wrote back a one-key stub, destroying
+                # AUTH_USERS (dropping the install into local-bootstrap mode),
+                # AUTH_SECRET_KEY (logging everyone out), and now AUTH_EPOCH_SEQ
+                # (rewinding revocation state itself).
+                return jsonify({"error": "config.json exists but could not be parsed; "
+                                         "not overwriting it. Fix or restore the file, "
+                                         "then save the key again."}), 200
+            except OSError as e:
+                return jsonify({"error": "Could not read config.json: {}".format(e)}), 200
             cfg["PIXAI_API_KEY"] = key
             try:
                 cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
