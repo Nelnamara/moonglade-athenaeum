@@ -56,6 +56,16 @@ Web gallery (browse, generate, The Loom) — at [localhost:5000](http://localhos
 python pixai_gallery.py --out pixai_backup
 ```
 
+**Create your login (v2.0.0+).** The gallery requires an account on every path, including on
+the machine running it, so the first thing you'll see is the login page. On a fresh install
+it offers to **create the first account** right there — no terminal step. That form appears
+only for a request from the server's own machine while zero accounts exist, so nobody on
+your network can claim the first account before you do. From then on, sign in with it from
+any device.
+
+Add more accounts later from **Panel → Users**. If you ever lock yourself out entirely,
+`python pixai_gallery_backup.py --add-web-user` is the recovery path.
+
 Desktop app (legacy — the PySide6 GUI is being folded into the web app):
 ```bash
 python pixai_gui.py

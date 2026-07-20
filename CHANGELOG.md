@@ -10,9 +10,49 @@ git tags. Full prose notes for tagged versions live on
 > section with every change, and cut it into a dated version block when you tag a release.**
 > GitHub Releases are published through **v1.10.0** — publishing paused after **v1.6.0**, and
 > **v1.8.0–v1.10.0 were back-published** on 2026-07-10 from tag messages + git history. **v1.11.0 is
-> tagged but has no Release yet.** There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
+> tagged but has no Release yet** — its tag sits on `loom-v2` and never reached master; it arrives
+> there as part of **v2.0.0**. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+
+## [2.0.0] - 2026-07-19 — Multi-account auth, Loom V2, and the Trophy Hall
+
+The first master update since 2026-07-07, carrying 179 commits: the Loom V2 rebuild, the
+achievement system and Trophy Hall, the web creation suite, LICENSE/CI/community bucket, a
+large docs consolidation, and a real multi-account authentication stack.
+
+### ⚠ BREAKING
+
+- **The gallery now requires a login on every path, including localhost.** Previously any
+  request from the machine running the server was trusted implicitly; that bypass is gone, by
+  explicit design decision — login is required from `127.0.0.1` exactly as it is from a LAN
+  address. **On first run after upgrading, open the gallery locally and the login page will
+  offer to create the first account.** That form appears *only* for a loopback request while
+  zero accounts exist, so a LAN device can never claim the first account. Afterwards, sign in
+  from any device. `--add-web-user` still exists as a recovery path but is no longer the
+  primary one.
+- **Password policy raised from 4 to 8 characters**, with a weak-password blocklist (repeated
+  characters, sequential runs, common passwords). Applies at account *creation* only —
+  existing accounts keep working and are not forced to rotate.
+- **Classic Loom (V1) has been retired.** `/loom` opens straight into the V2 shell; the `v2`
+  toggle and the `CardView`/`CardEditor` components are gone. There is one render tree now.
+- **Destructive Control Panel actions and `/api/setup/save-key` are localhost-only.** A
+  logged-in LAN session can browse and generate, but cannot organize/dedup, cancel a running
+  job, edit the schedule, or overwrite the API key. `/api/server/stop` and `/restart` remain
+  open to any logged-in session, deliberately.
+
+### Known issues in this release
+
+- **The `Serve Gallery` launcher's single-instance probe is broken.** It probes `/api/ping`
+  unauthenticated to detect an already-running server; that route is now gated and answers
+  401, so the probe fails and the launcher can start a *second* server on the same port.
+  Observed for real during development. Fix pending — treat 401 as "ours, already running".
+- **Service-worker registration fails on the login page.** `/sw.js` is gated, so a signed-out
+  page gets a redirect and Chrome refuses to register a redirected worker script. It registers
+  normally on the next navigation after signing in; the offline cache simply arms late.
+- **`/logout` is a plain GET with no CSRF token** and revokes every session for that account on
+  every device, so a hostile page can force-sign-you-out. Denial of convenience only — no data
+  exposure — but tracked.
 
 ### Changed
 - **Web-login password policy raised from 4 to 8 characters, with a weak-password blocklist**

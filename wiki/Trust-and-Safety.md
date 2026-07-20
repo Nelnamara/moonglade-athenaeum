@@ -22,11 +22,20 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   behind a flag, not commented out, not planned. `--account` only ever *reads* your
   credits/membership status.
 - **Touch anyone's account but yours.** Every request rides your own API key.
-- **Spend or delete from another device on your network.** The web app's generate/edit/
-  enhance/fix/delete/claim routes all check that the request came from the machine running
-  the server (`127.0.0.1`/`localhost`) and refuse otherwise — a phone or laptop browsing your
-  gallery over LAN can look, but cannot spend or delete. (Read-only browsing, on purpose, is
-  not localhost-gated — that's what lets you browse your own gallery from another device.)
+- **Be reached by anyone who hasn't signed in.** As of **v2.0.0** the gallery is default-deny:
+  every route except the login page itself requires an account, and that applies on the
+  machine running the server exactly as it does over the network. Nothing is browsable
+  anonymously. Sessions are signed cookies over scrypt-hashed passwords, rate-limited per
+  address, and signing out revokes every outstanding session for that account on every device.
+
+- **Touch the server machine, or irreversibly delete from your PixAI account, from another
+  device — even signed in.** A signed-in phone or tablet *can* browse and generate; that is
+  the point of the login. But three things stay stricter and require a request from the
+  machine running the server no matter who is signed in: the destructive Control Panel jobs
+  (organize, dedup-apply, rebuild-thumbnails, plus cancelling a running job and editing the
+  schedule), cloud bulk-delete, and writing the API key or launcher icon. Those act on your
+  files or delete from PixAI permanently, which is a different class of trust than spending
+  credits.
 - **Send your credentials anywhere but PixAI's own API.** `config.json` (your API key) and
   the git-ignored `private/` notes never leave your machine and are never logged or uploaded.
 

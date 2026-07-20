@@ -31,10 +31,21 @@ Nothing phones home.
 
 **Can I run it on my phone/tablet?**
 Yes — launch the gallery with `--host 0.0.0.0 --https` and open it on your device
-(installable as a PWA). [Select mode](Collections) is touch-friendly. A LAN-exposed
-gallery is **read-only** — every credit-spending and destructive endpoint is gated to
-localhost, so LAN browsers can look but only the owner's machine can spend or delete.
-Still use a trusted network: LAN viewers can see your images and prompts.
+(installable as a PWA). [Select mode](Collections) is touch-friendly.
+
+**As of v2.0.0 this needs a login, and a signed-in device can do real work.** The gallery
+requires an account on every path — including on the machine running it. Sign in from your
+phone and you can browse *and* generate, which is the point: the login exists so tablet
+generation is possible, not to keep you out.
+
+Three things stay stricter than "signed in", because they act on the server machine itself
+or delete irreversibly from your PixAI account: the destructive Control Panel jobs
+(organize, dedup-apply, rebuild-thumbnails), cloud bulk-delete, and setting the API key or
+launcher icon. Those require a request from the machine running the server, no matter who
+is signed in.
+
+Still use a trusted network: the app is served over plain HTTP unless you pass `--https`,
+and a signed-in session on a shared network can spend your credits.
 
 **Does organizing files break the gallery?**
 No. Lookups are by `media_id`, so files can live in any subfolder.
