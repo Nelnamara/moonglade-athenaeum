@@ -581,15 +581,10 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
 Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 
-- No Panel buttons for `--rebuild-similar`, `--verify-dupes`, `--restore-orphans` or
-  `--undo-organize`. `sync-artworks` / `sync-videos` / `reconcile-deleted` are runnable via
-  `/api/panel/run` and the scheduler but render no button (`panel_visible: False`). The Audit
-  button is hardcoded to `--audit --no-content` with no full-audit toggle. The Dedup button has
-  no `--dedup-delete` checkbox. (`PANEL_ACTIONS` in `pixai_gallery.py`.)
-- **Sync options.** "Sync now" runs a bare `--sync`. There is no web way to force a complete
-  non-incremental re-walk of full history, to catalog rows without downloading files (fast
-  inventory pass), or to pull a handful of tasks as a quick test. Needs its own scoping pass to
-  pick the UI shape (a Panel "Advanced" section vs. per-run options).
+- **`--restore-orphans` and `--undo-organize` have no Panel button** — the two remaining
+  CLI-only maintenance actions. (`sync-artworks` / `sync-videos` / `reconcile-deleted` run via
+  `/api/panel/run` and the scheduler but render no button by design, `panel_visible: False`.)
+  (`PANEL_ACTIONS` in `pixai_gallery.py`.)
 - **Video/audio reference slots are still missing from the LIVE gallery drawer's Multi-ref**
   (unchanged — its own hand-rolled Video tab, `#gen-mode-video`). The web Video tab was born
   "simple mode" (`d03e6c8`, 2026-07-03) with image slots only, one day after the CLI shipped
