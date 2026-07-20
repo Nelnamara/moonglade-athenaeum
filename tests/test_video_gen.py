@@ -385,3 +385,73 @@ def test_gallery_ref_upload_is_cached_per_media_id(tmp_path, monkeypatch):
     assert r.status_code == 200, r.get_data(as_text=True)
     assert len(calls) == 1, "same media_id uploaded {} times".format(len(calls))
     assert submitted["referenceVideo"]["referenceImageMediaIds"] == ["777", "777"]
+
+
+def _seed_one(tmp_path, mid="733917871331404290"):
+    from pixai_gallery import CATALOG_FIELDS, save_catalog
+    (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "2025-01" / ("s_%s.png" % mid)).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": mid, "filename": "2025-01/s_%s.png" % mid,
+        "created_at": "2026-06-18T05:24:56Z"}])
+    return mid
+
+
+def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
+    """The first fix for the invalid_media_id bug patched ONLY the video route, leaving
+    /api/enhance, /api/edit and /api/fix silently broken the same way -- the owner's next
+    enhance died on it. PixAI refuses a generation-OUTPUT id as an INPUT on every one of
+    these paths, so all four must resolve through _input_media_id.
+
+    Parametrised deliberately: a new input endpoint that forgets to resolve is the exact
+    way this returns, and this fails by name when it does."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = _seed_one(tmp_path)
+    seen = {}
+
+    monkeypatch.setattr(core, "upload_media", lambda s, path, **k: "999000111222")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "submit_generation",
+                        lambda s, params: seen.update(params=params) or "t1")
+    monkeypatch.setattr(core, "submit_fixer",
+                        lambda s, src, boxes: seen.update(fix_src=src) or "t2")
+    monkeypatch.setattr(core, "build_panelplugin_parameters",
+                        lambda src, wid: seen.update(enh_src=src) or {"p": 1})
+
+    cli = login_test_client(create_app(tmp_path))
+
+    # 1. video
+    assert cli.post("/api/loom/generate", json={"mode": "I2V", "prompt": "x",
+                    "images": [mid], "duration": 5}).status_code == 200
+    assert seen["params"]["i2vPro"]["mediaId"] == "999000111222"
+
+    # 2. enhance -- the path the owner's stuck job died on
+    cli.post("/api/enhance", json={"source": mid, "workflow_id": "wf1"})
+    assert seen.get("enh_src") == "999000111222", "enhance passed the raw catalog id"
+
+    # 3. fix
+    cli.post("/api/fix", json={"source": mid, "boxes": [{"x": 1, "y": 1, "w": 2, "h": 2}]})
+    assert seen.get("fix_src") == "999000111222", "fix passed the raw catalog id"
+
+    # 4. edit
+    seen.pop("params", None)
+    cli.post("/api/edit", json={"source": mid, "instruction": "make it night"})
+    chat = (seen.get("params") or {}).get("chat") or {}
+    ids = str(chat)
+    assert "999000111222" in ids and mid not in ids, "edit passed the raw catalog id"
+
+
+def test_pricing_never_uploads(tmp_path, monkeypatch):
+    """/api/price only needs the SHAPE to compute a cost. Resolving there would upload
+    the same file over and over while the user types, so _edit_params_from_payload
+    takes `session` only on the real submit path."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = _seed_one(tmp_path, "555111222333")
+    uploads = []
+    monkeypatch.setattr(core, "upload_media", lambda *a, **k: uploads.append(1) or "nope")
+    cli = login_test_client(create_app(tmp_path))
+    cli.post("/api/price", json={"mode": "edit", "source": mid, "instruction": "x"})
+    cli.post("/api/price", json={"mode": "I2V", "images": [mid], "duration": 5})
+    assert not uploads, "pricing uploaded {} time(s) -- it must not".format(len(uploads))
