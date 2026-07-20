@@ -2169,15 +2169,39 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     }, "video");
   };
   // ---- In-Loom reference-image gen: reuse /api/generate (image), poll, then route the result into the shot ----
-  const pollImg = (cardId, tid) => {
+  // Shared drawer poll. pollShot has had a POLL_CEILING_MS guard since the
+  // give-up-timer pass; these drawer polls never did, so a task that never reached
+  // a terminal phase polled FOREVER -- and so did a persistently failing fetch,
+  // because the .catch re-scheduled too. The control stayed disabled and the tab
+  // kept hitting the server every few seconds with nothing to show for it.
+  //
+  // On hitting the ceiling this stops and reports rather than failing silently.
+  // It uses phase "error" deliberately: these three drawers render only
+  // submitting/running (busy) and error (message), with no "paused" affordance --
+  // that exists on shot cards only. So "error" is what unsticks the control AND
+  // surfaces the reason; the message says plainly that the task may still be
+  // running, because elapsed time alone is not evidence of failure.
+  const pollTaskWithCeiling = (tid, setState, cardId) => {
+    const startedAt = Date.now();
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
-      if (cls.phase === "done") setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-      else if (cls.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-      else setTimeout(tick, 4000);
-    }).catch(() => setTimeout(tick, 5000));
+      if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+      else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+      else again(4000);
+    }).catch(() => again(5000));
+    const again = (ms) => {
+      if (Date.now() - startedAt > POLL_CEILING_MS) {
+        setState((s) => ({ ...s, [cardId]: { phase: "error",
+          msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS) +
+               " — the task may still be running; check it on pixai.art (task " +
+               String(tid).slice(-6) + ")" } }));
+        return;
+      }
+      setTimeout(tick, ms);
+    };
     setTimeout(tick, 2500);
   };
+  const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
   const genImage = async (entry) => {
     const c = entry.c;
     const prompt = (c.imgPrompt || "").trim();
@@ -2211,15 +2235,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const runGen = async (setState, cardId, endpoint, body, confirmMsg) => {
     if (confirmMsg && !window.confirm(confirmMsg)) return;
     setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
-    const poll = (tid) => {
-      const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-        const cls = classifyTaskStatus(d);
-        if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-        else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        else setTimeout(tick, 4000);
-      }).catch(() => setTimeout(tick, 5000));
-      setTimeout(tick, 2500);
-    };
+    // Same unbounded-loop fix as pollImg -- see pollTaskWithCeiling's comment.
+    const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
     try {
       const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d = await r.json();
