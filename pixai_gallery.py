@@ -2788,19 +2788,46 @@ def create_app(out_dir: Path):
         "sync":          {"args": ["--sync"], "label": "Sync now — pull new + fill metadata", "destructive": False},
         "stats":         {"args": ["--catalog-stats"], "label": "Catalog stats", "destructive": False},
         "audit":         {"args": ["--audit", "--no-content"], "label": "Duplicate audit (fast, read-only)", "destructive": False},
+        # The "full audit" checkbox in the UI does NOT append a flag to the action above --
+        # it selects this separate whitelisted entry. Same for dedup-delete below. Keeping
+        # the client to a fixed set of action KEYS is what preserves the property the
+        # whole runner is built on (see _panel_run: "a WHITELISTED argv, never an
+        # arbitrary command"); letting a checkbox contribute argv would erode it.
+        "audit-full":    {"args": ["--audit"], "label": "Duplicate audit (full — byte-compare, slower)", "destructive": False},
+        "verify-dupes":  {"args": ["--verify-dupes"],
+                          "label": "Verify _duplicates/ is safe to delete", "destructive": False},
+        "rebuild-similar": {"args": ["--rebuild-similar"],
+                            "label": "Rebuild the Similar index (slow, needs pixeltable)",
+                            "destructive": False},
         # (Export CSV isn't here on purpose -- in the browser it's a real DOWNLOAD via /export-csv,
         #  not a subprocess that writes catalog.csv into the backup folder.)
         "organize-dry":  {"args": ["--organize", "--dry-run"], "label": "Organize — preview (dry run)", "destructive": False},
         "dedup-dry":     {"args": ["--dedup"], "label": "Dedup — preview (dry run)", "destructive": False},
-        # --- background-only: full-feed scans, run by the scheduler, not a button ---
-        # (both re-walk the WHOLE history every run, no --update-style short-circuit --
-        # fine hourly/daily, wasteful to click after every incremental pull)
-        "sync-artworks":     {"args": ["--sync-artworks"], "label": "Sync published-artwork metadata", "destructive": False, "panel_visible": False},
-        "sync-videos":       {"args": ["--sync-videos"], "label": "Sync i2v videos (back up mp4s)", "destructive": False, "panel_visible": False},
+        # --- full-feed scans: they re-walk the WHOLE history every run, with no
+        # --update-style short-circuit. That is why they were originally scheduler-only.
+        # They now HAVE buttons (web parity: nothing should need the CLI), but the labels
+        # say "full re-walk" out loud so the cost is visible before clicking rather than
+        # discovered afterwards. ---
+        "sync-artworks":     {"args": ["--sync-artworks"],
+                              "label": "Sync published-artwork metadata (full re-walk)",
+                              "destructive": False},
+        "sync-videos":       {"args": ["--sync-videos"],
+                              "label": "Sync i2v videos — back up mp4s (full re-walk)",
+                              "destructive": False},
+        # reconcile-deleted deliberately keeps NO button: --sync already runs it as its
+        # final step (see run_sync's pipeline), so a button would be a second path to
+        # work that just happened, inviting someone to run it and wonder why nothing
+        # changed. It stays schedulable for anyone who wants it on its own cadence.
         "reconcile-deleted": {"args": ["--reconcile-deleted"], "label": "Reconcile deleted (flag cloud-removed rows)", "destructive": False, "panel_visible": False},
         # --- destructive: require confirm=true ---
         "organize":      {"args": ["--organize"], "label": "Organize into month folders", "destructive": True},
         "dedup-apply":   {"args": ["--dedup", "--apply"], "label": "Dedup — quarantine dupes to _duplicates/", "destructive": True},
+        # DELETES rather than quarantining, so it is strictly more dangerous than
+        # dedup-apply and carries the same destructive=True (confirm + localhost-only).
+        # Deliberately a separate key, not a flag the client can add -- see audit-full.
+        "dedup-delete":  {"args": ["--dedup", "--apply", "--dedup-delete"],
+                          "label": "Dedup — DELETE dupes outright (no _duplicates/ safety net)",
+                          "destructive": True},
         "rebuild-thumbs": {"args": ["--rebuild-thumbs"],
                            "label": "Rebuild ALL thumbnails — uniform quality + video posters",
                            "destructive": True},
@@ -6800,6 +6827,11 @@ function savePrompt() {
   .p-stat .v.lav{color:var(--lavender);}
   .jobrow{display:flex;flex-wrap:wrap;gap:8px;}
   .jobbtn{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:9px 12px;cursor:pointer;color:var(--text);font-family:inherit;min-width:180px;}
+  /* Per-job option toggle. Sits inside its button but swallows the click, so ticking it
+     configures the run instead of starting one. */
+  .job-opt{display:flex;align-items:center;gap:5px;margin-top:5px;font-size:11.5px;color:var(--subtext);cursor:pointer;}
+  .job-opt input{margin:0;accent-color:var(--accent);cursor:pointer;}
+  .jobbtn.danger .job-opt{color:var(--red);}
   .jobbtn:hover{border-color:var(--lavender);}
   .jobbtn:disabled{opacity:.45;cursor:not-allowed;}
   .jobbtn .t{font-size:13px;font-weight:500;}
@@ -7052,12 +7084,44 @@ function removeUser(btn){
       }
     }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
 }
+// Option toggles. A checkbox here does NOT add a flag to the request -- it swaps which
+// WHITELISTED action key gets sent, so the server still only ever accepts a fixed set of
+// keys and the "never an arbitrary command" property of _panel_run is untouched. Any
+// action listed as a `variant` is hidden from the button list so it can't also render as
+// its own button (the checkbox IS its entry point).
+var JOB_OPTIONS = {
+  'audit':       {variant:'audit-full',   label:'full (byte-compare — slower)',
+                  title:'Also hash file CONTENT to catch byte-identical duplicates saved under different ids (Class B). The default fast pass only finds the same id in two places.'},
+  'dedup-apply': {variant:'dedup-delete', label:'DELETE instead of quarantining',
+                  title:'Redundant copies are deleted outright instead of being moved to _duplicates/. There is no undo and no safety net -- run the preview and the verify step first.'}
+};
 function renderJobs(){
   var safe=el('jobs-safe'), danger=el('jobs-danger');
+  var variants={}; Object.keys(JOB_OPTIONS).forEach(function(k){ variants[JOB_OPTIONS[k].variant]=1; });
   ACTIONS.forEach(function(a){
+    if(variants[a.action]) return;              // reached via its checkbox, not its own button
+    var opt=JOB_OPTIONS[a.action];
     var b=document.createElement('button'); b.className='jobbtn'+(a.destructive?' danger':'');
     b.innerHTML='<span class="t">'+a.label+'</span>';
-    b.onclick=function(){ runJob(a); };
+    var cb=null;
+    if(opt){
+      var wrap=document.createElement('label');
+      wrap.className='job-opt'; wrap.title=opt.title;
+      cb=document.createElement('input'); cb.type='checkbox';
+      wrap.appendChild(cb);
+      wrap.appendChild(document.createTextNode(' '+opt.label));
+      // Clicking the checkbox must not also fire the button it sits under.
+      wrap.onclick=function(ev){ ev.stopPropagation(); };
+      b.appendChild(wrap);
+    }
+    b.onclick=function(){
+      var chosen=a;
+      if(opt && cb && cb.checked){
+        var alt=ACTIONS.concat(ALL_ACTIONS).filter(function(x){ return x.action===opt.variant; })[0];
+        if(alt) chosen=alt;
+      }
+      runJob(chosen);
+    };
     (a.destructive?danger:safe).appendChild(b);
   });
 }

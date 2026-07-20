@@ -45,11 +45,18 @@ def test_panel_page_renders_with_actions(tmp_path):
     # update/backfill-meta/fix-models folded into --sync -- no longer standalone actions
     for gone in ("update", "backfill-meta", "fix-models"):
         assert gone not in buttons_json and gone not in dropdown_json
-    # sync-videos etc. lost their BUTTON...
-    for hidden in ("sync-videos", "reconcile-deleted", "sync-artworks"):
-        assert hidden not in buttons_json
-        # ...but stay selectable in the scheduler dropdown -- that's their only home now
-        assert '"action": "{}"'.format(hidden) in dropdown_json
+    # sync-videos / sync-artworks GAINED buttons in the web-parity pass: nothing should
+    # need the CLI. They are full-history re-walks, so their labels say so out loud
+    # rather than hiding them.
+    for shown in ("sync-videos", "sync-artworks"):
+        assert '"action": "{}"'.format(shown) in buttons_json
+        assert "full re-walk" in buttons_json
+    # reconcile-deleted deliberately stays button-less -- NOT an oversight. --sync already
+    # runs it as its final step (run_sync's pipeline), so a button would be a second path
+    # to work that just happened, inviting someone to run it and wonder why nothing
+    # changed. It stays schedulable for anyone wanting it on its own cadence.
+    assert "reconcile-deleted" not in buttons_json
+    assert '"action": "reconcile-deleted"' in dropdown_json
 
 
 def test_run_rejects_unknown_action(tmp_path):
@@ -642,3 +649,73 @@ def test_export_silent_clip_with_no_trim_out_probes_real_duration(tmp_path, monk
     assert r.get_json()["ok"] is True
     fc = _filter_complex_of(_ffmpeg_call(captured))
     assert "[1:a]atrim=duration=5.000" in fc         # probed 6.0 - in(1.0) = 5.0
+
+
+def test_new_parity_actions_spawn_the_right_whitelisted_argv(tmp_path, monkeypatch):
+    """Web-parity pass: five actions gained a web entry point so nothing needs the CLI.
+
+    The two OPTION toggles (full audit, delete-instead-of-quarantine) are separate
+    whitelisted action KEYS, not flags the client contributes. That distinction is the
+    security property the runner is built on -- _panel_run assembles "a WHITELISTED argv,
+    never an arbitrary command" -- so a checkbox that appended argv would erode it.
+
+    Asserts the argv actually SPAWNED rather than reading the server-side table, because
+    the table is closed over inside create_app() and its argv is deliberately never sent
+    to the browser. Spawning is also the thing that matters."""
+    import subprocess, io
+    captured = []
+
+    class FakeProc:
+        def __init__(self):
+            self.stdout = io.StringIO("")
+        def wait(self):
+            return 0
+
+    def fake_popen(argv, **k):
+        captured.append(argv)
+        return FakeProc()
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    cli = _authed_client(tmp_path)
+    cases = [
+        ("audit-full",      ["--audit"],                              False),
+        ("verify-dupes",    ["--verify-dupes"],                       False),
+        ("rebuild-similar", ["--rebuild-similar"],                    False),
+        ("sync-videos",     ["--sync-videos"],                        False),
+        ("sync-artworks",   ["--sync-artworks"],                      False),
+        ("dedup-delete",    ["--dedup", "--apply", "--dedup-delete"], True),
+    ]
+    import time
+    for action, expected, destructive in cases:
+        captured.clear()
+        body = {"action": action}
+        if destructive:
+            body["confirm"] = True
+        r = cli.post("/api/panel/run", json=body)
+        assert r.status_code == 200, "{} -> {}".format(action, r.get_data(as_text=True))
+        for _ in range(50):                       # one job at a time; let it finish
+            if cli.get("/api/panel/status").get_json()["status"] != "running":
+                break
+            time.sleep(0.02)
+        assert captured, "{} spawned nothing".format(action)
+        argv = captured[0]
+        for flag in expected:
+            assert flag in argv, "{} argv missing {}: {}".format(action, flag, argv)
+        # The full audit must NOT carry --no-content -- that flag is what makes the
+        # default audit the fast pass, so keeping it would make "full" a no-op.
+        if action == "audit-full":
+            assert "--no-content" not in argv
+
+
+def test_dedup_delete_refuses_without_confirm(tmp_path, monkeypatch):
+    """It deletes outright with no _duplicates/ safety net, so it must be gated at
+    least as hard as dedup-apply -- confirm required, and (covered by
+    test_destructive_action_refuses_authenticated_lan_session) localhost-only."""
+    import subprocess
+    spawned = {"n": 0}
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: spawned.update(n=spawned["n"] + 1))
+    cli = _authed_client(tmp_path)
+    base = spawned["n"]
+    r = cli.post("/api/panel/run", json={"action": "dedup-delete"})   # no confirm
+    assert r.status_code == 400 and "confirm" in r.get_json()["error"]
+    assert spawned["n"] == base
