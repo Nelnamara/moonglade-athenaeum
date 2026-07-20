@@ -502,12 +502,22 @@ def test_failed_post_still_rotates_csrf_token(tmp_path):
 def test_login_rate_limit_locks_out_after_five_failures(tmp_path):
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
-    for _ in range(5):
+    for attempt in range(1, 6):
         html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
         r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
                      data={"username": "alice", "password": "wrong",
                            "csrf": _csrf(html)})
-        assert "Invalid username or password" in r.get_data(as_text=True)
+        body = r.get_data(as_text=True)
+        if attempt < 5:
+            assert "Invalid username or password" in body
+            assert "too many failed attempts" not in body.lower()
+        else:
+            # The 5th failure is the one that TRIPS the lock. It used to render the
+            # ordinary "invalid password" text, so the user was locked out without
+            # being told -- their next attempt looked like the same rejection for no
+            # stated reason. The attempt itself is still spent (five real tries), only
+            # the message changes.
+            assert "too many failed attempts" in body.lower()
     # 6th attempt from the SAME address, even with the CORRECT password, is refused.
     html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
     r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},

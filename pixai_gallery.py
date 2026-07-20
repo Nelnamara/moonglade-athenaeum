@@ -3635,7 +3635,10 @@ document.addEventListener('DOMContentLoaded', function() {
     <option value="{{ y }}" {% if value and y|string == yr %}selected{% endif %}>{{ y }}</option>
     {% endfor %}
   </select>
-  <select name="{{ prefix }}_month" style="width:64px">
+  {# 70px, not 64: at 64 the "Mon" placeholder collided with the native dropdown
+     arrow and rendered as "Mo|" -- measured intrinsic width is 69px. The year
+     select beside it is 78px against a 71px intrinsic, so it was never affected. #}
+  <select name="{{ prefix }}_month" style="width:70px">
     <option value="">Mon</option>
     {% for mnum in range(1, 13) %}
     {% set mm = '%02d'|format(mnum) %}
@@ -7313,14 +7316,20 @@ function loadSkins(){
       var c=document.createElement('div');
       c.style.cssText='width:150px;border:1px solid '+(active?'var(--accent)':'var(--surface1)')
         +';border-radius:11px;padding:9px;background:var(--surface0);'
-        +(s.earned?'cursor:pointer;':'opacity:.5;');
+        // A locked card was dimmed with opacity:.5, which composited its 10px
+        // description down to a measured 2.57:1 and its "locked" label to 1.88:1 --
+        // the latter under even the 3:1 large-text floor. .82 still reads as
+        // clearly inactive but keeps the text legible (measured 9.00 name /
+        // 4.77 desc / 4.77 locked). Re-measure if you change it; the label below
+        // also had to come off --overlay0, which is too dim to survive any dimming.
+        +(s.earned?'cursor:pointer;':'opacity:.82;');
       var sw=(SKIN_SW[s.id]||SKIN_SW.moonglade).map(function(h){
         return '<i style="flex:1;background:'+h+'"></i>'; }).join('');
       c.innerHTML='<div style="height:30px;border-radius:7px;display:flex;overflow:hidden;margin-bottom:7px;">'+sw+'</div>'
         +'<div style="font-size:12px;font-weight:600;color:var(--text);">'+escH(s.name)
         +(active?' <span style="color:var(--accent)">\\u2713</span>':'')+'</div>'
         +'<div style="font-size:10px;color:var(--subtext);margin-top:2px;">'+escH(s.desc)+'</div>'
-        +(s.earned?'':'<div style="font-size:10px;color:var(--overlay0);margin-top:3px;">\\ud83d\\udd12 locked</div>');
+        +(s.earned?'':'<div style="font-size:10px;color:var(--subtext);margin-top:3px;">\\ud83d\\udd12 locked</div>');
       if(s.earned) c.onclick=function(){ pickSkin(s.id); };
       g.appendChild(c);
     });
@@ -7538,6 +7547,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         _establish_session(username)
                         return redirect(_safe_next(next_url) or url_for("index"))
                     error = "Invalid username or password."
+                    # If THIS failure is the one that tripped the lockout, say so now.
+                    # _login_try_acquire reserves the attempt up front and returns None
+                    # so the attempt may proceed -- which is right, a correct password
+                    # on the 5th try must still work -- but it means the request that
+                    # crosses the threshold otherwise renders the ordinary "invalid"
+                    # message and the user is locked WITHOUT BEING TOLD. They then wait,
+                    # retype the correct password, and get refused for 15 minutes with no
+                    # idea why. (The function's own docstring already promised to report
+                    # a lockout that "was just now triggered"; the code did not.)
+                    just_locked = _login_seconds_locked(ip)
+                    if just_locked is not None:
+                        mins = max(1, (just_locked + 59) // 60)
+                        error = ("Too many failed attempts from this address. "
+                                 "Try again in about {} minute{}.".format(
+                                     mins, "" if mins == 1 else "s"))
         if request.method == "POST":
             # A POST that fell through to an error above: always hand back a
             # FRESH CSRF token -- one that was just consumed or never matched
