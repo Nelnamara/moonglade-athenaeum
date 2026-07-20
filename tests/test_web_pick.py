@@ -809,14 +809,27 @@ def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch
 
 
 def test_import_task_by_id(tmp_path, monkeypatch):
-    """Panel 'Recover a task by ID' -> collect_generation. Localhost-gated; numeric-only;
-    recovers edits/favorites-only tasks that Sync's listing skips."""
+    """Panel 'Recover a task by ID' -> collect_generation. LOGIN tier (not localhost --
+    see below); numeric-only; recovers edits/favorites-only tasks Sync's listing skips.
+
+    The 401 below is asserted from an ANONYMOUS client -- login_existing_client() is only
+    called on the next line -- so it proves the front door refuses an unauthenticated
+    request and nothing more. It used to be commented "# LAN refused" alongside a
+    "Localhost-gated" docstring, which claimed a tier assertion this test has never made:
+    the front door answers before any handler runs, so it would read identically whether
+    or not a localhost check existed. That exact shape is how three real gate regressions
+    shipped unnoticed this week. Relabelled rather than deleted -- the anonymous-refusal
+    check is still worth having.
+
+    This route's ACTUAL tier is pinned by tests/test_route_tiers.py, which drives an
+    authenticated non-local session against every registered route. It is deliberately
+    LOGIN, not localhost: recovering your own finished media spends nothing."""
     called = {}
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: called.update(tid=tid) or {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     assert cli.post("/api/import-task", json={"task_id": "123"},
-                    environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 401   # LAN refused
+                    environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 401   # anonymous refused by the front door
     cli = login_existing_client(cli)
     d = cli.post("/api/import-task", json={"task_id": "nope"}).get_json()
     assert d.get("error") and "tid" not in called                          # non-numeric rejected, no collect

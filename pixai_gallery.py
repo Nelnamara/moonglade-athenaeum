@@ -7638,14 +7638,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/server/stop", methods=["POST"])
     def api_server_stop():
         """Shut the server down cleanly from the browser (Homebridge-style) instead of Task
-        Manager. Localhost-only. Under the managed launcher this ends the whole app."""
+        Manager. Login required (any session, local or LAN). Under the managed launcher this ends the whole app."""
         _schedule_server_exit(0)
         return jsonify({"ok": True, "action": "stop"})
 
     @app.route("/api/server/restart", methods=["POST"])
     def api_server_restart():
         """Restart the server from the browser. Needs the managed launcher (Serve Gallery),
-        which relaunches on exit code 42; otherwise the process would just stop. Localhost-only."""
+        which relaunches on exit code 42; otherwise the process would just stop. Login required (any session, local or LAN)."""
         if not _supervised():
             return jsonify({"error": "Restart needs the managed launcher — start via "
                                      "'Serve Gallery'. (Stop still works.)"}), 409
@@ -7701,7 +7701,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_import_task():
         """Pull ONE generation/edit task's media into the gallery by its task id -- recovers
         edits + anything stuck in Favorites that --update's listing skips (edits aren't in that
-        listing). Downloads the owner's OWN finished media; spends nothing. Localhost-only.
+        listing). Downloads the owner's OWN finished media; spends nothing.
+
+        LOGIN tier, deliberately -- any signed-in session, local or LAN. This docstring
+        used to say "Localhost-only", which was never true of the code and is exactly the
+        bait a route-gating audit warned about: a stale claim like this invites someone to
+        "restore" a gate that was never there, silently breaking the LAN-recovery case.
+        The real tier is pinned by tests/test_route_tiers.py.
+
         Logs to the Activity card. Returns {saved, media_ids, is_video} or {error}."""
         tid = str((request.get_json(silent=True) or {}).get("task_id") or "").strip()
         if not tid.isdigit():
@@ -8554,7 +8561,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Resolve a model_id (from the grid) to its generatable version id + the version
         metadata the picker needs: model_type (for LoRA↔base compat), lora_base_model_type,
         trigger_words (to offer inserting into the prompt), and the author's tuned preset.
-        Localhost-only; read-only, one API call."""
+        Login required; read-only, one API call."""
         mid = (request.args.get("model_id") or "").strip()
         if not mid:
             return jsonify({"error": "model_id required", "version_id": ""}), 400
@@ -8785,7 +8792,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/account")
     def api_account():
-        """Credits + free-card balance for the header chip. Read-only, localhost-only.
+        """Credits + free-card balance for the header chip. Read-only; login required.
         Fails soft to nulls so the header never breaks."""
         try:
             core, session = _gen_session()
@@ -8920,7 +8927,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/claim", methods=["POST"])
     def api_claim():
         """Claim ready daily rewards (free credits/stamina to the owner's OWN account -- no
-        money moves). Localhost-only; the header click IS the confirmation. One bad claim
+        money moves). Login required; the header click IS the confirmation. One bad claim
         doesn't abort the rest. Returns {claimed, credits}."""
         try:
             core, session = _gen_session()
@@ -8946,7 +8953,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/snippets", methods=["GET", "POST"])
     def api_snippets():
         """Prompt snippets/favorites, stored server-side (out_dir/prompt_snippets.json) so
-        they persist with the backup and sync across the owner's machines. Localhost-only."""
+        they persist with the backup and sync across the owner's machines. Login required (any session, local or LAN)."""
         path = out_dir / "prompt_snippets.json"
         with _snips_lock:
             if request.method == "POST":
@@ -8986,7 +8993,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/artwork-views")
     def api_artwork_views():
         """Live view count for one published artwork -> the detail page's Views metric.
-        Localhost-only (owner key). ?id=<artwork_id>."""
+        Login required; uses the owner's key. ?id=<artwork_id>."""
         aid = (request.args.get("id") or "").strip()
         if not aid:
             return jsonify({"views": None}), 400
@@ -9203,7 +9210,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/suggest-prompt")
     def api_suggest_prompt():
         """Image-to-prompt for the gallery's 'Suggest prompt' button: PixAI's tag list +
-        NL description for a media_id. Read-only, free, localhost-only. ?media_id="""
+        NL description for a media_id. Read-only and free; login required. ?media_id="""
         mid = (request.args.get("media_id") or "").strip()
         if not mid:
             return jsonify({"suggestions": [], "error": "media_id required"}), 400
@@ -9216,7 +9223,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/tag-suggest")
     def api_tag_suggest():
         """Tag autocomplete for the drawer's prompt boxes (the site's Tag Suggestions
-        dropdown). Read-only, free, localhost-only. ?q=<prefix>."""
+        dropdown). Read-only and free; login required. ?q=<prefix>."""
         q = (request.args.get("q") or "").strip()
         if len(q) < 2:
             return jsonify({"tags": []})
@@ -9229,7 +9236,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/upload", methods=["POST"])
     def api_upload():
         """Upload a local file from the picker -> PixAI media_id (the same free
-        3-step S3 handshake as the CLI's --upload). Owner-only: localhost-gated,
+        3-step S3 handshake as the CLI's --upload). Login required,
         spends nothing."""
         f = request.files.get("file")
         if f is None or not f.filename:
@@ -9347,7 +9354,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         task data, never in the repo). GET lists {name: {label, scene_id}} (no prompt
         bodies). POST {task_id, label?} imports one from a task the owner ran on the
         site: fetches the task, extracts chat.prompts + sceneId + modelId, saves it.
-        Localhost-only (uses the owner's key on import)."""
+        Login required; uses the owner's key on import."""
         with _presets_lock:
             presets = _load_presets()
             if request.method == "GET":
@@ -9434,7 +9441,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/price", methods=["POST"])
     def api_price():
         """Live cost + free-card check for the drawer's current settings (generate OR
-        edit). Read-only (no spend). Localhost-only."""
+        edit). Read-only (no spend). Login required (any session, local or LAN)."""
         try:
             core, session = _gen_session()
             params, no_card, note = _params_and_nocard(core, request.get_json(silent=True) or {})
@@ -9452,7 +9459,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/generate", methods=["POST"])
     def api_generate():
         """Submit a generation from the drawer, wait, and catalog it into THIS gallery's
-        backup. Localhost-only (spends the owner's credits/cards). A matching free card is
+        backup. Login required -- any session, local or LAN, deliberately: spending from a
+        signed-in tablet is the point of the login. A matching free card is
         auto-applied unless no_card is set. Returns {task_id, media_ids, paid_credit}."""
         try:
             core, session = _gen_session()
@@ -9491,7 +9499,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/edit", methods=["POST"])
     def api_edit():
-        """Instruct-edit an existing gallery image ('make it night'). Localhost-gated;
+        """Instruct-edit an existing gallery image ('make it night'). Login required;
         auto-applies an Edit-Pro card unless no_card. Catalogs the result into this
         backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}."""
         try:
@@ -9514,7 +9522,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/enhance", methods=["POST"])
     def api_enhance():
-        """One-click enhance (panelplugin) on the Edit tab's source image. Localhost-gated;
+        """One-click enhance (panelplugin) on the Edit tab's source image. Login required;
         auto-applies a card if one matches. A rejected/unknown workflow just errors (no
         credits spent). Returns {task_id, media_ids, paid_credit}."""
         try:
@@ -9549,7 +9557,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
-        pixel coords. Localhost-gated; returns {task_id} for the async poller."""
+        pixel coords. Login required; returns {task_id} for the async poller."""
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
@@ -9765,7 +9773,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         upload it, and return the new frame media_id -- which the storyboard sets as the
         next shot's opening frame, chaining clips into one continuous scene. The clip must
         already be downloaded locally (it is, right after Generate-shot cataloged it).
-        Localhost-only; the upload is free."""
+        Login required; the upload is free."""
         body = request.get_json(silent=True) or {}
         mid = str(body.get("video_media_id") or "").strip()
         if not mid:
@@ -9905,7 +9913,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_loom_export():
         """Trim each finished shot to its in/out and concat into one 720p mp4 -- the
         rough cut becomes a real deliverable. Async (ffmpeg in a thread); poll
-        /api/loom/export-status, download /api/loom/export-file. Localhost-only.
+        /api/loom/export-status, download /api/loom/export-file. Login required (any session, local or LAN).
         Each segment's real audio rides along when the clip has one (ffprobe-detected);
         segments with no audio stream (e.g. rendered without the "Generate audio" toggle)
         get matching-duration silence synthesized (anullsrc) so the concatenated audio
@@ -10079,7 +10087,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/loom/export-bundle", methods=["POST"])
     def api_loom_export_bundle():
         """Full-bundle export: a zip of project.json (identical shape to the lightweight
-        Backup .json) plus every referenced media file under media/<id><ext>. Localhost-only
+        Backup .json) plus every referenced media file under media/<id><ext>. Login required
         -- reads real files off disk, same trust level as /export-zip."""
         import io
         import zipfile
@@ -10113,7 +10121,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         doesn't already have (source='api' -- it's real PixAI media, just synced via the
         bundle instead of --update), and returns {project, thumbs} in the exact shape
         importJSON already expects, so both tiers share one client-side create-project path.
-        Localhost-only."""
+        Login required (any session, local or LAN)."""
         import io
         import time
         import zipfile
@@ -10163,7 +10171,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_task_status():
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
         catalogs the result into this backup and returns media_ids + paid_credit. Read-only
-        until done; localhost-only."""
+        until done; login required."""
         tid = (request.args.get("task_id") or "").strip()
         if not tid:
             return jsonify({"phase": "failed", "error": "task_id required"}), 400
@@ -10196,7 +10204,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/jobs")
     def api_jobs():
         """Reconstructed job list for the Jobs card (newest-first) -- the paper trail that
-        survives a reload. The card polls this. Localhost-only, like the creation suite."""
+        survives a reload. The card polls this. Login required, like the creation suite."""
         import pixai_gallery_backup as core
         try:
             jobs = core.read_jobs(out_dir)
@@ -10209,7 +10217,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_jobs_register():
         """Register/update a job in the log. The Jobs card calls this the moment a gen is
         submitted (status=running) so it shows immediately; the authoritative done/failed
-        events are written server-side by /api/task-status. Localhost-only."""
+        events are written server-side by /api/task-status. Login required (any session, local or LAN)."""
         body = request.get_json(silent=True) or {}
         jid = str(body.get("job_id") or "").strip()
         if not jid:
@@ -10223,7 +10231,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/jobs/dismiss", methods=["POST"])
     def api_jobs_dismiss():
         """Dismiss one job (job_id) or every finished job (finished:true) from the card --
-        this is how a sticky failure gets cleared. Localhost-only."""
+        this is how a sticky failure gets cleared. Login required (any session, local or LAN)."""
         import pixai_gallery_backup as core
         body = request.get_json(silent=True) or {}
         if body.get("finished"):
@@ -10243,7 +10251,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/workflows")
     def api_workflows():
         """Live enhance-workflow catalog (id + name + type) for the Edit tab picker.
-        Read-only; localhost-only (owner key)."""
+        Read-only; login required (uses the owner's key)."""
         try:
             core, session = _gen_session()
             return jsonify({"workflows": core.workflow_catalog(session)})
