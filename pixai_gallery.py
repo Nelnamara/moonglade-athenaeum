@@ -2519,6 +2519,52 @@ ENHANCE_PLUGINS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Global 401 guard, injected into EVERY page head (BASE_HTML and _LOOM_SHELL).
+#
+# Why an interceptor and not a helper at each call site: there are ~90 fetch()
+# calls across pixai_gallery.py's inline JS, static/*.js and the Loom bundle, and
+# a browser crawl found that NOT ONE of them inspects response status. The gate
+# answers an expired session with a JSON 401 -- valid JSON -- so `r.json()`
+# resolves happily, `.catch` never fires, and callers read the error body as
+# data. Observed consequences: the job poller reads `d.phase` as undefined,
+# decides "still running", and re-polls every 3s FOREVER with the drawer pinned
+# on "Rendering under the eclipse..."; the picker renders "No images found" for
+# a full library; the Loom's pollImg/runGen loops never terminate.
+#
+# Wrapping fetch once covers all ~90 sites, including code inside the prebuilt
+# bundle that no call-site edit could reach, and cannot miss one the way a
+# 90-site refactor could.
+#
+# Defined ONCE here and injected into both shells. Today produced two separate
+# bugs from hand-synced duplicate copies (the Loom hook preamble, and a login
+# CSS block) -- not adding a third.
+_AUTH_401_GUARD_JS = r"""<script>/* Global 401 guard -- see _AUTH_401_GUARD_JS in pixai_gallery.py */
+(function(){
+  if (!window.fetch) return;
+  var orig = window.fetch, redirecting = false;
+  window.fetch = function(input, init){
+    return orig.apply(this, arguments).then(function(res){
+      try{
+        if (res && res.status === 401 && !redirecting) {
+          var url = new URL((typeof input === 'string' ? input : (input && input.url) || ''),
+                            location.href);
+          /* Same-origin only: a 401 from a third party is not our session. And
+             never bounce while already on /login, which would loop. */
+          if (url.origin === location.origin && location.pathname !== '/login') {
+            redirecting = true;
+            location.href = '/login?next=' +
+              encodeURIComponent(location.pathname + location.search);
+          }
+        }
+      }catch(e){ /* never let the guard break a real response */ }
+      return res;   /* hand the response back untouched -- callers are unchanged */
+    });
+  };
+})();
+</script>"""
+
+
 # The Loom (Seedance video storyboard tool) is served at /loom. Its React source
 # lives in loom/master-storyboard.jsx; this page loads React+Babel+picker-core from
 # locally-vendored files (loom/vendor/, served by /loom/vendor/<file>; zero network
@@ -2531,7 +2577,7 @@ _LOOM_SHELL = r"""<!DOCTYPE html>
 <title>The Loom - Moonglade Athenaeum</title>
 <script>/* apply saved skin before first paint (no FOUC) -- same key/origin the gallery
    header writes, so switching skin there re-colors the Loom too */
-try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>
+try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
 <style>
 __DESIGN_TOKENS__
 body { background: var(--base); margin: 0; }
@@ -3011,7 +3057,7 @@ def create_app(out_dir: Path):
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
-<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>
+<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
 <style>
 __DESIGN_TOKENS__
   * { box-sizing: border-box; margin: 0; padding: 0; }
