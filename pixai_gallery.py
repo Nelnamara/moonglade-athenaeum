@@ -6371,12 +6371,28 @@ function savePrompt() {
   <div class="splash-vignette"></div>
 </div>
 <div class="login-wrap">
+  <div class="login-stage" id="login-stage">
+    {# Mascot, ported from the mock's .char-stub: rises from BEHIND the card while
+       the card dims, on submit. Uses real mascot art when present; if it's absent
+       the glow + sparkle behind it is exactly the mock's own placeholder, so a
+       fresh install still gets the moment rather than a broken image. #}
+    <div class="login-char" id="login-char" aria-hidden="true">
+      {# Each rung must hand off to the NEXT rung, and the last must REMOVE the
+         element -- an <img> left in the DOM after its final 404 paints a broken-image
+         icon, and the `:has(img)` rule below would go on suppressing the sparkle
+         placeholder because a (broken) img still matches. Removing it restores the
+         mock's own glow-and-sparkle treatment on an install with no mascot art. #}
+      <img src="/branding/mascots/login_nel.png" alt=""
+           onerror="this.onerror=function(){this.remove();};this.src='/branding/mascots/gen_nel.png';">
+    </div>
   <div class="login-card">
     <div class="login-brand">
-      {# The mock carries a "banner art" placeholder here. Real installs have a
-         real banner; if it's absent the container's gradient IS the placeholder,
-         so this degrades to the mock's own look rather than to a broken image. #}
-      <div class="login-banner"><img src="/branding/banner.png" alt="" onerror="this.remove()"></div>
+      {# Prefers a login-specific banner (the gallery header's banner.png is cropped
+         for a wide header, not this 280x64 slot), falling back to it, and finally to
+         the container's gradient -- which is the mock's own "banner art" placeholder,
+         so every rung of the ladder degrades to the design, never to a broken image. #}
+      <div class="login-banner"><img src="/branding/login-banner.png" alt=""
+           onerror="this.onerror=null;this.src='/branding/banner.png';this.onerror=function(){this.remove();};"></div>
       <h1>Moonglade Athenaeum</h1>
       <p class="login-tagline">a library against the Void</p>
     </div>
@@ -6424,7 +6440,19 @@ function savePrompt() {
       </form>
     {% endif %}
   </div>
+  </div>
 </div>
+<script>
+/* On submit, raise the mascot from behind the card and dim the card -- the mock's
+   `l.submitted` state. Progressive: if anything here throws, the form still posts
+   normally, because nothing calls preventDefault. */
+(function(){
+  var stage = document.getElementById('login-stage');
+  var form  = stage && stage.querySelector('form.login-form');
+  if (!form || !stage) return;
+  form.addEventListener('submit', function(){ stage.classList.add('submitted'); });
+})();
+</script>
 <style>
   /* ---- Login screen -------------------------------------------------------
      Ported value-for-value from static/_mockup_login_panel.html (the locked
@@ -6446,11 +6474,37 @@ function savePrompt() {
 
   .login-wrap { position: relative; z-index: 1; min-height: 100vh; display: flex;
     align-items: center; justify-content: center; padding: 24px 16px; box-sizing: border-box; }
+  /* The stage exists so the mascot can be positioned against the card and rise
+     from BEHIND it (z-index 0 vs the card's 1) -- the mock's own arrangement. */
+  .login-stage { position: relative; width: 100%; max-width: 380px; }
   .login-card {
-    width: 100%; max-width: 380px; background: color-mix(in srgb, var(--surface0) 82%, transparent);
+    position: relative; z-index: 1;
+    width: 100%; background: color-mix(in srgb, var(--surface0) 82%, transparent);
     backdrop-filter: blur(18px);
     border: 1px solid color-mix(in srgb, var(--surface1) 70%, transparent); border-radius: 14px;
     padding: 36px 32px; box-shadow: 0 32px 80px rgba(0,0,0,.6); box-sizing: border-box;
+    transition: opacity .4s;
+  }
+  .login-stage.submitted .login-card { opacity: .5; }
+  .login-char { position: absolute; bottom: 0; left: 50%; width: 150px; height: 190px;
+    pointer-events: none; z-index: 0; opacity: 0; transform: translate(-50%, 0);
+    background: radial-gradient(ellipse 70% 90% at 50% 100%, color-mix(in srgb, var(--accent) 55%, transparent), transparent 72%);
+    filter: drop-shadow(0 -6px 20px color-mix(in srgb, var(--accent) 50%, transparent)); }
+  .login-char::after { content: '\\2726'; position: absolute; top: 18%; left: 50%;
+    transform: translateX(-50%); font-size: 38px; color: var(--text); opacity: .85;
+    text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 70%, transparent); }
+  /* Real art, when present, sits over the glow and hides the sparkle stand-in. */
+  .login-char img { position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; object-position: bottom center; }
+  .login-char:has(img)::after { display: none; }
+  .login-stage.submitted .login-char {
+    animation: login-char-rise 1.6s cubic-bezier(.22,1,.36,1) forwards; }
+  @keyframes login-char-rise {
+    0%   { opacity: 0; transform: translate(-50%, 40px) scale(.94); }
+    100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .login-stage.submitted .login-char { animation: none; opacity: 1; }
   }
   .login-brand { text-align: center; margin-bottom: 28px; }
   .login-banner { width: 100%; max-width: 280px; height: 64px; margin: 0 auto 12px; border-radius: 6px;
@@ -6470,6 +6524,22 @@ function savePrompt() {
     border-radius: 6px; padding: 10px 12px; color: var(--text); font: inherit; font-size: 14px;
     box-sizing: border-box; }
   .login-field input:focus { outline: none; border-color: var(--accent); }
+  /* Browser autofill repaints inputs with its own near-white background, which
+     overrides `background` outright -- so a saved password turned these fields
+     stark white on a dark card. There is no property to unset it; the only
+     reliable fix is to cover the painted area with an inset box-shadow and force
+     the text colour. The absurd transition delay stops Chrome re-applying its
+     colour a beat after load. Nothing else in this app had autofill handling. */
+  .login-field input:-webkit-autofill,
+  .login-field input:-webkit-autofill:hover,
+  .login-field input:-webkit-autofill:focus,
+  .login-field input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px var(--mantle) inset !important;
+    box-shadow: 0 0 0 1000px var(--mantle) inset !important;
+    -webkit-text-fill-color: var(--text) !important;
+    caret-color: var(--text);
+    transition: background-color 9999s ease-in-out 0s;
+  }
   .login-submit { width: 100%; background: var(--accent); color: var(--mantle); border: none;
     border-radius: 6px; padding: 11px 0; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
   .login-submit:hover { filter: brightness(1.06); }
