@@ -585,20 +585,6 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   CLI-only maintenance actions. (`sync-artworks` / `sync-videos` / `reconcile-deleted` run via
   `/api/panel/run` and the scheduler but render no button by design, `panel_visible: False`.)
   (`PANEL_ACTIONS` in `pixai_gallery.py`.)
-- **Video/audio reference slots are still missing from the LIVE gallery drawer's Multi-ref**
-  (unchanged — its own hand-rolled Video tab, `#gen-mode-video`). The web Video tab was born
-  "simple mode" (`d03e6c8`, 2026-07-03) with image slots only, one day after the CLI shipped
-  the full `--ref-image/--ref-video/--ref-audio` grammar, and the follow-up was never tracked
-  until 2026-07-18. **The fix exists now** — `<mg-generate-drawer>` has the full 6 image + 3
-  video + 1 audio slot split — but nothing mounts it in the gallery yet; it only reaches the
-  live drawer once that swap happens (see Web components above).
-- **Video negative prompts** are unreachable from the web drawer and the Loom.
-  `build_video_parameters()` accepts a `negative` kwarg and emits `i2v["negativePrompts"]`, but
-  the shared adapter `build_shot_video_params()` — used by both surfaces — has no `negative`
-  parameter and threads nothing to `build_video_parameters` or
-  `build_reference_video_parameters`. Fix: add the param, thread it to both call sites, add a
-  UI field. Reference-video (R2V) may be a genuine API gap — its captured submit shape has no
-  negative field.
 - **Convert-and-download.** `/export-zip` streams selected full-res files with `ZIP_STORED` —
   no format conversion, no metadata embedding, no whole-collection scope. Decided shape: the
   catalog stays exactly as PixAI delivers it; conversion is an export-time transform only and
@@ -621,9 +607,10 @@ Ranked, with the reason each sits where it does. Ordering changed once already w
 owner pointed out that **web parity gates GUI removal** — anything only reachable from the
 PySide6 GUI or the CLI needs a web equivalent *before* that GUI can go.
 
-1. **Web parity** — force-full-resync · video/audio reference slots in the live gallery
-   drawer's Multi-ref · convert-and-download for `/export-zip` · web import into the catalog.
-   Unblocks the PySide6 removal below, which is decided but cannot execute until this lands.
+1. **Web parity** — ✅ force-full-resync (Advanced Panel) · ✅ video/audio reference slots in the
+   live gallery drawer's Multi-ref (the `<mg-generate-drawer>` swap) · **remaining:**
+   convert-and-download for `/export-zip` · web import into the catalog. Unblocks the PySide6
+   removal below, which is decided but cannot execute until the last two land.
 2. **Gallery QoL easy wins** — chiefly the collection-remove UI: `/collection-remove` exists
    with **zero callers**, so the route is already written and only the UI is missing.
 3. **The 401 batch and the search wildcard** — ✅ both shipped 2026-07-19. What remains of

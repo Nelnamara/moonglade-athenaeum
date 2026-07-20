@@ -17,6 +17,15 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The gallery's Video generator is the full-parity form now.** The main-page Video tab was a
+  hand-rolled "simple mode" (9 undifferentiated image slots, a 5-model select, no video/audio
+  references, no negative prompt, no channel). It now mounts the shared `<mg-generate-drawer>`
+  web component — the same one the Loom uses — giving the gallery the full split (6 image + 3
+  video + 1 audio references), a negative prompt, the Channel control (Normal/Enhanced), and the
+  complete model roster with capability gating, over the proven `/api/loom/generate` submit
+  path. The video-reference slots browse your videos; "make a video from these" feeds the new
+  form directly. Negative prompt and channel thread through server-side (negative in multi-ref
+  is a PixAI API limitation, not ours). Retires ~130 lines of the old hand-rolled form.
 - **Advanced sync options in the Control Panel** (web parity step 2). A collapsed "Advanced"
   section exposes the three sync variants the incremental "Sync now" can't do: a full
   non-incremental re-walk of all history (`--full-meta`), a read-only inventory count
