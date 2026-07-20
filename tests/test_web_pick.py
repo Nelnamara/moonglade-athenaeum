@@ -461,6 +461,7 @@ def test_presets_import_and_use(tmp_path, monkeypatch):
     assert "prompt" not in lst["character-card"]          # GET never leaks the prompt body
     # price path uses the banked preset: canned prompt + sceneId + its model
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli.post("/api/price", json={"mode": "edit", "source": "55",
@@ -686,6 +687,7 @@ def test_edit_price_uses_selected_model(tmp_path, monkeypatch):
     """The Edit card's model picker drives the submitted modelId + valid option set:
     Reference Pro -> model 1948..., 4K/21:9, no quality; Edit Pro -> Edit Pro model + quality."""
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -725,6 +727,7 @@ def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch):
     """End-to-end: Reference Pro sent with Edit-Pro-style knobs (the preset-mismatch case) is
     clamped server-side to valid values before the params ever reach PixAI."""
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -738,6 +741,7 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
     """Multi-image references: the Edit card sends sources[] -> chat.mediaIds carries them all
     (primary first), capped to the model's ref limit; falls back to [source] when absent."""
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -797,6 +801,7 @@ def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch
     """/api/price mode=enhance builds panelplugin params (so cost can be shown), and the
     Enhance click carries a spend guardrail since free cards don't cover these workflows."""
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -825,6 +830,7 @@ def test_import_task_by_id(tmp_path, monkeypatch):
     authenticated non-local session against every registered route. It is deliberately
     LOGIN, not localhost: recovering your own finished media spends nothing."""
     called = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: called.update(tid=tid) or {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -849,6 +855,7 @@ def test_import_task_by_id(tmp_path, monkeypatch):
 def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     """The header balance surface exposes per-card breakdown + soonest expiry, claimable
     free credits, and the subscription cliff — the data the chip/badge/warnings render."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "account_info", lambda s: {
         "quotaAmount": 140, "subscription": {"endAt": "2026-07-27T00:00:00Z", "cancelAtPeriodEnd": True}})
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
@@ -870,6 +877,7 @@ def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
         {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
         {"id": "agent-startup-stamina", "amount": 15, "canClaim": False}])   # not ready -> skipped
     claimed = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "claim_reward", lambda s, cid: claimed.append(cid))
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     # An unauthenticated LAN request is refused -- checked first, while `cli` is still

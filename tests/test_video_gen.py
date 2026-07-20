@@ -344,6 +344,7 @@ def test_gallery_catalog_ref_is_uploaded_not_passed_through(tmp_path, monkeypatc
         "created_at": "2026-06-18T05:24:56Z"}])
 
     uploaded, submitted = [], {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "upload_media",
                         lambda session, path, **k: uploaded.append(str(path)) or "999000111222")
     monkeypatch.setattr(core, "submit_generation",
@@ -373,6 +374,7 @@ def test_gallery_ref_upload_is_cached_per_media_id(tmp_path, monkeypatch):
         "media_id": "555", "filename": "2025-01/a_555.png", "created_at": "2026-06-18T05:24:56Z"}])
 
     calls, submitted = [], {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "upload_media",
                         lambda session, path, **k: calls.append(1) or "777")
     monkeypatch.setattr(core, "submit_generation",
@@ -410,6 +412,7 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
     mid = _seed_one(tmp_path)
     seen = {}
 
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "upload_media", lambda s, path, **k: "999000111222")
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation",
