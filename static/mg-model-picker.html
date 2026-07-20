@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>&lt;mg-model-picker&gt; — standalone verification</title>
+<style>
+  /* A minimal slice of the app's DESIGN_TOKENS so the component renders on its own.
+     In the real app these come from DESIGN_TOKENS_CSS; here they're inlined for isolation. */
+  :root{
+    --base:#0c0a1c; --mantle:#131024; --surface0:#211f3a; --surface1:#3a3460;
+    --overlay0:#6a6088; --text:#d6d2e2; --subtext:#9a93ab; --accent:#b692e6;
+  }
+  body{background:var(--base);color:var(--text);font:14px/1.5 system-ui,sans-serif;
+    margin:0;padding:26px;max-width:560px;}
+  h1{font-size:18px;margin:0 0 4px;}
+  p{color:var(--subtext);font-size:13px;}
+  code{background:var(--surface0);border:1px solid var(--surface1);border-radius:5px;padding:1px 6px;}
+  .card{background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;padding:18px;margin-top:16px;}
+  #out{margin-top:14px;font-family:ui-monospace,monospace;font-size:13px;color:var(--accent);
+    background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:10px 12px;}
+  ol{color:var(--subtext);font-size:13px;padding-left:20px;}
+  ol code{color:var(--text);}
+</style>
+</head>
+<body>
+  <h1>&lt;mg-model-picker&gt; — standalone verification</h1>
+  <p>Isolates the shared web component (Option-A pilot) from the Loom, so a picker bug and a
+  React-bridge bug can't be confused. Serve the gallery, then open this at
+  <code>/static/mg-model-picker.html</code> on the same machine (it calls the localhost-gated
+  <code>/api/model-search</code>).</p>
+
+  <div class="card">
+    <label style="font:700 10px/1 system-ui;letter-spacing:.05em;text-transform:uppercase;color:var(--subtext);display:block;margin-bottom:7px;">Model</label>
+    <mg-model-picker kind="base"></mg-model-picker>
+  </div>
+
+  <div id="out">picked: (none)</div>
+
+  <ol>
+    <li>Cards should <b>browse on open</b> (popular models, no typing).</li>
+    <li>Typing filters; hovering a card shows a <b>preview</b> (cover · likes · base · Official · description).</li>
+    <li>Clicking a card marks it selected and updates <code>picked:</code> below via the <code>mg-pick</code> event.</li>
+  </ol>
+
+  <script src="/static/mg-model-picker.js"></script>
+  <script>
+    document.querySelector('mg-model-picker').addEventListener('mg-pick', function (e) {
+      document.getElementById('out').textContent =
+        'picked: ' + e.detail.title + '  (model_id ' + e.detail.model_id + ')';
+    });
+  </script>
+</body>
+</html>

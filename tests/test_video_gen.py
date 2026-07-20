@@ -226,6 +226,37 @@ def test_build_shot_video_params_model_and_audio_passthrough():
     assert d["i2vPro"]["model"] == core.DEFAULT_VIDEO_MODEL
 
 
+def test_build_shot_video_params_negative_and_channel():
+    # negative + is_private reach i2vPro (I2V/FLF) -- both fields exist on that submit shape.
+    p = core.build_shot_video_params("I2V", "x", image_ids=["1"], negative="blurry, watermark",
+                                     is_private=True)
+    assert p["i2vPro"]["negativePrompts"] == "blurry, watermark"
+    assert p["isPrivate"] is True
+    f = core.build_shot_video_params("FLF", "x", image_ids=["1", "2"], negative="extra fingers")
+    assert f["i2vPro"]["negativePrompts"] == "extra fingers"
+    # default is_private stays False (today's de-facto Normal-channel behavior, unchanged)
+    default = core.build_shot_video_params("I2V", "x", image_ids=["1"])
+    assert default["isPrivate"] is False
+
+
+def test_build_shot_video_params_r2v_channel_but_no_negative_field():
+    # referenceVideo DOES carry isPrivate...
+    r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], is_private=True)
+    assert r["isPrivate"] is True
+    # ...but has no negativePrompts field at all -- a genuine PixAI API gap (the captured
+    # referenceVideo submit shape has never had one), not a bug: negative is silently
+    # dropped for R2V rather than invented into a field PixAI doesn't accept.
+    r2 = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], negative="blurry")
+    assert "negativePrompts" not in r2["referenceVideo"]
+
+
+def test_build_shot_video_params_r2v_video_and_audio_ids_flow_through():
+    p = core.build_shot_video_params("R2V", "@video1 @audio1", video_ids=["9"], audio_ids=["7"])
+    rv = p["referenceVideo"]
+    assert rv["referenceVideoMediaIds"] == ["9"] and rv["referenceAudioMediaIds"] == ["7"]
+    assert rv["referenceImageMediaIds"] == []
+
+
 def test_collect_generation_detects_video(monkeypatch, tmp_path):
     monkeypatch.setattr(core, "task_detail_gql", lambda s, t: {"outputs": {"videos": [{"mediaId": "V9"}]}})
     monkeypatch.setattr(core, "video_outputs", lambda r: ([{"video_media_id": "V9"}], {"prompt": "p"}))

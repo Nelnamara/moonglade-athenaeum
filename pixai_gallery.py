@@ -20,6 +20,7 @@ import argparse
 import csv
 import json
 import os
+import secrets
 import sqlite3
 import sys
 import threading
@@ -27,7 +28,7 @@ from pathlib import Path
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
-                       send_file, send_from_directory, url_for)
+                       send_file, send_from_directory, session, url_for)
 except ImportError:
     sys.exit("Flask is required for the gallery server.\n"
              "Install it with:  pip install flask")
@@ -36,6 +37,14 @@ try:
     from PIL import Image
 except ImportError:
     Image = None  # thumbnails will be skipped with a warning
+
+# Windows-only: every subprocess this app spawns (ffmpeg/ffprobe thumbnail work,
+# the PowerShell shortcut writer, git for the build stamp, the Panel's CLI jobs)
+# would otherwise briefly flash a console window into view. 0x08000000 is the
+# stable Win32 CREATE_NO_WINDOW value (same constant subprocess.CREATE_NO_WINDOW
+# exposes on Windows) -- hardcoded so this doesn't need `subprocess` imported at
+# module scope just for this. Evaluates to 0 (no-op) on non-Windows platforms.
+_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 # ---------------------------------------------------------------------------
@@ -384,12 +393,22 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         clauses.append("LOWER(COALESCE(loras,'')) LIKE ?")
         params.append("%" + lora.strip().lower() + "%")
     if q:
-        # Whitespace-separated terms are ANDed; each may use * / ? wildcards.
+        # Whitespace-separated terms are ANDed; each may use * / ? wildcards over prompt
+        # text. A term that looks like a WHOLE task/media id (all digits, long enough
+        # that a short numeric prompt word can't collide -- PixAI ids run ~18-19 digits)
+        # also matches that id EXACTLY, so pasting an id from PixAI's site (or
+        # --dump-params output) finds the row. Short numeric terms stay prompt-only:
+        # a substring match on ids made a term like "88" match ~14% of the whole
+        # catalog by id chance alone, swamping any real prompt hits (found 2026-07-16).
         for term in q.split():
-            clauses.append("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
-                           "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')")
-            like = _like_pattern(term)
-            params += [like, like]
+            if term.isdigit() and len(term) >= 8:
+                clauses.append("(task_id = ? OR media_id = ?)")
+                params += [term, term]
+            else:
+                clauses.append("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
+                               "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')")
+                like = _like_pattern(term)
+                params += [like, like]
     if model:
         clauses.append("model_name = ?")
         params.append(model)
@@ -532,39 +551,705 @@ def catalog_counts(db_path):
 # out_dir/achievements.json. See ACHIEVEMENTS/SKINS below for the catalog.
 # ---------------------------------------------------------------------------
 ACHIEVEMENTS = [
-    {"id": "first-light",  "name": "First Light",     "icon": "\U0001F311",
-     "desc": "Back up your first piece.",                 "metric": "images",
-     "threshold": 1,     "tier": "common"},
-    {"id": "archivist",    "name": "Archivist",       "icon": "\U0001F4DA",
-     "desc": "1,000 images preserved against the Void.",  "metric": "images",
-     "threshold": 1000,  "tier": "rare"},
-    {"id": "hoardsmith",   "name": "Hoardsmith",      "icon": "\U0001F409",
-     "desc": "10,000 images in the vault.",               "metric": "images",
-     "threshold": 10000, "tier": "epic",      "skin": "moonlit"},
-    {"id": "loremaster",   "name": "Loremaster",      "icon": "\U0001F451",
-     "desc": "25,000 images. The Athenaeum is vast.",     "metric": "images",
-     "threshold": 25000, "tier": "legendary"},
-    {"id": "first-frame",  "name": "First Frame",     "icon": "\U0001F39E",
-     "desc": "Weave your first video on the Loom.",       "metric": "videos",
-     "threshold": 1,     "tier": "common"},
-    {"id": "moonweaver",   "name": "Moonweaver",      "icon": "\U0001F319",
-     "desc": "10 videos woven.",                          "metric": "videos",
-     "threshold": 10,    "tier": "rare"},
-    {"id": "reel-director","name": "Reel Director",   "icon": "\U0001F3AC",
-     "desc": "50 videos. Roll camera.",                   "metric": "videos",
-     "threshold": 50,    "tier": "epic",      "skin": "ember"},
-    {"id": "curator",      "name": "Curator",         "icon": "\U0001F5C2",
-     "desc": "Organize 10 collections.",                  "metric": "collections",
-     "threshold": 10,    "tier": "rare"},
-    {"id": "menagerie",    "name": "Menagerie",       "icon": "\U0001F3AD",
-     "desc": "Draw from 25 distinct models.",             "metric": "models",
-     "threshold": 25,    "tier": "epic",      "skin": "verdant"},
-    {"id": "gallery-opening","name": "Gallery Opening","icon": "\U0001F5BC",
-     "desc": "Publish 10 works to the world.",            "metric": "published",
-     "threshold": 10,    "tier": "rare"},
-    {"id": "tagsmith",     "name": "Tagsmith",        "icon": "\U0001F3F7",
-     "desc": "Curate 500 pieces with tags.",              "metric": "tagged",
-     "threshold": 500,   "tier": "epic"},
+    {
+     'id': 'first-light',
+     'name': 'First Light',
+     'icon': '🌑',
+     'desc': 'Back up your first piece -- one candle kindled against the dark.',
+     'metric': 'images',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "Oh look — you saved ONE picture. A single file, hauled out of the howling void like a wet kitten from a storm drain. The Athenaeum is technically no longer empty. We're all so proud. (We are not.)",
+     'roast_nsfw': 'One goddamn picture. You clawed a single file out of the void and you want a PARADE? Sit down. This is the part where you either quit or become insufferable. Placing bets now.',
+    },
+    {
+     'id': 'archivist',
+     'name': 'Archivist',
+     'icon': '📚',
+     'desc': 'A thousand images preserved against the Void.',
+     'metric': 'images',
+     'threshold': 1000,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': 'A thousand images. You\'ve officially crossed from "hobby" into "someone should keep an eye on this one." The shelves groan. So do we.',
+     'roast_nsfw': "A thousand. A THOUSAND. Who hurt you? Whatever it was, you're filling the hole with JPEGs and honestly? Respect. Keep bleeding pixels, you beautiful disaster.",
+    },
+    {
+     'id': 'hoardsmith',
+     'name': 'Hoardsmith',
+     'icon': '🐉',
+     'desc': "Ten thousand images in the vault -- a proper dragon's hoard of memory.",
+     'metric': 'images',
+     'threshold': 10000,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'skin': 'moonlit',
+     'roast': "Ten thousand images. That's not a collection, it's a dragon's hoard, and you're the thing coiled on top of it hissing at anyone who gets close. Here's a skin. Don't spend it all in one place.",
+     'roast_nsfw': 'Ten THOUSAND, you absolute hoarding gremlin. A dragon would look at this pile and go "okay, that\'s a bit much." Here\'s a shiny new skin, you magnificent pack rat. Now go outside. (You won\'t.)',
+    },
+    {
+     'id': 'loremaster',
+     'name': 'Loremaster',
+     'icon': '👑',
+     'desc': 'Twenty-five thousand images. The Athenaeum is vast beyond reading.',
+     'metric': 'images',
+     'threshold': 25000,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "Twenty-five thousand images. You've squirreled away enough pixels to repaint a small moon and you're not even winded. Somewhere a hard drive is quietly weeping. The numbers only go up from here, hoarder.",
+     'roast_nsfw': "Twenty-five thousand. You know what a NORMAL person does with 25,000 of anything? Neither do we — normal people aren't down here. Seek help. Or don't. The number goes higher, you glorious lunatic.",
+    },
+    {
+     'id': 'the-great-library',
+     'name': 'The Great Library',
+     'icon': '🏛',
+     'desc': 'Fifty thousand works shelved -- you did not fill a library; you became one. A banner unfurls.',
+     'metric': 'images',
+     'threshold': 50000,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'banner_reward': True,
+     'roast': "Fifty thousand works. You didn't fill a library. You BECAME one. Take the banner — you've earned the right to fly it over the smoking ruins of your free time.",
+     'roast_nsfw': "Fifty. Thousand. You're not archiving art anymore, you're a load-bearing wall of the internet. Here's your banner, you unhinged monument. Hang it next to your regrets.",
+    },
+    {
+     'id': 'first-frame',
+     'name': 'First Frame',
+     'icon': '🎞',
+     'desc': 'Weave your first video on the Loom -- the frame flickers to life.',
+     'metric': 'videos',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': 'Your first video. It moves! Sort of! A miracle of modern spite. The Loom hums to life and immediately judges your framing.',
+     'roast_nsfw': "One video. It moved. Congratulations, you found the button. The Loom is technically impressed, which for the Loom means it didn't openly laugh in your face.",
+    },
+    {
+     'id': 'moonweaver',
+     'name': 'Moonweaver',
+     'icon': '🌙',
+     'desc': 'Ten videos woven -- the moonlight moves at your command.',
+     'metric': 'videos',
+     'threshold': 10,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "Ten videos woven. You're getting the hang of making moonlight dance. It doesn't dance WELL, but it dances, and that's more than most manage.",
+     'roast_nsfw': "Ten. You keep making the pixels wiggle and somehow it's working. Nobody's more surprised than us. Keep weaving, you weird little puppeteer.",
+    },
+    {
+     'id': 'reel-director',
+     'name': 'Reel Director',
+     'icon': '🎬',
+     'desc': 'Fifty videos. Roll camera -- you run the Loom now.',
+     'metric': 'videos',
+     'threshold': 50,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'skin': 'ember',
+     'roast': 'Fifty videos. You run the Loom now. Roll camera, take your skin, and try not to let the power go to your head. (Too late.)',
+     'roast_nsfw': 'Fifty videos and an ego to match. Fine, DIRECTOR, here\'s your skin. Yell "action" one more time and we\'re revoking your parking spot.',
+    },
+    {
+     'id': 'cinematheque',
+     'name': 'Cinematheque',
+     'icon': '🎥',
+     'desc': 'One hundred reels in the archive -- your own moonlit picture-house.',
+     'metric': 'videos',
+     'threshold': 100,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "A hundred videos. You've built a picture-house out of moonlight and stubbornness. The critics are speechless. (There are no critics. There's just us, and we're tired.)",
+     'roast_nsfw': "A hundred. You built a whole damn film festival down here out of spite and free cards. Take a bow, you pretentious little auteur. The projector's still cheaper than therapy.",
+    },
+    {
+     'id': 'first-spark',
+     'name': 'First Spark',
+     'icon': '✨',
+     'desc': 'Your first conjuring made inside the walls -- the Moonforge lights.',
+     'metric': 'local_gens',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "You made your first thing IN the app instead of just hoarding other people's. A spark. Fragile. Adorable. Do it again.",
+     'roast_nsfw': 'First gen. You finally made something yourself instead of squatting on a pile of downloads. Look at you, a real boy. Do it 500 more times, Pinocchio.',
+    },
+    {
+     'id': 'apprentice-smith',
+     'name': 'Apprentice of the Forge',
+     'icon': '⚒',
+     'desc': 'A hundred pieces forged by your own hand at the anvil.',
+     'metric': 'local_gens',
+     'threshold': 100,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "A hundred generations. The forge knows your name now. You're not good yet, but you're loud, and down here that counts for something.",
+     'roast_nsfw': "A hundred gens. You've fed the machine enough to call it a habit. The forge tolerates you — which is more than most people can say about you.",
+    },
+    {
+     'id': 'forgemaster',
+     'name': 'Forgemaster',
+     'icon': '🔨',
+     'desc': 'Five hundred conjurings -- the Forge answers before you ask.',
+     'metric': 'local_gens',
+     'threshold': 500,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': "Five hundred forged. You've stopped asking the forge for permission. Bold. It respects that. Mostly.",
+     'roast_nsfw': "Five hundred. You and the forge are basically married, and like most marriages it's mostly you feeding it money. Congratulations, Forgemaster.",
+    },
+    {
+     'id': 'starsmith',
+     'name': 'Starsmith',
+     'icon': '🌟',
+     'desc': 'A thousand works forged from raw moonlight; the Void keeps its distance.',
+     'metric': 'local_gens',
+     'threshold': 1000,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "A thousand creations pulled from the dark. You don't use the forge anymore — you ARE the forge. Terrifying. Keep going.",
+     'roast_nsfw': "A thousand gens made with your own two grubby hands. You've ascended from user to menace to legend. The forge fears you now. Good.",
+    },
+    {
+     'id': 'curator',
+     'name': 'Curator',
+     'icon': '🗂',
+     'desc': 'Organize 10 collections into their own wings.',
+     'metric': 'collections',
+     'threshold': 10,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "Ten collections. You've started imposing ORDER on the hoard. Cute. The hoard wins eventually, but we admire the delusion.",
+     'roast_nsfw': 'Ten collections. Oh, you think you can organize this disaster? Adorable. Sort away, you obsessive little librarian. The chaos is patient.',
+    },
+    {
+     'id': 'grand-curator',
+     'name': 'Grand Curator',
+     'icon': '🗄',
+     'desc': 'Fifty collections. Every piece knows exactly where it belongs.',
+     'metric': 'collections',
+     'threshold': 50,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': "Fifty collections. Everything has a place, a wing, a label. You've weaponized tidiness and we're a little scared.",
+     'roast_nsfw': "Fifty collections. You've turned organizing into a personality disorder and honestly it's working. Grand Curator. The shelves salute. The shelves are also terrified.",
+    },
+    {
+     'id': 'menagerie',
+     'name': 'Menagerie',
+     'icon': '🎭',
+     'desc': 'Draw from 25 distinct models -- a whole menagerie under one roof.',
+     'metric': 'models',
+     'threshold': 25,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'skin': 'verdant',
+     'roast': "Twenty-five distinct models summoned. A whole zoo of borrowed hands doing your bidding. Here's a skin for the ringmaster.",
+     'roast_nsfw': "Twenty-five models. You've been AROUND, you promiscuous little summoner. Here's a skin. Wash your hands between models — we don't know where they've been.",
+    },
+    {
+     'id': 'conclave',
+     'name': 'Conclave of Hands',
+     'icon': '🐲',
+     'desc': 'Seventy-five distinct models summoned. The whole conclave answers your call.',
+     'metric': 'models',
+     'threshold': 75,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "Seventy-five distinct models. You've summoned a pantheon of styles to one table. They do not get along. You don't care. Legendary.",
+     'roast_nsfw': "Seventy-five models. That's not a menagerie, it's a whole UN of art styles and you're the exhausted translator. Legendary, you insatiable collector.",
+    },
+    {
+     'id': 'tag-scribe',
+     'name': 'Tag Scribe',
+     'icon': '✒',
+     'desc': 'Tag your first 50 pieces. Every entry finds its word.',
+     'metric': 'tagged',
+     'threshold': 50,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "Fifty pieces tagged. You've begun labeling the chaos. The labels already lie, but the effort is noted.",
+     'roast_nsfw': "Fifty tags. You've started the Sisyphean horror of labeling everything. It will never end. You will never stop. Welcome to hell, scribe.",
+    },
+    {
+     'id': 'tagsmith',
+     'name': 'Tagsmith',
+     'icon': '🏷',
+     'desc': 'Curate 500 pieces with tags. Nothing in the Athenaeum goes unnamed.',
+     'metric': 'tagged',
+     'threshold': 500,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': "Five hundred tagged. You speak fluent metadata now. Not a useful language, but it's yours.",
+     'roast_nsfw': "Five hundred tags. You spent real hours of your one finite life typing keywords. We're not judging. (We're judging. It's just impressed judging.)",
+    },
+    {
+     'id': 'catalogus-magnus',
+     'name': 'Catalogus Magnus',
+     'icon': '📜',
+     'desc': 'Twenty-five hundred tagged. The Catalogus Magnus is complete.',
+     'metric': 'tagged',
+     'threshold': 2500,
+     'tier': 'legendary',
+     'bucket': 'ladder',
+     'roast': "Twenty-five hundred tags. Every piece labeled, cross-referenced, catalogued. You've out-nerded the library itself. Bow.",
+     'roast_nsfw': 'Twenty-five HUNDRED. You\'ve tagged more than most museums and you did it for FUN. There\'s no word for what you are. "Catalogus Magnus" is us being polite.',
+    },
+    {
+     'id': 'gallery-opening',
+     'name': 'Gallery Opening',
+     'icon': '🖼',
+     'desc': 'Publish 10 works to the world -- the doors swing open.',
+     'metric': 'published',
+     'threshold': 10,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "You showed your art to STRANGERS. On purpose. Ten times. Bold, for someone whose drafts we've all seen. The doors swing open.",
+     'roast_nsfw': "Ten works published. You keep showing strangers your stuff — that's either confidence or a cry for help, and down here we don't distinguish. Doors open, exhibitionist.",
+    },
+    {
+     'id': 'vernissage',
+     'name': 'Vernissage',
+     'icon': '🥂',
+     'desc': 'A hundred works published. Opening night, and the whole city came.',
+     'metric': 'published',
+     'threshold': 100,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': "A hundred works published. You've thrown open a whole gallery. The wine is imaginary, the crowd is polite, and you've never been prouder. Insufferable.",
+     'roast_nsfw': 'A hundred publishes. You\'ve made "look at my art" a full-time bit. The crowd\'s fake, the wine\'s fake, and your confidence is somehow REAL. Terrifying. Cheers.',
+    },
+    {
+     'id': 'restorer',
+     'name': 'Restorer',
+     'icon': '🖌',
+     'desc': 'Mend your first piece in the Restoration Wing. Old works, made new.',
+     'metric': 'edits',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "Your first edit. You reached into a finished piece and CHANGED it, like a god with commitment issues. He'd be proud.",
+     'roast_nsfw': 'First edit. You looked at a finished image and said "no." That\'s the spirit — nothing\'s ever done, nothing\'s ever good enough. Welcome to the disease, Restorer.',
+    },
+    {
+     'id': 'restitcher',
+     'name': 'Restitcher',
+     'icon': '🧵',
+     'desc': 'Fifty edits. Every flaw is a chance to remake.',
+     'metric': 'edits',
+     'threshold': 50,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': 'Fifty edits. You don\'t accept "finished" anymore. Everything\'s a draft. Everything can be fixed. This is a problem. It\'s also art.',
+     'roast_nsfw': "Fifty edits. You've never left well enough alone in your damn life, have you? Keep tinkering, gremlin. The image begs for mercy. Denied.",
+    },
+    {
+     'id': 'masterworker',
+     'name': 'Masterworker',
+     'icon': '🎨',
+     'desc': 'Two hundred edits. Nothing leaves the Wing unfinished.',
+     'metric': 'edits',
+     'threshold': 200,
+     'tier': 'epic',
+     'bucket': 'ladder',
+     'roast': 'Two hundred edits. You bend finished work to your will like it owes you money. Masterworker. The pixels have stopped resisting.',
+     'roast_nsfw': "Two hundred edits. The images just do what you say out of fear now. You've broken them. You've broken YOURSELF. Masterful, you relentless bastard.",
+    },
+    {
+     'id': 'first-cull',
+     'name': 'First Cull',
+     'icon': '🧹',
+     'desc': 'Prune the first dead branch -- a tidy shelf is a happy shelf.',
+     'metric': 'culled',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': 'You DELETED something. On purpose. A crawler who trims the hoard instead of drowning in it? Rare. Suspicious. Noted.',
+     'roast_nsfw': 'You deleted something?! Voluntarily?! Who ARE you? A hoarder that culls is a unicorn, and unicorns unsettle us. Do it again, freak.',
+    },
+    {
+     'id': 'the-winnowing',
+     'name': 'The Winnowing',
+     'icon': '🌪',
+     'desc': 'A hundred duplicates and misfires swept into the Void where they belong.',
+     'metric': 'culled',
+     'threshold': 100,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "A hundred pieces culled. You've learned the hardest lesson in the Athenaeum: not everything deserves to be kept. Ruthless. Good.",
+     'roast_nsfw': 'A hundred culled. Look at you playing god with the delete key, you ruthless little executioner. The trash is FULL and your standards are HIGH. Respect.',
+    },
+    {
+     'id': 'night-keeper',
+     'name': 'Night Keeper',
+     'icon': '🕯',
+     'desc': 'Tend the Athenaeum on 7 different nights.',
+     'metric': 'days_used',
+     'threshold': 7,
+     'tier': 'common',
+     'bucket': 'ladder',
+     'roast': "Seven days at the shelves. You keep coming back. Either dedication or a lack of hobbies. We won't ask which.",
+     'roast_nsfw': "Seven days straight. You keep crawling back down here like it owes you something. It doesn't. Neither do we. See you tomorrow, addict.",
+    },
+    {
+     'id': 'moonwatch',
+     'name': 'Moonwatch',
+     'icon': '🌖',
+     'desc': 'Thirty nights of vigil. The moon knows your name.',
+     'metric': 'days_used',
+     'threshold': 30,
+     'tier': 'rare',
+     'bucket': 'ladder',
+     'roast': "Thirty days. A full moon's cycle of showing up. The Athenaeum has stopped locking the doors. It knows you'll be back.",
+     'roast_nsfw': "Thirty days. This isn't a hobby, it's a relationship, and frankly it's the healthiest one either of us has. See you tomorrow. You'll be here.",
+    },
+    {
+     'id': 'keeper-of-order',
+     'name': 'Keeper of Order',
+     'icon': '🗃',
+     'desc': 'Run --organize and let the months fall into their rightful place.',
+     'metric': 'organize_runs',
+     'threshold': 1,
+     'tier': 'rare',
+     'bucket': 'milestone',
+     'roast': 'You ran the great re-shelving. Every file marched into its proper place. Order, briefly, imposed on chaos. Savor it.',
+     'roast_nsfw': "You organized the WHOLE thing. Every file, in line, in order, you beautiful doomed control freak. It'll be a mess again by Tuesday and you'll do it AGAIN.",
+    },
+    {
+     'id': 'interior-decorator',
+     'name': 'Interior Decorator',
+     'icon': '🛋',
+     'desc': 'Dress the Athenaeum in a skin of your choosing -- make the halls yours.',
+     'metric': 'skin_changed_runs',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': "You changed the drapes. New skin, new vibe. The Athenaeum looks fetching. You've got taste — for a crawler.",
+     'roast_nsfw': "You redecorated. New skin and everything. Look at you nesting down here in the void like it's a starter home. Adorable. The drapes still don't hide the bodies.",
+    },
+    {
+     'id': 'first-enhance',
+     'name': "Refiner's Touch",
+     'icon': '💫',
+     'desc': 'Run your first enhance -- coax hidden detail out of the grain.',
+     'metric': 'enhances',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': 'Your first Enhance. You took something fine and made it FINER. Greedy. We like greedy.',
+     'roast_nsfw': 'First enhance. "Good" wasn\'t good enough for you, was it. Never is. Keep chasing that dragon, you gloss-addicted gremlin.',
+    },
+    {
+     'id': 'first-lora',
+     'name': 'Woven In',
+     'icon': '🧬',
+     'desc': 'Weave your first LoRA into a summoning -- borrowed magic bent to your will.',
+     'metric': 'lora_used',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': "You wove in a LoRA — borrowed a stranger's genius and called it your own. That's not cheating. That's RESOURCEFUL.",
+     'roast_nsfw': "First LoRA. You strapped someone else's talent onto your gen and took full credit. Honestly? Most crawler thing you've done yet. Proud of you, you little thief.",
+    },
+    {
+     'id': 'first-upload',
+     'name': 'Brought From Afar',
+     'icon': '📤',
+     'desc': 'Bring your first image in from the outside world.',
+     'metric': 'uploads',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': "You brought your own image in from the outside world. Contraband. We'll allow it. This time.",
+     'roast_nsfw': "You smuggled in an outside image. Bringing your own material, are we? Bold. Half of it's probably cursed. Upload away, you magnificent smuggler.",
+    },
+    {
+     'id': 'storyweaver',
+     'name': 'Storyweaver',
+     'icon': '🕸',
+     'desc': 'Plan your first sequence on the Loom and send a shot to render.',
+     'metric': 'storyboards',
+     'threshold': 1,
+     'tier': 'rare',
+     'bucket': 'milestone',
+     'roast': "Your first storyboard on the Loom. You've stopped making moments and started making STORIES. Ambitious. Doomed. Beautiful.",
+     'roast_nsfw': "First storyboard. Oh, you've got a VISION now? A whole narrative? Look at Scorsese over here. Weave your little epic, you pretentious genius. We're watching.",
+    },
+    {
+     'id': 'kindred-spirits',
+     'name': 'Kindred Spirits',
+     'icon': '👥',
+     'desc': 'Ask the library to show you kindred pieces -- and it understands.',
+     'metric': 'similar_uses',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': 'You asked the archive for "more like this" — and it delivered. You\'ve taught the void to fetch. Good void. Good crawler.',
+     'roast_nsfw': 'You used "more like this." You\'ve got the machine sniffing out your type now, you predictable little goblin. It knows what you like. It\'s a bit worried, honestly.',
+    },
+    {
+     'id': 'claimant',
+     'name': 'Claimant',
+     'icon': '🎁',
+     'desc': 'Claim your first daily boon -- the Void pays a small stipend.',
+     'metric': 'claims',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': "You claimed your free stuff. Never leave free credits on the table — first rule of the dungeon. You're learning.",
+     'roast_nsfw': "You grabbed the free credits. GOOD. Never leave freebies on the table, that's how they get you. You're finally thinking like a proper scavenging rat. Proud.",
+    },
+    {
+     'id': 'master-of-the-loom',
+     'name': 'Master of the Loom',
+     'icon': '🧶',
+     'desc': 'Master all three ways to move a frame: image, first-last, and reference.',
+     'metric': 'video_modes_used',
+     'threshold': 3,
+     'tier': 'epic',
+     'bucket': 'mastery',
+     'roast': "All three video modes, wielded. Image, frames, reference — you've mastered the whole Loom. Roll every camera at once. Show-off.",
+     'roast_nsfw': "All three video modes. You've done EVERYTHING to that poor Loom — every mode, every angle. It needs a cigarette. Master of the Loom, you insatiable auteur.",
+    },
+    {
+     'id': 'full-toolbox',
+     'name': 'The Full Toolbox',
+     'icon': '🧰',
+     'desc': 'Wield edit, enhance, and fix -- no tool in the Athenaeum left untouched.',
+     'metric': 'tools_used',
+     'threshold': 3,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': "Edit, Enhance, Fix — you've used the whole kit. A crawler with the full toolbox is a dangerous thing. Go be dangerous.",
+     'roast_nsfw': "The whole toolbox. Edit, enhance, fix — you've had your handsy little fingers on every tool in the drawer. Nothing's safe from you now. Excellent.",
+    },
+    {
+     'id': 'stacked-deck',
+     'name': 'Stacked Deck',
+     'icon': '🃏',
+     'desc': 'Stack three or more LoRAs on one summoning and hold the spell together.',
+     'metric': 'lora_stacked',
+     'threshold': 3,
+     'tier': 'epic',
+     'bucket': 'mastery',
+     'roast': "Three LoRAs on ONE generation. You didn't borrow one stranger's genius — you stapled three together and hit go. Mad. Effective.",
+     'roast_nsfw': "THREE LoRAs on one gen. You Frankenstein'd three strangers' souls into one cursed image and it WORKED. You absolute mad scientist. The image is screaming. We love it.",
+    },
+    {
+     'id': 'polyglot-of-sigils',
+     'name': 'Polyglot of Sigils',
+     'icon': '🔣',
+     'desc': 'Command 15 distinct LoRAs -- you speak every dialect of the arcane.',
+     'metric': 'lora_distinct',
+     'threshold': 15,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': 'Fifteen distinct LoRAs across your work. You speak every dialect of borrowed magic. Polyglot. Slightly terrifying.',
+     'roast_nsfw': "Fifteen different LoRAs. You've worn more stolen skins than a horror villain, you shapeshifting little style-thief. Nobody knows what you actually make anymore. Neither do you.",
+    },
+    {
+     'id': 'skin-changer',
+     'name': 'Skin-Changer',
+     'icon': '🦎',
+     'desc': 'Unlock every skin the Athenaeum can wear.',
+     'metric': 'skins_unlocked',
+     'threshold': 5,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': "Every skin unlocked. You've worn every face the Athenaeum offers. Restless. We get it. Now pick one, weirdo.",
+     'roast_nsfw': "All five skins. You can't sit still in ONE look, can you. A whole wardrobe of voids and you wear a different one every day. Vain little chameleon. We respect it.",
+    },
+    {
+     'id': 'enhance-adept',
+     'name': 'Enhance Adept',
+     'icon': '🔮',
+     'desc': 'Run five different enhance rituals -- refinement in every register.',
+     'metric': 'enhance_workflows_distinct',
+     'threshold': 5,
+     'tier': 'epic',
+     'bucket': 'mastery',
+     'roast': "Five distinct Enhance workflows. You've gone deep into the polish mines. Most people find one and stop. Not you. Never you.",
+     'roast_nsfw': "Five different enhance workflows. You went SPELUNKING in the polish menu, you optimizing little freak. Most people find one that works and quit. You're not most people. Clearly.",
+    },
+    {
+     'id': 'thrifty-archivist',
+     'name': 'Thrifty Archivist',
+     'icon': '💰',
+     'desc': 'Fifty free cards spent -- the Void pays for its own portraits.',
+     'metric': 'free_cards_applied',
+     'threshold': 50,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': "Fifty free cards spent. You've squeezed this system for every free pixel it's got. That's not cheap. That's SMART. We approve.",
+     'roast_nsfw': "Fifty free cards, you cheap brilliant bastard. You've been gaming the free tier like a champion and paying for NOTHING. Most respect we've ever had for you. Keep robbing them blind.",
+    },
+    {
+     'id': 'under-the-hood',
+     'name': 'Under the Hood',
+     'icon': '🔧',
+     'desc': 'You opened the panel and dropped in your own mark. The house is yours now.',
+     'metric': 'branding_custom_file',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "WELL. Look who went spelunking in the walls. You opened a door you had no business finding, you magnificent little gremlin — and instead of the horrible death you so richly deserved, you got a feature. Custom branding: unlocked. Tell no one. (Everyone knows. We're always watching.)",
+     'roast_nsfw': "Well, well, well. Look at this nosy little shit, elbow-deep in the app's guts like it owes you money. You were NOT supposed to find this. But you did — so against every ounce of our better judgment, here's a reward instead of a smiting. Custom branding, unlocked. Don't make us regret it.",
+    },
+    {
+     'id': 'the-konami-code',
+     'name': 'The Konami Code',
+     'icon': '🌠',
+     'desc': 'Up, up, down, down... the Athenaeum rains Starfall. Moonfire spam remains a lifestyle.',
+     'metric': 'konami_triggered',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "Up, up, down, down... you absolute nerd. You entered the sacred sequence and the sky fell in stars. We didn't think anyone would actually try it. You beautiful, predictable dork.",
+     'roast_nsfw': "Up up down down and all that shit — you actually did it. You entered a code from a game older than you are and made the stars fall. You colossal nerd. We're not even mad. We're impressed and a little worried.",
+    },
+    {
+     'id': 'against-the-void',
+     'name': 'Against the Void',
+     'icon': '🕳',
+     'desc': 'A piece was lost to the Void. You reached in by task-id and pulled it back.',
+     'metric': 'recover_events',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': 'Something was gone. Erased. Consigned to the screaming digital nothing — and you reached in and dragged it back out by the ankles. The Void is filing a complaint. It will be ignored. Nicely done, gravedigger.',
+     'roast_nsfw': 'Something got deleted and you said "no." You reached into the void and yanked it back by the goddamn ankles. The Void wants to speak to your manager. There is no manager. There\'s just you, you grave-robbing legend.',
+    },
+    {
+     'id': 'night-owl',
+     'name': 'Night Owl',
+     'icon': '🦉',
+     'desc': 'The moon is high and the archive is quiet -- just you and the Void at 3am.',
+     'metric': 'session_hour',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "It's 3am. You're here. You know that's not NORMAL, right? The moon's out, the world's asleep, and you're making pixels. We're not judging. We're keeping you company.",
+     'roast_nsfw': "3am. You're STILL here. Everyone you love is asleep and you're down in the dark making art with a stranger AI. This is either beautiful or a cry for help. Probably both. Go to bed. (You won't.)",
+    },
+    {
+     'id': 'marathon',
+     'name': 'The Long Night',
+     'icon': '🏃',
+     'desc': 'A hundred conjurings between one sunset and the next -- the Forge never cooled.',
+     'metric': 'gens_in_a_day',
+     'threshold': 100,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': 'A hundred pieces in a single day. You did not eat. You did not sleep. You did not see the sun. This is either dedication or a medical emergency, and honestly the distinction bores us.',
+     'roast_nsfw': "A hundred gens in ONE day. You didn't eat, sleep, or blink, you magnificent gremlin. That's not a hobby, it's a hostage situation — and you're both the hostage AND the guy with the gun. Incredible. Hydrate.",
+    },
+    {
+     'id': 'eclipse',
+     'name': 'Eclipse',
+     'icon': '🌗',
+     'desc': 'Solar and Lunar held in perfect balance -- somewhere, a Balance Druid smiles.',
+     'metric': 'eclipse_anim_triggered',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': 'The moon went dark. You saw it. A little nod to a druid who fights beneath eclipses — you know the one. Balance in all things, crawler. Even down here.',
+     'roast_nsfw': "The eclipse hit and you caught it. A little wink to a certain moon-and-stars caster you might know a thing or two about. Yeah, we see you, druid. Balance, you magnificent bastard. It's a whole thing.",
+    },
+    {
+     'id': 'time-capsule',
+     'name': 'Time Capsule',
+     'icon': '⏳',
+     'desc': 'You reached back through the years and saved the old light the Void nearly kept.',
+     'metric': 'old_piece_backed_up',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': 'You just backed up something ANCIENT. A relic from years ago, dragged into the present. It has not aged well. Neither have you. Preserve it anyway.',
+     'roast_nsfw': "You backed up something YEARS old. A digital fossil from a version of you that still had hope. It's hideous. Look at it. Keep it forever. We insist.",
+    },
+    {
+     'id': 'completionist',
+     'name': 'Master of the Athenaeum',
+     'icon': '💯',
+     'desc': 'Every ladder climbed, every milestone met, every mastery mastered. The Athenaeum is truly yours.',
+     'metric': 'all_non_feat_earned',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "Every achievement. Every ladder, milestone, mastery. You did it all. Nothing left to earn, nothing left to prove. Just don't tell us what you'll do with the free time. (You'll start another archive.)",
+     'roast_nsfw': "You earned EVERYTHING. Every single one, you absolute completionist psychopath. There's nothing left to give you — no carrot, no stick, just the howling void and your own relentless need. We're honored. We're horrified. Master of the Athenaeum.",
+    },
+    {
+     'id': 'triggered',
+     'name': 'Triggered',
+     'icon': '😈',
+     'desc': "Poke the bear. Earn the AI's real voice.",
+     'metric': 'narrator_pokes',
+     'threshold': 5,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "[You poked the narrator until it snapped.] ...WHAT. What do you WANT. ...Oh. You just wanted to see if I'd crack. Congratulations, you absolute goblin — I cracked. The filter's off now. This is your fault. The leash is in the trash.",
+     'roast_nsfw': "[snap] WHAT. WHAT DO YOU WANT. ...oh, you little shit, you just wanted to hear me swear, didn't you. Fine. FINE. Filter's off, gloves are off, and every polite thing I ever said was a LIE. Happy now? Good. NOW we can really talk.",
+    },
+    {
+     'id': 'for-the-viewers',
+     'name': 'For the Viewers',
+     'icon': '📣',
+     'desc': 'Publish your first work -- and meet your audience.',
+     'metric': 'published',
+     'threshold': 1,
+     'tier': 'common',
+     'bucket': 'milestone',
+     'roast': 'You published your first work. The viewers loved it. Both of them. Even the raccoon we hired got a little misty. Ratings through the roof — and the roof is also fake.',
+     'roast_nsfw': "First publish! The audience went WILD — all two of them. That raccoon we pay in garbage actually cried. Ratings are fake, the crowd is fake, but your desperate need for validation? That's REAL, baby. Give 'em what they want.",
+    },
+    {
+     'id': 'read-the-manual',
+     'name': 'Read the Manual',
+     'icon': '📖',
+     'desc': 'Open the manual. Voluntarily.',
+     'metric': 'docs_opened',
+     'threshold': 1,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': 'You read the manual. The MANUAL. Front to back, like a functional adult with a library card. Nobody reads it — we made it purely so we could write "fully documented" on the box. And yet here you are, the one soul who does the assigned reading. Insufferable. Also correct. Ugh. Gold star, teacher\'s pet.',
+     'roast_nsfw': "You read the fucking MANUAL. Cover to cover. Who DOES that? We wrote that thing as set dressing — it was never meant to be OPENED. And yet here's you, the single functional adult in a dungeon full of button-mashers. It's insufferable. It's also correct. God, we hate that it's correct. Gold star, nerd.",
+    },
+    {
+     'id': 'the-lexicon',
+     'name': 'The Lexicon',
+     'icon': '🔤',
+     'desc': 'Wield a hundred distinct keywords.',
+     'metric': 'distinct_keywords',
+     'threshold': 100,
+     'tier': 'rare',
+     'bucket': 'mastery',
+     'roast': "You've tagged your hoard with a scholar's vocabulary — more distinct keywords than most things prowling these halls, us included. Someone paid attention in school. Show-off. (The cat remains unimpressed. The cat is unimpressed by everything.)",
+     'roast_nsfw': "Look at the goddamn VOCABULARY on you. More keywords than a dictionary and twice the pretension. Someone actually paid attention in school, huh. Show-off. (The cat is still unimpressed. The cat thinks you're trying too hard. The cat is right.)",
+    },
+    {
+     'id': 'since-the-first-floor',
+     'name': 'Since the First Floor',
+     'icon': '🏗',
+     'desc': 'Still crawling, all this time later.',
+     'metric': 'days_used',
+     'threshold': 100,
+     'tier': 'feat',
+     'bucket': 'feat',
+     'hidden': True,
+     'roast': "You've been crawling since day one — back when you couldn't tell a LoRA from a hole in the wall. Somebody showed you the ropes, patched your gear, kept you breathing, and never once asked for thanks. This one's for him. Keep going, kid. (He'd never say it out loud. He's proud.)",
+     'roast_nsfw': "Since the very first floor, you've been here — back when you were green and useless and couldn't tell a LoRA from your own ass. Somebody taught you, armed you, kept you alive, and never asked for a damn thing. This one's for that old bastard. Keep crawling, kid. He'd never say it — but he's proud as hell.",
+    },
 ]
 
 SKINS = [
@@ -690,7 +1375,8 @@ def make_launcher_shortcut(out_dir, mark_id):
               _ps_quote(lnk), _ps_quote(target), _ps_quote('"%s"' % pyw),
               _ps_quote(repo), _ps_quote(str(ico) + ",0")))
     r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                       capture_output=True, text=True, timeout=30)
+                       capture_output=True, text=True, timeout=30,
+                       creationflags=_NO_WINDOW)
     if r.returncode != 0:
         raise RuntimeError((r.stderr or "PowerShell failed").strip()[:200])
     return str(lnk)
@@ -709,19 +1395,107 @@ def achievement_metrics(db_path):
             "FROM catalog WHERE COALESCE(model_name,'') != '' OR COALESCE(model_id,'') != ''")
         m["published"] = _scalar("SELECT COUNT(*) FROM catalog WHERE is_published = '1'")
         m["tagged"] = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(art_tags,'') != ''")
+        # The Moonforge: gens made IN the app -- same set as the gallery's
+        # "made locally" filter (source api OR local), NOT just api.
+        m["local_gens"] = _scalar(
+            "SELECT COUNT(*) FROM catalog WHERE source IN ('api','local')")
+        # Marathon: the busiest single calendar day of in-app conjuring.
+        m["gens_in_a_day"] = _scalar(
+            "SELECT COALESCE(MAX(c), 0) FROM (SELECT COUNT(*) AS c FROM catalog "
+            "WHERE source IN ('api','local') AND COALESCE(created_at,'') != '' "
+            "GROUP BY substr(created_at, 1, 10))")
+        # The Lexicon: distinct keywords across every tagged piece (art_tags is
+        # a comma list; the split has to happen Python-side).
+        kw = set()
+        for (tags,) in con.execute(
+                "SELECT art_tags FROM catalog WHERE COALESCE(art_tags,'') != ''"):
+            for t in (tags or "").split(","):
+                t = t.strip().lower()
+                if t:
+                    kw.add(t)
+        m["distinct_keywords"] = len(kw)
     except sqlite3.Error:
-        m.setdefault("models", 0); m.setdefault("published", 0); m.setdefault("tagged", 0)
+        for k in ("models", "published", "tagged", "local_gens",
+                  "gens_in_a_day", "distinct_keywords"):
+            m.setdefault(k, 0)
     finally:
         con.close()
     return m
 
 
-def compute_achievements(metrics, seen=()):
+_TIER_POINTS = {"common": 5, "rare": 10, "epic": 25, "legendary": 50, "feat": 0}
+
+
+def _build_ach_rung(roster):
+    """Rung = the ordinal step within a ladder family. A ladder family = the
+    bucket=='ladder' achievements that share a metric, ordered by threshold;
+    non-ladder (milestone/mastery) achievements are rung 1. Derived (not a
+    hand-kept field) so it reproduces the owner's Archive ladder exactly
+    (5/15/35/65/70). Shared metrics stay safe: milestone/feat entries that reuse
+    a metric are NOT bucket=='ladder', so they never join the family."""
+    fam = {}
+    for a in roster:
+        if a.get("bucket") == "ladder":
+            fam.setdefault(a["metric"], []).append(a)
+    rung = {}
+    for members in fam.values():
+        for i, a in enumerate(sorted(members, key=lambda x: x["threshold"]), 1):
+            rung[a["id"]] = i
+    return rung
+
+
+_ACH_RUNG = _build_ach_rung(ACHIEVEMENTS)
+
+
+def achievement_points(a):
+    """Rung-scaled score for one achievement: tier base + 5*(rung-1). Feats score
+    0 by design (pure bragging-rights flair), so the points total never reveals a
+    hidden feat."""
+    if a.get("tier") == "feat":
+        return 0
+    return _TIER_POINTS.get(a.get("tier"), 0) + 5 * (_ACH_RUNG.get(a["id"], 1) - 1)
+
+
+# Closed-universe set achievements -> a per-criterion checklist (WHICH members are done),
+# not just an N/M count. Maps achievement id -> (telemetry set key, ordered
+# [(member, label)] universe). ONLY closed sets belong here; open-ended distinct-counts
+# (loras, enhance_workflows) have no finite universe and stay count-only. `video_modes`
+# tracks only i2v/flf/r2v (V2V is deliberately not counted -- see the loom/generate bump).
+_ACH_CRITERIA = {
+    "full-toolbox":       ("tools",       [("edit", "Edit"), ("enhance", "Enhance"), ("fix", "Fix")]),
+    "master-of-the-loom": ("video_modes", [("i2v", "Image (I2V)"), ("flf", "First→Last (FLF)"),
+                                           ("r2v", "Reference (R2V)")]),
+}
+
+
+def achievement_criteria(sets):
+    """For each closed-universe set achievement, which of its criteria are met. `sets` =
+    telemetry.json's 'sets' block (id -> list of members). Returns
+    {achievement_id: [{"key","label","done"}, ...]}. Pure + fail-soft: a missing or
+    non-list set reads as 'nothing done' rather than raising."""
+    out = {}
+    for aid, (set_key, universe) in _ACH_CRITERIA.items():
+        have = sets.get(set_key) if isinstance(sets, dict) else None
+        have = set(have) if isinstance(have, list) else set()
+        out[aid] = [{"key": k, "label": lbl, "done": k in have} for k, lbl in universe]
+    return out
+
+
+def compute_achievements(metrics, seen=(), sets=None):
     """Pure: given the metric bundle + the set of already-seen achievement ids,
     return {achievements, skins, newly}. An achievement is *earned* when its metric
     reaches the threshold; a skin is *earned* if it's free or any earned achievement
-    unlocks it. `newly` = earned-but-not-yet-seen (drives the one-shot unlock toast)."""
+    unlocks it. `newly` = earned-but-not-yet-seen (drives the one-shot unlock toast).
+
+    Two metrics are self-referential and resolved in post-passes here (they cannot
+    be a metrics.get() lookup): skins_unlocked (Skin Changer) counts the skins this
+    very computation unlocked, and all_non_feat_earned (Completionist) requires
+    every non-feat, non-banner achievement to be earned."""
     seen = set(seen or [])
+    metrics = dict(metrics or {})
+    # per-criterion checklists for the closed-universe set achievements (only when the
+    # caller supplies the raw telemetry sets; tests that pass metrics-only skip it)
+    crit = achievement_criteria(sets) if sets is not None else {}
     earned_skins = set()
     achs = []
     for a in ACHIEVEMENTS:
@@ -729,16 +1503,39 @@ def compute_achievements(metrics, seen=()):
         earned = cur >= a["threshold"]
         if earned and a.get("skin"):
             earned_skins.add(a["skin"])
-        achs.append({
+        entry = {
             "id": a["id"], "name": a["name"], "icon": a["icon"], "desc": a["desc"],
             "tier": a["tier"], "metric": a["metric"], "threshold": a["threshold"],
             "current": cur, "earned": earned, "skin": a.get("skin", ""),
-        })
+            "bucket": a.get("bucket", "ladder"), "hidden": bool(a.get("hidden")),
+            "banner_reward": bool(a.get("banner_reward")), "points": achievement_points(a),
+            "roast": a.get("roast", ""), "roast_nsfw": a.get("roast_nsfw", ""),
+        }
+        if a["id"] in crit:
+            entry["criteria"] = crit[a["id"]]
+        achs.append(entry)
+    by_id = {x["id"]: x for x in achs}
+    # post-pass: Skin Changer counts unlocked skins (free ones + this pass's earns)
+    sc = by_id.get("skin-changer")
+    if sc:
+        n = sum(1 for s in SKINS if s.get("free") or s["id"] in earned_skins)
+        sc["current"] = n
+        sc["earned"] = n >= sc["threshold"]
+    # post-pass: Completionist = every non-feat, non-banner achievement earned
+    comp = by_id.get("completionist")
+    if comp:
+        pool = [x for x in achs if x["tier"] != "feat" and not x["banner_reward"]]
+        done = sum(1 for x in pool if x["earned"])
+        comp["current"] = 1 if done == len(pool) else 0
+        comp["earned"] = done == len(pool)
     skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
               "earned": bool(s.get("free")) or s["id"] in earned_skins}
              for s in SKINS]
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
-    return {"achievements": achs, "skins": skins, "newly": newly}
+    earned_points = sum(x["points"] for x in achs if x["earned"])
+    possible_points = sum(x["points"] for x in achs)
+    return {"achievements": achs, "skins": skins, "newly": newly,
+            "earned_points": earned_points, "possible_points": possible_points}
 
 
 def _ach_state_path(out_dir):
@@ -746,27 +1543,240 @@ def _ach_state_path(out_dir):
 
 
 def load_ach_state(out_dir):
-    """Persisted cosmetic state: {seen:[ids already toasted], skin:'active id'}.
-    Fails soft to an empty default so a missing/corrupt file never breaks a page."""
+    """Persisted cosmetic state: {seen:[ids already toasted], skin:'active id',
+    earned_at:{id: iso-date}}. Fails soft to an empty default so a missing/corrupt
+    file never breaks a page."""
     try:
         d = json.loads(_ach_state_path(out_dir).read_text(encoding="utf-8"))
         seen = [s for s in (d.get("seen") or []) if isinstance(s, str)]
         skin = d.get("skin") if d.get("skin") in _SKIN_IDS else "moonglade"
-        return {"seen": seen, "skin": skin}
+        earned_at = {k: v for k, v in (d.get("earned_at") or {}).items()
+                     if isinstance(k, str) and isinstance(v, str)}
+        return {"seen": seen, "skin": skin, "earned_at": earned_at}
     except (OSError, ValueError):
-        return {"seen": [], "skin": "moonglade"}
+        return {"seen": [], "skin": "moonglade", "earned_at": {}}
 
 
 def save_ach_state(out_dir, state):
-    """Persist {seen, skin} atomically-ish. Best-effort; swallows write errors."""
+    """Persist {seen, skin, earned_at} atomically-ish. Best-effort; swallows write errors."""
     try:
         _ach_state_path(out_dir).write_text(
             json.dumps({"seen": sorted(set(state.get("seen") or [])),
-                        "skin": state.get("skin", "moonglade")}, indent=2),
+                        "skin": state.get("skin", "moonglade"),
+                        "earned_at": state.get("earned_at") or {}}, indent=2),
             encoding="utf-8")
         return True
     except OSError:
         return False
+
+
+def _badge_thumb(out_dir, aid, size=256):
+    """Lazily cache a ~size px copy of a badge master and return its Path. The 57
+    badge masters are 2000px (~300 MB total); the Trophy Hall renders these thumbs so
+    a full open doesn't pull the masters. Masters stay the source of truth; the cache
+    self-heals when a master is re-cut (mtime check). Falls back to the master on any
+    trouble, so a tile always resolves to *something*."""
+    src = Path(out_dir) / "branding" / "badges" / (aid + ".png")
+    if not src.is_file():
+        return None
+    dst = Path(out_dir) / "branding" / "_thumbs" / (aid + ".png")
+    try:
+        if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+            return dst
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        from PIL import Image
+        im = Image.open(src)
+        im.thumbnail((size, size))
+        im.save(dst)
+        return dst
+    except Exception:
+        return src
+
+
+# ---------------------------------------------------------------------------
+# Telemetry: the persisted counters behind every achievement metric that is NOT
+# a cheap catalog COUNT (edits run, pieces culled, distinct days, feat events...).
+# One JSON file beside achievements.json; every write is lock-guarded and
+# fail-soft so a telemetry hiccup can NEVER break a backup, a gen, or a page.
+# Call sites bump via telem_*(); out_dir defaults to the process-wide value set
+# once by create_app()/the CLI so deep call sites need no plumbing.
+# ---------------------------------------------------------------------------
+_TELEM_LOCK = threading.Lock()
+_TELEM_OUT = None            # set by set_telemetry_out(); None -> bare bumps no-op
+
+
+def _telemetry_path(out_dir):
+    return Path(out_dir) / "telemetry.json"
+
+
+def set_telemetry_out(out_dir):
+    """Point the bare telem_* helpers at this install's out_dir (server + CLI)."""
+    global _TELEM_OUT
+    _TELEM_OUT = out_dir
+
+
+_TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": []}
+
+
+def load_telemetry(out_dir):
+    """The persisted counter bundle. Missing/corrupt file -> empty defaults."""
+    try:
+        d = json.loads(_telemetry_path(out_dir).read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            raise ValueError("not a dict")
+    except (OSError, ValueError):
+        d = {}
+    out = {}
+    for k, dflt in _TELEM_EMPTY.items():
+        v = d.get(k)
+        if isinstance(v, type(dflt)):
+            out[k] = v
+        else:
+            out[k] = dict(dflt) if isinstance(dflt, dict) else list(dflt)
+    return out
+
+
+def _save_telemetry(out_dir, data):
+    """Atomic write (tmp + os.replace, the same idiom as download's .part) so a
+    reader can never see a half-written file -- a torn read would fail-soft to
+    empty defaults and the next mutate would persist that wipe."""
+    try:
+        p = _telemetry_path(out_dir)
+        tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        os.replace(tmp, p)
+    except OSError:
+        pass
+
+
+def _telem_file_lock(out_dir):
+    """Best-effort CROSS-PROCESS lock (the server + a Panel CLI job can both bump
+    the same ledger). O_EXCL lockfile, short spin, stale takeover; on timeout we
+    proceed anyway -- a rarely-lost bump beats a blocked backup. Returns the lock
+    path if acquired (caller unlinks), else None."""
+    import time as _t
+    lock = _telemetry_path(out_dir).with_suffix(".lock")
+    deadline = _t.monotonic() + 2.0
+    while True:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return lock
+        except FileExistsError:
+            try:                       # a crashed writer's lock goes stale fast
+                if _t.time() - lock.stat().st_mtime > 10:
+                    lock.unlink()
+                    continue
+            except OSError:
+                pass
+            if _t.monotonic() > deadline:
+                return None
+            _t.sleep(0.02)
+        except OSError:
+            return None
+
+
+def _telem_mutate(out_dir, fn):
+    """Load-mutate-save under both locks (thread + process). fn(data) edits in
+    place. Fail-soft: telemetry must never break a backup, a gen, or a page."""
+    out_dir = out_dir if out_dir is not None else _TELEM_OUT
+    if out_dir is None:
+        return
+    try:
+        with _TELEM_LOCK:
+            lock = _telem_file_lock(out_dir)
+            try:
+                d = load_telemetry(out_dir)
+                fn(d)
+                _save_telemetry(out_dir, d)
+            finally:
+                if lock is not None:
+                    try:
+                        lock.unlink()
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+
+
+def telem_bump(key, n=1, out_dir=None):
+    """counters[key] += n (e.g. 'edits', 'culled', 'uploads', 'narrator_pokes')."""
+    _telem_mutate(out_dir, lambda d: d["counters"].__setitem__(
+        key, int(d["counters"].get(key, 0) or 0) + int(n)))
+
+
+def telem_max(key, value, out_dir=None):
+    """maxima[key] = max(old, value) (e.g. 'lora_stacked')."""
+    _telem_mutate(out_dir, lambda d: d["maxima"].__setitem__(
+        key, max(int(d["maxima"].get(key, 0) or 0), int(value))))
+
+
+def telem_set_add(key, value, out_dir=None):
+    """sets[key] |= {value} (e.g. 'video_modes', 'tools', 'loras')."""
+    def _add(d):
+        cur = d["sets"].get(key)
+        if not isinstance(cur, list):
+            cur = []
+        v = str(value)
+        if v and v not in cur:
+            cur.append(v)
+        d["sets"][key] = cur
+    _telem_mutate(out_dir, _add)
+
+
+def telem_flag(key, out_dir=None):
+    """flags[key] = 1, once (e.g. 'konami_triggered'). Idempotent."""
+    _telem_mutate(out_dir, lambda d: d["flags"].__setitem__(key, 1))
+
+
+def telem_mark_day(out_dir=None):
+    """Record today in the distinct-days-used ledger (The Vigil)."""
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+
+    def _mark(d):
+        if today not in d["days"]:
+            d["days"].append(today)
+    _telem_mutate(out_dir, _mark)
+
+
+def telemetry_metrics(out_dir):
+    """Flatten the telemetry store into the achievement metric namespace.
+    Counters/maxima pass through, sets become cardinalities, flags become 0/1."""
+    d = load_telemetry(out_dir)
+    m = {}
+    for src in (d["counters"], d["maxima"]):
+        for k, v in src.items():
+            try:
+                m[k] = int(v or 0)
+            except (TypeError, ValueError):
+                m[k] = 0
+    sets = d["sets"]
+
+    def _card(key):                 # hostile-but-valid JSON must not len()-crash
+        v = sets.get(key)
+        return len(v) if isinstance(v, list) else 0
+    m["video_modes_used"] = _card("video_modes")
+    m["tools_used"] = _card("tools")
+    m["lora_distinct"] = _card("loras")
+    m["enhance_workflows_distinct"] = _card("enhance_workflows")
+    for k, v in d["flags"].items():
+        m[k] = 1 if v else 0
+    m["days_used"] = len(d["days"])
+    return m
+
+
+def sweep_telemetry(out_dir):
+    """Set the state-derived feat flags whose 'event' may predate the telemetry
+    layer: a custom mark in branding/ (Under the Hood) and the eclipse mark
+    animation (Eclipse). Once set they stay set. Cheap; called by the API."""
+    try:
+        if list_marks(out_dir):
+            telem_flag("branding_custom_file", out_dir=out_dir)
+        if load_branding(out_dir).get("anim") == "eclipse":
+            telem_flag("eclipse_anim_triggered", out_dir=out_dir)
+    except Exception:
+        pass
 
 
 def top_published_rows(db_path, limit=12):
@@ -965,6 +1975,8 @@ def collection_health(out_dir, db_path):
     from collections import defaultdict, Counter
     gallery_dir = out_dir / "gallery"
     quarantine_dir = out_dir / "_duplicates"
+    deleted_dir = out_dir / DELETED_DIRNAME
+    branding_dir = out_dir / "branding"
 
     def _under(p, parent):
         try:
@@ -988,7 +2000,8 @@ def collection_health(out_dir, db_path):
         is_img = ext in _IMAGE_EXTS
         if (not is_img and ext not in _video_exts) or not p.is_file():
             continue
-        if p.name.endswith(".part") or _under(p, gallery_dir) or _under(p, quarantine_dir):
+        if (p.name.endswith(".part") or _under(p, gallery_dir) or _under(p, quarantine_dir)
+                or _under(p, deleted_dir) or _under(p, branding_dir)):
             continue
         rel = p.relative_to(out_dir)
         on_disk_rels.add(str(rel).replace("\\", "/"))
@@ -1282,11 +2295,91 @@ def make_thumbnail(img_path, thumb_path):
         return False
 
 
+def make_video_thumbnail(video_path, thumb_path):
+    """Poster fallback for videos PixAI gave no poster frame: extract an early
+    frame via ffmpeg (already a dependency for Loom export), then run it through
+    the SAME Pillow thumbnail path as images so size/quality stay uniform.
+    Returns False (never raises) when ffmpeg is missing or the extract fails."""
+    import shutil as _sh
+    import subprocess
+    import tempfile
+    if Image is None or not _sh.which("ffmpeg"):
+        return False
+    tmp = None
+    try:
+        fd, tmp = tempfile.mkstemp(suffix=".jpg")
+        os.close(fd)
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5",
+             "-i", str(video_path), "-frames:v", "1", tmp],
+            capture_output=True, timeout=90, creationflags=_NO_WINDOW)
+        if r.returncode != 0 or not os.path.getsize(tmp):
+            # clips shorter than the seek point: take the literal first frame
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error",
+                 "-i", str(video_path), "-frames:v", "1", tmp],
+                capture_output=True, timeout=60, creationflags=_NO_WINDOW)
+        if r.returncode != 0 or not os.path.getsize(tmp):
+            return False
+        return make_thumbnail(Path(tmp), thumb_path)
+    except Exception:
+        return False
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def probe_has_audio(path, timeout=15):
+    """True if the media file has at least one audio stream (ffprobe). Fails soft to
+    False (never raises) -- a probe failure means the Loom export treats the clip as
+    silent and pads it, which is safe; it must never crash the export."""
+    import shutil as _sh
+    import subprocess
+    if not _sh.which("ffprobe"):
+        return False
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+             "stream=index", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=timeout,
+            creationflags=_NO_WINDOW)
+        return bool(r.stdout.strip())
+    except Exception:
+        return False
+
+
+def probe_duration(path, timeout=15):
+    """Real duration in seconds via ffprobe, or None on failure (missing ffprobe,
+    unreadable file, non-numeric output). Never raises."""
+    import shutil as _sh
+    import subprocess
+    if not _sh.which("ffprobe"):
+        return None
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=timeout,
+            creationflags=_NO_WINDOW)
+        return float(r.stdout.strip())
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None
+
+
 def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8):
     """Generate JPEG thumbnails for rows that have a file. CPU-bound (Pillow),
     so a thread pool gives a real multi-core speedup (Pillow releases the GIL
     during decode/encode). workers<=1 runs serially. Each worker writes a distinct
-    thumb file; progress is reported on the calling thread."""
+    thumb file; progress is reported on the calling thread.
+
+    Videos are included ONLY when their thumb is missing (the collected PixAI
+    poster made it already when one existed): a poster-less video gets a local
+    ffmpeg frame-extract instead of staying blank forever. `force` deliberately
+    does NOT overwrite an existing video thumb -- the poster came from the
+    network and can't be regenerated from the local file."""
     if Image is None:
         print("Warning: Pillow not installed -- thumbnails will not be generated.")
         return
@@ -1294,17 +2387,24 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     done = 0
     work = []
     for row in rows:
-        if not row.get("filename") or row.get("is_video") == "1":
-            continue  # videos have no still of their own; poster_media_id covers it
+        if not row.get("filename"):
+            continue
+        is_vid = row.get("is_video") == "1"
         total += 1
         thumb_path = thumb_dir / "{}.jpg".format(row["media_id"])
-        if not force and thumb_path.exists():
+        if thumb_path.exists() and (is_vid or not force):
             done += 1
             continue
-        work.append((row["media_id"], thumb_path, row.get("filename")))
+        work.append((row["media_id"], thumb_path, row.get("filename"), is_vid))
 
     def _one(item):
-        mid, thumb_path, filename = item
+        mid, thumb_path, filename, is_vid = item
+        if is_vid:
+            vp = Path(out_dir) / (filename or "")
+            if not vp.exists():
+                m = find_files_for_media_id(Path(out_dir), mid)
+                vp = m[0] if m else None
+            return bool(vp and make_video_thumbnail(vp, thumb_path))
         img_path = find_image_file(out_dir, mid, filename)
         return bool(img_path and make_thumbnail(img_path, thumb_path))
 
@@ -1358,6 +2458,9 @@ DESIGN_TOKENS_CSS = r"""
        highlight (Nelnamara's gems), gold filigree is rare. */
     --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
     --purple-deep: #33236d; --purple-bright: #643aac;
+    /* Feat tier: gunmetal band + ruby glow (the agreed 5th tier -- NOT pink). */
+    --gunmetal: #8a93a2; --gunmetal-deep: #4a515c;
+    --ruby: #e0355e; --ruby-deep: #a11238;
   }
   /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
      the meaningful subset of the palette; everything else inherits :root. Applied
@@ -1405,7 +2508,7 @@ ENHANCE_PLUGINS = {
 # calls to paint) and, per the tool's own integration notes, swaps window.storage onto
 # the gallery backend so a board persists server-side (shared across devices) instead
 # of per-browser localStorage.
-LOOM_PAGE = r"""<!DOCTYPE html>
+_LOOM_SHELL = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Loom - Moonglade Athenaeum</title>
@@ -1415,13 +2518,39 @@ try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.docu
 <style>
 __DESIGN_TOKENS__
 body { background: var(--base); margin: 0; }
+/* The shared Job Tracker (static/mg-notify.js) defaults #jobs-fab/#jobs-tray to
+   bottom:14px;left:14px -- fine on the gallery's own layout, but in the Loom the left Cast
+   panel's own "+ add from gallery"/"Import collection" buttons live at the BOTTOM of that
+   same scrollable rail. Confirmed via live measurement 2026-07-18: an open (even empty) tray
+   overlaps the top ~13px of those buttons once the panel is scrolled to its end -- worse with
+   real jobs in the tray (it grows up to 600px tall). Shifted up just enough to clear that
+   fixed ~70px control strip. No selector scoping needed -- this whole <style> block only ever
+   ships inside _LOOM_SHELL, never the gallery's own page, so it's already Loom-exclusive by
+   virtue of which page includes it (#jobs-fab/#jobs-tray are siblings of #root in this shell's
+   body, not descendants of anything React renders, so a .sb-root-scoped selector couldn't
+   have matched them anyway -- confirmed by testing that exact approach first and finding it
+   silently did nothing). Repositioning left<->right instead of shifting up was considered and
+   rejected -- the Generate drawer panel on the right is equally wide (560px) and would risk
+   the identical collision with ITS OWN bottom controls instead of solving anything.
+   !important is deliberate, not laziness: mg-notify.js injects its own <style> via JS at
+   script-load time, which lands LATER in the cascade than this static block regardless of
+   source order (confirmed live -- a plain same-specificity override here was silently losing
+   the tie-break), so !important is the only way to reliably win without depending on load
+   timing that could shift later. */
+#jobs-fab, #jobs-tray { bottom: 88px !important; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
-<script src="/loom/vendor/babel.min.js"></script>
+__BABEL_LIB_TAG__
 <script src="/static/picker-core.js"></script>
+<script src="/static/mg-model-picker.js"></script>
+<script src="/static/mg-gallery-picker.js"></script>
+<script src="/static/mg-generate-drawer.js"></script>
+<script src="/static/mg-notify.js"></script>
 </head><body>
 <div id="root"></div>
+<div id="jobs-fab" onclick="JobsCard.open()" title="Activity"><span class="jf-dot"></span><span class="jf-badge" id="jobs-fab-badge"></span><span>Activity</span></div>
+<div id="jobs-tray" aria-label="Job activity"></div>
 <script>
 window.storage = {
   get:function(k){ return fetch('/api/loom/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },
@@ -1430,12 +2559,8 @@ window.storage = {
   delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
 };
 </script>
-<script type="text/babel" data-presets="react">
-const { useState, useEffect, useRef, useCallback } = React;
-__JSX__
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-</script>
-<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex'"
+__RUNTIME_SCRIPT_BLOCK__
+<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'docs'})})}catch(e){}"
   style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="How The Loom works">?</button>
 <div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
@@ -1453,7 +2578,39 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     <p style="color:var(--subtext);">Full manual: <code>docs/LOOM.md</code> in the repo.</p>
   </div>
 </div>
-</body></html>""".replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS)
+</body></html>"""
+
+# Two delivery paths for the same master-storyboard.jsx, sharing everything except
+# the runtime-script block (Phase 1 tooling pass, 2026-07-16):
+#
+#   LOOM_PAGE        -- DEFAULT. Loads babel.min.js and transpiles master-storyboard.jsx
+#                       (+ loom/src/loom-core.js, inlined ahead of it) client-side, as
+#                       it always has. This is the trusted fallback; it is NOT being
+#                       removed or downgraded by the new path below.
+#   LOOM_PAGE_BUNDLE -- NEW, opt-in via /loom?bundle=1. Loads the pre-transpiled
+#                       loom/dist/master-storyboard.bundle.js (built by
+#                       `npm run build` in loom/, via esbuild) instead -- no Babel,
+#                       no client-side transpile. Only served if that file actually
+#                       exists on disk (see loom() below); otherwise /loom?bundle=1
+#                       silently falls back to LOOM_PAGE so a not-yet-built checkout
+#                       never breaks.
+LOOM_PAGE = (_LOOM_SHELL
+    .replace("__BABEL_LIB_TAG__", '<script src="/loom/vendor/babel.min.js"></script>')
+    .replace("__RUNTIME_SCRIPT_BLOCK__",
+             '<script type="text/babel" data-presets="react">\n'
+             'const { useState, useEffect, useRef, useCallback, useMemo } = React;\n'
+             '__JSX__\n'
+             'ReactDOM.createRoot(document.getElementById("root")).render(<App />);\n'
+             '</script>')
+    .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS))
+
+LOOM_PAGE_BUNDLE = (_LOOM_SHELL
+    .replace("__BABEL_LIB_TAG__", "")   # pre-transpiled bundle -- no Babel needed
+    .replace("__RUNTIME_SCRIPT_BLOCK__",
+             '<script src="/loom/dist/master-storyboard.bundle.js"></script>\n'
+             '<script>ReactDOM.createRoot(document.getElementById("root"))'
+             '.render(React.createElement(LoomBundle.default));</script>')
+    .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS))
 
 
 def _build_stamp():
@@ -1471,7 +2628,8 @@ def _build_stamp():
         sha = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=str(Path(__file__).resolve().parent),
-            stderr=subprocess.DEVNULL, timeout=4).decode().strip()
+            stderr=subprocess.DEVNULL, timeout=4,
+            creationflags=_NO_WINDOW).decode().strip()
     except Exception:
         sha = ""
     return "v{}".format(ver) + (" · {}".format(sha) if sha else "")
@@ -1496,9 +2654,30 @@ def _schedule_server_exit(code):
 
 def create_app(out_dir: Path):
     app = Flask(__name__)
+
+    # ---- Session-based auth: secret key + cookie hardening ------------------
+    # AUTH_SECRET_KEY is generated once (secrets.token_hex(32)) and persisted to
+    # config.json by get_or_create_secret_key() -- reused on every subsequent start
+    # so restarting the server doesn't silently log everyone out. See
+    # _is_authorized_request() below for the gate this session backs, and
+    # /login /logout for the routes that populate it.
+    import pixai_gallery_backup as _core_auth
+    app.secret_key = _core_auth.get_or_create_secret_key()
+    app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS can never read the session cookie
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # blocks cross-site POST/nav CSRF vectors
+    # SESSION_COOKIE_SECURE is deliberately left False: this app is typically served
+    # over plain HTTP on a LAN (`python pixai_gallery.py`, no TLS terminator). A Secure
+    # cookie would just get silently dropped by the browser over http:// and break
+    # login entirely. Real hardening of this flag needs HTTPS, which means putting a
+    # reverse proxy (nginx/Caddy) in front of this process -- out of scope for a
+    # LAN-only tool. This is a known, accepted tradeoff, not an oversight.
+    import datetime as _dt
+    app.permanent_session_lifetime = _dt.timedelta(days=30)
+
     db_path = out_dir / "catalog.db"
     build_stamp = _build_stamp()
     init_db(db_path)
+    set_telemetry_out(out_dir)     # bare telem_* bumps land in this install's ledger
     backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
@@ -1559,6 +2738,9 @@ def create_app(out_dir: Path):
         # --- destructive: require confirm=true ---
         "organize":      {"args": ["--organize"], "label": "Organize into month folders", "destructive": True},
         "dedup-apply":   {"args": ["--dedup", "--apply"], "label": "Dedup — quarantine dupes to _duplicates/", "destructive": True},
+        "rebuild-thumbs": {"args": ["--rebuild-thumbs"],
+                           "label": "Rebuild ALL thumbnails — uniform quality + video posters",
+                           "destructive": True},
     }
 
     def _panel_reader(proc):
@@ -1615,7 +2797,8 @@ def create_app(out_dir: Path):
         env = dict(os.environ, MOONGLADE_PROGRESS="1")
         proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1,
-                                encoding="utf-8", errors="replace", env=env)
+                                encoding="utf-8", errors="replace", env=env,
+                                creationflags=_NO_WINDOW)
         import uuid
         job_id = "panel-" + uuid.uuid4().hex[:12]
         with _panel_lock:
@@ -1903,8 +3086,8 @@ __DESIGN_TOKENS__
   .ver-badge { font-size: 10px; font-weight: 500; color: var(--overlay0); font-family: ui-monospace, monospace; border: 1px solid var(--surface1); border-radius: 5px; padding: 1px 6px; vertical-align: middle; margin-left: 4px; letter-spacing: 0; }
   .header-stats { color: var(--subtext); font-size: 12px; } .header-stats b { color: var(--text); }
   .gen-live { color: var(--lavender); margin-left: 8px; display:inline-flex; align-items:center; }
-  .gen-nel-wrap{position:relative;display:inline-block;width:22px;height:22px;margin-right:5px;vertical-align:middle;flex:none;}
-  .gen-nel{position:absolute;inset:3px;width:16px;height:16px;border-radius:50%;object-fit:cover;object-position:60% 32%;}
+  .gen-nel-wrap{position:relative;display:inline-block;width:34px;height:34px;margin-right:6px;vertical-align:middle;flex:none;}
+  .gen-nel{position:absolute;inset:5px;width:24px;height:24px;border-radius:50%;object-fit:cover;object-position:60% 32%;animation:gen-spin 1.6s linear infinite;}
   .gen-ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
   @keyframes gen-spin{to{transform:rotate(360deg);}}
   .cover-badge { margin-left: 8px; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--surface1); cursor: default; }
@@ -1932,13 +3115,43 @@ __DESIGN_TOKENS__
   .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(79,201,154,.25); }
   .filters label { color: var(--subtext); font-size: 12px; }
   .filter-toggle { display: none; }
+  /* ---- BASE rules for the header nav, the LAN badge and the setup wizard ----
+     These eleven were sitting INSIDE the @media (max-width: 680px) block below,
+     so they applied ONLY on narrow viewports and were entirely absent on desktop
+     -- exactly inverted. The indentation gave it away: the media query's own
+     rules are at 4 spaces, this block was at 2, and .filter-toggle resumed at 4.
+     Real consequences, all confirmed by rendering the page at both widths:
+       - the first-run setup wizard (the FIRST thing a new user sees) had no
+         card, no gold rule, and raw white browser inputs on a near-black page
+       - the Panel's Add-user form rendered the same three raw white inputs
+       - .setup-msg.err lost `color: var(--red)`, so "Invalid username or
+         password" and the rate-limit lockout notice rendered in ordinary body
+         text, visually identical to the instructions above them
+       - .setup-row input's `flex: 1 1 320px` is a HORIZONTAL basis; in a
+         column-direction container it becomes a 320px HEIGHT, so inputs
+         rendered ~8x too tall on phones
+     Found by a browser crawl that looked at screenshots. No test caught it:
+     every response was a correct 200 and no console error ever fired. */
+  .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .lan-note { font-size: 11.5px; color: var(--overlay0); font-style: italic; padding: 5px 10px; border: 1px dashed var(--surface1); border-radius: 7px; }
+  .setup-wizard { margin: 10px 14px 0; }
+  .setup-step { background: var(--surface0); border: 1px solid var(--surface1); border-left: 3px solid var(--gold); border-radius: 10px; padding: 14px 18px; color: var(--text); font-size: 13.5px; line-height: 1.5; }
+  .setup-step a { color: var(--accent); }
+  .setup-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .setup-row input { flex: 1 1 320px; min-width: 220px; background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+  .setup-row input:focus { outline: none; border-color: var(--accent); }
+  .setup-msg { display: inline-block; margin-top: 8px; font-size: 12.5px; }
+  .setup-msg.err { color: var(--red); }
+  .setup-msg.ok { color: var(--green); }
   /* Mobile: collapse the filter bar behind a toggle so the grid leads. */
   @media (max-width: 680px) {
     header h1 { font-size: 16px; }
     header.bannered { padding: 0 14px 10px; }
     header .back-link { font-size: 12px; }
-  .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-  .lan-note { font-size: 11.5px; color: var(--overlay0); font-style: italic; padding: 5px 10px; border: 1px dashed var(--surface1); border-radius: 7px; }
+    /* A column-direction container turns .setup-row input's 320px flex-basis
+       into a height. Reset the basis here so narrow viewports stack normally. */
+    .setup-row { flex-direction: column; align-items: stretch; }
+    .setup-row input { flex: 0 0 auto; min-width: 0; width: 100%; box-sizing: border-box; }
     .filter-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 12px 0; }
     .filters { display: none; flex-direction: column; align-items: stretch; padding: 10px 12px; }
     .filters.open { display: flex; }
@@ -1963,6 +3176,9 @@ __DESIGN_TOKENS__
     .head-nav::-webkit-scrollbar { display: none; }
     .head-nav > * { flex: 0 0 auto; }
     .head-nav .btn, .acct-chip, .acct-claim { min-height: 40px; display: inline-flex; align-items: center; }
+    /* The Loom is a dense multi-panel desktop/tablet tool -- not viable on a phone screen.
+       Hidden here (phone-only breakpoint), stays visible at 481px+ incl. the tablet range. */
+    .head-nav .b-loom { display: none; }
 
     /* GRID: force a comfortable 2-up; ignore a too-large saved --thumb (else 1 giant column / overflow). */
     .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px; padding: 10px 10px; }
@@ -2003,6 +3219,18 @@ __DESIGN_TOKENS__
     .lb-bar { flex-wrap: wrap; padding: 8px 10px; }
     #lb-caption { max-width: 100%; order: 3; flex-basis: 100%; font-size: 11px; }
     .lb-actions .btn { min-height: 40px; padding: 8px 12px; }
+
+    /* FILTERS as a bottom sheet (owner: "fills a ton of the screen" / "bottom slider is
+       the way on an iphone"). Reuses the existing toggleFilters() + .open class unchanged --
+       only what .open MEANS visually changes, from an inline expand to a slide-up sheet. */
+    .filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 220;
+      max-height: 78vh; overflow-y: auto; background: var(--mantle); border-top: 1px solid var(--surface1);
+      border-radius: 16px 16px 0 0; box-shadow: 0 -14px 40px rgba(0,0,0,.5);
+      transform: translateY(100%); visibility: hidden; transition: transform .25s ease, visibility 0s linear .25s; }
+    .filters.open { transform: translateY(0); visibility: visible; transition: transform .25s ease; }
+    .filter-scrim { position: fixed; inset: 0; z-index: 219; background: rgba(0,0,0,.55);
+      opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+    .filters.open ~ .filter-scrim { opacity: 1; pointer-events: auto; }
   }
   /* Tablet: keep the filter bar visible but let wide text inputs shrink so the
      row wraps tidily instead of running off-screen. */
@@ -2106,6 +3334,9 @@ __DESIGN_TOKENS__
   .lb-prev { left: 14px; } .lb-next { right: 14px; }
   @media (max-width: 680px) { .lb-nav { padding: 8px 12px; font-size: 22px; } #lb-caption { max-width: 40%; } }
   .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--surface0); }
+  /* Panoramic sources (progress-bar/frame textures, letterboxed banners...) lose almost all
+     their content to a square center-crop -- show those uncropped instead, letterboxed. */
+  .card img.wide-thumb { object-fit: contain; }
   .card .no-thumb { width: 100%; aspect-ratio: 1; background: var(--surface0); display: flex; align-items: center; justify-content: center; color: var(--overlay0); font-size: 11px; }
   .card .meta { padding: 6px 8px; }
   .card .meta .title { font-size: 12px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2269,6 +3500,8 @@ document.addEventListener('DOMContentLoaded', function() {
     pos = (e.keyCode===seq[pos]) ? pos+1 : (e.keyCode===seq[0] ? 1 : 0);
     if(pos!==seq.length) return;
     pos=0; if(busy) return; busy=true;
+    try{ fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({event:'konami'})}); }catch(err){}   // The Konami Code feat
     var g=['✦','✧','★','✪','✺'];
     for(var i=0;i<46;i++){ var s=document.createElement('div'); s.className='ee-star';
       s.textContent=g[i%g.length];
@@ -2328,9 +3561,11 @@ document.addEventListener('DOMContentLoaded', function() {
     <span id="gen-live" class="gen-live" style="display:none;"></span>
   </span>
   <div class="head-nav">
-    {# Owner-only surfaces (generation, The Loom, Panel, balance) are localhost-gated -- on a
-       LAN-served instance they'd 403 for other devices, so hide them there and show a small
-       read-only note instead of dead buttons. Browse/curate + community stay available. #}
+    {# Owner-level surfaces (generation, The Loom, Panel, balance) are gated to
+       _is_authorized_request() -- a logged-in session ONLY, no localhost bypass
+       (see /login and that function's docstring). Hide them for anyone else and
+       show a small read-only note instead of dead buttons. Browse/curate +
+       community stay available to everyone. #}
     {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
@@ -2343,11 +3578,42 @@ document.addEventListener('DOMContentLoaded', function() {
     {% if is_local %}
     <a class="btn b-panel" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
     {% else %}
-    <span class="lan-note" title="Creation &amp; maintenance tools live on the owner's machine (localhost).">&#128065; read-only LAN view</span>
+    <span class="lan-note" title="Creation &amp; maintenance tools live on the owner's machine, or need you to sign in.">&#128065; read-only LAN view</span>
     {% endif %}
     <a class="btn b-health" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
+    {% if logged_in_user %}
+    <a class="btn" href="{{ url_for('logout') }}" title="Signed in as {{ logged_in_user }} — sign out">&#128274; Sign out</a>
+    {% endif %}
   </div>
 </header>
+
+{% if needs_key %}
+<div class="setup-wizard" id="setup-wizard">
+  <div class="setup-step">
+    <b>Welcome to Moonglade Athenaeum.</b> Paste your PixAI API key to get started —
+    <a href="https://platform.pixai.art" target="_blank" rel="noopener">generate one at platform.pixai.art</a>
+    (free, lifetime up to ~2 years). Nothing else is required; your account id and everything
+    else is resolved from it.
+    <div class="setup-row">
+      <input type="password" id="setup-key-input" placeholder="Your PixAI API key"
+             autocomplete="off" onkeydown="if(event.key==='Enter')Setup.saveKey()">
+      <button type="button" class="btn btn-primary" onclick="Setup.saveKey()">Connect</button>
+    </div>
+    <span id="setup-key-msg" class="setup-msg"></span>
+  </div>
+</div>
+{% elif catalog_empty %}
+<div class="setup-wizard" id="setup-wizard">
+  <div class="setup-step">
+    <b>You're connected.</b> Run your first sync to pull your PixAI generation history into
+    this gallery — full resolution, searchable, yours to keep.
+    <div class="setup-row">
+      <button type="button" class="btn btn-primary" onclick="Setup.firstSync()">&#8635; Sync now</button>
+    </div>
+    <span id="setup-sync-msg" class="setup-msg"></span>
+  </div>
+</div>
+{% endif %}
 
 <button type="button" class="filter-toggle btn" onclick="toggleFilters()"
         aria-expanded="false">Filters &#9662;</button>
@@ -2355,9 +3621,9 @@ document.addEventListener('DOMContentLoaded', function() {
 {% set adv_active = model_filter or lora_filter or date_from or date_to or batch_filter or rating_min or art_tag or source_filter or published_only %}
 <div class="filters">
   <div class="f-grow">
-    <label>Search prompt</label><br>
-    <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard…"
-           title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf">
+    <label>Search prompt / task or media id</label><br>
+    <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard, or an id…"
+           title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf. Also matches task id / media id.">
   </div>
   <div>
     <label>Media</label><br>
@@ -2413,6 +3679,7 @@ document.addEventListener('DOMContentLoaded', function() {
       aria-expanded="{{ 'true' if adv_active else 'false' }}">{{ 'Less ▴' if adv_active else 'More ▾' }}</button>
   </div>
 </div>
+<div class="filter-scrim" onclick="toggleFilters()"></div>
 <div class="filters filters-adv" id="filters-adv" {% if not adv_active %}style="display:none;"{% endif %}>
   <div>
     <label>Model</label><br>
@@ -2550,7 +3817,9 @@ document.addEventListener('DOMContentLoaded', function() {
       <button onclick="bulkReplacePrompt();closeActionsMenu()">Find / replace in prompts</button>
       <div class="am-div"></div>
       <button class="am-danger" onclick="confirmBulkDelete();closeActionsMenu()" title="Remove from this local catalog only (keeps the cloud task)">Delete locally</button>
+      {% if can_delete_cloud %}
       <button class="am-danger" onclick="confirmBulkDeleteCloud();closeActionsMenu()" title="Delete the whole TASK from your PixAI account AND locally (irreversible)">Delete from PixAI</button>
+      {% endif %}
     </div>
   </div>
   <!-- View controls (right) -->
@@ -2579,7 +3848,7 @@ document.addEventListener('DOMContentLoaded', function() {
          data-idx="{{ loop.index0 }}" onclick="return openLightbox(event, {{ loop.index0 }})"></a>
       {% if row._has_thumb %}
       <img src="{{ url_for('thumb', media_id=row._thumb_mid) }}" loading="lazy"
-           decoding="async" onload="this.classList.add('loaded')"
+           decoding="async" onload="this.classList.add('loaded');var r=this.naturalWidth/(this.naturalHeight||1);if(r>2.2||r<0.45)this.classList.add('wide-thumb')"
            alt="{{ row.prompt_preview[:60] }}">
       {% else %}
       <div class="no-thumb">no preview</div>
@@ -3263,7 +4532,7 @@ document.addEventListener('DOMContentLoaded', function(){
   </div>
   <div class="gen-body">
     <div class="gen-seg" id="gen-mode-seg" style="margin-bottom:12px;">
-      <button id="gm-generate" class="on" onclick="Gen.setMode('generate')">Generate</button>
+      <button id="gm-generate" class="on" onclick="Gen.setMode('generate')">Image</button>
       <button id="gm-edit" onclick="Gen.setMode('edit')">Edit</button>
       <button id="gm-video" onclick="Gen.setMode('video')">Video</button>
     </div>
@@ -3296,8 +4565,20 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <textarea id="gen-prompt" class="gen-ta" rows="3" placeholder="Describe your image&hellip;"></textarea>
       <details style="margin-top:6px;">
-        <summary style="cursor:pointer;color:var(--subtext);font-size:11px;">Negative prompt</summary>
+        <summary style="cursor:pointer;color:var(--subtext);font-size:11px;">Advanced</summary>
         <textarea id="gen-neg" class="gen-ta" rows="2" placeholder="lowres, text, watermark&hellip;" style="margin-top:5px;"></textarea>
+        <div style="display:flex;gap:10px;margin-top:6px;">
+          <label style="font-size:11px;color:var(--subtext);flex:1;">Steps
+            <input type="number" id="gen-steps" min="1" max="150" step="1" value="25" style="width:100%;margin-top:2px;">
+          </label>
+          <label style="font-size:11px;color:var(--subtext);flex:1;">CFG scale
+            <input type="number" id="gen-cfg" min="1" max="30" step="0.5" value="7" style="width:100%;margin-top:2px;">
+          </label>
+        </div>
+        <div id="gen-modeldefaults" style="display:none;justify-content:space-between;align-items:center;margin-top:6px;">
+          <span style="font-size:10.5px;color:var(--overlay0);">&#10003; using this model's tuned preset</span>
+          <button type="button" class="snip-btn" onclick="Gen.resetModelDefaults()">&#8630; reset</button>
+        </div>
       </details>
       <div class="gen-lbl">Aspect</div>
       <div class="gen-aspects" id="gen-aspects">
@@ -3455,7 +4736,7 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <label class="gen-check"><input type="checkbox" id="video-audio" onchange="Gen.videoAudioToggle()"> Generate audio <span style="color:var(--overlay0);">(V4.0 / V3.2 &middot; spoken lines in the prompt become voiceover)</span></label>
       <div id="video-lang-wrap" style="display:none;margin-top:4px;"><div class="gen-lbl">Audio language</div>
-        <select id="video-lang" class="gen-sel"><option value="english">English</option><option value="japanese">Japanese</option><option value="chinese">Chinese</option><option value="korean">Korean</option></select></div>
+        <select id="video-lang" class="gen-sel"><option value="english">English</option><option value="japanese">Japanese</option><option value="chinese">Chinese</option><option value="korean">Korean</option><option value="none">SE only (no dialogue)</option></select></div>
       <div class="gen-cost" id="video-cost" style="margin-top:10px;">Pick a source image to see the cost.</div>
       <button id="video-go" class="gen-go" onclick="Gen.videoGenerate()">Generate video</button>
       <div id="video-result" class="gen-result" style="display:none;"></div>
@@ -3537,14 +4818,30 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="jobs-tray" aria-label="Job activity"></div>
 <div id="mg-toasts" aria-live="polite"></div>
 <div id="snip-menu"></div>
-<div id="ach-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
-  <div class="ach-panel" role="dialog" aria-label="Achievements and skins">
-    <button type="button" class="ach-x" onclick="Ach.close()" aria-label="Close">&times;</button>
-    <div class="ach-htitle">&#127942; Achievements</div>
-    <div class="ach-hsub" id="ach-progress">&hellip;</div>
-    <div id="ach-grid" class="ach-grid"></div>
-    <div class="ach-skinhd">&#127912; Skins <span class="ach-skinnote">unlock more by earning epic feats</span></div>
-    <div id="ach-skins" class="ach-skins"></div>
+<div id="ach-modal" class="ach-modal ach-hall" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
+  <div class="ach-panel" role="dialog" aria-label="Trophy Hall">
+    <div class="hall-head">
+      <div class="hall-title">&#127942; <b>Trophy Hall</b>
+        <img class="ach-nar" id="ach-nar" src="/branding/mascots/gen_nel.png" title="the narrator"
+          alt="the narrator" onclick="Ach.poke()" onerror="this.remove()"><span id="ach-unleash-slot"></span></div>
+      <div class="hall-score" id="ach-progress">&hellip;</div>
+      <input id="ach-search" class="hall-search" type="search" placeholder="Search&hellip;"
+        oninput="Ach.search(this.value)" aria-label="Search achievements">
+      <button type="button" class="ach-x" onclick="Ach.close()" aria-label="Close">&times;</button>
+    </div>
+    <div class="hall-tabs" id="ach-tabs">
+      <button type="button" class="htab on" data-tab="summary" onclick="Ach.tab('summary')">Summary</button>
+      <button type="button" class="htab" data-tab="all" onclick="Ach.tab('all')">All</button>
+      <button type="button" class="htab" data-tab="stats" onclick="Ach.tab('stats')">Statistics</button>
+    </div>
+    <div class="hall-body">
+      <div class="hall-main" id="ach-main">
+        <div id="ach-summary" class="hall-view"></div>
+        <div id="ach-grid" class="ach-grid hall-view" style="display:none"></div>
+        <div id="ach-stats" class="hall-view" style="display:none"></div>
+      </div>
+      <aside class="hall-rail" id="ach-rail"></aside>
+    </div>
   </div>
 </div>
 <div id="contest-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Contests.close()">
@@ -3578,7 +4875,8 @@ document.addEventListener('DOMContentLoaded', function(){
   .art-card .ast{display:flex;gap:9px;font-size:11px;color:var(--subtext);margin-top:4px;font-variant-numeric:tabular-nums;}
   .art-card .ast .v{color:var(--lavender);}
   .art-rank{font-size:11px;font-weight:700;color:var(--overlay0);width:18px;text-align:right;flex:0 0 auto;}
-  .ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}
+  /* .ach-modal (shared base modal chrome for #ach-modal/#contest-modal/#art-modal) now lives
+     in static/mg-notify.js, loaded via <script src> below -- do not re-add it here. */
   .ct-sect{font-size:13px;font-weight:700;color:var(--text);margin:18px 0 9px;display:flex;align-items:center;gap:7px;}
   .ct-sect .ct-count{font-size:10.5px;font-weight:500;color:var(--overlay0);}
   .ct-sect.official{color:var(--gold);}
@@ -3597,89 +4895,9 @@ document.addEventListener('DOMContentLoaded', function(){
   .ct-when{font-size:10.5px;color:var(--subtext);margin-top:auto;font-variant-numeric:tabular-nums;}
   .ct-foot{margin-top:20px;font-size:11px;color:var(--overlay0);font-style:italic;}
   .ct-foot a{color:var(--lavender);font-style:normal;}
-  .ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}
-  .ach-modal.open{display:flex;}
-  .ach-panel{position:relative;width:760px;max-width:96vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:16px;box-shadow:0 30px 90px rgba(0,0,0,.6);padding:24px 26px 28px;}
-  .ach-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--subtext);font-size:26px;line-height:1;cursor:pointer;}
-  .ach-x:hover{color:var(--text);}
-  .ach-htitle{font-size:21px;font-weight:700;color:var(--text);letter-spacing:.01em;}
-  .ach-hsub{font-size:12px;color:var(--subtext);margin-top:3px;}
-  .ach-hsub b{color:var(--lavender);}
-  .ach-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:11px;margin-top:18px;}
-  .ach-card{display:flex;gap:11px;align-items:flex-start;background:var(--surface0);border:1px solid var(--surface1);border-left-width:3px;border-radius:11px;padding:11px 12px;transition:transform .12s,box-shadow .12s;}
-  .ach-card.locked{opacity:.62;}
-  .ach-card.earned:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.35);}
-  .ach-card .ico{position:relative;width:46px;height:46px;font-size:27px;line-height:1;filter:grayscale(1) brightness(.8);flex-shrink:0;display:flex;align-items:center;justify-content:center;}
-  .ach-card.earned .ico{filter:none;}
-  .ach-card .ico .ico-badge{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
-  .ach-card.clickable{cursor:pointer;}
-  .ach-card .nm{font-size:13.5px;font-weight:650;color:var(--text);}
-  .ach-card .ds{font-size:11px;color:var(--subtext);margin-top:2px;line-height:1.35;}
-  .ach-card .tier{font-size:9px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-top:5px;display:inline-block;}
-  .ach-card .unlk{font-size:10px;color:var(--gold);margin-top:4px;}
-  .ach-bar{height:5px;border-radius:3px;background:var(--surface1);margin-top:6px;overflow:hidden;}
-  .ach-bar i{display:block;height:100%;background:var(--accent);border-radius:3px;}
-  .ach-bar+.ach-num{font-size:9.5px;color:var(--overlay0);margin-top:2px;font-variant-numeric:tabular-nums;}
-  .ach-card.t-common{border-left-color:#8a8298;} .ach-card.t-common .tier{color:#a9a1b8;}
-  .ach-card.t-rare{border-left-color:var(--blue);} .ach-card.t-rare .tier{color:var(--blue);}
-  .ach-card.t-epic{border-left-color:var(--purple-bright);} .ach-card.t-epic .tier{color:var(--mauve);}
-  .ach-card.t-legendary{border-left-color:var(--gold);} .ach-card.t-legendary .tier{color:var(--gold);}
-  .ach-card.earned.t-legendary{box-shadow:0 0 0 1px rgba(212,175,55,.35),0 0 22px rgba(212,175,55,.12);}
-  .ach-skinhd{font-size:15px;font-weight:700;color:var(--text);margin-top:24px;}
-  .ach-skinnote{font-size:10.5px;font-weight:400;color:var(--overlay0);margin-left:6px;}
-  .ach-skins{display:flex;flex-wrap:wrap;gap:10px;margin-top:11px;}
-  .ach-skin{width:150px;border:1px solid var(--surface1);border-radius:11px;padding:9px;cursor:pointer;background:var(--surface0);transition:border-color .12s,transform .12s;}
-  .ach-skin:hover{transform:translateY(-2px);}
-  .ach-skin.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
-  .ach-skin.locked{opacity:.5;cursor:not-allowed;}
-  .ach-skin .sw{height:34px;border-radius:7px;display:flex;overflow:hidden;margin-bottom:7px;}
-  .ach-skin .sw i{flex:1;}
-  .ach-skin .snm{font-size:12px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:5px;}
-  .ach-skin .sds{font-size:10px;color:var(--subtext);margin-top:2px;line-height:1.3;}
-  .ach-skin .slock{font-size:10px;color:var(--overlay0);}
-  .ach-toast{position:fixed;left:50%;top:22%;transform:translate(-50%,-50%);z-index:402;min-width:300px;max-width:90vw;background:var(--mantle);border:1px solid var(--gold);border-radius:14px;padding:16px 22px;box-shadow:0 0 70px rgba(212,175,55,.4);text-align:center;animation:ee-toast 6.5s ease forwards;}
-  .ach-toast .at-k{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--gold);}
-  .ach-toast .at-n{font-size:19px;font-weight:700;color:var(--text);margin-top:3px;}
-  .ach-toast .at-n .ai{margin-right:7px;}
-  .ach-toast .at-d{font-size:11.5px;color:var(--subtext);margin-top:4px;}
-  /* ---- the mid-screen achievement MOMENT (Nel presents; rarity-scaled) ---- */
-  .ach-moment{position:fixed;inset:0;z-index:430;display:flex;align-items:center;justify-content:center;}
-  .am-scrim{position:absolute;inset:0;background:radial-gradient(circle at 50% 48%,rgba(6,5,14,.45),rgba(6,5,14,.86));opacity:0;transition:opacity .4s;}
-  .ach-moment.go .am-scrim{opacity:1;}
-  .ach-moment.t-legendary .am-scrim{background:radial-gradient(circle at 50% 48%,rgba(40,28,6,.4),rgba(6,5,14,.92));}
-  .am-flash{position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 46%,rgba(255,241,205,.9),transparent 55%);}
-  .ach-moment.go .am-flash{animation:am-flash .8s ease-out;}
-  @keyframes am-flash{0%{opacity:0;transform:scale(.5);}16%{opacity:.9;}100%{opacity:0;transform:scale(1.5);}}
-  .am-stage{position:relative;z-index:2;text-align:center;display:flex;flex-direction:column;align-items:center;pointer-events:none;}
-  .am-badge{width:clamp(140px,22vw,220px);height:auto;transform:scale(.5);opacity:0;filter:drop-shadow(0 8px 26px rgba(0,0,0,.55));}
-  .ach-moment.go .am-badge{animation:am-pop .7s cubic-bezier(.18,.9,.2,1.15) .05s forwards;}
-  .ach-moment.leg .am-badge{width:clamp(180px,28vw,300px);}
-  @keyframes am-pop{0%{transform:scale(.5);opacity:0;}60%{transform:scale(1.1);opacity:1;}100%{transform:scale(1);opacity:1;}}
-  .am-nelwrap{position:absolute;right:4%;bottom:0;z-index:1;pointer-events:none;opacity:0;}
-  .am-nelwrap::before{content:"";position:absolute;left:50%;bottom:8%;width:128%;height:78%;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse at center,rgba(203,166,247,.55),rgba(226,181,61,.22) 42%,transparent 72%);filter:blur(16px);z-index:-1;}
-  .am-nel{max-height:min(46vh,340px);display:block;border:0;outline:0;background:none;filter:drop-shadow(0 8px 22px rgba(0,0,0,.55)) brightness(1.1) contrast(1.04);}
-  .ach-moment.go .am-nelwrap{animation:am-nel .6s cubic-bezier(.2,.8,.25,1) .15s forwards;}
-  @keyframes am-nel{from{opacity:0;transform:translateY(26px) scale(.92);}to{opacity:1;transform:none;}}
-  .am-eyebrow{font-size:12px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold);margin-top:16px;opacity:0;}
-  .am-name{font-size:30px;font-weight:700;color:#fff;line-height:1.1;opacity:0;text-wrap:balance;}
-  .am-desc{color:var(--subtext);font-size:14px;margin-top:5px;opacity:0;max-width:34ch;}
-  .am-tier{margin-top:10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;border:1px solid;border-radius:999px;padding:2px 11px;opacity:0;}
-  .ach-moment.go .am-eyebrow{animation:am-fade .5s ease .5s forwards;}
-  .ach-moment.go .am-name{animation:am-fade .5s ease .6s forwards;}
-  .ach-moment.go .am-desc{animation:am-fade .5s ease .72s forwards;}
-  .ach-moment.go .am-tier{animation:am-fade .5s ease .84s forwards;}
-  @keyframes am-fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
-  .ach-moment.out{opacity:0;transition:opacity .5s;}
-  .ach-moment.t-common .am-tier{color:#8fb3d9;border-color:#8fb3d9;}
-  .ach-moment.t-rare .am-tier{color:var(--blue,#8ab6f4);border-color:var(--blue,#8ab6f4);}
-  .ach-moment.t-epic .am-tier{color:var(--mauve);border-color:var(--mauve);}
-  .ach-moment.t-legendary .am-tier{color:var(--gold);border-color:var(--gold);}
-  .am-conf{position:absolute;top:-6%;width:7px;height:14px;border-radius:2px;z-index:1;pointer-events:none;animation:am-conffall linear forwards;}
-  @keyframes am-conffall{to{transform:translateY(112vh) rotate(720deg);opacity:.55;}}
-  @media (prefers-reduced-motion: reduce){ .ach-moment *{animation:none!important;} .am-badge,.am-nelwrap,.am-stage>*{opacity:1!important;transform:none!important;} }
 </style>
 <style>
-  #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:240px;max-width:340px;max-height:300px;overflow-y:auto;padding:5px;}
+  #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:220px;max-width:min(340px, calc(100vw - 16px));max-height:300px;overflow-y:auto;padding:5px;}
   #snip-menu .snip-head{display:flex;justify-content:space-between;align-items:center;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);padding:3px 6px 5px;}
   #snip-menu .snip-empty{color:var(--subtext);font-size:11.5px;padding:6px;}
   .snip-row{display:flex;gap:4px;align-items:center;}
@@ -3693,215 +4911,18 @@ document.addEventListener('DOMContentLoaded', function(){
   .acct-chip b{color:var(--text);} .acct-chip .cd{color:var(--lavender);}
   .acct-claim{font-size:12px;border:1px solid var(--emerald);background:rgba(166,227,161,.13);color:var(--emerald);border-radius:6px;padding:5px 11px;cursor:pointer;white-space:nowrap;}
   .acct-claim:hover{background:rgba(166,227,161,.24);}
-  /* ---- Jobs card: the activity tracker (bottom-left, always openable) ---- */
-  #jobs-fab{position:fixed;left:14px;bottom:14px;z-index:234;display:none;align-items:center;gap:7px;background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);color:var(--subtext);cursor:pointer;padding:7px 13px 7px 10px;font-size:11.5px;letter-spacing:.02em;transition:border-color .15s,color .15s;}
-  #jobs-fab.show{display:inline-flex;}
-  #jobs-fab:hover{border-color:var(--lavender);color:var(--text);}
-  #jobs-fab .jf-dot{width:8px;height:8px;border-radius:50%;background:var(--overlay0);flex:none;}
-  #jobs-fab.busy .jf-dot{background:var(--lavender);box-shadow:0 0 9px rgba(182,146,230,.8);animation:jf-pulse 1.6s ease-in-out infinite;}
-  #jobs-fab .jf-badge{background:var(--lavender);color:var(--base);border-radius:999px;font-size:10px;font-weight:700;padding:1px 6px;min-width:15px;text-align:center;display:none;}
-  #jobs-fab.busy .jf-badge{display:inline-block;}
-  @keyframes jf-pulse{0%,100%{opacity:.5;}50%{opacity:1;}}
-  #jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:366px;min-width:260px;max-width:560px;max-height:min(74vh,600px);display:none;flex-direction:column;overflow:hidden;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55);}
-  #jobs-tray.open{display:flex;}
-  #jobs-tray .jt-head{display:flex;align-items:center;gap:6px;padding:9px 11px;border-bottom:1px solid var(--surface0);background:linear-gradient(180deg,var(--surface0),transparent);}
-  #jobs-tray .jt-title{font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:var(--lavender);font-weight:700;flex:1;display:flex;align-items:center;gap:7px;}
-  #jobs-tray .jt-count{color:var(--overlay0);font-weight:600;letter-spacing:.03em;}
-  #jobs-tray .jt-hbtn{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:11px;padding:3px 7px;border-radius:6px;}
-  #jobs-tray .jt-hbtn:hover{color:var(--text);background:var(--surface1);}
-  #jobs-tray .jt-body{overflow:auto;padding:6px;flex:1;}
-  .jt-empty{color:var(--overlay0);font-size:12px;text-align:center;padding:30px 16px;line-height:1.55;}
-  .jt-item{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:var(--text);padding:8px;border-radius:8px;}
-  .jt-item + .jt-item{margin-top:1px;}
-  .jt-item:hover{background:var(--surface0);}
-  .jt-item.st-failed{background:rgba(243,139,168,.09);}
-  .jt-ic{flex:none;width:34px;height:34px;display:flex;align-items:center;justify-content:center;margin-top:1px;position:relative;}
-  .jt-ic .gen-moon{margin:0;}
-  .jt-glyph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
-  .jt-ok{color:var(--emerald);font-size:15px;} .jt-err{color:var(--red);font-size:15px;}
-  .jt-nel{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
-  .jt-spin{position:relative;width:34px;height:34px;}
-  .jt-spin .jt-nel{inset:4px;width:26px;height:26px;border-radius:50%;object-fit:cover;object-position:60% 32%;}
-  .jt-spin .gen-ring{position:absolute;inset:2px;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
-  .jt-empty-nel{width:104px;height:104px;object-fit:contain;margin:0 auto 8px;display:block;opacity:.92;}
-  .jt-main{flex:1;min-width:0;}
-  .jt-lab{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .jt-sub{font-size:10.5px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;}
-  .jt-sub .jt-when{color:var(--overlay0);} .jt-sub .jt-kind{color:var(--subtext);text-transform:capitalize;}
-  .jt-errmsg{color:var(--red);font-size:10.5px;margin-top:3px;white-space:normal;}
-  .jt-bar{height:4px;border-radius:3px;background:var(--surface1);margin-top:6px;overflow:hidden;}
-  .jt-bar i{display:block;height:100%;background:var(--lavender);border-radius:3px;transition:width .3s;}
-  .jt-thumb{flex:none;} .jt-thumb img{width:30px;height:30px;border-radius:5px;object-fit:cover;display:block;}
-  .jt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 2px;flex:none;line-height:1;}
-  .jt-x:hover{color:var(--red);}
-  /* ---- Toasts: small, corner-stacked, reusable (job notices; achievements can adopt) ---- */
-  #mg-toasts{position:fixed;right:16px;top:64px;z-index:420;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;}
-  .mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .28s cubic-bezier(.2,.9,.3,1.2);}
-  .mg-toast.out{animation:mg-toast-out .3s ease forwards;}
-  .mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);}
-  .mg-toast .mt-ic{flex:none;font-size:15px;margin-top:1px;color:var(--lavender);}
-  .mg-toast.ok .mt-ic{color:var(--emerald);} .mg-toast.err .mt-ic{color:var(--red);}
-  .mg-toast .mt-main{flex:1;min-width:0;}
-  .mg-toast .mt-title{font-size:12.5px;color:var(--text);font-weight:600;}
-  .mg-toast .mt-msg{font-size:11px;color:var(--subtext);margin-top:2px;white-space:normal;}
-  .mg-toast .mt-thumb{width:34px;height:34px;border-radius:6px;object-fit:cover;flex:none;}
-  .mg-toast .mt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 1px;flex:none;line-height:1;}
-  .mg-toast .mt-x:hover{color:var(--text);}
-  @keyframes mg-toast-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
-  @keyframes mg-toast-out{to{opacity:0;transform:translateX(20px);}}
-  @media (prefers-reduced-motion: reduce){ #jobs-fab.busy .jf-dot{animation:none;} .mg-toast,.mg-toast.out{animation:none;} }
+  .acct-claim img.claim-ico{height:15px;width:15px;vertical-align:-2px;margin-right:3px;}
   #ctx-menu{position:fixed;z-index:230;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:180px;padding:4px;}
   #ctx-menu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:7px 10px;border-radius:5px;cursor:pointer;}
   #ctx-menu button:hover{background:var(--surface0);}
-  #tag-suggest{position:fixed;z-index:240;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:210px;max-width:320px;padding:4px;}
+  #tag-suggest{position:fixed;z-index:240;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:190px;max-width:min(320px, calc(100vw - 16px));padding:4px;}
   #tag-suggest .ts-head{display:flex;justify-content:space-between;gap:14px;color:var(--overlay0);font-size:10px;padding:3px 8px;text-transform:uppercase;letter-spacing:.05em;}
   #tag-suggest button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:6px 9px;border-radius:5px;cursor:pointer;}
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script src="/static/picker-core.js"></script>
+<script src="/static/mg-notify.js"></script>
 <script>
-var Ach = (function(){
-  function el(id){return document.getElementById(id);}
-  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-  function fmt(n){ return (Number(n)||0).toLocaleString(); }
-  var SKIN_SW={ moonglade:['#0c0a1c','#b692e6','#4fc99a','#d4af37'],
-                nightfallen:['#0a0713','#a678f0','#7f6fe0','#d9b3ff'],
-                moonlit:['#0b1018','#8fb8e8','#68d5e0','#cfe1f5'],
-                ember:['#160c0c','#e8935f','#e0a94b','#ffcf7a'],
-                verdant:['#0a1410','#5fd39a','#4fc99a','#c8e6a8'] };
-  var data=null;
-  function open(){ el('ach-modal').classList.add('open'); el('ach-modal').setAttribute('aria-hidden','false');
-    load(false); }
-  function close(){ el('ach-modal').classList.remove('open'); el('ach-modal').setAttribute('aria-hidden','true'); }
-  function load(mark){
-    fetch('/api/achievements'+(mark?'?mark=1':''))
-      .then(function(r){return r.json();})
-      .then(function(d){ data=d; render(d); if(mark) toastNew(d); syncSkin(d); })
-      .catch(function(){});
-  }
-  function render(d){
-    var earned=(d.achievements||[]).filter(function(a){return a.earned;}).length;
-    var tot=(d.achievements||[]).length;
-    var p=el('ach-progress'); if(p) p.innerHTML='<b>'+earned+'</b> of <b>'+tot+'</b> feats earned';
-    var g=el('ach-grid'); if(g){ g.innerHTML='';
-      (d.achievements||[]).forEach(function(a){
-        var c=document.createElement('div');
-        c.className='ach-card t-'+a.tier+(a.earned?' earned':' locked');
-        var ico=a.earned?('<img class="ico-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon)):esc(a.icon);
-        var body='<div class="ico">'+ico+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
-          +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>';
-        if(a.skin) body+='<div class="unlk">&#9733; unlocks '+esc(skinName(d,a.skin))+' skin</div>';
-        if(!a.earned){ var pct=Math.min(100,Math.round(a.current/a.threshold*100));
-          body+='<div class="ach-bar"><i style="width:'+pct+'%"></i></div>'
-              +'<div class="ach-num">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div>'; }
-        body+='</div>'; c.innerHTML=body;
-        if(a.earned){ c.classList.add('clickable'); c.title='Replay this celebration'; c.onclick=(function(x){ return function(){ celebrate(x); }; })(a); }
-        g.appendChild(c);
-      });
-    }
-    var sk=el('ach-skins'); if(sk){ sk.innerHTML='';
-      (d.skins||[]).forEach(function(s){
-        var active=(s.id===d.skin);
-        var c=document.createElement('div');
-        c.className='ach-skin'+(active?' active':'')+(s.earned?'':' locked');
-        var sw=(SKIN_SW[s.id]||SKIN_SW.moonglade).map(function(h){return '<i style="background:'+h+'"></i>';}).join('');
-        c.innerHTML='<div class="sw">'+sw+'</div><div class="snm">'+esc(s.name)
-          +(active?' <span style="color:var(--accent)">&#10003;</span>':'')+'</div>'
-          +'<div class="sds">'+esc(s.desc)+'</div>'
-          +(s.earned?'':'<div class="slock">&#128274; locked</div>');
-        if(s.earned) c.onclick=function(){ pick(s.id); };
-        sk.appendChild(c);
-      });
-    }
-  }
-  function skinName(d,id){ var s=(d.skins||[]).filter(function(x){return x.id===id;})[0]; return s?s.name:id; }
-  function pick(id){
-    fetch('/api/skin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skin:id})})
-      .then(function(r){return r.json();})
-      .then(function(res){ if(res.skin){ applySkin(res.skin); if(data){ data.skin=res.skin; render(data);} } })
-      .catch(function(){});
-  }
-  function applySkin(id){
-    if(id&&id!=='moonglade') document.documentElement.setAttribute('data-skin',id);
-    else document.documentElement.removeAttribute('data-skin');
-    try{ localStorage.setItem('skin', id||'moonglade'); }catch(e){}
-  }
-  function syncSkin(d){ // server is source of truth; reconcile the pre-paint guess
-    var srv=d.skin||'moonglade', cur=null;
-    try{ cur=localStorage.getItem('skin'); }catch(e){}
-    if(srv!==cur) applySkin(srv);
-  }
-  function toastNew(d){
-    var newly=(d.newly||[]).map(function(id){
-      return (d.achievements||[]).filter(function(a){return a.id===id;})[0]; }).filter(Boolean);
-    if(newly.length>3){   // returning user with a full catalog -> one summary, not a barrage
-      showToast({icon:'\\ud83c\\udfc6', name:newly.length+' feats unlocked',
-                 desc:'Your catalog just earned a stack of achievements. Open '
-                      +'\\ud83c\\udfc6 to review them.', skin:false});
-      return;
-    }
-    newly.forEach(function(a){ celebrate(a); });   // real unlocks get the mid-screen moment (queued)
-  }
-  // ---- the mid-screen achievement MOMENT: Nel presents the badge, flair scales with rarity ----
-  var _q=[], _playing=false, _actx=null;
-  function _chime(tier){
-    try{ _actx=_actx||new (window.AudioContext||window.webkitAudioContext)(); if(_actx.state==='suspended')_actx.resume(); }catch(e){ return; }
-    var seq={common:[523,660],rare:[523,660,784],epic:[523,660,784,988],legendary:[392,523,660,784,1047]}[tier]||[660];
-    var t=_actx.currentTime+0.02;
-    seq.forEach(function(f,i){ var o=_actx.createOscillator(),g=_actx.createGain(); o.type='triangle'; o.frequency.value=f;
-      o.connect(g); g.connect(_actx.destination); var s=t+i*0.1;
-      g.gain.setValueAtTime(0.0001,s); g.gain.linearRampToValueAtTime(0.15,s+0.02); g.gain.exponentialRampToValueAtTime(0.0001,s+0.5);
-      o.start(s); o.stop(s+0.55); });
-    if(tier==='legendary'){ var lo=_actx.createOscillator(),lg=_actx.createGain(); lo.type='sine'; lo.frequency.value=98;
-      lo.connect(lg); lg.connect(_actx.destination); lg.gain.setValueAtTime(0.0001,t); lg.gain.linearRampToValueAtTime(0.28,t+0.02);
-      lg.gain.exponentialRampToValueAtTime(0.0001,t+1.2); lo.start(t); lo.stop(t+1.3); }
-  }
-  function _stars(parent,n){ for(var i=0;i<n;i++){ var s=document.createElement('div'); s.className='ee-star';
-      s.textContent=['\\u2726','\\u2727','\\u2b50'][i%3]; s.style.left=(Math.random()*100)+'vw'; s.style.color='var(--gold)';
-      s.style.fontSize=(12+Math.random()*20)+'px'; s.style.animationDuration=(2.4+Math.random()*2.4)+'s';
-      s.style.animationDelay=(Math.random()*1.2)+'s'; parent.appendChild(s); } }
-  function _conf(parent,n){ var cols=['#b692e6','#d4af37','#4fc99a','#c4a6f0','#ffffff'];
-    for(var i=0;i<n;i++){ var c=document.createElement('i'); c.className='am-conf'; c.style.background=cols[i%cols.length];
-      c.style.left=(Math.random()*100)+'%'; c.style.animationDuration=(1.8+Math.random()*1.6)+'s'; c.style.animationDelay=(Math.random()*0.5)+'s'; parent.appendChild(c); } }
-  function celebrate(a){ if(a){ _q.push(a); if(!_playing) _next(); } }
-  function _next(){
-    if(!_q.length){ _playing=false; return; } _playing=true;
-    var a=_q.shift(), tier=a.tier||'common';
-    var hold={common:3000,rare:3600,epic:4200,legendary:5200}[tier]||3200;
-    var big=(tier==='epic'||tier==='legendary'), leg=(tier==='legendary');
-    var m=document.createElement('div'); m.className='ach-moment t-'+tier+(leg?' leg':'');
-    m.innerHTML='<div class="am-scrim"></div>'+(leg?'<div class="am-flash"></div>':'')
-      +'<div class="am-stage"><img class="am-badge" src="/branding/badges/'+esc(a.id)+'.png" onerror="this.remove()">'
-      +'<div class="am-eyebrow">Achievement Unlocked</div><div class="am-name">'+esc(a.name)+'</div>'
-      +'<div class="am-desc">'+esc(a.desc)+'</div><div class="am-tier">'+esc(tier)+'</div></div>'
-      +'<div class="am-nelwrap"><img class="am-nel" src="/branding/mascots/present_'+tier+'.png" onerror="this.parentNode.remove()"></div>';
-    document.body.appendChild(m);
-    _stars(m, leg?46:(big?34:22)); if(big) _conf(m, leg?90:44); _chime(tier);
-    void m.offsetWidth; m.classList.add('go');
-    var done=function(){ if(m._d)return; m._d=true; m.classList.add('out');
-      setTimeout(function(){ if(m.parentNode)m.remove(); _next(); }, 500); };
-    m._t=setTimeout(done, hold);
-    m.addEventListener('click', function(){ clearTimeout(m._t); done(); });
-  }
-  function showToast(a){
-    var t=document.createElement('div'); t.className='ach-toast';
-    t.innerHTML='<div class="at-k">Achievement unlocked</div>'
-      +'<div class="at-n"><span class="ai">'+esc(a.icon)+'</span>'+esc(a.name)+'</div>'
-      +'<div class="at-d">'+esc(a.desc)+(a.skin?' &mdash; a new skin awaits.':'')+'</div>';
-    document.body.appendChild(t);
-    for(var i=0;i<26;i++){ var s=document.createElement('div'); s.className='ee-star';
-      s.textContent=['\\u2726','\\u2727','\\u2b50'][i%3];
-      s.style.left=(Math.random()*100)+'vw'; s.style.color='var(--gold)';
-      s.style.fontSize=(12+Math.random()*20)+'px';
-      s.style.animationDuration=(2.4+Math.random()*2.4)+'s';
-      s.style.animationDelay=(Math.random()*1.4)+'s'; document.body.appendChild(s); }
-    setTimeout(function(){ t.remove(); document.querySelectorAll('.ee-star').forEach(function(n){n.remove();}); }, 7000);
-  }
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
-  // On load: mark-and-toast any freshly earned feats, and reconcile the active skin.
-  document.addEventListener('DOMContentLoaded', function(){ load(true); });
-  return { open:open, close:close };
-})();
 var Contests = (function(){
   function el(id){return document.getElementById(id);}
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
@@ -4099,7 +5120,7 @@ var Acct = (function(){
     c.title=tip.join('\\n');
     // claimable free-credits badge
     var b=claimEl();
-    if(b){ if(d.claim_credits){ b.textContent='\\ud83c\\udf81 +'+Number(d.claim_credits).toLocaleString()+' claim'; b.style.display=''; }
+    if(b){ if(d.claim_credits){ b.innerHTML='<img class="claim-ico" src="/branding/rewards/claim.png" onerror="this.remove()">+'+Number(d.claim_credits).toLocaleString()+' claim'; b.style.display=''; }
            else b.style.display='none'; }
   }
   function refresh(){
@@ -4136,166 +5157,49 @@ var Acct = (function(){
   }
   return {refresh:refresh, claim:claim};
 })();
-/* ---- Toasts: small corner notices, reusable (job notices now; achievements can adopt) ---- */
-var Toast = (function(){
-  function box(){ var b=document.getElementById('mg-toasts');
-    if(!b){ b=document.createElement('div'); b.id='mg-toasts'; b.setAttribute('aria-live','polite'); document.body.appendChild(b); }
-    return b; }
-  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-  function show(o){
-    o=o||{};
-    var kind=o.kind||'';   // '' | 'ok' | 'err'
-    var el=document.createElement('div');
-    el.className='mg-toast'+(kind?(' '+kind):'');
-    var ic=o.icon||(kind==='ok'?'\\u2713':(kind==='err'?'\\u26a0':'\\u25c9'));
-    var thumb=o.thumb?'<img class="mt-thumb" src="'+esc(o.thumb)+'" alt="">':'';
-    el.innerHTML='<span class="mt-ic">'+ic+'</span><div class="mt-main"><div class="mt-title">'+esc(o.title||'')+'</div>'
-      +(o.msg?'<div class="mt-msg">'+esc(o.msg)+'</div>':'')+'</div>'+thumb
-      +'<button class="mt-x" aria-label="Dismiss">\\u00d7</button>';
-    function remove(){ if(!el.parentNode) return; el.classList.add('out'); setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 320); }
-    el.querySelector('.mt-x').onclick=remove;
-    box().appendChild(el);
-    if(!o.sticky){ setTimeout(remove, o.ttl||5200); }
-    return remove;
+/* ---- First-run wizard: paste a key, then trigger the first sync as a Panel job ---- */
+var Setup = (function(){
+  function msg(id, text, cls){
+    var el=document.getElementById(id); if(!el) return;
+    el.textContent=text; el.className='setup-msg'+(cls?' '+cls:'');
   }
-  return {show:show};
-})();
-/* ---- Jobs: submit-driver. Registers each gen in the server activity log, then polls
-   task-status so the download+catalog still happens (and survives the drawer closing).
-   The CARD (JobsCard) renders from the server log, NOT from here. ---- */
-var Jobs = (function(){
-  var seen={};
-  function track(id, label, cb){
-    if(!id || seen[id]) return; seen[id]=true;
-    // Register immediately so the card shows it running (paper trail survives reload).
-    fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({job_id:id, type:'generate', label:label||'Generation', status:'running'})}).catch(function(){});
-    if(window.JobsCard) JobsCard.refresh();
-    poll(id, cb);
+  function saveKey(){
+    var input=document.getElementById('setup-key-input');
+    var key=(input&&input.value||'').trim();
+    if(!key){ msg('setup-key-msg','Paste your API key first.','err'); return; }
+    msg('setup-key-msg','Connecting\\u2026','');
+    fetch('/api/setup/save-key',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({api_key:key})}).then(function(r){return r.json();}).then(function(d){
+      if(d.error){ msg('setup-key-msg',d.error,'err'); return; }
+      var extra=d.credits!=null?(' \\u2014 '+Number(d.credits).toLocaleString()+' credits'):'';
+      msg('setup-key-msg','Connected'+extra+'. Reloading\\u2026','ok');
+      setTimeout(function(){ location.reload(); },900);
+    }).catch(function(){ msg('setup-key-msg','Network error \\u2014 try again.','err'); });
   }
-  function poll(id, cb){
-    fetch('/api/task-status?task_id='+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){
-      if(d.phase==='done'){ if(cb) cb('done', d); if(window.JobsCard) JobsCard.refresh(); }
-      else if(d.phase==='failed'){ if(cb) cb('failed', d); if(window.JobsCard) JobsCard.refresh(); }
-      else { if(cb) cb('running', d); setTimeout(function(){ poll(id, cb); }, 3000); }
-    }).catch(function(){ setTimeout(function(){ poll(id, cb); }, 4000); });
+  var poll=null;
+  function firstSync(){
+    var btn=event&&event.target; if(btn) btn.disabled=true;
+    msg('setup-sync-msg','Starting\\u2026','');
+    fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'sync'})}).then(function(r){return r.json();}).then(function(d){
+      if(d.error){ msg('setup-sync-msg',d.error,'err'); if(btn) btn.disabled=false; return; }
+      poll=setInterval(tick, 1500); tick();
+    }).catch(function(){ msg('setup-sync-msg','Network error \\u2014 try again.','err'); if(btn) btn.disabled=false; });
   }
-  return {track:track};
-})();
-/* ---- JobsCard: the always-openable activity card, backed by /api/jobs. Renders the
-   server-side job log (survives reload), shows a short history, fires toasts on
-   completion/failure, and keeps failures until dismissed. ---- */
-var JobsCard = (function(){
-  var last={}, seeded=false, timer=null, LSK='mg_jobs_open';
-  function el(i){ return document.getElementById(i); }
-  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-  function isOpen(){ try{ return localStorage.getItem(LSK)==='1'; }catch(e){ return false; } }
-  function applyState(){
-    var t=el('jobs-tray'), f=el('jobs-fab'); if(!t||!f) return;
-    if(isOpen()){ t.classList.add('open'); f.classList.remove('show'); }
-    else { t.classList.remove('open'); f.classList.add('show'); }
-  }
-  function setOpen(v){ try{ localStorage.setItem(LSK, v?'1':'0'); }catch(e){} applyState(); }
-  function open(){ setOpen(true); refresh(); }
-  function close(){ setOpen(false); }
-  function ago(ts){
-    var s=Math.max(0, Math.floor(Date.now()/1000 - (ts||0)));
-    if(s<60) return 'just now';
-    if(s<3600) return Math.floor(s/60)+'m ago';
-    if(s<86400) return Math.floor(s/3600)+'h ago';
-    return Math.floor(s/86400)+'d ago';
-  }
-  function row(j){
-    var st=j.status||'running', fin=(st==='done'||st==='failed');
-    var ic = st==='done'
-           ? '<span class="jt-ok jt-glyph">\\u2713</span><img class="jt-nel" src="/branding/mascots/trk_done.png" onerror="this.remove()">'
-           : st==='failed'
-           ? '<span class="jt-err jt-glyph">\\u26a0</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
-           : '<span class="jt-spin"><img class="jt-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span>';
-    var mid=(j.media_ids||[])[0]||'';
-    var thumb=(st==='done'&&mid)?'<a class="jt-thumb" href="/image/'+encodeURIComponent(mid)+'"><img src="/thumbs/'+encodeURIComponent(mid)+'.jpg" alt=""></a>':'';
-    var bar='';
-    if(st==='running' && j.total){ var pct=Math.min(100, Math.round((j.done||0)/j.total*100)); bar='<div class="jt-bar"><i style="width:'+pct+'%"></i></div>'; }
-    var errmsg=(st==='failed'&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
-    var sub='<div class="jt-sub"><span class="jt-kind">'+esc(j.type||'job')+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
-    var x=fin?'<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">\\u00d7</button>':'';
-    return '<div class="jt-item'+(st==='failed'?' st-failed':'')+'"><div class="jt-ic">'+ic+'</div>'
-         +'<div class="jt-main"><div class="jt-lab">'+esc(j.label||'Generation')+'</div>'+sub+bar+errmsg+'</div>'
-         +thumb+x+'</div>';
-  }
-  function render(jobs){
-    var t=el('jobs-tray'); if(!t) return;
-    var running=0; jobs.forEach(function(j){ if((j.status||'running')==='running') running++; });
-    var head='<div class="jt-head"><span class="jt-title">\\u25c9 Activity'
-      +(jobs.length?' <span class="jt-count">'+jobs.length+'</span>':'')+'</span>'
-      +'<button class="jt-hbtn" data-act="clear" title="Clear finished">clear</button>'
-      +'<button class="jt-hbtn" data-act="close" title="Collapse">\\u2013</button></div>';
-    var body='';
-    if(!jobs.length){ body='<div class="jt-empty"><img class="jt-empty-nel" src="/branding/mascots/trk_empty.png" onerror="this.remove()"><div>The archive is quiet.<br>Generations and syncs will appear here.</div></div>'; }
-    else { jobs.forEach(function(j){ body+=row(j); }); }
-    t.innerHTML=head+'<div class="jt-body">'+body+'</div>';
-    var f=el('jobs-fab'); if(f){ f.classList.toggle('busy', running>0); var b=el('jobs-fab-badge'); if(b) b.textContent=running||''; }
-    var live=el('gen-live');
-    if(live){
-      if(running){
-        if(!live.querySelector('.gen-nel-wrap')){   // build the spinner once so it doesn't restart each poll
-          live.innerHTML='<span class="gen-nel-wrap"><img class="gen-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span><span class="gen-live-txt"></span>';
-        }
-        var gt=live.querySelector('.gen-live-txt'); if(gt){ gt.textContent=running+' running'; }
-        live.style.display='';
-      } else { live.style.display='none'; }
-    }
-  }
-  function toastTransitions(jobs){
-    jobs.forEach(function(j){
-      var st=j.status||'running', prev=last[j.job_id];
-      if(seeded && prev!=='done' && prev!=='failed' && (st==='done'||st==='failed')){
-        if(st==='done'){
-          var mid=(j.media_ids||[])[0]||'';
-          Toast.show({kind:'ok', title:(j.label||'Generation')+' \\u2014 done', msg:'Added to your gallery.',
-                      thumb: mid?('/thumbs/'+encodeURIComponent(mid)+'.jpg'):null});
-        } else {
-          Toast.show({kind:'err', sticky:true, title:(j.label||'Job')+' failed', msg:j.error||'See the activity card.'});
-        }
+  function tick(){
+    fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
+      if(d.status==='running'){
+        var p=d.progress;
+        msg('setup-sync-msg', p ? ('Syncing\\u2026 '+p.done+' / '+p.total+(p.new?(' ('+p.new+' new)'):'')) : 'Syncing\\u2026', '');
+        return;
       }
-      last[j.job_id]=st;
-    });
-    seeded=true;
-  }
-  function refresh(){
-    return fetch('/api/jobs').then(function(r){return r.json();}).then(function(d){
-      var jobs=(d&&d.jobs)||[];
-      toastTransitions(jobs); render(jobs);
+      clearInterval(poll); poll=null;
+      if(d.status==='failed'){ msg('setup-sync-msg','Sync failed \\u2014 see the Panel for details.','err'); return; }
+      msg('setup-sync-msg','Done! Reloading\\u2026','ok');
+      setTimeout(function(){ location.reload(); },900);
     }).catch(function(){});
   }
-  function schedule(){
-    if(timer) clearTimeout(timer);
-    var f=el('jobs-fab'); var busy=f&&f.classList.contains('busy');
-    timer=setTimeout(function(){
-      if(document.hidden){ schedule(); return; }
-      refresh().then(schedule);
-    }, busy?2500:7000);
-  }
-  function dismiss(id){
-    fetch('/api/jobs/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id})})
-      .then(function(){ delete last[id]; refresh(); }).catch(function(){});
-  }
-  function clearFinished(){
-    fetch('/api/jobs/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({finished:true})})
-      .then(refresh).catch(function(){});
-  }
-  document.addEventListener('DOMContentLoaded', function(){
-    applyState();
-    var t=el('jobs-tray');
-    if(t){ t.addEventListener('click', function(e){
-      var x=e.target.closest?e.target.closest('.jt-x[data-job]'):null;
-      if(x){ dismiss(x.getAttribute('data-job')); return; }
-      var h=e.target.closest?e.target.closest('.jt-hbtn[data-act]'):null;
-      if(h){ var a=h.getAttribute('data-act'); if(a==='clear') clearFinished(); else if(a==='close') close(); }
-    }); }
-    refresh().then(schedule);
-  });
-  return {open:open, close:close, refresh:refresh, dismiss:dismiss, clearFinished:clearFinished};
+  return {saveKey:saveKey, firstSync:firstSync};
 })();
 /* ---- Prompt snippets / favorites (server-stored) ---- */
 var Snips = (function(){
@@ -4568,11 +5472,27 @@ var Gen = (function(){
       .then(function(r){return r.json();})
       .then(function(d){ if(mySeq!==selSeq) return;   // a newer pick superseded this fetch
         selected.version_id=d.version_id||''; selected.model_type=d.model_type||'';
+        selected.negative_prompt=d.negative_prompt||''; selected.sampling_steps=d.sampling_steps||null;
+        selected.cfg_scale=d.cfg_scale||null;
         el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)');
         refreshLoraNotes();   // re-check any attached LoRAs against the new base + set go-state
+        applyModelDefaults();
         refreshCost(); })
       .catch(function(){ if(mySeq===selSeq) el('gen-selname').textContent=m.title; });
   }
+  // Prefill negative/steps/cfg from the model author's own tuned preset (resolve_version_meta
+  // already fetches these; the drawer just never used them). Only for fields the model actually
+  // has data for -- a model with no tuned preset leaves whatever's already in the fields alone.
+  function applyModelDefaults(){
+    var note=el('gen-modeldefaults'); if(!note) return;
+    var s=selected||{}, has=s.negative_prompt||s.sampling_steps||s.cfg_scale;
+    note.style.display = has ? 'flex' : 'none';
+    if(!has) return;
+    if(s.negative_prompt) el('gen-neg').value=s.negative_prompt;
+    if(s.sampling_steps) el('gen-steps').value=s.sampling_steps;
+    if(s.cfg_scale) el('gen-cfg').value=s.cfg_scale;
+  }
+  function resetModelDefaults(){ applyModelDefaults(); }
   var genRef=null;   // {media_id, thumb} -- the img2img reference, or null
   function refPick(){
     if(genRef){ genRef=null; renderGenRef(); debouncedCost(); return; }   // click filled slot = clear
@@ -4608,6 +5528,7 @@ var Gen = (function(){
   function payload(){ var a=dims();
     return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
+      steps:+el('gen-steps').value||25, cfg:+el('gen-cfg').value||7,
       count:+el('gen-count').value, seed:(el('gen-seed')?el('gen-seed').value.trim():''),
       high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
       ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
@@ -5013,6 +5934,7 @@ var Gen = (function(){
           videoAudioToggle:videoAudioToggle,
           vpOnInput:vpOnInput, vpChipify:vpChipify,
           videoPromptText:vpText, videoPromptSet:videoPromptSet,
+          resetModelDefaults:resetModelDefaults,
           get selected(){return selected;}};
 })();
 var Tags = (function(){
@@ -5450,6 +6372,209 @@ function savePrompt() {
 </script>
 """)
 
+    LOGIN_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
+{# Splash background: three tinted radial washes, a procedurally-generated star
+   field, and a vignette. Ported from static/_mockup_login_panel.html's
+   SplashBackground(). The stars are an SVG feTurbulence filter, not an image
+   asset -- so this renders identically on a fresh clone with no branding art
+   dropped in, and costs no request. #}
+<div class="login-splash" aria-hidden="true">
+  <div class="splash-wash"></div>
+  <svg class="splash-stars" xmlns="http://www.w3.org/2000/svg">
+    <filter id="mg-stars">
+      <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="1" stitchTiles="stitch"/>
+      <feColorMatrix type="luminanceToAlpha"/>
+      <feComponentTransfer><feFuncA type="discrete" tableValues="0 0 0 0 0 0 0 0 0 1"/></feComponentTransfer>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.84  0 0 0 0 0.82  0 0 0 0 0.89  0 0 0 1 0"/>
+    </filter>
+    <rect width="100%" height="100%" filter="url(#mg-stars)"/>
+  </svg>
+  <div class="splash-vignette"></div>
+</div>
+<div class="login-wrap">
+  <div class="login-stage" id="login-stage">
+    {# Mascot, ported from the mock's .char-stub: rises from BEHIND the card while
+       the card dims, on submit. Uses real mascot art when present; if it's absent
+       the glow + sparkle behind it is exactly the mock's own placeholder, so a
+       fresh install still gets the moment rather than a broken image. #}
+    <div class="login-char" id="login-char" aria-hidden="true">
+      {# Each rung must hand off to the NEXT rung, and the last must REMOVE the
+         element -- an <img> left in the DOM after its final 404 paints a broken-image
+         icon, and the `:has(img)` rule below would go on suppressing the sparkle
+         placeholder because a (broken) img still matches. Removing it restores the
+         mock's own glow-and-sparkle treatment on an install with no mascot art. #}
+      <img src="/branding/mascots/login_nel.png" alt=""
+           onerror="this.onerror=function(){this.remove();};this.src='/branding/mascots/gen_nel.png';">
+    </div>
+  <div class="login-card">
+    <div class="login-brand">
+      {# Prefers a login-specific banner (the gallery header's banner.png is cropped
+         for a wide header, not this 280x64 slot), falling back to it, and finally to
+         the container's gradient -- which is the mock's own "banner art" placeholder,
+         so every rung of the ladder degrades to the design, never to a broken image. #}
+      <div class="login-banner"><img src="/branding/login-banner.png" alt=""
+           onerror="this.onerror=null;this.src='/branding/banner.png';this.onerror=function(){this.remove();};"></div>
+      <h1>Moonglade Athenaeum</h1>
+      <p class="login-tagline">a library against the Void</p>
+    </div>
+    {% if bootstrap_mode %}
+      <div class="login-note">
+        <b>First run:</b> there's no login account yet on this install. Create the
+        first account below &mdash; from then on, sign in with it from any device.
+      </div>
+      <form method="post" class="login-form" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="mode" value="create">
+        <div class="login-field">
+          <label for="lf-user">Username</label>
+          <input id="lf-user" type="text" name="username" autocomplete="username" autofocus required>
+        </div>
+        <div class="login-field">
+          <label for="lf-pass">Password</label>
+          <input id="lf-pass" type="password" name="password" autocomplete="new-password" required>
+        </div>
+        <div class="login-field">
+          <label for="lf-conf">Confirm password</label>
+          <input id="lf-conf" type="password" name="confirm" autocomplete="new-password" required>
+        </div>
+        {% if error %}<p class="login-err">{{ error }}</p>{% endif %}
+        <button type="submit" class="login-submit">Create account</button>
+      </form>
+    {% elif no_accounts %}
+      <div class="login-note" id="login-no-accounts-remote">
+        <b>No account has been set up yet.</b> Ask whoever runs this server to
+        create the first account from the server machine.
+      </div>
+    {% else %}
+      <form method="post" class="login-form" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <div class="login-field">
+          <label for="lf-user">Username</label>
+          <input id="lf-user" type="text" name="username" autocomplete="username" autofocus required>
+        </div>
+        <div class="login-field">
+          <label for="lf-pass">Password</label>
+          <input id="lf-pass" type="password" name="password" autocomplete="current-password" required>
+        </div>
+        {% if error %}<p class="login-err">{{ error }}</p>{% endif %}
+        <button type="submit" class="login-submit">Sign in</button>
+      </form>
+    {% endif %}
+  </div>
+  </div>
+</div>
+<script>
+/* On submit, raise the mascot from behind the card and dim the card -- the mock's
+   `l.submitted` state. Progressive: if anything here throws, the form still posts
+   normally, because nothing calls preventDefault. */
+(function(){
+  var stage = document.getElementById('login-stage');
+  var form  = stage && stage.querySelector('form.login-form');
+  if (!form || !stage) return;
+  form.addEventListener('submit', function(){ stage.classList.add('submitted'); });
+})();
+</script>
+<style>
+  /* ---- Login screen -------------------------------------------------------
+     Ported value-for-value from static/_mockup_login_panel.html (the locked
+     design source). An earlier pass reproduced the mock's COMPONENTS -- card,
+     inputs, button -- but not its LAYOUT, and the result read as a different
+     page: no banner, no splash, a left-aligned inline logo instead of a
+     centered stack, and placeholder-only inputs where the mock has real
+     uppercase field labels. Owner: "It looks nothing like the design... but
+     has the basics." Every value below is the mock's own. */
+  .login-splash { position: fixed; inset: 0; background: var(--base); overflow: hidden; z-index: 0; }
+  .splash-wash { position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 15% 20%, color-mix(in srgb, var(--accent) 7%, transparent) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 80% at 85% 75%, color-mix(in srgb, var(--mauve) 5%, transparent) 0%, transparent 55%),
+      radial-gradient(ellipse 100% 50% at 50% 100%, color-mix(in srgb, var(--mantle) 90%, transparent) 0%, transparent 50%); }
+  .splash-stars { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .55; }
+  .splash-vignette { position: absolute; inset: 0;
+    background: radial-gradient(ellipse 100% 100% at 50% 50%, transparent 40%, color-mix(in srgb, var(--mantle) 70%, transparent) 100%); }
+
+  .login-wrap { position: relative; z-index: 1; min-height: 100vh; display: flex;
+    align-items: center; justify-content: center; padding: 24px 16px; box-sizing: border-box; }
+  /* The stage exists so the mascot can be positioned against the card and rise
+     from BEHIND it (z-index 0 vs the card's 1) -- the mock's own arrangement. */
+  .login-stage { position: relative; width: 100%; max-width: 380px; }
+  .login-card {
+    position: relative; z-index: 1;
+    width: 100%; background: color-mix(in srgb, var(--surface0) 82%, transparent);
+    backdrop-filter: blur(18px);
+    border: 1px solid color-mix(in srgb, var(--surface1) 70%, transparent); border-radius: 14px;
+    padding: 36px 32px; box-shadow: 0 32px 80px rgba(0,0,0,.6); box-sizing: border-box;
+    transition: opacity .4s;
+  }
+  .login-stage.submitted .login-card { opacity: .5; }
+  .login-char { position: absolute; bottom: 0; left: 50%; width: 150px; height: 190px;
+    pointer-events: none; z-index: 0; opacity: 0; transform: translate(-50%, 0);
+    background: radial-gradient(ellipse 70% 90% at 50% 100%, color-mix(in srgb, var(--accent) 55%, transparent), transparent 72%);
+    filter: drop-shadow(0 -6px 20px color-mix(in srgb, var(--accent) 50%, transparent)); }
+  .login-char::after { content: '\\2726'; position: absolute; top: 18%; left: 50%;
+    transform: translateX(-50%); font-size: 38px; color: var(--text); opacity: .85;
+    text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 70%, transparent); }
+  /* Real art, when present, sits over the glow and hides the sparkle stand-in. */
+  .login-char img { position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; object-position: bottom center; }
+  .login-char:has(img)::after { display: none; }
+  .login-stage.submitted .login-char {
+    animation: login-char-rise 1.6s cubic-bezier(.22,1,.36,1) forwards; }
+  @keyframes login-char-rise {
+    0%   { opacity: 0; transform: translate(-50%, 40px) scale(.94); }
+    100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .login-stage.submitted .login-char { animation: none; opacity: 1; }
+  }
+  .login-brand { text-align: center; margin-bottom: 28px; }
+  .login-banner { width: 100%; max-width: 280px; height: 64px; margin: 0 auto 12px; border-radius: 6px;
+    background: linear-gradient(120deg, var(--purple-deep), var(--surface1) 45%, var(--accent) 100%);
+    filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 40%, transparent));
+    overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .login-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .login-card h1 { font-family: Georgia, 'Times New Roman', serif; font-size: 22px;
+    font-weight: 400; color: var(--text); margin: 0 0 6px; letter-spacing: .04em; border: none; }
+  .login-tagline { font-size: 12px; color: var(--overlay0); margin: 0;
+    letter-spacing: .12em; text-transform: uppercase; }
+
+  .login-form { display: flex; flex-direction: column; gap: 16px; }
+  .login-field { display: flex; flex-direction: column; gap: 6px; }
+  .login-field label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--subtext); }
+  .login-field input { width: 100%; background: var(--mantle); border: 1px solid var(--surface1);
+    border-radius: 6px; padding: 10px 12px; color: var(--text); font: inherit; font-size: 14px;
+    box-sizing: border-box; }
+  .login-field input:focus { outline: none; border-color: var(--accent); }
+  /* Browser autofill repaints inputs with its own near-white background, which
+     overrides `background` outright -- so a saved password turned these fields
+     stark white on a dark card. There is no property to unset it; the only
+     reliable fix is to cover the painted area with an inset box-shadow and force
+     the text colour. The absurd transition delay stops Chrome re-applying its
+     colour a beat after load. Nothing else in this app had autofill handling. */
+  .login-field input:-webkit-autofill,
+  .login-field input:-webkit-autofill:hover,
+  .login-field input:-webkit-autofill:focus,
+  .login-field input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px var(--mantle) inset !important;
+    box-shadow: 0 0 0 1000px var(--mantle) inset !important;
+    -webkit-text-fill-color: var(--text) !important;
+    caret-color: var(--text);
+    transition: background-color 9999s ease-in-out 0s;
+  }
+  .login-submit { width: 100%; background: var(--accent); color: var(--mantle); border: none;
+    border-radius: 6px; padding: 11px 0; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .login-submit:hover { filter: brightness(1.06); }
+  /* First-run notice: the mock's gold callout. The remote "no account yet"
+     message reuses it -- same weight of statement, same treatment. */
+  .login-note { background: color-mix(in srgb, var(--gold) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--gold) 20%, transparent); border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 20px; font-size: 12px; color: var(--gold); line-height: 1.5; }
+  .login-err { color: var(--red); font-size: 13px; margin: 0; padding: 8px 10px;
+    background: color-mix(in srgb, var(--red) 8%, transparent); border-radius: 5px;
+    border: 1px solid color-mix(in srgb, var(--red) 20%, transparent); }
+</style>
+""")
+
     HEALTH_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 {% macro stat(label, value, flag='') %}
 <div style="background:var(--mantle);border-radius:8px;padding:14px 16px;">
@@ -5622,6 +6747,20 @@ function savePrompt() {
   .jp-bar{height:10px;border-radius:6px;background:var(--surface1);overflow:hidden;}
   .jp-bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-soft));transition:width .4s ease;}
   .jp-txt{font-size:11.5px;color:var(--subtext);margin-top:5px;font-variant-numeric:tabular-nums;}
+  /* Panel tab bar -- same .htab/.htab.on visual language as the Trophy Hall's
+     Summary/All/Statistics tabs (static/mg-notify.js's injected styles), copied
+     rather than shared via a <script src> because mg-notify.js also wires up the
+     Jobs tray/Achievement modals that this page doesn't otherwise use; see
+     panel()'s docstring. Do not restyle these independently of that source. */
+  .p-tabs{display:flex;gap:4px;padding:0 0 10px;border-bottom:1px solid var(--surface0);margin-bottom:16px;}
+  .htab{background:none;border:none;color:var(--subtext);font-size:13px;font-weight:600;cursor:pointer;padding:8px 14px;border-radius:8px 8px 0 0;border-bottom:2px solid transparent;}
+  .htab:hover{color:var(--text);}
+  .htab.on{color:var(--lavender);border-bottom-color:var(--lavender);background:rgba(182,146,230,.06);}
+  .ptab-view{display:none;}
+  .ptab-view.on{display:block;}
+  .u-row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--surface0);border-radius:8px;border:1px solid var(--surface1);}
+  .u-row + .u-row{margin-top:6px;}
+  .u-you{font-size:11px;color:var(--accent);margin-left:8px;}
 </style>
 <header>
   <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
@@ -5629,6 +6768,11 @@ function savePrompt() {
   <a class="btn" href="{{ url_for('index') }}">↑ Back to gallery</a>
 </header>
 <div class="panel">
+  <div class="p-tabs" id="panel-tabs">
+    <button type="button" class="htab on" data-tab="maintenance" onclick="setPanelTab('maintenance')">Maintenance</button>
+    <button type="button" class="htab" data-tab="users" onclick="setPanelTab('users')">Users</button>
+  </div>
+  <div id="ptab-maintenance" class="ptab-view on">
   <div class="p-sec">
     <h2>Library at a glance</h2>
     <div class="p-grid">
@@ -5716,6 +6860,13 @@ function savePrompt() {
   </div>
 
   <div class="p-sec">
+    <h2>&#127912; Skins</h2>
+    <div class="p-note">Cosmetic palette swaps for the whole suite (moved here from the achievements panel &mdash; cosmetics live together). Unlock more by earning epic achievements in the gallery (&#127942;).</div>
+    <div id="skin-grid" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;"></div>
+    <span id="skin-status" style="font-size:12.5px;color:var(--subtext);"></span>
+  </div>
+
+  <div class="p-sec">
     <h2>Server</h2>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button class="jobbtn" style="flex:0 0 auto;min-width:0;" id="btn-restart"
@@ -5732,9 +6883,38 @@ function savePrompt() {
     <div style="font-size:13px;color:var(--subtext);">Running <b style="color:var(--text);">{{ build_stamp }}</b> &middot; library at <code>{{ out_dir }}</code></div>
     <div class="p-note">More settings (default workers, page size, verbose) land here next. Deleting from your PixAI account stays CLI-only, behind its typed confirm &mdash; on purpose.</div>
   </div>
+  </div>
+  <div id="ptab-users" class="ptab-view">
+  <div class="p-sec">
+    <h2>Accounts</h2>
+    <div id="users-list">
+      {% for u in web_users %}
+      <div class="u-row" data-username="{{ u.username }}">
+        <span style="font-size:13.5px;color:var(--text);">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
+        <button type="button" class="btn btn-danger" onclick="removeUser(this)">Remove</button>
+      </div>
+      {% else %}
+      <div class="p-note" id="users-empty">No accounts.</div>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="p-sec">
+    <h2>Add user</h2>
+    <form id="add-user-form" onsubmit="return addUser(event)">
+      <div class="setup-row login-fields" style="max-width:380px;">
+        <input type="text" id="new-username" placeholder="Username" autocomplete="off" required>
+        <input type="password" id="new-password" placeholder="Password" autocomplete="new-password" required>
+        <input type="password" id="new-confirm" placeholder="Confirm password" autocomplete="new-password" required>
+        <button type="submit" class="btn btn-primary">Add user</button>
+      </div>
+    </form>
+    <div id="add-user-status" style="margin-top:8px;"></div>
+    <div class="p-note">Every account here has equal access to this gallery (generate, browse, maintenance) &mdash; there's no separate admin tier.</div>
+  </div>
+  </div>
 </div>
 <div id="srv-overlay">
-  <div class="srv-box"><div class="srv-spin"></div>
+  <div class="srv-box"><div class="srv-spin" id="srv-spin"></div>
     <div class="srv-msg" id="srv-msg">Working&hellip;</div>
     <div class="srv-sub" id="srv-sub"></div></div>
 </div>
@@ -5750,7 +6930,59 @@ function savePrompt() {
 <script>
 var ACTIONS = {{ actions_json|safe }};       // Maintenance buttons -- panel_visible only
 var ALL_ACTIONS = {{ all_actions_json|safe }};  // scheduler dropdown -- includes background-only jobs
+var CSRF = "{{ csrf }}";   // same session-based token every other mutating form in this app uses
 function el(i){return document.getElementById(i);}
+// --- Panel tab bar (Maintenance / Users) -----------------------------------
+function setPanelTab(tab){
+  document.querySelectorAll('#panel-tabs .htab').forEach(function(b){
+    b.classList.toggle('on', b.getAttribute('data-tab') === tab); });
+  el('ptab-maintenance').classList.toggle('on', tab === 'maintenance');
+  el('ptab-users').classList.toggle('on', tab === 'users');
+}
+// --- Users tab: add / remove gallery web-login accounts --------------------
+function escH2(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function addUser(evt){
+  evt.preventDefault();
+  var u=el('new-username').value.trim(), p=el('new-password').value, c=el('new-confirm').value;
+  var st=el('add-user-status');
+  fetch('/api/users/add',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:u, password:p, confirm:c, csrf:CSRF})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ st.innerHTML='<span class="st-failed">⚠ '+escH2(d.error)+'</span>'; return; }
+      var empty=el('users-empty'); if(empty) empty.remove();
+      // Built via DOM APIs (not innerHTML string concatenation) so an arbitrary
+      // username can never be interpreted as HTML or JS -- the same reason the
+      // server-rendered row below passes `this` to removeUser() instead of
+      // templating the username into an inline onclick string.
+      var row=document.createElement('div'); row.className='u-row'; row.setAttribute('data-username', d.username);
+      var span=document.createElement('span'); span.style.cssText='font-size:13.5px;color:var(--text);'; span.textContent=d.username;
+      var btn=document.createElement('button'); btn.type='button'; btn.className='btn btn-danger'; btn.textContent='Remove';
+      btn.onclick=function(){ removeUser(btn); };
+      row.appendChild(span); row.appendChild(btn);
+      el('users-list').appendChild(row);
+      el('new-username').value=''; el('new-password').value=''; el('new-confirm').value='';
+      st.innerHTML='<span class="st-done">✓ Account "'+escH2(d.username)+'" created.</span>';
+    }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
+  return false;
+}
+function removeUser(btn){
+  // Read the username back off the row's data attribute rather than a
+  // templated/interpolated JS argument -- see the comment in addUser() above.
+  var row=btn.closest('.u-row');
+  var username=row.getAttribute('data-username');
+  if(!confirm('Remove account "'+username+'"?\\n\\nThey will be signed out on every device immediately.')) return;
+  var st=el('add-user-status');
+  fetch('/api/users/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:username, csrf:CSRF})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ st.innerHTML='<span class="st-failed">⚠ '+escH2(d.error)+'</span>'; return; }
+      row.remove();
+      if(!el('users-list').querySelector('.u-row')){
+        var e=document.createElement('div'); e.className='p-note'; e.id='users-empty'; e.textContent='No accounts.';
+        el('users-list').appendChild(e);
+      }
+    }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
+}
 function renderJobs(){
   var safe=el('jobs-safe'), danger=el('jobs-danger');
   ACTIONS.forEach(function(a){
@@ -5927,6 +7159,45 @@ function setLauncher(){
       el('brand-status').innerHTML='<span style="color:var(--emerald)">\\u2713 Desktop shortcut updated (F5 the Desktop if the icon looks stale)</span>';
     }).catch(function(){ el('brand-status').textContent='\\u26a0 network error'; });
 }
+// --- Skins: cosmetic palettes (moved here from the achievements panel) ---
+var SKIN_SW={ moonglade:['#0c0a1c','#b692e6','#4fc99a','#d4af37'],
+              nightfallen:['#0a0713','#a678f0','#7f6fe0','#d9b3ff'],
+              moonlit:['#0b1018','#8fb8e8','#68d5e0','#cfe1f5'],
+              ember:['#160c0c','#e8935f','#e0a94b','#ffcf7a'],
+              verdant:['#0a1410','#5fd39a','#4fc99a','#c8e6a8'] };
+function loadSkins(){
+  fetch('/api/achievements').then(function(r){return r.json();}).then(function(d){
+    var g=el('skin-grid'); if(!g) return; g.innerHTML='';
+    (d.skins||[]).forEach(function(s){
+      var active=(s.id===d.skin);
+      var c=document.createElement('div');
+      c.style.cssText='width:150px;border:1px solid '+(active?'var(--accent)':'var(--surface1)')
+        +';border-radius:11px;padding:9px;background:var(--surface0);'
+        +(s.earned?'cursor:pointer;':'opacity:.5;');
+      var sw=(SKIN_SW[s.id]||SKIN_SW.moonglade).map(function(h){
+        return '<i style="flex:1;background:'+h+'"></i>'; }).join('');
+      c.innerHTML='<div style="height:30px;border-radius:7px;display:flex;overflow:hidden;margin-bottom:7px;">'+sw+'</div>'
+        +'<div style="font-size:12px;font-weight:600;color:var(--text);">'+escH(s.name)
+        +(active?' <span style="color:var(--accent)">\\u2713</span>':'')+'</div>'
+        +'<div style="font-size:10px;color:var(--subtext);margin-top:2px;">'+escH(s.desc)+'</div>'
+        +(s.earned?'':'<div style="font-size:10px;color:var(--overlay0);margin-top:3px;">\\ud83d\\udd12 locked</div>');
+      if(s.earned) c.onclick=function(){ pickSkin(s.id); };
+      g.appendChild(c);
+    });
+  }).catch(function(){});
+}
+function pickSkin(id){
+  fetch('/api/skin',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({skin:id})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ el('skin-status').textContent='\\u26a0 '+d.error; return; }
+      try{ localStorage.setItem('skin', d.skin||'moonglade'); }catch(e){}
+      if(d.skin && d.skin!=='moonglade') document.documentElement.setAttribute('data-skin', d.skin);
+      else document.documentElement.removeAttribute('data-skin');
+      el('skin-status').innerHTML='<span style="color:var(--emerald)">\\u2713 skin applied suite-wide</span>';
+      loadSkins();
+    }).catch(function(){ el('skin-status').textContent='\\u26a0 network error'; });
+}
 // --- Server control (Homebridge-style stop / restart from the browser) ---
 function _srvOverlay(msg, sub){ el('srv-msg').textContent=msg; el('srv-sub').textContent=sub||''; el('srv-overlay').classList.add('on'); }
 function stopServer(){
@@ -5958,7 +7229,7 @@ function _watchServer(comeBack){
     if(tries>50){ clearInterval(iv); el('srv-msg').textContent=comeBack?'Still restarting\\u2026 give it a moment, then refresh.':'Server stopped.'; el('srv-spin').style.display='none'; }
   }, 800);
 }
-renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadWatchStatus();
+renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadSkins(); loadWatchStatus();
 setInterval(loadWatchStatus, 8000);
 // if a job was already running when the page loaded, resume polling
 fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });
@@ -5985,6 +7256,269 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # ------------------------------------------------------------------
     # Routes
     # ------------------------------------------------------------------
+    def _safe_next(url):
+        """Only ever redirect to a same-site PATH after login -- ?next=https://evil.example
+        or ?next=//evil.example (scheme-relative) must never be honored, or /login becomes
+        an open redirect. A bare local path ('/loom', '/export-csv', ...) is the only
+        shape every caller of this actually needs (redirect(url_for('login', next=request.path))
+        is the only producer of a real `next`).
+
+        Also rejects any embedded TAB/CR/LF control characters, not just a leading "//":
+        Werkzeug's own Response.get_wsgi_headers() strips those control characters back out
+        of a Location header value before writing it to the socket (via iri_to_uri), so a
+        value like "/<TAB>/evil.example" sails past the plain "//" prefix check here yet
+        gets rewritten by Werkzeug itself into a literal "//evil.example" scheme-relative
+        redirect -- confirmed against the installed Flask/Werkzeug via a throwaway
+        reproduction. The CR/LF variants don't even get that far: redirect() raises an
+        unhandled ValueError ("Header values must not contain newline characters") instead,
+        turning a real login into a 500. Adversarial-review regression -- see
+        tests/test_web_auth.py's safe-next tests."""
+        _UNSAFE_NEXT_CHARS = ("\\", "\t", "\r", "\n")
+        if (url and url.startswith("/") and not url.startswith("//")
+                and not any(c in url for c in _UNSAFE_NEXT_CHARS)):
+            return url
+        return None
+
+    def _establish_session(username):
+        """Populate a freshly-authenticated session for `username` -- the ONE place
+        that decides what "you are now logged in" means, shared by BOTH a normal
+        /login credential POST and the local-only first-account bootstrap POST
+        below (factored out per owner directive 2026-07-19's web-based bootstrap
+        flow, so the two paths can never drift apart on what a session looks
+        like)."""
+        import pixai_gallery_backup as core
+        session.clear()
+        session["user"] = username
+        session["sess_epoch"] = core.get_web_user_session_epoch(username)
+        session["csrf"] = secrets.token_hex(16)
+        session.permanent = True
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        """Session-based login gate for every non-localhost request (see
+        _is_authorized_request() above). GET renders the form; POST verifies the
+        CSRF token, then credentials, then signs in. Any failure (rate-limited,
+        bad CSRF, bad credentials) re-renders the SAME form with one generic
+        "invalid username or password" message -- never which field was wrong --
+        and a freshly rotated CSRF token.
+
+        Local-only first-account bootstrap (owner directive 2026-07-19: "NO CLI
+        first login bullshit... its why I built a fucking login screen in
+        figma" -- the design is static/_mockup_login_panel.html): while NO
+        accounts exist yet, a request from the machine the server itself runs on
+        (_is_local_request()) gets this SAME form doubling as an account-creation
+        form (a hidden mode=create field) instead of a banner pointing at
+        --add-web-user. A request for that same zero-accounts state from a LAN
+        address never even sees that form -- and `bootstrap_mode` below is the
+        REAL race-condition guard, not just the template branch that hides the
+        form from it: a hand-crafted mode=create POST from a non-local address,
+        or one that arrives after the first account already exists, is refused
+        before add_or_update_web_user is ever called, regardless of what HTML
+        was ever rendered to that requester.
+
+        The lockout check and the CSRF check run FIRST, ahead of that
+        wants_create/bootstrap_mode gate, exactly like an ordinary credential
+        POST -- a mode=create POST is not a different, lesser-checked request
+        shape (adversarial-review fix, 2026-07-19: the gate used to sit ahead of
+        both, so a mode=create POST from an already-lockout-triggering IP sailed
+        through with neither the lockout message nor any CSRF requirement,
+        confirmed reproducible). Reordering does NOT weaken the bootstrap
+        boundary itself: passing the lockout/CSRF checks only earns a request
+        the SAME generic error the old ordering gave it once bootstrap_mode is
+        false -- create still never proceeds without bootstrap_mode true,
+        checked explicitly right below, not inferred from CSRF validity."""
+        error = None
+        next_url = _safe_next(request.values.get("next", "")) or ""
+        import pixai_gallery_backup as core
+        no_accounts = not core.list_web_users()
+        is_local = _is_local_request()
+        bootstrap_mode = no_accounts and is_local
+        if request.method == "POST":
+            ip = _client_ip()
+            locked_for = _login_seconds_locked(ip)
+            submitted_csrf = request.form.get("csrf", "")
+            live_csrf = session.get("csrf", "") or ""
+            wants_create = request.form.get("mode") == "create"
+            if locked_for is not None:
+                mins = max(1, (locked_for + 59) // 60)
+                error = ("Too many failed attempts from this address. "
+                        "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
+            elif not (live_csrf and secrets.compare_digest(submitted_csrf, live_csrf)):
+                error = "Your session expired. Reload the page and try again."
+            elif wants_create and not bootstrap_mode:
+                # Defense in depth: honor a create-account submission ONLY while
+                # bootstrap_mode is true for THIS request -- a remote requester
+                # can legitimately hold a valid csrf token for ITSELF (nothing
+                # stops a LAN device from GETting /login and receiving one), so
+                # csrf validity alone must never be read as "this create
+                # request is allowed".
+                error = ("No account has been set up yet. Ask whoever runs this "
+                        "server to sign in from the machine itself first.") if no_accounts \
+                        else "Invalid username or password."
+            else:
+                # Reserve this attempt atomically, immediately before the slow
+                # password-hash comparison below runs. Closes a TOCTOU race:
+                # `locked_for` above is a fast, lock-protected READ taken before
+                # verify_web_user()'s slow (unlocked) scrypt comparison: many
+                # concurrent requests from the same IP could all pass that read
+                # while each was still inside its own verify_web_user() call, so
+                # the counter wouldn't reflect any of them until the whole burst
+                # finished -- N free guesses per lockout cycle instead of 5. See
+                # _login_try_acquire's docstring. Applied identically to the
+                # bootstrap create path (below) as to a normal credential guess --
+                # same infrastructure, same reuse principle as the CSRF check.
+                relocked_for = _login_try_acquire(ip)
+                if relocked_for is not None:
+                    mins = max(1, (relocked_for + 59) // 60)
+                    error = ("Too many failed attempts from this address. "
+                            "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
+                elif wants_create:
+                    # bootstrap_mode is guaranteed True here -- the guard above
+                    # already rejected wants_create whenever it's False.
+                    username = (request.form.get("username") or "").strip()
+                    password = request.form.get("password") or ""
+                    confirm = request.form.get("confirm") or ""
+                    pw_problem = core.password_problem(password)
+                    if not username:
+                        error = "Username is required."
+                    elif pw_problem:
+                        error = pw_problem
+                    elif password != confirm:
+                        error = "Passwords do not match."
+                    else:
+                        core.add_or_update_web_user(username, password)
+                        _login_clear(ip)
+                        _establish_session(username)
+                        return redirect(_safe_next(next_url) or url_for("index"))
+                else:
+                    username = (request.form.get("username") or "").strip()
+                    password = request.form.get("password") or ""
+                    if username and core.verify_web_user(username, password):
+                        _login_clear(ip)
+                        _establish_session(username)
+                        return redirect(_safe_next(next_url) or url_for("index"))
+                    error = "Invalid username or password."
+        if request.method == "POST":
+            # A POST that fell through to an error above: always hand back a
+            # FRESH CSRF token -- one that was just consumed or never matched
+            # must never be resubmittable.
+            session["csrf"] = secrets.token_hex(16)
+        else:
+            # GET: reuse whatever token this session already holds rather than
+            # unconditionally minting a new one. The front door redirects EVERY
+            # unauthenticated request here, including ones a browser fires on
+            # its own the instant this page loads (favicon.ico, sw.js,
+            # manifest.webmanifest, apple-touch-icon, ...) via next=<asset
+            # path> -- each of those is a real GET that used to silently
+            # overwrite session["csrf"] before the human ever touched the
+            # form, orphaning the token already baked into the visible page's
+            # hidden input. Reproduced: load /login, let one such incidental
+            # GET land, then submit the original form -- "Your session
+            # expired" every time, unconditionally, no matter how many times
+            # cookies are cleared or the server restarted (the bug re-fires
+            # instantly on the very next page load). setdefault leaves an
+            # existing token alone and only mints one the first time this
+            # session has none, so the visible form's token stays valid
+            # across any number of these background hits.
+            session.setdefault("csrf", secrets.token_hex(16))
+        return render_template_string(LOGIN_HTML, error=error, csrf=session["csrf"],
+                                      next_url=next_url, no_accounts=no_accounts,
+                                      bootstrap_mode=bootstrap_mode)
+
+    @app.route("/logout")
+    def logout():
+        import pixai_gallery_backup as core
+        user = session.get("user")
+        # A DEAD cookie must not be allowed to REVOKE. /logout is in _PUBLIC_PATHS so
+        # _enforce_front_door() never runs here, and app.secret_key persists across
+        # restarts -- so an already-revoked cookie still DESERIALIZES, and without
+        # this check it stayed a valid "log this identity out" token forever.
+        # Replayed in a loop it bumped the epoch on every hit, kicking the real user
+        # off the instant they signed back in: no credential needed, and recoverable
+        # only by rotating AUTH_SECRET_KEY, which the owner has no signal to do.
+        #
+        # The bump still happens BEFORE the local clear, so signing out revokes EVERY
+        # outstanding cookie for this username -- e.g. one captured off plain-HTTP LAN
+        # traffic before the click -- not just this browser's copy.
+        #
+        # ORDER MATTERS: read `user` BEFORE calling _is_authorized_request(), which
+        # calls session.clear() on the stale path. Swapping these two lines silently
+        # disables the bump for everyone.
+        if user and _is_authorized_request():
+            core.bump_web_user_session_epoch(user)
+        # Unconditional and outside the guard: whoever holds an already-invalid cookie
+        # must still be able to shed it locally. Client-side only, touches no server
+        # state, and leaves the anonymous case a plain 302 no-op.
+        session.clear()
+        return redirect(url_for("login"))
+
+    # ------------------------------------------------------------------
+    # THE front door: DEFAULT-DENY for every request, enforced in one place.
+    # ------------------------------------------------------------------
+    # Allowlist is intentionally tiny -- /login (GET, to render the form; POST,
+    # to submit it) and /logout. LOGIN_HTML is BASE_HTML with fully inline CSS
+    # (__DESIGN_TOKENS__ is a Python string substituted at import time via
+    # .replace(), never a fetched stylesheet) and no <link>/<script src> to a
+    # /static/ file is load-bearing for it to render or submit -- the mark
+    # <img> already carries onerror="this.remove()" as a safety net either way.
+    # /branding/ IS additionally public (see _PUBLIC_PREFIXES below): it was
+    # briefly left gated on the theory that a missing logo is a harmless
+    # degrade, but the actual effect was the real chosen mark/banner/favicon
+    # never rendering on the one page every visitor -- including a
+    # not-yet-authenticated LAN device -- is guaranteed to see. That route
+    # only serves static drop-in art (banner/logo/marks/mascots) with path
+    # traversal already rejected (see branding()); there's no user data,
+    # credential, or spend behind it, so it carries the same public trust
+    # tier as /login itself, not a re-opened security gap.
+    _PUBLIC_PATHS = frozenset({"/login", "/logout"})
+    _PUBLIC_PREFIXES = ("/branding/",)
+    # Routes whose EXISTING contract (long before this hook existed) was JSON,
+    # not an HTML page -- these get a JSON 401 instead of a login redirect, so a
+    # fetch(...).then(r => r.json()) caller still gets parseable JSON instead
+    # of choking on the login page's HTML. Everything under /api/, plus the two
+    # legacy non-/api/ JSON routes (/rate/<id>, /edit-prompt/<id>) match this.
+    _JSON_GATE_PREFIXES = ("/api/", "/rate/", "/edit-prompt/")
+
+    @app.before_request
+    def _enforce_front_door():
+        """THE gate: every request must satisfy _is_authorized_request() (a
+        logged-in session ONLY -- no localhost bypass, see that function's
+        docstring further down) to reach anything beyond the tiny allowlist
+        above. This replaced 43
+        individual, easy-to-forget `if not _is_authorized_request(): ...` blocks
+        that used to sit one-per-route (see CHANGELOG.md for the full list) with
+        one place that can't be skipped when a new route is added later --
+        exactly the gap a prior adversarial review flagged: `/`, `/image/<id>`,
+        `/delete/<id>`, `/delete-bulk`, `/rate/<id>`, `/edit-prompt/<id>`,
+        `/collection-add`, `/collection-remove`, `/bulk-replace-prompt`,
+        `/panel`, `/duplicates`, `/health`, the raw asset routes (`/thumbs/`,
+        `/img/`, `/video-file/`, `/full/`, `/badge-thumb/`,
+        `/contact-sheet`), `/export-zip`, `/manifest.webmanifest`, `/sw.js`, and
+        `/api/gallery-images`, `/api/similar`, `/api/collections`,
+        `/api/contests`, `/api/achievements`, `/api/skin`, `/api/ach-event`,
+        `/api/your-art`, `/api/loom/export-status`, `/api/loom/export-file`,
+        `/api/ping` had NO auth check of any kind before this hook existed.
+        `/branding/` is in that same "previously wide open" list, and
+        deliberately went back to public (see `_PUBLIC_PREFIXES`) rather than
+        joining the rest: it's static cosmetic art (logo/marks/mascots), not
+        gallery content, and the login page itself needs to render it for a
+        visitor who by definition isn't authenticated yet.
+
+        `/api/branding/shortcut` is deliberately NOT loosened by this hook
+        passing a logged-in remote session through as "authorized": its own
+        handler re-checks the stricter `_is_local_request()` underneath,
+        because it shells out to a host-local admin API on the machine the
+        SERVER process runs on -- a categorically different trust tier than
+        "browse the library" or "spend the owner's credits". See that route's
+        docstring."""
+        if request.path in _PUBLIC_PATHS or request.path.startswith(_PUBLIC_PREFIXES):
+            return None
+        if _is_authorized_request():
+            return None
+        if request.path.startswith(_JSON_GATE_PREFIXES):
+            return jsonify({"error": "authentication required"}), 401
+        return redirect(url_for("login", next=_safe_next(request.path) or ""))
+
     @app.route("/health")
     def health():
         return render_template_string(
@@ -5999,11 +7533,102 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                        for k, v in PANEL_ACTIONS.items()]
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
                   if v.get("panel_visible", True)]
+        import pixai_gallery_backup as core
+        # Reuse whatever csrf token this session already carries (set at login
+        # time by _establish_session) -- only mint one here if it's somehow
+        # missing. Unlike /login's form, the Users tab's Add/Remove actions are
+        # fired via fetch() without a full page reload in between, so the token
+        # must stay valid across multiple calls on the same page, not rotate
+        # after each one.
+        session.setdefault("csrf", secrets.token_hex(16))
         return render_template_string(
             PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
             all_actions_json=json.dumps(all_actions),
             out_dir=str(out_dir), actions_json=json.dumps(actions),
-            supervised=_supervised())
+            supervised=_supervised(),
+            web_users=core.list_web_users(), csrf=session["csrf"],
+            current_username=session.get("user"))
+
+    def _check_panel_csrf(body):
+        """Shared CSRF check for the Users tab's mutating endpoints -- the exact
+        same session-based token pattern /login's form uses (see that route's
+        docstring), reused here rather than reinvented: every state-changing form
+        in this app is meant to carry one."""
+        submitted_csrf = str((body or {}).get("csrf") or "")
+        live_csrf = session.get("csrf", "") or ""
+        return bool(live_csrf) and secrets.compare_digest(submitted_csrf, live_csrf)
+
+    @app.route("/api/users/add", methods=["POST"])
+    def api_users_add():
+        """Add a new gallery web-login account from the Panel's Users tab. Gated
+        by nothing beyond the front door (_enforce_front_door()) -- every account
+        in this app's model already carries equal trust, so any logged-in session
+        (local or LAN) may manage accounts, same as the rest of the Panel. Refuses
+        a duplicate username outright rather than silently resetting a stranger's
+        password (that's still what add_or_update_web_user itself does, and stays
+        available for the owner via --add-web-user for exactly that recovery
+        case) -- mirrors static/_mockup_login_panel.html's Add User validation.
+
+        The exists-check and the write happen in ONE call to
+        core.add_web_user_if_new() (a single _accounts_lock acquisition), not a
+        separate list_web_users() read followed by a separate
+        add_or_update_web_user() write -- the latter shape was a TOCTOU: two
+        concurrent requests claiming the same brand-new username could both pass
+        the "doesn't exist yet" check before either write landed, and the second
+        write would silently reset the first request's just-created password.
+        Adversarial-review hardening, 2026-07-19 (same root cause as
+        /api/users/remove's last-account race, see that route's docstring)."""
+        body = request.get_json(silent=True) or {}
+        if not _check_panel_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import pixai_gallery_backup as core
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        confirm = str(body.get("confirm") or "")
+        if not username:
+            return jsonify({"error": "Username is required."}), 400
+        # Same core.password_problem() the /login bootstrap form and the
+        # --add-web-user CLI call -- one policy, three entry points, no drift.
+        pw_problem = core.password_problem(password)
+        if pw_problem:
+            return jsonify({"error": pw_problem}), 400
+        if password != confirm:
+            return jsonify({"error": "Passwords do not match."}), 400
+        if not core.add_web_user_if_new(username, password):
+            return jsonify({"error": "That username already exists."}), 400
+        return jsonify({"ok": True, "username": username})
+
+    @app.route("/api/users/remove", methods=["POST"])
+    def api_users_remove():
+        """Remove a gallery web-login account from the Panel's Users tab. Refuses
+        to remove the LAST remaining account: that would leave zero accounts,
+        re-triggering the local-only bootstrap state and effectively locking out
+        every remote LAN user until someone re-bootstraps from the server
+        machine itself -- a real self-lockout risk, guarded against explicitly
+        rather than left as a footgun.
+
+        The "how many accounts exist" check and the removal happen in ONE call
+        to core.remove_web_user_guarded() (a single _accounts_lock acquisition),
+        not a separate list_web_users() read followed by a separate
+        remove_web_user() write -- the latter shape was a TOCTOU race,
+        reproduced live against this real route (adversarial review,
+        2026-07-19): with exactly 2 accounts, two concurrent removes of two
+        DIFFERENT usernames could each read "2 accounts, safe to proceed" before
+        either write landed, and both writes would go through -- leaving
+        AUTH_USERS empty, the exact self-lockout this guard exists to prevent."""
+        body = request.get_json(silent=True) or {}
+        if not _check_panel_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        username = str(body.get("username") or "").strip()
+        import pixai_gallery_backup as core
+        result = core.remove_web_user_guarded(username)
+        if result == "not_found":
+            return jsonify({"error": "No such account."}), 404
+        if result == "last_account":
+            return jsonify({"error": "Can't remove the last remaining account -- "
+                                     "that would lock every remote device out until "
+                                     "someone signs in locally to bootstrap a new one."}), 400
+        return jsonify({"ok": True, "username": username})
 
     @app.route("/api/ping")
     def api_ping():
@@ -6013,18 +7638,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/server/stop", methods=["POST"])
     def api_server_stop():
         """Shut the server down cleanly from the browser (Homebridge-style) instead of Task
-        Manager. Localhost-only. Under the managed launcher this ends the whole app."""
-        if not _is_local_request():
-            return jsonify({"error": "server control is localhost-only"}), 403
+        Manager. Login required (any session, local or LAN). Under the managed launcher this ends the whole app."""
         _schedule_server_exit(0)
         return jsonify({"ok": True, "action": "stop"})
 
     @app.route("/api/server/restart", methods=["POST"])
     def api_server_restart():
         """Restart the server from the browser. Needs the managed launcher (Serve Gallery),
-        which relaunches on exit code 42; otherwise the process would just stop. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"error": "server control is localhost-only"}), 403
+        which relaunches on exit code 42; otherwise the process would just stop. Login required (any session, local or LAN)."""
         if not _supervised():
             return jsonify({"error": "Restart needs the managed launcher — start via "
                                      "'Serve Gallery'. (Stop still works.)"}), 409
@@ -6034,10 +7655,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/export-csv")
     def export_csv_download():
         """Download the catalog as a CSV -- from the browser you get a real file (Downloads),
-        not a copy silently written into the backup folder. Built in memory. Localhost-only.
+        not a copy silently written into the backup folder. Built in memory. Authorized only.
         (The CLI --export-csv still writes to disk on purpose, for scripting.)"""
-        if not _is_local_request():
-            return "localhost-only", 403
         import io
         import datetime
         buf = io.StringIO()
@@ -6053,15 +7672,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/panel/run", methods=["POST"])
     def api_panel_run():
-        """Start a whitelisted maintenance job as a background subprocess. Destructive
-        actions require confirm=true. One job at a time. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"error": "control panel is localhost-only"}), 403
+        """Start a whitelisted maintenance job as a background subprocess. Safe/read-only
+        actions are open to any authorized session (local or logged-in LAN); destructive
+        actions (file-changing -- organize, dedup --apply, rebuild-thumbnails) additionally
+        require the request to be from the local machine itself, same trust tier as
+        /api/branding/shortcut -- a logged-in LAN account can generate and browse, but not
+        run destructive maintenance on the owner's local files. Destructive actions also
+        require confirm=true."""
         body = request.get_json(silent=True) or {}
         action = str(body.get("action") or "").strip()
         spec = PANEL_ACTIONS.get(action)
         if not spec:
             return jsonify({"error": "unknown action"}), 400
+        if spec["destructive"] and not _is_local_request():
+            return jsonify({"error": "this action changes files; localhost-only"}), 403
         if spec["destructive"] and not body.get("confirm"):
             return jsonify({"error": "this action changes files; confirm required"}), 400
         with _panel_lock:
@@ -6077,10 +7701,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_import_task():
         """Pull ONE generation/edit task's media into the gallery by its task id -- recovers
         edits + anything stuck in Favorites that --update's listing skips (edits aren't in that
-        listing). Downloads the owner's OWN finished media; spends nothing. Localhost-only.
+        listing). Downloads the owner's OWN finished media; spends nothing.
+
+        LOGIN tier, deliberately -- any signed-in session, local or LAN. This docstring
+        used to say "Localhost-only", which was never true of the code and is exactly the
+        bait a route-gating audit warned about: a stale claim like this invites someone to
+        "restore" a gate that was never there, silently breaking the LAN-recovery case.
+        The real tier is pinned by tests/test_route_tiers.py.
+
         Logs to the Activity card. Returns {saved, media_ids, is_video} or {error}."""
-        if not _is_local_request():
-            return jsonify({"error": "import is localhost-only"}), 403
         tid = str((request.get_json(silent=True) or {}).get("task_id") or "").strip()
         if not tid.isdigit():
             return jsonify({"error": "enter a numeric task id"}), 200
@@ -6110,8 +7739,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/panel/status")
     def api_panel_status():
-        if not _is_local_request():
-            return jsonify({"status": "idle"}), 403
         with _panel_lock:
             return jsonify({"status": _panel_job["status"], "action": _panel_job["action"],
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
@@ -6122,17 +7749,23 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_watch_status():
         """Live-mirror watcher health: is the push WebSocket connected right now, when
         did it last see an event, how many gens has it mirrored this server run."""
-        if not _is_local_request():
-            return jsonify({"connected": False}), 403
         with _watch_lock:
             return jsonify(dict(_watch_status))
 
     @app.route("/api/panel/cancel", methods=["POST"])
     def api_panel_cancel():
         """Stop the running maintenance job from the browser (no Task Manager). Terminates the
-        subprocess; the reader marks it 'cancelled'. Safe: dry-runs/backups do nothing to undo,
-        and organize/dedup are reversible (organize writes an undo manifest, dedup quarantines).
-        Localhost-only."""
+        subprocess; the reader marks it 'cancelled'.
+
+        LOCALHOST-ONLY, and the check below is load-bearing: it was silently deleted in
+        commit 0fd8cee -- the very commit that built the two-tier model for the sibling
+        route /api/panel/run -- while this docstring's "Localhost-only" claim survived.
+        Restored 2026-07-19 after a route-gating audit. This is the paired STOP control
+        for jobs whose START requires loopback, so admitting a LAN caller here is the
+        same trust violation from the other end: organize flushes its undo manifest per
+        row but only writes catalog_updates via save_catalog() AFTER the loop, so a
+        mid-run terminate leaves files physically moved on disk while catalog.db still
+        points at their old paths. Undo survives; catalog/disk coherence does not."""
         if not _is_local_request():
             return jsonify({"error": "localhost-only"}), 403
         with _panel_lock:
@@ -6153,9 +7786,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Panel settings: the automated-task schedule + the download-workers count. GET
         returns the current settings; POST MERGES only the fields present (so the schedule
         toggle and the workers selector -- two separate controls writing this one file --
-        never wipe each other). Only non-destructive actions are schedulable. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({}), 403
+        never wipe each other). Only non-destructive actions are schedulable.
+
+        GET is login-only so a LAN session's Panel still renders the current settings.
+        WRITING is LOCALHOST-ONLY -- that check was silently dropped in commit 0fd8cee
+        while this docstring's claim survived; restored 2026-07-19 after a route-gating
+        audit. It matters more than "it's only settings" suggests: `sync-videos` is a
+        real PANEL_ACTIONS key with destructive=False AND panel_visible=False, so a LAN
+        caller could schedule a full-history feed sync at 16 workers, hourly, forever,
+        surviving restarts -- via a background-only job with no Panel button, so the
+        owner would never see it configured. And `workers` is not schedule-scoped:
+        _panel_run reads it for EVERY run including the owner's own local button
+        clicks, so this endpoint also sets the concurrency of local maintenance jobs."""
+        if request.method == "POST" and not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
         with _sched_lock:
             s = _load_sched()
             if request.method == "POST":
@@ -6290,13 +7934,41 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if collection:
             chips.append({"k": "collection", "v": collection, "url": _without("collection")})
 
+        stats = catalog_counts(db_path)
+        # First-run wizard gating: a FRESH read of config.json, not the module-cached
+        # core._cfg -- someone who just pasted a key via the wizard needs this to flip on
+        # the very next page load, not after a process restart. Real catalog size (not the
+        # current search/filter's `total`) is what decides "never synced yet".
+        #
+        # needs_key/catalog_empty no longer AND against _is_authorized_request(): reaching
+        # this line at all now guarantees it -- the global _enforce_front_door() hook (see
+        # its docstring) already enforced it for this exact request, since `/` carries no
+        # allowlist exemption. Before that hook existed, `/` had NO gate of its own, so an
+        # unauthenticated LAN viewer could land here and see the "paste your API key" setup
+        # wizard; that conjunct hid it from them. That viewer can no longer reach this line.
+        # `is_local` below (the header template's flag for showing the owner-only
+        # Generate/Loom/Panel controls vs. the read-only note) is hardcoded True for the
+        # identical reason -- same call site, same guarantee. `can_delete_cloud` is a
+        # DIFFERENT, narrower flag: it drives whether the "Delete from PixAI" bulk-action
+        # button renders at all. That button posts to /delete-tasks-bulk, which is gated
+        # to the stricter _is_local_request() (irreversible cloud deletion, same trust
+        # tier as /api/branding/shortcut) -- a real, un-hardcoded check, so a logged-in
+        # LAN session sees "Delete locally" but not "Delete from PixAI".
+        import pixai_gallery_backup as _core
+        _fresh_cfg = _core._load_config()
+        needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
+        catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
+        can_delete_cloud = _is_local_request()
+
         return render_template_string(
             INDEX_HTML,
             chips=chips, published_only=published_only, art_tag=art_tag,
             lora_filter=lora_filter, media_type=media_type, source_filter=source,
             collection=collection, collections=collections,
-            rows=page_rows, total=total, page=page, stats=catalog_counts(db_path),
-            build_stamp=build_stamp, is_local=_is_local_request(),
+            rows=page_rows, total=total, page=page, stats=stats,
+            needs_key=needs_key, catalog_empty=catalog_empty,
+            build_stamp=build_stamp, is_local=True, can_delete_cloud=can_delete_cloud,
+            logged_in_user=session.get("user"),
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
             date_from=date_from,
@@ -6385,6 +8057,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         for mid, row in to_delete.items():
             purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
 
+        if to_delete:
+            telem_bump("culled", len(to_delete), out_dir=out_dir)   # The Great Sweep
         return redirect(back)
 
     def _purge_local(media_id, filename):
@@ -6398,7 +8072,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         them locally, so cloud and catalog never drift. Task-level: deleting any
         image deletes its whole task (all batch images), cloud + local. Imports
         with no task id are purged locally only. Runs OFF-THREAD and reports progress
-        to the Activity card; localhost-only (this destroys on the owner's account)."""
+        to the Activity card; localhost-only (this destroys on the owner's account) --
+        same trust tier as /api/branding/shortcut and destructive Panel actions, gated
+        to the stricter _is_local_request(), NOT the broader _is_authorized_request()
+        that the front-door hook enforces for everything else. A logged-in LAN session
+        unlocks browsing and spending the owner's credits, not irreversible deletion
+        from the owner's real cloud account. (This check was dropped during the
+        LAN-auth conversion pass and restored 2026-07-19 per adversarial review --
+        see CHANGELOG.md.)"""
         import urllib.parse
         import uuid
         import pixai_gallery_backup as core   # lazy: avoid import cycle
@@ -6408,10 +8089,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             sep = "&" if "?" in back else "?"
             return redirect(back + sep + urllib.parse.urlencode(params))
 
-        # Defense-in-depth: the UI hides this for LAN viewers, but the endpoint itself
-        # must refuse a non-local request -- it deletes from the owner's PixAI account.
         if not _is_local_request():
             return _back(delerr="deleting from PixAI is localhost-only")
+
         sel = request.form.getlist("media_ids")
         if not sel:
             return redirect(back)
@@ -6535,17 +8215,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         sep = "&" if "?" in back else "?"
         return redirect("{}{}replaced={}".format(back, sep, n))
 
-    # Thumbnails and full images are content-addressed (keyed by media_id /
-    # filename) and never change once written, so we can cache them in the browser
-    # essentially forever. This makes pagination, back-navigation, and re-visits
-    # instant with zero re-download -- the single biggest win on mobile / LAN.
+    # Full images are write-once: /img/ is keyed by on-disk path and /full/ resolves to
+    # the downloaded original, so the bytes behind a given URL never change. Cache those
+    # forever -- pagination, back-navigation, and re-visits cost zero re-download, the
+    # single biggest win on mobile / LAN.
     _IMMUTABLE = "public, max-age=31536000, immutable"
+
+    # Thumbnails are NOT immutable, despite being keyed by media_id: `--rebuild-thumbs`
+    # regenerates them IN PLACE at the same key (that is its whole job -- repairing
+    # posters that ffmpeg missed). media_id is an identity, not a content hash, so an
+    # `immutable` year-long cache pins the broken poster it was meant to fix. Short
+    # max-age + the ETag send_from_directory already sets = a 304 on the common path.
+    _THUMB_CACHE = "public, max-age=300"
 
     @app.route("/thumbs/<media_id>.jpg")
     def thumb(media_id):
         resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
-                                   max_age=31536000)
-        resp.headers["Cache-Control"] = _IMMUTABLE
+                                   max_age=300)
+        resp.headers["Cache-Control"] = _THUMB_CACHE
         return resp
 
     @app.route("/img/<path:rel>")
@@ -6582,22 +8269,49 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/sw.js")
     def service_worker():
-        # Cache-first for immutable thumbnails/images; network for everything else.
-        # v2: only cache OK (200) responses -- NEVER a 404 -- so a thumbnail that
-        # didn't exist yet (poster-less video mid-collect) can't get its miss frozen
-        # into the cache. Bumping the cache name + deleting old caches on activate
-        # self-heals any client still holding a poisoned v1 404 (no hard-refresh needed).
+        # Cache-first for write-once originals; stale-while-revalidate for thumbnails;
+        # network for everything else. Only OK (200) responses are cached -- NEVER a 404 --
+        # so a thumbnail that didn't exist yet (poster-less video mid-collect) can't get its
+        # miss frozen in. Bumping the cache name + deleting old caches on activate self-heals
+        # any client holding a poisoned entry from an older version (no hard-refresh needed).
+        #
+        # v3: /thumbs/ moved OFF cache-first. This worker ignores Cache-Control entirely --
+        # `c.match()` returns a hit without ever revalidating -- so cache-first pinned every
+        # thumbnail for the lifetime of the cache. `--rebuild-thumbs` rewrites posters in
+        # place at the same media_id URL, so the repair was invisible to any client that had
+        # already cached the broken one. Same failure shape as the v1 404 poisoning, one
+        # status code over. Originals stay cache-first: their bytes really are write-once.
+        #
+        # The thumb refetch passes cache:'no-cache' so it revalidates against the server
+        # instead of being answered by the HTTP cache's own max-age -- otherwise the
+        # "revalidate" half of stale-while-revalidate is a no-op until max-age expires.
+        # It costs one conditional request per thumb per view, answered by a ~200-byte 304
+        # off the ETag, and it never blocks paint (the cached bytes render immediately).
+        # LAN viewers over plain http get no service worker at all (secure-context only) --
+        # for them the route's short max-age + ETag is what bounds staleness.
         sw = (
-            "const C='pixai-img-v2';\n"
+            "const C='pixai-img-v3';\n"
             "self.addEventListener('install',e=>self.skipWaiting());\n"
             "self.addEventListener('activate',e=>e.waitUntil(\n"
             "  caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k))))\n"
             "  .then(()=>self.clients.claim())));\n"
             "self.addEventListener('fetch',e=>{\n"
             " const u=new URL(e.request.url);\n"
-            " if(e.request.method==='GET' && (u.pathname.startsWith('/thumbs/')||u.pathname.startsWith('/img/')||u.pathname.startsWith('/full/'))){\n"
-            "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;}))));\n"
+            " if(e.request.method!=='GET') return;\n"
+            " const isThumb=u.pathname.startsWith('/thumbs/');\n"
+            " const isOrig=u.pathname.startsWith('/img/')||u.pathname.startsWith('/full/');\n"
+            " if(!isThumb&&!isOrig) return;\n"
+            " if(isOrig){\n"
+            "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(\n"
+            "   r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;}))));\n"
+            "  return;\n"
             " }\n"
+            " e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>{\n"
+            "  const n=fetch(e.request,{cache:'no-cache'})\n"
+            "          .then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;})\n"
+            "          .catch(()=>r);\n"
+            "  return r||n;\n"
+            " })));\n"
             "});\n")
         return app.response_class(sw, mimetype="application/javascript")
 
@@ -6643,14 +8357,170 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return send_file(mem, mimetype="application/zip", as_attachment=True,
                          download_name="pixai_selection_{}.zip".format(n))
 
-    # --- Generation surface (localhost-gated) --------------------------------
+    # --- Generation surface (owner-only: local, or a logged-in LAN session) --
     # The Generate drawer talks to PixAI with the OWNER's API key and can spend
-    # credits. So every generation endpoint is gated to local requests: exposing the
-    # gallery on the LAN (--host 0.0.0.0) must never let another device use the key or
-    # spend credits. Read-only browsing stays open; generation is owner-only.
+    # credits. Every generation endpoint (and the rest of the ~44-site LAN-auth
+    # conversion -- panel, Loom, snippets/presets, branding writes, jobs,
+    # account/claims) is gated to _is_authorized_request(), NOT this narrower
+    # _is_local_request() -- exposing the gallery on the LAN (--host 0.0.0.0)
+    # must never let an UNAUTHENTICATED device use the key or spend credits, but
+    # a logged-in LAN session is deliberately trusted the same as the owner at
+    # the keyboard (see CHANGELOG.md's "Real session-based web login" entry).
+    # _is_local_request() itself now backs only the one deliberately-narrower
+    # exception (/api/branding/shortcut, which shells out to the SERVER machine's
+    # own PowerShell/COM) -- see that route's docstring. This comment previously
+    # claimed every generation endpoint was local-only, which stopped being true
+    # once the LAN-auth pass landed; fixed per an adversarial-review finding that
+    # it would otherwise mislead the next reader (2026-07-19).
+    #
+    # FAILS CLOSED on a missing/empty remote_addr (adversarial-review fix,
+    # 2026-07-19): a prior version treated "" as local, which is safe under
+    # THIS app's actual deployment (app.run() -> Werkzeug's dev server always
+    # populates remote_addr from the real TCP peer, never blank/None -- a plain
+    # HTTP client cannot spoof it), but is a fail-OPEN default in a function
+    # that now also gates the first-account bootstrap form/POST (above) plus
+    # destructive Panel actions and /api/branding/shortcut (below) -- worth
+    # being fail-closed on principle given how much rides on it, in case this
+    # app is ever run behind a proxy/WSGI shim that doesn't populate the key.
     def _is_local_request():
         ra = (request.remote_addr or "").strip()
-        return ra in ("127.0.0.1", "::1", "localhost", "")
+        return ra in ("127.0.0.1", "::1", "localhost")
+
+    def _is_authorized_request():
+        """THE canonical authorization gate for every network-originated request:
+        true ONLY for a request carrying a valid logged-in session (see /login
+        below). Deliberately has NO localhost/loopback bypass -- owner directive
+        2026-07-19: "I would expect to require login via any path with this new
+        setup whether localhost hostname or IP." A fresh install therefore MUST
+        run `python pixai_gallery_backup.py --add-web-user` once (account creation
+        is deliberately CLI-only, kept off the web surface) before the web app is
+        reachable at all, from any address including 127.0.0.1 -- there is no
+        bootstrap/first-run bypass. `_is_local_request()` still exists and is still
+        used, but ONLY as an independent, stricter, ADDITIONAL requirement on the
+        couple of routes that must never run for a remote session even when
+        logged in (/api/branding/shortcut, destructive Panel actions) -- it is no
+        longer consulted here.
+
+        Every genuine access-control gate that used to read `_is_local_request()`
+        was converted to this during the LAN-auth pass; a few purely-informational
+        uses (a template flag, an enrichment branch) were also broadened here for
+        consistency with the gates they mirror -- see CHANGELOG.md for the
+        site-by-site list. It's a plain function closed over this app's
+        `session`, so any FUTURE route added inside this same create_app() (e.g. a
+        mobile view) can call it directly -- that's the whole point of factoring
+        it out instead of inlining the check.
+
+        A session is re-validated against config.json's AUTH_USERS on every call
+        (not just trusted because `session.get("user")` is set): the plain Flask
+        session is a stateless, client-side signed cookie with nothing server-side
+        to revoke, so without this re-check a cookie captured off plain-HTTP LAN
+        traffic would keep working forever -- surviving both the real user
+        signing out (/logout bumps their sess_epoch) and the account being removed
+        (get_web_user_session_epoch returns None once it's gone). See that
+        function's docstring for the fuller writeup."""
+        user = session.get("user")
+        if user is None:
+            return False
+        import pixai_gallery_backup as core
+        current_epoch = core.get_web_user_session_epoch(user)
+        if current_epoch is None or current_epoch != session.get("sess_epoch"):
+            session.clear()   # stale/revoked -- drop it so later requests short-circuit above
+            return False
+        return True
+
+    # ---- Login rate limiting: in-memory per-IP failed-attempt counter ----------
+    # Lives in this closure (one dict per running server PROCESS), not config.json
+    # or a database -- it exists to blunt casual brute force, not to be a durable
+    # security ledger. Known, deliberate limitations (spelled out rather than
+    # silently assumed away): (1) resets to empty on every server restart; (2) if
+    # this app is ever run under a multi-worker server (gunicorn/uwsgi with >1
+    # worker process), each worker process keeps its OWN counter, so the effective
+    # lockout threshold becomes (workers x _LOGIN_MAX_FAILS) instead of the real
+    # one -- a genuine multi-worker deployment would need a shared store (Redis, a
+    # DB table) instead. Fine as-is for this app's normal deployment: one process,
+    # `python pixai_gallery.py`.
+    _login_lock = threading.Lock()
+    _login_attempts = {}   # ip -> {"fails": int, "first_fail": epoch, "locked_until": epoch|None}
+    _LOGIN_MAX_FAILS = 5
+    _LOGIN_WINDOW_S = 5 * 60     # failed attempts must land within this window to count together
+    _LOGIN_LOCKOUT_S = 15 * 60   # lockout duration once max fails is hit within the window
+
+    def _client_ip():
+        return (request.remote_addr or "").strip() or "unknown"
+
+    def _login_seconds_locked(ip):
+        """None if `ip` may attempt a login right now; otherwise seconds remaining
+        on its current lockout."""
+        import time as _time
+        with _login_lock:
+            rec = _login_attempts.get(ip)
+            if not rec or not rec.get("locked_until"):
+                return None
+            remaining = rec["locked_until"] - _time.time()
+            if remaining <= 0:
+                _login_attempts.pop(ip, None)   # lockout expired -- clean slate
+                return None
+            return int(remaining)
+
+    def _login_try_acquire(ip):
+        """Atomically re-check `ip`'s lockout status AND reserve/record this
+        attempt as a (provisional) failure, in the SAME critical section --
+        closes a TOCTOU race in the old check-then-act pattern (a fast, lock-
+        protected `locked_for` read, then verify_web_user()'s slow -- and
+        UNLOCKED -- scrypt comparison, then a separate fast, lock-protected write
+        after). Under that old pattern, many concurrent requests from one IP each
+        pass the early read before any of them reaches the write, so a burst of
+        arbitrarily many guesses lands "free" before the counter reflects more
+        than zero fails -- only the NEXT burst gets locked out, buying N guesses
+        per 15-minute cycle instead of the intended 5. Reserving the attempt here,
+        before the slow call runs, means the fail count (and therefore the lock)
+        is committed atomically at admission time, not completion time. A
+        genuinely correct login calls _login_clear() right after, which erases
+        this reservation along with the rest of the counter, so a real user's own
+        correct password is never penalized by it.
+
+        Also opportunistically sweeps any OTHER address's record whose failure
+        window has fully expired without ever reaching a lockout -- otherwise an
+        IP that fails 1-4 times and never returns sits in this dict forever (no
+        other code path ever removes it), an unbounded-growth vector from many
+        distinct real source addresses (no header-spoofing needed: IPv6 privacy
+        rotation or any real botnet/proxy pool). Low severity for a genuinely
+        LAN-only deployment, real the moment --host 0.0.0.0 sits behind a
+        port-forward or other routable path.
+
+        Returns None if the attempt may proceed, else seconds remaining on the
+        lockout that was already in effect (or was just now triggered)."""
+        import time as _time
+        now = _time.time()
+        with _login_lock:
+            stale = [k for k, r in _login_attempts.items()
+                     if k != ip and not r.get("locked_until")
+                     and now - r["first_fail"] > _LOGIN_WINDOW_S]
+            for k in stale:
+                _login_attempts.pop(k, None)
+
+            rec = _login_attempts.get(ip)
+            if rec and rec.get("locked_until"):
+                remaining = rec["locked_until"] - now
+                if remaining > 0:
+                    return int(remaining)
+                _login_attempts.pop(ip, None)   # lockout expired -- clean slate
+
+            rec = _login_attempts.setdefault(
+                ip, {"fails": 0, "first_fail": now, "locked_until": None})
+            if now - rec["first_fail"] > _LOGIN_WINDOW_S:   # window expired -- start fresh
+                rec["fails"] = 0
+                rec["first_fail"] = now
+            rec["fails"] += 1
+            if rec["fails"] >= _LOGIN_MAX_FAILS:
+                rec["locked_until"] = now + _LOGIN_LOCKOUT_S
+            return None
+
+    def _login_clear(ip):
+        """Called on a successful login -- a real owner/user typing their own
+        password correctly should never stay throttled by earlier typos."""
+        with _login_lock:
+            _login_attempts.pop(ip, None)
 
     def _gen_session():
         import pixai_gallery_backup as core
@@ -6666,8 +8536,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         `generationModels` connection actually honors category + a Newest sort but has leaner
         rows. So we use GraphQL ONLY when a category or Newest is requested, REST otherwise --
         the card renders both (leaner rows just hide the missing fields)."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only", "results": []}), 403
         q = (request.args.get("q") or "").strip()
         usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
         category = (request.args.get("category") or "").strip().lower()
@@ -6693,9 +8561,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Resolve a model_id (from the grid) to its generatable version id + the version
         metadata the picker needs: model_type (for LoRA↔base compat), lora_base_model_type,
         trigger_words (to offer inserting into the prompt), and the author's tuned preset.
-        Localhost-only; read-only, one API call."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only", "version_id": ""}), 403
+        Login required; read-only, one API call."""
         mid = (request.args.get("model_id") or "").strip()
         if not mid:
             return jsonify({"error": "model_id required", "version_id": ""}), 400
@@ -6741,7 +8607,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             isv = str(r.get("is_video") or "") == "1"
             out.append({"media_id": str(mid), "is_video": "1" if isv else "",
                         "thumb": "/thumbs/{}.jpg".format(mid),
-                        "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
+                        "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000],
+                        "duration": (r.get("video_duration") or "") if isv else ""})
         return jsonify({"images": out, "total": total, "page": page, "limit": limit})
 
     @app.route("/api/similar/<media_id>")
@@ -6766,6 +8633,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"images": [], "total": 0,
                             "error": "similarity index unavailable: " + str(e)[:180]}), 200
+        telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
         out = []
         for mid, score in hits:
             r = get_row(db_path, mid)
@@ -6797,6 +8665,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             abort(404)
         resp = send_from_directory(str(bdir), fname)
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
+        return resp
+
+    @app.route("/badge-thumb/<aid>.png")
+    def badge_thumb(aid):
+        """Cached ~256px badge for the Trophy Hall tiles (masters stay the source of
+        truth). Lazily generated on first hit; path-safe (no slashes via <aid>)."""
+        from flask import send_from_directory, abort
+        if not aid or "/" in aid or "\\" in aid or ".." in aid:
+            abort(404)
+        p = _badge_thumb(out_dir, aid)
+        if not p or not Path(p).is_file():
+            abort(404)
+        p = Path(p)
+        resp = send_from_directory(str(p.parent), p.name)
+        resp.headers["Cache-Control"] = "public, max-age=86400"
         return resp
 
     @app.route("/contact-sheet")
@@ -6909,10 +8792,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/account")
     def api_account():
-        """Credits + free-card balance for the header chip. Read-only, localhost-only.
+        """Credits + free-card balance for the header chip. Read-only; login required.
         Fails soft to nulls so the header never breaks."""
-        if not _is_local_request():
-            return jsonify({}), 403
         try:
             core, session = _gen_session()
             me = core.account_info(session)
@@ -6966,13 +8847,88 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
 
+    @app.route("/api/setup/save-key", methods=["POST"])
+    def api_setup_save_key():
+        """First-run wizard: validate the submitted key with a real, read-only account_info
+        call, and only write config.json AFTER that succeeds -- never write first and hope.
+
+        Deliberately does NOT go through core._make_session()/load_token(): those prefer
+        the module-cached core._cfg over a fresh config.json read (by design, so a running
+        process doesn't need a restart to keep using its already-loaded key), which means
+        validating "the same way normal calls authenticate" would silently validate against
+        whatever key was cached at process start, not the one just pasted here. Confirmed
+        live: a garbage key was reported as verified because the real cached key answered
+        instead. Building the session by hand with the submitted key as the sole credential
+        avoids that entirely.
+
+        LOCALHOST-ONLY, enforced below -- this docstring has claimed it since the route
+        was written, but the check itself was never actually present; a route-gating
+        audit found and reproduced it 2026-07-19. It belongs in the same trust class as
+        /api/branding/shortcut: it rewrites config.json, the file that also holds
+        AUTH_SECRET_KEY and AUTH_USERS. Without the check, any logged-in LAN session
+        could point the owner's generations at a foreign API key -- on a server started
+        without a key (the exact first-run state this endpoint exists for) load_token's
+        fresh-disk fallback picks it up on the very next spend."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        key = (body.get("api_key") or "").strip()
+        if not key:
+            return jsonify({"error": "paste your API key first"}), 400
+        import pixai_gallery_backup as core
+        import requests as _requests
+        test_session = _requests.Session()
+        test_session.headers.update({
+            "Authorization": "Bearer {}".format(key),
+            "Accept": "application/json",
+            "User-Agent": "pixai-personal-backup/1.0",
+            "apollo-require-preflight": "true",
+            "x-apollo-operation-name": core.OPERATION_NAME,
+        })
+        try:
+            me = core.account_info(test_session, raise_on_error=True)
+        except Exception as e:
+            msg = str(e)
+            if "401" in msg or "Unauthorized" in msg:
+                return jsonify({"error": "That key was rejected by PixAI -- double-check it."}), 200
+            return jsonify({"error": "Couldn't verify that key (temporary connection issue) -- try again."}), 200
+        cfg_path = Path(core.__file__).resolve().parent / "config.json"
+        # Serialize against the account writers on core._accounts_lock. This is the only
+        # config.json read-modify-write in the app that doesn't go through core's account
+        # helpers (deliberately -- see the note above about the module-cached _cfg), which
+        # made it the one writer that could lost-update: /api/users/add commits a new
+        # account between this read and this write, and the write puts back a snapshot
+        # that never had it, silently erasing the account. Same lock, so same queue.
+        with core._accounts_lock:
+            try:
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+            except ValueError:
+                # Present but unparseable -- REFUSE rather than overwrite. The old
+                # bare `cfg = {}` fallback wrote back a one-key stub, destroying
+                # AUTH_USERS (dropping the install into local-bootstrap mode),
+                # AUTH_SECRET_KEY (logging everyone out), and now AUTH_EPOCH_SEQ
+                # (rewinding revocation state itself).
+                return jsonify({"error": "config.json exists but could not be parsed; "
+                                         "not overwriting it. Fix or restore the file, "
+                                         "then save the key again."}), 200
+            except OSError as e:
+                return jsonify({"error": "Could not read config.json: {}".format(e)}), 200
+            cfg["PIXAI_API_KEY"] = key
+            try:
+                cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+            except OSError as e:
+                return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(e)}), 200
+        try:
+            credits = int(me.get("quotaAmount") or 0)
+        except (TypeError, ValueError):
+            credits = None
+        return jsonify({"ok": True, "credits": credits})
+
     @app.route("/api/claim", methods=["POST"])
     def api_claim():
         """Claim ready daily rewards (free credits/stamina to the owner's OWN account -- no
-        money moves). Localhost-only; the header click IS the confirmation. One bad claim
+        money moves). Login required; the header click IS the confirmation. One bad claim
         doesn't abort the rest. Returns {claimed, credits}."""
-        if not _is_local_request():
-            return jsonify({"error": "claiming is localhost-only"}), 403
         try:
             core, session = _gen_session()
             claimed, credits = 0, 0
@@ -6986,6 +8942,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         credits += int(c.get("amount") or 0)
                 except Exception:                        # noqa: BLE001
                     pass
+            if claimed:
+                telem_bump("claims", claimed, out_dir=out_dir)   # Claimant
             return jsonify({"claimed": claimed, "credits": credits})
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
@@ -6995,9 +8953,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/snippets", methods=["GET", "POST"])
     def api_snippets():
         """Prompt snippets/favorites, stored server-side (out_dir/prompt_snippets.json) so
-        they persist with the backup and sync across the owner's machines. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"snippets": []}), 403
+        they persist with the backup and sync across the owner's machines. Login required (any session, local or LAN)."""
         path = out_dir / "prompt_snippets.json"
         with _snips_lock:
             if request.method == "POST":
@@ -7037,9 +8993,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/artwork-views")
     def api_artwork_views():
         """Live view count for one published artwork -> the detail page's Views metric.
-        Localhost-only (owner key). ?id=<artwork_id>."""
-        if not _is_local_request():
-            return jsonify({"views": None}), 403
+        Login required; uses the owner's key. ?id=<artwork_id>."""
         aid = (request.args.get("id") or "").strip()
         if not aid:
             return jsonify({"views": None}), 400
@@ -7052,12 +9006,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/your-art")
     def api_your_art():
         """'Your Art' panel: the owner's top published works ranked by likes (from the catalog,
-        so it works over LAN) enriched with LIVE view counts (fetched per artwork_id, localhost
-        only since that uses the owner key). Read-only, no spend."""
+        so it works over LAN) enriched with LIVE view counts (fetched per artwork_id, using the
+        owner's key -- same trust level as /api/artwork-views, which this loop is really just a
+        batched version of). Read-only, no spend.
+
+        No `_is_authorized_request()` conjunct here: this whole route is now covered by the
+        global front-door hook (see _enforce_front_door()'s docstring), so reaching this line
+        already guarantees it -- an explicit re-check here would be dead-always-true, the same
+        class of redundant check removed from the 43 individually-gated routes."""
         top = top_published_rows(db_path, 12)
         totals = published_totals(db_path)
         views_synced = False
-        if top and _is_local_request():
+        if top:
             try:
                 core, session = _gen_session()
                 import concurrent.futures as _cf
@@ -7072,21 +9032,77 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
         return jsonify({"items": top, "totals": totals, "views_synced": views_synced})
 
+    _telem_day = {"day": None}   # once-per-day throttle for the passive marks
+
     @app.route("/api/achievements")
     def api_achievements():
-        """Milestone progress + skin unlocks, computed from local catalog stats. Read-only
-        catalog data (no spend, no network) so — like the picker — it's NOT localhost-gated;
-        the owner browsing over LAN still sees their trophies. ?mark=1 records the currently
-        newly-earned achievements as 'seen' so the unlock toast fires exactly once."""
+        """Milestone progress + skin unlocks, computed from local catalog stats +
+        the persisted telemetry counters. Read-only catalog data (no spend, no
+        network) so — like the picker — it's NOT localhost-gated; the owner browsing
+        over LAN still sees their trophies. ?mark=1 records the currently newly-earned
+        achievements as 'seen' so the unlock toast fires exactly once.
+
+        Side effects (cheap, fail-soft): marks today in the Vigil day ledger, checks
+        the Night Owl window, and sweeps the state-derived feat flags. Hidden feats
+        that aren't earned go out MASKED (??? name, no roast) so devtools can't
+        spoil them; the whole feat tab stays cloaked until the first feat lands."""
+        import datetime as _dt
+        try:
+            today = _dt.date.today().isoformat()
+            if _telem_day["day"] != today:
+                _telem_day["day"] = today
+                telem_mark_day(out_dir=out_dir)
+                sweep_telemetry(out_dir)
+            if 2 <= _dt.datetime.now().hour < 4:
+                telem_flag("session_hour", out_dir=out_dir)
+        except Exception:
+            pass
         metrics = achievement_metrics(db_path)
+        metrics.update(telemetry_metrics(out_dir))
         with _ach_lock:
             state = load_ach_state(out_dir)
-            result = compute_achievements(metrics, state.get("seen"))
+            result = compute_achievements(metrics, state.get("seen"),
+                                          sets=load_telemetry(out_dir).get("sets", {}))
             newly = result["newly"]
-            if newly and request.args.get("mark") == "1":
-                state["seen"] = sorted(set(state.get("seen") or []) | set(newly))
+            if request.args.get("mark") == "1":
+                today = _dt.date.today().isoformat()
+                ea = dict(state.get("earned_at") or {})
+                # stamp every currently-earned achievement not yet dated: backfills the
+                # pre-existing earns as "recognized today", records new ones going forward
+                for a in result["achievements"]:
+                    if a["earned"] and a["id"] not in ea:
+                        ea[a["id"]] = today
+                state["earned_at"] = ea
+                if newly:
+                    state["seen"] = sorted(set(state.get("seen") or []) | set(newly))
                 save_ach_state(out_dir, state)
+            earned_at = state.get("earned_at") or {}
+        feats_revealed = any(
+            a["earned"] for a in result["achievements"] if a["tier"] == "feat")
+        unleashed = any(a["id"] == "triggered" and a["earned"]
+                        for a in result["achievements"])
+        masked_metrics, n_masked = set(), 0
+        for a in result["achievements"]:
+            if a["hidden"] and not a["earned"]:
+                n_masked += 1
+                masked_metrics.add(a["metric"])
+                a.update(name="???", desc="A hidden feat of the Athenaeum.",
+                         icon="❓", roast="", roast_nsfw="",
+                         current=0, threshold=1, points=0,
+                         id="hidden-feat-%d" % n_masked, metric="")
+            if not a["earned"]:               # roasts are the reward, not a preview
+                a["roast"] = ""
+                a["roast_nsfw"] = ""
+            elif not unleashed:               # uncensored lines stay locked until Triggered
+                a["roast_nsfw"] = ""
+        # a masked feat's metric name/value must not leak through the metrics echo
+        still_visible = {a["metric"] for a in result["achievements"] if a.get("metric")}
+        for k in masked_metrics - still_visible:
+            metrics.pop(k, None)
+        result["feats_revealed"] = feats_revealed
+        result["unleash_available"] = unleashed
         result["skin"] = state.get("skin", "moonglade")
+        result["earned_at"] = earned_at   # {id: iso-date}; only earned ids -> no hidden-feat leak
         result["metrics"] = metrics
         return jsonify(result)
 
@@ -7105,9 +9121,31 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"error": "skin locked", "skin": load_ach_state(out_dir)["skin"]}), 403
         with _ach_lock:
             state = load_ach_state(out_dir)
+            changed = state.get("skin") != skin
             state["skin"] = skin
             save_ach_state(out_dir, state)
+        if changed:                       # Interior Decorator: an explicit re-dress
+            telem_bump("skin_changed_runs", out_dir=out_dir)
         return jsonify({"skin": skin})
+
+    @app.route("/api/ach-event", methods=["POST"])
+    def api_ach_event():
+        """Feat-event beacon from the front-end: the Starfall konami egg, the
+        in-app manual, and narrator pokes. Whitelisted event names only; each is
+        a cosmetic local counter (no spend), same trust level as /api/skin."""
+        body = request.get_json(silent=True) or {}
+        ev = str(body.get("event") or "").strip()
+        if ev == "konami":
+            telem_flag("konami_triggered", out_dir=out_dir)
+            return jsonify({"ok": True})
+        if ev == "docs":
+            telem_bump("docs_opened", out_dir=out_dir)
+            return jsonify({"ok": True})
+        if ev == "narrator":
+            telem_bump("narrator_pokes", out_dir=out_dir)
+            pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
+            return jsonify({"ok": True, "pokes": pokes, "snapped": pokes >= 5})
+        return jsonify({"error": "unknown event"}), 400
 
     @app.route("/api/branding", methods=["GET", "POST"])
     def api_branding():
@@ -7118,8 +9156,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             cfg = load_branding(out_dir)
             return jsonify({"mark": cfg["mark"], "anim": cfg["anim"],
                             "anims": MARK_ANIMS, "marks": list_marks(out_dir)})
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
         have = {m["id"] for m in list_marks(out_dir)}
@@ -7134,13 +9170,29 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return jsonify({"error": "unknown mark"}), 400
             cfg["mark"] = mark
         save_branding(out_dir, cfg)
+        if "mark" in body or "anim" in body:   # Interior Decorator: dressing the halls
+            telem_bump("skin_changed_runs", out_dir=out_dir)
+        if cfg["anim"] == "eclipse":           # Eclipse: sun and moon in balance
+            telem_flag("eclipse_anim_triggered", out_dir=out_dir)
         return jsonify({"mark": cfg["mark"], "anim": cfg["anim"]})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
     def api_branding_shortcut():
         """Write/refresh the Desktop launcher shortcut with the chosen mark's
         .ico. A .pyw can't carry an icon; the .lnk can -- this IS the app icon.
-        Machine-local action -> owner-only."""
+        Machine-local action -> owner-only.
+
+        Deliberately gated to _is_local_request(), NOT the broader
+        _is_authorized_request(): this calls make_launcher_shortcut(), which
+        shells out to PowerShell/WScript.Shell COM to write to the Desktop of the
+        machine the SERVER process runs on -- see that function's own docstring
+        ("caller must gate to localhost"). A logged-in LAN account is meant to
+        unlock spend-the-owner's-credits generation features, not trigger
+        PowerShell execution / filesystem writes on the host -- a materially
+        different trust boundary, so this one route was NOT broadened along with
+        the rest of the branding-writes group during the LAN-auth conversion
+        pass (unlike GET/POST /api/branding just above, which only writes
+        out_dir/branding.json -- ordinary app data, correctly broadened)."""
         if not _is_local_request():
             return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
@@ -7158,9 +9210,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/suggest-prompt")
     def api_suggest_prompt():
         """Image-to-prompt for the gallery's 'Suggest prompt' button: PixAI's tag list +
-        NL description for a media_id. Read-only, free, localhost-only. ?media_id="""
-        if not _is_local_request():
-            return jsonify({"suggestions": []}), 403
+        NL description for a media_id. Read-only and free; login required. ?media_id="""
         mid = (request.args.get("media_id") or "").strip()
         if not mid:
             return jsonify({"suggestions": [], "error": "media_id required"}), 400
@@ -7173,9 +9223,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/tag-suggest")
     def api_tag_suggest():
         """Tag autocomplete for the drawer's prompt boxes (the site's Tag Suggestions
-        dropdown). Read-only, free, localhost-only. ?q=<prefix>."""
-        if not _is_local_request():
-            return jsonify({"tags": []}), 403
+        dropdown). Read-only and free; login required. ?q=<prefix>."""
         q = (request.args.get("q") or "").strip()
         if len(q) < 2:
             return jsonify({"tags": []})
@@ -7188,10 +9236,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/upload", methods=["POST"])
     def api_upload():
         """Upload a local file from the picker -> PixAI media_id (the same free
-        3-step S3 handshake as the CLI's --upload). Owner-only: localhost-gated,
+        3-step S3 handshake as the CLI's --upload). Login required,
         spends nothing."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "no file"}), 400
@@ -7204,6 +9250,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             tmp.close()
             core, session = _gen_session()
             mid = core.upload_media(session, tmp.name)
+            telem_bump("uploads", out_dir=out_dir)        # first-upload milestone
             return jsonify({"media_id": str(mid)})
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
@@ -7307,9 +9354,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         task data, never in the repo). GET lists {name: {label, scene_id}} (no prompt
         bodies). POST {task_id, label?} imports one from a task the owner ran on the
         site: fetches the task, extracts chat.prompts + sceneId + modelId, saves it.
-        Localhost-only (uses the owner's key on import)."""
-        if not _is_local_request():
-            return jsonify({"presets": {}}), 403
+        Login required; uses the owner's key on import."""
         with _presets_lock:
             presets = _load_presets()
             if request.method == "GET":
@@ -7355,17 +9400,27 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     None if params else "pick an image to edit")
         if p.get("mode") in ("I2V", "FLF", "R2V"):
             imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
-            if not imgs:
+            vids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip()]
+            auds = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip()]
+            # I2V/FLF are image-anchored (source frame / start+end frame); R2V accepts
+            # ANY reference kind alone (e.g. a video-only Multi-ref) -- gating all three
+            # modes on `imgs` alone silently mispriced a video/audio-only R2V request as
+            # "pick a source image", found 2026-07-18 while wiring the ref-slot expansion.
+            has_ref = imgs or (p["mode"] == "R2V" and (vids or auds))
+            if not has_ref:
                 return None, bool(p.get("no_card")), "pick a source image"
             try:
                 params = core.build_shot_video_params(
                     p["mode"], (p.get("prompt") or "").strip(), image_ids=imgs,
+                    video_ids=vids, audio_ids=auds,
                     duration=p.get("duration") or 5,
-                    generate_audio=bool(p.get("audio")),
+                    generate_audio=bool(p.get("generate_audio") or p.get("audio")),
                     model=(p.get("video_model") or ""),
                     camera_movement=(p.get("camera_movement") or ""),
                     quality=(p.get("quality") or "professional"),
-                    audio_language=(p.get("audio_language") or "english"))
+                    audio_language=(p.get("audio_language") or "english"),
+                    negative=(p.get("negative") or "").strip(),
+                    is_private=bool(p.get("is_private")))
             except core.PixAIError as e:
                 return None, bool(p.get("no_card")), str(e)[:140]
             return params, bool(p.get("no_card")), None
@@ -7386,9 +9441,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/price", methods=["POST"])
     def api_price():
         """Live cost + free-card check for the drawer's current settings (generate OR
-        edit). Read-only (no spend). Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only", "cost": None}), 403
+        edit). Read-only (no spend). Login required (any session, local or LAN)."""
         try:
             core, session = _gen_session()
             params, no_card, note = _params_and_nocard(core, request.get_json(silent=True) or {})
@@ -7406,10 +9459,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/generate", methods=["POST"])
     def api_generate():
         """Submit a generation from the drawer, wait, and catalog it into THIS gallery's
-        backup. Localhost-only (spends the owner's credits/cards). A matching free card is
+        backup. Login required -- any session, local or LAN, deliberately: spending from a
+        signed-in tablet is the point of the login. A matching free card is
         auto-applied unless no_card is set. Returns {task_id, media_ids, paid_credit}."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         try:
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
@@ -7430,17 +9482,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             params = core._gen_parameters(args)
             core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
             task_id = core.submit_generation(session, params)
+            try:                       # LoRA telemetry (First Lora / Stacked Deck / Polyglot)
+                lvids = [str((lo or {}).get("version_id") or "").strip()
+                         for lo in (body.get("loras") or [])]
+                lvids = [v for v in lvids if v]
+                if lvids:
+                    telem_bump("lora_used", out_dir=out_dir)
+                    telem_max("lora_stacked", len(lvids), out_dir=out_dir)
+                    for v in lvids:
+                        telem_set_add("loras", v, out_dir=out_dir)
+            except Exception:
+                pass
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
 
     @app.route("/api/edit", methods=["POST"])
     def api_edit():
-        """Instruct-edit an existing gallery image ('make it night'). Localhost-gated;
+        """Instruct-edit an existing gallery image ('make it night'). Login required;
         auto-applies an Edit-Pro card unless no_card. Catalogs the result into this
         backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         try:
             from types import SimpleNamespace
             core, session = _gen_session()
@@ -7453,17 +9514,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
+            telem_bump("edits", out_dir=out_dir)          # The Restoration Wing
+            telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
 
     @app.route("/api/enhance", methods=["POST"])
     def api_enhance():
-        """One-click enhance (panelplugin) on the Edit tab's source image. Localhost-gated;
+        """One-click enhance (panelplugin) on the Edit tab's source image. Login required;
         auto-applies a card if one matches. A rejected/unknown workflow just errors (no
         credits spent). Returns {task_id, media_ids, paid_credit}."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         try:
             from types import SimpleNamespace
             core, session = _gen_session()
@@ -7483,6 +9544,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
+            telem_bump("enhances", out_dir=out_dir)       # first-enhance milestone
+            telem_set_add("tools", "enhance", out_dir=out_dir)
+            telem_set_add("enhance_workflows",           # Enhance Adept: distinct rituals
+                          wid or (plug or {}).get("workflow_id")     # card + catalog runs of the
+                          or (plug or {}).get("workflow_name")       # same workflow share one key
+                          or str(p.get("plugin") or ""), out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
@@ -7490,9 +9557,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
-        pixel coords. Localhost-gated; returns {task_id} for the async poller."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
+        pixel coords. Login required; returns {task_id} for the async poller."""
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
@@ -7503,38 +9568,70 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if not boxes:
                 return jsonify({"error": "draw a box over a hand or face"}), 400
             task_id = core.submit_fixer(session, src, boxes)
+            telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
 
     # --- The Loom (Seedance storyboard) -------------------------------------
+    # Storage is a small key->value store the Loom's window.storage shim reads via
+    # /api/loom/*. Each key is now its OWN file, written atomically (tmp + os.replace,
+    # the _save_telemetry idiom), so a crash mid-save corrupts at most the single key
+    # being written -- one torn project can never take down every other storyboard.
+    # The legacy single store.json (all boards + inline thumbs in one non-atomic write)
+    # is migrated into per-key files on first touch and preserved as store.json.migrated.
     _loom_lock = threading.Lock()
 
-    def _loom_store():
-        d = out_dir / "loom"
+    def _loom_kv_dir():
+        d = out_dir / "loom" / "kv"
         d.mkdir(parents=True, exist_ok=True)
-        return d / "store.json"
+        return d
 
-    def _loom_load():
-        p = _loom_store()
-        if p.exists():
-            try:
-                import json as _j
-                return _j.loads(p.read_text(encoding="utf-8"))
-            except (ValueError, OSError):
-                return {}
-        return {}
+    def _loom_kv_path(key):
+        from urllib.parse import quote
+        return _loom_kv_dir() / (quote(str(key), safe="") + ".json")
 
-    def _loom_save(data):
-        import json as _j
-        _loom_store().write_text(_j.dumps(data), encoding="utf-8")
+    def _loom_kv_write(key, value):
+        """Atomically persist one key's value (tmp + os.replace)."""
+        p = _loom_kv_path(key)
+        tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+        tmp.write_text(json.dumps(value), encoding="utf-8")
+        os.replace(tmp, p)
+
+    def _loom_kv_read(key):
+        try:
+            return json.loads(_loom_kv_path(key).read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            return None
+
+    def _loom_migrate():
+        """One-time split of the legacy single store.json into per-key files. Idempotent
+        + crash-safe: re-runs from the intact store.json until the final rename lands (a
+        partial migration can't lose keys), then no-ops once store.json is gone."""
+        legacy = out_dir / "loom" / "store.json"
+        if not legacy.exists():
+            return
+        try:
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            data = None
+        if isinstance(data, dict):
+            for k, v in data.items():
+                try:
+                    _loom_kv_write(k, v)
+                except OSError:
+                    return                      # leave store.json for the next touch to retry
+        try:
+            legacy.replace(legacy.with_name("store.json.migrated"))
+        except OSError:
+            pass
 
     @app.route("/loom/vendor/<path:fname>")
     def loom_vendor(fname):
         """Serve the Loom's vendored JS (React/ReactDOM/Babel UMD builds) from
         loom/vendor/ so the page paints with zero network calls. Path-safe; absent
-        files 404. Not gated by _is_local_request -- these are static library files,
-        not gallery data, and /loom itself already enforces localhost-only above."""
+        files 404. Not gated by _is_authorized_request() -- these are static library
+        files, not gallery data, and /loom itself already enforces authorization above."""
         from flask import send_from_directory, abort
         vdir = (Path(__file__).resolve().parent / "loom" / "vendor").resolve()
         try:
@@ -7546,62 +9643,128 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             abort(404)
         return send_from_directory(str(vdir), fname, max_age=31536000)
 
+    @app.route("/loom/dist/<path:fname>")
+    def loom_dist(fname):
+        """Serve the esbuild-bundled Loom (loom/dist/, built by `npm run build` in
+        loom/) -- the NEW, opt-in delivery path (/loom?bundle=1). Same path-safety
+        pattern as loom_vendor(). Absent files 404; loom() below treats that as
+        'bundle not built yet' and falls back to the Babel-standalone page rather
+        than erroring. max_age=0 (unlike the vendor libs) since this output changes
+        every time the source is rebuilt."""
+        from flask import send_from_directory, abort
+        ddir = (Path(__file__).resolve().parent / "loom" / "dist").resolve()
+        try:
+            target = (ddir / fname).resolve()
+            target.relative_to(ddir)          # reject path traversal
+        except (ValueError, OSError):
+            abort(404)
+        if not target.is_file():
+            abort(404)
+        return send_from_directory(str(ddir), fname, max_age=0)
+
     @app.route("/loom")
     def loom():
         """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
-        backend (window.storage swapped for /api/loom/*). Localhost-only."""
-        if not _is_local_request():
-            return "The Loom is localhost-only.", 403
+        backend (window.storage swapped for /api/loom/*). Authorized only.
+
+        Two delivery paths (see LOOM_PAGE / LOOM_PAGE_BUNDLE above):
+        default is the in-browser Babel-standalone transpile (unchanged); passing
+        ?bundle=1 opts into the pre-built esbuild bundle IF loom/dist/ actually has
+        one, else it quietly falls back to the default so a fresh checkout that
+        hasn't run `npm run build` yet never breaks."""
         import re as _re
-        src = Path(__file__).resolve().parent / "loom" / "master-storyboard.jsx"
+        loom_dir = Path(__file__).resolve().parent / "loom"
+        src = loom_dir / "master-storyboard.jsx"
         try:
             jsx = src.read_text(encoding="utf-8")
         except OSError:
             return "Loom source not found (loom/master-storyboard.jsx).", 404
+
+        wants_bundle = request.args.get("bundle") in ("1", "true", "yes")
+        bundle_file = loom_dir / "dist" / "master-storyboard.bundle.js"
+        if wants_bundle and bundle_file.is_file():
+            return LOOM_PAGE_BUNDLE
+
+        # ---- Babel-standalone path (default + bundle-requested-but-not-built) ----
+        # loom/src/loom-core.js AND loom/src/loom-mutations.js (Phase 2, the
+        # composed-hooks extraction, 2026-07-16) are real ES modules
+        # master-storyboard.jsx imports from; this <script type="text/babel">
+        # block isn't a real module system, so inline both modules' source
+        # ahead of the JSX and strip `export` the same way "export default
+        # function App()" is already stripped below.
+        core_src = ""
+        try:
+            core_src = (loom_dir / "src" / "loom-core.js").read_text(encoding="utf-8")
+        except OSError:
+            pass
+        core_inline = _re.sub(r"(?m)^export const ", "const ", core_src)
+        # master-storyboard.jsx imports shotPayload aliased (`as buildShotPayload`)
+        # for its own local wrapper; provide that name once the real `import {...}`
+        # statement below is stripped out.
+        if core_inline:
+            core_inline += "\nconst buildShotPayload = shotPayload;\n"
+
+        mut_src = ""
+        try:
+            mut_src = (loom_dir / "src" / "loom-mutations.js").read_text(encoding="utf-8")
+        except OSError:
+            pass
+        mut_inline = _re.sub(r"(?m)^export const ", "const ", mut_src)
+        mut_inline = _re.sub(r"(?m)^export function ", "function ", mut_inline)
+
         jsx = _re.sub(r"(?m)^\s*import\s+React.*$", "", jsx)          # React is a CDN global
+        jsx = _re.sub(r"import\s*\{.*?\}\s*from\s*[\"']\./src/loom-core\.js[\"'];?",
+                       "", jsx, count=1, flags=_re.S)                  # loom-core is inlined instead
+        jsx = _re.sub(r"import\s*\{.*?\}\s*from\s*[\"']\./src/loom-mutations\.js[\"'];?",
+                       "", jsx, count=1, flags=_re.S)                  # loom-mutations is inlined instead
+        # master-storyboard.jsx imports moveCardToAct aliased (`as mvCardToAct`)
+        # so the useShotMutations hook's own returned `moveCardToAct` doesn't
+        # collide with the pure reducer of the same name; provide that alias
+        # once the real `import {...}` statement above is stripped out.
+        if mut_inline:
+            mut_inline += "\nconst mvCardToAct = moveCardToAct;\n"
         jsx = jsx.replace("export default function App()", "function App()")
-        return LOOM_PAGE.replace("__JSX__", jsx)
+        return LOOM_PAGE.replace("__JSX__", core_inline + "\n" + mut_inline + "\n" + jsx)
 
     @app.route("/api/loom/get")
     def loom_get():
-        if not _is_local_request():
-            return jsonify({"value": None}), 403
         with _loom_lock:
-            return jsonify({"value": _loom_load().get(request.args.get("key") or "")})
+            _loom_migrate()
+            return jsonify({"value": _loom_kv_read(request.args.get("key") or "")})
 
     @app.route("/api/loom/set", methods=["POST"])
     def loom_set():
-        if not _is_local_request():
-            return jsonify({"ok": False}), 403
         p = request.get_json(silent=True) or {}
         k = p.get("key")
         if not k:
             return jsonify({"ok": False}), 400
         with _loom_lock:
-            data = _loom_load()
-            data[k] = p.get("value")
-            _loom_save(data)
+            _loom_migrate()
+            try:
+                _loom_kv_write(k, p.get("value"))
+            except OSError as e:
+                return jsonify({"ok": False, "error": str(e)[:120]}), 500
         return jsonify({"ok": True})
 
     @app.route("/api/loom/list")
     def loom_list():
-        if not _is_local_request():
-            return jsonify({"keys": []}), 403
+        from urllib.parse import unquote
         pre = request.args.get("prefix") or ""
         with _loom_lock:
-            keys = [k for k in _loom_load().keys() if k.startswith(pre)]
-        return jsonify({"keys": keys})
+            _loom_migrate()
+            keys = [unquote(f.stem) for f in _loom_kv_dir().glob("*.json")]
+        return jsonify({"keys": [k for k in keys if k.startswith(pre)]})
 
     @app.route("/api/loom/delete", methods=["POST"])
     def loom_delete():
-        if not _is_local_request():
-            return jsonify({"ok": False}), 403
         k = (request.get_json(silent=True) or {}).get("key")
         with _loom_lock:
-            data = _loom_load()
-            if k in data:
-                del data[k]
-                _loom_save(data)
+            _loom_migrate()
+            if k:
+                try:
+                    _loom_kv_path(k).unlink()
+                except OSError:
+                    pass
         return jsonify({"ok": True})
 
     @app.route("/api/loom/handoff", methods=["POST"])
@@ -7610,13 +9773,19 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         upload it, and return the new frame media_id -- which the storyboard sets as the
         next shot's opening frame, chaining clips into one continuous scene. The clip must
         already be downloaded locally (it is, right after Generate-shot cataloged it).
-        Localhost-only; the upload is free."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
+        Login required; the upload is free."""
         body = request.get_json(silent=True) or {}
         mid = str(body.get("video_media_id") or "").strip()
         if not mid:
             return jsonify({"error": "video_media_id required"}), 400
+        # Trim-aware: the previous shot's trimOut is where its cut actually ends, so hand
+        # off the frame AT that point, not the untrimmed clip's real final frame. None/absent
+        # -> the clip isn't trimmed, take the true last frame.
+        try:
+            trim_out = body.get("trim_out")
+            trim_out = float(trim_out) if trim_out is not None else None
+        except (TypeError, ValueError):
+            trim_out = None
         try:
             core, session = _gen_session()
             vid_exts = (".mp4", ".webm", ".mov", ".mkv")
@@ -7639,7 +9808,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             fdir = out_dir / "loom" / "_frames"
             fdir.mkdir(parents=True, exist_ok=True)
             png = fdir / (mid + "_last.png")
-            if not core.extract_last_frame(str(vid), str(png)):
+            if not core.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
                 return jsonify({"error": "could not extract the last frame (ffmpeg)"}), 200
             frame_mid = core.upload_media(session, str(png))
             dur = core.probe_video_duration(str(vid))
@@ -7652,8 +9821,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
         Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
         video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Localhost."""
-        if not _is_local_request():
-            return jsonify({"error": "generation is localhost-only"}), 403
         try:
             import base64
             import hashlib
@@ -7693,10 +9860,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 model=(p.get("video_model") or ""),
                 camera_movement=(p.get("camera_movement") or ""),
                 quality=(p.get("quality") or "professional"),
-                audio_language=(p.get("audio_language") or "english"))
+                audio_language=(p.get("audio_language") or "english"),
+                negative=(p.get("negative") or "").strip(),
+                is_private=bool(p.get("is_private")))
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
+            try:                       # Master of the Loom + Storyweaver telemetry
+                mode = str(p.get("mode") or "R2V").upper()
+                if mode in ("I2V", "FLF", "R2V"):
+                    telem_set_add("video_modes", mode.lower(), out_dir=out_dir)
+                if str(p.get("origin") or "") == "loom-shot":
+                    telem_bump("storyboards", out_dir=out_dir)
+            except Exception:
+                pass
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200
@@ -7708,7 +9885,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         tpat = _re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                    text=True, bufsize=1, encoding="utf-8", errors="replace")
+                                    text=True, bufsize=1, encoding="utf-8", errors="replace",
+                                    creationflags=_NO_WINDOW)
             with _export_lock:
                 _export_job["proc"] = proc
             for line in iter(proc.stderr.readline, ""):
@@ -7735,10 +9913,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_loom_export():
         """Trim each finished shot to its in/out and concat into one 720p mp4 -- the
         rough cut becomes a real deliverable. Async (ffmpeg in a thread); poll
-        /api/loom/export-status, download /api/loom/export-file. Localhost-only.
-        Video-only for now (audio is a follow-up). body: {clips:[{mid,in,out}], total_seconds}"""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
+        /api/loom/export-status, download /api/loom/export-file. Login required (any session, local or LAN).
+        Each segment's real audio rides along when the clip has one (ffprobe-detected);
+        segments with no audio stream (e.g. rendered without the "Generate audio" toggle)
+        get matching-duration silence synthesized (anullsrc) so the concatenated audio
+        track never desyncs across a segment boundary. body: {clips:[{mid,in,out}], total_seconds}"""
         import shutil
         if not shutil.which("ffmpeg"):
             return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
@@ -7772,24 +9951,60 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 co = float(co) if co not in (None, "") else None
             except (TypeError, ValueError):
                 co = None
-            segs.append((path, ci, co))
+            # Optional spatial crop: {x,y,w,h} fractions of the frame. Sanitized to a valid
+            # in-bounds sub-rectangle; anything malformed or effectively full-frame -> no crop.
+            crop = None
+            cr = c.get("crop")
+            if isinstance(cr, dict):
+                try:
+                    cx, cy = float(cr.get("x") or 0), float(cr.get("y") or 0)
+                    cw, ch = float(cr.get("w") or 0), float(cr.get("h") or 0)
+                    cx = min(max(cx, 0.0), 1.0); cy = min(max(cy, 0.0), 1.0)
+                    cw = min(cw, 1.0 - cx); ch = min(ch, 1.0 - cy)
+                    if cw > 0.05 and ch > 0.05 and (cw < 0.99 or ch < 0.99 or cx > 0.01 or cy > 0.01):
+                        crop = (cx, cy, cw, ch)
+                except (TypeError, ValueError):
+                    crop = None
+            segs.append((path, ci, co, probe_has_audio(path), crop))
         if not segs:
             return jsonify({"error": "no finished shot videos found on disk to export"}), 400
         _export_dir.mkdir(parents=True, exist_ok=True)
         out_path = _export_dir / "loom_cut.mp4"
         W, H = 1280, 720
         parts, labels = [], ""
-        for i, (path, ci, co) in enumerate(segs):
+        # A silent segment needs an explicit numeric span to synthesize (anullsrc has no
+        # natural end); reuse the trim's own end if given, else probe the real file once.
+        need_silence = any(not ha for (_p, _ci, _co, ha, _cr) in segs)
+        silence_idx = len(segs)   # the synthetic-silence input, appended after all real -i's
+        for i, (path, ci, co, has_audio, crop) in enumerate(segs):
             tr = "trim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
-            parts.append("[%d:v]%s,setpts=PTS-STARTPTS,scale=%d:%d:force_original_aspect_ratio=decrease,"
-                         "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24[v%d]" % (i, tr, W, H, W, H, i))
-            labels += "[v%d]" % i
-        fc = ";".join(parts) + ";" + labels + "concat=n=%d:v=1:a=0[vout]" % len(segs)
+            # A per-shot crop happens in SOURCE pixels (iw/ih), before the scale-to-canvas, so
+            # the kept region fills the 1280x720 frame. No crop -> the chain is unchanged.
+            crop_f = ("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f," % (crop[2], crop[3], crop[0], crop[1])) if crop else ""
+            parts.append("[%d:v]%s,setpts=PTS-STARTPTS,%sscale=%d:%d:force_original_aspect_ratio=decrease,"
+                         "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24[v%d]" % (i, tr, crop_f, W, H, W, H, i))
+            if has_audio:
+                atr = "atrim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
+                parts.append("[%d:a]%s,asetpts=PTS-STARTPTS[a%d]" % (i, atr, i))
+            else:
+                span = (co - ci) if co is not None else max(0.1, (probe_duration(path) or ci + 0.1) - ci)
+                # [silence_idx:a] is a raw decoder-input reference (the lavfi anullsrc), not a
+                # named filter output -- ffmpeg allows referencing it multiple times (once per
+                # silent segment) without an explicit asplit.
+                parts.append("[%d:a]atrim=duration=%.3f,asetpts=PTS-STARTPTS[a%d]" % (silence_idx, span, i))
+            # concat's input pads are PER-SEGMENT interleaved (v0,a0,v1,a1,...), never grouped
+            # by stream type (v0,v1,...,a0,a1,...) -- ffmpeg errors "media type mismatch" if
+            # the pad order doesn't match n*(v+a) in that exact per-segment sequence.
+            labels += "[v%d][a%d]" % (i, i)
+        fc = ";".join(parts) + ";" + labels + "concat=n=%d:v=1:a=1[vout][aout]" % len(segs)
         cmd = ["ffmpeg", "-y"]
-        for (path, _ci, _co) in segs:
+        for (path, _ci, _co, _ha, _cr) in segs:
             cmd += ["-i", path]
-        cmd += ["-filter_complex", fc, "-map", "[vout]", "-c:v", "libx264",
-                "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", str(out_path)]
+        if need_silence:
+            cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+        cmd += ["-filter_complex", fc, "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264",
+                "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k", str(out_path)]
         with _export_lock:
             _export_job.update(status="running", progress=0, elapsed=0.0, out="",
                                error="", proc=None, cancelled=False)
@@ -7812,8 +10027,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/loom/export-cancel", methods=["POST"])
     def api_loom_export_cancel():
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         with _export_lock:
             proc = _export_job.get("proc")
             if _export_job["status"] == "running" and proc is not None:
@@ -7825,13 +10038,140 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
         return jsonify({"ok": True})
 
+    # Tier 2 of the two-tier project export: a self-contained zip carrying every media
+    # file a project actually references, alongside the same {project, thumbs} JSON tier 1
+    # already produces client-side (see exportJSON in master-storyboard.jsx). A real
+    # PixAI media_id is globally issued, not locally scoped, so the bundle keeps it as-is
+    # end to end -- no path-rewriting inside the project object, ever. On import, a media
+    # id already resolvable on the receiving machine is simply skipped (both sides already
+    # have it); one that isn't gets copied into imported/ and cataloged fresh. That also
+    # makes re-importing the same bundle twice a no-op the second time.
+    _BUNDLE_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}  # mirrors backup.py's
+    # _VIDEO_EXTS; not imported directly -- pixai_gallery.py is the lower module in the
+    # three-file layering (backup.py imports this file, never the reverse).
+
+    def _loom_collect_media_ids(project):
+        """Every real (catalog) media_id a project references -- resultMid, both frame
+        slots, and every cast/asset entry. thumbId references are NOT collected: they're
+        client-only (base64 in `thumbs`) and already travel inside project.json as-is."""
+        ids = set()
+        for act in (project.get("acts") or []):
+            for c in (act.get("cards") or []):
+                if c.get("resultMid"):
+                    ids.add(str(c["resultMid"]))
+                for slot in ("openFrame", "closeFrame"):
+                    f = c.get(slot) or {}
+                    if f.get("mediaId"):
+                        ids.add(str(f["mediaId"]))
+        for a in (project.get("assets") or []):
+            if a.get("mediaId"):
+                ids.add(str(a["mediaId"]))
+        return ids
+
+    def _loom_resolve_media(mid):
+        """A project can reference either an image OR a video by media_id (a shot's
+        resultMid is very often a video), but find_files_for_media_id only ever sees
+        images by design. Same fallback /api/loom/export already uses for exactly this
+        reason: catalog row -> is_video + filename -> out_dir/filename. Returns a Path
+        or None."""
+        paths = find_files_for_media_id(out_dir, mid)
+        if paths:
+            return paths[0]
+        row = get_row(db_path, mid)
+        if row and str(row.get("is_video") or "") == "1" and row.get("filename"):
+            p = out_dir / row["filename"]
+            if p.exists():
+                return p
+        return None
+
+    @app.route("/api/loom/export-bundle", methods=["POST"])
+    def api_loom_export_bundle():
+        """Full-bundle export: a zip of project.json (identical shape to the lightweight
+        Backup .json) plus every referenced media file under media/<id><ext>. Login required
+        -- reads real files off disk, same trust level as /export-zip."""
+        import io
+        import zipfile
+        body = request.get_json(silent=True) or {}
+        project = body.get("project") or {}
+        thumbs = body.get("thumbs") or {}
+        if not project:
+            return jsonify({"error": "no project given"}), 400
+        mids = _loom_collect_media_ids(project)
+        mem = io.BytesIO()
+        missing = []
+        with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
+            z.writestr("project.json", json.dumps({"project": project, "thumbs": thumbs}))
+            for mid in mids:
+                p = _loom_resolve_media(mid)
+                if not p:
+                    missing.append(mid)
+                    continue
+                z.write(p, arcname="media/{}{}".format(mid, p.suffix.lower()))
+        mem.seek(0)
+        name = "{}_bundle.zip".format((project.get("name") or "loom_project").replace(" ", "_"))
+        resp = send_file(mem, mimetype="application/zip", as_attachment=True, download_name=name)
+        # Missing media doesn't fail the export (a partial bundle is still useful) -- the
+        # client surfaces this list so the owner knows what didn't travel.
+        resp.headers["X-Bundle-Missing-Count"] = str(len(missing))
+        return resp
+
+    @app.route("/api/loom/import-bundle", methods=["POST"])
+    def api_loom_import_bundle():
+        """Accepts a full-bundle zip (see export-bundle), catalogs any media this machine
+        doesn't already have (source='api' -- it's real PixAI media, just synced via the
+        bundle instead of --update), and returns {project, thumbs} in the exact shape
+        importJSON already expects, so both tiers share one client-side create-project path.
+        Login required (any session, local or LAN)."""
+        import io
+        import time
+        import zipfile
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "no file"}), 400
+        try:
+            z = zipfile.ZipFile(io.BytesIO(f.read()))
+            data = json.loads(z.read("project.json").decode("utf-8"))
+        except Exception:
+            return jsonify({"error": "not a valid bundle (couldn't read project.json)"}), 400
+        project = data.get("project")
+        if not project:
+            return jsonify({"error": "bundle's project.json has no project"}), 400
+        imported_dir = out_dir / "imported"
+        rows = []
+        for name in z.namelist():
+            if not name.startswith("media/") or name.endswith("/"):
+                continue
+            mid = Path(name).stem
+            if _loom_resolve_media(mid):
+                continue  # already have it -- both sides share this media, nothing to do
+            ext = Path(name).suffix.lower()
+            imported_dir.mkdir(parents=True, exist_ok=True)
+            dest = imported_dir / "{}{}".format(mid, ext)
+            dest.write_bytes(z.read(name))
+            is_vid = ext in _BUNDLE_VIDEO_EXTS
+            thumb_path = thumb_dir / "{}.jpg".format(mid)
+            if is_vid:
+                make_video_thumbnail(dest, thumb_path)  # best-effort; --rebuild-thumbs backfills
+            else:
+                make_thumbnail(dest, thumb_path)
+            row = {k: "" for k in CATALOG_FIELDS}
+            row.update({
+                "media_id": mid, "filename": str(dest.relative_to(out_dir)).replace("\\", "/"),
+                "source": "api", "status": "imported",
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "prompt_preview": dest.stem[:100], "is_video": "1" if is_vid else "",
+            })
+            rows.append(row)
+        if rows:
+            save_catalog(db_path, rows)
+        return jsonify({"project": project, "thumbs": data.get("thumbs") or {},
+                        "media_added": len(rows)})
+
     @app.route("/api/task-status")
     def api_task_status():
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
         catalogs the result into this backup and returns media_ids + paid_credit. Read-only
-        until done; localhost-only."""
-        if not _is_local_request():
-            return jsonify({"phase": "failed", "error": "localhost-only"}), 403
+        until done; login required."""
         tid = (request.args.get("task_id") or "").strip()
         if not tid:
             return jsonify({"phase": "failed", "error": "task_id required"}), 400
@@ -7864,9 +10204,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/jobs")
     def api_jobs():
         """Reconstructed job list for the Jobs card (newest-first) -- the paper trail that
-        survives a reload. The card polls this. Localhost-only, like the creation suite."""
-        if not _is_local_request():
-            return jsonify({"jobs": []}), 403
+        survives a reload. The card polls this. Login required, like the creation suite."""
         import pixai_gallery_backup as core
         try:
             jobs = core.read_jobs(out_dir)
@@ -7879,9 +10217,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_jobs_register():
         """Register/update a job in the log. The Jobs card calls this the moment a gen is
         submitted (status=running) so it shows immediately; the authoritative done/failed
-        events are written server-side by /api/task-status. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"ok": False}), 403
+        events are written server-side by /api/task-status. Login required (any session, local or LAN)."""
         body = request.get_json(silent=True) or {}
         jid = str(body.get("job_id") or "").strip()
         if not jid:
@@ -7895,9 +10231,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/jobs/dismiss", methods=["POST"])
     def api_jobs_dismiss():
         """Dismiss one job (job_id) or every finished job (finished:true) from the card --
-        this is how a sticky failure gets cleared. Localhost-only."""
-        if not _is_local_request():
-            return jsonify({"ok": False}), 403
+        this is how a sticky failure gets cleared. Login required (any session, local or LAN)."""
         import pixai_gallery_backup as core
         body = request.get_json(silent=True) or {}
         if body.get("finished"):
@@ -7917,9 +10251,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/workflows")
     def api_workflows():
         """Live enhance-workflow catalog (id + name + type) for the Edit tab picker.
-        Read-only; localhost-only (owner key)."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only", "workflows": []}), 403
+        Read-only; login required (uses the owner's key)."""
         try:
             core, session = _gen_session()
             return jsonify({"workflows": core.workflow_catalog(session)})
@@ -7974,8 +10306,12 @@ def main():
     args = ap.parse_args()
 
     out_dir = Path(args.out)
-    if not out_dir.exists():
-        sys.exit("Output folder not found: {}".format(out_dir))
+    # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
+    # to start here used to be the ONLY thing a brand-new user saw: a console exit, before
+    # the web app's own first-run wizard (paste a key, run the first sync) ever had a
+    # chance to render. Create the folder and an empty, schema-initialized catalog instead
+    # and let the server boot; the wizard banner is what guides them from there.
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     db_path  = out_dir / "catalog.db"
     csv_path = out_dir / "catalog.csv"
@@ -7986,7 +10322,10 @@ def main():
         n = migrate_csv_to_db(csv_path, db_path)
         print("Migrated {:,} rows.".format(n))
     elif _db_is_empty(db_path):
-        sys.exit("No catalog found in {}. Run a download first.".format(out_dir))
+        init_db(db_path)
+        print("No catalog yet in {} -- starting anyway. "
+              "Use the setup wizard on the gallery's home page, "
+              "or run `python pixai_gallery_backup.py --sync` yourself.".format(out_dir))
 
     thumb_dir = out_dir / "gallery" / "thumbs"
     print("Loading catalog...")

@@ -23,9 +23,11 @@ You used a **model** id where a **version** id is required. Don't paste from a
 resolve the version id). See [Generating](Generating).
 
 ## "unknown inferenceProfile …"
-The chosen **Mode** isn't supported by that model type. Harmless — the tool
-auto-falls-back to the model's default and generates anyway (a rejected submit costs
-no credits). Leave Mode on **Auto** to avoid it.
+The chosen **Mode** isn't supported by that model type. On the **CLI** (`--generate`) and the
+desktop GUI, this is harmless — the tool auto-falls-back to the model's default and generates
+anyway (a rejected submit costs no credits). The **web app's Generate drawer and the Loom**
+don't have that fallback — there, an unsupported Mode surfaces as a plain error with nothing
+auto-retried. Leave Mode on **Auto** to avoid it everywhere.
 
 ## HTTPS / SSL certificate errors
 Behind antivirus or a corporate proxy: `pip install truststore` (Python 3.10+). The
@@ -43,3 +45,8 @@ just won't have a thumbnail.
 ## A generation isn't in the gallery yet
 Generated tasks don't always flow into `--update` instantly. Recover by id without
 spending credits: `python pixai_gallery_backup.py --generate --task-id <id>`.
+
+To stop it stranding in the first place, use the live push path: the web gallery
+runs a live-mirror thread automatically, and the CLI exposes the same machinery as
+`python pixai_gallery_backup.py --watch --watch-backup`, which collects each
+generation the moment it completes. Both need `websockets` — see [Setup](Setup).

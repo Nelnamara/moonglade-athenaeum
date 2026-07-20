@@ -6,10 +6,9 @@
 
 **Back up · browse · generate · curate** — a complete local companion for **your own** [PixAI.art](https://pixai.art) work.
 
-![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.8%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey)
+![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.8%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey) [![Tests](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml/badge.svg)](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml)
 
-![Gallery hero](docs/img/hero.png)
-<sub>*The local web gallery — your entire PixAI history, full-resolution, searchable.*</sub>
+*The local web gallery — your entire PixAI history, full-resolution, searchable.*
 
 </div>
 
@@ -24,7 +23,7 @@ PixAI's site only shows a handful of images at a time and nothing older is easy 
 ## ⚡ Quickstart — one key, that's it
 
 ```bash
-pip install requests pillow PySide6 flask truststore
+pip install requests pillow PySide6 flask truststore websockets
 ```
 
 1. Generate an API key at **[platform.pixai.art](https://platform.pixai.art)** (lifetime up to ~2 years).
@@ -71,24 +70,19 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 | **Run & control** | Web **Control Panel**: one-click maintenance jobs with a real progress bar and a Stop button, scheduled auto-backups, and **server Stop/Restart from the browser** · double-click `Serve Gallery` launcher · **make it yours**: pick your header mark + its animation, and set the Desktop launcher icon to match |
 
 ### Collections & Select mode
-![Collections and select mode](docs/img/curation.png)
-<sub>*Toggle **Select**, drag across images to paint a selection, then **+ Add to Collection** — files never move, and it survives Organize.*</sub>
+*Toggle **Select**, drag across images to paint a selection, then **+ Add to Collection** — files never move, and it survives Organize.*
 
 ### Generate, and watch it appear
-![Generate](docs/img/generate.png)
-<sub>*Model/LoRA pickers, quality modes, cheaper priority by default. New images land in the same catalog you browse.*</sub>
+*Model/LoRA pickers, quality modes, cheaper priority by default. New images land in the same catalog you browse.*
 
 ### Collection Health
-![Collection Health](docs/img/health.png)
-<sub>*Storage, full-meta coverage, duplicates, images-by-month, top models/LoRAs/tags, prompt word-cloud.*</sub>
+*Storage, full-meta coverage, duplicates, images-by-month, top models/LoRAs/tags, prompt word-cloud.*
 
 ---
 
 ## 🖥️ The desktop app
 
-A PySide6 GUI (`pixai_gui.py`) wraps the whole workflow — Download, Generate, Organize, Convert, Utilities, and a one-click Gallery launcher — with live logs and a dark theme. Prefer the terminal? Every feature has a CLI flag. Want a double-click launcher? Use **`Moonglade Athenaeum.pyw`** (no console window).
-
-![GUI](docs/img/gui.png)
+A PySide6 GUI (`pixai_gui.py`) wraps the whole workflow — Download, Generate, Organize, Convert, Utilities, and a one-click Gallery launcher — with live logs and a dark theme. Prefer the terminal? Every backup and generation feature has a CLI flag (the curation and web-suite surfaces — collections, star ratings, saved views, the Loom, branding, achievements/skins, the Trophy Hall — are browser-only). Want a double-click launcher? Use **`Moonglade Athenaeum.pyw`** (no console window).
 
 ---
 
@@ -96,22 +90,22 @@ A PySide6 GUI (`pixai_gui.py`) wraps the whole workflow — Download, Generate, 
 
 Everything deep lives in the **[Wiki](../../wiki)**:
 
-[Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Troubleshooting](../../wiki/Troubleshooting) · [How It Works](../../wiki/How-It-Works)
+[Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Troubleshooting](../../wiki/Troubleshooting) · [Trust & Safety](../../wiki/Trust-and-Safety) · [FAQ](../../wiki/FAQ) · [How It Works](../../wiki/How-It-Works)
 
-In-repo: [`docs/architecture.md`](docs/architecture.md) (contributors).
+In-repo: [`docs/architecture.md`](docs/architecture.md) (how it's built), [`docs/LOOM.md`](docs/LOOM.md) (the Loom's manual), [`docs/STATE.md`](docs/STATE.md) (current project state), [`docs/STANDARDS.md`](docs/STANDARDS.md) (house standards), [`docs/ART.md`](docs/ART.md) (art direction), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
 ## Requirements
 
-`requests` is the only hard dependency. `pillow` (thumbnails/convert), `PySide6` (GUI), `flask` (gallery), and `truststore` (HTTPS behind AV/proxies) are recommended; `ffmpeg` on PATH is optional for video posters.
+`requests` is the only hard dependency. `pillow` (thumbnails/convert), `PySide6` (GUI), `flask` (gallery), `truststore` (HTTPS behind AV/proxies), and `websockets` (`--watch` and the gallery's live-mirror) are recommended; `ffmpeg` on PATH is required for the Loom's export and frame handoff, and optional for video posters.
 
 ```bash
-pip install requests pillow PySide6 flask truststore
+pip install requests pillow PySide6 flask truststore websockets
 ```
 
 ---
 
 <div align="center">
-<sub>Unofficial · personal-use · MIT-spirited. Made for Nelnamara's archive, shared in case it helps yours.</sub>
+<sub>Unofficial · personal-use · <a href="LICENSE">MIT licensed</a>. Made for Nelnamara's archive, shared in case it helps yours.</sub>
 </div>
