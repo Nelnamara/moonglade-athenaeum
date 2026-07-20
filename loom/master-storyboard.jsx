@@ -1408,7 +1408,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <FrameSlot which="close" frame={active.c.closeFrame} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("closeFrame", p)} />
         </div>
-        <div className="lv-tabs">{["Image", "Edit", "Reference", "Video"].map((t) => (<span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
+        {/* The Image/Edit/Reference/Video tab strip lives in the rail's .lv-sidehead
+            (like the left rail's Cast/Footage tabs), so `gen` must NOT render its own --
+            an identical strip here stacked a duplicate directly below the header one
+            whenever the right rail was expanded. Removed to match the left-rail pattern:
+            tabs in the header, content below without repeating them. */}
         {acct && (
           <div className="lv-bal">&#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
             {acct.claim_credits ? <span className="lv-balclaim"> &middot; +{acct.claim_credits} claimable</span> : null}</div>
