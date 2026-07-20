@@ -360,6 +360,12 @@ def list_web_users():
 # off the keyboard, and the perennial favourites.
 MIN_WEB_PASSWORD_LEN = 8
 
+# Usernames are bounded so a pathological one can't wreck the account-list layout
+# (a 300-char name pushed a live Remove button ~980px outside its card) or bloat
+# config.json. 64 is generous for a display name yet safely short; the account row
+# also truncates in CSS as a second line of defence for any legacy over-long name.
+MAX_WEB_USERNAME_LEN = 64
+
 _COMMON_PASSWORDS = frozenset({
     "password", "password1", "passw0rd", "12345678", "123456789", "1234567890",
     "qwertyui", "qwerty123", "letmein1", "welcome1", "iloveyou", "admin123",
@@ -395,6 +401,22 @@ def password_problem(password):
     return None
 
 
+def username_problem(username):
+    """Return a human-readable reason `username` is unacceptable for a web-login
+    account, or None if it passes. Mirrors password_problem(): one policy, rendered
+    verbatim at every entry point (the /login bootstrap form, the Panel's
+    /api/users/add, and --add-web-user), so the rule can't drift between them.
+    Callers strip first; this assumes an already-stripped value but tolerates one."""
+    u = (username or "").strip()
+    if not u:
+        return "Username is required."
+    if len(u) > MAX_WEB_USERNAME_LEN:
+        return "Username must be at most {} characters.".format(MAX_WEB_USERNAME_LEN)
+    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in u):
+        return "Username can't contain control characters."
+    return None
+
+
 def add_or_update_web_user(username, password):
     """Hash `password` (werkzeug, scrypt) and add/update `username` in config.json's
     AUTH_USERS. Only the hash ever touches disk -- the plaintext password passed in
@@ -411,6 +433,11 @@ def add_or_update_web_user(username, password):
     username = (username or "").strip()
     if not username:
         raise ValueError("username must not be empty")
+    # Hard backstop for EVERY writer, including the --add-web-user CLI path that
+    # doesn't go through username_problem() -- length is enforced at the one place
+    # the account actually gets written, so nothing can persist an over-long name.
+    if len(username) > MAX_WEB_USERNAME_LEN:
+        raise ValueError("username must be at most {} characters".format(MAX_WEB_USERNAME_LEN))
     if not password:
         raise ValueError("password must not be empty")
     with _accounts_lock:
@@ -443,6 +470,8 @@ def add_web_user_if_new(username, password):
     username = (username or "").strip()
     if not username:
         raise ValueError("username must not be empty")
+    if len(username) > MAX_WEB_USERNAME_LEN:          # same backstop as add_or_update_web_user
+        raise ValueError("username must be at most {} characters".format(MAX_WEB_USERNAME_LEN))
     if not password:
         raise ValueError("password must not be empty")
     with _accounts_lock:
