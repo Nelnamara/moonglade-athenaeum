@@ -59,3 +59,8 @@ Thumbs.db
 # definition, points at a local port). Scoped to the file, not all of .claude/, so
 # genuinely shareable project config (agents, hooks) can still be tracked later. ----
 /.claude/launch.json
+
+# Ephemeral design mockups: throwaway single-file HTML built to verify a design
+# before implementing it (the locked pixel source lives in the Claude artifact, not
+# here). Never committed -- they would rot instantly against the real surface.
+static/_mockup_*.html
