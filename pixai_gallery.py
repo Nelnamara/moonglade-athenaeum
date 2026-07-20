@@ -8666,6 +8666,46 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         import pixai_gallery_backup as core
         return core, core._make_session(None)
 
+    def _input_media_id(core, session, val):
+        """Turn whatever the client sent into a media_id PixAI will accept as an INPUT.
+
+        A media_id in our catalog identifies a generation OUTPUT, and PixAI refuses one
+        as an input -- invalid_media_id / invalid_reference_image_media_id, with a full
+        refund. Readable is NOT usable-as-input: verified 2026-07-20 that both a
+        month-old and a same-day catalog id still resolve fine through GET /v1/media, so
+        this is media KIND, not expiry.
+
+        We hold the file on disk (that is what the backup IS), so upload it and hand
+        PixAI an upload-kind id. Same free S3 handshake as --upload and /api/upload;
+        spends nothing. Cached per media_id for the process lifetime.
+
+        This lives at create_app scope, called by EVERY path that feeds a user-chosen
+        image to PixAI -- /api/loom/generate, /api/enhance, /api/edit, /api/fix. The
+        first fix for this bug only patched the video route, which left enhance/edit/fix
+        silently broken in exactly the same way; a shared helper is what stops the next
+        input path from reintroducing it.
+
+        Falls back to the value unchanged on ANY failure (no local copy, upload error)
+        so PixAI's own error surfaces rather than a mystery 'no reference'.
+        """
+        s = str(val or "").strip()
+        if not s or not s.isdigit():
+            return s                       # data: URLs and blanks are handled by callers
+        if s in _ref_upload_cache:
+            return _ref_upload_cache[s]
+        try:
+            row = get_row(db_path, s)
+            fp = find_image_file(out_dir, s, (row or {}).get("filename") or "")
+            if not fp or not fp.exists():
+                return s
+            mid = core.upload_media(session, str(fp))
+        except Exception:                  # noqa: BLE001 -- never 500 a generation over this
+            return s
+        if mid:
+            _ref_upload_cache[s] = str(mid)
+            return str(mid)
+        return s
+
     @app.route("/api/model-search")
     def api_model_search():
         """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key -> localhost only.
@@ -9446,11 +9486,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             pass
         return {}
 
-    def _edit_params_from_payload(core, p):
+    def _edit_params_from_payload(core, p, session=None):
         """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
         catalog media_id (the image being edited). A `preset` name swaps in a locally
         banked Toolbox preset (canned prompt + sceneId + its modelId). Returns None if
-        no source."""
+        no source.
+
+        `session` is REQUIRED for a real submit and deliberately omitted for pricing.
+        With it, every source id is run through _input_media_id -- a catalog id is a
+        generation OUTPUT and PixAI refuses it as an input. Without it, ids are left
+        alone: /api/price only needs the SHAPE to compute a cost, and uploading on every
+        cost check would upload the same file repeatedly while the user types."""
         p = p or {}
         src = str(p.get("source") or "").strip()
         if not src:
@@ -9485,6 +9531,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         spec = core.edit_model_by_id(model_id)
         if spec:
             media = media[:spec["max_refs"]] or [src]
+        if session is not None:            # real submit -- see the docstring
+            media = [_input_media_id(core, session, m) for m in media]
         return core.build_chat_edit_parameters(instruction, media, **kwargs)
 
     @app.route("/api/presets", methods=["GET", "POST"])
@@ -9646,7 +9694,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             from types import SimpleNamespace
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            params = _edit_params_from_payload(core, p)
+            params = _edit_params_from_payload(core, p, session)
             if params is None:
                 return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
@@ -9669,7 +9717,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             from types import SimpleNamespace
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            src = str(p.get("source") or "").strip()
+            src = _input_media_id(core, session, str(p.get("source") or "").strip())
             wid = str(p.get("workflow_id") or "").strip()
             plug = ENHANCE_PLUGINS.get(str(p.get("plugin") or "").strip())
             if not src:
@@ -9701,7 +9749,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            src = str(p.get("source") or "").strip()
+            src = _input_media_id(core, session, str(p.get("source") or "").strip())
             boxes = p.get("boxes") or []
             if not src:
                 return jsonify({"error": "pick an image first"}), 400
@@ -9975,40 +10023,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 if not s:
                     return ""
                 if s.isdigit():
-                    # A media_id from OUR catalog identifies a generation OUTPUT, and
-                    # PixAI does not accept one of those as a generation INPUT -- it
-                    # answers invalid_media_id (i2vPro.mediaId) or
-                    # invalid_reference_image_media_id (referenceImageMediaIds) and
-                    # refunds. Readable is not the same as usable-as-input: both a
-                    # month-old and a same-day id resolve fine through GET /v1/media,
-                    # so this is not expiry, it is media KIND.
-                    #
-                    # The Loom never hit this because it sends data: thumbnails, which
-                    # take the upload branch below and come back with an upload-kind id.
-                    # The gallery sends bare ids, so it could never reach that branch --
-                    # which is exactly why generating from the gallery failed on every
-                    # reference while the Loom worked.
-                    #
-                    # We hold the actual file (that is what the backup IS), so upload it
-                    # and hand PixAI an id it will accept. upload_media is the same free
-                    # S3 handshake as --upload and /api/upload; it spends nothing.
-                    if s in _ref_upload_cache:
-                        return _ref_upload_cache[s]
-                    row = get_row(db_path, s)
-                    fp = find_image_file(out_dir, s, (row or {}).get("filename") or "")
-                    if not fp or not fp.exists():
-                        # No local copy -- pass the id through unchanged rather than
-                        # dropping the reference silently. If PixAI rejects it the user
-                        # gets its real error instead of a mystery "no reference" one.
-                        return s
-                    try:
-                        mid = core.upload_media(session, str(fp))
-                    except Exception:                 # noqa: BLE001 -- fall back, never 500
-                        return s
-                    if mid:
-                        _ref_upload_cache[s] = str(mid)
-                        return str(mid)
-                    return s
+                    # Shared with /api/enhance, /api/edit and /api/fix -- see
+                    # _input_media_id. A catalog id is a generation OUTPUT and PixAI
+                    # refuses it as an input, so upload the local file we hold.
+                    return _input_media_id(core, session, s)
                 if s.startswith("data:"):             # a Loom thumbnail -> upload it
                     try:
                         head, b64 = s.split(",", 1)
