@@ -618,13 +618,39 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   preview/confirm step before commit. Builds on existing conventions — the `source='local'`
   catalog tag and the `imported/` folder already exist.
 
-### Release
+---
 
-- **Merge `loom-v2` → `master` with `--no-ff`.** The single act that carries the Loom V2 set,
-  achievements, `CHANGELOG.md` and `LICENSE` to master. `master` has no commits that aren't
-  already in `loom-v2`; merge-tree is clean.
-- **Publish a GitHub Release for the newest tag** — it is the only tag without one; every
-  earlier tag is released.
+## Priority order (agreed 2026-07-19)
+
+Ranked, with the reason each sits where it does. Ordering changed once already when the
+owner pointed out that **web parity gates GUI removal** — anything only reachable from the
+PySide6 GUI or the CLI needs a web equivalent *before* that GUI can go.
+
+1. **Web parity** — force-full-resync · video/audio reference slots in the live gallery
+   drawer's Multi-ref · convert-and-download for `/export-zip` · web import into the catalog.
+   Unblocks the PySide6 removal below, which is decided but cannot execute until this lands.
+2. **Gallery QoL easy wins** — chiefly the collection-remove UI: `/collection-remove` exists
+   with **zero callers**, so the route is already written and only the UI is missing.
+3. **The 401 batch and the search wildcard** — ✅ both shipped 2026-07-19. What remains of
+   the 401 finding is the poll-ceiling half (see Known defects).
+4. **The naming pass** (`pixai_* → moonglade_*`) — sequenced here for *timing*, not value:
+   it is cleanest immediately after a merge while `master` and the working branch are
+   identical. Size it with `python tools/name_inventory.py modules` before committing to it.
+5. **The Design Pass** (below) — one body of work, not five separate ones.
+
+### The Design Pass (consolidated)
+
+Grouped by owner decision 2026-07-19: these were tracked as separate items but are one
+coherent visual effort and should be scoped and executed together rather than piecemeal.
+
+- The **Trophy Hall redesign**, blocked on the owner's own Figma frame.
+- The **Loom visual-refinement pass** — the skin system already reaches the Loom, so what
+  remains is refinement rather than plumbing.
+- The **gallery search-bar redesign**, blocked on owner input.
+- The **owner's layout/function note-taking pass**, which gates several deferred items.
+- Epic-tier frame art, per-tile ornate frames, the "earned rewards" display, the
+  toast-badge-to-home-marker motion, and toast tier colours vs shipped badge art — all
+  previously filed individually under Open owner calls.
 
 ---
 
@@ -655,8 +681,9 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   owner-confirmed; the code still runs the original (common = steel-blue `#9fbad6`, with
   `--gunmetal #8a93a2` / `--ruby #e0355e`).
 - **PySide6 GUI removal** (`pixai_gui.py` + `Moonglade Athenaeum.pyw`) is decided but **not
-  executed** — both files are present. The GO is gated on the Panel web additions above landing
-  first. A GUI/web/CLI parity matrix confirmed zero GUI-only business capability; the only
+  executed** — both files are present. The GO is gated on the web-parity work landing first —
+  see **Priority order** above, where parity is ranked #1 precisely because it
+  unblocks this. Owner, 2026-07-19: *"Pending the web parity solutions."* A GUI/web/CLI parity matrix confirmed zero GUI-only business capability; the only
   GUI-only items are two local conveniences (an "open `_deleted/` in Explorer" button and a
   "recently-used models" quick-pick). The phase-out is surgical — strip the redundant spend
   surfaces (the Generate/Video/Edit clones, which are strictly worse and have no cost/free-card
@@ -669,20 +696,16 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   cosmetic items: the image picker's further visual polish, taste-level width/spacing tweaks on
   Generate/Edit/Enhance, and the Composer's collapsed-stack fan animation. Features are built
   cheap-to-rearrange in anticipation of it.
-- **Generation Flags** (an AI QA pass) has zero code footprint and no spec. Blocked on two
-  decisions: what a pass flags (anatomy / artifacts / NSFW / duplication?), and where the
-  verdict lives. It is not dependency-free — numpy is not a current dep and the CLIP index
-  rides heavy optional deps. It is **not** the shipped Pixeltable "Similar / more like this"
-  search.
-- **Mio.2** (PixAI's agent surface) is deferred pending explicit owner direction. It is
-  cookie-authed — the `sk-` Bearer 401s — and the contract is bankable free from the JS bundle,
-  but integration means a cookie-jar rewrite. Worth it only as a deliberate agent-UX bet. **Do
-  not capture cookies without owner direction.**
-- **Deleting the stale branches** needs a go-ahead. `generate-drawer`, `suite-polish` and
-  `video-gen` each have zero commits not already in `loom-v2` — safe, no-data-loss deletes.
-  `suite-polish` exists only locally; the other two also exist on origin. Keep
-  `loom-extract-hook`: it holds the disproven single-hook extraction attempt (2321cac) as the
-  documented record.
+- **Generation Flags** — the owner asked 2026-07-19 for a scope call rather than another
+  deferral: *"either we keep deferring this or it's actually done. WHAT is the scope."*
+  Current state is zero code, no spec, and two unanswered product questions (what a pass
+  flags — anatomy / artifacts / NSFW / duplication — and where the verdict lives). It is not
+  dependency-free: numpy is not a current dep and the CLIP index rides heavy optional ones.
+  It is **not** the shipped Pixeltable "Similar / more like this" search.
+  **Recommendation on the table: shrink or drop.** The only version that is concrete and
+  nearly free today is *"flag near-duplicate generations"*, which the existing Pixeltable
+  CLIP index can already answer with no new dependencies. Anatomy/artifact/NSFW detection is
+  a research project rather than a backlog item, and should be named as one or dropped.
 - **File logging** has never entered any tracker, despite `CLAUDE.md` calling it "a separate,
   still-open discussion" since `-v/--verbose` shipped. It is a loose thread, not a parked
   decision: decide whether it is in scope, or drop it.
@@ -751,10 +774,6 @@ green throughout. Ranked; the V1-cluster CSS bug they were found alongside is al
   look the next time that stacking area changes. Low severity.
 - **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not roam between
   the home and work machines this project is already edited from.
-- **`master` is missing `CHANGELOG.md` and `LICENSE`**, and master's README still points at
-  five `docs/img/*.png` files that do not exist in its tree (only `docs/img/README.md` is
-  there). These reach master only when `loom-v2` merges.
-
 ### Machine-local layout (a standing drift hazard, not a bug)
 
 - The **live gallery server runs from the D: run-copy** (`D:\Moonglade Athenaeum\`), a separate
@@ -810,6 +829,11 @@ green throughout. Ranked; the V1-cluster CSS bug they were found alongside is al
   during the spike via Seedance's own upload endpoint, a temporary tunnel, or a short-lived
   presigned upload. Discipline: add the seam only when the second real provider lands, so two
   concrete cases shape it.
+- **Mio.2 — PixAI's agent surface.** Filed here by owner directive 2026-07-19, moved out of
+  Open owner calls: it is an epic-sized bet, not a pending decision. Cookie-authed — the `sk-`
+  Bearer 401s — and the contract is bankable free from the JS bundle, but integration means a
+  cookie-jar rewrite. Worth it only as a deliberate agent-UX bet. **Do not capture cookies
+  without owner direction.**
 - **Epic C — Publish & Community (core + web).** Roadmapped into the next core + web
   passes. Independent of A/B — no provider-seam prerequisite; it can move whenever core+web
   capacity allows. `createArtworkFromTaskV2`, `upsertArtwork` / `deleteArtwork`, `markArtwork`
