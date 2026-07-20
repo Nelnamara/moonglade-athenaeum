@@ -79,6 +79,58 @@ def test_add_user_validates_password_length_and_confirm(tmp_path):
     assert core.list_web_users() == [{"username": "tester"}]
 
 
+def test_username_problem_policy():
+    """The one policy every entry point shares. Empty / over-length / control chars are
+    rejected with a rendered-verbatim reason; an ordinary name passes."""
+    cap = core.MAX_WEB_USERNAME_LEN
+    assert core.username_problem("") == "Username is required."
+    assert core.username_problem("   ") == "Username is required."      # strips first
+    assert "at most" in core.username_problem("x" * (cap + 1))
+    assert core.username_problem("x" * cap) is None                      # exactly at the cap is fine
+    assert "control characters" in core.username_problem("bad\x00name")
+    assert "control characters" in core.username_problem("tab\tname")
+    assert core.username_problem("Nel'namara 42") is None                # spaces/punctuation/unicode ok
+
+
+def test_add_user_rejects_overlong_username(tmp_path):
+    """The 300-char-username row-break bug: a name past the cap is refused with a friendly
+    message, and nothing is written."""
+    cli = login_client(tmp_path)
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    long_name = "z" * (core.MAX_WEB_USERNAME_LEN + 50)
+    r = cli.post("/api/users/add", json={
+        "username": long_name, "password": "a-valid-password", "confirm": "a-valid-password",
+        "csrf": csrf})
+    assert r.status_code == 400
+    assert "at most" in r.get_json()["error"]
+    assert core.list_web_users() == [{"username": "tester"}]             # not written
+
+
+def test_writers_reject_overlong_username_as_a_backstop(tmp_path):
+    """The hard backstop at the one place an account is written -- so even the
+    --add-web-user CLI path (which never calls username_problem) can't persist an
+    over-long name."""
+    import pytest
+    over = "q" * (core.MAX_WEB_USERNAME_LEN + 1)
+    with pytest.raises(ValueError):
+        core.add_or_update_web_user(over, "a-valid-password")
+    with pytest.raises(ValueError):
+        core.add_web_user_if_new(over, "a-valid-password")
+    # a name exactly at the cap writes fine
+    assert core.add_web_user_if_new("y" * core.MAX_WEB_USERNAME_LEN, "a-valid-password") is True
+
+
+def test_username_inputs_carry_a_maxlength(tmp_path):
+    """Client-side belt to the server's braces: the account-creation and login username
+    fields cap input at the same 64, so the UI can't even submit an over-long name."""
+    cli = login_client(tmp_path)
+    panel = cli.get("/panel").get_data(as_text=True)
+    assert 'id="new-username"' in panel and 'maxlength="64"' in panel
+    # login page from a FRESH unauthenticated client -- an authed GET /login may redirect
+    login = create_app(tmp_path).test_client().get("/login").get_data(as_text=True)
+    assert 'name="username"' in login and 'maxlength="64"' in login
+
+
 def test_add_user_requires_valid_csrf(tmp_path):
     cli = login_client(tmp_path)
     cli.get("/panel")  # establishes the session; deliberately ignore its real csrf

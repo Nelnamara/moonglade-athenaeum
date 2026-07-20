@@ -6567,7 +6567,7 @@ function savePrompt() {
         <input type="hidden" name="mode" value="create">
         <div class="login-field">
           <label for="lf-user">Username</label>
-          <input id="lf-user" type="text" name="username" autocomplete="username" autofocus required>
+          <input id="lf-user" type="text" name="username" autocomplete="username" maxlength="64" autofocus required>
         </div>
         <div class="login-field">
           <label for="lf-pass">Password</label>
@@ -6590,7 +6590,7 @@ function savePrompt() {
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <div class="login-field">
           <label for="lf-user">Username</label>
-          <input id="lf-user" type="text" name="username" autocomplete="username" autofocus required>
+          <input id="lf-user" type="text" name="username" autocomplete="username" maxlength="64" autofocus required>
         </div>
         <div class="login-field">
           <label for="lf-pass">Password</label>
@@ -6903,8 +6903,13 @@ function savePrompt() {
   .htab.on{color:var(--lavender);border-bottom-color:var(--lavender);background:rgba(182,146,230,.06);}
   .ptab-view{display:none;}
   .ptab-view.on{display:block;}
-  .u-row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--surface0);border-radius:8px;border:1px solid var(--surface1);}
+  .u-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--surface0);border-radius:8px;border:1px solid var(--surface1);}
   .u-row + .u-row{margin-top:6px;}
+  /* The name flexes and truncates; the Remove button never shrinks or moves. This
+     is the layout half of the username-length fix -- new names are capped at 64,
+     but a legacy over-long name in config must still not push the button off-card. */
+  .u-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;color:var(--text);}
+  .u-row .btn{flex:none;}
   .u-you{font-size:11px;color:var(--accent);margin-left:8px;}
 </style>
 <header>
@@ -7035,7 +7040,7 @@ function savePrompt() {
     <div id="users-list">
       {% for u in web_users %}
       <div class="u-row" data-username="{{ u.username }}">
-        <span style="font-size:13.5px;color:var(--text);">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
+        <span class="u-name">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
         <button type="button" class="btn btn-danger" onclick="removeUser(this)">Remove</button>
       </div>
       {% else %}
@@ -7047,7 +7052,7 @@ function savePrompt() {
     <h2>Add user</h2>
     <form id="add-user-form" onsubmit="return addUser(event)">
       <div class="setup-row login-fields" style="max-width:380px;">
-        <input type="text" id="new-username" placeholder="Username" autocomplete="off" required>
+        <input type="text" id="new-username" placeholder="Username" autocomplete="off" maxlength="64" required>
         <input type="password" id="new-password" placeholder="Password" autocomplete="new-password" required>
         <input type="password" id="new-confirm" placeholder="Confirm password" autocomplete="new-password" required>
         <button type="submit" class="btn btn-primary">Add user</button>
@@ -7100,7 +7105,7 @@ function addUser(evt){
       // server-rendered row below passes `this` to removeUser() instead of
       // templating the username into an inline onclick string.
       var row=document.createElement('div'); row.className='u-row'; row.setAttribute('data-username', d.username);
-      var span=document.createElement('span'); span.style.cssText='font-size:13.5px;color:var(--text);'; span.textContent=d.username;
+      var span=document.createElement('span'); span.className='u-name'; span.textContent=d.username;
       var btn=document.createElement('button'); btn.type='button'; btn.className='btn btn-danger'; btn.textContent='Remove';
       btn.onclick=function(){ removeUser(btn); };
       row.appendChild(span); row.appendChild(btn);
@@ -7387,7 +7392,13 @@ function pickSkin(id){
       try{ localStorage.setItem('skin', d.skin||'moonglade'); }catch(e){}
       if(d.skin && d.skin!=='moonglade') document.documentElement.setAttribute('data-skin', d.skin);
       else document.documentElement.removeAttribute('data-skin');
-      el('skin-status').innerHTML='<span style="color:var(--emerald)">\\u2713 skin applied suite-wide</span>';
+      // Transient confirmation: nothing else ever cleared #skin-status, so the "applied"
+      // line lingered indefinitely -- and since a LOCKED card is inert (no handler), a
+      // later click on one left the stale success showing, reading as though the locked
+      // skin had applied. Clear it after a few seconds; re-arm on each pick.
+      var st=el('skin-status'); st.innerHTML='<span style="color:var(--emerald)">\\u2713 skin applied suite-wide</span>';
+      if(window._skinMsgTimer) clearTimeout(window._skinMsgTimer);
+      window._skinMsgTimer=setTimeout(function(){ if(st) st.innerHTML=''; }, 3500);
       loadSkins();
     }).catch(function(){ el('skin-status').textContent='\\u26a0 network error'; });
 }
@@ -7571,9 +7582,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     username = (request.form.get("username") or "").strip()
                     password = request.form.get("password") or ""
                     confirm = request.form.get("confirm") or ""
+                    un_problem = core.username_problem(username)
                     pw_problem = core.password_problem(password)
-                    if not username:
-                        error = "Username is required."
+                    if un_problem:
+                        error = un_problem
                     elif pw_problem:
                         error = pw_problem
                     elif password != confirm:
@@ -7793,10 +7805,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
         confirm = str(body.get("confirm") or "")
-        if not username:
-            return jsonify({"error": "Username is required."}), 400
-        # Same core.password_problem() the /login bootstrap form and the
-        # --add-web-user CLI call -- one policy, three entry points, no drift.
+        # Same core.username_problem()/password_problem() the /login bootstrap form
+        # and the --add-web-user CLI call use -- one policy, three entry points, no
+        # drift. username_problem covers empty, over-length, and control chars.
+        un_problem = core.username_problem(username)
+        if un_problem:
+            return jsonify({"error": un_problem}), 400
         pw_problem = core.password_problem(password)
         if pw_problem:
             return jsonify({"error": pw_problem}), 400
