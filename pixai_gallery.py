@@ -2818,6 +2818,25 @@ def create_app(out_dir: Path):
         "rebuild-similar": {"args": ["--rebuild-similar"],
                             "label": "Rebuild the Similar index (slow, needs pixeltable)",
                             "destructive": False},
+        # --- Advanced sync (web parity step 2): the sync variants the bare "Sync now"
+        # (an INCREMENTAL --sync, i.e. --update --full-meta) can't do. Each is its own
+        # whitelisted KEY, exactly like audit-full/dedup-delete -- never argv the client
+        # assembles. `advanced: True` routes them to the Panel's own "Advanced" section and
+        # keeps them OUT of the scheduler dropdown (a full re-walk on a timer is a foot-gun,
+        # and test-pull's N has no home there). All three are read/append, never destructive.
+        "resync-full":   {"args": ["--full-meta"],
+                          "label": "Full re-walk — re-pull ALL history + metadata (non-incremental)",
+                          "destructive": False, "advanced": True},
+        "inventory":     {"args": ["--count"],
+                          "label": "Inventory count — tally account vs. backup (read-only, no download)",
+                          "destructive": False, "advanced": True},
+        # The ONLY parameterised action. `int_param` means _panel_run appends a single
+        # server-validated, clamped integer (the N for --max) -- not an arbitrary string,
+        # the same discipline as the scheduler's interval_hours. int_range bounds it.
+        "test-pull":     {"args": ["--max"], "int_param": True, "int_range": (1, 200),
+                          "int_default": 20,
+                          "label": "Test pull — fetch the N most-recent tasks",
+                          "destructive": False, "advanced": True},
         # (Export CSV isn't here on purpose -- in the browser it's a real DOWNLOAD via /export-csv,
         #  not a subprocess that writes catalog.csv into the backup folder.)
         "organize-dry":  {"args": ["--organize", "--dry-run"], "label": "Organize — preview (dry run)", "destructive": False},
@@ -2890,7 +2909,7 @@ def create_app(out_dir: Path):
             _log_job(jid, status=("failed" if status == "failed" else "done"),
                      error=("exited {}".format(rc) if status == "failed" else None))
 
-    def _panel_run(action):
+    def _panel_run(action, int_arg=None):
         import subprocess
         spec = PANEL_ACTIONS[action]
         # Worker count is a persisted panel setting (schedule.json), so BOTH manual
@@ -2900,8 +2919,21 @@ def create_app(out_dir: Path):
             workers = max(1, min(int(_load_sched().get("workers") or 4), 16))
         except (TypeError, ValueError):
             workers = 4
+        action_args = list(spec["args"])
+        if spec.get("int_param"):
+            # The ONLY variable part of any panel argv, and it is a single bounded
+            # integer, never a caller string: clamp int_arg into the action's declared
+            # range (falling back to its default when absent, e.g. a stray scheduler
+            # call), then append it. This is what lets test-pull carry an N without
+            # eroding _panel_run's "a WHITELISTED argv, never an arbitrary command".
+            lo, hi = spec["int_range"]
+            try:
+                n = max(lo, min(int(int_arg), hi))
+            except (TypeError, ValueError):
+                n = spec.get("int_default", lo)
+            action_args = action_args + [str(n)]
         argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v",
-                "--workers", str(workers)] + spec["args"]
+                "--workers", str(workers)] + action_args
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
         env = dict(os.environ, MOONGLADE_PROGRESS="1")
         proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
@@ -2912,7 +2944,7 @@ def create_app(out_dir: Path):
         job_id = "panel-" + uuid.uuid4().hex[:12]
         with _panel_lock:
             _panel_job.update(status="running", action=action, label=spec["label"],
-                              lines=["$ " + " ".join(spec["args"])], rc=None,
+                              lines=["$ " + " ".join(action_args)], rc=None,
                               started_at=None, progress=None, proc=proc, cancelled=False,
                               job_id=job_id)
         _log_job(job_id, status="running", type="panel", label=spec["label"])
@@ -2961,7 +2993,11 @@ def create_app(out_dir: Path):
                 s = _load_sched()
                 action = s.get("action")
                 if not s.get("enabled") or action not in PANEL_ACTIONS \
-                        or PANEL_ACTIONS[action]["destructive"]:
+                        or PANEL_ACTIONS[action]["destructive"] \
+                        or PANEL_ACTIONS[action].get("advanced"):
+                    # advanced actions are manual-run only (a full re-walk on a timer is a
+                    # foot-gun; test-pull needs an N the scheduler can't supply) -- backstop
+                    # to the dropdown already hiding them, in case an old schedule names one.
                     continue
                 interval = max(1, int(s.get("interval_hours") or 6)) * 3600
                 if _time.time() - (s.get("last_run") or 0) < interval:
@@ -6944,6 +6980,11 @@ function savePrompt() {
     <div class="jobrow" id="jobs-safe"></div>
     <div style="font-size:12px;color:var(--overlay0);margin:16px 0 8px;">Changes files &middot; asks first</div>
     <div class="jobrow" id="jobs-danger"></div>
+    <details class="jobs-adv" style="margin-top:16px;">
+      <summary style="font-size:12px;color:var(--overlay0);cursor:pointer;user-select:none;">Advanced &middot; sync variants the one-click Sync doesn't cover</summary>
+      <div style="font-size:11.5px;color:var(--overlay0);margin:8px 0;line-height:1.5;">These re-walk the full account rather than the incremental default. Slower, all read/append (never delete).</div>
+      <div class="jobrow" id="jobs-advanced"></div>
+    </details>
     <div id="jobprog" class="jobprog" style="display:none;"><div class="jp-bar"><i></i></div><div class="jp-txt"></div></div>
     <div id="jobstatus"></div>
     <button type="button" id="job-stop" class="jobbtn danger" style="display:none;width:auto;min-width:0;margin-top:8px;" onclick="stopJob()"><span class="t">&#9632; Stop this job</span></button>
@@ -7145,14 +7186,14 @@ var JOB_OPTIONS = {
                   title:'Redundant copies are deleted outright instead of being moved to _duplicates/. There is no undo and no safety net -- run the preview and the verify step first.'}
 };
 function renderJobs(){
-  var safe=el('jobs-safe'), danger=el('jobs-danger');
+  var safe=el('jobs-safe'), danger=el('jobs-danger'), adv=el('jobs-advanced');
   var variants={}; Object.keys(JOB_OPTIONS).forEach(function(k){ variants[JOB_OPTIONS[k].variant]=1; });
   ACTIONS.forEach(function(a){
     if(variants[a.action]) return;              // reached via its checkbox, not its own button
     var opt=JOB_OPTIONS[a.action];
     var b=document.createElement('button'); b.className='jobbtn'+(a.destructive?' danger':'');
     b.innerHTML='<span class="t">'+a.label+'</span>';
-    var cb=null;
+    var cb=null, numInput=null;
     if(opt){
       var wrap=document.createElement('label');
       wrap.className='job-opt'; wrap.title=opt.title;
@@ -7163,21 +7204,37 @@ function renderJobs(){
       wrap.onclick=function(ev){ ev.stopPropagation(); };
       b.appendChild(wrap);
     }
+    if(a.int_param){
+      // A single bounded integer (test-pull's N), clamped again server-side. Lives inside
+      // the button; interacting with it must not fire the run.
+      var rng=a.int_range||[1,200];
+      var nwrap=document.createElement('label'); nwrap.className='job-opt';
+      nwrap.appendChild(document.createTextNode('N '));
+      numInput=document.createElement('input'); numInput.type='number';
+      numInput.min=rng[0]; numInput.max=rng[1];
+      numInput.value=(a.int_default!=null?a.int_default:rng[0]);
+      numInput.style.width='56px';
+      nwrap.appendChild(numInput);
+      nwrap.onclick=function(ev){ ev.stopPropagation(); };
+      b.appendChild(nwrap);
+    }
     b.onclick=function(){
       var chosen=a;
       if(opt && cb && cb.checked){
         var alt=ACTIONS.concat(ALL_ACTIONS).filter(function(x){ return x.action===opt.variant; })[0];
         if(alt) chosen=alt;
       }
-      runJob(chosen);
+      runJob(chosen, numInput ? numInput.value : null);
     };
-    (a.destructive?danger:safe).appendChild(b);
+    (a.advanced && adv ? adv : (a.destructive?danger:safe)).appendChild(b);
   });
 }
 var polling=false;
-function runJob(a){
+function runJob(a, n){
   if(a.destructive && !confirm('Run: '+a.label+'?\\n\\nThis changes files on disk (reversible). Continue?')) return;
-  fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a.action, confirm:true})})
+  var payload={action:a.action, confirm:true};
+  if(n!=null && n!=='') payload.n=n;           // only test-pull sends it; server clamps + ignores elsewhere
+  fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(function(r){return r.json();}).then(function(d){
       if(d.error){ el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>'; return; }
       el('joblog').style.display='block'; if(!polling){ polling=true; poll(); }
@@ -7244,7 +7301,7 @@ function importTask(){
 }
 function loadSchedule(){
   var sel=el('sch-action');
-  ALL_ACTIONS.filter(function(a){return !a.destructive;}).forEach(function(a){
+  ALL_ACTIONS.filter(function(a){return !a.destructive && !a.advanced;}).forEach(function(a){
     var o=document.createElement('option'); o.value=a.action; o.textContent=a.label; sel.appendChild(o); });
   fetch('/api/panel/schedule').then(function(r){return r.json();}).then(function(s){
     el('sch-enabled').checked=!!s.enabled;
@@ -7749,7 +7806,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # actions -> Maintenance buttons (panel_visible only). all_actions -> the
         # scheduler dropdown, which needs the background-only jobs too (that's their
         # only home now that they're not buttons).
-        all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"]}
+        all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"],
+                        "advanced": v.get("advanced", False),
+                        "int_param": v.get("int_param", False),
+                        "int_default": v.get("int_default"),
+                        "int_range": v.get("int_range")}
                        for k, v in PANEL_ACTIONS.items()]
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
                   if v.get("panel_visible", True)]
@@ -7914,7 +7975,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if _panel_job["status"] == "running":
                 return jsonify({"error": "a job is already running"}), 409
         try:
-            _panel_run(action)
+            # `n` is only consumed by an int_param action (test-pull); _panel_run
+            # clamps it into range and ignores it otherwise, so passing it always is safe.
+            _panel_run(action, int_arg=body.get("n"))
             return jsonify({"ok": True, "action": action, "label": spec["label"]})
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
