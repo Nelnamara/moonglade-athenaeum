@@ -730,12 +730,6 @@ marks 4/12/62/63/74; and **`mg-notify.js`'s mascot paths are consistent** — al
 `/branding/mascots/`. The genuine gap there is that no `login_nel.png` art exists, so the login
 page's `onerror` chain degrades to `gen_nel.png` as designed.*
 
-- **A 300-char username breaks the account row ~980px outside its card**, putting a live
-  **Remove** button outside its container. No server-side length limit anywhere
-  (`add_or_update_web_user`, `add_web_user_if_new`, `/api/users/add`), no `maxlength` on
-  `#new-username`, and `.u-row` is a flex row with no `min-width:0` / `word-break`. Output
-  escaping held — Jinja autoescaped it, markup rendered as literal text — so this is input
-  hygiene, not XSS.
 - **`/logout` is a CSRF-able GET that revokes globally.** No token, and it bumps `sess_epoch`,
   so a cross-site *top-level navigation* (link, `window.open`, `location=`) signs the user out
   on every device. Denial of convenience only. *Not* closed by the revocation fix — the
@@ -764,11 +758,7 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   page, which has its own `#jobs-fab` and no `.lv-overlay`. (Distinct from the entry above: on
   the Loom an opaque overlay swallows those clicks first, so it cannot also be a dead zone
   there. These were one entry until verification separated them.)
-- **Smaller, all confirmed visually:** a duplicate tab strip renders twice bound to one state
-  (`.lv-sidehead` and the `gen` rail both map the same array over the same `setTab`) · locked
-  skins are inert under a *stale success message* — `pickSkin` writes "✓ skin applied
-  suite-wide" into `#skin-status` and nothing ever clears it, while `loadSkins()` rebuilds only
-  `#skin-grid` · upstream exceptions still print verbatim into the UI as a minor UX nit (34
+- **Smaller:** upstream exceptions still print verbatim into the UI as a minor UX nit (34
   `str(e)` sites) — but they are no longer an injection seam: the `innerHTML` sinks now escape
   (`escH2`) or build text nodes, verified in a browser (see CHANGELOG).
 - **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
