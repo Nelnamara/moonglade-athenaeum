@@ -349,6 +349,71 @@ def test_full_image_and_export_zip_routes(tmp_path):
     assert client.post("/export-zip", data={"media_ids": "ghost"}).status_code == 404
 
 
+def test_export_zip_converts_format_without_touching_the_original(tmp_path):
+    """Convert-and-download: fmt=jpeg re-encodes into the ZIP only. THE decided-shape
+    guarantee -- the original file on disk is byte-for-byte unchanged and no converted copy
+    lands in the archive, so a download transform never re-enters the catalog."""
+    import io
+    import zipfile
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="111", filename="a_111.png", prompt_preview="a moonlit grove")])
+    (tmp_path / "images").mkdir()
+    src = tmp_path / "images" / "a_111.png"
+    Image.new("RGB", (8, 8), (120, 90, 200)).save(src, "PNG")
+    before = src.read_bytes()
+    client = login_client(tmp_path)
+
+    z = client.post("/export-zip", data={"media_ids": "111", "fmt": "jpeg"})
+    assert z.status_code == 200
+    assert zipfile.ZipFile(io.BytesIO(z.data)).namelist() == ["a_111.jpg"]   # converted in the ZIP
+    assert src.exists() and src.read_bytes() == before                       # original untouched
+    assert not (tmp_path / "images" / "a_111.jpg").exists()                  # no converted copy left on disk
+
+
+def test_export_zip_embeds_metadata_on_a_copy(tmp_path):
+    """fmt=png + embed writes the prompt/ids into the DOWNLOADED file's PNG text chunks --
+    on the temp copy, never the archived original."""
+    import io
+    import zipfile
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="222", filename="b_222.png", prompt_preview="silver stag")])
+    (tmp_path / "images").mkdir()
+    src = tmp_path / "images" / "b_222.png"
+    Image.new("RGB", (8, 8), (30, 40, 60)).save(src, "PNG")
+    before = src.read_bytes()
+    client = login_client(tmp_path)
+
+    z = client.post("/export-zip", data={"media_ids": "222", "fmt": "png", "embed": "1"})
+    assert z.status_code == 200
+    data = zipfile.ZipFile(io.BytesIO(z.data)).read("b_222.png")
+    im = Image.open(io.BytesIO(data))
+    assert im.text.get("media_id") == "222"          # metadata embedded in the downloaded copy
+    assert src.read_bytes() == before                # original untouched (no text chunks added)
+
+
+def test_export_zip_passes_videos_through_untransformed(tmp_path):
+    """A video in the selection is shipped as-is even with fmt set -- Pillow can't transform
+    an mp4, and the guard skips it rather than corrupting or dropping it."""
+    import io
+    import zipfile
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="v1", filename="videos/clip_v1.mp4", is_video="1")])
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "clip_v1.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42fake")
+    client = login_client(tmp_path)
+
+    z = client.post("/export-zip", data={"media_ids": "v1", "fmt": "jpeg", "embed": "1"})
+    assert z.status_code == 200
+    assert zipfile.ZipFile(io.BytesIO(z.data)).namelist() == ["clip_v1.mp4"]   # untouched extension
+
+
 def test_collection_health_resolves_video_and_local_by_filename(tmp_path):
     """A video / imported row's media_id is synthetic (or a video id the image-only
     walk never sees), so 'missing' must resolve by filename too -- not over-report."""

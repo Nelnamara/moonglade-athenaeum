@@ -3639,6 +3639,28 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
   </div>
 </div>
+<div class="modal-bg" id="export-modal">
+  <div class="modal">
+    <h2 style="color:var(--text);">Download <span id="export-n"></span></h2>
+    <p>Files download exactly as PixAI delivered them by default. Converting or embedding
+       happens <b>only in this download</b> &mdash; your archive and catalog are never changed.</p>
+    <div style="display:flex;flex-direction:column;gap:13px;margin-bottom:18px;">
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--overlay0);text-transform:uppercase;letter-spacing:.05em;">Format
+        <select id="export-fmt" class="gen-sel" style="text-transform:none;letter-spacing:0;">
+          <option value="original" selected>Original &mdash; no re-compression</option>
+          <option value="png">PNG</option>
+          <option value="jpeg">JPEG</option>
+        </select></label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;">
+        <input type="checkbox" id="export-embed"> Embed prompt &amp; ids into each file
+        <span style="color:var(--overlay0);font-size:11px;">(PNG/JPEG)</span></label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('export-modal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="doExportDownload()">&#8681; Download</button>
+    </div>
+  </div>
+</div>
 <style>
   .ee-star{position:fixed;top:-40px;z-index:400;pointer-events:none;color:var(--lavender);text-shadow:0 0 14px rgba(182,146,230,.9),0 0 30px rgba(182,146,230,.5);animation:ee-fall linear forwards;}
   @keyframes ee-fall{to{transform:translateY(112vh) rotate(540deg);opacity:.05;}}
@@ -4259,14 +4281,26 @@ function toggleSelectMode() {
   }, true);
 })();
 function downloadZip() {
+  // Opens the export-options dialog (format + embed); doExportDownload() does the POST.
   var sel = [...selGet()];
   if (!sel.length) return;
+  document.getElementById('export-n').textContent = sel.length + ' item' + (sel.length===1?'':'s');
+  document.getElementById('export-modal').classList.add('open');
+}
+function doExportDownload() {
+  var sel = [...selGet()];
+  if (!sel.length) return;
+  document.getElementById('export-modal').classList.remove('open');
+  var fmt = document.getElementById('export-fmt').value;
+  var embed = document.getElementById('export-embed').checked;
   var f = document.createElement('form');
   f.method = 'post'; f.action = '/export-zip';
   sel.forEach(function(mid){
     var i = document.createElement('input');
     i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; f.appendChild(i);
   });
+  var ff = document.createElement('input'); ff.type='hidden'; ff.name='fmt'; ff.value=fmt; f.appendChild(ff);
+  if (embed) { var fe = document.createElement('input'); fe.type='hidden'; fe.name='embed'; fe.value='1'; f.appendChild(fe); }
   document.body.appendChild(f); f.submit(); f.remove();
 }
 function bulkReplacePrompt() {
@@ -8463,33 +8497,68 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/export-zip", methods=["POST"])
     def export_zip():
-        # Stream a ZIP of the selected images' full-res files. Stored (no
-        # recompression) since images are already compressed.
+        # Stream a ZIP of the selected files. Default is STORED (no recompression) --
+        # they're already compressed. Optional export-time transforms: convert to
+        # PNG/JPEG (`fmt`) and/or embed prompt+ids into the file (`embed`). Both run on a
+        # COPY in a temp dir and are discarded after zipping -- the catalog and the
+        # originals on disk are NEVER touched, and a converted file never re-enters the
+        # catalog as a new row (the decided shape; the archive stays exactly as PixAI
+        # delivered it). Videos are always passed through as-is (Pillow can't transform mp4).
         import io
         import zipfile
+        import shutil
+        import tempfile
+        import pixai_gallery_backup as core
         ids = request.form.getlist("media_ids")
+        fmt = (request.form.get("fmt") or "original").lower()
+        if fmt not in ("original", "png", "jpeg"):
+            fmt = "original"
+        embed = (request.form.get("embed") or "") in ("1", "true", "on", "yes")
+        transforming = (fmt != "original") or embed
+        tmp = tempfile.mkdtemp(prefix="mg_export_") if transforming else None
         mem = io.BytesIO()
         n = 0
-        with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
-            seen_names = set()
-            for mid in ids[:2000]:  # safety cap
-                row = get_row(db_path, mid)
-                if not row:
-                    continue
-                p = find_image_file(out_dir, mid, row.get("filename"))
-                if not p or not p.exists():
-                    continue
-                name = p.name
-                if name in seen_names:
-                    name = "{}_{}".format(mid, p.name)
-                seen_names.add(name)
-                z.write(p, arcname=name)
-                n += 1
-        if not n:
-            return "No matching images found.", 404
-        mem.seek(0)
-        return send_file(mem, mimetype="application/zip", as_attachment=True,
-                         download_name="pixai_selection_{}.zip".format(n))
+        try:
+            with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
+                seen_names = set()
+                for mid in ids[:2000]:  # safety cap
+                    row = get_row(db_path, mid)
+                    if not row:
+                        continue
+                    p = find_image_file(out_dir, mid, row.get("filename"))
+                    if not p or not p.exists():
+                        continue
+                    src = p
+                    if tmp and not row.get("is_video"):
+                        # Transform a COPY only -- never the original file.
+                        work = Path(tmp) / p.name
+                        try:
+                            shutil.copy2(p, work)
+                            if fmt != "original":
+                                work, _note = core.convert_image(work, fmt, keep_original=False)
+                            if embed:
+                                core.embed_metadata(work, {
+                                    "prompt": row.get("prompt_full") or row.get("prompt") or "",
+                                    "media_id": mid, "task_id": row.get("task_id") or "",
+                                    "model": row.get("model") or "", "seed": row.get("seed") or "",
+                                    "date": row.get("created_at") or ""})
+                            src = work
+                        except Exception:
+                            src = p        # any transform failure -> ship the original untouched
+                    name = src.name
+                    if name in seen_names:
+                        name = "{}_{}".format(mid, src.name)
+                    seen_names.add(name)
+                    z.write(src, arcname=name)
+                    n += 1
+            if not n:
+                return "No matching images found.", 404
+            mem.seek(0)
+            return send_file(mem, mimetype="application/zip", as_attachment=True,
+                             download_name="pixai_selection_{}.zip".format(n))
+        finally:
+            if tmp:
+                shutil.rmtree(tmp, ignore_errors=True)   # bytes are already in `mem`
 
     # --- Generation surface (owner-only: local, or a logged-in LAN session) --
     # The Generate drawer talks to PixAI with the OWNER's API key and can spend
