@@ -790,7 +790,15 @@ def test_login_rate_limit_race_does_not_grant_extra_guesses(tmp_path, monkeypatc
     import time as _time
 
     core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
+    # Each thread gets its OWN client (own session/cookie jar) from the SAME app.
+    # A single shared test client is NOT thread-safe: 10 concurrent GET+POST pairs on
+    # one session race on the CSRF cookie, so some POSTs land with a token a sibling
+    # already rotated and come back "session expired" -- neither Invalid nor locked,
+    # which broke the `== N` count intermittently (green locally, red on CI's timing).
+    # The rate limiter is keyed by IP, not session, so separate sessions from the same
+    # REMOTE_ADDR still share the counter -- the concurrency race under test is intact;
+    # only the incidental CSRF cross-talk is removed.
+    app = _client(tmp_path)
     real_verify = core.verify_web_user
 
     def slow_verify(username, password):
@@ -802,6 +810,7 @@ def test_login_rate_limit_race_does_not_grant_extra_guesses(tmp_path, monkeypatc
     results = [None] * N
 
     def attempt(i):
+        cli = app.test_client()
         html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
         r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
                      data={"username": "alice", "password": "wrong-{}".format(i),
