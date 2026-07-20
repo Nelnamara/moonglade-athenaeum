@@ -716,56 +716,70 @@ coherent visual effort and should be scoped and executed together rather than pi
 
 *Found 2026-07-19 by a Playwright browser crawl (185 controls, 60 screenshots reviewed by eye).
 None of these produce a console error or a wrong HTTP response, which is why the suite was fully
-green throughout. Ranked; the V1-cluster CSS bug they were found alongside is already fixed.*
+green throughout. Ranked.*
+
+*Every entry re-verified against the code 2026-07-20; fixed ones are deleted, per this file's
+rule. Two claims did not survive: the Loom's **cost pill is not dead** (`refreshEstimate` has
+been wired since the pill's introducing commit — the crawler most likely clicked it while
+prices were already settled), and **`#del-modal` is not dead markup** (`confirmDelete()` drives
+both the per-row and bulk delete paths; it being what a crawl agent's XPath matched is a
+crawler-targeting note, not a defect). Two more were crawl-environment artifacts rather than
+bugs: **"Set launcher icon" 400s only where no `branding/marks/` exists**, so there is no `.ico`
+to point at and the 400 carries a correct explanatory message — the real install has cuts for
+marks 4/12/62/63/74; and **`mg-notify.js`'s mascot paths are consistent** — all use
+`/branding/mascots/`. The genuine gap there is that no `login_nel.png` art exists, so the login
+page's `onerror` chain degrades to `gen_nel.png` as designed.*
 
 - **The `Serve Gallery` launcher can start a second server on one port.** Its single-instance
   guard probes `/api/ping` unauthenticated; that route is now gated and answers 401, the bare
   `except` swallows it, and it launches anyway. Observed for real during development — three
   Python processes shared port 5077 via Windows `SO_REUSEADDR`, serving stale code and costing
   four rounds of misdiagnosis. Fix: treat 401 as "ours, already running".
-- **The search wildcard makes searches *stricter*, usually to zero.** The placeholder advertises
-  `night*`; typing the app's own example returns nothing. `sample` → 24 results, `sampl*` → 0.
-  With a wildcard present the term becomes the whole LIKE pattern, anchored to the start of the
-  entire prompt, instead of being wrapped as a substring. `_like_pattern()`.
+- **A 300-char username breaks the account row ~980px outside its card**, putting a live
+  **Remove** button outside its container. No server-side length limit anywhere
+  (`add_or_update_web_user`, `add_web_user_if_new`, `/api/users/add`), no `maxlength` on
+  `#new-username`, and `.u-row` is a flex row with no `min-width:0` / `word-break`. Output
+  escaping held — Jinja autoescaped it, markup rendered as literal text — so this is input
+  hygiene, not XSS.
 - **`/logout` is a CSRF-able GET that revokes globally.** No token, and it bumps `sess_epoch`,
-  so any page with `<img src=".../logout">` signs the user out on every device. Denial of
-  convenience only. *Not* closed by the revocation fix — the victim's cookie is still valid, so
-  the bump proceeds legitimately. Fix is a POST + CSRF, or splitting local sign-out from global
-  revocation.
+  so a cross-site *top-level navigation* (link, `window.open`, `location=`) signs the user out
+  on every device. Denial of convenience only. *Not* closed by the revocation fix — the
+  victim's cookie is still valid, so the bump proceeds legitimately. Fix is a POST + CSRF, or
+  splitting local sign-out from global revocation. **Note:** the `<img src=".../logout">`
+  vector originally cited here never worked — `SESSION_COOKIE_SAMESITE = "Lax"` predates the
+  crawl, so a cross-site subresource GET carries no cookie and the bump is skipped. The defect
+  is real; only its cheapest vector was wrong.
 - **Escape doesn't close the Loom's project or Export menus**, and their backdrop is a
   full-viewport `pointer-events:auto` veil — so the entire app is unclickable until the user
   happens to click outside. Deep Focus's own Escape handler works correctly in the same app.
-- **The rate-limit lockout is off by one and locks silently.** The 5th failure sets
-  `locked_until` but still returns the ordinary "Invalid username or password", so the user is
-  locked without being told, then the *correct* password is refused for 15 minutes.
 - **Service-worker registration fails on the login page.** `/sw.js` is gated, so a signed-out
   page gets a redirect and Chrome refuses a redirected worker script. It registers on the next
   navigation after signing in; the thumbnail cache simply arms late.
-- **Native form controls are unstyled in three inconsistent flavours** — 24 white OS checkboxes
-  over artwork on the default grid, native-grey selects beside custom purple ones, and checked
-  states rendering Chrome blue *and* app purple on the same page. The Loom has no `accent-color`
-  rule anywhere.
-- **Two Loom widgets are invisible but report as visible.** The help FAB and Activity chip have
-  real bounding rects and `visibility: visible` — a DOM crawler marks them healthy — but a
-  `z-index:400` overlay paints over them. The Activity chip is also a genuine 79×31 dead zone
-  over a grid card's link.
-- **A 300-char username breaks the account row ~980px outside its card**, putting a live
-  **Remove** button outside its container. No server-side length limit. Output escaping held —
-  markup rendered as literal text — so this is input hygiene, not XSS.
-- **Smaller, all confirmed visually:** locked skin cards fail WCAG AA badly (1.88:1 on the
-  "locked" label) · the "← Gallery" link is unstyled browser blue at 1.69:1 · a duplicate tab
-  strip renders twice bound to one state · the month select clips "Mon" to "Moı" · the Loom's
-  cost pill is dead while its tooltip says "Click to refresh" · "Set launcher icon" is offered
-  enabled and always 400s · locked skins are inert under a *stale success message* · the
-  schedule confirms "every 168h" beside a dropdown reading "1 week" · raw upstream exceptions
-  print verbatim into the UI · dead `#del-modal` markup sits beside a live destructive control
-  (it is what a crawl agent's XPath matched, deleting three accounts by mistake).
+- **Native `<select>`s are styled two inconsistent ways.** `.filters select` / `#preset-select` /
+  `select.p-sel` get `appearance:none` + a custom caret; `.pick-filters select`
+  (`pixai_gallery.py`), `.lv-sel` and `.sb-pick-filters select` (the Loom) keep the native OS
+  arrow. `accent-color` has no effect on `<select>`, so this needs a real styling pass rather
+  than a token. *(The checkbox half of this finding is fixed: `color-scheme: dark` +
+  `accent-color` on `:root` — see CHANGELOG.)*
+- **Two Loom widgets are invisible but report as visible.** The help FAB (`z-index:300`) and
+  Activity chip (`z-index:234`) are siblings of `#root` in `_LOOM_SHELL`, and `LoomV2`
+  unconditionally renders an opaque `z-index:400` `.lv-overlay` over them. Real bounding rects
+  and `visibility: visible`, so a DOM crawler marks them healthy.
+- **The Activity chip is a 79×31 click dead zone over a grid card's link** — on the *gallery*
+  page, which has its own `#jobs-fab` and no `.lv-overlay`. (Distinct from the entry above: on
+  the Loom an opaque overlay swallows those clicks first, so it cannot also be a dead zone
+  there. These were one entry until verification separated them.)
+- **Smaller, all confirmed visually:** a duplicate tab strip renders twice bound to one state
+  (`.lv-sidehead` and the `gen` rail both map the same array over the same `setTab`) · locked
+  skins are inert under a *stale success message* — `pickSkin` writes "✓ skin applied
+  suite-wide" into `#skin-status` and nothing ever clears it, while `loadSkins()` rebuilds only
+  `#skin-grid` · raw upstream exceptions print verbatim into the UI (34 `str(e)` sites;
+  `/api/suggest-prompt`'s is injected *unescaped* into `innerHTML`).
 - **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
-  is unreachable dead markup and the variable name is a misnomer for "authorized". Behaviour is
-  correct; it will mislead the next reader.
-- **`mg-notify.js` requests `/branding/gen_nel.png` at two call sites and
-  `/branding/mascots/gen_nel.png` at another.** One of the two is wrong regardless of which art
-  exists.
+  is unreachable and the variable name is a misnomer for "authorized". This is *deliberate and
+  documented* at the call site — the front-door hook guarantees an authorized request reaches
+  that line — so it is a naming/clarity wart, not a bug. Renaming it touches auth-adjacent
+  template logic and wants an owner nod rather than a drive-by.
 
 - **No UI for removing an image from a collection.** The `/collection-remove` POST route exists
   with zero callers anywhere in the codebase. A real gap, not a design choice.

@@ -15,6 +15,42 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+
+- **The login lockout no longer locks you out silently.** The 5th failed attempt set
+  `locked_until` but still rendered the ordinary "Invalid username or password", so you were
+  locked without being told — and the *correct* password was then refused for 15 minutes with
+  no stated reason. The attempt itself is unchanged (five real tries); only the message now
+  tells you what happened. `_login_try_acquire`'s own docstring already promised to report a
+  lockout that "was just now triggered".
+- **The Jobs card no longer strands a job at "running" forever.** Two independent defects, both
+  found by diagnosing one real stuck enhance:
+  - `resolve_orphan_jobs` compares its `status_fn` return against `("done","failed")`, but the
+    web caller passed `generation_status(...)` — which returns a *dict* — straight through. The
+    comparison never matched, so **the orphan reaper resolved nothing on every run** while
+    returning 0 and looking healthy. The unit tests stubbed `status_fn` with the documented
+    string, so they honoured a contract the only real caller broke.
+  - A task PixAI reports `done` whose outputs carry no media is terminal, but it fell into
+    `/api/task-status`'s catch-all `except`, which deliberately withholds a terminal event so a
+    transient 5xx cannot brick the card with a false failure. New `EmptyOutputsError`
+    (subclassing `PixAIError`, so existing handlers are unaffected) separates the two.
+- **Contrast and clipping, all measured in-browser rather than by eye:** the Loom's only exit
+  ("← Gallery") rendered as an unstyled browser link at **1.69:1** because `.lv-top` styled only
+  `button`/`label` and the control is an `<a>` — now **10.73:1**; locked skin cards used
+  `opacity:.5`, dropping their description to 2.57:1 and the "locked" label to **1.88:1** (under
+  even the large-text floor) — now `.82` with the label off `--overlay0`, measuring 9.00 / 4.77
+  / 4.77; and the month filter was 64px against a 69px intrinsic width, so "Mon" collided with
+  the native arrow and read "Mo|".
+- **Native controls follow the theme.** `accent-color` was set on three individual controls, so
+  everything else fell back to the browser's accent — bright blue on Windows Chrome. Declared
+  once on `:root` (inherited, so a skin retinting `--accent` retints them free), plus
+  `color-scheme: dark`, which is what actually stops *unchecked* boxes keeping white OS chrome
+  over artwork. A grid checkbox that pinned `--lavender` now uses `--accent`, so it no longer
+  drifts off-skin.
+- **The saved-schedule confirmation matches the dropdown.** Picking "1 week" confirmed "every
+  168h"; the status now reads the label back off the `<option>` rather than re-formatting the
+  number, so the two cannot disagree again.
+
 ## [2.0.0] - 2026-07-19 — Multi-account auth, Loom V2, and the Trophy Hall
 
 The first master update since 2026-07-07, carrying 179 commits: the Loom V2 rebuild, the
