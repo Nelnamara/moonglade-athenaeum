@@ -3022,7 +3022,13 @@ def create_app(out_dir: Path):
         def _status(tid):
             if box["s"] is None:
                 box["s"] = core._make_session(None)
-            return core.generation_status(box["s"], tid)
+            # ["phase"], not the whole dict: resolve_orphan_jobs compares this return
+            # against ("done","failed"), and generation_status returns
+            # {status, phase, paid_credit}. Passing the dict straight through meant the
+            # comparison never matched, so the reaper resolved NOTHING -- it just
+            # returned 0 forever while looking healthy. The unit tests stubbed status_fn
+            # with the documented string, so nothing caught the caller disagreeing.
+            return core.generation_status(box["s"], tid)["phase"]
         try:
             core.resolve_orphan_jobs(out_dir, _status)
         except Exception:                          # noqa: BLE001
@@ -10404,6 +10410,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
         catalogs the result into this backup and returns media_ids + paid_credit. Read-only
         until done; login required."""
+        # Bound HERE, not inside the try: the except clause below names this module,
+        # and an except expression is evaluated while handling the exception -- so if
+        # _gen_session() were the thing that raised, a try-scoped name would turn a
+        # handled error into a NameError.
+        import pixai_gallery_backup as _core
         tid = (request.args.get("task_id") or "").strip()
         if not tid:
             return jsonify({"phase": "failed", "error": "task_id required"}), 400
@@ -10424,6 +10435,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 _log_job(tid, status="failed", error=(st.get("status") or "failed"))
                 return jsonify({"phase": "failed", "status": st["status"]})
             return jsonify({"phase": "running", "status": st["status"]})
+        except _core.EmptyOutputsError as e:
+            # TERMINAL, unlike the transient case below: PixAI already told us the
+            # task reached 'done', and collect then found its outputs empty. The task
+            # produced nothing and never will, so this MUST write an authoritative
+            # 'failed' -- without it the job spins on 'running' in the Jobs card
+            # forever. (Observed: an enhance submitted with an unusable input media id
+            # sat at 'running' indefinitely while PixAI considered it long finished.)
+            _log_job(tid, status="failed", error=str(e)[:200])
+            return jsonify({"phase": "failed", "error": str(e)[:200]}), 200
         except Exception as e:
             # A transient PixAI blip (5xx/429/timeout) raises here even though the task may
             # still be running -- or already finished. Do NOT write an authoritative 'failed'
