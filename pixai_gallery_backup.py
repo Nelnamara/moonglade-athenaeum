@@ -165,14 +165,43 @@ def _load_config():
 
 
 def _save_config(cfg):
-    """Write config.json back to disk (indent=2, matching the file's existing style --
-    see api_setup_save_key's read-modify-write in pixai_gallery.py for the same idiom).
-    Used for one-time AUTH_SECRET_KEY generation (get_or_create_secret_key, called from
-    create_app) and --add-web-user/--remove-web-user (CLI, run by the owner, never over
-    the network). Not atomic-tmp-swapped: config.json is small and single-owner (either
-    the one running gallery process, or a CLI invocation you run yourself) -- the extra
-    machinery isn't worth it here, matching the existing api_setup_save_key precedent."""
-    _config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    """Write config.json back to disk (indent=2, matching the file's existing style).
+    ATOMIC: serialize fully, write a same-directory temp file, then os.replace() --
+    an atomic rename on NTFS and POSIX alike. A reader therefore always sees either
+    the complete old file or the complete new one, never a torn hybrid.
+
+    This is load-bearing, not polish, and it is why the old "not atomic-tmp-swapped,
+    config.json is small and single-owner" reasoning no longer holds. _load_config()
+    catches ValueError on a corrupt file and returns {} -- which reads as an EMPTY
+    AUTH_USERS, which drops /login into local-only bootstrap_mode (whoever is at the
+    machine mints a fresh admin) and clears every live session. Revocation state
+    (AUTH_EPOCH_SEQ) now lives in this file too, and EVERY /logout writes it, so the
+    old truncate-then-write was a steadily widening window on an auth wipe."""
+    path = _config_path()
+    data = json.dumps(cfg, indent=2)          # serialize BEFORE touching disk
+    tmp = path.with_name(path.name + ".tmp-{}".format(os.getpid()))
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                # Windows only: an AV scanner or indexer can transiently hold the
+                # target open. Retry briefly, then fail LOUD -- a silently dropped
+                # write here IS the lost-revocation defect this change exists to fix.
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (2 ** attempt))
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +260,59 @@ def _find_web_user(cfg, username):
         if isinstance(u, dict) and u.get("username") == username:
             return u
     return None
+
+
+_EPOCH_SEQ_KEY = "AUTH_EPOCH_SEQ"
+# Applied ONCE, when config.json has never carried AUTH_EPOCH_SEQ. See below -- this
+# constant is the fix, not a tuning knob.
+_EPOCH_LEGACY_MARGIN = 1_000_000
+
+
+def _next_sess_epoch(cfg):
+    """Return the next install-wide session-epoch ticket, stamping it into `cfg`.
+
+    MUST be called with `_accounts_lock` ALREADY HELD, and with `cfg` a config dict
+    the caller is about to _save_config(). It deliberately takes NO lock and does NO
+    I/O of its own -- precisely so its callers, every one of which already holds the
+    NON-REENTRANT _accounts_lock, cannot self-deadlock. A new caller must already
+    hold the lock.
+
+    WHY THE COUNTER IS INSTALL-WIDE AND NOT PER-ACCOUNT: a counter stored in the
+    account record dies with the account. Removing and re-creating a username reset
+    sess_epoch to 0 -- the exact value stale cookies already carry -- so
+    _is_authorized_request() compared 0 == 0 and ALLOWED. Remove-and-re-add is
+    precisely the recovery an owner performs after a suspected cookie theft, which
+    made the recovery step itself un-revoke every cookie ever issued to that name.
+
+    WHY THE MARGIN (do NOT "simplify" this away -- removing it silently re-opens the
+    defect): on a config written by the previous code there is no AUTH_EPOCH_SEQ, and
+    the max-scan below can only see accounts that STILL EXIST. If the owner removed
+    the compromised account and THEN upgraded -- the likely ordering, since the
+    upgrade is the response to the incident -- that account's epoch history is gone,
+    the scan returns only the survivors' small values, and the first tickets walk
+    1, 2, 3... straight back through the stale cookies' range. Jumping clear of the
+    whole legacy range on first mint closes that without needing to see the deleted
+    account. Live legacy cookies carry small ints, so the jump logs nobody out.
+
+    The max-scan is kept too, and is self-healing: if config.json is hand-edited so a
+    user's sess_epoch exceeds the counter, the next ticket still clears it."""
+    seeded = _EPOCH_SEQ_KEY in cfg
+    try:
+        highest = int(cfg.get(_EPOCH_SEQ_KEY, 0) or 0)
+    except (TypeError, ValueError):
+        highest = 0
+        seeded = False
+    if not seeded:
+        highest = max(highest, _EPOCH_LEGACY_MARGIN)
+    for u in (cfg.get("AUTH_USERS") or []):
+        if isinstance(u, dict):
+            try:
+                highest = max(highest, int(u.get("sess_epoch", 0)))
+            except (TypeError, ValueError):
+                pass          # hand-edited garbage -> ignore, never crash a login
+    nxt = highest + 1
+    cfg[_EPOCH_SEQ_KEY] = nxt
+    return nxt
 
 
 def list_web_users():
@@ -316,7 +398,9 @@ def add_or_update_web_user(username, password):
         users = cfg.get("AUTH_USERS") or []
         existing = _find_web_user(cfg, username)
         replaced = existing is not None
-        next_epoch = int(existing.get("sess_epoch", 0)) + 1 if replaced else 0
+        # Ticket from the install-wide counter, never a per-account increment: see
+        # _next_sess_epoch()'s docstring for why a record-local counter was the bug.
+        next_epoch = _next_sess_epoch(cfg)
         new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
         new_users.append({"username": username, "password_hash": generate_password_hash(password),
                            "sess_epoch": next_epoch})
@@ -347,7 +431,10 @@ def add_web_user_if_new(username, password):
             return False
         users = cfg.get("AUTH_USERS") or []
         users.append({"username": username, "password_hash": generate_password_hash(password),
-                       "sess_epoch": 0})
+                       # The Panel's /api/users/add path -- the one an owner actually
+                       # uses from a browser. Hardcoding 0 here left the resurrection
+                       # defect fully live through the UI even with the CLI path fixed.
+                       "sess_epoch": _next_sess_epoch(cfg)})
         cfg["AUTH_USERS"] = users
         _save_config(cfg)
         return True
@@ -364,6 +451,12 @@ def remove_web_user(username):
         new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
         removed = len(new_users) != len(users)
         if removed:
+            # Advance the install-wide counter while the departing account is STILL
+            # in cfg["AUTH_USERS"], so its epoch is folded into the high-water mark
+            # before the record -- and therefore the evidence -- is destroyed.
+            # Calling this AFTER the reassignment below silently re-opens the
+            # resurrection defect, because _next_sess_epoch scans that same list.
+            _next_sess_epoch(cfg)
             cfg["AUTH_USERS"] = new_users
             _save_config(cfg)
         return removed
@@ -392,6 +485,7 @@ def remove_web_user_guarded(username, min_remaining=1):
             return "not_found"
         if len(users) <= min_remaining:
             return "last_account"
+        _next_sess_epoch(cfg)     # BEFORE the filter -- see remove_web_user's comment
         cfg["AUTH_USERS"] = [u for u in users
                               if not (isinstance(u, dict) and u.get("username") == username)]
         _save_config(cfg)
@@ -420,17 +514,29 @@ def get_web_user_session_epoch(username):
 
 
 def bump_web_user_session_epoch(username):
-    """Increment `username`'s sess_epoch, invalidating every outstanding session
-    cookie for that identity in one move (used by /logout). No-op (returns False)
-    if the account no longer exists."""
+    """Issue `username` a fresh session-epoch ticket, invalidating every outstanding
+    session cookie for that identity in one move (used by /logout). No-op (returns
+    False) if the account no longer exists.
+
+    Runs the whole read-modify-write under `_accounts_lock`, like every OTHER
+    AUTH_USERS writer. It previously did _load_config -> mutate -> _save_config
+    entirely UNLOCKED -- the one writer that didn't -- which interleaved with a
+    concurrent /api/users/add is a lost update in BOTH directions: either the newly
+    created account is erased from disk, or the epoch bump is lost. A lost bump means
+    revocation silently no-ops and the stolen cookie this function exists to kill
+    stays live. Found by an independent cloud review, not by any test.
+
+    _find_web_user returns the dict living inside cfg["AUTH_USERS"] (not a copy), so
+    mutating it mutates cfg -- the previous implementation relied on this too."""
     username = (username or "").strip()
-    cfg = _load_config()
-    user = _find_web_user(cfg, username)
-    if user is None:
-        return False
-    user["sess_epoch"] = int(user.get("sess_epoch", 0)) + 1
-    _save_config(cfg)
-    return True
+    with _accounts_lock:
+        cfg = _load_config()
+        user = _find_web_user(cfg, username)
+        if user is None:
+            return False
+        user["sess_epoch"] = _next_sess_epoch(cfg)
+        _save_config(cfg)
+        return True
 
 
 _dummy_hash_cache = {}
