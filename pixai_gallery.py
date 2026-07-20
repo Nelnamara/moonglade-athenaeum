@@ -2478,6 +2478,13 @@ DESIGN_TOKENS_CSS = r"""
     /* Feat tier: gunmetal band + ruby glow (the agreed 5th tier -- NOT pink). */
     --gunmetal: #8a93a2; --gunmetal-deep: #4a515c;
     --ruby: #e0355e; --ruby-deep: #a11238;
+    /* Native controls (checkbox/radio/range/progress) default to the BROWSER's
+       accent -- Windows Chrome's is a bright blue that belongs to no skin here.
+       Three places had already set this one control at a time; declaring it on
+       :root covers every control app-wide, and because it is an inherited
+       property a skin that redefines --accent retints them for free. Per-control
+       overrides (e.g. the ruby unleash toggle) still win on specificity. */
+    accent-color: var(--accent);
   }
   /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
      the meaningful subset of the palette; everything else inherits :root. Applied
@@ -7223,12 +7230,22 @@ function saveWorkers(){
       st.innerHTML='<span style="color:var(--emerald)">\\u2713 '+(s.workers||w)+' workers</span> \\u00b7 Sync + scheduled run';
     }).catch(function(){ st.textContent='\\u26a0 network error'; });
 }
+// Echo the interval using the dropdown's OWN label for that value, never a
+// re-formatted number: the confirmation used to read "every 168h" beside a
+// dropdown reading "1 week", so the app appeared to have saved something other
+// than what was picked. Reading the option back means the two cannot disagree
+// again, including for any interval added to the list later.
+function _schIntervalLabel(hours){
+  var opts=el('sch-interval').options;
+  for(var i=0;i<opts.length;i++){ if(+opts[i].value===+hours) return opts[i].text; }
+  return hours+'h';   // value not in the list (hand-edited config): show the raw number
+}
 function saveSchedule(){
   var body={enabled:el('sch-enabled').checked, action:el('sch-action').value, interval_hours:+el('sch-interval').value};
   fetch('/api/panel/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(s){
       if(s.error){ el('sch-status').textContent='\\u26a0 '+s.error; return; }
-      el('sch-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved'+(s.enabled?(' \\u00b7 every '+s.interval_hours+'h while open'):' \\u00b7 disabled')+'</span>';
+      el('sch-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved'+(s.enabled?(' \\u00b7 every '+_schIntervalLabel(s.interval_hours)+' while open'):' \\u00b7 disabled')+'</span>';
     }).catch(function(){ el('sch-status').textContent='\\u26a0 network error'; });
 }
 function _timeAgo(ts){
