@@ -2485,6 +2485,11 @@ DESIGN_TOKENS_CSS = r"""
        property a skin that redefines --accent retints them for free. Per-control
        overrides (e.g. the ruby unleash toggle) still win on specificity. */
     accent-color: var(--accent);
+    /* accent-color only tints the CHECKED fill; an unchecked box, a native select
+       arrow and the scrollbars all keep light OS chrome without this. Every
+       surface in this app is dark, so declaring it once here is what actually
+       stops white checkboxes sitting on top of artwork. */
+    color-scheme: dark;
   }
   /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
      the meaningful subset of the palette; everything else inherits :root. Applied
@@ -3459,7 +3464,12 @@ __DESIGN_TOKENS__
   body.privacy-blur .card[data-nsfw="1"] img { filter: blur(28px); }
   body.privacy-blur .card:hover img { filter: none; }
   .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
-  .card .cb-wrap input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--lavender); cursor: pointer; }
+  /* --accent, not --lavender: the two are the same colour in the default skin, so this
+     read as correct, but a skin that retints --accent (nightfallen: #a678f0 vs a
+     --lavender of #c9a6ff) left these grid checkboxes on the old skin's purple. The
+     :root accent-color would already cover this -- the rule is kept only for the
+     18px sizing -- so it must not pin a colour that drifts from the active skin. */
+  .card .cb-wrap input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
   .card a.cover { position: absolute; inset: 0; z-index: 1; }
   .card .cb-wrap { z-index: 2; }
   .card .vbadge { position: absolute; top: 6px; right: 6px; z-index: 2; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 20px; pointer-events: none; }
