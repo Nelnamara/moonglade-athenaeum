@@ -6352,81 +6352,135 @@ function savePrompt() {
 """)
 
     LOGIN_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
+{# Splash background: three tinted radial washes, a procedurally-generated star
+   field, and a vignette. Ported from static/_mockup_login_panel.html's
+   SplashBackground(). The stars are an SVG feTurbulence filter, not an image
+   asset -- so this renders identically on a fresh clone with no branding art
+   dropped in, and costs no request. #}
+<div class="login-splash" aria-hidden="true">
+  <div class="splash-wash"></div>
+  <svg class="splash-stars" xmlns="http://www.w3.org/2000/svg">
+    <filter id="mg-stars">
+      <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="1" stitchTiles="stitch"/>
+      <feColorMatrix type="luminanceToAlpha"/>
+      <feComponentTransfer><feFuncA type="discrete" tableValues="0 0 0 0 0 0 0 0 0 1"/></feComponentTransfer>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.84  0 0 0 0 0.82  0 0 0 0 0.89  0 0 0 1 0"/>
+    </filter>
+    <rect width="100%" height="100%" filter="url(#mg-stars)"/>
+  </svg>
+  <div class="splash-vignette"></div>
+</div>
 <div class="login-wrap">
   <div class="login-card">
-    <div class="brand" style="justify-content:center;">
-      <span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span>
-      <div class="brand-txt">
-        <h1 style="border:none;">Moonglade Athenaeum</h1>
-        <span class="tagline">a library against the Void</span>
-      </div>
+    <div class="login-brand">
+      {# The mock carries a "banner art" placeholder here. Real installs have a
+         real banner; if it's absent the container's gradient IS the placeholder,
+         so this degrades to the mock's own look rather than to a broken image. #}
+      <div class="login-banner"><img src="/branding/banner.png" alt="" onerror="this.remove()"></div>
+      <h1>Moonglade Athenaeum</h1>
+      <p class="login-tagline">a library against the Void</p>
     </div>
     {% if bootstrap_mode %}
-    <div class="setup-step" id="login-bootstrap">
-      <b>First run:</b> there's no login account yet on this install. Create the
-      first account below &mdash; from then on, sign in with it from any device.
-      <form method="post" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
+      <div class="login-note">
+        <b>First run:</b> there's no login account yet on this install. Create the
+        first account below &mdash; from then on, sign in with it from any device.
+      </div>
+      <form method="post" class="login-form" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="mode" value="create">
-        <div class="setup-row login-fields">
-          <input type="text" name="username" placeholder="Username" autocomplete="username" autofocus required>
-          <input type="password" name="password" placeholder="Password" autocomplete="new-password" required>
-          <input type="password" name="confirm" placeholder="Confirm password" autocomplete="new-password" required>
-          <button type="submit" class="btn btn-primary">Create account</button>
+        <div class="login-field">
+          <label for="lf-user">Username</label>
+          <input id="lf-user" type="text" name="username" autocomplete="username" autofocus required>
         </div>
+        <div class="login-field">
+          <label for="lf-pass">Password</label>
+          <input id="lf-pass" type="password" name="password" autocomplete="new-password" required>
+        </div>
+        <div class="login-field">
+          <label for="lf-conf">Confirm password</label>
+          <input id="lf-conf" type="password" name="confirm" autocomplete="new-password" required>
+        </div>
+        {% if error %}<p class="login-err">{{ error }}</p>{% endif %}
+        <button type="submit" class="login-submit">Create account</button>
       </form>
-      {% if error %}<div class="setup-msg err">{{ error }}</div>{% endif %}
-    </div>
     {% elif no_accounts %}
-    <div class="setup-step" id="login-no-accounts-remote">
-      <b>No account has been set up yet.</b> Ask whoever runs this server to
-      create the first account from the server machine.
-    </div>
+      <div class="login-note" id="login-no-accounts-remote">
+        <b>No account has been set up yet.</b> Ask whoever runs this server to
+        create the first account from the server machine.
+      </div>
     {% else %}
-    <div class="setup-step">
-      <b>Sign in</b> to open the Athenaeum.
-      <form method="post" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
+      <form method="post" class="login-form" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
         <input type="hidden" name="csrf" value="{{ csrf }}">
-        <div class="setup-row login-fields">
-          <input type="text" name="username" placeholder="Username" autocomplete="username" autofocus required>
-          <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
-          <button type="submit" class="btn btn-primary">Sign in</button>
+        <div class="login-field">
+          <label for="lf-user">Username</label>
+          <input id="lf-user" type="text" name="username" autocomplete="username" autofocus required>
         </div>
+        <div class="login-field">
+          <label for="lf-pass">Password</label>
+          <input id="lf-pass" type="password" name="password" autocomplete="current-password" required>
+        </div>
+        {% if error %}<p class="login-err">{{ error }}</p>{% endif %}
+        <button type="submit" class="login-submit">Sign in</button>
       </form>
-      {% if error %}<div class="setup-msg err">{{ error }}</div>{% endif %}
-    </div>
     {% endif %}
   </div>
 </div>
 <style>
-  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
+  /* ---- Login screen -------------------------------------------------------
+     Ported value-for-value from static/_mockup_login_panel.html (the locked
+     design source). An earlier pass reproduced the mock's COMPONENTS -- card,
+     inputs, button -- but not its LAYOUT, and the result read as a different
+     page: no banner, no splash, a left-aligned inline logo instead of a
+     centered stack, and placeholder-only inputs where the mock has real
+     uppercase field labels. Owner: "It looks nothing like the design... but
+     has the basics." Every value below is the mock's own. */
+  .login-splash { position: fixed; inset: 0; background: var(--base); overflow: hidden; z-index: 0; }
+  .splash-wash { position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 15% 20%, color-mix(in srgb, var(--accent) 7%, transparent) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 80% at 85% 75%, color-mix(in srgb, var(--mauve) 5%, transparent) 0%, transparent 55%),
+      radial-gradient(ellipse 100% 50% at 50% 100%, color-mix(in srgb, var(--mantle) 90%, transparent) 0%, transparent 50%); }
+  .splash-stars { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .55; }
+  .splash-vignette { position: absolute; inset: 0;
+    background: radial-gradient(ellipse 100% 100% at 50% 50%, transparent 40%, color-mix(in srgb, var(--mantle) 70%, transparent) 100%); }
+
+  .login-wrap { position: relative; z-index: 1; min-height: 100vh; display: flex;
+    align-items: center; justify-content: center; padding: 24px 16px; box-sizing: border-box; }
   .login-card {
     width: 100%; max-width: 380px; background: color-mix(in srgb, var(--surface0) 82%, transparent);
+    backdrop-filter: blur(18px);
     border: 1px solid color-mix(in srgb, var(--surface1) 70%, transparent); border-radius: 14px;
     padding: 36px 32px; box-shadow: 0 32px 80px rgba(0,0,0,.6); box-sizing: border-box;
   }
-  .login-card .login-fields { flex-direction: column; align-items: stretch; }
-  .login-card .login-fields input {
-    width: 100%; background: var(--mantle); border: 1px solid var(--surface1);
-    border-radius: 6px; color: var(--text); font: inherit; font-size: 14px;
-    padding: 10px 12px; box-sizing: border-box;
-  }
-  .login-card .login-fields input:focus { outline: none; border-color: var(--accent); }
-  .login-card .login-fields input::placeholder { color: var(--overlay0); }
-  .login-card .login-fields button { width: 100%; justify-content: center; margin-top: 4px; }
-  /* Editorial serif wordmark, matching static/_mockup_login_panel.html's
-     splash treatment -- scoped to .login-card only. Georgia/Times New Roman
-     are standard system serifs (no webfont to fetch); .tagline is a shared
-     header class used on every other page, so it's overridden here rather
-     than edited globally. */
-  .login-card .brand-txt h1 {
-    font-family: Georgia, 'Times New Roman', serif; font-size: 22px;
-    font-weight: 400; letter-spacing: .04em; margin: 0 0 6px;
-  }
-  .login-card .tagline {
-    font-style: normal; font-size: 12px; letter-spacing: .12em;
-    text-transform: uppercase;
-  }
+  .login-brand { text-align: center; margin-bottom: 28px; }
+  .login-banner { width: 100%; max-width: 280px; height: 64px; margin: 0 auto 12px; border-radius: 6px;
+    background: linear-gradient(120deg, var(--purple-deep), var(--surface1) 45%, var(--accent) 100%);
+    filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 40%, transparent));
+    overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .login-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .login-card h1 { font-family: Georgia, 'Times New Roman', serif; font-size: 22px;
+    font-weight: 400; color: var(--text); margin: 0 0 6px; letter-spacing: .04em; border: none; }
+  .login-tagline { font-size: 12px; color: var(--overlay0); margin: 0;
+    letter-spacing: .12em; text-transform: uppercase; }
+
+  .login-form { display: flex; flex-direction: column; gap: 16px; }
+  .login-field { display: flex; flex-direction: column; gap: 6px; }
+  .login-field label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--subtext); }
+  .login-field input { width: 100%; background: var(--mantle); border: 1px solid var(--surface1);
+    border-radius: 6px; padding: 10px 12px; color: var(--text); font: inherit; font-size: 14px;
+    box-sizing: border-box; }
+  .login-field input:focus { outline: none; border-color: var(--accent); }
+  .login-submit { width: 100%; background: var(--accent); color: var(--mantle); border: none;
+    border-radius: 6px; padding: 11px 0; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .login-submit:hover { filter: brightness(1.06); }
+  /* First-run notice: the mock's gold callout. The remote "no account yet"
+     message reuses it -- same weight of statement, same treatment. */
+  .login-note { background: color-mix(in srgb, var(--gold) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--gold) 20%, transparent); border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 20px; font-size: 12px; color: var(--gold); line-height: 1.5; }
+  .login-err { color: var(--red); font-size: 13px; margin: 0; padding: 8px 10px;
+    background: color-mix(in srgb, var(--red) 8%, transparent); border-radius: 5px;
+    border: 1px solid color-mix(in srgb, var(--red) 20%, transparent); }
 </style>
 """)
 
