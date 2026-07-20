@@ -6471,7 +6471,18 @@ function suggestPrompt(btn) {
   fetch('/api/suggest-prompt?media_id=' + encodeURIComponent(mid)).then(function(r){return r.json();}).then(function(d){
     btn.disabled = false; btn.textContent = old;
     var s = d.suggestions || [];
-    if (d.error || !s.length) { box.innerHTML = '<span style="color:var(--overlay0);">' + (d.error || 'No suggestion returned.') + '</span>'; return; }
+    if (d.error || !s.length) {
+      // d.error is a server-side str(e)[:200] -- an upstream exception string. Build it
+      // as a TEXT node, never innerHTML: this page (DETAIL_HTML) has no escaper in scope,
+      // and concatenating raw server text into innerHTML is an injection sink. textContent
+      // cannot inject, so no escaper is needed.
+      box.textContent = '';
+      var em = document.createElement('span');
+      em.style.color = 'var(--overlay0)';
+      em.textContent = d.error || 'No suggestion returned.';
+      box.appendChild(em);
+      return;
+    }
     box.innerHTML = '<div style="color:var(--overlay0);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Suggested prompt(s) &middot; click to copy</div>';
     s.forEach(function(t){
       var line = document.createElement('div');
@@ -7163,7 +7174,7 @@ function runJob(a){
   if(a.destructive && !confirm('Run: '+a.label+'?\\n\\nThis changes files on disk (reversible). Continue?')) return;
   fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a.action, confirm:true})})
     .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>'; return; }
+      if(d.error){ el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>'; return; }
       el('joblog').style.display='block'; if(!polling){ polling=true; poll(); }
     });
 }
@@ -7178,11 +7189,11 @@ function poll(){
         +'  ('+(p.pct!=null?p.pct:0)+'%)'+(p.new?('  \\u00b7 +'+p.new+' new'):'');
     } else { jp.style.display='none'; }
     var st=el('jobstatus'), stop=el('job-stop');
-    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+d.label+'\\u2026</span>'; stop.style.display=''; setButtons(true); setTimeout(poll,1000); }
+    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+escH2(d.label)+'\\u2026</span>'; stop.style.display=''; setButtons(true); setTimeout(poll,1000); }
     else { setButtons(false); polling=false; stop.style.display='none';
-      if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
-      else if(d.status==='cancelled'){ st.innerHTML='<span class="st-failed">\\u25a0 '+(d.label||'job')+' stopped by you</span>'; loadAcct(); }
-      else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
+      if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+escH2(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
+      else if(d.status==='cancelled'){ st.innerHTML='<span class="st-failed">\\u25a0 '+escH2(d.label||'job')+' stopped by you</span>'; loadAcct(); }
+      else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
     }
   }).catch(function(){ polling=false; setButtons(false); });
 }
@@ -7191,7 +7202,7 @@ function stopJob(){
   el('job-stop').disabled=true;
   fetch('/api/panel/cancel',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
     el('job-stop').disabled=false;
-    if(d.error) el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>';
+    if(d.error) el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>';
   }).catch(function(){ el('job-stop').disabled=false; });
 }
 function _acctPaint(d){
@@ -7214,15 +7225,15 @@ function importTask(){
   var tid=(document.getElementById('import-tid').value||'').trim();
   var st=document.getElementById('import-status');
   if(!/^\\d+$/.test(tid)){ st.innerHTML='<span class="st-failed">Enter a numeric task id.</span>'; return; }
-  st.innerHTML='<span class="st-running">\\u25c9 Pulling task '+tid+'\\u2026</span>';
+  st.innerHTML='<span class="st-running">\\u25c9 Pulling task '+escH2(tid)+'\\u2026</span>';
   fetch('/api/import-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid})})
     .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ st.innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>'; return; }
+      if(d.error){ st.innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>'; return; }
       if(d.already){ var n=(d.media_ids||[]).length, mid=(d.media_ids||[])[0];
         st.innerHTML='<span class="st-done">\\u2713 Already in your gallery ('+n+' item'+(n===1?'':'s')+')'
           +(mid?' \\u2014 <a href="/image/'+mid+'" style="color:var(--lavender);text-decoration:underline;">view it \\u2192</a>':'')+'</span>'; return; }
       if(!d.saved){ st.innerHTML='<span class="st-failed">\\u26a0 Task resolved but no media to import.</span>'; return; }
-      st.innerHTML='<span class="st-done">\\u2713 Imported '+d.saved+' item(s) from task '+tid+' \\u2014 open the gallery to see it.</span>';
+      st.innerHTML='<span class="st-done">\\u2713 Imported '+d.saved+' item(s) from task '+escH2(tid)+' \\u2014 open the gallery to see it.</span>';
       document.getElementById('import-tid').value=''; loadAcct();
     }).catch(function(){ st.innerHTML='<span class="st-failed">\\u26a0 network error</span>'; });
 }
@@ -10538,6 +10549,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     resp.headers["Vary"] = "Accept-Encoding"
         except Exception:
             pass
+        return resp
+
+    @app.after_request
+    def _identify_server(resp):
+        # Stamp EVERY response -- including the front door's 401 short-circuit -- with a
+        # stable marker the "Serve Gallery" launcher uses to tell "our server is already
+        # on this port" from "some other service is" (or nothing). It MUST ride the auth
+        # gate: the launcher probes /api/ping without a session and now gets a 401, not a
+        # 200, so a status-based check can't identify us. A fixed value, not __version__:
+        # the launcher only needs identity, and broadcasting the exact build on every
+        # response is needless disclosure for a public-repo app. after_request runs on
+        # responses returned by before_request (the gate returns, never raises), so the
+        # header lands on the 401 too -- pinned by test_web_auth.
+        resp.headers["X-Moonglade"] = "1"
         return resp
 
     return app
