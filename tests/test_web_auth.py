@@ -29,6 +29,25 @@ LAN = "203.0.113.5"          # TEST-NET-3 -- a "some other device on the LAN" st
 LAN2 = "203.0.113.9"
 
 
+def test_every_response_carries_the_server_marker(tmp_path):
+    """The `Serve Gallery` launcher decides "one of our servers is already on this port"
+    by the X-Moonglade response header, NOT a 200 status: /api/ping now sits behind the
+    login gate, so its unauthenticated probe gets a 401, and urllib raises on that. The
+    marker therefore has to ride EVERY response, including the front door's 401 -- which
+    is returned straight from the before_request hook and runs no view. If the header were
+    set in the ping view instead, the 401 would lack it and the launcher would mistake a
+    gated-but-live server for a dead port and start a second one (the original bug).
+
+    Bite: move the header into api_ping()'s body and the 401 assertion here fails."""
+    cli = _client(tmp_path).test_client()
+    r200 = cli.get("/login")                       # public page, a real view runs
+    assert r200.status_code == 200
+    assert r200.headers.get("X-Moonglade") == "1"
+    r401 = cli.get("/api/ping")                     # gated -> 401 from the hook, no view
+    assert r401.status_code == 401
+    assert r401.headers.get("X-Moonglade") == "1"
+
+
 # ---------------------------------------------------------------------------
 # config.json helpers (secret key + account lifecycle)
 # ---------------------------------------------------------------------------
