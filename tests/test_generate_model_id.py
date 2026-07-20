@@ -7,7 +7,8 @@ unguarded, so a fast model switch could leave selected.version_id pointing at th
 version server-side from the base model_id and ignores the client's cached version_id.
 These lock that in. No network, no spend (everything mocked)."""
 import pixai_gallery_backup as core
-from pixai_gallery import create_app
+
+from tests.conftest import login_client
 
 
 def test_generate_reresolves_current_version_over_stale_client_version(tmp_path, monkeypatch):
@@ -24,7 +25,7 @@ def test_generate_reresolves_current_version_over_stale_client_version(tmp_path,
     monkeypatch.setattr(core, "submit_generation",
                         lambda s, params: seen.update(submitted=params) or "task123")
 
-    client = create_app(tmp_path).test_client()
+    client = login_client(tmp_path)
     r = client.post("/api/generate", json={"model_id": "M1", "version_id": STALE, "prompt": "a cat"})
     assert r.status_code == 200, r.data
     assert r.get_json().get("task_id") == "task123"
@@ -41,7 +42,7 @@ def test_generate_without_model_id_uses_client_version(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
     monkeypatch.setattr(core, "submit_generation", lambda s, params: "t")
 
-    client = create_app(tmp_path).test_client()
+    client = login_client(tmp_path)
     r = client.post("/api/generate", json={"version_id": "V-DIRECT", "prompt": "x"})
     assert r.status_code == 200, r.data
     assert seen["model"] == "V-DIRECT"

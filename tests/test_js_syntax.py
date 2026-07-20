@@ -7,10 +7,13 @@ import os
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+
+from tests.conftest import login_client
 
 NODE = shutil.which("node")
 
@@ -27,7 +30,7 @@ def client(tmp_path):
         _row(media_id="2", filename="b_2.png", prompt_preview="y",
              created_at="2025-01-02T00:00:00"),
     ])
-    return create_app(tmp_path).test_client()
+    return login_client(tmp_path)
 
 
 def _scripts(html):
@@ -35,7 +38,7 @@ def _scripts(html):
 
 
 @pytest.mark.skipif(NODE is None, reason="node not installed")
-@pytest.mark.parametrize("path", ["/", "/image/1", "/health", "/duplicates"])
+@pytest.mark.parametrize("path", ["/", "/image/1", "/health", "/duplicates", "/panel", "/login"])
 def test_embedded_js_is_valid(client, tmp_path, path):
     html = client.get(path).get_data(as_text=True)
     blocks = _scripts(html)
@@ -53,6 +56,63 @@ def test_embedded_js_is_valid(client, tmp_path, path):
     except OSError as e:
         pytest.skip(f"cannot spawn node in this environment: {e}")
     assert rc == 0, f"{path} has invalid JS:\n{out.read_text(encoding='utf-8')}"
+
+
+def _hook_list(text, label):
+    """Pull the hook names out of a `... { a, b, c } ... React` construct."""
+    m = re.search(r"\{([^}]*)\}\s*(?:from\s*[\"']react[\"']|=\s*React)", text)
+    assert m, "no React hook destructure/import found in " + label
+    return [h.strip() for h in m.group(1).split(",") if h.strip()]
+
+
+def test_loom_hook_preamble_matches_source_in_every_delivery_path():
+    """The Loom ships two ways, and BOTH strip master-storyboard.jsx's `import React,
+    {...}` line and inject their own `const {...} = React;` preamble in its place:
+    pixai_gallery.py's LOOM_PAGE (the default Babel-standalone path) and
+    loom/dist/master-storyboard.bundle.js (the ?bundle=1 path, emitted by
+    loom/scripts/build.mjs).
+
+    Those preambles were hand-maintained copies of one list, and they rotted exactly as
+    build.mjs's own comment warned they could: `useMemo` was added to the .jsx (imported
+    L1, used L2344) and to LOOM_PAGE, but not to build.mjs. The committed bundle then
+    destructured four hooks while the bundled code called a fifth, so /loom?bundle=1 threw
+    `ReferenceError: useMemo is not defined` during mount and rendered a blank page -- and
+    because the throw happens in App, a PARENT of the app's own error boundary, the
+    boundary could not catch it either. Nothing failed: the Node suite covers pure logic,
+    not the bundle's mount, and the default path was fine, so the opt-in path was broken
+    alone and silently. Found by a browser crawl, not by any test.
+
+    build.mjs now derives its list from the source. This test pins the remaining two."""
+    root = Path(__file__).resolve().parent.parent
+    jsx = root / "loom" / "master-storyboard.jsx"
+    if not jsx.is_file():
+        pytest.skip("loom/master-storyboard.jsx not present in this checkout")
+    src_hooks = _hook_list(
+        re.search(r"^[ \t]*import\s+React\s*,\s*\{[^}]*\}\s*from\s*[\"']react[\"'].*$",
+                  jsx.read_text(encoding="utf-8"), flags=re.M).group(0),
+        "master-storyboard.jsx")
+
+    # 1. The default Babel path's preamble, as literally written in pixai_gallery.py.
+    py = (root / "pixai_gallery.py").read_text(encoding="utf-8")
+    m = re.search(r"const \{[^}]*\} = React;", py)
+    assert m, "pixai_gallery.py no longer contains a `const {...} = React;` preamble"
+    assert _hook_list(m.group(0), "pixai_gallery.py LOOM_PAGE") == src_hooks, (
+        "LOOM_PAGE's hook preamble has drifted from master-storyboard.jsx's import.\n"
+        "  jsx imports : {}\n  LOOM_PAGE   : {}\n"
+        "Any hook in the source but missing here is a ReferenceError on mount."
+        .format(src_hooks, _hook_list(m.group(0), "LOOM_PAGE")))
+
+    # 2. The committed bundle. A stale bundle is exactly how this shipped broken, so a
+    #    checkout that HAS one must have a current one -- rebuild with `npm run build`.
+    bundle = root / "loom" / "dist" / "master-storyboard.bundle.js"
+    if bundle.is_file():
+        bm = re.search(r"var \{[^}]*\} = React;", bundle.read_text(encoding="utf-8"))
+        assert bm, "the built bundle has no `var {...} = React;` preamble"
+        assert _hook_list(bm.group(0), "the built bundle") == src_hooks, (
+            "loom/dist/master-storyboard.bundle.js is STALE relative to "
+            "master-storyboard.jsx.\n  jsx imports : {}\n  bundle has  : {}\n"
+            "Run `npm run build` in loom/ and commit the result."
+            .format(src_hooks, _hook_list(bm.group(0), "the bundle")))
 
 
 def test_no_real_newline_inside_confirm_string(client):

@@ -3,6 +3,13 @@ UDF needs a GPU, so every test mocks the table handle (_get_table) and, where ne
 indexed_ids — the logic under test (dedup, the row-by-row fallback, self-exclusion) is
 pure Python around those. Importing the module pulls in pixeltable but no torch/model
 (the model is lazy) and never touches Postgres."""
+import pytest
+
+pytest.importorskip("pixeltable")  # optional heavy dep, not in requirements.txt -- skip
+# cleanly (not a collection error) for anyone who hasn't installed it, e.g. a fresh clone
+# running plain `pytest`. CLAUDE.md's --ignore=tests/test_similar.py flag is still the
+# documented way to exclude this file explicitly; this is the fallback for someone who
+# doesn't know that yet.
 import pixai_similar as S
 
 
@@ -125,7 +132,8 @@ def test_similar_excludes_self_and_limits_k(monkeypatch):
 def test_api_similar_route(tmp_path, monkeypatch):
     """Hydrates neighbours like /api/gallery-images, drops ids no longer in the catalog,
     and soft-404s an unknown media_id — the sidecar itself is mocked."""
-    from pixai_gallery import create_app, save_catalog, CATALOG_FIELDS
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    from tests.conftest import login_client
 
     def row(**kw):
         return {f: "" for f in CATALOG_FIELDS} | kw
@@ -140,7 +148,7 @@ def test_api_similar_route(tmp_path, monkeypatch):
     monkeypatch.setattr(pixai_similar, "similar",
                         lambda p, k=24, exclude_media_id=None: [("n1", 0.9), ("gone", 0.8)])
 
-    cli = create_app(tmp_path).test_client()
+    cli = login_client(tmp_path)
     d = cli.get("/api/similar/q").get_json()
     assert d["query"] == "q"
     assert [i["media_id"] for i in d["images"]] == ["n1"]        # "gone" not in catalog -> dropped

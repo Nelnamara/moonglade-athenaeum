@@ -157,4 +157,35 @@ the inline `<style>` (move to a stylesheet).
 
 ---
 
+---
+
+## Build tooling (Phase 1, 2026-07-16)
+
+The rest of the repo has no Node/npm toolchain; this is the first one, scoped entirely
+to `loom/` via `loom/package.json`.
+
+- `loom/src/loom-core.js` — pure, framework-agnostic logic pulled out of
+  `master-storyboard.jsx` (`flat`, `shotText`, `nextTag`/`maxTagNum`, `frameLinked`,
+  `connectMeta`, `shotPayload`, `durOf`/`reelStats`, plus the `CONNECT` table and a
+  couple of small constants/formatters they depend on). No React import, no DOM access
+  — safe to `node --test` directly.
+- `loom/test/loom-core.test.js` — unit tests for every exported function
+  (`cd loom && npm test`, or `node --test`).
+- `loom/scripts/build.mjs` — bundles `master-storyboard.jsx` (+ its `loom-core.js`
+  import) into `loom/dist/master-storyboard.bundle.js` via esbuild
+  (`cd loom && npm run build`; `npm install` once first).
+
+**Two delivery paths, both live in `pixai_gallery.py`:**
+- `/loom` (default) — unchanged in-browser Babel-standalone transpile. `loom()` inlines
+  `loom-core.js` ahead of the JSX (stripping `export`, same trick already used for
+  `export default function App()`) so it works without a build step, exactly as before.
+- `/loom?bundle=1` (new, opt-in) — serves the pre-built `loom/dist/` bundle instead (no
+  Babel, no client-side transpile). Falls back to the default page automatically if the
+  bundle hasn't been built yet, so a fresh checkout never breaks.
+
+The Babel-standalone path remains the trusted default; the bundle path is additive and
+opt-in until it's proven out.
+
+---
+
 *Built as a personal creative tool. Not affiliated with ByteDance/Seedance or PixAI.*

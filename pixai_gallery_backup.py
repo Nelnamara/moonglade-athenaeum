@@ -36,23 +36,27 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "1.10.0"
+__version__ = "2.0.0"
 
 import argparse
 import csv
 import datetime
+import getpass
 import json
 import mimetypes
 import os
 import re
+import secrets
 import sys
+import threading
 import time
 from collections import defaultdict, Counter
 from pathlib import Path
 
 from pixai_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
                             save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
-                            media_id_of, find_files_for_media_id)
+                            media_id_of, find_files_for_media_id, build_thumbnails,
+                            _NO_WINDOW)
 
 
 def _ensure_db(out):
@@ -134,14 +138,23 @@ OPERATION_NAME = "listUserTaskSummaries"
 CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
 
 
+def _config_path():
+    """Resolve config.json's path: prefer a copy next to the script file, then the
+    current working directory (same order _load_config() has always read in). If
+    neither exists yet (first run / a fresh write), default to creating it next to
+    the script -- the natural "this install's config" location."""
+    for cfg_path in (Path(__file__).resolve().parent / "config.json", Path("config.json")):
+        if cfg_path.exists():
+            return cfg_path
+    return Path(__file__).resolve().parent / "config.json"
+
+
 def _load_config():
     """Read config.json. Returns {} quietly if absent so --help and offline modes
     (--organize, --catalog-stats) work without it; main() validates before API calls.
     Looks next to the script file first, then the current working directory."""
-    for cfg_path in (Path(__file__).resolve().parent / "config.json", Path("config.json")):
-        if cfg_path.exists():
-            break
-    else:
+    cfg_path = _config_path()
+    if not cfg_path.exists():
         return {}
     try:
         with open(cfg_path, encoding="utf-8") as f:
@@ -151,7 +164,437 @@ def _load_config():
         return {}
 
 
+def _save_config(cfg):
+    """Write config.json back to disk (indent=2, matching the file's existing style).
+    ATOMIC: serialize fully, write a same-directory temp file, then os.replace() --
+    an atomic rename on NTFS and POSIX alike. A reader therefore always sees either
+    the complete old file or the complete new one, never a torn hybrid.
+
+    This is load-bearing, not polish, and it is why the old "not atomic-tmp-swapped,
+    config.json is small and single-owner" reasoning no longer holds. _load_config()
+    catches ValueError on a corrupt file and returns {} -- which reads as an EMPTY
+    AUTH_USERS, which drops /login into local-only bootstrap_mode (whoever is at the
+    machine mints a fresh admin) and clears every live session. Revocation state
+    (AUTH_EPOCH_SEQ) now lives in this file too, and EVERY /logout writes it, so the
+    old truncate-then-write was a steadily widening window on an auth wipe."""
+    path = _config_path()
+    data = json.dumps(cfg, indent=2)          # serialize BEFORE touching disk
+    tmp = path.with_name(path.name + ".tmp-{}".format(os.getpid()))
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                # Windows only: an AV scanner or indexer can transiently hold the
+                # target open. Retry briefly, then fail LOUD -- a silently dropped
+                # write here IS the lost-revocation defect this change exists to fix.
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (2 ** attempt))
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Web gallery login accounts -- session-based auth for pixai_gallery.py's Flask
+# app (gates every non-localhost request; see _is_authorized_request() there).
+# Stored in config.json (the existing convention for secrets -- it already holds
+# PIXAI_API_KEY): AUTH_SECRET_KEY signs the Flask session cookie, AUTH_USERS is a
+# list of {"username", "password_hash"} (werkzeug.security -- scrypt as of modern
+# werkzeug, timing-safe compare built in; no new pip install, werkzeug already
+# ships with Flask). Account lifecycle used to be CLI-only; as of the web-based
+# bootstrap + Panel Users tab (2026-07-19) it's also reachable from the browser
+# (see pixai_gallery.py's /login bootstrap POST and /api/users/add|remove) --
+# --add-web-user / --remove-web-user / --list-web-users remain a valid recovery
+# path. If AUTH_USERS is empty, logging in from the LAN is simply impossible --
+# there is no default/backdoor account, ever.
+#
+# _accounts_lock serializes every read-modify-write of AUTH_USERS (and the
+# atomic check-and-mutate helpers below) against every OTHER thread doing the
+# same, within this one process. pixai_gallery.py runs `app.run(...,
+# threaded=True)`, so two browser tabs/devices hitting /login's bootstrap POST
+# (or the Panel's Add/Remove-user endpoints) concurrently used to run
+# add_or_update_web_user()/remove_web_user()'s _load_config -> mutate ->
+# _save_config sequence unlocked and interleaved -- a real, reproduced lost-
+# update: two concurrent bootstrap creates for DIFFERENT usernames could both
+# return a 302 "success" to their own browser while only the second write
+# actually landed on disk, silently discarding the first account (adversarial
+# review, 2026-07-19). Does NOT protect against a separate CLI invocation
+# editing config.json while the server is also running -- that's a distinct,
+# pre-existing, cross-PROCESS assumption (_save_config's docstring), not what
+# this lock is for.
+# ---------------------------------------------------------------------------
+_accounts_lock = threading.Lock()
+
+def get_or_create_secret_key():
+    """Return config.json's AUTH_SECRET_KEY, generating + persisting a fresh
+    secrets.token_hex(32) the first time this ever runs. Persisting it is what lets
+    Flask sessions (and therefore logins) survive a server restart -- without this,
+    every restart would silently log everyone out, which is a usability bug, not
+    just a security nitpick."""
+    cfg = _load_config()
+    key = (cfg.get("AUTH_SECRET_KEY") or "").strip()
+    if key:
+        return key
+    key = secrets.token_hex(32)
+    cfg["AUTH_SECRET_KEY"] = key
+    try:
+        _save_config(cfg)
+    except OSError as e:
+        print("Warning: could not persist AUTH_SECRET_KEY to config.json: {}. "
+              "Sessions will not survive a restart this run.".format(e))
+    return key
+
+
+def _find_web_user(cfg, username):
+    for u in (cfg.get("AUTH_USERS") or []):
+        if isinstance(u, dict) and u.get("username") == username:
+            return u
+    return None
+
+
+_EPOCH_SEQ_KEY = "AUTH_EPOCH_SEQ"
+# Applied ONCE, when config.json has never carried AUTH_EPOCH_SEQ. See below -- this
+# constant is the fix, not a tuning knob.
+_EPOCH_LEGACY_MARGIN = 1_000_000
+
+
+def _next_sess_epoch(cfg):
+    """Return the next install-wide session-epoch ticket, stamping it into `cfg`.
+
+    MUST be called with `_accounts_lock` ALREADY HELD, and with `cfg` a config dict
+    the caller is about to _save_config(). It deliberately takes NO lock and does NO
+    I/O of its own -- precisely so its callers, every one of which already holds the
+    NON-REENTRANT _accounts_lock, cannot self-deadlock. A new caller must already
+    hold the lock.
+
+    WHY THE COUNTER IS INSTALL-WIDE AND NOT PER-ACCOUNT: a counter stored in the
+    account record dies with the account. Removing and re-creating a username reset
+    sess_epoch to 0 -- the exact value stale cookies already carry -- so
+    _is_authorized_request() compared 0 == 0 and ALLOWED. Remove-and-re-add is
+    precisely the recovery an owner performs after a suspected cookie theft, which
+    made the recovery step itself un-revoke every cookie ever issued to that name.
+
+    WHY THE MARGIN (do NOT "simplify" this away -- removing it silently re-opens the
+    defect): on a config written by the previous code there is no AUTH_EPOCH_SEQ, and
+    the max-scan below can only see accounts that STILL EXIST. If the owner removed
+    the compromised account and THEN upgraded -- the likely ordering, since the
+    upgrade is the response to the incident -- that account's epoch history is gone,
+    the scan returns only the survivors' small values, and the first tickets walk
+    1, 2, 3... straight back through the stale cookies' range. Jumping clear of the
+    whole legacy range on first mint closes that without needing to see the deleted
+    account. Live legacy cookies carry small ints, so the jump logs nobody out.
+
+    The max-scan is kept too, and is self-healing: if config.json is hand-edited so a
+    user's sess_epoch exceeds the counter, the next ticket still clears it."""
+    seeded = _EPOCH_SEQ_KEY in cfg
+    try:
+        highest = int(cfg.get(_EPOCH_SEQ_KEY, 0) or 0)
+    except (TypeError, ValueError):
+        highest = 0
+        seeded = False
+    if not seeded:
+        highest = max(highest, _EPOCH_LEGACY_MARGIN)
+    for u in (cfg.get("AUTH_USERS") or []):
+        if isinstance(u, dict):
+            try:
+                highest = max(highest, int(u.get("sess_epoch", 0)))
+            except (TypeError, ValueError):
+                pass          # hand-edited garbage -> ignore, never crash a login
+    nxt = highest + 1
+    cfg[_EPOCH_SEQ_KEY] = nxt
+    return nxt
+
+
+def list_web_users():
+    """Return [{"username": ...}, ...] from config.json's AUTH_USERS -- USERNAMES
+    ONLY, never password hashes. Used by --list-web-users."""
+    with _accounts_lock:
+        cfg = _load_config()
+        return [{"username": u["username"]} for u in (cfg.get("AUTH_USERS") or [])
+                if isinstance(u, dict) and u.get("username")]
+
+
+# --- Web-login password policy -------------------------------------------
+# ONE source of truth, called by every path that can create an account: the
+# first-run bootstrap form on /login, the Control Panel's Users tab, and the
+# --add-web-user CLI recovery flag. It lives here, next to the account model,
+# rather than in the web layer specifically so those three can't drift apart --
+# the previous 4-character rule was duplicated across two call sites and would
+# have had to be corrected in both.
+#
+# Deliberately shaped after NIST SP 800-63B: LENGTH is the control that matters,
+# and composition rules ("must contain a symbol") are NOT enforced, because they
+# measurably push people toward predictable mutations like "P@ssw0rd1" instead
+# of toward real entropy. What we DO reject is the small set of passwords that
+# stay trivially guessable at any length: one repeated character, a straight run
+# off the keyboard, and the perennial favourites.
+MIN_WEB_PASSWORD_LEN = 8
+
+_COMMON_PASSWORDS = frozenset({
+    "password", "password1", "passw0rd", "12345678", "123456789", "1234567890",
+    "qwertyui", "qwerty123", "letmein1", "welcome1", "iloveyou", "admin123",
+    "administrator", "changeme", "trustno1", "sunshine", "princess", "football",
+    "baseball", "superman", "dragon123", "monkey123", "abc12345", "starwars",
+})
+
+
+def _is_single_run(s):
+    """True if `s` is one unbroken ascending or descending character run
+    ("12345678", "abcdefgh", "87654321") -- a keyboard-walk shape long enough to
+    sail past a length check while carrying almost no entropy."""
+    if len(s) < 3:
+        return False
+    deltas = {ord(b) - ord(a) for a, b in zip(s, s[1:])}
+    return deltas == {1} or deltas == {-1}
+
+
+def password_problem(password):
+    """Return a human-readable reason `password` is unacceptable for a web-login
+    account, or None if it passes. Every caller renders the returned string to
+    the user verbatim, so each one names what to do next, not just what's wrong."""
+    pw = password or ""
+    if len(pw) < MIN_WEB_PASSWORD_LEN:
+        return "Password must be at least {} characters.".format(MIN_WEB_PASSWORD_LEN)
+    if pw.lower() in _COMMON_PASSWORDS:
+        return "That password is too common to be safe. Pick something less guessable."
+    if len(set(pw)) == 1:
+        return "Password can't be one character repeated. Pick something less guessable."
+    if _is_single_run(pw.lower()):
+        return ("Password can't be a single run of sequential characters. "
+                "Pick something less guessable.")
+    return None
+
+
+def add_or_update_web_user(username, password):
+    """Hash `password` (werkzeug, scrypt) and add/update `username` in config.json's
+    AUTH_USERS. Only the hash ever touches disk -- the plaintext password passed in
+    here is never written anywhere. Returns True if this replaced an existing
+    account's password, False if the account is new.
+
+    Also stamps/bumps `sess_epoch` -- see get_web_user_session_epoch()'s docstring
+    for why: a password change must invalidate any session cookie issued under the
+    old password immediately, not just future ones.
+
+    The whole read-modify-write runs under `_accounts_lock` -- see that lock's
+    docstring for the concurrent-bootstrap lost-update it closes."""
+    from werkzeug.security import generate_password_hash
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("username must not be empty")
+    if not password:
+        raise ValueError("password must not be empty")
+    with _accounts_lock:
+        cfg = _load_config()
+        users = cfg.get("AUTH_USERS") or []
+        existing = _find_web_user(cfg, username)
+        replaced = existing is not None
+        # Ticket from the install-wide counter, never a per-account increment: see
+        # _next_sess_epoch()'s docstring for why a record-local counter was the bug.
+        next_epoch = _next_sess_epoch(cfg)
+        new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
+        new_users.append({"username": username, "password_hash": generate_password_hash(password),
+                           "sess_epoch": next_epoch})
+        cfg["AUTH_USERS"] = new_users
+        _save_config(cfg)
+        return replaced
+
+
+def add_web_user_if_new(username, password):
+    """Atomic check-and-add: like add_or_update_web_user(), but refuses outright
+    (returns False, writes nothing) if `username` already exists, instead of
+    resetting a stranger's password -- the whole "does it exist" check and the
+    write happen under ONE `_accounts_lock` acquisition, so two concurrent
+    requests trying to claim the same brand-new username can never both
+    succeed. Used by the Panel's /api/users/add (pixai_gallery.py); the plain
+    add_or_update_web_user()'s update-or-add semantics stay reserved for the
+    CLI's --add-web-user recovery case. Returns True if added, False if the
+    username was already taken (nothing written)."""
+    from werkzeug.security import generate_password_hash
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("username must not be empty")
+    if not password:
+        raise ValueError("password must not be empty")
+    with _accounts_lock:
+        cfg = _load_config()
+        if _find_web_user(cfg, username) is not None:
+            return False
+        users = cfg.get("AUTH_USERS") or []
+        users.append({"username": username, "password_hash": generate_password_hash(password),
+                       # The Panel's /api/users/add path -- the one an owner actually
+                       # uses from a browser. Hardcoding 0 here left the resurrection
+                       # defect fully live through the UI even with the CLI path fixed.
+                       "sess_epoch": _next_sess_epoch(cfg)})
+        cfg["AUTH_USERS"] = users
+        _save_config(cfg)
+        return True
+
+
+def remove_web_user(username):
+    """Remove `username` from config.json's AUTH_USERS. Returns True if an account
+    was actually removed, False if no such username existed. Runs under
+    `_accounts_lock` -- see that lock's docstring."""
+    username = (username or "").strip()
+    with _accounts_lock:
+        cfg = _load_config()
+        users = cfg.get("AUTH_USERS") or []
+        new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
+        removed = len(new_users) != len(users)
+        if removed:
+            # Advance the install-wide counter while the departing account is STILL
+            # in cfg["AUTH_USERS"], so its epoch is folded into the high-water mark
+            # before the record -- and therefore the evidence -- is destroyed.
+            # Calling this AFTER the reassignment below silently re-opens the
+            # resurrection defect, because _next_sess_epoch scans that same list.
+            _next_sess_epoch(cfg)
+            cfg["AUTH_USERS"] = new_users
+            _save_config(cfg)
+        return removed
+
+
+def remove_web_user_guarded(username, min_remaining=1):
+    """Atomic check-and-remove: refuses to remove `username` if doing so would
+    leave fewer than `min_remaining` accounts, checked under the SAME
+    `_accounts_lock` acquisition as the mutation itself -- closes a TOCTOU race
+    where the Panel's /api/users/remove used to read list_web_users() (a
+    "how many accounts are there" snapshot), THEN separately call
+    remove_web_user() to mutate, with nothing stopping two concurrent removals
+    of two DIFFERENT accounts from each observing "more than one left" via
+    their own stale snapshot before either write landed, and both proceeding --
+    reproduced live against the real Flask route (adversarial review,
+    2026-07-19): exactly 2 accounts, two concurrent removes of two different
+    usernames, both return 200 {"ok": true}, AUTH_USERS ends up empty --
+    the self-lockout this guard exists to prevent, achieved anyway.
+
+    Returns one of "removed", "not_found", "last_account"."""
+    username = (username or "").strip()
+    with _accounts_lock:
+        cfg = _load_config()
+        users = cfg.get("AUTH_USERS") or []
+        if _find_web_user(cfg, username) is None:
+            return "not_found"
+        if len(users) <= min_remaining:
+            return "last_account"
+        _next_sess_epoch(cfg)     # BEFORE the filter -- see remove_web_user's comment
+        cfg["AUTH_USERS"] = [u for u in users
+                              if not (isinstance(u, dict) and u.get("username") == username)]
+        _save_config(cfg)
+        return "removed"
+
+
+def get_web_user_session_epoch(username):
+    """Current `sess_epoch` for `username`, or None if the account doesn't exist
+    (e.g. removed via --remove-web-user). A session's cookie embeds the epoch that
+    was current at login time; pixai_gallery.py's _is_authorized_request()
+    re-checks it against this on every request, so:
+      - removing the account invalidates any outstanding session for it immediately
+        (this returns None -> no epoch can ever match again), and
+      - /logout can revoke every outstanding session for that identity (not just
+        the browser that clicked it) by calling bump_web_user_session_epoch()
+        before clearing its own session.
+    Without this, a stolen session cookie (plain-HTTP LAN, packet capture) would
+    keep working after the legitimate user signs out or the account is removed,
+    since the stock Flask session is a stateless, client-side signed cookie with
+    nothing server-side to revoke -- see CHANGELOG.md for the fuller writeup."""
+    cfg = _load_config()
+    user = _find_web_user(cfg, (username or "").strip())
+    if user is None:
+        return None
+    return int(user.get("sess_epoch", 0))
+
+
+def bump_web_user_session_epoch(username):
+    """Issue `username` a fresh session-epoch ticket, invalidating every outstanding
+    session cookie for that identity in one move (used by /logout). No-op (returns
+    False) if the account no longer exists.
+
+    Runs the whole read-modify-write under `_accounts_lock`, like every OTHER
+    AUTH_USERS writer. It previously did _load_config -> mutate -> _save_config
+    entirely UNLOCKED -- the one writer that didn't -- which interleaved with a
+    concurrent /api/users/add is a lost update in BOTH directions: either the newly
+    created account is erased from disk, or the epoch bump is lost. A lost bump means
+    revocation silently no-ops and the stolen cookie this function exists to kill
+    stays live. Found by an independent cloud review, not by any test.
+
+    _find_web_user returns the dict living inside cfg["AUTH_USERS"] (not a copy), so
+    mutating it mutates cfg -- the previous implementation relied on this too."""
+    username = (username or "").strip()
+    with _accounts_lock:
+        cfg = _load_config()
+        user = _find_web_user(cfg, username)
+        if user is None:
+            return False
+        user["sess_epoch"] = _next_sess_epoch(cfg)
+        _save_config(cfg)
+        return True
+
+
+_dummy_hash_cache = {}
+
+
+def _dummy_password_hash():
+    """A real (valid-format) werkzeug hash of a password nobody will ever type,
+    computed lazily and cached for this process. verify_web_user() runs a check
+    against this for an UNKNOWN username so an unknown-username login takes about
+    the same time as a known-username-wrong-password one -- no username enumeration
+    via response timing. Lazy + cached so a plain CLI run that never touches web
+    auth never pays scrypt's cost, and a running server pays it at most once."""
+    if "h" not in _dummy_hash_cache:
+        from werkzeug.security import generate_password_hash
+        _dummy_hash_cache["h"] = generate_password_hash("no-such-account-#dummy-timing-guard")
+    return _dummy_hash_cache["h"]
+
+
+def verify_web_user(username, password):
+    """Check username/password against config.json's AUTH_USERS. True only on an
+    exact match against a KNOWN username, via werkzeug's timing-safe
+    check_password_hash. An unknown username still runs a (dummy) hash check
+    instead of returning immediately, so response timing doesn't leak which
+    usernames exist."""
+    from werkzeug.security import check_password_hash
+    cfg = _load_config()
+    user = _find_web_user(cfg, (username or "").strip())
+    if user is None:
+        check_password_hash(_dummy_password_hash(), password or "")
+        return False
+    return check_password_hash(user.get("password_hash", ""), password or "")
+
+
 _cfg = _load_config()
+# A trust signal for anyone nervous about handing a third-party tool spend/delete access
+# to their PixAI account: with READ_ONLY:true in config.json, every account-mutating
+# network call refuses itself -- CLI and web alike, and REGARDLESS of --confirm/--apply/
+# --yes, since those flags are the very thing a cautious first run wants to be safe to
+# pass without reading the source first. This does NOT cover purely local operations
+# (--organize, --dedup) -- those already have their own dry-run-by-default + --apply
+# gates and never touch the network; conflating "protect my files" with "protect my
+# account" would be a different, weaker promise than the one this flag makes.
+READ_ONLY = bool(_cfg.get("READ_ONLY", False))
+
+
+def _check_read_only(action):
+    """Called at the top of every function that actually fires an account-mutating
+    network call (submit_generation, submit_fixer, delete_task_gql, claim_reward) --
+    the shared choke points both the CLI and the web app's generate/edit/enhance/fix/
+    delete/claim routes all funnel through. Raising here, unconditionally, is what
+    makes READ_ONLY override --confirm/--apply/--yes rather than just changing their
+    default."""
+    if READ_ONLY:
+        raise PixAIError(
+            "READ_ONLY is set in config.json -- refusing to {}. "
+            "Remove it (or set it to false) to allow this.".format(action))
+
+
 # Persisted-query hashes are PUBLIC, non-secret identifiers of PixAI's own frontend
 # GraphQL operations (the same for every user, embedded in their JS bundle). The
 # history feed / task detail / delete operations are NOT exposed on the public API
@@ -178,8 +621,9 @@ ARTWORK_DETAIL_HASH = _cfg.get("ARTWORK_DETAIL_HASH", "") or \
 CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 # Deletion mutation (deleteGenerationTask). Also a public persisted hash. It only
 # ever touches YOUR OWN tasks, and the destructive paths are independently gated by
-# explicit confirmation (typed "DELETE" in the gallery, --confirm on the CLI), so the
-# default is safe; override in config.json if it rotates.
+# explicit confirmation (typed "DELETE" in the gallery; --apply plus a typed "delete"
+# on the CLI -- NOT --confirm, which gates credit-spending generation), so the default
+# is safe; override in config.json if it rotates.
 DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "") or \
     "9f0c8dd3edfe712a4479d700df0b33faebbbc28c7d2310589ea192e1a35d6ee4"
 DELETE_OPERATION = "deleteGenerationTask"
@@ -249,11 +693,38 @@ def _progress_line(done, total, new=0, width=40):
 PANEL_PROGRESS_PREFIX = "~=MGPROG=~"
 
 
-def _make_progress():
+def _make_progress(out_dir=None, job_id=None):
     """Return a progress(done, total, new=0) callback. Under the Control Panel
     (env MOONGLADE_PROGRESS=1) it emits newline-terminated machine markers the panel parses into
     a live bar; in a terminal it draws the \\r-overwriting bar. So long jobs (dedup/audit/sync)
-    show real progress in BOTH places instead of just spinning silently."""
+    show real progress in BOTH places instead of just spinning silently.
+
+    When `out_dir` + `job_id` are BOTH given, the terminal-bar callback ALSO appends a
+    throttled 'running' progress heartbeat (~once per 1% tick, same throttling as the
+    Control Panel's own _panel_reader) to out_dir/jobs.jsonl via append_job_event. This is
+    purely additive -- a side-channel log write -- and never changes what gets printed to
+    stdout; it's what lets a bare-terminal run build the same jobs.jsonl activity trail a
+    panel-spawned subprocess already gets (the panel logs its OWN job by parsing the
+    MOONGLADE_PROGRESS markers below, so that branch deliberately does NOT also log here --
+    doing so would double the Jobs card entry for one real run)."""
+    _last_pct = {"v": -1}
+
+    def _log_tick(done, total):
+        if not (out_dir and job_id and total):
+            return
+        try:
+            pct = int(min(done / total, 1.0) * 100)
+        except (TypeError, ZeroDivisionError):
+            return
+        if pct == _last_pct["v"]:
+            return
+        _last_pct["v"] = pct
+        try:
+            append_job_event(out_dir, job_id, status="running",
+                             done=int(done), total=int(total))
+        except Exception:                                  # noqa: BLE001 -- fail-soft logging
+            pass
+
     if os.environ.get("MOONGLADE_PROGRESS") == "1":
         def _cb(done, total, new=0):
             print("{}{}|{}|{}".format(PANEL_PROGRESS_PREFIX,
@@ -263,6 +734,7 @@ def _make_progress():
     def _cb(done, total, new=0):
         sys.stdout.write(_progress_line(done, total, new))
         sys.stdout.flush()
+        _log_tick(done, total)
     return _cb
 
 
@@ -304,6 +776,46 @@ def append_job_event(out_dir, job_id, status=None, **fields):
         with _jobs_path(out_dir).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
     except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# CLI-side job logging: gives a command run straight from a terminal
+# (python pixai_gallery_backup.py --sync / --update / --generate / ...) the SAME
+# jobs.jsonl activity trail a panel-spawned subprocess already gets from
+# pixai_gallery.py's _panel_run/_panel_reader (job_id "panel-<uuid>") and
+# delete_tasks_bulk (job_id "bulkdel-<uuid>") -- this is the "cli-<uuid>" flavor.
+# Deliberately a no-op under the Control Panel itself (MOONGLADE_PROGRESS=1): the
+# panel already logs its OWN "panel-<uuid>" job for that exact subprocess, so
+# creating a second "cli-<uuid>" job here would just double the Jobs card entry
+# for one real run. Every call is fail-soft -- a logging problem must NEVER
+# crash, block, or change the outcome of the real command.
+# ---------------------------------------------------------------------------
+
+def _cli_job_start(out_dir, label):
+    """Start a 'cli-<uuid>' job for a bare-terminal run. Returns the job_id, or None
+    when under the panel (see module note above) or if logging itself fails."""
+    if os.environ.get("MOONGLADE_PROGRESS") == "1":
+        return None
+    try:
+        import uuid
+        job_id = "cli-" + uuid.uuid4().hex[:12]
+        append_job_event(out_dir, job_id, status="running", type="cli", label=label)
+        return job_id
+    except Exception:                                       # noqa: BLE001 -- fail-soft logging
+        return None
+
+
+def _cli_job_finish(out_dir, job_id, error=None):
+    """Terminal event for a _cli_job_start job. No-op if no job was started."""
+    if not job_id:
+        return
+    try:
+        if error is not None:
+            append_job_event(out_dir, job_id, status="failed", error=str(error))
+        else:
+            append_job_event(out_dir, job_id, status="done")
+    except Exception:                                       # noqa: BLE001 -- fail-soft logging
         pass
 
 
@@ -936,12 +1448,17 @@ def delete_task_gql(session, task_id):
     PixAIError with a clear message on any failure. Deliberately single-attempt (NO
     retry/backoff loop) so a flaky network can never cause a delete to fire twice.
     """
+    _check_read_only("delete a task from your PixAI account")
+    # Defensive only: DELETE_TASK_HASH ships with a working built-in default, so this
+    # can fire solely if that default is stripped or the hash rotates and someone blanks
+    # it. It is NOT a setup gate -- --apply plus the typed "delete" confirm are what stand
+    # between a caller and a real delete.
     if not DELETE_TASK_HASH:
         raise PixAIError(
-            "DELETE_TASK_HASH missing from config.json. Capture deleteGenerationTask's "
-            "sha256Hash from DevTools (Network -> graphql -> a delete request -> Payload "
-            "-> extensions.persistedQuery.sha256Hash) and add it. This is required on "
-            "purpose so deletion can't run without an explicit setup step.")
+            "DELETE_TASK_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current "
+            "deleteGenerationTask sha256Hash from DevTools (Network -> graphql -> a delete "
+            "request -> Payload -> extensions.persistedQuery.sha256Hash) if the hash rotated.")
     # Mutations are POST (Apollo blocks them over GET). Mirror the site's params.
     params = {"operation": DELETE_OPERATION, "u3t": U3T}
     body = {
@@ -1139,7 +1656,11 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
             "model_id": str(m.get("id") or ""),
             "liked_count": int(m.get("likedCount") or 0),
             "should_blur": bool(flag.get("shouldBlur")),
-            "preview_url": med.get("thumbnailUrl") or med.get("publicUrl") or "",
+            # publicUrl preferred (matches cover_url below): PixAI's own thumbnailUrl is a
+            # small, often blurry auto-thumb -- fine as a last-resort fallback, poor as the
+            # grid card's main image. loading="lazy" on the <img> bounds the cost to what's
+            # actually on screen.
+            "preview_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
             "has_version": bool(m.get("hasLatestAvailableVersion")),
             # Rich surface for the preview pop-out card.
             "description": (m.get("modelDescription") or "")[:600],
@@ -1722,6 +2243,13 @@ def cmd_dedup(args, out, db_path):
             moved, quarantine_root.relative_to(out.parent) if out.parent else quarantine_root,
             failed))
 
+    if moved or removed:
+        try:      # The Great Sweep: cumulative pieces removed via --dedup
+            from pixai_gallery import telem_bump
+            telem_bump("culled", moved + removed, out_dir=out)
+        except Exception:
+            pass
+
     if have_catalog:
         n = reconcile_catalog_with_disk(out, db_path)
         print("Reconciled catalog: updated {:,} filename/batch entries to match disk.".format(n))
@@ -2066,6 +2594,11 @@ def cmd_organize(args, out, img_dir, db_path):
     if embedded:
         print("Embedded metadata into {:,} images.".format(embedded))
     print("Reversible manifest: {}  (run --undo-organize to revert)".format(manifest_path))
+    try:      # Keeper of Order: a real (non-dry-run) organize completed
+        from pixai_gallery import telem_bump
+        telem_bump("organize_runs", out_dir=out)
+    except Exception:
+        pass
 
 
 def cmd_undo_organize(args, out):
@@ -2131,7 +2664,8 @@ def _make_session(token_val):
         raise PixAIError(
             "No API key found. Add PIXAI_API_KEY to config.json (recommended -- then "
             "nothing else is required), or use the legacy token path (U3T + token.txt).\n"
-            "Copy config.example.json to config.json. See docs/setup.md.")
+            "Copy config.example.json to config.json. See the Setup wiki page: "
+            "https://github.com/Nelnamara/moonglade-athenaeum/wiki/Setup")
     token = load_token(token_val)
     session = requests.Session()
     session.headers.update({
@@ -2629,29 +3163,19 @@ def _ffmpeg_path(_cache=[]):
 
 
 def video_poster_thumb(video_path, thumb_path):
-    """Extract the first frame of a video via ffmpeg and write it as the gallery
-    thumbnail. OPTIONAL: returns False (no-op) if ffmpeg isn't on PATH, so videos
-    just fall back to the placeholder + play badge. Used for imported videos and
-    as a fallback for i2v videos with no still-frame poster."""
-    ff = _ffmpeg_path()
-    if not ff:
+    """Extract a frame of a video via ffmpeg and write it as the gallery thumbnail.
+    OPTIONAL: returns False (no-op) if ffmpeg isn't on PATH, so videos just fall
+    back to the placeholder + play badge. Used for imported videos and as a
+    fallback for i2v videos with no still-frame poster.
+
+    Thin delegate: the ONE ffmpeg-extract implementation lives in
+    pixai_gallery.make_video_thumbnail (which build_thumbnails' poster-less
+    fallback also uses) -- two copies of this wheel WILL drift. The `_ffmpeg_path`
+    guard stays here because import-local and sync-videos gate on it."""
+    if not _ffmpeg_path():
         return False
-    import subprocess
-    import tempfile
-    from pixai_gallery import make_thumbnail
-    tmp = Path(tempfile.gettempdir()) / ("poster_{}.png".format(Path(thumb_path).stem))
-    try:
-        subprocess.run([ff, "-y", "-ss", "0.5", "-i", str(video_path),
-                        "-frames:v", "1", str(tmp)],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
-    except Exception:                                # noqa: BLE001
-        return False
-    ok = tmp.exists() and tmp.stat().st_size > 0 and make_thumbnail(tmp, Path(thumb_path))
-    try:
-        tmp.unlink()
-    except OSError:
-        pass
-    return bool(ok)
+    from pixai_gallery import make_video_thumbnail
+    return make_video_thumbnail(video_path, thumb_path)
 
 
 def _mp4_is_faststart(path):
@@ -2701,7 +3225,8 @@ def video_faststart(path):
     try:
         r = subprocess.run([ff, "-y", "-v", "error", "-i", str(p),
                             "-c", "copy", "-movflags", "+faststart", str(tmp)],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300,
+                           creationflags=_NO_WINDOW)
         if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
             os.replace(str(tmp), str(p))            # atomic swap
             return True
@@ -3071,12 +3596,16 @@ def _snap_video_duration(d):
 def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=(),
                             *, duration=5, generate_audio=False, model="",
                             audio_language="english", camera_movement="",
-                            quality="professional"):
+                            quality="professional", negative="", is_private=False):
     """PixAI video PROVIDER ADAPTER: map a Loom shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
     i2vPro; R2V/V2V/any-with-refs -> referenceVideo. Duration snaps to PixAI's allowed
-    lengths. (Card auto-apply happens at the route: a V4.0 card makes it free.)"""
+    lengths. (Card auto-apply happens at the route: a V4.0 card makes it free.)
+
+    `negative` only reaches i2vPro (I2V/FLF) -- the referenceVideo submit shape captured
+    2026-07-02 has no negativePrompts field, a genuine PixAI API gap (see docs/STATE.md's
+    Control Panel / web parity section), not an oversight here."""
     m = (mode or "R2V").upper()
     imgs = [str(i) for i in (image_ids or []) if str(i).strip()]
     vids = [str(v) for v in (video_ids or []) if str(v).strip()]
@@ -3089,16 +3618,19 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
         return build_video_parameters(prompt, imgs[0], model=mdl, duration=dur,
                                       mode=qual, generate_audio=generate_audio,
                                       audio_language=audio_language,
-                                      camera_movement=camera_movement, model_id=mid_num)
+                                      camera_movement=camera_movement, model_id=mid_num,
+                                      negative=negative, is_private=is_private)
     if m == "FLF" and len(imgs) >= 2:
         return build_video_parameters(prompt, imgs[0], model=mdl, tail_media_id=imgs[1],
                                       duration=dur, mode=qual, generate_audio=generate_audio,
                                       audio_language=audio_language,
-                                      camera_movement=camera_movement, model_id=mid_num)
+                                      camera_movement=camera_movement, model_id=mid_num,
+                                      negative=negative, is_private=is_private)
     if imgs or vids or auds:                       # R2V / V2V / any mode carrying references
         return build_reference_video_parameters(prompt, image_media_ids=imgs,
                                                  video_media_ids=vids, audio_media_ids=auds,
                                                  model=mdl, duration=dur, mode=qual,
+                                                 is_private=is_private,
                                                  generate_audio=generate_audio,
                                                  audio_language=audio_language,
                                                  model_id=(mid_num or REFVIDEO_MODEL_ID))
@@ -3115,24 +3647,44 @@ def probe_video_duration(path):
         out = subprocess.check_output(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            stderr=subprocess.DEVNULL, timeout=20).decode().strip()
+            stderr=subprocess.DEVNULL, timeout=20,
+            creationflags=_NO_WINDOW).decode().strip()
         return round(float(out), 2)
     except Exception:                                  # noqa: BLE001
         return None
 
 
-def extract_last_frame(video_path, out_png):
-    """Grab a clip's FINAL frame to out_png via ffmpeg (seek to ~0.15s before end).
-    This is the frame-handoff primitive: the last frame of one shot becomes the
-    opening frame of the next, so a sequence of clips reads as one continuous scene.
-    Returns out_png on success, else None."""
+def extract_last_frame(video_path, out_png, at_seconds=None):
+    """Grab a clip's frame to out_png via ffmpeg. This is the frame-handoff primitive:
+    one shot's last frame becomes the next shot's opening frame, so a sequence reads as
+    one continuous scene.
+
+    `at_seconds` makes the handoff TRIM-AWARE: the previous shot's trimOut is the point
+    the cut actually ends on, so the handed-off frame must be the frame AT that out-point,
+    not the untrimmed clip's real final frame. When it's None (no trim) -- or past the
+    clip's real end -- fall back to seeking ~0.15s before EOF. Returns out_png or None."""
     import os
     import subprocess
+    if at_seconds is not None:
+        try:
+            dur = probe_video_duration(video_path)
+        except Exception:                              # noqa: BLE001
+            dur = None
+        # a trimOut at/after the real end is just "the last frame" -> use the EOF path
+        if not (dur and at_seconds < dur - 0.05):
+            at_seconds = None
     try:
+        if at_seconds is None:
+            seek = ["-sseof", "-0.15", "-i", str(video_path)]
+        else:
+            # -ss before -i (fast, keyframe-accurate enough for a still); back off a hair
+            # so we land ON the last kept frame, not the first discarded one.
+            seek = ["-ss", "{:.3f}".format(max(0.0, float(at_seconds) - 0.05)), "-i", str(video_path)]
         subprocess.run(
-            ["ffmpeg", "-y", "-sseof", "-0.15", "-i", str(video_path),
-             "-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=True)
+            ["ffmpeg", "-y"] + seek +
+            ["-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=True,
+            creationflags=_NO_WINDOW)
         return str(out_png) if os.path.exists(out_png) and os.path.getsize(out_png) > 0 else None
     except Exception:                                  # noqa: BLE001
         return None
@@ -3463,6 +4015,7 @@ def run_generate(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
 
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
                           interval=3, label="generate", fail_noun="generation")
@@ -3536,6 +4089,12 @@ def run_generate(args):
 
     if rows:
         save_catalog(db_path, rows)
+        if existing_task:
+            try:      # Against the Void: a stranded task pulled back by id
+                from pixai_gallery import telem_bump
+                telem_bump("recover_events", out_dir=out)
+            except Exception:
+                pass
     print("Generated + cataloged {} image(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
@@ -3691,13 +4250,26 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     return saved
 
 
+def _bump_card_use(params):
+    """Thrifty Archivist: count the free card only once its task ACTUALLY submitted
+    (a card attached to a rejected submit was never spent). Fail-soft no-op."""
+    if isinstance(params, dict) and params.get("kaisuukenId"):
+        try:
+            from pixai_gallery import telem_bump
+            telem_bump("free_cards_applied")
+        except Exception:
+            pass
+
+
 def submit_generation(session, params):
     """Submit a createGenerationTask and return the task id immediately -- no wait, no
     download. The card (if any) must already be attached to `params`. Raises on no id."""
+    _check_read_only("submit a generation (spends credits)")
     created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
     task_id = (created.get("createGenerationTask") or {}).get("id")
     if not task_id:
         raise PixAIError("no task id returned: " + json.dumps(created)[:200])
+    _bump_card_use(params)
     return str(task_id)
 
 
@@ -3705,6 +4277,7 @@ def submit_fixer(session, media_id, boxes):
     """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
     generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
     'hand' | 'face' (<=20). Builds a mask from the boxes and repairs those regions. Raises."""
+    _check_read_only("submit a hand/face fix (spends credits)")
     clean = []
     for b in (boxes or []):
         tag = str((b or {}).get("tag") or "").lower()
@@ -3821,6 +4394,7 @@ def run_generate_video(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600),
                           interval=5, label="video", fail_noun="video generation")
 
@@ -3913,6 +4487,7 @@ def run_reference_video(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 600), interval=5,
                           label="reference video", fail_noun="reference video generation")
 
@@ -3990,6 +4565,7 @@ def run_enhance(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300), interval=3,
                           label="enhance", fail_noun="enhance")
 
@@ -4080,6 +4656,7 @@ def run_edit_image(args):
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
         print("  task id:", task_id)
+        _bump_card_use(params)
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
                           interval=3, label="edit", fail_noun="edit")
 
@@ -4770,6 +5347,7 @@ def claim_reward(session, claim_id):
     """Claim a reward by id via POST /v2/claim/{id}. State-changing: grants the reward to
     YOUR OWN account (a routine daily entitlement, no money moves). Returns the updated
     claim record. Raises PixAIError on error."""
+    _check_read_only("claim a reward")  # still a real account mutation, even a beneficial one
     return _rest_post(session, "/claim/" + str(claim_id), {})
 
 
@@ -4833,6 +5411,12 @@ def run_claims(args):
             claimed += 1
         except PixAIError as e:
             print("Failed to claim {}: {}".format(r["id"], str(e)[:150]))
+    if claimed:
+        try:      # Claimant: the Void pays a small stipend
+            from pixai_gallery import telem_bump
+            telem_bump("claims", claimed)
+        except Exception:
+            pass
     return {"claimed": claimed}
 
 
@@ -5219,6 +5803,22 @@ def run_backfill_full_meta(args):
     print("Done. Fetched {:,} tasks, {:,} failed, catalog updated.".format(fetched, failed))
 
 
+def _check_time_capsule(created_at, out_dir):
+    """Time Capsule feat: a NEWLY-downloaded piece created >2 years ago. Fires
+    only on the download event, never on a full-catalog rescan (old rows already
+    on disk must not earn it). Fail-soft; never slows the download loop."""
+    try:
+        from datetime import datetime
+        s = str(created_at or "")[:19]
+        if not s:
+            return
+        if (datetime.now() - datetime.fromisoformat(s)).days > 730:
+            from pixai_gallery import telem_flag
+            telem_flag("old_piece_backed_up", out_dir=out_dir)
+    except Exception:
+        pass
+
+
 def run_download(args, progress=None):
     """Run the full paginated download + catalog loop.
 
@@ -5453,6 +6053,8 @@ def run_download(args, progress=None):
                                     filename=path.name if path else "", url=url, w=w, h=h))
                                 if path and status in ("ok", "skip"):
                                     on_disk_by_mid[mid] = path
+                                if status == "ok":
+                                    _check_time_capsule(meta.get("created_at"), out)
                             written.add(mid)
                             _tick()
 
@@ -5593,6 +6195,7 @@ def run_download(args, progress=None):
                         on_disk_by_mid[mid] = path  # keep index current within the run
                         batch_results.append((idx, mid, path, info))
                     if status == "ok":
+                        _check_time_capsule(meta.get("created_at"), out)
                         time.sleep(args.delay)
 
             # Upsert this page's rows so progress is durable even on interrupt.
@@ -5685,9 +6288,97 @@ def run_download(args, progress=None):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def run_rebuild_thumbs(args):
+    """--rebuild-thumbs: one uniform thumbnail pass over the whole catalog.
+    Images are re-rendered from their originals at today's size/quality settings
+    (OVERWRITTEN in place, so the gallery never goes blank mid-run -- this is
+    what kills years of quality drift), poster-less videos get a local ffmpeg
+    frame extract, and thumbs whose media left the catalog are swept."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    from pixai_gallery import build_thumbnails, load_catalog
+    thumb_dir = out / "gallery" / "thumbs"
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    rows = load_catalog(db_path)
+    known = {r.get("media_id") for r in rows if r.get("media_id")}
+    swept = 0
+    for f in thumb_dir.glob("*.jpg"):
+        if f.stem not in known:
+            try:
+                f.unlink()
+                swept += 1
+            except OSError:
+                pass
+    if swept:
+        print("Swept {:,} orphaned thumbnails (media no longer in the catalog).".format(swept))
+    print("Rebuilding thumbnails for {:,} catalog rows (images overwritten in place; "
+          "poster-less videos get an ffmpeg frame; existing video posters kept)...".format(len(rows)))
+    _prog = getattr(args, "progress", None)
+    build_thumbnails(rows, out, thumb_dir, force=True,
+                     progress_cb=((lambda d, t, _p: _prog(d, t)) if _prog else None),
+                     workers=max(1, int(getattr(args, "workers", 4) or 4)))
+    print("\nThumbnail rebuild complete.")
+    return {"swept": swept, "rows": len(rows)}
+
+
+# ---------------------------------------------------------------------------
+# Web gallery login account management (CLI-only -- see the module note above
+# get_or_create_secret_key). Deliberately interactive-only (no --password flag):
+# a password never belongs in shell history, a saved script, or a process list.
+# ---------------------------------------------------------------------------
+
+def run_add_web_user(args):
+    """CLI: add or update one gallery web-login account. Prompts for username
+    (plain input -- not secret) and password (getpass.getpass -- never echoed to
+    the terminal, never printed, never logged), then hashes and persists it via
+    add_or_update_web_user. Refuses to save on a blank entry or a confirmation
+    mismatch."""
+    username = input("Username: ").strip()
+    if not username:
+        sys.exit("Username must not be empty. Nothing was saved.")
+    password = getpass.getpass("Password: ")
+    if not password:
+        sys.exit("Password must not be empty. Nothing was saved.")
+    problem = password_problem(password)
+    if problem:
+        # Same policy the web forms enforce -- this is the recovery path, not a
+        # back door around the rules the Users tab applies.
+        sys.exit("{} Nothing was saved.".format(problem))
+    confirm = getpass.getpass("Confirm password: ")
+    if password != confirm:
+        sys.exit("Passwords did not match. Nothing was saved.")
+    replaced = add_or_update_web_user(username, password)
+    print("{} web-login account '{}'.".format("Updated" if replaced else "Added", username))
+
+
+def run_remove_web_user(args):
+    """CLI: remove one gallery web-login account by username."""
+    username = args.remove_web_user
+    if remove_web_user(username):
+        print("Removed web-login account '{}'.".format(username))
+    else:
+        print("No web-login account named '{}'.".format(username))
+
+
+def run_list_web_users(args):
+    """CLI: list gallery web-login USERNAMES only -- never prints password hashes."""
+    users = list_web_users()
+    if not users:
+        print("No web-login accounts yet. Add one with --add-web-user.")
+        return
+    print("Web-login accounts ({}):".format(len(users)))
+    for u in users:
+        print("  " + u["username"])
+
+
 def main():
     ap = argparse.ArgumentParser(description="Back up your own PixAI gallery.")
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
+    ap.add_argument("--rebuild-thumbs", action="store_true",
+                    help="regenerate EVERY image thumbnail at the current size/quality "
+                         "settings (fixes quality drift across eras), extract posters for "
+                         "poster-less videos via ffmpeg, and sweep orphaned thumbs. "
+                         "Overwrites in place -- the gallery never goes blank.")
     ap.add_argument("--sync", action="store_true",
                     help="One-shot sync: incremental pull WITH full metadata "
                          "(equivalent to --update --full-meta), then re-resolve any "
@@ -5988,6 +6679,17 @@ def main():
                     help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
                          "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
                          "named index. ~decode-bound, no network. Needs torch/pixeltable.")
+    webauth = ap.add_argument_group("web gallery login accounts (session-based auth)")
+    webauth.add_argument("--add-web-user", action="store_true",
+                    help="add or update a gallery web-login account: interactively prompts "
+                         "for a username and password (getpass -- never echoed/printed), "
+                         "hashes the password, and saves it to config.json's AUTH_USERS. "
+                         "Deliberately CLI-only -- no account-creation form is ever reachable "
+                         "over the network")
+    webauth.add_argument("--remove-web-user", default="", metavar="USERNAME",
+                    help="remove a gallery web-login account by username")
+    webauth.add_argument("--list-web-users", action="store_true",
+                    help="list gallery web-login usernames (never password hashes), then exit")
     args = ap.parse_args()
     set_verbose(getattr(args, "verbose", False))
     # Give every command a progress callback (terminal bar, or Control Panel markers under
@@ -6000,10 +6702,27 @@ def main():
               "  python pixai_gallery_backup.py --count\n"
               "Continuing with --probe only.\n")
 
+    # Web-login account management: no PixAI token/network/out-dir needed at all,
+    # so these run before anything else touches --out.
+    if getattr(args, "list_web_users", False):
+        run_list_web_users(args)
+        return
+    if getattr(args, "remove_web_user", ""):
+        run_remove_web_user(args)
+        return
+    if getattr(args, "add_web_user", False):
+        run_add_web_user(args)
+        return
+
     out = Path(args.out)
     img_dir = out / "images"
     db_path  = out / "catalog.db"
     csv_path = out / "catalog.csv"
+    try:      # achievement telemetry: bare telem_* bumps land in this install's ledger
+        from pixai_gallery import set_telemetry_out
+        set_telemetry_out(out)
+    except Exception:
+        pass
 
     try:
         if getattr(args, "delete_task", None):
@@ -6056,10 +6775,22 @@ def main():
             run_list_models(args)
             return
         if args.generate:
-            run_generate(args)
+            _job = _cli_job_start(out, "generate")
+            try:
+                run_generate(args)
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job)
             return
         if getattr(args, "generate_video", False):
-            run_generate_video(args)
+            _job = _cli_job_start(out, "generate-video")
+            try:
+                run_generate_video(args)
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job)
             return
         if getattr(args, "reference_video", False):
             run_reference_video(args)
@@ -6088,24 +6819,59 @@ def main():
         if args.verify_dupes:
             cmd_verify_dupes(args, out)
             return
+        if getattr(args, "rebuild_thumbs", False):
+            run_rebuild_thumbs(args)
+            return
         if getattr(args, "sync", False):
             # Sync = the "it should just happen" pipeline: incremental pull that
-            # arrives WITH metadata, then re-resolve any model ids that came back
-            # blank/numeric, then a targeted fill of anything still blank
-            # (run_backfill_full_meta already skips rows that have prompt_full).
-            # All three steps are idempotent/self-limiting, so re-running --sync
-            # with a clean catalog costs almost nothing extra.
+            # arrives WITH metadata, re-resolve any model ids that came back
+            # blank/numeric, fill anything still blank, rebuild any missing preview
+            # thumbnails, then reconcile rows deleted on the website. Every step is
+            # idempotent/self-limiting (backfill skips rows that already have
+            # prompt_full; build_thumbnails skips thumbs already on disk), so
+            # re-running --sync on a clean catalog costs almost nothing extra.
             args.update = True
             args.full_meta = True
-            # run_download uses its `progress` PARAM (not args.progress), so hand it over
-            # explicitly -- otherwise the panel's progress bar is blank during the
-            # download step (fix_models/backfill already read args.progress themselves).
-            run_download(args, progress=getattr(args, "progress", None))
-            print("\nSync: resolving any unlabeled model names...")
-            run_fix_models(args)
-            print("Sync: filling any rows still missing metadata...")
-            run_backfill_full_meta(args)
-            print("Sync complete.")
+            # cli-<uuid> job: parity with the Control Panel's own panel-<uuid> logging for
+            # a --sync run spawned as a subprocess. Also re-point args.progress at a
+            # job-aware callback so the download/thumbnail progress ticks below feed
+            # throttled heartbeats into the same job (purely additive -- see _make_progress).
+            _job = _cli_job_start(out, "sync")
+            if _job:
+                args.progress = _make_progress(out, _job)
+            try:
+                # run_download uses its `progress` PARAM (not args.progress), so hand it over
+                # explicitly -- otherwise the panel's progress bar is blank during the
+                # download step (fix_models/backfill already read args.progress themselves).
+                run_download(args, progress=getattr(args, "progress", None))
+                print("\nSync: resolving any unlabeled model names...")
+                run_fix_models(args)
+                print("Sync: filling any rows still missing metadata...")
+                run_backfill_full_meta(args)
+                print("Sync: building any missing preview thumbnails...")
+                thumb_dir = out / "gallery" / "thumbs"
+                thumb_dir.mkdir(parents=True, exist_ok=True)
+                # build_thumbnails reports progress_cb(done, total, pct); our shared progress
+                # callback expects (done, total, new-count), so adapt -- forward only done/total
+                # (new defaults to 0) rather than mislabel the percentage as a "new items" count.
+                _prog = getattr(args, "progress", None)
+                build_thumbnails(load_catalog(db_path), out, thumb_dir,
+                                 progress_cb=((lambda d, t, _pct: _prog(d, t)) if _prog else None))
+                # Reconcile is advisory (it only FLAGS cloud-deleted rows) and runs its own live
+                # feed scan, so a failure here must NOT discard the successful backup above. Catch
+                # BROADLY on purpose: that scan goes through gql(), which re-raises bare requests
+                # network/HTTP errors that are NOT PixAIError -- a narrow catch would let a
+                # transient blip crash the whole sync after everything else already succeeded.
+                print("Sync: reconciling rows deleted on PixAI...")
+                try:
+                    run_reconcile_deleted(args)
+                except Exception as e:                   # noqa: BLE001 -- advisory step, never fatal
+                    print("  reconcile skipped: {}".format(e))
+                print("Sync complete.")
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job)
             return
         if args.backfill_meta:
             run_backfill_meta(args)
@@ -6128,7 +6894,19 @@ def main():
         if args.count:
             run_count(args)
             return
-        run_download(args)
+        # Plain full download, or --update (an incremental run of the same code path) --
+        # cli-<uuid> job, same parity rationale as --sync above. Deliberately does NOT
+        # thread a job-aware progress callback through run_download here: that call
+        # passes no `progress` kwarg today, so run_download's own `sys.stdout.isatty()`
+        # fallback draws the \r bar directly -- wiring progress in would change that
+        # existing terminal-output behavior (it would print unconditionally, tty or not).
+        _job = _cli_job_start(out, "update" if getattr(args, "update", False) else "download")
+        try:
+            run_download(args)
+        except Exception as e:                           # noqa: BLE001 -- re-raised below unchanged
+            _cli_job_finish(out, _job, error=e)
+            raise
+        _cli_job_finish(out, _job)
     except PixAIError as e:
         sys.exit(str(e))
 

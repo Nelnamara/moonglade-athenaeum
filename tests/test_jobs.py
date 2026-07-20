@@ -12,6 +12,8 @@ import time
 import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
+from tests.conftest import login_client
+
 
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
@@ -21,6 +23,15 @@ def _client(tmp_path):
     save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     return create_app(tmp_path).test_client()
+
+
+def _authed_client(tmp_path):
+    """Like _client(), but logged in for real -- for every endpoint test below EXCEPT
+    test_jobs_endpoints_are_localhost_only, which deliberately stays anonymous to prove
+    the gate itself (an unauthenticated request is refused regardless of address)."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    return login_client(tmp_path)
 
 
 def _lan(cli, method, url, **kw):
@@ -177,7 +188,7 @@ def test_compaction_agrees_with_read_and_preserves_running(tmp_path):
 # ----------------------------------------------------------------------- endpoints
 
 def test_register_list_dismiss_roundtrip(tmp_path):
-    cli = _client(tmp_path)
+    cli = _authed_client(tmp_path)
     assert cli.get("/api/jobs").get_json()["jobs"] == []
     r = cli.post("/api/jobs", json={"job_id": "t1", "type": "generate", "label": "Elf"})
     assert r.get_json()["ok"] is True
@@ -189,7 +200,7 @@ def test_register_list_dismiss_roundtrip(tmp_path):
 
 
 def test_register_requires_job_id(tmp_path):
-    cli = _client(tmp_path)
+    cli = _authed_client(tmp_path)
     assert cli.post("/api/jobs", json={"label": "no id"}).status_code == 400
 
 
@@ -197,7 +208,7 @@ def test_running_then_done_merges_through_the_endpoint(tmp_path):
     """The real lifecycle: the card POSTs a running job on submit, then /api/task-status
     writes the authoritative done event (same _log_job path). GET must show ONE job,
     done, with the label from register AND the media_ids from completion."""
-    cli = _client(tmp_path)
+    cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "t7", "type": "generate", "label": "Nightsong"})
     core.append_job_event(tmp_path, "t7", status="done", media_ids=["mid42"])  # what task-status does
     jobs = cli.get("/api/jobs").get_json()["jobs"]
@@ -207,7 +218,7 @@ def test_running_then_done_merges_through_the_endpoint(tmp_path):
 
 
 def test_dismiss_finished_clears_done_and_failed_only(tmp_path):
-    cli = _client(tmp_path)
+    cli = _authed_client(tmp_path)
     core.append_job_event(tmp_path, "d", status="done", media_ids=["m"])
     core.append_job_event(tmp_path, "f", status="failed", error="x")
     core.append_job_event(tmp_path, "r", status="running", label="live")
@@ -259,11 +270,12 @@ def test_resolve_orphan_jobs_survives_lookup_errors(tmp_path):
 def test_jobs_endpoints_are_localhost_only(tmp_path):
     cli = _client(tmp_path)
     core.append_job_event(tmp_path, "j1", status="running")
-    # GET from the LAN reveals nothing and 403s
+    # GET from the LAN reveals nothing and 401s (the global front-door hook, not
+    # api_jobs()'s own body -- see pixai_gallery.py's _enforce_front_door())
     r = _lan(cli, "get", "/api/jobs")
-    assert r.status_code == 403 and r.get_json()["jobs"] == []
+    assert r.status_code == 401 and "jobs" not in r.get_json()
     # register + dismiss are refused from the LAN
-    assert _lan(cli, "post", "/api/jobs", json={"job_id": "x"}).status_code == 403
-    assert _lan(cli, "post", "/api/jobs/dismiss", json={"job_id": "j1"}).status_code == 403
+    assert _lan(cli, "post", "/api/jobs", json={"job_id": "x"}).status_code == 401
+    assert _lan(cli, "post", "/api/jobs/dismiss", json={"job_id": "j1"}).status_code == 401
     # ...and nothing was written by those rejected calls
     assert [j["job_id"] for j in core.read_jobs(tmp_path)] == ["j1"]

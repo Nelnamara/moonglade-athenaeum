@@ -8,7 +8,11 @@ appears in the gallery alongside your history.
 > is the paid part. The tool **previews unless you explicitly confirm**, and defaults
 > to the cheaper priority.
 
-## In the GUI (recommended)
+## In the GUI (legacy — being phased out)
+
+> **The PySide6 GUI is on its way out.** The two surfaces going forward are the **CLI**
+> and the **web gallery**. Prefer the web **Generate drawer** (below) — it's the one with
+> live credit cost and the free-card check up front.
 
 The **Generate** tab:
 
@@ -86,7 +90,7 @@ so the preview shouts the cost, and the actual charge is read back from the serv
 (`paidCredit`) after it runs. Clips download into `videos/` and catalog as `is_video`.
 
 **GUI:** the **Video** tab — paste a source image `media_id`, pick model / duration
-(5/10/15s; 15 is V4.0-only) / mode (Basic cheaper, Professional = Plus), optional audio,
+(5/10/15s; 15 is V4.0-only) / mode (Basic cheaper, Professional), optional audio,
 optional **End frame id** for first/last-frame interpolation, then Confirm.
 
 ```bash
@@ -211,12 +215,17 @@ but only the owner's machine can spend credits or cards.
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
   the prompt turns into a chip; model + duration + audio; live cost shows **FREE + how many
   video cards you have left** when a card covers it.
-- **Tag Suggestions** — Danbooru-style autocomplete in every prompt box; **TAB** accepts.
+- **Tag Suggestions** — Danbooru-style autocomplete in the **Generate** prompt, the **Generate**
+  negative, and the **Edit** instruction (not the Video tab's prompt); **TAB** accepts.
 - **Bridges from the gallery**: right-click any thumbnail (Edit / Send to Video / Copy media id),
   the same buttons in the lightbox, and multi-select → **Send to Video** in the bulk bar.
 - Results are downloaded and cataloged automatically (`source='api'`; videos into `videos/`),
   so everything you make lands in your own library the moment it finishes.
 
 **The Loom** (`/loom`) is the storyboard for multi-clip video — acts, shots, cast,
-frame handoff, and per-shot **Generate** on the same engine. Full manual: `docs/LOOM.md`
-(or the ? button on the page).
+frame handoff, and per-shot **Generate** on the same engine. It's a fixed 4-region shell
+(Cast & Assets / Footage on the left, the Acts & Shots board center, the Generate drawer
+right, a Timeline drawer across the top) with a "draft generation" mode for exploring a
+look before assigning it to a shot, multiple independently-saved storyboards, project-wide
+Draft-quality rendering, and a two-tier project export. Full manual: `docs/LOOM.md` (or the
+? button on the page).

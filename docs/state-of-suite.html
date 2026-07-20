@@ -1,0 +1,442 @@
+<title>Moonglade Athenaeum — State of the Suite</title>
+<style>
+  :root{
+    /* daylight archive (light) — a chosen lilac-parchment, not cream */
+    --void:#f3f0fb; --mantle:#ffffff; --surface:#faf8ff; --surface2:#efeafb;
+    --hairline:rgba(88,66,150,.16); --hairline-2:rgba(88,66,150,.10);
+    --ink:#211b37; --subtext:#57506f; --faint:#8b84a6;
+    --accent:#6a4dcf; --accent-soft:rgba(106,77,207,.12); --glow:rgba(106,77,207,.16);
+    --done:#1f9c68; --partial:#b1741a; --waiting:#2f6fc4; --unbuilt:#c9445f;
+    --done-s:rgba(31,156,104,.13); --partial-s:rgba(177,116,26,.14);
+    --waiting-s:rgba(47,111,196,.13); --unbuilt-s:rgba(201,68,95,.13);
+    --shadow:0 18px 40px -22px rgba(40,20,90,.35);
+    --disp:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --body:"Segoe UI",system-ui,-apple-system,BlinkMacSystemFont,Roboto,sans-serif;
+    --mono:"SF Mono","Cascadia Code","JetBrains Mono",ui-monospace,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --void:#0b0917; --mantle:#131024; --surface:#191530; --surface2:#221d3c;
+      --hairline:rgba(185,164,245,.15); --hairline-2:rgba(185,164,245,.08);
+      --ink:#eae6f7; --subtext:#a79fc6; --faint:#6f6892;
+      --accent:#b39bf3; --accent-soft:rgba(169,140,240,.15); --glow:rgba(150,118,230,.40);
+      --done:#6fe0a6; --partial:#f2c879; --waiting:#7fb6f2; --unbuilt:#f28ba0;
+      --done-s:rgba(111,224,166,.12); --partial-s:rgba(242,200,121,.12);
+      --waiting-s:rgba(127,182,242,.12); --unbuilt-s:rgba(242,139,160,.13);
+      --shadow:0 22px 46px -24px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="light"]{
+    --void:#f3f0fb; --mantle:#ffffff; --surface:#faf8ff; --surface2:#efeafb;
+    --hairline:rgba(88,66,150,.16); --hairline-2:rgba(88,66,150,.10);
+    --ink:#211b37; --subtext:#57506f; --faint:#8b84a6;
+    --accent:#6a4dcf; --accent-soft:rgba(106,77,207,.12); --glow:rgba(106,77,207,.16);
+    --done:#1f9c68; --partial:#b1741a; --waiting:#2f6fc4; --unbuilt:#c9445f;
+    --done-s:rgba(31,156,104,.13); --partial-s:rgba(177,116,26,.14);
+    --waiting-s:rgba(47,111,196,.13); --unbuilt-s:rgba(201,68,95,.13);
+    --shadow:0 18px 40px -22px rgba(40,20,90,.35);
+  }
+  :root[data-theme="dark"]{
+    --void:#0b0917; --mantle:#131024; --surface:#191530; --surface2:#221d3c;
+    --hairline:rgba(185,164,245,.15); --hairline-2:rgba(185,164,245,.08);
+    --ink:#eae6f7; --subtext:#a79fc6; --faint:#6f6892;
+    --accent:#b39bf3; --accent-soft:rgba(169,140,240,.15); --glow:rgba(150,118,230,.40);
+    --done:#6fe0a6; --partial:#f2c879; --waiting:#7fb6f2; --unbuilt:#f28ba0;
+    --done-s:rgba(111,224,166,.12); --partial-s:rgba(242,200,121,.12);
+    --waiting-s:rgba(127,182,242,.12); --unbuilt-s:rgba(242,139,160,.13);
+    --shadow:0 22px 46px -24px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--void);color:var(--ink);font-family:var(--body);
+    line-height:1.6;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 24px 96px;}
+  a{color:var(--accent);}
+
+  /* ---------- header ---------- */
+  header{position:relative;overflow:hidden;border-bottom:1px solid var(--hairline);
+    background:radial-gradient(120% 140% at 82% -10%,var(--glow),transparent 55%);}
+  .hz{max-width:1060px;margin:0 auto;padding:44px 24px 38px;position:relative;z-index:2;}
+  .eyebrow{display:flex;align-items:center;gap:11px;font-family:var(--mono);
+    font-size:11.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--accent);}
+  .moon{width:22px;height:22px;flex:0 0 auto;}
+  h1{font-family:var(--disp);font-weight:600;letter-spacing:-.01em;text-wrap:balance;
+    font-size:clamp(2.3rem,5.5vw,3.5rem);line-height:1.04;margin:18px 0 0;}
+  h1 .sub{display:block;color:var(--subtext);font-style:italic;font-size:.52em;
+    font-weight:400;letter-spacing:0;margin-top:.35em;}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px;}
+  .tag{font-family:var(--mono);font-size:12px;padding:4px 10px;border-radius:999px;
+    background:var(--surface);border:1px solid var(--hairline);color:var(--subtext);
+    display:inline-flex;gap:7px;align-items:center;}
+  .tag b{color:var(--ink);font-weight:600;}
+  .lede{margin-top:26px;max-width:64ch;color:var(--subtext);font-size:1.06rem;}
+  .lede b{color:var(--ink);font-weight:600;}
+  .theme-btn{position:absolute;top:20px;right:24px;z-index:3;font-family:var(--mono);
+    font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;
+    background:var(--surface);color:var(--subtext);border:1px solid var(--hairline);
+    border-radius:999px;padding:7px 13px;}
+  .theme-btn:hover{color:var(--accent);border-color:var(--accent);}
+
+  /* ---------- thesis / tally ---------- */
+  .thesis{margin-top:40px;background:var(--mantle);border:1px solid var(--hairline);
+    border-radius:16px;padding:26px 26px 22px;box-shadow:var(--shadow);}
+  .thesis .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--faint);}
+  .thesis p{margin:.5em 0 0;max-width:70ch;}
+  .thesis p .strike{color:var(--faint);text-decoration:line-through;text-decoration-color:var(--unbuilt);}
+  .tally{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:22px;}
+  .tcard{border:1px solid var(--hairline);border-radius:12px;padding:15px 16px;position:relative;
+    background:var(--surface);overflow:hidden;}
+  .tcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c);}
+  .tcard .n{font-family:var(--disp);font-size:2.5rem;line-height:1;font-weight:600;color:var(--c);
+    font-variant-numeric:tabular-nums;}
+  .tcard .lbl{margin-top:6px;font-size:12.5px;color:var(--subtext);}
+  .tcard .lbl b{color:var(--ink);}
+  .t-done{--c:var(--done);} .t-partial{--c:var(--partial);}
+  .t-wait{--c:var(--waiting);} .t-unbuilt{--c:var(--unbuilt);}
+
+  /* ---------- legend ---------- */
+  .legend{display:flex;flex-wrap:wrap;gap:26px;margin:34px 2px 0;padding-top:22px;
+    border-top:1px solid var(--hairline-2);}
+  .legcol h4{margin:0 0 10px;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--faint);font-weight:600;}
+  .legrow{display:flex;gap:9px;align-items:center;font-size:13px;color:var(--subtext);margin:5px 0;}
+  .legrow .desc{color:var(--faint);}
+
+  /* status chip */
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+    padding:3px 9px 3px 8px;border-radius:999px;white-space:nowrap;letter-spacing:.01em;}
+  .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--c);flex:0 0 auto;}
+  .chip{background:var(--s);color:var(--c);border:1px solid color-mix(in srgb,var(--c) 30%,transparent);}
+  .c-done{--c:var(--done);--s:var(--done-s);}
+  .c-partial{--c:var(--partial);--s:var(--partial-s);}
+  .c-wait{--c:var(--waiting);--s:var(--waiting-s);}
+  .c-unbuilt{--c:var(--unbuilt);--s:var(--unbuilt-s);}
+
+  /* provenance pill */
+  .prov{font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:5px;letter-spacing:.02em;
+    border:1px solid var(--hairline);color:var(--faint);white-space:nowrap;}
+  .p-code{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 34%,transparent);
+    background:var(--accent-soft);}
+  .p-git{color:var(--subtext);}
+  .p-doc{color:var(--partial);border-color:color-mix(in srgb,var(--partial) 32%,transparent);
+    border-style:dashed;}
+
+  /* ---------- sections ---------- */
+  section{margin-top:52px;}
+  .shead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+    padding-bottom:14px;border-bottom:1px solid var(--hairline);}
+  .snum{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.1em;}
+  .shead h2{font-family:var(--disp);font-weight:600;font-size:1.7rem;margin:0;letter-spacing:-.01em;}
+  .shead .note{color:var(--faint);font-size:13px;margin-left:auto;}
+
+  .cards{display:grid;gap:14px;margin-top:20px;}
+  .grid2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr));}
+  .card{background:var(--mantle);border:1px solid var(--hairline);border-radius:14px;
+    padding:18px 20px;position:relative;overflow:hidden;}
+  .card.stripe{padding-left:22px;}
+  .card.stripe::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);}
+  .s-done{--c:var(--done);} .s-partial{--c:var(--partial);}
+  .s-wait{--c:var(--waiting);} .s-unbuilt{--c:var(--unbuilt);} .s-accent{--c:var(--accent);}
+  .card h3{margin:0;font-size:1.02rem;font-weight:600;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .card h3 .g{color:var(--faint);font-family:var(--mono);font-size:11px;font-weight:500;
+    letter-spacing:.1em;text-transform:uppercase;}
+  ul.items{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:11px;}
+  ul.items li{display:flex;gap:11px;align-items:flex-start;font-size:13.5px;color:var(--subtext);}
+  ul.items li .mk{color:var(--c,var(--accent));flex:0 0 auto;margin-top:.15em;font-size:12px;}
+  ul.items li b{color:var(--ink);font-weight:600;}
+  .refs{display:inline-flex;flex-wrap:wrap;gap:5px;margin-left:2px;vertical-align:middle;}
+  code,.ref{font-family:var(--mono);font-size:11.5px;background:var(--surface2);color:var(--subtext);
+    padding:1px 6px;border-radius:5px;border:1px solid var(--hairline-2);white-space:nowrap;}
+
+  /* partial split card */
+  .split{display:grid;grid-template-columns:1fr;gap:0;}
+  .split .row{display:grid;grid-template-columns:130px 1fr 1fr;gap:16px;padding:13px 0;
+    border-top:1px solid var(--hairline-2);align-items:start;font-size:13px;}
+  .split .row:first-child{border-top:0;}
+  .split .rlbl{font-weight:600;color:var(--ink);}
+  .split .rt{color:var(--subtext);} .split .rt .h{display:block;font-family:var(--mono);font-size:10px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:3px;}
+  .split .rt.miss .h{color:var(--partial);}
+  @media(max-width:640px){.split .row{grid-template-columns:1fr;gap:7px;}}
+
+  /* frontier emphasis */
+  .frontier{background:linear-gradient(180deg,var(--accent-soft),transparent 70%);
+    border:1px solid color-mix(in srgb,var(--accent) 26%,var(--hairline));border-radius:16px;padding:8px 20px 22px;}
+  .fitem{display:flex;gap:14px;padding:17px 2px;border-top:1px solid var(--hairline-2);align-items:flex-start;}
+  .fitem:first-of-type{border-top:0;}
+  .fnum{font-family:var(--disp);font-size:1.5rem;font-weight:600;color:var(--accent);
+    line-height:1;flex:0 0 34px;font-variant-numeric:tabular-nums;}
+  .fitem .body{flex:1;min-width:0;}
+  .fitem .body h3{margin:0 0 4px;font-size:1.02rem;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .fitem .body p{margin:0;font-size:13.5px;color:var(--subtext);max-width:72ch;}
+  .horizon-lbl{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--faint);margin:26px 0 4px;padding-top:18px;border-top:1px dashed var(--hairline);}
+
+  /* housekeeping */
+  ul.keep{list-style:none;margin:20px 0 0;padding:0;display:grid;gap:12px;}
+  ul.keep li{display:flex;gap:12px;align-items:flex-start;background:var(--mantle);
+    border:1px solid var(--hairline);border-radius:11px;padding:13px 16px;font-size:13.5px;color:var(--subtext);}
+  ul.keep li b{color:var(--ink);font-weight:600;}
+  ul.keep .ic{flex:0 0 auto;color:var(--partial);margin-top:.1em;}
+
+  footer{margin-top:56px;padding-top:24px;border-top:1px solid var(--hairline);
+    font-size:12.5px;color:var(--faint);max-width:74ch;}
+  footer .prov{margin:0 2px;}
+
+  @keyframes drift{from{transform:translateY(0);}to{transform:translateY(-3px);}}
+  @media (prefers-reduced-motion:no-preference){
+    .moon{animation:drift 5s ease-in-out infinite alternate;}
+  }
+</style>
+
+<header>
+  <button class="theme-btn" id="themeToggle" aria-label="Toggle light and dark theme">◐ theme</button>
+  <div class="hz">
+    <div class="eyebrow">
+      <svg class="moon" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <defs><radialGradient id="mg" cx="38%" cy="34%" r="72%">
+          <stop offset="0%" stop-color="var(--accent)"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+        </radialGradient></defs>
+        <circle cx="20" cy="20" r="15" fill="url(#mg)" opacity=".5"/>
+        <circle cx="20" cy="20" r="12" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+        <circle cx="24.5" cy="16.5" r="10.5" fill="var(--void)"/>
+      </svg>
+      Moonglade Athenaeum · a library against the Void
+    </div>
+    <h1>State of the Suite
+      <span class="sub">a code-level reckoning of what's built, what's waiting, and what was never started</span>
+    </h1>
+    <div class="meta">
+      <span class="tag">🌒 <b>2026-07-10</b></span>
+      <span class="tag">branch <b>loom-v2</b></span>
+      <span class="tag">version <b>1.10.0</b></span>
+      <span class="tag">HEAD <b>2673936</b></span>
+    </div>
+    <p class="lede">Written after actually reading the source — not skimming the tracker. It exists because
+      <b>docs/REFINEMENTS.md</b> had drifted out of sync with the code, listing shipped features as pending.
+      This is the corrected picture, with every claim tagged by how it was verified.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- UPDATE BANNER -->
+  <div style="margin-top:34px;background:var(--done-s);border:1px solid color-mix(in srgb,var(--done) 34%,var(--hairline));border-left:4px solid var(--done);border-radius:12px;padding:16px 20px;">
+    <div style="font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--done);font-weight:700;">Update · 2026-07-10 (later same day)</div>
+    <p style="margin:.5em 0 0;color:var(--subtext);font-size:14px;max-width:76ch;">
+      The <b style="color:var(--ink)">--sync</b> gap flagged in §2 / §4 is now <b style="color:var(--done)">closed</b> — the pipeline
+      builds any missing thumbnails and reconciles cloud-deletes in the same idempotent pass
+      (<code>pixai_gallery_backup.py</code> sync branch; <code>tests/test_sync.py</code>; documented in CLAUDE.md).
+      An <b style="color:var(--ink)">adversarial-verify pass caught and fixed a real bug before merge</b>: the reconcile guard
+      was <code>except PixAIError</code> — too narrow for the bare <code>requests</code> errors <code>gql()</code> re-raises, so a
+      network blip could have crashed the whole sync <em>after</em> a successful backup. Now a deliberately broad
+      <code>except Exception</code>. The lone unbuilt backlog item remains <b style="color:var(--ink)">Generation Flags</b>.
+    </p>
+  </div>
+
+  <!-- THESIS -->
+  <div class="thesis">
+    <div class="kicker">The correction</div>
+    <p>The backlog named <b>six items</b> as <span class="strike">next up</span>. A code-level read found
+      <b>four already shipped</b>, one <b>two-thirds done</b>, and surfaced the single one that was
+      <b>never built</b> — Generation Flags, which has zero footprint anywhere in the repo.</p>
+    <div class="tally">
+      <div class="tcard t-done"><div class="n">4</div><div class="lbl"><b>Shipped</b><br>live-mirror · similar-search · Loom export · branding</div></div>
+      <div class="tcard t-partial"><div class="n">1</div><div class="lbl"><b>Partial</b><br>--sync (metadata only; no thumbs/reconcile)</div></div>
+      <div class="tcard t-unbuilt"><div class="n">1</div><div class="lbl"><b>Never built</b><br>Generation Flags (AI QA pass)</div></div>
+      <div class="tcard t-wait"><div class="n">2</div><div class="lbl"><b>Horizon epics</b><br>Foundry · Provider Deck — await a "go"</div></div>
+    </div>
+
+    <div class="legend">
+      <div class="legcol">
+        <h4>Status</h4>
+        <div class="legrow"><span class="chip c-done"><span class="dot"></span>Shipped</span><span class="desc">in the code, working</span></div>
+        <div class="legrow"><span class="chip c-partial"><span class="dot"></span>Partial</span><span class="desc">some pieces landed</span></div>
+        <div class="legrow"><span class="chip c-wait"><span class="dot"></span>Awaiting call</span><span class="desc">needs an owner decision</span></div>
+        <div class="legrow"><span class="chip c-unbuilt"><span class="dot"></span>Unbuilt</span><span class="desc">no code yet</span></div>
+      </div>
+      <div class="legcol">
+        <h4>How each claim was verified</h4>
+        <div class="legrow"><span class="prov p-code">code</span><span class="desc">read in source this pass (file:line cited)</span></div>
+        <div class="legrow"><span class="prov p-git">git</span><span class="desc">confirmed via commit history</span></div>
+        <div class="legrow"><span class="prov p-doc">doc</span><span class="desc">from docs/memory — <b>not</b> re-verified in code</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1 · SHIPPED -->
+  <section>
+    <div class="shead"><span class="snum">§1</span><h2>Complete &amp; shipped</h2>
+      <span class="note">verified in source this pass</span></div>
+    <div class="cards grid2">
+
+      <div class="card stripe s-done">
+        <h3>Backup &amp; catalog engine</h3>
+        <ul class="items" style="--c:var(--done)">
+          <li><span class="mk">◆</span><span><b>Resume</b> keyed on media_id; <code>.part</code>/zero-byte never counted done <span class="refs"><span class="prov p-code">backup:568,839</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>--sync</b> one-shot: pull + full-meta + fix-models + backfill, idempotent <span class="refs"><span class="prov p-code">backup:6091</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>--reconcile-deleted</b>, <b>--organize/--undo</b>, <b>video backup</b> + faststart <span class="refs"><span class="prov p-code">:374,2479,2718</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>audit / dedup / verify-dupes</b> content-hash + quarantine <span class="refs"><span class="prov p-code">:1619,1661,1811</span></span></span></li>
+          <li><span class="mk">◆</span><span>Persisted-hash <b>defaults baked in</b> — runs on just the API key <span class="refs"><span class="prov p-code">:161</span></span></span></li>
+        </ul>
+      </div>
+
+      <div class="card stripe s-done">
+        <h3>Create surface <span class="g">one createGenerationTask</span></h3>
+        <ul class="items" style="--c:var(--done)">
+          <li><span class="mk">◆</span><span><b>gql_adhoc()</b> — ad-hoc POST foundation, no hash capture needed <span class="refs"><span class="prov p-code">backup:983</span></span></span></li>
+          <li><span class="mk">◆</span><span>generate · video · reference-video · edit · enhance · upload <span class="refs"><span class="prov p-code">:3417,3781,3850,4014</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>build_shot_video_params</b> — the mode→params provider interface <span class="refs"><span class="prov p-code">:3071</span></span></span></li>
+          <li><span class="mk">◆</span><span>free-card auto-apply · price_task · suggest · claims · contests <span class="refs"><span class="prov p-code">:4601,4688</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>delete</b> = void mutation (null == success), single-attempt <span class="refs"><span class="prov p-code">:930</span></span></span></li>
+        </ul>
+      </div>
+
+      <div class="card stripe s-done">
+        <h3>Web suite <span class="g">Flask · localhost-gated</span></h3>
+        <ul class="items" style="--c:var(--done)">
+          <li><span class="mk">◆</span><span><b>Live-mirror watcher folded into the server</b> — daemon auto-starts, mirrors finishing gens, self-heals orphans. No CLI process. <span class="refs"><span class="prov p-code">gallery:1688</span><span class="prov p-git">f502beb</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>Pixeltable similar-search UI</b> — route + lightbox/right-click + modal (backend just not installed here) <span class="refs"><span class="prov p-code">:6747</span></span></span></li>
+          <li><span class="mk">◆</span><span>Generate/Edit/Video drawer · Control Panel · Stop/Restart · Jobs tray <span class="refs"><span class="prov p-code">:6054,6013</span></span></span></li>
+          <li><span class="mk">◆</span><span>Contests · achievements · skins · My-Art · branding surfaces <span class="refs"><span class="prov p-code">:7022,7075</span></span></span></li>
+        </ul>
+      </div>
+
+      <div class="card stripe s-done">
+        <h3>The Loom <span class="g">classic · /loom</span></h3>
+        <ul class="items" style="--c:var(--done)">
+          <li><span class="mk">◆</span><span>Full storyboard — Acts→Shots, cast/@refs, reel vs 8:00 target, palettes <span class="refs"><span class="prov p-code">jsx:659</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>Generate shot</b> on PixAI with price guardrail + batch-all <span class="refs"><span class="prov p-code">gallery:7650</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>Auto frame-handoff</b> — extracts a clip's last frame, uploads free <span class="refs"><span class="prov p-code">:7607</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>Trim · Play · Export</b> — ffmpeg concat, threaded, cancel <span class="refs"><span class="prov p-code">:7734</span></span></span></li>
+        </ul>
+      </div>
+
+      <div class="card stripe s-done">
+        <h3>Achievement &amp; branding art <span class="g">actively landing</span></h3>
+        <ul class="items" style="--c:var(--done)">
+          <li><span class="mk">◆</span><span>11 badge prompts + Loom mark, mascot-per-state, "Nel presents" pop, spinning-Nel loader, Konami easter egg <span class="refs"><span class="prov p-git">06c0972,485d8d0,7a4e1fd</span></span></span></li>
+          <li><span class="mk">◇</span><span>Surface is code-complete — owner is iterating on the <b>mascot art itself</b> now (content, not code).</span></li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 2 · PARTIAL -->
+  <section>
+    <div class="shead"><span class="snum">§2</span><h2>Partial &amp; in-progress</h2></div>
+    <div class="cards">
+      <div class="card stripe s-partial split">
+        <div class="row">
+          <div><span class="chip c-partial"><span class="dot"></span>Partial</span><div class="rlbl" style="margin-top:8px">--sync pipeline</div></div>
+          <div class="rt"><span class="h">Done</span>pull + full-meta + fix-models + backfill (the metadata chain) <span class="ref">backup:6091</span></div>
+          <div class="rt miss"><span class="h">Missing</span>thumbnail rebuild + <code>--reconcile-deleted</code> not folded in. 2 of the 4 pieces the backlog described.</div>
+        </div>
+        <div class="row">
+          <div><span class="chip c-partial"><span class="dot"></span>In&nbsp;progress</span><div class="rlbl" style="margin-top:8px">Mascot art</div></div>
+          <div class="rt"><span class="h">Done</span>badges, skins, pop, ART_PROMPTS all committed <span class="ref">git</span></div>
+          <div class="rt miss"><span class="h">Remaining</span>the mascot/badge artwork — owner's active work.</div>
+        </div>
+        <div class="row">
+          <div><span class="chip c-partial"><span class="dot"></span>Preview</span><div class="rlbl" style="margin-top:8px">Loom V2 dockable</div></div>
+          <div class="rt"><span class="h">Done</span>board · reel · Cast/Legend/Footage · timeline · <b>Video</b> generate tab — all share the classic engine <span class="ref">jsx:340</span></div>
+          <div class="rt miss"><span class="h">Open</span>the in-panel ref-gen decision — see §3.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · AWAITING DECISION -->
+  <section>
+    <div class="shead"><span class="snum">§3</span><h2>Waiting on a call</h2>
+      <span class="note">owner decision / context needed before building</span></div>
+    <div class="cards grid2">
+      <div class="card stripe s-wait">
+        <h3><span class="chip c-wait"><span class="dot"></span>Decide</span> In-Loom ref-gen</h3>
+        <p style="margin:12px 0 0;font-size:13.5px;color:var(--subtext)">THE parked Loom V2 decision. The V2 Generate panel's <b>Image / Edit / Reference</b> tabs are placeholders — only <b>Video</b> renders. In-code note: <em>"wiring the in-Loom ref-gen is the next decision we flagged."</em> Neither classic nor V2 generates frames in-board today. <span class="refs"><span class="prov p-code">jsx:588</span></span></p>
+      </div>
+      <div class="card stripe s-wait">
+        <h3><span class="chip c-wait"><span class="dot"></span>Scoped</span> Banked design items</h3>
+        <ul class="items" style="--c:var(--waiting)">
+          <li><span class="mk">◆</span><span><b>#8</b> Gallery two-drawer redesign — awaiting layout-notes pass <span class="refs"><span class="prov p-doc">doc</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>#15</b> Model Market parity — owner wants a video first <span class="refs"><span class="prov p-doc">doc</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>Preset prefill</b> — plumbing in place, not wired to the drawer <span class="refs"><span class="prov p-doc">doc</span></span></span></li>
+          <li><span class="mk">◆</span><span><b>Logging design</b> — file logs vs <code>logging</code> migration, parked <span class="refs"><span class="prov p-doc">doc</span></span></span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · TO BUILD -->
+  <section>
+    <div class="shead"><span class="snum">§4</span><h2>Waiting to be built</h2>
+      <span class="note">the real frontier, whole suite</span></div>
+    <div class="frontier" style="margin-top:20px">
+      <div class="fitem">
+        <div class="fnum">1</div>
+        <div class="body"><h3>Generation Flags — AI QA pass <span class="chip c-unbuilt"><span class="dot"></span>Unbuilt</span></h3>
+          <p>The one backlog item with <b>zero code footprint</b>. Full-repo grep + <code>git log --all</code> for flag/QA/quality patterns found nothing but the naming line in REFINEMENTS.md. Never started — <b>needs a spec</b>: what does it flag (anatomy / artifacts / NSFW / dupes)? where does the verdict live? <span class="refs"><span class="prov p-code">grep</span><span class="prov p-git">log</span></span></p></div>
+      </div>
+      <div class="fitem">
+        <div class="fnum">2</div>
+        <div class="body"><h3>Finish --sync <span class="chip c-partial"><span class="dot"></span>Extend</span></h3>
+          <p>Fold thumbnail rebuild + <code>--reconcile-deleted</code> into the one pass so "Sync" is genuinely one button, not three commands.</p></div>
+      </div>
+      <div class="fitem">
+        <div class="fnum">3</div>
+        <div class="body"><h3>In-Loom ref-gen <span class="chip c-wait"><span class="dot"></span>Decide→build</span></h3>
+          <p>Generate/edit a shot's opening, closing, and reference frames without leaving the Loom board. Blocked on the §3 decision first.</p></div>
+      </div>
+
+      <div class="horizon-lbl">Horizon epics · both await an explicit "go" — do not start speculatively</div>
+
+      <div class="fitem">
+        <div class="fnum">A</div>
+        <div class="body"><h3>The Foundry — image → 3D print <span class="chip c-wait"><span class="dot"></span>Awaits go</span></h3>
+          <p>Nearer of the two. Stage-1 spike = one gallery image → Hunyuan3D-2 mini/turbo on the RTX 4070 Super 12GB → GLB, judged on a real render = the go/no-go gate. Then headless-Blender cleanup → watertight STL → "Send to Foundry" + three.js preview + STL download. Separate optional install. <span class="refs"><span class="prov p-doc">ROADMAP</span></span></p></div>
+      </div>
+      <div class="fitem">
+        <div class="fnum">B</div>
+        <div class="body"><h3>The Provider Deck — multi-provider <span class="chip c-wait"><span class="dot"></span>Awaits go</span></h3>
+          <p>Seedance 2.0 as provider #2 behind the seam <code>build_shot_video_params</code> already establishes. The one genuinely new problem: Seedance wants <b>publicly-reachable input URLs</b>; localhost can't provide (tunnel / presigned / provider-upload — bank during the spike). Waits for the Foundry to prove the seam pattern a second time. <span class="refs"><span class="prov p-doc">ROADMAP</span></span></p></div>
+      </div>
+
+      <div class="horizon-lbl">Banked / lower priority</div>
+      <div class="fitem">
+        <div class="fnum">◦</div>
+        <div class="body"><h3>Odds &amp; ends</h3>
+          <p><b>BlurHash grid placeholders</b> (col captured, needs a JS decoder) · <b>PySide6 desktop-GUI parity</b> — <em>not read this pass, state unverified</em> · <b>Loom export audio</b> — export is video-only today <span class="refs"><span class="prov p-code">gallery:7739</span></span></p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 · HOUSEKEEPING -->
+  <section>
+    <div class="shead"><span class="snum">§5</span><h2>Doc drift &amp; housekeeping</h2></div>
+    <ul class="keep">
+      <li><span class="ic">▲</span><span><b>REFINEMENTS.md:86 "Next up" is stale</b> — lists live-mirror, Pixeltable search &amp; Loom export as pending; all shipped. Only Generation Flags is genuinely open on that line. This assessment is the evidence to correct it.</span></li>
+      <li><span class="ic">▲</span><span><b>Memory <code>pixai-gallery-backup-project.md</code> is behind</b> — still frames the pre-Loom state; should move to loom-v2 @ 1.10.0.</span></li>
+      <li><span class="ic">▲</span><span><b>Stray <code>HEAD</code> file in repo root</b> — 6 bytes, contents "OUTPUT", untracked; the only thing in <code>git status</code>. Hazard if anyone runs <code>git add -A</code>. Not deleted (not created by this session).</span></li>
+      <li><span class="ic">▲</span><span><b>CLAUDE.md ~line 26</b> still says "default working branch is video-gen" — stale; work is on master/loom-v2.</span></li>
+    </ul>
+  </section>
+
+  <footer>
+    Files read this pass: <span class="prov p-code">pixai_gallery_backup.py</span> <span class="prov p-code">loom/master-storyboard.jsx</span> <span class="prov p-code">pixai_gallery.py</span> (route map + Loom/watch/export). <b style="color:var(--ink)">Not</b> read: <span class="prov p-doc">pixai_gui.py</span> (2,573-line PySide6 GUI), deep catalog internals, moonglade_mcp.py, pixai_similar.py — any claim about those is marked <span class="prov p-doc">doc</span> and unverified. Written after a code-level read, not a doc skim.
+  </footer>
+
+</div>
+
+<script>
+  (function(){
+    var btn=document.getElementById("themeToggle");
+    var root=document.documentElement;
+    btn.addEventListener("click",function(){
+      var cur=root.getAttribute("data-theme");
+      if(!cur){cur=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
+      root.setAttribute("data-theme",cur==="dark"?"light":"dark");
+    });
+  })();
+</script>

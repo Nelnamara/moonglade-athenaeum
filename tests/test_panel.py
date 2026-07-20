@@ -1,8 +1,18 @@
 """Control Panel: maintenance-job runner. Whitelist-only actions, destructive ones
 gated behind confirm, one at a time. The subprocess spawn is monkeypatched so no CLI
 actually runs."""
+import re
 import pixai_gallery as g
+import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+
+from tests.conftest import login_test_client, login_existing_client
+
+
+def _csrf(html):
+    m = re.search(r'name="csrf" value="([^"]+)"', html)
+    assert m, "login page did not render a csrf hidden field"
+    return m.group(1)
 
 
 def _row(**kw):
@@ -15,8 +25,16 @@ def _client(tmp_path):
     return create_app(tmp_path)
 
 
+def _authed_client(tmp_path):
+    """Like _client(tmp_path).test_client(), but logged in for real -- for every test
+    below EXCEPT test_destructive_action_refuses_authenticated_lan_session (which does
+    its own explicit login inline) and test_cancel_is_localhost_only (which deliberately
+    stays anonymous to prove the gate itself)."""
+    return login_test_client(_client(tmp_path))
+
+
 def test_panel_page_renders_with_actions(tmp_path):
-    html = _client(tmp_path).test_client().get("/panel").get_data(as_text=True)
+    html = _authed_client(tmp_path).get("/panel").get_data(as_text=True)
     assert "Control Panel" in html
     assert "Sync now" in html
     # ACTIONS drives the Maintenance BUTTONS (panel_visible only); ALL_ACTIONS drives the
@@ -35,7 +53,7 @@ def test_panel_page_renders_with_actions(tmp_path):
 
 
 def test_run_rejects_unknown_action(tmp_path):
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     assert cli.post("/api/panel/run", json={"action": "rm -rf"}).status_code == 400
 
 
@@ -44,11 +62,56 @@ def test_run_destructive_needs_confirm(tmp_path, monkeypatch):
     spawned = {"n": 0}
     monkeypatch.setattr(subprocess, "Popen",
                         lambda *a, **k: spawned.update(n=spawned["n"] + 1))
-    cli = _client(tmp_path).test_client()      # create_app's build-stamp may spawn git
+    cli = _authed_client(tmp_path)      # create_app's build-stamp may spawn git
     base = spawned["n"]
     r = cli.post("/api/panel/run", json={"action": "dedup-apply"})   # no confirm
     assert r.status_code == 400 and "confirm" in r.get_json()["error"]
     assert spawned["n"] == base                # the panel run itself spawned nothing
+
+
+def test_destructive_action_refuses_authenticated_lan_session(tmp_path, monkeypatch):
+    """A logged-in LAN account must NOT be able to trigger a destructive maintenance
+    job (organize / dedup --apply / rebuild-thumbnails) -- unlike safe read-only panel
+    actions, these change local files on the SERVER's own machine, same trust tier as
+    /api/branding/shortcut. A LAN login unlocks spend-the-owner's-credits generation
+    features, not host-filesystem mutation."""
+    import subprocess, io
+    spawned = {"n": 0}
+
+    class FakeProc:
+        """A real Popen-alike: the final call in this test succeeds (localhost),
+        so _panel_run really does spawn the reader thread on whatever Popen
+        returns -- it needs .stdout (iterable) and .wait(), unlike a plain
+        counter callback that returns None and crashes that thread."""
+        def __init__(self):
+            self.stdout = io.StringIO("")
+        def wait(self):
+            return 0
+
+    def fake_popen(*a, **k):
+        spawned["n"] += 1
+        return FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    core.add_or_update_web_user("alice", "hunter2")
+    cli = _client(tmp_path).test_client()
+    LAN = "203.0.113.5"
+    html = cli.get("/login").get_data(as_text=True)
+    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
+    # Prove the session really is authenticated (it can reach an ordinary
+    # authorized-LAN route) before proving it still can't reach this one.
+    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
+    base = spawned["n"]
+    r = cli.post("/api/panel/run", json={"action": "dedup-apply", "confirm": True},
+                 environ_overrides={"REMOTE_ADDR": LAN})
+    assert r.status_code == 403 and "localhost-only" in r.get_json()["error"]
+    assert spawned["n"] == base   # nothing was spawned
+
+    # The same account, from the actual local machine, still works (destructive
+    # actions aren't broken for the owner -- just not exposed to remote sessions).
+    r2 = cli.post("/api/panel/run", json={"action": "dedup-apply", "confirm": True})
+    assert r2.status_code == 200
+    assert spawned["n"] == base + 1
 
 
 def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
@@ -62,8 +125,7 @@ def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
             return 0
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: FakeProc())
 
-    app = _client(tmp_path)
-    cli = app.test_client()
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/panel/run", json={"action": "sync"})
     assert r.get_json()["ok"] is True
     # reader thread is a daemon; poll status until it finishes
@@ -78,7 +140,7 @@ def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
 
 
 def test_schedule_roundtrip_and_safe_only(tmp_path):
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     # default: disabled
     assert cli.get("/api/panel/schedule").get_json()["enabled"] is False
     # save a valid safe schedule -- sync-videos has NO panel button anymore (it's
@@ -114,7 +176,7 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
         return FakeProc()
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     cli.post("/api/panel/run", json={"action": "audit"})
     import time
     time.sleep(0.05)
@@ -129,7 +191,7 @@ def test_workers_setting_persists_merges_and_reaches_argv(tmp_path, monkeypatch)
     the scheduled run use it, is injected as --workers N into the spawned argv, and its
     partial POST merges (doesn't wipe the schedule fields the other control wrote)."""
     import subprocess
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
 
     # seed a schedule, then a workers-ONLY post must not wipe it (merge, not replace)
     cli.post("/api/panel/schedule", json={"enabled": True, "action": "sync", "interval_hours": 12})
@@ -168,13 +230,19 @@ def test_watch_status_default_shape(tmp_path):
     """conftest sets MOONGLADE_DISABLE_WATCH=1 for every test (see its docstring --
     without it, create_app() would open a real WebSocket to PixAI using whatever real
     credentials happen to be on this machine, on every single test in the suite).
-    /api/watch/status must still answer safely with the never-started default shape,
-    and stay localhost-gated like every other panel status endpoint."""
-    cli = _client(tmp_path).test_client()
+    /api/watch/status must still answer safely with the never-started default shape.
+    It's NOT actually localhost-only (api_watch_status() has no _is_local_request()
+    check of its own, just ordinary read data) -- an authenticated LAN session can
+    read it too, same as most routes here. The anonymous check below proves an
+    UNauthenticated request is still refused outright, using a still-anonymous
+    client off the same app rather than claiming address alone gates this route."""
+    app = _client(tmp_path)
+    anon = app.test_client()
+    r = anon.get("/api/watch/status", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r.status_code == 401
+    cli = login_test_client(app)
     d = cli.get("/api/watch/status").get_json()
     assert d["connected"] is False and d["mirrored"] == 0 and d["events_seen"] == 0
-    r = cli.get("/api/watch/status", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 403
 
 
 def test_watch_autostarts_unless_disabled(tmp_path, monkeypatch):
@@ -215,7 +283,7 @@ def test_run_sync_action_spawns_sync_flag(tmp_path, monkeypatch):
         return FakeProc()
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/panel/run", json={"action": "sync"})
     assert r.get_json()["ok"] is True
     import time
@@ -226,25 +294,38 @@ def test_run_sync_action_spawns_sync_flag(tmp_path, monkeypatch):
 # --- Server control: stop / restart from the browser (Homebridge-style) ---
 
 def test_ping_is_open(tmp_path):
-    cli = _client(tmp_path).test_client()
+    """Despite api_ping()'s own "Open" docstring, the global front door (added after
+    that comment was written) now gates it like every other /api/ route -- it's listed
+    among the previously-fully-ungated routes in _enforce_front_door()'s docstring and
+    covered by tests/test_web_auth.py's parametrized denial tests. This just needs a
+    logged-in session like everything else here."""
+    cli = _authed_client(tmp_path)
     assert cli.get("/api/ping").get_json() == {"ok": True}
 
 
 def test_server_stop_schedules_exit_0(tmp_path, monkeypatch):
+    """Per the LAN-auth pass's commit message ("/api/server/stop ... stay open to any
+    logged-in LAN session" -- owner decision), this is trusted for ANY authenticated
+    session, not localhost-only -- api_server_stop() has no _is_local_request() check
+    of its own. The anonymous check below proves an unauthenticated request is
+    refused regardless of address; the authenticated checks after prove a logged-in
+    session can stop it from either address."""
     codes = []
     monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
     cli = _client(tmp_path).test_client()
+    r0 = cli.post("/api/server/stop", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r0.status_code == 401 and codes == []
+    cli = login_existing_client(cli)
     d = cli.post("/api/server/stop").get_json()
     assert d == {"ok": True, "action": "stop"} and codes == [0]      # stop -> exit 0
-    # LAN device can't stop the owner's server
-    r = cli.post("/api/server/stop", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 403 and codes == [0]                     # unchanged
+    d2 = cli.post("/api/server/stop", environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).get_json()
+    assert d2 == {"ok": True, "action": "stop"} and codes == [0, 0]  # LAN session: also trusted
 
 
 def test_server_restart_needs_supervisor(tmp_path, monkeypatch):
     codes = []
     monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     # not supervised -> refused (409), no exit scheduled
     monkeypatch.setattr(g, "_supervised", lambda: False)
     r = cli.post("/api/server/restart")
@@ -257,14 +338,14 @@ def test_server_restart_needs_supervisor(tmp_path, monkeypatch):
 
 def test_panel_shows_restart_state(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_supervised", lambda: True)
-    html = _client(tmp_path).test_client().get("/panel").get_data(as_text=True)
+    html = _authed_client(tmp_path).get("/panel").get_data(as_text=True)
     assert "Restart server" in html and "Stop server" in html
 
 
 # --- Cancel a running maintenance job from the browser (no Task Manager) ---
 
 def test_cancel_with_no_job_is_a_noop(tmp_path):
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/panel/cancel")
     assert r.get_json() == {"ok": False, "error": "no job is running"}
 
@@ -304,7 +385,7 @@ def test_cancel_terminates_running_job(tmp_path, monkeypatch):
     proc = CancelableProc()
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: proc)
 
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     assert cli.post("/api/panel/run", json={"action": "dedup-dry"}).get_json()["ok"] is True
 
     # wait for the job to actually be 'running' (reader thread picked up the proc)
@@ -327,9 +408,37 @@ def test_cancel_terminates_running_job(tmp_path, monkeypatch):
 
 
 def test_cancel_is_localhost_only(tmp_path):
-    cli = _client(tmp_path).test_client()
+    """AUTHENTICATED but non-local, so a 403 can only come from the handler's own
+    _is_local_request() check. This previously drove an anonymous client asserting 401 --
+    the front door's answer, returned before the handler runs -- so it passed whether or
+    not the check existed. It did not: commit 0fd8cee deleted it (in the very commit that
+    built the two-tier model for the sibling route /api/panel/run) while leaving the
+    'Localhost-only' docstring in place. Restored 2026-07-19."""
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/panel/cancel", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
     assert r.status_code == 403
+    assert "localhost" in r.get_json()["error"]
+
+
+def test_schedule_write_is_localhost_only_but_read_is_not(tmp_path):
+    """The schedule endpoint is deliberately SPLIT: GET stays login-only so a LAN
+    session's Panel can still render current settings, while POST is localhost-only.
+    Its check was dropped in the same commit as cancel's. Writing matters more than
+    'it's only settings' suggests -- sync-videos is a real PANEL_ACTIONS key with
+    destructive=False and panel_visible=False, so a LAN caller could schedule a
+    full-history sync at 16 workers hourly, forever, via a job with no Panel button;
+    and `workers` is read by _panel_run for EVERY run, including the owner's own local
+    ones."""
+    cli = _authed_client(tmp_path)
+    lan = {"REMOTE_ADDR": "192.168.1.9"}
+    assert cli.get("/api/panel/schedule", environ_overrides=lan).status_code == 200
+    r = cli.post("/api/panel/schedule", json={"action": "sync-videos", "enabled": True,
+                                              "interval_hours": 1, "workers": 16},
+                 environ_overrides=lan)
+    assert r.status_code == 403
+    assert "localhost" in r.get_json()["error"]
+    # and the write really did not land
+    assert cli.get("/api/panel/schedule").get_json().get("enabled") is not True
 
 
 # --- The Loom: ffmpeg export of the rough cut (mocked -- no real ffmpeg) ---
@@ -353,6 +462,13 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: FakeProc(argv))
 
     cli = create_app(tmp_path).test_client()
+    # An unauthenticated LAN request can't kick off exports -- checked FIRST, while
+    # `cli` is still anonymous (api_loom_export() has no extra _is_local_request()
+    # check of its own; once logged in, a LAN session is trusted the same as the owner).
+    r = cli.post("/api/loom/export", json={"clips": []},
+                 environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
+    assert r.status_code == 401
+    cli = login_existing_client(cli)
     r = cli.post("/api/loom/export",
                  json={"clips": [{"mid": "v1", "in": 0, "out": 2}], "total_seconds": 2})
     assert r.get_json().get("ok") is True
@@ -363,15 +479,166 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
         time.sleep(0.02)
     assert d["status"] == "done" and d["progress"] == 100
     assert cli.get("/api/loom/export-file").status_code == 200
-    # LAN can't kick off exports
-    r = cli.post("/api/loom/export", json={"clips": []},
-                 environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 403
 
 
 def test_loom_export_needs_a_video(tmp_path, monkeypatch):
     import shutil
     monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg")
-    cli = _client(tmp_path).test_client()
+    cli = _authed_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [{"mid": "nope", "in": 0}]})
     assert r.status_code == 400 and "no finished shot" in r.get_json()["error"]
+
+
+# --- probe_has_audio / probe_duration: pure ffprobe wrappers, fail-soft ---------
+
+def test_probe_has_audio(monkeypatch):
+    import subprocess, shutil
+    monkeypatch.setattr(shutil, "which", lambda n: "/bin/ffprobe" if n == "ffprobe" else None)
+
+    class R:
+        def __init__(self, out):
+            self.stdout = out
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("0\n"))
+    assert g.probe_has_audio("clip.mp4") is True
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R(""))
+    assert g.probe_has_audio("silent.mp4") is False          # no stream index -> no audio
+    monkeypatch.setattr(shutil, "which", lambda n: None)
+    assert g.probe_has_audio("clip.mp4") is False            # ffprobe missing -> fail soft
+
+    def _boom(*a, **k):
+        raise OSError("gone")
+    monkeypatch.setattr(shutil, "which", lambda n: "/bin/ffprobe")
+    monkeypatch.setattr(subprocess, "run", _boom)
+    assert g.probe_has_audio("clip.mp4") is False             # never raises
+
+
+def test_probe_duration(monkeypatch):
+    import subprocess, shutil
+    monkeypatch.setattr(shutil, "which", lambda n: "/bin/ffprobe")
+
+    class R:
+        def __init__(self, out):
+            self.stdout = out
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("5.234\n"))
+    assert g.probe_duration("clip.mp4") == 5.234
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("not-a-number\n"))
+    assert g.probe_duration("clip.mp4") is None                # never raises on garbage
+    monkeypatch.setattr(shutil, "which", lambda n: None)
+    assert g.probe_duration("clip.mp4") is None                # ffprobe missing -> None
+
+
+# --- /api/loom/export: real audio rides along, silence fills the gap -----------
+
+def _mock_export_ffmpeg(monkeypatch):
+    """Same FakeProc convention as test_loom_export_runs_and_downloads, but captures
+    every argv so the constructed ffmpeg command is inspectable."""
+    import subprocess, shutil, io
+    monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg" if n == "ffmpeg" else None)
+    captured = []
+
+    class FakeProc:
+        def __init__(self, argv):
+            captured.append(argv)
+            open(argv[-1], "wb").write(b"OUTPUT")
+            self.stderr = io.StringIO("frame=1 time=00:00:01.00 bitrate=x\n")
+        def wait(self):
+            return 0
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: FakeProc(argv))
+    return captured
+
+
+def _two_video_client(tmp_path):
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "shot_v1.mp4").write_bytes(b"fakemp4")
+    (tmp_path / "videos" / "shot_v2.mp4").write_bytes(b"fakemp4")
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="v1", filename="videos/shot_v1.mp4", is_video="1",
+             created_at="2025-01-01T00:00:00"),
+        _row(media_id="v2", filename="videos/shot_v2.mp4", is_video="1",
+             created_at="2025-01-01T00:00:00")])
+    return login_test_client(create_app(tmp_path))
+
+
+def _ffmpeg_call(captured):
+    """create_app() shells out to git rev-parse for its build stamp -- pick out the
+    actual ffmpeg invocation from everything Popen captured, not just captured[0]."""
+    return next(argv for argv in captured if argv and argv[0] == "ffmpeg")
+
+
+def _filter_complex_of(argv):
+    return argv[argv.index("-filter_complex") + 1]
+
+
+def test_export_real_audio_maps_both_streams_no_a0(tmp_path, monkeypatch):
+    """The original bug: audio was hard-dropped (concat=...a=0, no -c:a, no [aout] map)
+    even when every clip has real audio. Two clips, both WITH audio."""
+    captured = _mock_export_ffmpeg(monkeypatch)
+    monkeypatch.setattr(g, "probe_has_audio", lambda path: True)
+    cli = _two_video_client(tmp_path)
+    r = cli.post("/api/loom/export", json={"clips": [
+        {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 0, "out": 3}],
+        "total_seconds": 5})
+    assert r.get_json()["ok"] is True
+    argv = _ffmpeg_call(captured)
+    fc = _filter_complex_of(argv)
+    assert "a=0" not in fc and "a=1" in fc
+    assert "-map" in argv and "[aout]" in argv
+    assert "-c:a" in argv and "aac" in argv
+    assert "anullsrc" not in fc                    # no silence needed, no synthetic input
+    # concat's input pads must be PER-SEGMENT interleaved (v0,a0,v1,a1,...) -- grouping by
+    # stream type instead ([v0][v1][a0][a1]) is a real ffmpeg error ("media type mismatch
+    # between ... audio and ... video"), caught only by actually running ffmpeg, not by any
+    # assertion on individual substrings above. Pin the exact adjacent ordering.
+    assert "[v0][a0][v1][a1]concat=" in fc
+    assert argv.count("-i") == 2                   # exactly the two real clips, no lavfi extra
+
+
+def test_export_silent_clip_gets_matching_duration_silence(tmp_path, monkeypatch):
+    """One real-audio clip + one silent clip (e.g. rendered without 'Generate audio') --
+    the silent one must get a synthetic track sized to its OWN trim span, not skipped."""
+    captured = _mock_export_ffmpeg(monkeypatch)
+    monkeypatch.setattr(g, "probe_has_audio",
+                        lambda path: "v1" in str(path))   # v1 has audio, v2 doesn't
+    cli = _two_video_client(tmp_path)
+    r = cli.post("/api/loom/export", json={"clips": [
+        {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 1, "out": 4}],
+        "total_seconds": 5})
+    assert r.get_json()["ok"] is True
+    argv = _ffmpeg_call(captured)
+    fc = _filter_complex_of(argv)
+    assert "a=1" in fc and "a=0" not in fc
+    assert "anullsrc" in " ".join(argv)             # synthetic-silence input WAS added
+    assert argv.count("-i") == 3                    # 2 real clips + 1 lavfi anullsrc
+    # the silent segment (v2, span 4-1=3.0s) draws from input index 2 (after the 2 real -i's)
+    assert "[2:a]atrim=duration=3.000" in fc
+    assert "atrim=start=0.000:end=2.000" in fc      # v1's real audio trimmed to its own span
+
+
+def test_export_all_silent_reuses_one_anullsrc_input(tmp_path, monkeypatch):
+    """Neither clip has audio -- exactly ONE synthetic-silence input is added and referenced
+    twice (not duplicated per segment); each segment still gets its own correctly-sized span."""
+    captured = _mock_export_ffmpeg(monkeypatch)
+    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
+    cli = _two_video_client(tmp_path)
+    r = cli.post("/api/loom/export", json={"clips": [
+        {"mid": "v1", "in": 0, "out": 2}, {"mid": "v2", "in": 0, "out": 3}],
+        "total_seconds": 5})
+    assert r.get_json()["ok"] is True
+    argv = _ffmpeg_call(captured)
+    fc = _filter_complex_of(argv)
+    assert argv.count("-i") == 3                    # 2 real clips + exactly 1 lavfi input
+    assert "[2:a]atrim=duration=2.000" in fc and "[2:a]atrim=duration=3.000" in fc
+
+
+def test_export_silent_clip_with_no_trim_out_probes_real_duration(tmp_path, monkeypatch):
+    """When 'out' isn't set (trim to the clip's real end) AND the clip has no audio, the
+    synthetic silence can't infer a length from anullsrc -- probe_duration must be consulted."""
+    captured = _mock_export_ffmpeg(monkeypatch)
+    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(g, "probe_duration", lambda path: 6.0)
+    cli = _two_video_client(tmp_path)
+    r = cli.post("/api/loom/export", json={"clips": [
+        {"mid": "v1", "in": 1.0}], "total_seconds": 5})   # no 'out' -> co is None
+    assert r.get_json()["ok"] is True
+    fc = _filter_complex_of(_ffmpeg_call(captured))
+    assert "[1:a]atrim=duration=5.000" in fc         # probed 6.0 - in(1.0) = 5.0
