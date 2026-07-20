@@ -3115,11 +3115,23 @@ __DESIGN_TOKENS__
   .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(79,201,154,.25); }
   .filters label { color: var(--subtext); font-size: 12px; }
   .filter-toggle { display: none; }
-  /* Mobile: collapse the filter bar behind a toggle so the grid leads. */
-  @media (max-width: 680px) {
-    header h1 { font-size: 16px; }
-    header.bannered { padding: 0 14px 10px; }
-    header .back-link { font-size: 12px; }
+  /* ---- BASE rules for the header nav, the LAN badge and the setup wizard ----
+     These eleven were sitting INSIDE the @media (max-width: 680px) block below,
+     so they applied ONLY on narrow viewports and were entirely absent on desktop
+     -- exactly inverted. The indentation gave it away: the media query's own
+     rules are at 4 spaces, this block was at 2, and .filter-toggle resumed at 4.
+     Real consequences, all confirmed by rendering the page at both widths:
+       - the first-run setup wizard (the FIRST thing a new user sees) had no
+         card, no gold rule, and raw white browser inputs on a near-black page
+       - the Panel's Add-user form rendered the same three raw white inputs
+       - .setup-msg.err lost `color: var(--red)`, so "Invalid username or
+         password" and the rate-limit lockout notice rendered in ordinary body
+         text, visually identical to the instructions above them
+       - .setup-row input's `flex: 1 1 320px` is a HORIZONTAL basis; in a
+         column-direction container it becomes a 320px HEIGHT, so inputs
+         rendered ~8x too tall on phones
+     Found by a browser crawl that looked at screenshots. No test caught it:
+     every response was a correct 200 and no console error ever fired. */
   .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
   .lan-note { font-size: 11.5px; color: var(--overlay0); font-style: italic; padding: 5px 10px; border: 1px dashed var(--surface1); border-radius: 7px; }
   .setup-wizard { margin: 10px 14px 0; }
@@ -3131,6 +3143,15 @@ __DESIGN_TOKENS__
   .setup-msg { display: inline-block; margin-top: 8px; font-size: 12.5px; }
   .setup-msg.err { color: var(--red); }
   .setup-msg.ok { color: var(--green); }
+  /* Mobile: collapse the filter bar behind a toggle so the grid leads. */
+  @media (max-width: 680px) {
+    header h1 { font-size: 16px; }
+    header.bannered { padding: 0 14px 10px; }
+    header .back-link { font-size: 12px; }
+    /* A column-direction container turns .setup-row input's 320px flex-basis
+       into a height. Reset the basis here so narrow viewports stack normally. */
+    .setup-row { flex-direction: column; align-items: stretch; }
+    .setup-row input { flex: 0 0 auto; min-width: 0; width: 100%; box-sizing: border-box; }
     .filter-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 12px 0; }
     .filters { display: none; flex-direction: column; align-items: stretch; padding: 10px 12px; }
     .filters.open { display: flex; }
