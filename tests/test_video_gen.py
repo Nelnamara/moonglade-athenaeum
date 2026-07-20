@@ -314,3 +314,74 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
     core._download_video_task(object(), {}, "T2", tmp_path, SimpleNamespace(name_length=60), {})
     assert called == [], "poster present -> ffmpeg fallback should be skipped"
     assert (tmp_path / "gallery" / "thumbs" / "V2.jpg").exists()
+
+
+# ---- gallery references must be uploaded, not passed through (regression) ----
+
+def test_gallery_catalog_ref_is_uploaded_not_passed_through(tmp_path, monkeypatch):
+    """PRODUCTION BUG, 2026-07-20: every generation started from the gallery failed with
+    PixAI's invalid_media_id / invalid_reference_image_media_id and a full refund, while
+    the same thing from the Loom worked.
+
+    A media_id in our catalog identifies a generation OUTPUT, and PixAI will not accept
+    one as a generation INPUT. It is NOT expiry -- both a month-old and a same-day id
+    resolve fine through GET /v1/media -- it is media kind: readable is not usable-as-input.
+
+    The Loom escaped it by accident: it sends data: thumbnails, which the route already
+    uploaded, yielding an upload-kind id. The gallery sends bare catalog ids, so it could
+    never reach that branch.
+
+    Pins the fix: a catalog id whose file we hold on disk must be uploaded, and the
+    UPLOADED id is what reaches PixAI."""
+    from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+
+    (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
+    img = tmp_path / "2025-01" / "shot_733917871331404290.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "733917871331404290", "filename": "2025-01/shot_733917871331404290.png",
+        "created_at": "2026-06-18T05:24:56Z"}])
+
+    uploaded, submitted = [], {}
+    monkeypatch.setattr(core, "upload_media",
+                        lambda session, path, **k: uploaded.append(str(path)) or "999000111222")
+    monkeypatch.setattr(core, "submit_generation",
+                        lambda session, params: submitted.update(params) or "task-1")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/loom/generate", json={
+        "mode": "I2V", "prompt": "test", "images": ["733917871331404290"], "duration": 5})
+    assert r.status_code == 200, r.get_data(as_text=True)
+
+    assert uploaded, "the catalog reference was passed through instead of uploaded"
+    assert img.name in uploaded[0]
+    # The UPLOADED id must be what PixAI receives -- not the catalog id that it rejects.
+    assert submitted["i2vPro"]["mediaId"] == "999000111222"
+
+
+def test_gallery_ref_upload_is_cached_per_media_id(tmp_path, monkeypatch):
+    """Referencing the same image twice in one R2V must upload it once, not per slot."""
+    from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+
+    (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
+    img = tmp_path / "2025-01" / "a_555.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "555", "filename": "2025-01/a_555.png", "created_at": "2026-06-18T05:24:56Z"}])
+
+    calls, submitted = [], {}
+    monkeypatch.setattr(core, "upload_media",
+                        lambda session, path, **k: calls.append(1) or "777")
+    monkeypatch.setattr(core, "submit_generation",
+                        lambda session, params: submitted.update(params) or "t")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/loom/generate", json={
+        "mode": "R2V", "prompt": "x", "images": ["555", "555"], "duration": 5})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert len(calls) == 1, "same media_id uploaded {} times".format(len(calls))
+    assert submitted["referenceVideo"]["referenceImageMediaIds"] == ["777", "777"]

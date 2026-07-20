@@ -2761,6 +2761,13 @@ def create_app(out_dir: Path):
     # ------------------------------------------------------------------
     _cli_path = str(Path(__file__).resolve().parent / "pixai_gallery_backup.py")
     _cli_dir = str(Path(__file__).resolve().parent)
+    # catalog media_id -> upload-kind media_id, for references sent from the gallery.
+    # PixAI refuses a generation-output id as an input (see resolve_img), so each
+    # referenced image is uploaded once and reused. Process-lifetime only and
+    # deliberately unbounded-but-tiny: one short string pair per image the owner has
+    # ever referenced this run. Losing it on restart just re-uploads, which is free.
+    _ref_upload_cache = {}
+
     _panel_lock = threading.Lock()
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
                   "rc": None, "started_at": None, "progress": None,
@@ -9967,7 +9974,40 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 s = str(val or "").strip()
                 if not s:
                     return ""
-                if s.isdigit():                       # already a PixAI media_id
+                if s.isdigit():
+                    # A media_id from OUR catalog identifies a generation OUTPUT, and
+                    # PixAI does not accept one of those as a generation INPUT -- it
+                    # answers invalid_media_id (i2vPro.mediaId) or
+                    # invalid_reference_image_media_id (referenceImageMediaIds) and
+                    # refunds. Readable is not the same as usable-as-input: both a
+                    # month-old and a same-day id resolve fine through GET /v1/media,
+                    # so this is not expiry, it is media KIND.
+                    #
+                    # The Loom never hit this because it sends data: thumbnails, which
+                    # take the upload branch below and come back with an upload-kind id.
+                    # The gallery sends bare ids, so it could never reach that branch --
+                    # which is exactly why generating from the gallery failed on every
+                    # reference while the Loom worked.
+                    #
+                    # We hold the actual file (that is what the backup IS), so upload it
+                    # and hand PixAI an id it will accept. upload_media is the same free
+                    # S3 handshake as --upload and /api/upload; it spends nothing.
+                    if s in _ref_upload_cache:
+                        return _ref_upload_cache[s]
+                    row = get_row(db_path, s)
+                    fp = find_image_file(out_dir, s, (row or {}).get("filename") or "")
+                    if not fp or not fp.exists():
+                        # No local copy -- pass the id through unchanged rather than
+                        # dropping the reference silently. If PixAI rejects it the user
+                        # gets its real error instead of a mystery "no reference" one.
+                        return s
+                    try:
+                        mid = core.upload_media(session, str(fp))
+                    except Exception:                 # noqa: BLE001 -- fall back, never 500
+                        return s
+                    if mid:
+                        _ref_upload_cache[s] = str(mid)
+                        return str(mid)
                     return s
                 if s.startswith("data:"):             # a Loom thumbnail -> upload it
                     try:
