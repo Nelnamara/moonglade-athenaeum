@@ -1,15 +1,20 @@
 # How It Works
 
-Three Python modules around one SQLite catalog.
+Five Python modules around one SQLite catalog, plus the Loom's JS surface.
 
 ```
 pixai_gallery_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
 pixai_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
-pixai_gui.py              PySide6 desktop app: every workflow as a tab, background threads
+pixai_gui.py              PySide6 desktop app: 9 workflow tabs, background threads
+pixai_similar.py          "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
+moonglade_mcp.py          local stdio MCP server: curation tools over the catalog
+loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite
 ```
 
 Both the engine and the GUI import `pixai_gallery.py` for catalog access — so
-catalog logic lives in exactly one place.
+catalog logic lives in exactly one place. The GUI no longer covers every workflow:
+the Loom, Control Panel, achievements, collections, contact sheet, `--watch` and
+`--claims` are web/CLI-only.
 
 ## How it talks to PixAI — and why setup is just one key
 
@@ -44,8 +49,14 @@ pixai_backup/
 ├─ 2024-03/           organize: month folders, descriptive names
 ├─ videos/  imported/ backed-up + imported media
 ├─ gallery/thumbs/    768px JPEG thumbnails (immutable cache)
+├─ branding/          marks, frames, badge thumbs (machine-local)
+├─ loom/              the Loom's storyboard store + exports
 ├─ _duplicates/       quarantine from --dedup (reversible)
+├─ _deleted/          quarantine from a gallery delete (reversible)
 ├─ organize_manifest.csv   reversible move log (--undo-organize)
+├─ achievements.json  earned achievements + earn dates
+├─ telemetry.json     achievement counters
+├─ jobs.jsonl         Control Panel job log
 ├─ catalog.db         the source of truth
 └─ raw_tasks.jsonl    raw task data
 ```
@@ -59,5 +70,7 @@ pixai_backup/
    naming layouts, so resume / gallery / audit never drift.
 
 ## Testing
-195 pytest tests in `tests/` (pure, filesystem, catalog, gallery routes, mocked
-network, embedded-JS syntax). `python -m pytest`. All must pass before merging.
+Run `python -m pytest -q` from the repo root — pure functions, filesystem, catalog,
+gallery routes, mocked network, embedded-JS syntax. `tests/test_similar.py` needs the
+optional `pixeltable` dep and skips itself cleanly without it. The Loom's pure-logic
+modules have their own suite: `node --test` from `loom/`. All must pass before merging.

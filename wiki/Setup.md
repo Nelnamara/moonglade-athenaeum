@@ -5,7 +5,7 @@
 Python 3.8+ (`python --version`), then:
 
 ```bash
-pip install requests pillow PySide6 flask truststore
+pip install -r requirements.txt
 ```
 
 | Package | Needed for |
@@ -14,9 +14,11 @@ pip install requests pillow PySide6 flask truststore
 | `pillow` | thumbnails, conversion, metadata embedding |
 | `PySide6` | the desktop GUI (`pixai_gui.py`) |
 | `flask` | the local web gallery (`pixai_gallery.py`) |
+| `websockets` | `--watch` / `--watch-backup`, and the web gallery's auto-starting live-mirror thread |
 | `truststore` | optional — fixes HTTPS cert errors behind corporate proxies / AV |
 | `cryptography` | optional — only for the gallery's `--https` mode |
-| `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos |
+| `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos; required for The Loom's video export and last-frame extract |
+| `pytest`, `pytest-mock`, `pytest-cov` | dev only — running the test suite |
 
 ## 2. Configure — one value
 
@@ -49,7 +51,22 @@ optional overrides; leave them blank. More detail: [How It Works](How-It-Works).
 
 ## 3. First run
 
-Desktop app:
+Web gallery (browse, generate, The Loom) — at [localhost:5000](http://localhost:5000):
+```bash
+python pixai_gallery.py --out pixai_backup
+```
+
+**Create your login (v2.0.0+).** The gallery requires an account on every path, including on
+the machine running it, so the first thing you'll see is the login page. On a fresh install
+it offers to **create the first account** right there — no terminal step. That form appears
+only for a request from the server's own machine while zero accounts exist, so nobody on
+your network can claim the first account before you do. From then on, sign in with it from
+any device.
+
+Add more accounts later from **Panel → Users**. If you ever lock yourself out entirely,
+`python pixai_gallery_backup.py --add-web-user` is the recovery path.
+
+Desktop app (legacy — the PySide6 GUI is being folded into the web app):
 ```bash
 python pixai_gui.py
 ```

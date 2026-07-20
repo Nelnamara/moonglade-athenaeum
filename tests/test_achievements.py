@@ -4,6 +4,8 @@ read-only catalog data (no network, no spend)."""
 import pixai_gallery as g
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
+from tests.conftest import login_client
+
 
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
@@ -60,10 +62,12 @@ def test_achievement_metrics_counts(tmp_path):
 # ---- persisted state --------------------------------------------------------
 
 def test_state_roundtrip_and_soft_fail(tmp_path):
-    assert g.load_ach_state(tmp_path) == {"seen": [], "skin": "moonglade"}
-    g.save_ach_state(tmp_path, {"seen": ["a", "a", "b"], "skin": "ember"})
+    assert g.load_ach_state(tmp_path) == {"seen": [], "skin": "moonglade", "earned_at": {}}
+    g.save_ach_state(tmp_path, {"seen": ["a", "a", "b"], "skin": "ember",
+                                "earned_at": {"a": "2026-07-13"}})
     st = g.load_ach_state(tmp_path)
     assert st["seen"] == ["a", "b"] and st["skin"] == "ember"      # deduped + sorted
+    assert st["earned_at"] == {"a": "2026-07-13"}                  # earn-dates round-trip
     # an unknown skin id falls back to the default on read
     g.save_ach_state(tmp_path, {"seen": [], "skin": "not-a-skin"})
     assert g.load_ach_state(tmp_path)["skin"] == "moonglade"
@@ -76,7 +80,7 @@ def test_state_roundtrip_and_soft_fail(tmp_path):
 
 def _client(tmp_path, rows):
     save_catalog(tmp_path / "catalog.db", rows)
-    return create_app(tmp_path).test_client(), tmp_path
+    return login_client(tmp_path), tmp_path
 
 
 def test_api_achievements_marks_seen_once(tmp_path):

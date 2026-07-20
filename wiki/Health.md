@@ -7,7 +7,7 @@ The **`/health`** page is your analytics dashboard over `catalog.db`:
 - Top models, top LoRAs, top tags.
 - A prompt word-cloud.
 
-Reach it from the gallery header (**Collection health →**) or
+Reach it from the gallery header (**♡ Health**) or
 `http://127.0.0.1:5000/health`.
 
 ## Duplicates review
@@ -18,9 +18,10 @@ Reach it from the gallery header (**Collection health →**) or
 
 ## Thumbnails & health accuracy
 
-Thumbnails are 768px JPEGs cached under `gallery/thumbs/` (videos are skipped).
-Health resolves video/local rows by filename, so they aren't reported as false
-"missing". Regenerate thumbnails any time:
+Thumbnails are 768px JPEGs cached under `gallery/thumbs/` (videos get an
+ffmpeg-extracted poster frame when `ffmpeg` is on PATH, and stay blank if it
+isn't). Health resolves video/local rows by filename, so they aren't reported as
+false "missing". Regenerate thumbnails any time:
 
 ```bash
 python pixai_gallery.py --out pixai_backup --rebuild-thumbs

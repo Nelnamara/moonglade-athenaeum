@@ -1,0 +1,600 @@
+# Moonglade Athenaeum — Active Roadmap (Loom V2 + Achievements)
+
+> ## ❄️ FROZEN — historical record, do not edit. Superseded by `docs/STATE.md`.
+>
+> **Frozen 2026-07-17.** This file was the project's source-of-truth doc from 2026-07-11. It is no
+> longer maintained; current state lives in **`docs/STATE.md`**.
+>
+> **Why it was retired — read this before starting another "living" doc.** This file was itself a
+> consolidation, and it became the single rottenest file in the repo: a 2026-07-16 audit checked 914
+> documentation claims against the code and found 158 false or stale — **40 of them here**, a quarter
+> of the entire repo's doc-rot in one file. The cause was structural, not careless: it was written as
+> an **append-only journal**. Corrections piled up *beside* the errors (`~~struck~~`, "SUPERSEDED",
+> "459 tests green — that day's count; 478 now") instead of replacing them, so reading it end-to-end
+> meant wading through contradictory statements — the owner's words, "countless conflicting data
+> points". `STATE.md` replaces the journal habit with one hard rule: it describes only what is true
+> now, and a fact that stops being true is **deleted, not annotated**. The narrative this file
+> preserves — what was tried, flipped, and abandoned — is exactly what `STATE.md` refuses to carry;
+> that is what this frozen copy is *for*. Read it for history; never as current fact.
+> (Far-horizon epics — the Foundry + Provider Deck — live in `docs/ROADMAP.md`. Near-term tracker: `docs/REFINEMENTS.md`.)
+
+---
+
+## 0. Tonight's scope + parked items
+
+- **Focus:** Loom V2 · Achievement art. Keep it fun, not infrastructure.
+- **Generation Flags → TABLED to Sunday.** Genuinely unbuilt; needs a taxonomy spec first; NOT dependency-free (numpy isn't a current dep; the CLIP index rides heavy optional deps). Least important item on the board.
+- **Pixeltable** = the shipped "Similar / more like this" search. It works; it is NOT Generation Flags. Don't conflate them again.
+
+---
+
+## 0.4 · TROPHY HALL REGRESSION — RESOLVED (revert) + THE DESIGN WORKFLOW STANDARD (2026-07-14/15) — see `docs/DESIGN_WORKFLOW.md`
+
+**The reformat commit `c877919` landed way off the owner's intended visual target** — cards
+reorganized, the ladder-carousel mechanic itself rejected outright ("didn't even work and looked like
+dogwater... not what I asked for... one of those charge-ahead sessions with no design questions"),
+locked/DONE work undone without permission. **Recovery: Option A (revert) was chosen and executed
+2026-07-15** — `c877919` reverted clean as `0a8da3a` on the C: repo, confirmed with a real rendered
+screenshot. The reverted commit's CSS/JS is kept filed as a reference artifact only — **not** a
+recommended starting point for the rebuild. **The Hall redesign itself is NOT done, but the owner
+already has real Figma mocks built** (told this repeatedly this session — do not re-suggest the
+screenshot-decomposition checklist, ask for the frame URL instead) for a rename+rebuild. Rename
+shortlist as of 2026-07-15: The Vault Against the Void / The Folio of Honors / the owner's own "The
+Ledger of the World Tree" (banner subtext: "The Pillar of the Vault"). Full incident detail, tooling
+state (Figma plugin — **confirmed live and authenticated 2026-07-15**, no more one-time-OAuth
+blocker; Claude Design + `DesignSync`), the two not-actually-regressions caveats (feats-cloak =
+original spec; machine-local branding art), and the model-strategy guidance ALL live in
+**`docs/DESIGN_WORKFLOW.md`** — read it before touching any user-visible surface. **Standing rule from this incident: no visual
+build from prose alone; verify against the pixel source before calling it done.**
+
+---
+
+## 0.5 · Suite architecture decisions (OWNER-LOCKED 2026-07-13) — see `docs/SUITE_ARCHITECTURE_AUDIT.md`
+
+The 5-agent front-end cohesion audit ran → `docs/SUITE_ARCHITECTURE_AUDIT.md`. Owner calls:
+- **Front-end direction = OPTION A (web components), all the way.** Promote the duplicated widgets to
+  framework-neutral custom elements (gallery-owned, no build step, loaded like `picker-core.js`); both the
+  vanilla gallery and the React Loom mount them, natures unchanged. **Pilot = `<mg-model-picker>`** (the
+  model/LoRA flyout + hover card) — which also delivers **D** (upgrades the Loom's Image-tab picker for free).
+  Migration order in audit §6.
+- **Loom save/load fix = DO FIRST (data-safety, independent of the web-component work).** The whole store *was*
+  one non-atomically-written `store.json` (`_loom_save`) → a crash mid-save could
+  corrupt every board. Rework to **file-per-project + atomic `os.replace`** (idiom already in `_save_telemetry`,
+  `pixai_gallery.py:1629-1637`); thumbnails-as-media_id + import-creates-new-project as follow-ups. **Ships first.**
+  *[✅ SHIPPED (`1710f04`) — corrected 2026-07-16: each key is now its OWN file under `out_dir/loom/kv`, written
+  atomically (tmp + `os.replace`), with the legacy `out_dir/loom/store.json` auto-migrated in. `_loom_save` no
+  longer exists and the corruption risk described above is gone.]*
+- **PySide6 GUI = phase out, surgically.** Owner has been slimming it as the web side grew; plan is to shrink
+  it to **pure dev-tool status** and strip the redundant spend surfaces (Generate/Video/Edit clones — strictly
+  worse, no cost/free-card safety). NOT a wholesale delete yet. Excluded from the cohesion migration. (Full
+  deprecation later requires repointing the `Moonglade Athenaeum.pyw` launcher.)
+- **"No framework" note clarified:** the real, confirmed value is **no build step / framework-neutral shared
+  widgets**, NOT "no framework" (the Loom is React by design). `REFINEMENTS.md:72` reworded; stop citing it as a rule.
+
+**✅ PILOT SHIPPED + VERIFIED LIVE (2026-07-13) — `<mg-model-picker>` (Option A step 1 = D):** framework-neutral
+custom element in `static/mg-model-picker.js` (search + rich cards + hover preview; emits a `mg-pick` CustomEvent),
+loaded as a plain global like `picker-core.js`, styled off the shared `DESIGN_TOKENS_CSS`, owning its own preview
+(dissolves the singleton-`#model-preview` problem). Standalone `static/mg-model-picker.html` harness for isolated
+verification. First adoption = the **Loom V2 Image tab** (React↔element bridge via a `ref` callback listening for
+`mg-pick`), replacing the thin type-in search → **delivers D**. **Owner-verified live 2026-07-13** — both the
+standalone harness AND the Loom Image tab render the rich cards + hover preview and pick correctly (`c24837c` +
+CSS/CHANGELOG cleanup). Gallery adoption (replacing the working `#model-flyout`) is the LATER, live-QA'd step.
+**✅ STEP 2 VERIFIED LIVE (2026-07-13) — `<mg-gallery-picker>`:** `static/mg-gallery-picker.js`, a full
+"pick an image" modal wrapping the already-shared `PickerCore` (mount-to-open / unmount-to-close, same
+idiom as the Loom's `pickCb` pattern it replaces). Optional attrs (`show-type`/`show-source`/
+`show-upload`/`show-copy-prompt`) all OFF by default — the Loom's FIRST adoption is a byte-for-byte
+behavior match of the retired `GalleryPick` component (no scope creep), which is now fully removed
+(`.sb-pick-*` CSS kept — still used by the Export dialog + ImportCollection). Bridged via
+`bindGalleryPicker` (mirrors `bindPicker`); wired at the ONE `pickCb &&` mount point used app-wide
+(Cast add-from-gallery, both FrameSlots, etc.) so every picker call site upgrades at once. Standalone
+harness `static/mg-gallery-picker.html` (two buttons: Loom-parity vs all-features-on).
+**Verified 2026-07-13 evening** (a real Loom + catalog, headless-browser QA since the owner's own
+session was time-budgeted): the empty-open bug (`1a83d51`) holds fixed — Cast "Pick from the gallery"
+opens, browses-on-open, filters (confirmed `type=video` against 5 real video rows: correct request,
+correct render, correct `mg-pick` payload, clean unmount), and closes with zero console errors. The
+other call sites (both FrameSlots) share the exact same `pickCb`/`bindGalleryPicker` mount — one JSX
+conditional, no per-caller logic — so they're the same verified path, not a separate one.
+**NEXT after this = `<mg-cost-badge>`.** Save/load crash-safe fix shipped separately (`1710f04`,
+re-verified: migration + atomic per-key writes both confirmed live + 5 dedicated tests green).
+
+---
+
+## 1. Loom V2 — LIVE. The "REBUILD" umbrella is DISSOLVED (owner, 2026-07-16 evening): features ship into the live V2 directly, nothing waits on a rebuild decision anymore
+
+**Where this actually landed, in one place (2026-07-16 end of day) — read this first if you just want the current state, not the whole arc:** the section below is told as one long same-day narrative (full rebuild committed → a real probe reversed that decision → the shell redesign shipped anyway, since it was always independent of the rebuild question → three rounds of real owner-reported bugs found and fixed → a whole new capability, draft generation, shipped on top). None of that is contradictory, but it reads like a rollercoaster if skimmed instead of read straight through, so here's the settled state:
+- **The V2 shell is the live, shipping product surface.** Features go into it directly. The active work is the V1→V2 convergence punch list (§6), the project export system, the theme/skin pass, and the video-control base set — all live-feature work, none of it gated on anything.
+- **The "rebuild" as an organizing concept is retired** (owner, 2026-07-16 evening: "We need to stop putting things in the on-hold REBUILD umbrella and focus on the features making it live"). The render-tree merge idea itself isn't cancelled as a thought — but nothing may be filed under it, deferred because of it, or scoped relative to it anymore. It already orphaned one real feature (project export sat "rebuild-scope" until the owner caught it); that failure mode is the reason for the dissolution.
+- **State-layer consolidation (the composed-hooks extraction): SHIPPED and merged** (`ee4b33a`).
+- **V2 shell redesign (fixed 4-region layout): SHIPPED** (`c0c7399`), plus **draft generation**, plus four rounds of live-verified bug fixes, plus Play sequence wired in (`768aecf`).
+- Net effect: the tool went from "everything might need rebuilding" to "the important parts already work, refined through several real bug-fix passes" in one day — not because the bar got lowered, but because the actual probe evidence pointed away from the bigger rebuild and the shipped alternative held up under real use.
+
+**Everything below this point (the V2.1 rail-layout arc, the shot-mechanics work) is now historical — read for context, not as the active plan.** After the Trophy Hall incident forced a full ground-truth audit of the suite (2026-07-15), the Loom's classic/V2 fork got its own dedicated scrutiny: a first comprehensive-plan pass built independent consolidate and rebuild plans, then a focused 7-agent adversarial audit (2026-07-16, Sonnet/Opus/Fable mix) stress-tested both from multiple angles — a fresh skeptical re-read explicitly hunting for reasons rebuild was wrong, an off-the-shelf prior-art survey, a Loom-scoped standalone-app survey, a render-architecture-options survey, an adversarial stress-test of the rebuild plan's real costs, a Fable-model synthesis, and an Opus adversarial verify checking the synthesis for the same one-sidedness this exact decision had already shown in both directions.
+
+**What that audit actually found, load-bearing for everything after:** the "~600 good state-layer lines lift out cleanly" premise both plans shared is **false as stated** — two independent passes confirmed the real state layer (`generateShot`/`pollShot`/`exportCut`/the multi-project store) is React closures woven through ~150 setter call-sites inside `App()` (1024–1701 *as the file stood that morning* — superseded by the `ee4b33a` extraction below: `App()` now begins at `:1664` and the state layer lives in four hooks at `:1228` `useProjectStore` / `:1370` `useShotMutations` / `:1410` `useGenerationPipeline` / `:1620` `useExportPipeline`, plus pure helpers in `loom/src/loom-mutations.js`), not a separable module; the genuinely pure, cheaply-testable core is ~150–200 lines. The audit also found real bugs living *inside* that "solid" layer, not just in the classic/V2 render fork: `importJSON` silently clobbers the currently-open project with no confirm (real data-loss risk); `CONNECT[c.connect]` is unguarded and can throw on a stale/legacy card; `shotPayload` defaults both open and close frames to the same `@image9` tag; generation polls have no abort/cleanup and leak if a card is deleted mid-render; the continuity indicator is broken *by the app's own headline frame-handoff feature* (handoff writes `mediaId`, the indicator only checks `thumbId`); and there are ~7 duplicate tag-numbering call sites in 3 different algorithm shapes (not the originally-counted 4). No off-the-shelf storyboard app or render-layer replacement exists to shortcut this (checked and ruled out) — though **Dockview or FlexLayout** (both mature, MIT-licensed, actively maintained) are real candidates to replace the hand-rolled `DockablePanel` docking chrome if/when the rebuild reaches that piece, rather than hand-rolling it again. React + esbuild + Vitest/RTL remains the right tooling combo (Preact is a legitimate but optional later spike; Svelte and hand-rolled vanilla+signals were both explicitly rejected for a solo-dev migration of untested code; canvas isn't needed for the reel at this scale).
+
+**Owner decision (2026-07-16): rebuild is the destination.** Not gated behind a probe-first decision tree — the owner weighed the evidence (including the audit's own "probe first, decide second" hybrid suggestion, which a subsequent adversarial-verify pass caught quietly pre-committing to rebuild's tooling anyway) and chose to commit directly, starting with:
+
+**✅ PHASE 0 SHIPPED (2026-07-16, commit `b4303f5`):**
+1. `frameLinked(a,b)` helper checking both `thumbId` and `mediaId` — fixes the continuity indicator. (Not ported to V2 — V2 never had this indicator at all; adding it there is later-phase feature-parity work, not a Phase 0 bugfix.)
+2. `nextTag`/`maxTagNum(assets, prefix)` helpers — unified all 7 duplicate tag-numbering call sites (V2 cast-add, URL cast-import, `importCollection`, `routeImg`, `routeGen`, classic "+Add reference", `addRef`) onto one anchored-regex-max algorithm.
+3. `dupCard` resets `resultMid`/`status`/`actualDur`/`trimIn`/`trimOut` on clone (also fixes Export's double-include-footage side effect).
+4. `connectMeta(connect)` guards every `CONNECT[...]` index (3 call sites) against undefined/stale/legacy values, falling back to "new scene" instead of throwing.
+5. `importJSON` creates a new storyboard + confirms instead of clobbering the open board in place.
+6. (Found during implementation, not in the original 5:) `shotPayload`'s untagged-frame fallback gave both open AND close frame the same literal `@image9` tag on an FLF shot with neither tagged — now distinct fallbacks (`@image8`/`@image9`) so both images actually reach the model.
+
+Verified: babel-in-node transpile clean, full pytest suite 474/474 (that day's count — the suite is **478** as of 2026-07-16 end of day, 483 with `tests/test_similar.py`'s pixeltable-only cases; trust `python -m pytest` over any number written in this doc), live browser check (tag numbering + continuity indicator confirmed working end-to-end, zero console errors). `dupCard`/`importJSON` verified by code read, not live-triggered (would need either a faked rendered-shot state or a real PixAI generation call — declined per the standing hands-off-PixAI-generation rule).
+
+These are shared, in-file helpers — no build step, no module system change, matches "no new tooling" exactly. *[True of Phase 0 as shipped, superseded hours later by Phase 1a below (`7231f83`): the same four helpers now live in `loom/src/loom-core.js` as ES `export const`s (`:45` `maxTagNum`, `:51` `nextTag`, `:59` `frameLinked`, `:67` `connectMeta`), imported at `master-storyboard.jsx:9`, behind a real Node/npm/esbuild toolchain (`loom/package.json` declares `"type":"module"` + an esbuild devDependency + a `node scripts/build.mjs` script). They are no longer in-file and a build step now exists — opt-in via `/loom?bundle=1`.]*
+
+**✅ PHASE 1a — esbuild + pure-core extraction — SHIPPED 2026-07-16 (commit `7231f83`, pushed, live on `loom-v2`).** First Node/npm toolchain ever in this repo (`loom/package.json`, esbuild). `flat`/`shotText`/`shotPayload`/tag-math/continuity/pricing extracted into `loom/src/loom-core.js` (no React import), 30 `node --test` cases. The esbuild bundle is reachable only via an opt-in `?bundle=1` flag on `/loom`; Babel-standalone stays the untouched default. Verified for real: live Flask server hit both ways in-browser (identical render, zero console errors), full Python suite unaffected (474 tests that day; **478** now — that drift came from later work, not from Phase 1a, which touched only `loom/` JS).
+
+**⚠️ PHASE 1b — the decisive `useLoomProject` extraction — RUN FOR REAL 2026-07-16, and it changed the plan.** First attempt failed to even start (worktree-isolation tooling bug, fixed — see the dashboard for that detail); the re-run completed cleanly: two independent agents each extracted the ~450-line state/mutation layer in isolated worktrees (single monolithic hook vs. four composed hooks: `useProjectStore`/`useShotMutations`/`useGenerationPipeline`/`useExportPipeline`), each reviewed by 2 independent adversarial skeptics instructed to try to refute a "clean" claim, synthesized by Opus.
+
+**What actually happened — read this before assuming "rebuild" is still the plan:**
+- **The single-hook attempt claimed genuinely-clean and was wrong.** Its own skeptics split (one said clean, one didn't) — the synthesis agent independently verified the dissenting skeptic's evidence directly against the files and confirmed it: `loom/src/useLoomProject.js`'s `exportAll()` calls `fmt()` without importing it from `loom-core.js` — a real `ReferenceError` on the esbuild-bundle path, invisible because `exportAll` has zero test coverage. Separately, `duplicateProject` now silently clears the V2 shot selection via a blanket `useEffect`, where the original code deliberately preserved it — a real, undisclosed behavioral regression the self-report called "provably behavior-identical." **The skeptic that missed both is exactly the "adversarial verify quietly favoring the flattering read" failure mode this whole decision has already been caught in twice before — surfacing again, one layer down, inside the thing built specifically to catch it.**
+- **The composed (four smaller hooks) attempt did NOT claim clean** (`cleanExtractionClaim: false`, three specific named blockers disclosed up front) **and its account held up completely** under its one real skeptic's independent re-execution (the second "skeptic" was a stub/failed run returning literal placeholder text — correctly disregarded by the synthesis). No runtime bug, no behavioral regression, only two trivial pre-existing edge-case deltas.
+- **The real, load-bearing finding:** the state layer genuinely CAN be lifted out cleanly — via the composed strategy — but doing so does **not** require first merging classic+V2's render trees. The actually-hard, still-unsolved part in BOTH attempts is the state↔view coupling (the shared gallery-picker DOM bridge, status writes mid-generation-poll, `entries` being per-render-derived data no hook can own, the V2-panel-layout storage sharing, per-project selection reset) — exactly what a "unified render tree" rebuild exists to solve, and this probe deliberately never tested that part.
+
+**Opus synthesis recommendation (full text in the workflow journal, not yet condensed to an artifact):** *do the state extraction now, using the composed strategy, against the CURRENT classic/V2 fork, as a consolidation step — not as step one of a rebuild.* This reduces rather than strengthens the rebuild's case, because the main problem the rebuild was supposed to solve (the tangled state layer) turns out to be solvable in place. The render-tree unification itself was never tested here and remains genuinely open — not validated, not ruled out.
+
+**✅ MERGED 2026-07-16 (commit `ee4b33a` on `loom-v2`, pushed) — owner call: merge the composed extraction, park the full rebuild.** After walking through what the probe actually meant (the state layer being separable reduces rather than strengthens the case for merging the render trees — the expensive, still-unvalidated part of a full rebuild), the owner chose speed and evidence over the earlier gut-call: ship the working, adversarially-verified consolidation now; stop treating full render-tree rebuild as a locked destination since it was never actually earned by data. `loom/src/loom-mutations.js` (pure reducers/classifiers/builders) + the four composed hooks in `master-storyboard.jsx` are live. Re-verified independently in the real repo post-merge, not just trusted from the worktree: `node --test` 66/66 (still 66/66 today), `npm run build` clean, `python -m pytest` 474/474 (the composed worktree's own report showed 467/7 due to a fresh-worktree missing `config.json` — confirmed environmental, not a regression, and indeed 474/474 in the real repo where the file exists; that was the count at merge time, the suite is **478** now), live Flask server hit fresh (`loom-verify` config, not a stale process), zero console errors, a real populated project with real acts/shots/continuity-check state rendering correctly. The single-hook attempt's branch (`loom-extract-hook`) is kept, unmerged, as the documented record of what a "genuinely clean" claim that wasn't held up looks like. Both experimental worktree directories can be removed now that composed is safely merged (their content lives in `loom-v2` history) — housekeeping, not a decision.
+
+**Rebuild status: PARKED, not cancelled, not locked.** The full render-tree unification (classic+V2 merge) remains genuinely untested and undecided — nobody has run the same rigor against it that this probe just ran against the state layer. It stays on the table for whenever that gets its own real probe; it is not the active plan. The shell/Timeline design work already done and owner-approved stays valid regardless — that's front-end layout, entirely orthogonal to this state-layer question, and applies to whatever render tree eventually exists.
+
+**Timeline → fixed drawer: SPEC IS LOCKED (owner has stated this identically 2026-07-13/14 and again 2026-07-16) — this is NOT an open design question, stop treating it as one.**
+
+The ask, unchanged across every restatement: a **fixed drawer attached to the top banner — never a draggable/dockable panel.** Three states: (1) **default = visible at a slim height** (not hidden), full page width; (2) **can be fully pushed away, collapsing the whole space to nothing**; (3) **pulled down, it extends to a set full size showing the video preview ABOVE the scrubber** (not beside it). "Preview-above-scrubber" was already marked LOCKED on 2026-07-13/14 (owner: "the gold standard for a reason") — the owner repeated the full spec again 2026-07-16, word for word matching what's recorded here, specifically because it kept not getting built.
+
+**What actually happened, verified against the live code (2026-07-16 morning — superseded that evening by `c0c7399`, see below):** the Timeline was still just one more entry in `V2_DEFAULT`, rendered through the exact same generic `<DockablePanel>` component as Cast/Legend/Board/Generate/Footage — draggable, resizable, x/y/w/h-persisted, identically to every other panel. *[No longer true: `c0c7399` deleted `DockablePanel`, `V2_DEFAULT`, `V2_PH` and panel-layout persistence outright. The Timeline is now a fixed region of the 4-region shell; nothing in V2 is draggable or x/y/w/h-persisted, and no `storyboard:v2:layout` key remains.]* The 2026-07-14 "Timeline collapse fixed" work (blunt `display:none` → a real slim scrubber strip) fixed the *collapsed-view rendering bug* only — it never touched the structural ask (make it a fixed, non-draggable drawer). That fix most likely got reported/treated as "Timeline: done," which is why the core ask kept surviving, unbuilt, underneath a series of "it's handled" checkpoints. Naming the pattern so it doesn't repeat: a partial fix to a related bug is not the same as verifying against the full locked spec.
+
+**Descoped from the old "needs its own scoping pass" framing (2026-07-14, historical section below):** that framing bundled three unrelated things together and let a fully-specified small item hide behind two genuinely big ones. Splitting them for real:
+- **#1, this item (fixed drawer + preview-above-scrubber) — fully specified, zero scoping left, ready to build whenever picked up.** Small and contained; doesn't touch the other panels and doesn't depend on the Phase 1 rebuild-probe outcome.
+- **#2, panels snap/dock together** (free x/y/w/h → tiling/split-pane) — **RESOLVED-MOOT (2026-07-16 end of day):** the shipped V2 shell has no free-floating panels at all (fixed 4-region layout, `DockablePanel` deleted), so there is nothing left to snap or dock. The question this was downstream of (modular-vs-fixed workspace) got answered by shipping the fixed shell.
+- **#3, multi-track timeline** (layered clips + audio lane) — **owner call, 2026-07-16: a nice-to-have, explicitly not important.** The tool's actual job is building 5–15s scenes and stitching them cohesively — the stitched output then goes to a real video editor for post. Not trying to be an NLE. Per-shot audio cues (already tabled above) cover the real need; a full multi-track timeline doesn't fit the tool's scope and isn't worth building.
+
+Only #1 is ready now. #2/#3 aren't just unscoped, they may not be needed at all depending on the paradigm question.
+
+**✅ WORKSPACE SHELL — owner answered 2026-07-16: replaces the 6-arbitrary-draggable-panel model with 3 named elements, nothing else free-floating.** The question was reframed correctly by the owner as "what needs to be open and in front of us at all times in the scene-builder flow," not an abstract modular-vs-not debate. V1 (simple, no docking) vs. V2 ("muddied what do I do first and when do I use this") is the diagnostic; the answer:
+1. **Cast & Assets — always present**, two view states: **simple** (small square card: name + tag + ref-image preview only) and **detailed** (the full V1-style row: name/tag/kind/lock/thumbnail). Owner's own analogy for the simple→detailed expand: similar in spirit to the gallery's Generate-drawer sliding-card reveal (different platform, same interaction idea) — not a literal component reuse, just the reference feel.
+2. **Generate panel (Image/Video/Edit/Reference) — a collapsible drawer, matching the GALLERY's actual drawer**, not a Loom-only lookalike. Owner: *"this was my ask from the get go on this and I got a lot of push."* **Verified against the live code 2026-07-16: that push was real and the drift is confirmed** — the Loom's `genImage`/`runGen`/`genEdit`/`genRef` and all Generate-tab chrome are hand-rolled inside `master-storyboard.jsx` itself; the ONLY thing actually shared with the gallery's drawer is the `<mg-model-picker>` widget. The 2026-07-11 plan explicitly promised "same component as the gallery — one mental model" and what shipped instead was a parallel reimplementation that merely resembles it. **The fix isn't a new idea — it's finishing the already-decided suite-wide front-end direction** (`docs/SUITE_ARCHITECTURE_AUDIT.md`, owner-locked 2026-07-13: promote shared UI to framework-neutral web components so the vanilla gallery AND the React Loom mount the *same* element, no build step) and applying it to the one place it was skipped. `<mg-model-picker>`/`<mg-gallery-picker>` are the proof this playbook works; a `<mg-generate-drawer>` would make "same component as the gallery" literally true this time.
+3. **Timeline & preview** — the fixed drawer, spec'd above.
+
+**✅ Overall shell — owner's mental picture (2026-07-16), matches V1's structure plus one new addition:**
+- **Left: Cast & Assets, a collapsing card.**
+- **Center: Acts & Shots board** (unnamed by the owner because it's the obvious main content — same as V1).
+- **Right: the Generate drawer (Image/Video/Edit/Reference), collapsible, "no different than gallery layout"** — mirrors the gallery's own drawer positioning/behavior, not just its component identity (see `<mg-generate-drawer>` note above).
+- **Top: the fixed Timeline drawer**, spec'd separately above.
+- **Confirmed staying:** generating straight from the board for establishing shots — the owner re-confirmed the earlier call that a FULL generate panel belongs inside the Loom itself (not a stub linking back to the gallery), so nothing has to leave the tool to reach the real generation flows.
+
+This is essentially V1's proven layout (top reel + left cast + center board) plus exactly one new region (right Generate drawer) for the one capability V1 never had — not a new invented shape.
+
+**Footage (Asset Bin) — real intent clarified:** lets you pull an ALREADY-RENDERED video into a scene for stitching/reference (PixAI's video gen already supports video refs, not just images) — the owner still wants this, it's the bridge that makes the Loom double as a lightweight video-ref tool. Correction to the earlier hypothesis: NOT folded into the on-demand `<mg-gallery-picker>` modal — owner wants it "hidable, just like Cast and Assets" (persistent-but-collapsible, not summon-only). **Open fork, Claude's lean offered, not decided:** own collapsible card, or a second tab inside the same left-side Cast & Assets card (both are fundamentally "browse existing visuals to pull into a shot," and folding it in keeps the "only a few persistent regions" principle intact instead of growing back to four). Owner to confirm.
+
+**✅ Legend & notes — DECIDED (owner, 2026-07-16): revive V1's inline "+terms" mechanism, no persistent home at all.** Agreed outright — Legend goes back to being a per-field on-demand popover (Camera/Lighting/Transition), not a panel anywhere.
+
+**✅ Footage — DECIDED (owner, 2026-07-16): folds into the same left card as a tab alongside Cast & Assets, "just like gens"** (i.e. the same tabbed-drawer pattern as the Generate panel). One left-side card, two tabs (Cast & Assets · Footage), not a 4th region.
+
+**✅ SHIPPED FOR REAL 2026-07-16 (commit `c0c7399` on `loom-v2`, pushed) — the mockup below is now the live V2 shell, not just a reference.** `DockablePanel`/`V2_DEFAULT`/`V2_PH`/panel-layout persistence all deleted; nothing in the new shell is draggable or freely resizable. Caught and fixed one real bug during live verification: the Timeline drag handler's release-time snap read React state (batched/async) instead of a ref, so a fast drag-and-release could snap back to the start height instead of where you let go — fixed by tracking the live height in the same ref already used for drag bookkeeping. Verified live end-to-end: shell renders and the selected-shot binding works across board/cast/generate/timeline simultaneously, the Camera "+terms" popover opens the full grouped palette and appends correctly to the field, the Timeline drag was exercised through all three states post-fix, both sides' collapse-to-rail and re-expand confirmed, zero console errors throughout. `node --test` 66/66 (still 66/66 today), esbuild build clean, full pytest unaffected (474 that day; **478** now).
+
+**✅ TWO MORE REAL BUGS — owner-reported same day, fixed same pass (commit `ba1c82e`, pushed):**
+1. **Side panels didn't scroll** — `.lv-side` had `overflow:hidden` with no scrollable child, so Cast/Footage/Generate content past the visible height was silently clipped, the "old bug returning" in symptom only (root cause was new — nothing to do with the deleted canvas-scaling system). Fixed: `.lv-side` keeps `overflow-x:hidden` only; `.lv-cast`/`.lv-gen`/`.lv-railicons` are the real `flex:1;min-height:0;overflow-y:auto` scroll containers. Measured, not assumed: 740px of real content in a 555px box, `overflow-y:auto` confirmed engaged.
+2. **Detailed and Simple cast views were nearly identical** — both were the same read-only glance card, just grid vs. list; you couldn't edit a name/tag anymore. Detailed was always supposed to be V1's full editable row — ported classic Loom's existing `sb-assetrow` (name/tag/kind/lock/remove, all wired to the same `setAssets`) instead of reusing V2's old read-only display for both densities. When a shot is selected, Detailed rows also get an explicit "in `<shot>`" checkbox instead of Simple's whole-card-click (which would have fought with editing the fields). Verified live: renamed an asset via a real input event, confirmed it persisted AND showed up in Simple mode too (shared state, not a local copy).
+
+**✅ TWO MORE FIXES, same day, third pass (owner asks B + E from the same message; commit `48ac4dd`, pushed):**
+1. **Detailed Cast & Assets widened** — owner: "Can the detailed tab be twice as wide for longer descriptions?" `.lv-side.left` was a flat `280px` regardless of density; added a `.wide` modifier class (`560px`, exactly 2×) applied only when `leftTab==='cast' && density==='detailed'`. Simple mode and the Footage tab keep the original 280px.
+2. **Simple-mode cards had a dishonest affordance** — owner: "Cast and asset - Simple pane has ZERO interaction on the cards." Root cause: `.lv-simplecard`'s `onClick` is a no-op when no shot is selected (`sel && setCard(...)`), but the CSS showed `cursor:pointer` and an accent hover on every card regardless — so with nothing selected, every card looked clickable and silently did nothing, with no feedback explaining why. Fixed by adding a `.nosel` modifier (dims the card, drops the pointer cursor/hover) whenever `!sel`, plus a `title` tooltip that reads "Select a shot on the board to toggle its cast" in that state or "Toggle into `<shot code>`" once one's selected. Clicking still works exactly as before whenever a shot **is** selected — this only fixes the look-clickable-but-isn't state.
+3. **Tooling gotcha hit and resolved while verifying #1:** `getComputedStyle`/`getBoundingClientRect` read through both the in-app Browser pane AND a real Chrome tab (via CDP) reported the panel stuck at `560px` after switching back to Simple density, even though `el.matches('.lv-side.left.wide')` correctly returned `false` and the class attribute was confirmed correct — a pure measurement-layer staleness artifact, not a real layout bug. Caught it by escalating to an actual screenshot (forces a real compositor frame) instead of trusting computed-style reads, per the standing lesson in `feedback_visual_verification.md` — the real rendered page was correct the whole time. Along the way, also removed a redundant/conflicting second `transition:width` declaration on `.lv-side.left` (the base `.lv-side` rule already declares one) since duplicate transition declarations across specificity levels are exactly the kind of thing worth not leaving in place even after ruling it out as the cause.
+
+**✅ SHIPPED SAME DAY — Generate drawer works with no shot selected ("draft generation"), commit `2874850`, pushed.** Owner asked, after loving the Generate flow: "I wonder if it should be gated behind selecting a shot?... the ability to click accept and move into the shot or to reject... Make sense? Or overkill." First answer given was wrong and got corrected on the spot — worth recording both the correction and why, not just the fix:
+- **Initial (wrong) answer:** claimed ungating Video specifically would require "inventing a new concept from scratch" (an orphaned/unassigned video result), framing this as two differently-sized asks (small for Image/Edit/Reference, bigger for Video).
+- **Owner's correction:** "Why would ungating video mean reinventing the wheel. The main engine in the gallery is the basis for the panels I thought. If not, WHY... I think you are focusing to hard on the loom and not taking the entire suites details into account." Exactly right — checking `pixai_gallery.py` showed the main gallery's *own* Generate drawer Video tab (`videoGenerate()`) posts to the identical `/api/loom/generate` route Loom's shot-video uses, which is 100% shot-agnostic engine code (`core.build_shot_video_params` → `core._apply_kaisuuken` → `core.submit_generation`, the only "loom" reference being a telemetry string). "Unbound video generation, lands in the gallery" is the *existing default* of that route, not a concept to invent. `useExistingVideo` (attach a gallery video as a shot's `resultMid`) already covers the "accept" half too. The error was reasoning only from `master-storyboard.jsx`'s own state/JSX instead of checking the shared Python engine and the main drawer's own wiring.
+- **Second question, same instinct:** "Where do generations go in the main gallery generator...." — pointing at the obvious answer that undercut the remaining hedge ("needs a design pass for where results live when nothing's selected"): they go to the gallery, auto-cataloged, exactly like every other generation in the suite (the documented async engine: submit → poll `/api/task-status` → auto-download + catalog). There's no "results tray" to design; the gallery already is one.
+- **What shipped:** all four Generate-drawer tabs (Image/Edit/Reference/Video) now render and work with no shot selected — a `draftCard` (component state, `"__draft__"` id) stands in for `sel` everywhere the tab bodies read/write, keyed into the *same* `genState`/`genImgState`/`genEditState`/`genRefState` dicts real shots already use (no new state shape). A small "route results into a shot" picker appears only in draft mode (cast routing doesn't need one — it already writes to `project.assets` directly, unmodified). `routeImg`/`routeGen` gained an optional third `sourceId` param (defaults to the old behavior exactly) so a routed *result* can come from the draft's key while the *destination* is whichever shot got chosen. Video's "attach to shot" reuses `pollShot`'s exact completion write (`setCardStatus`-equivalent), just triggered manually instead of automatically. Bound-mode generation (select a shot, it binds, generate straight into it) is **completely untouched** — verified in the actual control flow, not assumed: the code was a clean `if (!sel) placeholder; else {...real flow...}` split, and only the `if (!sel)` branch was replaced.
+- **Verified live** (Claude-in-Chrome, real screenshots + DOM checks, per the visual-verification lesson above): draft mode renders correctly on first load (header, route picker listing real shots, all 4 tabs), typing persists per-field and survives tab switching without leaking into a real shot's fields or vice versa, selecting a real shot afterward shows the exact original bound-mode UI unchanged.
+- **✅ Exercised end-to-end with real generations, same day, owner-authorized ("Go", then "you have a go until you get to the upper video gen tiers, anything above 80k ask for a go"):** two real tests, both through the actual Loom UI (model picker, prompt fields, real click), not raw API calls. **Test 1 — Image, draft mode → route to cast:** picked a real model via the picker (Hoshino/SDXL), generated a real image matching the prompt, routed it to cast — confirmed a genuine new `@image6` asset landed in the project with a real media_id. Previewed at 1,300 credits (a hand-built price-check payload); actual cost was 200 — the preview overstated it because `genImage()` only ever sends `{model_id, prompt}`, letting the server fill in its own (cheaper) defaults, a real gotcha worth remembering for future estimates. **Test 2 — Video, draft mode → attach to shot:** attached the Test-1 image as the draft's own opening frame (via the FrameSlot's "▤ pick from gallery" button — note the "＋ attach frame" box itself is a *local file upload* input, not the gallery picker; easy to mix up), generated an R2V clip from it, attached the result to shot A-01 — confirmed A-01's board card and duration actually updated with the new result. Previewed at 27,500; actual cost was 34,200 (higher than previewed this time, opposite direction from Test 1 — reported plainly rather than guessed at further). Both draft→generate→route/attach paths are now proven live, not just by code reading.
+
+**✅ FOUR MORE REAL BUGS, same day, owner's next message (search/Health-vs-Panel/Generate-panel-scroll/video-controls) — all fixed, commits `b1f7ee7`/`1322744`/`1c319c2`:**
+1. **Gallery search never matched task/media id** — missing feature, not a broken match: `_build_where()`'s search clause only ever compared `prompt_full`/`prompt_preview`. Extended to also match `task_id`/`media_id`; search box relabeled "Search prompt / task or media id." Verified live against the real catalog (searched a real media_id, got the real hit). *[Corrected: the first cut (`b1f7ee7`) matched ids by **substring** and was replaced the same day (`c999ae6`) — a term like "88" matched ~14% of the whole catalog by id chance alone and swamped every real prompt hit. The shipped clause is `(task_id = ? OR media_id = ?)` — EXACT equality, gated to all-digit terms ≥8 chars; short numeric terms stay prompt-only. The label is unchanged.]*
+2. **Health page (43,829 images) vs. Panel page (31,064) — root-caused against the real D: catalog, not guessed.** `collection_health()`'s disk walk excluded `gallery/` and `_duplicates/` but never `_deleted/` (recoverable trash from anything ever deleted through the gallery UI) or `branding/` (UI art assets) — those two folders alone accounted for ~12,759 of the 12,765 gap. Panel's catalog-row count was already correct; Health's disk scan now excludes both.
+3. **Loom Generate panel had a side-scroll that revealed almost nothing** — the frame-slot header (name label + pick icon + `@tag` input) needed ~175px but only had 147px in the 320px drawer; the `@image1`-style tag input's 90px fixed width was fine in classic Loom's wider layout but didn't fit reparented into V2. Widened the drawer (320→380px) and narrowed the tag input specifically inside the Generate panel (classic Loom untouched). Confirmed 0px overflow.
+4. **Video playback controls — two reports, investigated with a live reproduction, not just code reading.** V2's Timeline/Deep-Focus preview (`ShotPreview`) was a hover-scrub-only component by original design — no play button existed anywhere, which is why "no controls at all" was accurate. Added a play/pause button; playback honors the trim range (stops/rewinds to `trimIn` at the trimmed-out point, not the clip's real end) and hover-scrub is disabled while actually playing so mouse movement doesn't fight it. Classic Loom's `SequencePlayer` (the "▶▶ Play sequence" back-to-back player) had `autoPlay` without `muted` — browsers can silently block un-muted autoplay, which would leave a "playing" sequence actually paused; fixed. **Original caveat, now resolved (see the "Play sequence wired into V2" entry below):** an earlier investigation couldn't reproduce "prev/next/close do nothing once it's playing" via a synthetic live-reproduction harness. The REAL bug was found and fixed a few hours later while wiring Play sequence into V2 for real, against an actual generated clip — see below. The synthetic repro missed it because it never drove a full close/next click cycle against genuinely-playing real media the way manual testing did.
+
+**✅ PLAY SEQUENCE WIRED INTO V2 + the real close/next bug found and fixed (commit `768aecf`) — first item off the V1→V2 convergence punch list (§6).** Reused `playSequence(entries)`/`<SequencePlayer>` unchanged (same z-index math already puts it above the V2 overlay, `500` vs `400` — no restructuring needed); added a "▶▶ Play" button to V2's top banner, disabled until a shot has a result. **While verifying it live, reproduced the owner's original bug report for real:** close/next did nothing once a sequence was playing. Root cause, confirmed via a browser console `ReferenceError`: `useExportPipeline`'s `onClose` was wired as `() => setSeq(null)`, but the hook's own return object never actually exposed `setSeq` — only `seq`. Every close click, and every natural end-of-clip auto-advance, threw `ReferenceError: setSeq is not defined`, which is exactly why the buttons looked unresponsive. **This predates today's session entirely** — a real, old bug, not something introduced by the shell work. Fixed by exposing a proper `closeSequence()` closer (mirroring the existing `closeExport()` pattern) instead of the never-exposed raw setter. Verified live end-to-end: opened the player against a real generated clip, closed it, confirmed both the DOM state and the served page source (zero remaining occurrences of the broken inline pattern).
+   - **⚠️ Scope correction, owner, same day:** what shipped (play/pause) is a first step only, not the intended feature. *"The controls in the video pane were an ask from the start. We just never got that far in the dev. We wanted Scrub, FFwd, Rwind, split, crop, etc... Not super in-depth video editing features but a modest base set was the intention for the scene builder."* So the real target for `ShotPreview`'s control set is: scrub (already had, via hover), play/pause (shipped today), **fast-forward/rewind, split (cut a clip into two), crop** — a modest base set, explicitly not a full NLE. Not built yet beyond play/pause; roadmapped as the next real increment on this component.
+5. **Loom's own page scrollbar fought the internal panels** — owner: *"You made the internal panels all scrollable so sometimes depending on where I am it tries to scroll that bar and it jumps about."* Root cause, verified live: the V2 overlay is `position:fixed` (never visibly moves), but classic Loom's own page underneath is a normal tall document (2118px content in a 910px viewport) whose `body`/`html` scrollbar stayed live the whole time V2 was open — a wheel scroll not captured by one of the internal `overflow-y:auto` panels bubbled up and scrolled that instead, with nothing visible moving to explain it. Fixed: lock `document.body`'s overflow on mount, restore the previous value on unmount. Verified both directions live.
+
+**📋 ROADMAPPED, owner-stated — a full design/theme pass on the Loom; the SKIN half of it is already done, the visual-refinement half isn't.** *"Its going to be time to take a design and theme pass on the loom. We offer color schemes in the panel and those should apply to the loom as well. We are looking at a working windows now in need of live testing use and visual refinement."* **Corrected against the live code 2026-07-16 — the earlier "the skin system has no reach into the Loom at all; the CSS custom properties are hardcoded to one palette" note was FALSE, the code does the opposite:** the Loom's palette *inherits* the gallery's design tokens rather than hardcoding its own — `master-storyboard.jsx:35-46` says so in its own comment ("switching skin in the gallery header re-colors the Loom too") and maps `--panel:var(--surface0)` · `--panel2:var(--surface1)` · `--ink:var(--text)` · `--ink2:var(--subtext)` · `--amber:var(--accent)`, i.e. the very variables claimed hardcoded. Server side, both page variants get the shared block (`pixai_gallery.py:2535` `LOOM_PAGE` and `:2543` `LOOM_PAGE_BUNDLE` each `.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS)`, "shared … by `BASE_HTML` and `LOOM_PAGE` so both surfaces re-skin together"), and `_LOOM_SHELL` (`:2464`) carries the pre-paint at `:2470` off the same `localStorage` `skin` key the gallery header writes. All 5 skins are live (`SKINS` at `:1246` = moonglade/nightfallen/moonlit/ember/verdant; `html[data-skin=…]` blocks at `:2421`/`:2427`/`:2433`/`:2439`). **So what's actually left is the visual-refinement half**, framed by the owner as the next phase once the shell is functionally solid: "a working window now in need of live testing use and visual refinement" — i.e. build/bugfix phase is substantially done, next phase is real visual polish + skin integration. Not scoped in detail yet.
+
+**📋 ROADMAPPED, not built — owner request:** a larger text/button size option for the new shell, **on desktop** — this is explicitly NOT a phone/responsive-layout ask, the owner hasn't raised mobile at all here. Owner's own framing (first pass): "the side panels look AWESOME but I have trouble making out the text... the color scheme isn't set and no theming yet though so I get it" — a legibility/density preference for the shell's own compact type scale, not a different-device concern. **Broadened same day, second pass:** explicitly extended to the board's shot cards too — "Same goes for the establish shot cards... These TINY by default and that needs to change a bit — The entire setup is formatted VERY small text and all." So the ask now covers the side panels (Cast&Assets/Footage/Generate/Timeline) **and** the board's `.lv-card` shot cards, as one consistent larger-scale option — **not** two separate asks. **Owner explicit constraint: the current compact spec stays the default in both places** — this is an opt-in alternate scale, never a replacement. Not blocking since the shell's visual system (sizing, type scale, theming) isn't finalized yet. Revisit once a real design pass on V2's own visual polish happens, not before — likely implemented as a size toggle (e.g. compact/comfortable) driving a CSS custom-property scale rather than two maintained layouts.
+
+**✅ PIXEL SOURCE OF TRUTH (historical — describes the mockup this was built from) — [`loom_shell_mockup.html`](https://claude.ai/code/artifact/e41a3020-32fb-4baa-ae81-69814d5ee4c9).** Interactive, not static — real design tokens, all pieces demonstrated working together: left card (Cast&Assets/Footage tabs, Simple/Detailed density toggle, collapse-to-icon-rail), center board (acts/shot cards, gold selected-shot ring), right Generate drawer (Image/Video/Edit/Ref tabs, collapse-to-rail, bound-to-shot chip), the fixed Timeline drawer (ported from the standalone Timeline wireframe, same 3-state drag mechanic), and a live "+terms" popover on the Camera field proving the Legend decision concretely instead of just describing it. Verified interactively (tab switches, density toggle, both sides' collapse/expand via rail icons, terms popover append) with zero layout breakage after one text-wrap fix (bound-chip + cost row). **Owner reviewed 2026-07-16 — reaction: "Wow. Just wow. Beautiful mockup," 3 fixes requested, all shipped same pass:**
+1. Preview box was full-width-but-short (~3.4:1) instead of a real video frame — fixed to `aspect-ratio:16/9`, centered, generous size; full-drawer height grown 260→400px to fit it properly instead of squeezing it.
+2. "Where's the Legend hiding" — valid catch: only Camera had a "+ terms" trigger. Added it to Transition In and Transition Out too (matching V1's actual `CAM_PALETTE`/`TRANS_PALETTE` scope exactly), generalized the JS so any `.termsbtn`/`.termspal` pair works without per-field code.
+3. Footage tab needed a way to reach footage beyond this project, plus external drag-and-drop — added a "Browse library" button (opens the shared gallery-picker concept) and a drop-zone with live dragover/dragleave visual feedback, "same picker + drop-to-upload pattern as the gallery's Generate panel" (owner's framing). Video vs. image cells now visually distinguished (play badge).
+
+**Status: shell shape + all 3 fixes owner-approved in spirit ("excellent design"); this is now the working pixel source of truth for the V2 shell** — the front-end layout, not the parked render-tree/state-layer rebuild above; the two are independent per the "orthogonal" note earlier in this section. Supersedes the standalone Timeline-only wireframe (`https://claude.ai/code/artifact/84be1748-2c7d-4304-967c-8ac22cd37687`, kept for reference).
+
+**Follow-up round (2026-07-16), owner reactions + Claude verification:**
+- Preview box: "Chef Kiss," no notes.
+- "+terms" location — owner asked where else it shows up. Re-verified live against the actual published URL (not just local): Camera/Transition In/Transition Out all correctly show it in the Video tab. Two real reasons it looks absent elsewhere, both disclosed: (1) the mockup's Image/Edit/Ref tab buttons are cosmetic-only right now — clicking them doesn't swap panel content, so exploring those tabs just re-shows the same Video fields; (2) more importantly, Camera/Transition genuinely ARE video-only concepts in the real app — `genEdit`/`genRef` only ever took `source(s)+instruction`, no camera/transition params — so there's nothing missing, Video is the only tab where these fields exist by nature of what they represent.
+- Footage scroll — owner asked if it scrolls once full. Grew the demo data to 8 items and measured directly in-browser rather than asserting from the CSS: `sidebody` clientHeight 585 vs. scrollHeight 646, `overflow-y:auto` confirmed engaged. It scrolls.
+
+**✅ Project save/delete/import/export — DECIDED (owner, 2026-07-16): "a killer take on the idea."** Previously unaddressed rebuild surface — the owner asked directly, after hating "the volatile browser cache and server side saves." Verified against the actual current code first, not memory: the old crash-safety fix (single `store.json` blob → atomic per-key files, already shipped) solved a *different* problem than this one. A "project" today still isn't one real portable thing — it's one key-file for the project JSON plus a scattered pile of separate key-files, one per uploaded reference-image thumbnail, tied together only by ID references inside the JSON. The existing `Backup (.json)`/`Restore` buttons already bundle the project structure plus small embedded thumbnail JPEGs — but a project's actual finished shots (`resultMid`) only travel as a reference into the local PixAI catalog, so handing that `.json` to anyone else, or opening it on a fresh install, leaves every finished shot blank.
+
+**Locked design — two deliberate tiers, not one ad hoc export button:**
+1. **Lightweight (default, quiet background save)** — one real project file (not a buried KV key), media referenced by catalog `media_id`. Fast, small, correct for the owner's own cross-machine use (home ⇄ work), since both sides share the same catalog.
+2. **Full bundle (for real sharing)** — a zip containing the project JSON *plus the actual referenced media copied in* (full-res images and video, not just thumbnails), with references rewritten to point inside the bundle instead of the catalog. This is the one that means anything to another person, or to a install with a different catalog. Import auto-detects which kind it received.
+- **Delete** stays simple either way once this lands — removing one project's file, no change from today's UX.
+- **UI touchpoint:** lives off the `ProjectSwitcher` as an "Export ▾" menu (Lightweight / Full bundle), not new persistent chrome — consistent with the shell redesign's "only a few persistent regions" principle.
+- **Why it matters — corrected 2026-07-16, stronger than first framed:** this isn't a hypothetical "if Moonglade ever goes public" feature — **the repo is already public (`Nelnamara/moonglade-athenaeum`) and already has real users in the wild.** Sharing a storyboard project is a live need now, not a someday nicety.
+
+**Not yet built. Decoupled from the parked render-tree rebuild** — this is a save/load-format change, independent of which render tree eventually exists, and doesn't need to wait on that decision. Elevated to an active near-term priority alongside the V1→V2 convergence punch list (§6) — both are now things to actually build, not just track.
+
+**Standalone-app note, corrected twice by the owner:** "standalone" was scoped Loom-only in the 2026-07-16 audit by mistake — the owner's real question is **suite-wide** (the whole Moonglade Athenaeum app, not just the Loom), and they added real history: **"The loom started standalone and its how we got in this mess"** — the classic/V2 fork and general disconnection from the rest of the suite's patterns trace back to the Loom's own standalone-then-merged past. Treat that as a cautionary data point for whenever the suite-wide question gets its own real scoping pass, not an argument for or against outright. Not blocking the current rebuild — explicitly low-priority, "not the currently preferred direction" per the owner's own words.
+
+---
+
+### Historical: the V2.1 rail-layout arc (superseded by the rebuild decision above, kept for provenance)
+
+**State (git + transpile verified, as of this arc):** branch `loom-v2`, **6 commits ahead of master, unmerged**, transpiles clean. A **non-breaking opt-in overlay** behind a "V2 layout" toggle; classic waterfall Loom is default and untouched. All V2 code in `loom/master-storyboard.jsx`. *[Current as of 2026-07-16: `loom-v2` is **128 commits ahead of `origin/master`** and still unmerged — `origin/master` has ZERO commits not in `loom-v2` and `git merge-tree` shows a clean 0-conflict merge. The opt-in-overlay + single-file parts still hold (`.lv-overlay` at `:389`, `LoomV2` at `:646`, classic `App()` at `:1664` with its own header at `:1785`), but V2 is no longer merely additive — `c0c7399` replaced the shell wholesale.]*
+
+**Locked design:** *[Superseded 2026-07-16 by `c0c7399`, which deleted the whole dockable shell — there is no `V2_DEFAULT`, no 1498×820 canvas and no `storyboard:v2:layout` key in the live code (only `PKEY`/`PPRE`/`ACTIVE_KEY` survive, `:321-323`). Kept below as the record of what V2.1 was.]*
+- **6-panel layout** (shipped verbatim as `V2_DEFAULT`, canvas ~1498×820). Coords (x,y,w,h):
+  - Timeline & preview `0,0,1498,271` (full-width top) · Asset bin—footage `5,275,286,538` · Cast & assets `301,276,255,284` · Legend & notes `301,565,256,244` (STATIC) · Acts & shots (board) `562,278,628,536` · ⚙ Generate—shot `1198,276,294,540` (full-height).
+  - The "alternate, fixed" layout: Generate full-height, Cast wider, board narrowed so it clears Generate. Persists to store key `storyboard:v2:layout`.
+- **Selected-shot interaction model** (owner-approved via `loom_selectshot`): click a shot → binds Generate + panels to it; LOUD selection (gold ring + timeline glow + name in headers); two-way live edit; double-click = deep-focus modal; board never moves in place.
+- **Collapsing:** timeline collapses to keep just the scrubber; app banner header = "Collapsing" mode (sticky 260px, collapses on scroll; modes Collapsing/Always-slim/Off). Banner default = mark **#62**. *[Gone with the dockable shell (`c0c7399`) — the sticky 260px banner, its three modes and the mark-#62 default no longer exist. V2's top region is now `.lv-top` (`:390`), a plain text/control strip: a "The Loom · V2" eyebrow (`:1118`), a note, `ProjectSwitcher`, Play and Close — no mark image.]*
+
+**Wired / working (browser-verified):** V2 toggle · error boundary · layout persistence · real acts&shots board · timeline reel + `ShotPreview` trim · Cast (toggle refs, +add from gallery) · static Legend · Footage grid · **all 4 Generate tabs functional** (Video/Image/Edit/Reference — real gens verified live 2026-07-12 with real task IDs, routed into open/close frame/cast).
+
+**✅ SHOT MECHANICS SHIPPED (2026-07-14) — V2 is now mechanically complete:**
+- **Add / reorder / duplicate / delete shots in V2** — `addCard`/`moveCard`/`dupCard`/`delCard`/`moveCardToAct` (the same functions classic Loom always used) now wired into the V2 board. Per-card icon row (↑↓⧉✕ + "move to act…").
+- **Add / reorder / delete ACTS in V2 too** — `addAct`/`moveAct`/`delAct`/`setAct` wired in; the board now iterates `project.acts` directly instead of the entries-derived `grouped`, so a freshly-added **empty act stays visible** (with its own "+ Add shot" button) instead of disappearing.
+- **`FrameSlot` (open/close frame) reparented into Generate** — sits above the tab bar so it applies across modes, exact same splice/inherit-from-previous mechanics as classic (`/api/loom/handoff`).
+- Browser-verified end-to-end: add act → shows immediately (incl. empty) → add shot → shows "first shot" placeholder → add a 2nd shot → shows "↳ inherit A·01 close" correctly. Zero console errors; Babel-transpile-checked clean.
+- **Still stubbed:** Timeline collapse-to-scrubber is **buggy** (blunt hide-body, not a real slim scrubber); no snap-to-grid; no double-click deep-focus in the overlay yet; no rail/icon-strip Generate collapse. These are item **#2 — the rail layout restructure** (next).
+
+**✅ V2 can now replace classic Loom for full shot-building** — the two literal blockers ("still needs classic Loom for add-shots + frame-setting") are closed. Remaining work is ergonomics (rail/collapse) + polish (deep-focus/snap-grid), not missing mechanics.
+
+**✅ DECIDED (owner, 2026-07-11) — OFFICIAL PLAN: Loom V2.1 "drawer-ized" build. NEXT MAJOR BUILD after the achievement implementation.**
+The ref-gen question is resolved as **Option A + bridge** (supersedes the open decision below):
+
+1. **Shared Generate drawer mounts in the Loom** (same component as the gallery — one mental model) with a **shot-context bridge**: bound-shot chip at top · refs pickable from Cast/Footage · **output routing** one-clicks on completion (→ open frame · → close frame · → cast · → footage bin). Delivers the original "Edit-deck" per-shot pitch via the shared component. Mostly wiring: drawer already emits media_id; Loom already has FrameSlot/Cast/Footage targets.
+2. **Rail layout (progressive disclosure) — ✅ PARTLY SHIPPED (2026-07-14):**
+   - **Timeline collapse fixed** — was a blunt full-hide (`display:none` regardless of panel id, the "buggy" collapse); now collapses to a real slim scrubber strip (just the reel + target marker, no preview/info line), height 78px, full width kept.
+   - **Generate collapses to a right-edge icon rail** — ✦ Image · ✎ Edit · 🖼 Reference · 🎬 Video, exactly as specified. Collapse axis is per-panel now (`DockablePanel` takes an optional `collapsedView`): Generate collapses in **width** (294px→52px, full height kept, since it's the tall right-edge column) while Timeline collapses in **height** (full width kept) — the old code only ever shrank height uniformly, which is why Generate could never have worked as a rail before. Clicking a rail icon expands the panel AND switches to that tab in one click (`setTab(t); collapse("generate")`). Browser-verified end-to-end (rail renders at 52px/full-height, correct icon reflects the live tab, click expands + switches, zero console errors). *[Superseded by `c0c7399`: `DockablePanel` and its `collapsedView` prop are gone, along with the 294px Generate panel and the height-collapsing Timeline. The 52px collapsed width lives on as the fixed side-rail — `.lv-side.collapsed{width:52px}` (`:406`) against `.lv-side.right{width:380px}` (`:405`).]*
+   - **"Center panels become dynamic reflowing panels" — ✅ RESOLVED, no build needed (owner, 2026-07-14):** the phrase just meant the existing free drag/resize (already built, already persisted per-layout). Mystery closed, not a gap.
+   - **✅ Panel-drag SNAP-TO-GRID shipped (2026-07-14)** — `DockablePanel`'s drag/resize now rounds x/y/w/h to a 16px grid (`snap()` in `startDrag`/`startResize`). Browser-verified: dragged Cast to (368,320) — both exact multiples of 16. *[Removed by `c0c7399` with the rest of the dockable shell: `DockablePanel`, `startDrag`, `startResize` and `snap()` are all gone. Nothing in V2 drags or resizes, so there is no grid left to snap to — see the RESOLVED-MOOT note on item #2 in §1.]*
+   - **✅ Deep Focus modal shipped (2026-07-14)** — double-click a board card → a maximized distraction-free editor for just that shot (title, mode chips, duration, both `FrameSlot`s via the same shared component, a "Select in Generate →" button that selects + closes). Escape/backdrop/× all close it. Browser-verified: opens with correct shot data, Escape closes, the Generate button selects the right shot in the main panel and closes the modal.
+   - **✅ V2 scroll bug FIXED (2026-07-14, owner-reported)** — root cause: `.lv-scaler{overflow:hidden}` plus `transform:scale()` on `.lv-canvas`, which doesn't shrink an element's contribution to its parent's *scrollable*-overflow size (only its paint size) — so on a short viewport the excess just clipped, with the page's own unrelated scrollbar moving uselessly (exactly the "scrollbar moves, does nothing" report). Fix: a `.lv-canvaswrap` sized to the REAL scaled footprint (`1498*scaleV × 820*scaleV`) so `.lv-scaler{overflow:auto}` computes the correct scroll range. Verified exactly: at a forced 400px-tall viewport, scrollable range was 177px = precisely `scrollHeight(516) − clientHeight(339)`. *[Removed by `c0c7399`: `.lv-canvaswrap` and `.lv-scaler` are both gone, and with them the scaled-canvas model they served (a 1498×820 virtual canvas inside an `overflow:auto` scaler). The fixed shell fills the viewport and scrolls per-region via `.lv-cast`/`.lv-gen`/`.lv-railicons`.]*
+   - **⚠️ MAJOR — design drift surfaced (2026-07-14, owner).** Owner described a substantially different Timeline vision than anything built or found in any artifact: **Timeline as a fixed drawer attached to the top banner** (not a draggable panel) — full page width, default visible at a slim height, fully collapsible to hidden, pulling down extends it to a set size showing the **video preview ABOVE the scrubber** (not beside it, as the one located mockup showed). Checked `loom_mockup` (artifact `8bd885e1`, 2026-07-10) — it does NOT match: timeline there is 55%-width (not full), preview sits BESIDE the track (not above), and its own Legend panel literally lists *"Timeline: dock‑collapse vs drag‑open?"* as an **open, unresolved question** at the time. The owner's fuller vision (this + panel snap/dock + multi-track timeline) apparently came from an unrecoverable "weekend" conversation — searched this session's full transcript, only this message matches. **Nothing built yet.** *[Corrected 2026-07-16 — see §1 above: item #1 below was never actually unscoped, it was locked from the first restatement. Only #2/#3 genuinely needed a scoping pass.]* Three components tangled together, sized separately:
+     1. **Timeline → fixed top drawer** (hide/extend, preview-above-scrubber) — small, contained, doesn't touch the other panels' architecture.
+     2. **Panels snap/dock together** (replace free x/y/w/h per panel with a tiling/split-pane layout) — a real architecture change, multi-session.
+     3. **Multi-track timeline** (layered clips + a visible audio lane) — a data-model change (shots are currently one sequential list, not parallel tracks) — also multi-session, separate from #2.
+     Also asked: can the docked panels occupy the drawer's dead space beside the preview when fully extended? (falls out of #2, not separate work.)
+
+   **✅ OWNER DECISIONS on the design-drift items (2026-07-13/14), + 3 more V2 polish items SHIPPED:**
+   - **Preview-above-scrubber: LOCKED as the direction** for the eventual fixed-drawer timeline (item #1 above) — owner: "the gold standard for a reason," but ALSO wants to keep a side-by-side preview option available (their existing mockup idea) as a secondary layout worth exploring later. Novel ideas come after the drawer/dock/multi-track architecture (#1–#3) is actually built — not before.
+   - **Audio lane: TABLED, roadmapped only, NOT built.** Owner leans per-shot audio cues aligned to their own timeline segment (a single extra layer, not a full multi-track system) — captured as the shape of a future #3 (multi-track timeline) increment, not scoped further tonight.
+   - **Docking into the drawer's dead space: parked in the "a boy can dream" pile.** Owner's own framing — it was a musing tied to snap-together frames (part of #2, panel snap/dock), not as deep a request as it first read. Small panels using the preview's dead space when the drawer is down, returning home when it collapses, is a nice-to-have IF #2 gets built, not a requirement driving it.
+   - **✅ Panel resize cap SHIPPED + browser-verified (2026-07-14):** owner's call — "most panels don't need to get very wide, ever" (width capped) but "height can be a bit more liberal" (only bounded by the canvas floor). `startResize` in `master-storyboard.jsx` caps non-timeline panels at `min(800, canvas_edge - x)` width; Timeline stays exempt (still full-width by design) — verified live by dragging the Cast panel far past 800px (pinned at 800×496 across three escalating drag attempts) and the Timeline panel past 800px width (grew to 1504px, confirming its exemption). *[Removed by `c0c7399`: `startResize` no longer exists and panels aren't resizable, so there is no width cap and no Timeline exemption. The commit that introduced it, `3a69827`, is still in history.]*
+   - **✅ Loom nav button blocked on phone, not tablet (2026-07-14):** `.head-nav .b-loom{display:none}` added inside the existing sub-480px breakpoint in `pixai_gallery.py` — the Loom is a dense multi-panel tool that isn't viable on a phone screen. Verified live: hidden at 390px, visible at 768px (tablet range untouched).
+   - **✅ Bottom-sheet mobile filters SHIPPED (2026-07-14):** `.filters` becomes a fixed bottom sheet at the sub-480px breakpoint (slide up/down via the existing `toggleFilters()`/`.open` mechanism, unchanged JS) + a `.filter-scrim` backdrop. Browser-verified correct in both directions — a false alarm surfaced mid-verification (getComputedStyle read before the CSS transition's animation frame had advanced, an artifact of the automated test tab pausing its render timeline, confirmed via `getAnimations()` showing `localTime` stuck at 0) — the actual CSS/cascade was correct the whole time, no code fix needed.
+   - **Committed + pushed** (`loom-v2`, commit `3a69827`) and fast-forwarded to the D: run-copy (the D: fast-forward isn't verifiable from the C: checkout). All 474 tests green (that day's count; **478** now).
+
+3. Folded-in mechanicals — **✅ FULLY SHIPPED (2026-07-14):** add/reorder/duplicate/delete shots AND acts · reparent `FrameSlot` into Generate · double-click deep-focus modal · snap-to-grid. Nothing left in this bullet.
+4. **Estimate ~two focused sessions** (1: drawer mount + bridge routing · 2: collapse states + reflow + mechanicals), then `pytest` + merge `loom-v2 → master` (`--no-ff`).
+
+**Sequencing (owner-locked):** Achievements first (board selection → wire winners → telemetry layer) → **then Loom V2.1**.
+
+**⏳ V2.1 INCREMENT 1 BUILT (2026-07-11) — the shot-context bridge, in `loom/master-storyboard.jsx`:** the dead **Image tab** now generates a reference image for the selected shot — model picker (via `/api/model-search`), image-prompt + "seed from shot", "✦ Generate reference image" (reuses `/api/generate` + spend-confirm), and **output routing** buttons (→ open frame / close frame / cast) that patch the shot so the gen feeds its video render. App-level `genImage`/`pollImg`/`routeImg` + `genImgState`/`imgModel` state; passed to `LoomV2`. **Verified live:** renders, model search returns hits, selection binds. **Pipeline confirmed end-to-end (2026-07-11):** a real shot gen reached PixAI's `createGenerationTask` and was rejected *only* with `INSUFFICIENT_BALANCE` (owner's free rewards spent on badges that day) — i.e. request build/auth/submit all work; the last-inch "watch it land + route" test is DEFERRED to when free rewards refresh, NOT re-verification of the wiring. Do not re-litigate whether the bridge works. **✅ FULLY VERIFIED LIVE 2026-07-12 (owner, with daily-reward credits): Image gen (task 2033281781419406134), Edit (2033281140142052223), Reference (2033280508060971303) all SUCCEEDED end-to-end — generated, landed, and clicking the result routed the image into the shot's scene reference each time. The bridge is done; nothing left to prove on the gen pipeline.** **Bug found+fixed:** seed button called `shotText` (App-scoped, not in `LoomV2`) → crashed on click → rewrote seed inline from card fields. **⚠️ ENV: live server runs from the D: run-copy (`D:\Moonglade Athenaeum\`), NOT the C: repo — edits made in C: (loom-v2) AND synced to D: so the live server serves them. The two loom-v2 checkouts are at different commits (C: eeb1c0a vs D: 2673936) — pre-existing cross-machine drift, DON'T mass-commit-fix (per CLAUDE.md); the loom .jsx itself matched.** C: repo changes are UNCOMMITTED (owner to commit/reconcile). *[Stale as of 2026-07-16: the C: repo is clean at `682b677` with ZERO uncommitted changes — the "owner to commit/reconcile" action is done, and the specific C: `eeb1c0a` vs D: `2673936` drift pair is long superseded. The D:-serves-live arrangement itself isn't verifiable from the C: checkout.]* **Remaining V2.1:** rail layout · reparent FrameSlot · add/reorder shots · Edit/Reference tabs.
+
+**✅ MULTI-PROJECT PERSISTENCE (2026-07-11) — the long-standing "only one project persists" gap, closed.** The Loom now saves multiple named storyboards: each lives at `storyboard:v2:proj:<id>` in the existing server-side KV store (`out_dir/loom/store.json` — since `1710f04`, one atomically-written file per key under `out_dir/loom/kv/`, with the old `store.json` migrated in; the keys, the legacy-project migration and the four reused routes are otherwise exactly as described), with an `active` pointer and a header **switcher** (New · Open · Duplicate · Delete; Rename via the name field). The legacy single-key project (`storyboard:v2:project`) **auto-migrates** in as storyboard #1 on first load and is preserved untouched as a backup. No new server code — reuses `/api/loom/get|set|list|delete`. **Verified end-to-end** on a copy of the real store: migrate → new → switch, name + content intact, no crash. **Hardening pass (2026-07-11, same day):** switcher extracted to a shared `ProjectSwitcher` component now rendered in **both** the classic header and the V2 header; **outside-click-close** added (fixed veil at z-59); **Duplicate + Delete interactively verified** on isolated real-data — this caught + fixed a real bug where deleting the *active* project re-created it (the switch-away `openProject()` flushed the doomed project back to the store). Minor cosmetic detail left: in V2, the hidden classic switcher shares `projMenu` state so both popups mount, but the classic one is fully occluded by the z-400 V2 overlay (invisible, harmless).
+
+**✅ SLICE 2 — balance + friendly errors (2026-07-11).** Generate panel shows live credits + cards from `/api/account` (`⚡ N credits · M cards`, themed, conditional "+N claimable"), verified rendering real data (`0 credits · 2 cards`). `friendlyGenErr()` maps raw PixAI `INSUFFICIENT_BALANCE` GraphQL to a human message, wired at all 4 gen error-set points (submit + poll, shot + image); unit-tested against the real error string. **✅ SLICE 4 — Edit + Reference tabs (2026-07-11).** All four Generate tabs live. **Edit** → `/api/edit` `{source: open-frame mediaId, instruction, edit_model:"edit-pro"}` (Edit Pro). **Reference** → `/api/edit` `{source: refs[0], sources:[cast @image mediaIds], instruction, edit_model:"reference-pro"}` (Reference Pro, ≤10 refs). Both poll + route (open/close frame · cast) via shared `runGen`/`routeGen` — the verified Image path (`genImage`/`routeImg`) left untouched. Verified on isolated real-data: Edit shows the shot's real open-frame thumb + enabled button; Reference shows 1 real cast ref + enabled button; no crash; balance line on both. Live edit/ref gen awaits balance (contract-verified: payload matches `_edit_params_from_payload`). **✅ NOW LIVE-VERIFIED 2026-07-12 — Edit + Reference both succeeded with real task IDs (see Increment 1 above), routed into the shot.**
+
+**⏳ LOOM REFINEMENT (owner feedback 2026-07-12, post-verification):** the Image tab's model selection is a type-in `/api/model-search` box — NOT intuitive (you have to discover it's a search). Owner wants the **gallery's model/LoRA picker flyout reused in the Loom** (the one with hover preview cards: cover/likes/author/tags + LoRA chips), instead of reinventing a thinner picker. This is a [[feedback-cohesion]] win — the gallery Generate drawer already solved this well; the Loom should mount the SAME component, not a parallel one. Fold into the V2.1 "shared Generate drawer in the Loom" plan (§1 Option A+bridge already calls for the shared drawer — this is concrete evidence for doing it). NEXT concrete Loom task candidate.
+
+**All three picked slices (1·2·4) shipped.** Remaining Loom work = **#3 rail layout** — the focused-session restructure, to pair with the cohesion audit.
+
+*(Superseded original decision list, kept for provenance:)*
+1. ~~[BIG DECISION] In-Loom ref-gen scope~~ → resolved: A+bridge.
+2. ~~Reparent `FrameSlot` into Generate~~ → folded into V2.1 item 3.
+3. ~~Polish: collapse-scrubber bug · deep-focus · snap-to-grid · add/reorder shots~~ → folded into V2.1 items 2–3.
+4. `pytest` + merge — unchanged, end of V2.1.
+
+---
+
+## 2. Achievements — the system (code)
+
+- **✅ THE FULL 57 SHIPPED (2026-07-12, loom-v2).** `ACHIEVEMENTS` is now all 57, generated verbatim from `docs/achievements_roster_57.json` (three roster threshold data-bugs fixed per their own trigger text: marathon 1→100, read-the-manual 0→1, triggered 0→5). Browser-verified against the real 31k catalog — 18 auto-earned on first compute, incl. 2 feats (Under the Hood, The Long Night/marathon):
+  - **Telemetry layer** — `out_dir/telemetry.json` (counters/maxima/sets/flags/days; `telem_bump/_max/_set_add/_flag/_mark_day` in `pixai_gallery.py`, lock-guarded, fail-soft; `set_telemetry_out()` wired in `create_app` + CLI `main`). ~15 call sites bump: `/api/edit·enhance·fix·upload·similar·claim·generate(LoRAs)·loom/generate(video modes + origin:"loom-shot")·skin·branding·delete-bulk` + CLI `--organize`, `--dedup`, `--claim`, `--task-id` recovery, `_apply_kaisuuken` (free cards), new-download Time-Capsule check. New SQL metrics: `local_gens` (source api|local), `gens_in_a_day`, `distinct_keywords`. Compute post-passes: `skins_unlocked`, `all_non_feat_earned`.
+  - **Hidden feats** masked server-side (`???`, no roast/name leak); the feats section stays cloaked until the first feat earns. **Narrator poke** (chibi in the panel header, 5 pokes → *Triggered*) reveals the **Unleash the AI** toggle → `roast_nsfw` everywhere. Feat events via `/api/ach-event` (konami/docs/narrator) + state sweeps (custom mark → *Under the Hood*, eclipse anim → *Eclipse*).
+  - **Feat tier = GUNMETAL + RUBY** (`--gunmetal #8a93a2`, `--ruby #e0355e`): panel band/inner-rim/glow, section header, moment pill/scrim/confetti, its own chime. The pink is gone.
+  - Panel groups by bucket (Ladders/Milestones/Masteries/Feats); earned cards show roasts; Great Library carries `banner_reward` (flag only — the banner-unlock pool mechanic is still future work). The moment presents with the achievement's OWN mascot (`branding/mascots/ach/<id>.png` → tier-chibi fallback).
+  - Tests: **459 passing** incl. new `tests/test_telemetry.py` (that day's count; **478** now).
+- **✅ Art COMPLETE ON DISK (`D:\Moonglade Athenaeum\pixai_backup\branding\`): badges 57/57 + mascots/ach 57/57.** The final 9 (loremaster + moonweaver silent replacements, forgemaster, vernissage, against-the-void, read-the-manual, the-konami-code, time-capsule, under-the-hood) plus a first-frame v2 replacement were already keyed in the owner's `badges_keyed` folder (rename pass hadn't landed) — placed + alpha-verified 2026-07-12. All pre-existing versions preserved in `badges\_pre57_backup\`. LE10_Q3 remains an unassigned spare. Remaining art thread = Phase 2 items only (mystery tiles · 9-slice frames · optional SFX/ribbon/animated-chibi — see the Art Worklist artifact `13712183`).
+- **✅ FRAME DIRECTION LOCKED (2026-07-13) — see `docs/ART_PICKS.md` §Decisions:** ornate frames **wrap the toast, 9-sliced** (WoW-style: corners fixed, edges stretch, frame grows to content — the earlier "frame the page cards" mock was a wrong turn). **Tier-gated: legendary + feat ONLY** wear the custom frame + toast, on the toast moment AND the page tile; common/rare/epic stay clean (epic TBC). **Points come to toasts + cards** (feats = 0 → show none). CLAIM7 gift box → the toast reward ribbon. Finalists wrapping the real toast in artifact `3655423e`. **WINNERS (2026-07-13): legendary = LEG6 (gold+emerald), feat = FEAT13 (ruby thorns); BAR4 parked as a future test (gem-window→badge edit).** Real toast = `.ach-m2` (locked `335ef4e7`).
+- **✅ FLAIR SLICE SHIPPED (2026-07-13, `loom-v2`, commits `3e91af4` + `3572b22`, 464 tests green — that day's count; 478 now):** (1) 9-slice tier **frames on the unlock toast** — legendary `branding/frames/legendary.png` (=LEG6) / feat `frames/feat.png` (=FEAT13); a `.tframe` wrapper in `_mkMoment` carries the `border-image` and grows with the roast (slices legendary 16.8%/13.3%, feat 15.8%/10.3%; borders 46/44 + 46/38). (2) **CLAIM7 gift box** in the `.rwd` ribbon (`branding/rewards/gift.png`, replaces the emoji). (3) **Rung-scaled points** — `_TIER_POINTS` + derived `_ACH_RUNG` + `achievement_points()`; `compute_achievements` emits per-ach `points` + `earned_points`/`possible_points`; shown on the toast (gold `+N` chip), grid tiles, and a Warband-style total in the panel header (960 possible; Archive ladder verified 5/15/35/65/70; feats 0 so no hidden-feat leak). Epic left clean — `framed={legendary:1,feat:1}` in `_mkMoment`, add `epic:1` to enable. **NEXT (owner call): frames on the achievement-page TILES — frame the current modal cards now, or defer to the Trophy Hall where tiles become mini-toasts. Then the Trophy Hall — a **maximized OVERLAY, not a page** (grow `#ach-modal` to full-screen; tiles become mini-toasts that carry the frames), Phase 2.**
+- **✅ The full 57 is CATALOGUED DURABLY at `docs/achievements_roster_57.json`** (2026-07-11) — 57 achievements, ALL with `roast` (default/spicy) + `roast_nsfw` (unhinged), buckets 29 ladder/9 milestone/8 mastery/11 feat. This is the canonical roster file; it no longer lives only in artifact `31d6c68a` or chat. **Tabled-ideas check:** the 5 workshopped feats (Triggered, For the Viewers, Read the Manual, The Lexicon, Since the First Floor) are all IN; The Descent is deliberately shelved (owner). Room for ~3 more (60 ceiling).
+- **⬆ PARKED IDEA UPGRADED (2026-07-12 evening):** owner cooked 5 NEW casting-bar renders (celestial gold/silver + a literal **moon-phase progress gauge** — waning→full→star→gibbous→crescent, segmented fill track, gold+amethyst end-caps) in the Selection v3 artifact (`812e82b4`) "Bonus: WoW UI bars" section. The moon-phase one is near-finished-asset quality and directly enacts the app's own name — this bumps the feature from "someday" toward "seriously consider soon." Original verdict below still holds for the wider casting-bar system design.
+- **Original PARKED note (real potential, Claude viewed the art 2026-07-11):** owner's `Potential… items?` collection + catalog (78–102 rows) hold WoW-style void-purple-metal cast-bar FRAMES + bronze/teal sliding tracks on #00FF00. **Best fit = a themed "casting" progress bar for generation/render** (thematically perfect — you're casting a gen), plus ladder-achievement progress + Panel job progress. **Caveats:** it's a real UI build (art = the FRAME, dynamic fill composited inside via 9-slice so ornate ends don't stretch); prefer the CLEANER rounded frames over the maximalist spiky-lightning ones for constant on-screen use. Park like the Foundry/Provider epics — not tonight.
+- **BADGE THEME — Claude viewed all 52 Part Deux gens (2026-07-11): the set is COHESIVE and confirms the anchor.** Tiered ring working (blue-steel rare = books/frames · amethyst-gold epic = dragons/masks · royal-gold legendary = cathedrals/cinematheque/conclave), violet field + cardinal gem accents + scene-inside, keyed on green. The "duplicates" are a SELECTION TRAY (~4–6 variants/achievement). Remaining work: (1) pick winner per slot, (2) key the few on purple/transparent, (3) gen the ~40 gaps in this style. One outlier = the flat clapperboard (decide: keep flat "ward" look or ring it to match).
+- **✅ Toast "moment" v2 SHIPPED (2026-07-12):** the unlock moment is the locked `335ef4e7` design verbatim — medallion sweeps R→L into the cap (+ring pulse/ding), mascot leaps from the TOP edge over a tier glow, "New Achievement" eyebrow, roast on the read-along shimmer, metallic rarity pill w/ sheen, rarity-scaled hold + legendary/feat flash, click-to-dismiss, queued. Summary (>3 unlocks) shares the frame. Feat = gunmetal band/pill + ruby glow + ruby cap rim. Browser-verified (feat: gunmetal `rgb(138,147,162)` band + ruby `rgb(224,53,94)` glow/rim; epic: real badge art loads + amethyst band).
+
+---
+
+## 2b. Achievements PHASE 2 — "the Trophy Hall" (✅ SHIPPED 2026-07-13, v1.11.0, `loom-v2`)
+
+**Version caveat (verified 2026-07-16):** "v1.11.0" above is the **tag**, which sits on `loom-v2` and is NOT an
+ancestor of `origin/master` — but `__version__` in `pixai_gallery_backup.py:39` was never bumped past `1.10.0`,
+so the tag has no matching version string. Don't read "v1.11.0" here as the code's version.
+
+**✅ SHIPPED (commits `8836086` backend foundation + `911b2ef` Hall, 466 tests green — that day's count; 478 now):** the achievement
+window is now a **maximized full-screen overlay** (grew `#ach-modal`, scoped to `.ach-hall`; NOT a
+page) — banner header + points total + search, **Summary / All / Statistics** tabs, a Summary landing
+(Recent Achievements from `earned_at` + Progress Overview bars), the bucket grid as collapsible tile
+sections (via the `/badge-thumb` cache), a right rail (category nav · Within Reach · Rewards Earned ·
+mascot alcove), and mobile stacking. Backend: earn-date persistence + badge thumb-cache (A0). Runtime-
+verified (mock payload) across every render path. **Owner's WoW screenshots now tune the INTERIOR only.**
+**Deferred polish:** per-*tile* ornate frames (toast has them), ~~per-criteria checklists on set
+achievements~~ (✅ SHIPPED, see below), ~~owner-made mystery-tile art~~ (✅ SHIPPED
+2026-07-14, see below).
+
+**✅ Mystery-tile art SHIPPED (2026-07-14, commit `43014ef`).** Masked feats showed a plain grayscale
+`❓` emoji before this; now use the owner's own cloaked-Nel artwork (`SecretCurtainSquare.png`, sourced
+from `Downloads/7.12`, downsized 2000×2000→512×512, served at `branding/mystery/secret_feat.png`).
+Shown in **full color, not grayscaled** — a pre-existing `.ach-card.t-feat.masked .ico` rule was
+force-graying it, changed to `filter:none` since the art is meant to read as an intentional tease
+(you can see *something*, just not the name/criteria) rather than a disabled state. Name/description
+still masked server-side as before (`"???"` / "A hidden feat of the Athenaeum.") — no spoiler risk,
+a bare badge image with no text doesn't tell you what unlocks it. `SecretCurtainRectangle.png`
+(badge-in-center composition) banked for a possible future reveal-moment treatment, not used now.
+
+**✅ RESOLVED 2026-07-15 — reverted, not fixed-in-place.** `c877919` was reverted clean
+(`0a8da3a`, inverse diff, zero conflicts — every commit in between was docs-only). The Hall is back
+to the pre-reformat rail-rewards/plain-grid layout, confirmed with an actual rendered screenshot this
+time (not just computed-style checks — see the lesson below for why that distinction matters). Tests
+still 474/474 (that day's count; **478** now). **This does not mean the Hall redesign is abandoned** — the owner is building a Figma
+mock (screenshot-decomposition of the real app + a proper carousel/"lightboard" treatment for the
+ladder rungs) as the actual pixel source of truth, and the Hall is getting renamed as part of that
+rebuild. Treat the revert as returning to a known-good baseline to design forward from, not as the
+final answer. D: was independently rolled back further by the owner (to the point custom
+Legendary/Feat frames were introduced) and is not necessarily in sync with this C: revert point —
+don't assume the two match without checking.
+
+- **What actually landed:** rewards moved from the narrow 290px rail into a `.hall-rewards-bar`
+  spanning the full grid width (rail widened 290px→370px); `.ach-card` restyled toward the unlock
+  toast's visual language (64px badge, tier-colored top accent, `minmax(340px,1fr)` columns);
+  ladder-bucket achievements grouped by `metric` client-side into a horizontal depth-carousel
+  (current rung centered/full-color/spotlight-glowed, others recede + grayscale by distance).
+- **Why "shipped" was the wrong word:** every check that session was a `getComputedStyle`/DOM-assertion
+  call (grid-template-columns, rung scale/opacity/grayscale math, element presence) — genuinely correct
+  readings of *those specific properties*, but never an actual look at the rendered page, because
+  screenshot capture was unreliable all session and I leaned on programmatic checks instead of pushing
+  to get a real visual. That gap is almost certainly how something is wrong without having been caught —
+  a real screenshot or the owner's own eyes would have said differently than the computed styles did.
+  **Lesson for next time:** for a visual/layout task specifically, a passing `getComputedStyle` check is
+  not equivalent to "verified" — get an actual rendered view before claiming done, or say plainly that
+  visual confirmation is still outstanding instead of reporting success.
+- **Owner's exact words:** "Well you fucked that up." No detail yet on what's wrong specifically.
+- **Next step (Thursday):** re-open the Hall with the owner watching, find out exactly what's broken
+  (layout overlap? carousel rendering wrong? toast-cards illegible? something else entirely?), fix it
+  for real this time, and get an actual visual confirmation — screenshot or the owner looking at it
+  live — before marking this done again.
+
+**✅ SHIPPED (2026-07-13, this session) — quick wins A + B:**
+- **A · per-criteria checklists (set masteries) — ✅ SHIPPED, landed exactly as specced** (verified live in
+  `pixai_gallery.py`: `_ACH_CRITERIA` `:1454`, `achievement_criteria(sets)` `:1461`, and the `sets=` param
+  threaded through `compute_achievements(metrics, seen=(), sets=None)` `:1474`): the two CLOSED-universe set masteries — **Full Toolbox**
+  (`tools` = edit/enhance/fix) and **Master of the Loom** (`video_modes` = i2v/flf/r2v; V2V is NOT tracked) —
+  get a ✓/○ checklist on their Hall tiles so you see WHICH criterion is missing, not just `2/3`. Open-ended
+  sets (loras, enhance_workflows) stay count-only. Impl: pure `achievement_criteria(sets)` + `_ACH_CRITERIA`
+  map → threaded into `compute_achievements(…, sets=)` → rendered in `card()`; unit-tested.
+- **B · roster threshold reconcile:** aligned the 3 stale thresholds in `achievements_roster_57.json`
+  (marathon 1→100, triggered 0→5, read-the-manual 0→1) to shipped code; cleared the `DOC_MAP` stale note.
+- **C · epic frames: DEFERRED — owner deciding art style.** Wants epic to read "deep-purple WoW epic /
+  tier-gear," leaning **Nelnamara's Dreamwalker (feathers) + Balance-Druid Moonfire flair**, WITHOUT
+  out-shouting legendary-gold / feat-ruby. Suggestions delivered this session; art TBD.
+- **D · Loom picker cohesion:** to discuss next (owner-flagged §1 refinement).
+
+_Original design notes (now realized) below for reference:_
+
+**A0. PREREQUISITE — badge serving cache:** the 57 badge masters total **321 MB** (2000² PNGs, vernissage alone 8.4 MB) served raw into 46px cards; a 57-tile Trophy Hall would pull all of it. Build a branding thumb cache (server auto-generates ~256px copies, masters stay the source of truth) BEFORE the Hall renders all 57. Also on record: 4 badge masters are sub-2000² (eclipse 416² · gallery-opening 597×504 · first-cull 1024² · starsmith 1024²) — owner may re-export for uniformity, not blocking; mascots/ach are native chibi-cutout sizes (~400–600px), fine at toast display sizes.
+
+**A-ref. WOW SCREENSHOT ANALYSIS (owner supplied 2026-07-12; "nothing this ornate", "simpler sidebar on the RIGHT"):** ideas adopted into the Hall plan — (1) **Summary landing**: Recent Achievements rows (needs NEW earn-date persistence in achievements.json) + Progress Overview (overall + per-category bars); (2) **Statistics tab**: label/value rows from the existing telemetry/metrics bundle (nearly free); (3) **per-criteria checklists** on set-based achievements (Full Toolbox/Master of the Loom/Skin Changer etc. — telemetry sets already hold members; expose contents, not just counts); (4) toast-banner archetype validated; 9-slice frames may carry transparent-margin corners so flourishes overflow the toast rectangle; (5) search box. SKIPPED: shields, nested subcats, heavy chrome. **OWNER CALLS PENDING:** points economy y/n (roster's "feats worth no points" implies tiers could carry points) · Summary landing vs straight-to-grid · right-sidebar contents (nav + mascot + detail?).
+
+**A-decisions (OWNER LOCKED 2026-07-12 evening):** (1) **POINTS ECONOMY: YES** — `points = tier base + 5×(rung−1)` for ladders, flat base for one-shots, feats = 0; bases common 5 / rare 10 / epic 25 / legendary 50 (e.g. Archive ladder: 5/15/35/65/70); Warband-style total in the Hall header; data-driven, "can evolve as needed"; NOTE: re-add the `rung` field to the code roster (dropped as unused). (2) **FRONT DOOR: Summary landing** (Recent Achievements rows + Progress Overview bars), sections one click away. (3) **RIGHT SIDEBAR, top→bottom:** banner → simple category nav → chibi mascot alcove (tooltip/chat-bubble emotes) → bottom = Recent Rewards chips + "Within Reach" (3 closest-to-earning w/ mini bars). Frames in production on **Krea2 via Maestro** (prose prompts issued; overflow-corner technique). Reward ribbons stay emoji (owner: nice-to-have, not needed).
+
+**A. The panel → maximized overlay (decided direction), "the Trophy Hall" (`b-ach` hue exists):**
+1. Wider layout; tiles become **mini-toasts** (same design language as the shipped toast v2: cap + band + body).
+2. **Right rail**: detail/tooltip pane + a mascot presence + rewards display (ties to C2/C3); room for future ideas.
+3. **Banner header** for the panel (the 201-banner pool; possibly where banner rewards display).
+4. **Feats more mysterious** — owner wants them NOT visible unless earned. Two modes on the table: (a) truly hidden (server omits; section shows count only), (b) mystery tiles obscured by owner-made mascot art. OWNER CALL with screenshots.
+5. **Collapsible category sections.**
+6. Form factor: **LOCKED = MAXIMIZED OVERLAY** (owner-confirmed 2026-07-13 via the pinned chat section "🎨 1.6 — the best-of-both answer"). **NOT a page/route** — grow the existing `#ach-modal` to full-screen: instant open (DOM already there, zero nav / zero reload), gallery stays mounted behind it, ESC out, can animate open from the 🏆 button. Page-scale real estate for wide mini-toast tiles + banner header + right rail + collapsing sections. **Screenshots tune the INTERIOR only — the form factor is settled.**
+
+**B. Toast refinements:**
+1. Badge bigger / "grows as it hits its home marker" — owner articulating the idea separately. AWAITING.
+2. **Real SFX** replacing the synth chimes — build a drop-in `branding/sfx/` loader (per-tier ogg, fail-soft to synth). Sources: Kenney (CC0), Sonniss GDC, freesound CC0, OpenGameArt; Pinokio lane = Stable Audio Open (local SFX gen) to scout on request. Owner has 1–2 WoW sounds (their call, local app).
+3. Legendary/Feat need MORE: ornate 9-slice frame art (owner-generated — SAME tech as the parked cast-bar frames), god-rays/vignette/particles.
+4. Mascot pop height: make seating ADAPTIVE per image (read natural size, seat ~75% above the toast band) instead of the global 158px headroom.
+5. **✅ Animated chibis: PIPELINE PROVEN LIVE (2026-07-12).** First animated presenter shipped (Happy Horse 1.1 gen → keyed → in-app, owner: "ZOMG they look great"). The pipeline: gen on flat #00FF00 (models repaint it as their own studio green — the keyer tolerates it) → drag mp4 onto `D:\Art Scratch\make_anim_webp.bat` (ffmpeg keys/de-spills → **Pillow assembles**; ffmpeg's own webp muxer writes broken blend/dispose flags = frame-trail smears, never use it for assembly) → drop as `mascots/ach/<id>.webp` (loader tries .webp before .png, `d00b39d`). Companion helpers: `make_green_source.bat` (still → green field for i2v) + `_assemble_webp.py`. GOTCHA for viewers: browsers/Photos render transparency as WHITE — verify on a dark canvas or in the app. Known cosmetic: soft despilled ground-shadow survives keying (reads fine on the toast; tunable on request).
+6. **REGRESSION to fix:** the mockup-verbatim port dropped the screen-wide fanfare — restore stars + confetti at screen level for legendary + feat ("make the screen blow up a bit").
+
+**C. Rewards & skins:**
+1. Skins move out of the panel bottom → **Control Panel beside Branding** (cosmetics live together).
+2. Reward notice ON the toast (mini ribbon/sub-toast: "unlocks <skin>/banner") + rewards shown in the right rail on replay (speech bubble from the mascot presence).
+3. "Earned rewards" as its own display — shape TBD with the redesign.
+
+**✅ Quick wins SHIPPED (2026-07-12, owner-green-lit):** B2 sfx loader (drop `branding/sfx/ach_<tier>.ogg` → plays; missing → synth chime — **note 2026-07-16: no `branding/sfx/` folder exists on the served D: tree, so no `ach_<tier>.ogg` has ever been dropped and the synth chime is the only sound that plays; the fallback is what's actually exercised**) · B6 fanfare restored (screen-level stars+confetti for legendary gold / feat ruby-gunmetal) · B4 adaptive mascot seating (alpha-bbox measured per image, ~75% of the character above the band) · C1 skins→Control Panel card beside Branding (ach modal now links there) · C2 toast reward ribbon (🎁 skin / ⚑ banner, emoji pending owner art). Browser-verified on isolated real data; 459 tests green (that day's count; **478** now). **Feat obscurity DECIDED: mystery tiles under owner-made art (design pending). Panel direction leaning MAXIMIZED OVERLAY (modal fluidity + page real estate) — final with screenshots.**
+
+---
+
+## 3. Achievement ART — the STYLE ANCHOR + reconciled picks
+
+### 3a. THE STYLE ANCHOR (the fix for the off-brand briefs)
+
+From `docs/ART_PROMPTS.md` (L164–187), owner-confirmed. **The house badge style is a TIERED RING over a FIXED violet/emerald field — NOT a universal gold frame.** Gold is the *legendary ring only*.
+
+**Canonical 11-badge template (verbatim):**
+> A circular World-of-Warcraft-style achievement emblem, an ornate **{RING}** ring with a soft glow, **{ICON}** centered inside on deep violet (#33236d), lavender highlights (#b692e6) and a faint emerald inner glow (#4fc99a), polished and iconic, reads clearly at small size. Flat pure-green #00FF00 background, no shadow, no text.
+
+**Ring by tier:** common → `weathered silver` · rare → `polished blue-steel` · epic → `ornate amethyst-and-gold` · legendary → `radiant royal gold`.
+
+**Fixed for every badge:** field `#33236d` · highlights `#b692e6` · emerald inner glow `#4fc99a` · flat `#00FF00` cut-out · 256×256, reads at ~64px.
+**Palette (say the hex):** ground `#0c0a1c`, violet `#33236d`/`#643aac`, lavender `#b692e6`, mauve `#c4a6f0`, gold `#d4af37` (sparingly), emerald `#4fc99a`.
+
+**Prompt-craft ruling (owner):** for badge BATCHES use the **simple single-paragraph template above** — NOT the LOCK-block / NOT-fence / fixed-seed machinery (that's reserved for one-off brand marks + character sheets). "Simple is king" for these. *The rejected briefs broke exactly this — flattened the tier ring to always-gold and over-scaffolded.*
+
+**✅ RESOLVED via gallery ground-truth (2026-07-11).** Parsed the owner's `Moonglade Icons/Badges Part Deux` collection (52 real gens) in `catalog.db`. It holds BOTH styles side by side: (a) the OFF-BRAND rejects — universal "ornate polished GOLD ring filigree, crown-grade polished gold, radiant amethyst-purple aura" (my briefs: Menagerie/Starsmith/Cinematheque) — and (b) the GOOD canonical set = the **docs TIERED RING executed exactly**: Archivist "ornate polished **blue-steel** ring + open ancient tome" (rare), Gallery Opening "blue-steel ring + empty picture frame", Hoardsmith/Menagerie/Tagsmith "ornate **amethyst-and-gold** ring" (epic) — Menagerie even carries the exact hexes #33236d/#b692e6/#4fc99a. **VERDICT: the tiered ring is correct (blue-steel rare · amethyst-and-gold epic · royal-gold legendary over the violet field), NOT universal gold.** Owner's evolution ON TOP: some badges swap the single flat icon for a **small SCENE inside the ring** (e.g. "grand elven library entrance with spires + glowing tomes floating like birds"). **Write the new prompts to: tiered ring + optional scenic icon; reject the universal-gold flat versions.** (The earlier v1–v4 doc variation is superseded by this ground-truth.)
+
+**TIER-COLOR SCHEME — owner wants WoW-rarity literacy (green/blue/purple/orange). DECISION PENDING owner confirm (2026-07-11).** Part Deux is already ~75% there (rare=blue ✓, epic=purple/amethyst ✓, legendary=gold ✓). Two collisions to respect: (a) **common = green ring FIGHTS the #00FF00 green key** → put green on the GEM+GLOW, not the ring; (b) **epic = purple ring FIGHTS the #33236d violet field** → keep epic purple BRIGHTER than the field. **Recommended scheme (rarity carried on GEM+GLOW, ring reinforces):** common → silver ring + emerald-green (#4fc99a) gem/glow · rare → blue-steel ring + sapphire-blue gem/glow · epic → amethyst ring (less gold) + bright-amethyst gem/glow · legendary → gold ring WARMED toward amber/orange + rays · feat → most-ornate gold, UNIQUE per-feat (obsidian+gold), no tier uniformity. **Downstream consistency:** the code toast tier-glow colors + rarity pill (pixai_gallery.py; currently common=steel-blue #9fbad6) must be realigned to match whatever badge scheme is locked. **PRE-GENERATION LOCK-LIST:** (1) tier-color scheme (2) green on gem/glow not ring (3) legendary→orange (4) feats distinct (5) icon-vs-scene per achievement (6) toast+pill colors realigned (7) 64px readability on scene-heavy ones (8) gaps to fill + winners picked from dupe tray.
+
+### 3b. The 11 shipped badges — art picked, swap ✅ superseded by the full-57 ship
+
+The **2026-07-07 owner vote** picked upgraded art (F#/G# codes): First Light→F8 · Archivist→F39 · Hoardsmith→F34 · Loremaster→F31 · First Frame→G56 · Moonweaver→G38 · Reel Director→F27 · Curator→F22 · Menagerie→F14 · Gallery Opening→F43 · Tagsmith→F11. ~~**Swap not yet executed.** Old ornate versions are serving on D: now.~~ **✅ Moot as of the full-57 art ship (verified 2026-07-16): nothing ornate-and-old is serving anymore.** `D:\…\branding\badges\` holds 57 badges at 2000² (e.g. `first-light.png` 2000×2000 / 5.6 MB, `archivist.png` 2000×2000 / 5.9 MB); the 11 originals are preserved but NOT served, in `badges\_pre57_backup\`, at their original small sizes (`first-light.png` 324×340 / 0.1 MB, `archivist.png` 318×340 / 0.2 MB).
+
+### 3c. ⚠️ CONFLICT to resolve (owner call)
+
+The **session ledger** (my picks, Z-codes) disagrees with the **2026-07-07 vote** (F#/G#) on the 11 — e.g. First Light Z12 vs F8, Reel Director G50 vs F27, Menagerie "generate" vs F14, Gallery Opening "chibi #1 Nel+Mio" vs F43. Three numbering universes (F#=PixAI batch, G#=Grok slices, Z#=zip) are **not reconciled.**
+**Recommendation:** the 2026-07-07 vote is authoritative for the 11 medallions; the ledger is the later opinion for the un-locked 46 + a re-open flag on Gallery Opening (badge vs the Nel+Mio chibi).
+
+### 3d. The other 46
+
+- **Mascots: DONE** — every one of the 57 has a finalized `art_candidate` chibi # (re-verified 2026-07-16: 57/57).
+- **Badges: ✅ ART DONE — the "41 still need a pick" ledger is superseded.** All **57** badge PNGs exist and serve from `D:\…\branding\badges\` (all but 4 at 2000²); the old tally (16 seeded · 41 to pick; full-57 ledger 9 locked · 22 in-pool · 24 generate · 1 special · 1 banner) no longer describes reality. What's left is a **bookkeeping gap, not art**: `achievements_roster_57.json`'s `badge` field is populated for only **16 of 57** entries even though the art itself shipped.
+- **The Great Library** = BANNER reward, not a badge (banner art ← G65–G67).
+- Full per-achievement mascot+badge table lives in roster board `31d6c68a` + ledger `d1ee39a1`.
+
+---
+
+## 4. Image consolidation (owner's active task)
+
+- **Served (KEEP live):** `D:\Moonglade Athenaeum\pixai_backup\branding\` — badges (**57**; the old 11 sit unserved in `badges\_pre57_backup\`), mascots (10) + `mascots\ach\` (57 png + 1 webp), marks (5 +ico +marks.json), banners/logo/favicon/starfall a-v, plus `frames\`, `mystery\`, `rewards\`, `_thumbs\` and `gen_nel.png`. The app serves from here. *(Re-counted 2026-07-16: marks, mascots-top-level and banners/logo/favicon/starfall are unchanged; badges grew 11→57 and the rest of the tree is new since this was written.)*
+- **Staging (Downloads):** Icon Sheets (23) · Icons (19) · grok-group (26) · grok-assets (6) · Chiblis (217, deduped chibi library) · Chibli Sheets (35) · Chibli Stickers (1) · export-20260709T231731Z-1 (463 — full Canva account dump, **cherry-pick only**) · loose from-PixAI (7) / Gemini (8) / grok-* (55) / Untitled design (4) · scratchpad `menagerie_badge` (4 — tonight's gens).
+- **Stale duplicate (flag, don't auto-delete):** `C:\Users\gwilkins\Desktop\pixai-gallery-backup-master\pixai_backup\branding` (marks + banners only).
+- **✅ CONSOLIDATED (owner, 2026-07-11) → `D:\Art Scratch\`** — the art-IN-PROGRESS home; all working art lives here now. Structure (**700 files** as re-counted 2026-07-16, up from 675 as badge art got generated): `Badges` (**48**, up from 26) · `Icon Sheets` (23) · `Chibli Sheets` (35) · `Canva image dump - sorted by claude - new items added` (525) · `Live Nel Cutouts` (8) · `Nelnamara Fine Images` (29) · `Surprise flair the original ogs` (9) · `App icon candidates` (4) · `Banners` (8) · `logos_cut` (5) · `Stickers` (1) + loose `DCC-micdropNel.png`. The served `D:\...\branding\` set stays live + separate. Good moment to scaffold `mascots.json` (asset→role registry).
+
+---
+
+## 5. Next actions (notated — NOT started)
+
+| Who | Action |
+|---|---|
+| **owner** | Flag favorite badges into a gallery collection → I pull their prompts + realign the badge briefs to §3a |
+| **owner** | Consolidate images → `art-library\` (see §4) |
+| **owner call** | Resolve the F#/G# vote vs ledger conflict for the 11 (§3c) |
+| **owner decision** | Loom in-Loom ref-gen scope (§1 next-1) |
+| ~~**NOW → owner**~~ **✅ DONE** | ~~Generate the **40 blank badges** from `docs/badge_generation_prompts.md` (written 2026-07-11, Solid Style) → keepers into `D:\Art Scratch`~~ — no badges remain to generate: all **57** exist and serve from D: (§3d). The prompts doc is real and correctly dated, kept as the record. Still open: a NEW roster board from `docs/achievements_roster_57.json` |
+| **later** | ~~Execute the 11-badge swap~~ **✅ superseded** by the full-57 art ship (§3b) · then wire 46→code (telemetry layer) |
+| **later** | Rebuild roster board `31d6c68a`: **BIGGER cards + previews** (owner readability), KEEP layout + faceted sort + style; fresh rebuild AFTER new art is generated. Owner returning with a "final submission" first — HOLD until then. |
+
+**FLOW (SUPERSEDED 2026-07-11 evening — owner flipped it):** the board is now the selection tool, built FIRST. **Roster board `31d6c68a` REBUILT + republished (same URL) 2026-07-11:** FULL RESET of all badge+mascot selections (incl. the 11 live — their art is back in the pool as `P:*`; the F/G/Z-vs-ledger conflict is mooted). Three voting lanes: **Nel / Claude (pre-seeded: 51 badge votes + 57 mascot seeds from prior assignments) / Family (wife+daughter)**. Pools embedded: Part Deux 52 · **Part Tree 133 (incl. Edit Pro keepers, confirmed mirrored)** · Art Scratch\Badges 46 · legacy G/Z/P 134 · 332 chibis · 8 banners (Great Library slot only). Features: per-achievement picker w/ auto-grouped "For this" tab · **▶ toast preview** (lifted from toast_mockup `335ef4e7`, plays the real unlock moment w/ selected art) · NSFW roast toggle · bucket + general notes · JSON/summary export w/ verified copy buttons · localStorage persistence. **Board v3 (2026-07-11, same URL):** REFRESHED the mascot pipeline — re-deduped the entire Canva dump (406→312 unique, tight perceptual thresh so distinct chibis aren't merged), VISION-classified every survivor → **300 clean chibis + 9 badge-art rescued to the badge pool + 3 grids dropped**; Carl/DCC (#311) + mic-drop (#312) folded in. Mascot thumbs now **208px WEBP-with-ALPHA** (was 150px flattened — that was the "preview looks bad"). Badge picker consolidated **8 tabs → 2** (For-this + All(432) + id-search, e.g. `CB`=canva badges, `MI`=originals). One-time **localStorage pick-migration** (`st.v→3`, `D.remap` old#→new#) preserves in-progress votes across the renumber; badge picks are pool-ID-stable. Source of truth for pools: `scratchpad/pools_v3.json` + `refresh_unique.json` (idx→disk path). **Next: owner+family select → export → Claude wires winners into `branding\` + manifest → gap list → gen run (PixAI Tsubaki prose recipe) → telemetry layer.**
+
+**Local-gen reality check (2026-07-11 · UPDATED 2026-07-12): Krea2 on Maestro is the new local quality lane** — owner: "we hit the motherload" on the legendary/feat frame run; ornate-effect prompts "just come through." First local model to meet the house art bar; prefer it for frames/ornament work going forward. **CORRECTION (same day):** some frame/icon renders in the 2026-07-12 haul carry real alpha because the OWNER keyed them by hand before sharing, not because Krea2/ComfyUI/ChatGPT output alpha natively — don't assume any of these tools produce transparent output on their own; verify per-file, not per-model. (Prior state: Maestro Flux/Chroma + Forge WAI infra worked but neither matched the badge bar — the benchmark is **PixAI Tsubaki.2 v1, detailed prose, NO LoRA** (the Hoardsmith dragon, task 2031115782282256404). Model research (Track 2) ✅ DELIVERED 2026-07-11 → **`docs/MODEL_DECK.md`** (25 verified entries + methods; artifact 9f16f42d). Headlines: WAI v11→**v17** upgrade (no token) · NoobAI-XL V-Pred = crispness lane (vpred settings mandatory) · badge stack = Game Icon Institute V4_XL / ZavyChromaXL+Zavy Fantasy Icons LoRA (glow trigger) / game-icon-XL LoRA (full-frame icon LoRAs WANT high weight — the overcook rule inverts) · SpatterXL verdict: SKIP (dated; Black Magic absorbed the look) · lifelike = Illustrij/Equinox/Semi-Real MM + Chroma1-HD prose recipes · **train Nel LoRA locally on Illustrious via OneTrainer (12GB ok; 50-150 imgs; FLUX.1 via FluxGym ok, Flux2/Chroma = cloud)** · Pinokio adds: ComfyUI, BEN2 bg-remover (green-key killer), Invoke · newcomer to watch: Anima (Cosmos 2B, ComfyUI). Next: owner picks downloads → bake-off vs Tsubaki dragon benchmark. Loom ref-gen call ✅ DECIDED → see §1 "Loom V2.1" official plan (A+bridge, rail layout, after achievements). Board v2.1 republished same URL with Originals (74, `Moonglade Icons` collection) + 201 banners (7 Art Scratch + 194 `Moonglade Banners` gallery); Add-On/App Icons (227) deliberately excluded like the Canva dump.
+
+_Superseded/older roadmap artifacts (kept for provenance, not authoritative for these threads): 51a7931d, a67437b9, placement_report, Final Placement, Assignment Board. This doc supersedes them for Loom V2 + Achievements._
+
+---
+
+## 6. Top-down audit — 2026-07-16 (suite-wide, 4-agent workflow)
+
+Owner asked, after the day's Loom work: is the roadmap actually accurate, when can V1 Loom be
+retired, what's still open on the Trophy Hall and gallery QoL, and what got dropped early in
+dev that deserves attention now. Full agent reports are in the workflow journal
+(`wf_cde74217-82b`); this is the condensed, actioned version.
+
+**Loom V1 → V2 parity — verdict: NOT at parity, don't retire classic yet.** V2 is additive and
+non-destructive (both render trees share one `project` state and one set of mutators — verified,
+no data-model divergence risk — both trees consume the same hooks via `App()`, and `LoomV2` `:646`
+takes `project`/`setCard`/`setAssets` as props). Structural gaps requiring classic Loom today, now
+**three**: **Export** (trim+stitch to mp4), **batch "Generate all"**, and per-shot
+**"other references"** (add/set/delete) — none of these are wired into `LoomV2` at all. (**Play
+sequence** was the fourth when this was written; wired into V2 the same day by `768aecf` — no longer
+a gap.) Smaller
+gaps: Audio cue, Notes, and the Discreet/blur toggle have no home in V2; manual status-cycle and
+"Copy shot" aren't reachable; Import Collection / Backup / Restore / Export
+shot-list require exiting to classic. **Cast&Assets is no longer among them** — `ba1c82e` made V2's
+Detailed rows a full editable add/edit (name/tag/kind select/lock/remove) and the cast picker
+(`openPick(…, "image", true)`) adds assets straight from the gallery, so the "blank manual add /
+local-file-only" note is superseded. **Concrete convergence punch list**, in priority order:
+~~wire Play sequence~~ ✅ done (`768aecf`, see §1) → **wire Export next** → wire batch-generate →
+bring "other references" into the Video tab or Deep Focus → add the three small missing fields →
+surface the four classic-only modals from inside V2. Once Export + batch-generate land too, the
+retirement conversation is real.
+
+**Docs reconciliation — done.** CLAUDE.md/architecture.md/wiki test counts (474→477, node suite
+noted), CHANGELOG.md's `[Unreleased]` (had nothing from today), docs/DOC_MAP.md's refresh date,
+docs/LOOM.md (was V1-only — added a "Two layouts" section), and wiki/Gallery.md +
+wiki/Generating.md (search box, Loom blurb) all updated same day — see CHANGELOG.md for the
+itemized list. **Correction 2026-07-16: "wiki/ had zero Loom coverage of any kind before today's
+fix — confirmed by a full-text search, not assumed" was FALSE.** `wiki/Generating.md` has carried a
+Loom section since **2026-07-05** (`0c8872d`, the Edit Bay → The Loom rename) — it was there at
+`4be6142`, the last wiki commit before today. Today's `6b1065e` touched that file by 6 lines (+4
+net) and *updated* the existing blurb; its own commit message says as much. The "confirmed by a
+full-text search" flourish was a false confidence marker on a search that would have found the
+section.
+
+**Trophy Hall — confirmed still-open** (cross-checked against live code, nothing silently
+shipped or regressed): the redesign is blocked on the owner's own Figma frame (don't re-suggest
+the screenshot-decomposition checklist, per `docs/DESIGN_WORKFLOW.md` — ask for the URL when
+ready); rename undecided (3-item shortlist banked); per-tile ornate frames not yet built (the
+unlock toast has them, grid tiles don't); epic-tier frame art not yet made; "earned rewards" as
+its own display is shape-TBD; the "toast badge grows to its home marker" idea needs the owner to
+finish articulating it before it's buildable. The 2026-07-14 rejected reformat's revert holds —
+verified no trace of it survives in the code.
+
+**Gallery QoL — real, non-duplicate opportunities** (the gallery is already unusually mature —
+full filters, saved views, bulk actions, a real lightbox, keyboard nav — these are genuine gaps,
+checked against the code so nothing below already exists): rate/delete from inside the lightbox
+without closing it; bulk "set rating" on a selection; an "unrated only" filter (today's
+`rating_min` is `>=` only); **a UI for removing an image from a collection — the backend route
+exists (`/collection-remove`) with zero callers anywhere**, a real gap not a design choice;
+export just the current search/selection instead of always the whole catalog; a random/shuffle
+sort for rediscovering older generations; a manual side-by-side two-image compare (distinct from
+the existing algorithmic "Similar" search); and saved-view presets are localStorage-only, so they
+don't roam between the home/work machines this project is already edited from.
+
+**Early-dev archaeology — two real candidates, not padded.** The audit was told to hunt
+specifically for the video-controls pattern (a real early ask that quietly never got built) and
+came back honest that most "unfinished-looking" things are actually deliberately tabled with a
+date or superseded elsewhere in this same doc. Two genuinely dropped:
+1. **Loom export silently discards audio** — `/api/loom/export`'s ffmpeg concat still hardcodes
+   `a=0`; the code comment ("audio is a follow-up") is unchanged since at least 2026-07-10. Not
+   reconnected even during today's Loom rebuild session, which *did* discuss a timeline audio
+   lane as a roadmap idea without anyone noticing the export path already drops audio outright.
+   A generation with the "Generate audio" toggle on would have that audio silently thrown away
+   the moment it's stitched into a multi-shot export.
+2. **File logging** — `CLAUDE.md` has called this "a separate, still-open discussion" since the
+   `-v/--verbose` feature shipped (~2026-06-22) and it has never entered any active tracker
+   (not in `REFINEMENTS.md`'s owner list, not in `ROADMAP.md`'s epics) — a loose thread, not a
+   parked decision.
+
+**➡ Second sweep, same evening (owner: "small SMALL items slip past") — full results in
+`docs/SWEEP_2026-07-16.md`.** 8 briefed finders + adversarial per-claim verification: **10 unique
+confirmed defects — ✅ ALL 10 FIXED the same evening** (`5d24fb1` marks each one in the sweep doc
+with its commit ref; the headline list below is the record of what the sweep *found*, not live
+defects): Deep Focus edits visibly revert — stale snapshot (`d4f8f7a`); V2 has no shot
+deselect so draft mode is one-way (`7d28be1`); the credit-spend confirm FAILS OPEN on any
+price-check error (`0714c85`); attaching a new clip keeps stale trims that can hang the sequence
+player (`49af623`); today's id-search floods results for short numeric terms (`c999ae6`); the Panel
+stop-server spinner never stops (`e84400b`). Plus 2 untracked in-code
+promises (ENHANCE_PLUGINS curated cards never added; hand/face-fix workflowNames still unverified),
+8 fresh-clone/public-user issues (~~**no LICENSE file**~~ ✅ MIT LICENSE added `682b677`;
+~~`websockets` missing from requirements~~ ✅ added `bf3d9c8`; ~~the published wiki is v1.6-era~~
+✅ republished the same evening — **but still true, and only fixed on `loom-v2`: `master` has no
+CHANGELOG and no LICENSE, and master's README still points at five `docs/img/*.png` files that do
+not exist in its tree. Those fixes reach master only when `loom-v2` merges**), and
+three grounded feature slates (Loom creator / gallery curator / PixAI power user + community).
+None of the 11 raised claims were refuted — several were confirmed-with-corrections, recorded in
+the sweep doc.
+
+**Branch hygiene — verified, not acted on (deletion needs your go-ahead):**
+`generate-drawer`, `suite-polish`, `video-gen`, and `master` all have **zero commits** not
+already in `loom-v2` (`git log --oneline loom-v2..<branch>` is empty for each) — safe,
+no-data-loss deletes whenever you want them gone, both local and on `origin`. `loom-v2` is **128**
+commits ahead of `origin/master` (109 when this was written; 19 more have landed since).
+`loom-extract-hook` has exactly the one disproven single-hook-attempt
+commit not in `loom-v2` (`2321cac`) — keep it as the documented record per the Phase 1b writeup above, don't
+delete it.

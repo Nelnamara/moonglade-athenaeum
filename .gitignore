@@ -38,8 +38,29 @@ env/
 .coverage.*
 htmlcov/
 
+# ---- Working dashboard artifact (Claude+owner reference; not project documentation) ----
+docs/DASHBOARD.html
+
+# ---- Loom Node toolchain (loom/package.json) ----
+loom/node_modules/
+
 # ---- Editor / OS ----
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ---- Stray artifact: a root file literally named HEAD (born from a `> HEAD` shell
+# redirect; content is just "OUTPUT"). Anchored to root so it never shadows .git/HEAD
+# or subdir HEADs. This neutralizes it no matter which machine regenerates it. ----
+/HEAD
+
+# ---- Claude Code: local browser-preview launch config (machine-local dev-server
+# definition, points at a local port). Scoped to the file, not all of .claude/, so
+# genuinely shareable project config (agents, hooks) can still be tracked later. ----
+/.claude/launch.json
+
+# Ephemeral design mockups: throwaway single-file HTML built to verify a design
+# before implementing it (the locked pixel source lives in the Claude artifact, not
+# here). Never committed -- they would rot instantly against the real surface.
+static/_mockup_*.html
