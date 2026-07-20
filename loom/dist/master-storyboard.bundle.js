@@ -2335,15 +2335,27 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         });
       }, "video");
     };
-    const pollImg = (cardId, tid) => {
+    const pollTaskWithCeiling = (tid, setState, cardId) => {
+      const startedAt = Date.now();
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
         const cls = classifyTaskStatus(d);
-        if (cls.phase === "done") setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-        else if (cls.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        else setTimeout(tick, 4e3);
-      }).catch(() => setTimeout(tick, 5e3));
+        if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+        else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+        else again(4e3);
+      }).catch(() => again(5e3));
+      const again = (ms) => {
+        if (Date.now() - startedAt > POLL_CEILING_MS) {
+          setState((s) => ({ ...s, [cardId]: {
+            phase: "error",
+            msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS) + " \u2014 the task may still be running; check it on pixai.art (task " + String(tid).slice(-6) + ")"
+          } }));
+          return;
+        }
+        setTimeout(tick, ms);
+      };
       setTimeout(tick, 2500);
     };
+    const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
     const genImage = async (entry) => {
       const c = entry.c;
       const prompt = (c.imgPrompt || "").trim();
@@ -2390,15 +2402,7 @@ A matching free card auto-applies; otherwise it spends credits.`)) return;
     const runGen = async (setState, cardId, endpoint, body, confirmMsg) => {
       if (confirmMsg && !window.confirm(confirmMsg)) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
-      const poll = (tid) => {
-        const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-          const cls = classifyTaskStatus(d);
-          if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-          else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-          else setTimeout(tick, 4e3);
-        }).catch(() => setTimeout(tick, 5e3));
-        setTimeout(tick, 2500);
-      };
+      const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
         const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const d = await r.json();
