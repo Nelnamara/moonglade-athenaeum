@@ -26,13 +26,33 @@ const loomDir = path.resolve(here, "..");
 const entryPath = path.join(loomDir, "master-storyboard.jsx");
 const outfile = path.join(loomDir, "dist", "master-storyboard.bundle.js");
 
-const HOOK_PREAMBLE = "const { useState, useEffect, useRef, useCallback } = React;\n";
+// The hook list is DERIVED from master-storyboard.jsx's own import statement, never
+// hardcoded here. It used to be a string constant, and it silently rotted: `useMemo`
+// was added to the .jsx (import on L1, used at L2344) and to pixai_gallery.py's
+// LOOM_PAGE preamble, but not to this file. esbuild happily produced a bundle whose
+// preamble destructured four hooks while the code called a fifth, so /loom?bundle=1
+// threw `ReferenceError: useMemo is not defined` on mount and rendered a blank page.
+// Nothing caught it: the Node suite tests pure logic, not the bundle's mount, and the
+// default Babel path was unaffected, so the opt-in path was broken in isolation.
+// Deriving it means adding a hook to the .jsx can never again desync this bundle.
+const REACT_IMPORT_RE = /^[ \t]*import\s+React\s*,\s*\{([^}]*)\}\s*from\s*["']react["'];?[ \t]*$/m;
 
 function loadEntrySource() {
   const raw = readFileSync(entryPath, "utf-8");
+  const match = raw.match(REACT_IMPORT_RE);
+  if (!match) {
+    throw new Error(
+      "build.mjs: could not find the `import React, { ... } from \"react\"` line in " +
+      entryPath + ". The hook preamble is derived from it, so refusing to emit a " +
+      "bundle rather than guess a hook list and ship one that crashes on mount.");
+  }
+  const hooks = match[1].split(",").map((h) => h.trim()).filter(Boolean);
+  if (!hooks.length) throw new Error("build.mjs: React import destructures no hooks.");
+  const preamble = "const { " + hooks.join(", ") + " } = React;\n";
+  console.log("[build] hook preamble derived from source:", hooks.join(", "));
   // Mirrors pixai_gallery.py's loom(): `jsx = re.sub(r"(?m)^\s*import\s+React.*$", "", jsx)`
   const stripped = raw.replace(/^[ \t]*import\s+React.*$/m, "");
-  return HOOK_PREAMBLE + stripped;
+  return preamble + stripped;
 }
 
 async function main() {

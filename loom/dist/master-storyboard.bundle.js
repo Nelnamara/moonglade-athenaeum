@@ -312,7 +312,7 @@ ${"=".repeat(48)}
   }
 
   // master-storyboard.jsx
-  var { useState, useEffect, useRef, useCallback } = React;
+  var { useState, useEffect, useRef, useCallback, useMemo } = React;
   var STYLES = `
 :root{
   /* Loom palette now INHERITS the gallery's design tokens (pixai_gallery.py's
