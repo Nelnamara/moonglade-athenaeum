@@ -588,9 +588,6 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   sorted Canva dump, Live Nel Cutouts, Nelnamara Fine Images, Banners, `logos_cut`, Stickers,
   App icon candidates, Forge, plus `make_anim_webp.bat` / `make_green_source.bat` /
   `_assemble_webp.py`). The served `D:\...\branding\` set stays live and separate.
-- A **stale duplicate branding folder** (marks + banners only) sits at
-  `C:\Users\gwilkins\Desktop\pixai-gallery-backup-master\pixai_backup\branding`. Flag it; do
-  not auto-delete.
 
 ---
 
