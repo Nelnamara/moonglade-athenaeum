@@ -38,14 +38,28 @@ requires an account on every path — including on the machine running it. Sign 
 phone and you can browse *and* generate, which is the point: the login exists so tablet
 generation is possible, not to keep you out.
 
-Three things stay stricter than "signed in", because they act on the server machine itself
+A few things stay stricter than "signed in", because they act on the server machine itself
 or delete irreversibly from your PixAI account: the destructive Control Panel jobs
-(organize, dedup-apply, rebuild-thumbnails), cloud bulk-delete, and setting the API key or
-launcher icon. Those require a request from the machine running the server, no matter who
-is signed in.
+(organize, dedup-apply, rebuild-thumbnails), cloud bulk-delete, setting the API key or
+launcher icon, and importing local files into your library (**↑ Import** / `--import-local`).
+Those require a request from the machine running the server, no matter who is signed in.
 
 Still use a trusted network: the app is served over plain HTTP unless you pass `--https`,
 and a signed-in session on a shared network can spend your credits.
+
+**How do I add another person, or get back in if I'm locked out?**
+
+Add accounts from **Panel → Users** once you're signed in — any account can, since they're all
+equal-trust (there's no separate admin role). The login page *creates* an account only during
+first-run setup (on the server's own machine, before any account exists), so once you've made
+yours it goes back to sign-in only and no one on your network can register themselves. That's
+by design — it's your library and your PixAI account behind it, not a public signup.
+
+Locked out with an account already there? On the server machine,
+`python pixai_gallery_backup.py --add-web-user` prompts (hidden) for a username and password and
+writes it to `config.json`. It *adds or updates*, so it also resets a forgotten password;
+`--list-web-users` and `--remove-web-user <name>` are the companions. Full flow in
+[Setup](Setup).
 
 **Does organizing files break the gallery?**
 No. Lookups are by `media_id`, so files can live in any subfolder.
