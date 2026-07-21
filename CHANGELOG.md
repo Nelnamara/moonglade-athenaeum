@@ -57,6 +57,18 @@ git tags. Full prose notes for tagged versions live on
   [1, 200], so the panel's "whitelisted argv, never an arbitrary command" guarantee holds with a
   parameter in play. All three are read/append (never destructive) and kept off the scheduler.
 
+### Removed
+
+- **The legacy PySide6 desktop GUI is gone.** `pixai_gui.py` and its launcher
+  `Moonglade Athenaeum.pyw` are deleted, and the `PySide6` dependency dropped. The two
+  surfaces going forward are the **CLI** (`pixai_gallery_backup.py`) and the **web app**
+  (`pixai_gallery.py`) — every GUI business capability already had a CLI flag and usually a
+  web surface (a parity matrix confirmed zero GUI-only business capability), so nothing was
+  lost; the GUI's only exclusives were local conveniences (open the quarantine folder in the
+  OS file manager, a recently-used-models quick-pick). The web launcher `Serve Gallery.pyw`
+  and the desktop-shortcut branding feature (which targets *that* launcher, not the GUI) are
+  unaffected. Docs, wiki, CI comments, and the dependency list were scrubbed to match.
+
 ### Security
 
 - **Error text is no longer an HTML-injection seam.** Several UI sinks concatenated a

@@ -15,11 +15,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      # PySide6 (the legacy desktop GUI) is intentionally NOT installed here: no test
-      # imports pixai_gui, and pulling in Qt just to sit unused is exactly the kind of
-      # CI flakiness (headless-display system deps) worth avoiding. pixeltable is also
-      # skipped -- it's a heavy, optional, GPU-oriented dep; tests/test_similar.py skips
-      # itself cleanly without it (see its own pytest.importorskip).
+      # pixeltable is intentionally NOT installed here: it's a heavy, optional,
+      # GPU-oriented dep, and tests/test_similar.py skips itself cleanly without it
+      # (see its own pytest.importorskip). Pulling it in just to sit unused is exactly
+      # the kind of CI flakiness worth avoiding.
       - name: Install dependencies
         run: pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov
 

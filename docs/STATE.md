@@ -26,9 +26,8 @@
 
 Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owner's own AI
 generations, serves a local searchable web gallery, generates images and videos through
-PixAI's API, and curates the archive. Two surfaces are current — the CLI
-(`pixai_gallery_backup.py`) and the web app (`pixai_gallery.py`); the PySide6 desktop GUI is
-legacy and folding into the web app. All work happens on the `loom-v2` branch; `master` has no
+PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
+the web app (`pixai_gallery.py`). All work happens on the `loom-v2` branch; `master` has no
 commits that aren't already in `loom-v2`. Merging `loom-v2` → `master` with `--no-ff` is the
 single act that carries the Loom V2 set, the achievement system, `CHANGELOG.md` and `LICENSE`
 to master. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
@@ -307,8 +306,8 @@ users.
 ## Public repo / community
 
 - **CI** (`.github/workflows/tests.yml`) runs both suites on every push and pull request: the
-  Python suite (`--ignore=tests/test_similar.py`, no `pixeltable`/PySide6 installed — no test
-  imports either) and the Loom's `node --test` after an esbuild rebuild.
+  Python suite (`--ignore=tests/test_similar.py`, no `pixeltable` installed — no test imports
+  it) and the Loom's `node --test` after an esbuild rebuild.
 - **`CONTRIBUTING.md`** covers setup, running tests, the invariants that matter most to an
   outside contributor (`media_id` resolution, catalog-schema three-place changes, never
   committing `config.json`), PR expectations, and a private channel for security reports.
@@ -591,7 +590,7 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
 ### Control Panel / web parity
 
-Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
+What's still CLI-only, tracked so the web surface stays complete:
 
 - **`--restore-orphans` and `--undo-organize` have no Panel button** — the two remaining
   CLI-only maintenance actions. (`sync-artworks` / `sync-videos` / `reconcile-deleted` run via
@@ -608,15 +607,12 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 
 ## Priority order (agreed 2026-07-19)
 
-Ranked, with the reason each sits where it does. Ordering changed once already when the
-owner pointed out that **web parity gates GUI removal** — anything only reachable from the
-PySide6 GUI or the CLI needs a web equivalent *before* that GUI can go.
+Ranked, with the reason each sits where it does.
 
 1. **Web parity** — ✅ **COMPLETE 2026-07-20.** ✅ force-full-resync (Advanced Panel) · ✅
    video/audio reference slots in the live gallery drawer's Multi-ref (the `<mg-generate-drawer>`
    swap) · ✅ convert-and-download for `/export-zip` · ✅ web import into the catalog (the
-   drop-zone modal + `/api/import-local`). Nothing CLI-only stands in front of the PySide6
-   removal now — that removal (item below) is unblocked.
+   drop-zone modal + `/api/import-local`). The two surfaces are the CLI and the web app.
 2. **Gallery QoL easy wins** — chiefly the collection-remove UI: `/collection-remove` exists
    with **zero callers**, so the route is already written and only the UI is missing.
 3. **The 401 batch and the search wildcard** — ✅ both shipped 2026-07-19. What remains of
@@ -668,15 +664,6 @@ coherent visual effort and should be scoped and executed together rather than pi
   carried on gem + glow, ring reinforces; legendary warmed toward amber) was never
   owner-confirmed; the code still runs the original (common = steel-blue `#9fbad6`, with
   `--gunmetal #8a93a2` / `--ruby #e0355e`).
-- **PySide6 GUI removal** (`pixai_gui.py` + `Moonglade Athenaeum.pyw`) is decided but **not
-  executed** — both files are present. **Now UNBLOCKED: the web-parity gate cleared 2026-07-20
-  (web import was the last item).** Owner, 2026-07-19: *"Pending the web parity solutions"* — that
-  condition is met. A GUI/web/CLI parity matrix confirmed zero GUI-only business capability; the only
-  GUI-only items are two local conveniences (an "open `_deleted/` in Explorer" button and a
-  "recently-used models" quick-pick). The phase-out is surgical — strip the redundant spend
-  surfaces (the Generate/Video/Edit clones, which are strictly worse and have no cost/free-card
-  safety), not a wholesale delete. The GUI is excluded from the web-component cohesion
-  migration. Full deprecation also requires repointing the `Moonglade Athenaeum.pyw` launcher.
 - **Gallery search-bar redesign** is unstarted and deliberately blocked on the owner's
   layout-notes pass. Banked design: a LEFT Filters drawer mirroring the right Generate drawer.
   Sketch only after that pass.

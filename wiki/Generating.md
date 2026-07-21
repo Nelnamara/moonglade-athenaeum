@@ -8,34 +8,31 @@ appears in the gallery alongside your history.
 > is the paid part. The tool **previews unless you explicitly confirm**, and defaults
 > to the cheaper priority.
 
-## In the GUI (legacy — being phased out)
+## In the web gallery (the Generate drawer)
 
-> **The PySide6 GUI is on its way out.** The two surfaces going forward are the **CLI**
-> and the **web gallery**. Prefer the web **Generate drawer** (below) — it's the one with
-> live credit cost and the free-card check up front.
-
-The **Generate** tab:
+Open the gallery and click **✦ Generate** to slide out the **Generate drawer** — the
+creation surface, with the live credit cost and free-card check up front (covered
+generations cost 0). Its controls map onto the same PixAI parameters:
 
 | Control | Maps to | Notes |
 |---|---|---|
 | **Prompt** / **Negative** | `prompts` / `negativePrompts` | natural language is fine |
-| **Model** dropdown | `modelId` | pre-filled with models **you've used** (valid version ids), most-used first |
-| **Search PixAI…** | — | search the catalog; resolves the correct *version* id automatically |
-| **LoRAs** → Add LoRA… | `lora` + `loraParameters` | search → pick → weight; stack several |
-| **Aspect** + ⇄ Swap | `width`/`height` | presets at SDXL-friendly dims |
-| Width / Height / Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 |
+| **Model** picker | `modelId` | search resolves the correct *version* id automatically |
+| **LoRAs** → Add | `lora` + `loraParameters` | search → pick → weight; stack several |
+| **Aspect** / dimensions | `width`/`height` | presets at SDXL-friendly dims |
+| Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 |
 | **Mode** | `inferenceProfile` | Auto (default) · Lite · Standard · Pro · Ultra |
 | **Prompt helper** | `promptHelper` | on by default; uncheck to use your prompt literally |
 | **High priority** | `priority` | off (500, cheaper) by default; on = 1000 (faster, more credits) |
-| **Confirm** | — | **required** to actually submit and spend credits |
 
-Click **Generate** and watch the log: `Generated + cataloged N image(s)`.
+Submit and the result drops straight into your catalog, tagged `source='api'`, and
+appears in the gallery.
 
 ### The model-vs-version-id gotcha
 `createGenerationTask` needs a model's **version id**, not its model id. A model page
 URL (`pixai.art/model/<id>`) gives the *model* id, which generation rejects
-("Invalid modelId"). The dropdown and **Search PixAI…** hand you the correct version
-id — prefer those.
+("Invalid modelId"). The drawer's **model search** (and the CLI's `--list-models`) hand
+you the correct version id — prefer those.
 
 ### Modes are model-specific
 Lite/Standard suit older SD models; Pro/Ultra are for newer types. Picking an
@@ -89,9 +86,10 @@ but **video is expensive** (a V4.0 5-second clip is ~27,500 credits, ~50–100×
 so the preview shouts the cost, and the actual charge is read back from the server
 (`paidCredit`) after it runs. Clips download into `videos/` and catalog as `is_video`.
 
-**GUI:** the **Video** tab — paste a source image `media_id`, pick model / duration
-(5/10/15s; 15 is V4.0-only) / mode (Basic cheaper, Professional), optional audio,
-optional **End frame id** for first/last-frame interpolation, then Confirm.
+**Web:** the Generate drawer's **Video** tab — pick a source image, set model / duration
+(5/10/15s; 15 is V4.0-only) / mode (Basic cheaper, Professional), optional audio, optional
+end frame for first/last-frame interpolation, then submit (the cost + free-card check show
+first).
 
 ```bash
 # preview (free): prints the exact request + the ~credit cost
@@ -109,8 +107,8 @@ Describe a change and let PixAI's Edit model apply it — "make it nighttime", "
 Source can be a **catalog `media_id`** or a **local file** (uploaded automatically); pass
 `--edit-src` more than once for multi-image reference. Results catalog as `source='api'`.
 
-**GUI:** the **Edit** tab — put media_id(s) or a file path in *Source*, or click **Browse…**
-to pick a local image; type the change; set resolution/aspect/quality; Confirm.
+**Web:** the Generate drawer's **Edit** tab — pick the source image(s) from your gallery,
+type the change, set resolution/aspect/quality, then submit.
 
 ```bash
 # preview (free; local files show as placeholders, nothing uploads):
