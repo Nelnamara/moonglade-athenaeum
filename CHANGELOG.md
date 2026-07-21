@@ -15,6 +15,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-07-20 — Windows poster-lock fix
+
 ### Fixed
 
 - **A finished video no longer vanishes from the panel when its poster thumbnail hits a Windows
