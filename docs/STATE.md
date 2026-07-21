@@ -429,24 +429,24 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   path keeps serving whatever bug the default Babel-in-browser path already fixed — flagged by
   an adversarial review 2026-07-18, rebuilt as part of the Mode fix landing. Not yet on any
   automated rebuild step; still a manual reminder.
-- `<mg-cost-badge>` remains unbuilt. Nothing exists in `static/` for it.
+- `<mg-cost-badge>` is **built and verified** (`static/mg-cost-badge.js` + its harness page) but
+  **mounted nowhere in the app**. Six live `/api/price` consumers still each hand-roll their own
+  cost display: the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`, shared by the gallery
+  Video tab and the Loom), three in `pixai_gallery.py` (Image, Edit, and the picker path), and the
+  Loom's `priceShot` + `confirmSpend` — with `loom/src/loom-core.js` owning the aggregate summary
+  behind the cost-to-finish pill. Consolidating them is the open work, and it is a spend-safety
+  surface: six copies of "is this free or does it cost 27,500 credits" is the drift shape this
+  codebase has been bitten by before.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
-
-### Achievements
-
-- Populate `docs/achievements_roster_57.json`'s `badge` field — most entries are blank even
-  though every badge ships. A bookkeeping gap, not an art gap.
-- Build a new roster board from `docs/achievements_roster_57.json`.
 
 ### Control Panel / web parity
 
 What's still CLI-only, tracked so the web surface stays complete:
 
-- **`--restore-orphans` and `--undo-organize` have no Panel button** — the two remaining
-  CLI-only maintenance actions. (`reconcile-deleted` runs via `/api/panel/run` and the
-  scheduler but renders no button by design, `panel_visible: False`; `sync-artworks` and
-  `sync-videos` DO render buttons.) (`PANEL_ACTIONS` in `pixai_gallery.py`.)
+- Nothing. `--restore-orphans` and `--undo-organize` were the last two, and both now render
+  Panel buttons. (`reconcile-deleted` runs via `/api/panel/run` and the scheduler but renders
+  no button by design, `panel_visible: False`.) (`PANEL_ACTIONS` in `pixai_gallery.py`.)
 
 ---
 
