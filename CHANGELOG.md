@@ -85,6 +85,18 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Saved views belong to your account, not to the whole install.** They shipped in a single
+  shared file, by analogy with the skin choice — which is right for a theme and wrong for a
+  saved search, since a view's name and query say what you look for in your own library. On an
+  install with more than one login, everyone could read, overwrite and delete everyone else's.
+  Now one file per account. Nothing is lost on upgrade: an account with no file of its own
+  still reads the old shared set until its first save.
+- **The Loom's ? help button no longer covers the Generate button or the cost readout.** Making
+  it visible put a fixed circle in the bottom-right — which on `/loom` is where the Generate
+  drawer lives — so scrolling the drawer to the end, right before submitting, tucked the edge of
+  the Generate button and the tail of the cost line underneath it. The drawer now keeps clear
+  space beneath its content.
+
 - **Saved views now follow you between devices.** The gallery's "Saved views…" presets lived in
   each browser's own localStorage, so a view saved at the desktop simply didn't exist on the
   tablet sharing the same server. They now persist server-side (`/api/view-presets` →

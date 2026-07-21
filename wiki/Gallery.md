@@ -52,7 +52,9 @@ The filter bar:
 - **Sort** — newest/oldest, rating, aesthetic, likes, resolution.
 - Per-page selector, thumbnail-size slider, saved filter presets, privacy blur. Saved
   views are stored server-side, so a view saved at the desktop is in the tablet's
-  dropdown too — same follows-you behavior as your skin choice.
+  dropdown too. They belong to **your account**, not to the install — if someone else
+  has a login here, your saved searches are yours and theirs are theirs. (Your skin
+  choice, being purely cosmetic, is still install-wide.)
 - When any filter is active, the active-filter bar shows an **⬇ Export this view (CSV)**
   link that downloads exactly the rows you're looking at. (The Control Panel's **Download
   catalog (CSV)** is the whole-library dump.)
