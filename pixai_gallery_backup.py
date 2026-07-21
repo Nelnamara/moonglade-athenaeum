@@ -3426,7 +3426,10 @@ def run_import_local(args):
         save_catalog(db_path, rows)
     print("Imported {} new local file(s){}; {} already cataloged.".format(
         made, " (copied into the backup)" if external else "", skipped))
-    return {"imported": made, "skipped": skipped}
+    # media_ids of the rows created THIS run -- the web importer uses them to tag an
+    # optional collection; CLI callers that only read imported/skipped are unaffected.
+    return {"imported": made, "skipped": skipped,
+            "media_ids": [r["media_id"] for r in rows]}
 
 
 _GEN_MUTATION = ("mutation createGenerationTask($parameters: JSONObject!) {"
