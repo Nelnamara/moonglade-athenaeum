@@ -395,10 +395,16 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 ### Documentation
 
-- **`wiki/` is still missing a branding / mascots page.** The Loom, Control Panel, and Trophy
-  Hall pages landed 2026-07-21, closing three of the four gaps a DASHBOARD↔STATE reconciliation
-  surfaced 2026-07-20. Branding/mascots (marks, banner marks, the mascot chain, the Desktop
-  shortcut writer) is the one still undocumented in `wiki/`.
+- **The wiki backlog is closed — and branding/mascots stays deliberately undocumented there
+  (owner call, 2026-07-21). Do not write that page.** The branding surface is itself a
+  hidden-feat trigger field: the Konami Starfall egg, picking the *eclipse* mark animation,
+  and adding a custom mark file all set feat flags (`api_ach_event`, `telem_flag` —
+  `konami_triggered` / `eclipse_anim_triggered` / `branding_custom_file`), and the
+  per-achievement mascot chain, reward art, and tier-SFX slots are unlock-moment surprises the
+  feat system masks server-side (`api_achievements` cloaks and scrubs masked metrics). A wiki
+  page inventorying marks/animations/mascots would put those spoilers in the user reading
+  path. The README's one-line "make it yours" mention is the intended ceiling of public
+  documentation for this surface.
 
 ### The Loom — other
 - **Opt-in larger text/button scale** covering *both* the V2 shell's side panels and the
