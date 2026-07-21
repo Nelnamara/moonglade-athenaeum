@@ -573,10 +573,7 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   that line — so it is a naming/clarity wart, not a bug. Renaming it touches auth-adjacent
   template logic and wants an owner nod rather than a drive-by.
 
-- **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not follow the
-  owner between the devices that share one server — the desktop and the tablet. (The work
-  machine is dev/test and runs no gallery, so cross-*install* sync is not the gap; same-server
-  roaming is.)
+
 ### Machine-local layout (a standing drift hazard, not a bug)
 
 - The **live gallery server runs from the D: run-copy** (`D:\Moonglade Athenaeum\`), a separate
