@@ -110,7 +110,12 @@ ROUTE_TIERS = {
     ("duplicates", "GET"): LOGIN,
     ("loom", "GET"): LOGIN,
     ("contact_sheet", "GET"): LOGIN,
-    ("manifest", "GET"): LOGIN,
+    # The manifest body is a compile-time constant (no user data, no install paths), and
+    # the browser fetches it unprompted from the public login page -- gating it only bought
+    # a self-inflicted redirect. /sw.js is the same CLASS of asset but is NOT bundled in
+    # with it: serving the worker script is a separate question from what the worker
+    # caches, and the cache-survives-sign-out concern has to be settled on its own.
+    ("manifest", "GET"): PUBLIC,
     ("service_worker", "GET"): LOGIN,
     # Flask's own static endpoint is NOT special-cased away here on purpose.
     # `if rule.endpoint == "static": continue` is the single most common way a
@@ -224,6 +229,7 @@ PUBLIC_EXPECTED_STATUS = {
     ("login", "POST"): {200},      # re-renders the form (no csrf) -- never a redirect
     ("logout", "GET"): {302},      # its own redirect to /login, not the front door's
     ("branding", "GET"): {404},    # missing art 404s; it must never redirect to /login
+    ("manifest", "GET"): {200},    # a constant body -- anonymous callers get the real thing
 }
 
 # A few routes only reach their localhost gate with a meaningful payload.
