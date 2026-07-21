@@ -27,15 +27,22 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   machine running the server exactly as it does over the network. Nothing is browsable
   anonymously. Sessions are signed cookies over scrypt-hashed passwords, rate-limited per
   address, and signing out revokes every outstanding session for that account on every device.
+  Account creation is **closed after the first local bootstrap**: the login page mints the very
+  first account (only from the server's own machine, only while none exist), then never offers
+  signup again. New accounts come only from **Panel → Users** (any signed-in session) or the
+  `--add-web-user` CLI on the server machine — never a public registration form. Removing the
+  last account re-opens that first-run bootstrap locally, which is the deliberate lockout
+  escape hatch.
 
 - **Touch the server machine, or irreversibly delete from your PixAI account, from another
   device — even signed in.** A signed-in phone or tablet *can* browse and generate; that is
   the point of the login. But three things stay stricter and require a request from the
   machine running the server no matter who is signed in: the destructive Control Panel jobs
   (organize, dedup-apply, rebuild-thumbnails, plus cancelling a running job and editing the
-  schedule), cloud bulk-delete, and writing the API key or launcher icon. Those act on your
-  files or delete from PixAI permanently, which is a different class of trust than spending
-  credits.
+  schedule), cloud bulk-delete, writing the API key or launcher icon, and importing local
+  files into your library (the **↑ Import** drop-zone / `--import-local`, which copies files
+  onto the server machine). Those act on your files or delete from PixAI permanently, which is
+  a different class of trust than spending credits.
 - **Send your credentials anywhere but PixAI's own API.** `config.json` (your API key) and
   the git-ignored `private/` notes never leave your machine and are never logged or uploaded.
 
