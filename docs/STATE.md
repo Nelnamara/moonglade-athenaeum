@@ -28,8 +28,9 @@ Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owne
 generations, serves a local searchable web gallery, generates images and videos through
 PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
 the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; it and `master` are
-currently level at **v2.1.0** (released 2026-07-20 — web parity complete, the desktop GUI
-removed, gallery generation fixed). Each release is a `--no-ff` merge of `loom-v2` → `master`,
+currently level at **v2.1.1** (2026-07-20 — v2.1.0 completed web parity, removed the desktop
+GUI, and fixed gallery generation; v2.1.1 patched a Windows poster file-lock that could drop a
+finished video from the panel). Each release is a `--no-ff` merge of `loom-v2` → `master`,
 tagged and published as a GitHub Release. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
 tree, the `v2` toggle, and the `CardView`/`CardEditor` components) was retired 2026-07-17; `/loom`
 opens straight into the V2 shell with no layout switch. The repo is public and has real external
