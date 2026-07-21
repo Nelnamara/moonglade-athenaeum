@@ -4059,6 +4059,10 @@ document.addEventListener('DOMContentLoaded', function() {
 <div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--emerald, #4fc99a);border-radius:4px;color:var(--text);font-size:13px;">
   Added {{ request.args.get('collected') }} image(s) to the collection.</div>
 {% endif %}
+{% if request.args.get('uncollected') %}
+<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--emerald, #4fc99a);border-radius:4px;color:var(--text);font-size:13px;">
+  Removed {{ request.args.get('uncollected') }} item(s) from the collection. Files are untouched.</div>
+{% endif %}
 {% if request.args.get('deleted') %}
 <div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--red);border-radius:4px;color:var(--text);font-size:13px;">
   Deleted {{ request.args.get('deleted') }} task(s) from PixAI · {{ request.args.get('removed') }} local file(s) purged{% if request.args.get('failed') and request.args.get('failed') != '0' %} · <span style="color:var(--red);">{{ request.args.get('failed') }} failed</span>{% endif %}.</div>
@@ -4106,6 +4110,14 @@ document.addEventListener('DOMContentLoaded', function() {
     <button class="btn btn-primary" id="actions-btn" onclick="toggleActionsMenu(event)">Actions <span id="act-n"></span> &#9662;</button>
     <div class="actions-menu" id="actions-menu">
       <button onclick="bulkAddCollection();closeActionsMenu()">&#43; Add to collection</button>
+      {# Only meaningful while a collection filter is active -- "remove from WHICH one?"
+         has no answer otherwise. Same conditional shape as the "Download collection"
+         button in the filter bar, and the name rides a data attribute (HTML-escaped,
+         read back via dataset) so a name with quotes can't break the handler. #}
+      {% if collection %}
+      <button data-coll="{{ collection }}" onclick="bulkRemoveCollection(this.dataset.coll);closeActionsMenu()"
+              title="Take the selected items out of this collection (a label only -- no files are deleted)">&#8722; Remove from &ldquo;{{ collection }}&rdquo;</button>
+      {% endif %}
       <button onclick="bulkSendVideo();closeActionsMenu()">&#9654; Send to Video</button>
       <button onclick="bulkSendCast();closeActionsMenu()">&#9648; Send to The Loom (cast)</button>
       <button onclick="bulkContactSheet();closeActionsMenu()">&#128424; Print sheet</button>
@@ -4552,6 +4564,27 @@ function bulkAddCollection() {
   add('back', location.href); add('name', name.trim());
   sel.forEach(function(mid){ add('media_ids', mid); });
   localStorage.removeItem('gallery_sel');   // consume the selection so the NEXT collection starts fresh
+  document.body.appendChild(f); f.submit();
+}
+// Mirror of bulkAddCollection for the other direction. The collection is NOT prompted for:
+// this button only exists while a collection filter is active, so the target is the one the
+// grid is already showing -- passed in from the button's data attribute.
+function bulkRemoveCollection(name) {
+  var sel = [...selGet()];
+  if (!sel.length) { alert('Select one or more images/videos first (check the boxes, or "Select all"), then use Remove from collection.'); return; }
+  if (!name) return;
+  if (!confirm('Remove ' + sel.length + ' item(s) from the collection \\u201c' + name + '\\u201d?\\n\\n'
+    + 'Only the collection label is removed \\u2014 no files are deleted and nothing leaves your PixAI account.')) return;
+  var f = document.createElement('form');
+  f.method = 'post'; f.action = '/collection-remove';
+  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
+  // Strip the one-shot banner param before it becomes `back`: removing twice in a row
+  // would otherwise stack ?uncollected=3&uncollected=1 and the banner (which reads the
+  // FIRST value) would report the stale count.
+  var back = new URL(location.href); back.searchParams.delete('uncollected');
+  add('back', back.pathname + back.search); add('name', name);
+  sel.forEach(function(mid){ add('media_ids', mid); });
+  localStorage.removeItem('gallery_sel');   // consume the selection: those rows are about to leave this view
   document.body.appendChild(f); f.submit();
 }
 function confirmBulkDelete() {
@@ -8606,11 +8639,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/collection-remove", methods=["POST"])
     def collection_remove():
+        # Same shape as /collection-add, including the one-shot count in the query
+        # string: `back` normally carries the collection filter the removal happened
+        # under, so the reloaded grid is missing those rows and the banner is the only
+        # thing that says how many left. `uncollected` (not `removed`, which the
+        # cloud-delete banner already owns) keeps the two banners independent.
         back = request.form.get("back") or url_for("index")
         ids = request.form.getlist("media_ids")
         name = request.form.get("name", "")
-        remove_from_collection(db_path, ids, name)
-        return redirect(back)
+        n = remove_from_collection(db_path, ids, name)
+        sep = "&" if "?" in back else "?"
+        return redirect("{}{}uncollected={}".format(back, sep, n))
 
     @app.route("/bulk-replace-prompt", methods=["POST"])
     def bulk_replace():

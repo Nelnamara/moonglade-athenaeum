@@ -45,5 +45,51 @@ jobs:
       - name: Build the esbuild bundle
         run: npm run build
 
+      # THE STALE-BUNDLE GATE.
+      #
+      # loom/dist/master-storyboard.bundle.js is COMMITTED and served verbatim by
+      # /loom?bundle=1 (pixai_gallery.py's loom() reads it straight off disk). Nothing
+      # else in the repo forces a rebuild, so editing master-storyboard.jsx and
+      # forgetting `npm run build` silently leaves that route serving the OLD code --
+      # which is exactly how the `useMemo` blank-page bug shipped: the .jsx and the
+      # Babel path moved on, the committed bundle did not, and only a browser crawl
+      # found it. tests/test_js_syntax.py pins the hook preamble, but that catches
+      # only the one drift that happens to touch the preamble; every other kind of
+      # source change leaves a stale bundle completely invisible.
+      #
+      # The comparison is byte-exact, which is safe here because the build is
+      # deterministic: `npm ci` installs the esbuild version pinned in
+      # loom/package-lock.json (0.25.12 at time of writing), esbuild emits no banner,
+      # timestamp or build id, and its module-path comments use forward slashes on
+      # every platform. Verified by rebuilding on Windows and diffing against the
+      # Linux-built committed artifact: identical, all 192,513 bytes. Line endings are
+      # a non-issue because git normalizes through .gitattributes (`* text=auto`), so
+      # this compares normalized blobs, not raw working-tree bytes.
+      #
+      # `git status --porcelain` (not `git diff`) so a NEW untracked file in dist/ --
+      # e.g. someone adds a second entry point and forgets to commit it -- fails too.
+      - name: Fail if the committed bundle is stale
+        run: |
+          if [ -n "$(git status --porcelain -- dist)" ]; then
+            echo "::error file=loom/dist/master-storyboard.bundle.js::Stale bundle: loom/dist does not match a fresh build. Run 'cd loom && npm run build' and commit loom/dist/."
+            echo "-------------------------------------------------------------------"
+            echo "loom/dist/ is STALE -- the committed bundle differs from a fresh build."
+            echo "/loom?bundle=1 serves the committed file, so it is currently serving"
+            echo "code that no longer matches loom/master-storyboard.jsx."
+            echo ""
+            echo "Fix:  cd loom && npm run build   then commit loom/dist/"
+            echo ""
+            echo "(If you did rebuild, your local esbuild may differ from the version"
+            echo " pinned in loom/package-lock.json -- run 'npm ci' in loom/ first.)"
+            echo "-------------------------------------------------------------------"
+            git status --porcelain -- dist
+            git --no-pager diff --stat -- dist
+            # `|| true`: the default shell is `bash -e -o pipefail`, and head closing
+            # the pipe early would SIGPIPE git and abort before the explicit exit below.
+            git --no-pager diff -- dist | head -100 || true
+            exit 1
+          fi
+          echo "loom/dist matches a fresh build."
+
       - name: Run the Loom's pure-logic test suite
         run: node --test
