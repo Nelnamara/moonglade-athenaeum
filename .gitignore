@@ -2,7 +2,6 @@
 token.txt
 .env
 config.json
-pixai_gui_settings.json
 serve.txt
 serve.log
 

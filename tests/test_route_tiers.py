@@ -100,6 +100,7 @@ ROUTE_TIERS = {
     ("api_panel_schedule", "POST"): LOCALHOST,      # writes the schedule + global workers count
     ("api_setup_save_key", "POST"): LOCALHOST,      # rewrites config.json
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
+    ("api_import_local", "POST"): LOCALHOST,         # writes files into the backup + shells thumbnails
 
     # -- LOGIN: any authorized session ---------------------------------------
     ("index", "GET"): LOGIN,

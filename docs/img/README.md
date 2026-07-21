@@ -8,9 +8,8 @@ theme (pick one and stay consistent). Crop out your OS chrome where you can.
 |---|---|---|
 | `hero.png` | The gallery grid, full of thumbnails | The banner. Make it look abundant — lots of images, filter bar visible. |
 | `curation.png` | Select mode active + a Collection | Toggle **Select**, paint a few selected (highlighted), Collection dropdown open or a collection filtered. |
-| `generate.png` | The Generate tab (GUI) | Prompt filled, a model chosen, LoRA row visible. |
+| `generate.png` | The web **Generate drawer** | Prompt filled, a model chosen, LoRA row visible. |
 | `health.png` | `/health` Collection Health page | Scroll so a chart + the top-models/word-cloud show. |
-| `gui.png` | The GUI main window | Any tab; show the tabbed layout + log pane. |
 
 Optional GIFs (nice-to-have, not referenced yet): `drag-paint.gif` (painting a
 selection), `generate-appear.gif` (submit → image appears in the grid). Use

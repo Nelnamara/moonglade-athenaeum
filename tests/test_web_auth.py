@@ -29,6 +29,25 @@ LAN = "203.0.113.5"          # TEST-NET-3 -- a "some other device on the LAN" st
 LAN2 = "203.0.113.9"
 
 
+def test_every_response_carries_the_server_marker(tmp_path):
+    """The `Serve Gallery` launcher decides "one of our servers is already on this port"
+    by the X-Moonglade response header, NOT a 200 status: /api/ping now sits behind the
+    login gate, so its unauthenticated probe gets a 401, and urllib raises on that. The
+    marker therefore has to ride EVERY response, including the front door's 401 -- which
+    is returned straight from the before_request hook and runs no view. If the header were
+    set in the ping view instead, the 401 would lack it and the launcher would mistake a
+    gated-but-live server for a dead port and start a second one (the original bug).
+
+    Bite: move the header into api_ping()'s body and the 401 assertion here fails."""
+    cli = _client(tmp_path).test_client()
+    r200 = cli.get("/login")                       # public page, a real view runs
+    assert r200.status_code == 200
+    assert r200.headers.get("X-Moonglade") == "1"
+    r401 = cli.get("/api/ping")                     # gated -> 401 from the hook, no view
+    assert r401.status_code == 401
+    assert r401.headers.get("X-Moonglade") == "1"
+
+
 # ---------------------------------------------------------------------------
 # config.json helpers (secret key + account lifecycle)
 # ---------------------------------------------------------------------------
@@ -502,12 +521,22 @@ def test_failed_post_still_rotates_csrf_token(tmp_path):
 def test_login_rate_limit_locks_out_after_five_failures(tmp_path):
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
-    for _ in range(5):
+    for attempt in range(1, 6):
         html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
         r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
                      data={"username": "alice", "password": "wrong",
                            "csrf": _csrf(html)})
-        assert "Invalid username or password" in r.get_data(as_text=True)
+        body = r.get_data(as_text=True)
+        if attempt < 5:
+            assert "Invalid username or password" in body
+            assert "too many failed attempts" not in body.lower()
+        else:
+            # The 5th failure is the one that TRIPS the lock. It used to render the
+            # ordinary "invalid password" text, so the user was locked out without
+            # being told -- their next attempt looked like the same rejection for no
+            # stated reason. The attempt itself is still spent (five real tries), only
+            # the message changes.
+            assert "too many failed attempts" in body.lower()
     # 6th attempt from the SAME address, even with the CORRECT password, is refused.
     html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
     r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
@@ -761,7 +790,15 @@ def test_login_rate_limit_race_does_not_grant_extra_guesses(tmp_path, monkeypatc
     import time as _time
 
     core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
+    # Each thread gets its OWN client (own session/cookie jar) from the SAME app.
+    # A single shared test client is NOT thread-safe: 10 concurrent GET+POST pairs on
+    # one session race on the CSRF cookie, so some POSTs land with a token a sibling
+    # already rotated and come back "session expired" -- neither Invalid nor locked,
+    # which broke the `== N` count intermittently (green locally, red on CI's timing).
+    # The rate limiter is keyed by IP, not session, so separate sessions from the same
+    # REMOTE_ADDR still share the counter -- the concurrency race under test is intact;
+    # only the incidental CSRF cross-talk is removed.
+    app = _client(tmp_path)
     real_verify = core.verify_web_user
 
     def slow_verify(username, password):
@@ -773,6 +810,7 @@ def test_login_rate_limit_race_does_not_grant_extra_guesses(tmp_path, monkeypatc
     results = [None] * N
 
     def attempt(i):
+        cli = app.test_client()
         html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
         r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
                      data={"username": "alice", "password": "wrong-{}".format(i),

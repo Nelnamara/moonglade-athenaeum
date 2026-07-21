@@ -12,7 +12,6 @@ pip install -r requirements.txt
 |---|---|
 | `requests` | all network operations (required) |
 | `pillow` | thumbnails, conversion, metadata embedding |
-| `PySide6` | the desktop GUI (`pixai_gui.py`) |
 | `flask` | the local web gallery (`pixai_gallery.py`) |
 | `websockets` | `--watch` / `--watch-backup`, and the web gallery's auto-starting live-mirror thread |
 | `truststore` | optional — fixes HTTPS cert errors behind corporate proxies / AV |
@@ -63,14 +62,22 @@ only for a request from the server's own machine while zero accounts exist, so n
 your network can claim the first account before you do. From then on, sign in with it from
 any device.
 
-Add more accounts later from **Panel → Users**. If you ever lock yourself out entirely,
-`python pixai_gallery_backup.py --add-web-user` is the recovery path.
+**Adding more accounts.** The login page offers to *create* an account only during that
+first-run bootstrap; once one account exists it goes back to sign-in only, so nobody on your
+network can register themselves — deliberate, since it's your library and your PixAI account
+behind it. To add a person or a second device after that, open **Panel → Users** and add them
+there. Any signed-in session can: every account carries equal trust, there's no separate admin
+role.
 
-Desktop app (legacy — the PySide6 GUI is being folded into the web app):
-```bash
-python pixai_gui.py
-```
-Double-click launcher (no console): **`Moonglade Athenaeum.pyw`**.
+**Locked out, or resetting a forgotten password.** On the server machine,
+`python pixai_gallery_backup.py --add-web-user` prompts (hidden — never echoed) for a username
+and password and writes the hash straight to `config.json`. It *adds or updates*, so it doubles
+as a password reset for an existing name. Companions: `--list-web-users` shows who exists,
+`--remove-web-user <name>` deletes one. (Remove the last account and the first-run bootstrap
+re-opens on the server machine — a deliberate escape hatch, not a bug.)
+
+Prefer a double-click, no-console launcher? Use **`Serve Gallery.pyw`** — it starts the web
+gallery (and supervises it) without a terminal window.
 
 Headless:
 ```bash

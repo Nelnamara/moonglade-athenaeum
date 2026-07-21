@@ -24,8 +24,9 @@ in the gallery:
 Deleting a task on PixAI doesn't touch your local backup (by design). To find and
 prune those orphans:
 
-1. GUI **Library → Reconcile Deleted** (or `--reconcile-deleted`). It pages your
-   live feed (~1–2 min) and flags catalog rows whose task is gone.
+1. Run **`python pixai_gallery_backup.py --reconcile-deleted`** (it's also the last step of
+   `--sync`, and a scheduler action). It pages your live feed (~1–2 min) and flags catalog
+   rows whose task is gone.
 2. Gallery → **Source → "Deleted on PixAI"** → select → **Delete locally**.
 
 It skips imports and anything generated in the last ~2 days (so a fresh generation

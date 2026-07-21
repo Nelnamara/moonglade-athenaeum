@@ -26,9 +26,8 @@
 
 Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owner's own AI
 generations, serves a local searchable web gallery, generates images and videos through
-PixAI's API, and curates the archive. Two surfaces are current — the CLI
-(`pixai_gallery_backup.py`) and the web app (`pixai_gallery.py`); the PySide6 desktop GUI is
-legacy and folding into the web app. All work happens on the `loom-v2` branch; `master` has no
+PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
+the web app (`pixai_gallery.py`). All work happens on the `loom-v2` branch; `master` has no
 commits that aren't already in `loom-v2`. Merging `loom-v2` → `master` with `--no-ff` is the
 single act that carries the Loom V2 set, the achievement system, `CHANGELOG.md` and `LICENSE`
 to master. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
@@ -307,8 +306,8 @@ users.
 ## Public repo / community
 
 - **CI** (`.github/workflows/tests.yml`) runs both suites on every push and pull request: the
-  Python suite (`--ignore=tests/test_similar.py`, no `pixeltable`/PySide6 installed — no test
-  imports either) and the Loom's `node --test` after an esbuild rebuild.
+  Python suite (`--ignore=tests/test_similar.py`, no `pixeltable` installed — no test imports
+  it) and the Loom's `node --test` after an esbuild rebuild.
 - **`CONTRIBUTING.md`** covers setup, running tests, the invariants that matter most to an
   outside contributor (`media_id` resolution, catalog-schema three-place changes, never
   committing `config.json`), PR expectations, and a private channel for security reports.
@@ -386,6 +385,18 @@ reads as zero accounts and drops the install into bootstrap mode.
 ---
 
 ## Next
+
+### Documentation
+
+- **The published `wiki/` has a real catch-up backlog.** Four current areas are undocumented
+  there: **The Loom** (V2 shell + generation), the **Control Panel** (maintenance jobs, the
+  scheduler, Advanced sync options, Users), **Trophy Hall / achievements**, and
+  **branding / mascots**. `wiki/` today is only Backing-Up · Collections · Deleting · FAQ ·
+  Gallery · Generating · Health · How-It-Works · Setup · Troubleshooting · Trust-and-Safety. This
+  is a discrete deliverable, distinct from CLAUDE.md's go-forward "update the wiki on every
+  commit" rule — that rule is what makes the backlog a live obligation, not a nice-to-have.
+  (Surfaced 2026-07-20 by a DASHBOARD↔STATE reconciliation; the item had lived only in the
+  git-ignored local dashboard.)
 
 ### The Loom — other
 
@@ -579,52 +590,51 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
 ### Control Panel / web parity
 
-Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
+What's still CLI-only, tracked so the web surface stays complete:
 
-- No Panel buttons for `--rebuild-similar`, `--verify-dupes`, `--restore-orphans` or
-  `--undo-organize`. `sync-artworks` / `sync-videos` / `reconcile-deleted` are runnable via
-  `/api/panel/run` and the scheduler but render no button (`panel_visible: False`). The Audit
-  button is hardcoded to `--audit --no-content` with no full-audit toggle. The Dedup button has
-  no `--dedup-delete` checkbox. (`PANEL_ACTIONS` in `pixai_gallery.py`.)
-- **Sync options.** "Sync now" runs a bare `--sync`. There is no web way to force a complete
-  non-incremental re-walk of full history, to catalog rows without downloading files (fast
-  inventory pass), or to pull a handful of tasks as a quick test. Needs its own scoping pass to
-  pick the UI shape (a Panel "Advanced" section vs. per-run options).
-- **Video/audio reference slots are still missing from the LIVE gallery drawer's Multi-ref**
-  (unchanged — its own hand-rolled Video tab, `#gen-mode-video`). The web Video tab was born
-  "simple mode" (`d03e6c8`, 2026-07-03) with image slots only, one day after the CLI shipped
-  the full `--ref-image/--ref-video/--ref-audio` grammar, and the follow-up was never tracked
-  until 2026-07-18. **The fix exists now** — `<mg-generate-drawer>` has the full 6 image + 3
-  video + 1 audio slot split — but nothing mounts it in the gallery yet; it only reaches the
-  live drawer once that swap happens (see Web components above).
-- **Video negative prompts** are unreachable from the web drawer and the Loom.
-  `build_video_parameters()` accepts a `negative` kwarg and emits `i2v["negativePrompts"]`, but
-  the shared adapter `build_shot_video_params()` — used by both surfaces — has no `negative`
-  parameter and threads nothing to `build_video_parameters` or
-  `build_reference_video_parameters`. Fix: add the param, thread it to both call sites, add a
-  UI field. Reference-video (R2V) may be a genuine API gap — its captured submit shape has no
-  negative field.
-- **Convert-and-download.** `/export-zip` streams selected full-res files with `ZIP_STORED` —
-  no format conversion, no metadata embedding, no whole-collection scope. Decided shape: the
-  catalog stays exactly as PixAI delivers it; conversion is an export-time transform only and
-  never re-enters the catalog as a new row. An "embed metadata" checkbox (prompt / task-id /
-  media-id into a PNG text chunk or JPEG EXIF) belongs on this same export flow — that is where
-  `--embed-metadata` gets a web home, not a bulk Organize checkbox. CLI-side machinery already
-  exists (`embed_metadata()`, `--embed-metadata`, `convert_image()`).
-- **Web import into the catalog.** `--import-local [DIR]` is CLI-only and a blind scan-and-add
-  with no preview or confirm step. No web route imports into the catalog (`/api/upload` sends a
-  file to PixAI for use as a generation reference; `/api/import-task` banks a Toolbox task id).
-  Wanted: a button or drag-and-drop target accepting a single file, a folder, or a zip, with a
-  preview/confirm step before commit. Builds on existing conventions — the `source='local'`
-  catalog tag and the `imported/` folder already exist.
+- **`--restore-orphans` and `--undo-organize` have no Panel button** — the two remaining
+  CLI-only maintenance actions. (`sync-artworks` / `sync-videos` / `reconcile-deleted` run via
+  `/api/panel/run` and the scheduler but render no button by design, `panel_visible: False`.)
+  (`PANEL_ACTIONS` in `pixai_gallery.py`.)
+- ~~**Web import into the catalog.**~~ ✅ **Shipped 2026-07-20.** The **↑ Import** button (owner
+  header) opens a drop-zone modal (drop images / a folder / a `.zip`, or browse), with an adaptive
+  preview (thumbnail list when few, capped 24-tile grid when many — import is uncapped) and
+  add-to-collection. `POST /api/import-local` is localhost-only (host-filesystem write tier),
+  reuses `run_import_local` (`source='local'` → `imported/` → thumbnail, path-dedup), and expands
+  zips with a zip-slip guard. This was the last web-parity item.
 
-### Release
+---
 
-- **Merge `loom-v2` → `master` with `--no-ff`.** The single act that carries the Loom V2 set,
-  achievements, `CHANGELOG.md` and `LICENSE` to master. `master` has no commits that aren't
-  already in `loom-v2`; merge-tree is clean.
-- **Publish a GitHub Release for the newest tag** — it is the only tag without one; every
-  earlier tag is released.
+## Priority order (agreed 2026-07-19)
+
+Ranked, with the reason each sits where it does.
+
+1. **Web parity** — ✅ **COMPLETE 2026-07-20.** ✅ force-full-resync (Advanced Panel) · ✅
+   video/audio reference slots in the live gallery drawer's Multi-ref (the `<mg-generate-drawer>`
+   swap) · ✅ convert-and-download for `/export-zip` · ✅ web import into the catalog (the
+   drop-zone modal + `/api/import-local`). The two surfaces are the CLI and the web app.
+2. **Gallery QoL easy wins** — chiefly the collection-remove UI: `/collection-remove` exists
+   with **zero callers**, so the route is already written and only the UI is missing.
+3. **The 401 batch and the search wildcard** — ✅ both shipped 2026-07-19. What remains of
+   the 401 finding is the poll-ceiling half (see Known defects).
+4. **The naming pass** (`pixai_* → moonglade_*`) — sequenced here for *timing*, not value:
+   it is cleanest immediately after a merge while `master` and the working branch are
+   identical. Size it with `python tools/name_inventory.py modules` before committing to it.
+5. **The Design Pass** (below) — one body of work, not five separate ones.
+
+### The Design Pass (consolidated)
+
+Grouped by owner decision 2026-07-19: these were tracked as separate items but are one
+coherent visual effort and should be scoped and executed together rather than piecemeal.
+
+- The **Trophy Hall redesign**, blocked on the owner's own Figma frame.
+- The **Loom visual-refinement pass** — the skin system already reaches the Loom, so what
+  remains is refinement rather than plumbing.
+- The **gallery search-bar redesign**, blocked on owner input.
+- The **owner's layout/function note-taking pass**, which gates several deferred items.
+- Epic-tier frame art, per-tile ornate frames, the "earned rewards" display, the
+  toast-badge-to-home-marker motion, and toast tier colours vs shipped badge art — all
+  previously filed individually under Open owner calls.
 
 ---
 
@@ -654,14 +664,6 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   carried on gem + glow, ring reinforces; legendary warmed toward amber) was never
   owner-confirmed; the code still runs the original (common = steel-blue `#9fbad6`, with
   `--gunmetal #8a93a2` / `--ruby #e0355e`).
-- **PySide6 GUI removal** (`pixai_gui.py` + `Moonglade Athenaeum.pyw`) is decided but **not
-  executed** — both files are present. The GO is gated on the Panel web additions above landing
-  first. A GUI/web/CLI parity matrix confirmed zero GUI-only business capability; the only
-  GUI-only items are two local conveniences (an "open `_deleted/` in Explorer" button and a
-  "recently-used models" quick-pick). The phase-out is surgical — strip the redundant spend
-  surfaces (the Generate/Video/Edit clones, which are strictly worse and have no cost/free-card
-  safety), not a wholesale delete. The GUI is excluded from the web-component cohesion
-  migration. Full deprecation also requires repointing the `Moonglade Athenaeum.pyw` launcher.
 - **Gallery search-bar redesign** is unstarted and deliberately blocked on the owner's
   layout-notes pass. Banked design: a LEFT Filters drawer mirroring the right Generate drawer.
   Sketch only after that pass.
@@ -669,20 +671,16 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   cosmetic items: the image picker's further visual polish, taste-level width/spacing tweaks on
   Generate/Edit/Enhance, and the Composer's collapsed-stack fan animation. Features are built
   cheap-to-rearrange in anticipation of it.
-- **Generation Flags** (an AI QA pass) has zero code footprint and no spec. Blocked on two
-  decisions: what a pass flags (anatomy / artifacts / NSFW / duplication?), and where the
-  verdict lives. It is not dependency-free — numpy is not a current dep and the CLIP index
-  rides heavy optional deps. It is **not** the shipped Pixeltable "Similar / more like this"
-  search.
-- **Mio.2** (PixAI's agent surface) is deferred pending explicit owner direction. It is
-  cookie-authed — the `sk-` Bearer 401s — and the contract is bankable free from the JS bundle,
-  but integration means a cookie-jar rewrite. Worth it only as a deliberate agent-UX bet. **Do
-  not capture cookies without owner direction.**
-- **Deleting the stale branches** needs a go-ahead. `generate-drawer`, `suite-polish` and
-  `video-gen` each have zero commits not already in `loom-v2` — safe, no-data-loss deletes.
-  `suite-polish` exists only locally; the other two also exist on origin. Keep
-  `loom-extract-hook`: it holds the disproven single-hook extraction attempt (2321cac) as the
-  documented record.
+- **Generation Flags** — the owner asked 2026-07-19 for a scope call rather than another
+  deferral: *"either we keep deferring this or it's actually done. WHAT is the scope."*
+  Current state is zero code, no spec, and two unanswered product questions (what a pass
+  flags — anatomy / artifacts / NSFW / duplication — and where the verdict lives). It is not
+  dependency-free: numpy is not a current dep and the CLIP index rides heavy optional ones.
+  It is **not** the shipped Pixeltable "Similar / more like this" search.
+  **Recommendation on the table: shrink or drop.** The only version that is concrete and
+  nearly free today is *"flag near-duplicate generations"*, which the existing Pixeltable
+  CLIP index can already answer with no new dependencies. Anatomy/artifact/NSFW detection is
+  a research project rather than a backlog item, and should be named as one or dropped.
 - **File logging** has never entered any tracker, despite `CLAUDE.md` calling it "a separate,
   still-open discussion" since `-v/--verbose` shipped. It is a loose thread, not a parked
   decision: decide whether it is in scope, or drop it.
@@ -693,56 +691,56 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
 
 *Found 2026-07-19 by a Playwright browser crawl (185 controls, 60 screenshots reviewed by eye).
 None of these produce a console error or a wrong HTTP response, which is why the suite was fully
-green throughout. Ranked; the V1-cluster CSS bug they were found alongside is already fixed.*
+green throughout. Ranked.*
 
-- **The `Serve Gallery` launcher can start a second server on one port.** Its single-instance
-  guard probes `/api/ping` unauthenticated; that route is now gated and answers 401, the bare
-  `except` swallows it, and it launches anyway. Observed for real during development — three
-  Python processes shared port 5077 via Windows `SO_REUSEADDR`, serving stale code and costing
-  four rounds of misdiagnosis. Fix: treat 401 as "ours, already running".
-- **The search wildcard makes searches *stricter*, usually to zero.** The placeholder advertises
-  `night*`; typing the app's own example returns nothing. `sample` → 24 results, `sampl*` → 0.
-  With a wildcard present the term becomes the whole LIKE pattern, anchored to the start of the
-  entire prompt, instead of being wrapped as a substring. `_like_pattern()`.
+*Every entry re-verified against the code 2026-07-20; fixed ones are deleted, per this file's
+rule. Two claims did not survive: the Loom's **cost pill is not dead** (`refreshEstimate` has
+been wired since the pill's introducing commit — the crawler most likely clicked it while
+prices were already settled), and **`#del-modal` is not dead markup** (`confirmDelete()` drives
+both the per-row and bulk delete paths; it being what a crawl agent's XPath matched is a
+crawler-targeting note, not a defect). Two more were crawl-environment artifacts rather than
+bugs: **"Set launcher icon" 400s only where no `branding/marks/` exists**, so there is no `.ico`
+to point at and the 400 carries a correct explanatory message — the real install has cuts for
+marks 4/12/62/63/74; and **`mg-notify.js`'s mascot paths are consistent** — all use
+`/branding/mascots/`. The genuine gap there is that no `login_nel.png` art exists, so the login
+page's `onerror` chain degrades to `gen_nel.png` as designed.*
+
 - **`/logout` is a CSRF-able GET that revokes globally.** No token, and it bumps `sess_epoch`,
-  so any page with `<img src=".../logout">` signs the user out on every device. Denial of
-  convenience only. *Not* closed by the revocation fix — the victim's cookie is still valid, so
-  the bump proceeds legitimately. Fix is a POST + CSRF, or splitting local sign-out from global
-  revocation.
+  so a cross-site *top-level navigation* (link, `window.open`, `location=`) signs the user out
+  on every device. Denial of convenience only. *Not* closed by the revocation fix — the
+  victim's cookie is still valid, so the bump proceeds legitimately. Fix is a POST + CSRF, or
+  splitting local sign-out from global revocation. **Note:** the `<img src=".../logout">`
+  vector originally cited here never worked — `SESSION_COOKIE_SAMESITE = "Lax"` predates the
+  crawl, so a cross-site subresource GET carries no cookie and the bump is skipped. The defect
+  is real; only its cheapest vector was wrong.
 - **Escape doesn't close the Loom's project or Export menus**, and their backdrop is a
   full-viewport `pointer-events:auto` veil — so the entire app is unclickable until the user
   happens to click outside. Deep Focus's own Escape handler works correctly in the same app.
-- **The rate-limit lockout is off by one and locks silently.** The 5th failure sets
-  `locked_until` but still returns the ordinary "Invalid username or password", so the user is
-  locked without being told, then the *correct* password is refused for 15 minutes.
 - **Service-worker registration fails on the login page.** `/sw.js` is gated, so a signed-out
   page gets a redirect and Chrome refuses a redirected worker script. It registers on the next
   navigation after signing in; the thumbnail cache simply arms late.
-- **Native form controls are unstyled in three inconsistent flavours** — 24 white OS checkboxes
-  over artwork on the default grid, native-grey selects beside custom purple ones, and checked
-  states rendering Chrome blue *and* app purple on the same page. The Loom has no `accent-color`
-  rule anywhere.
-- **Two Loom widgets are invisible but report as visible.** The help FAB and Activity chip have
-  real bounding rects and `visibility: visible` — a DOM crawler marks them healthy — but a
-  `z-index:400` overlay paints over them. The Activity chip is also a genuine 79×31 dead zone
-  over a grid card's link.
-- **A 300-char username breaks the account row ~980px outside its card**, putting a live
-  **Remove** button outside its container. No server-side length limit. Output escaping held —
-  markup rendered as literal text — so this is input hygiene, not XSS.
-- **Smaller, all confirmed visually:** locked skin cards fail WCAG AA badly (1.88:1 on the
-  "locked" label) · the "← Gallery" link is unstyled browser blue at 1.69:1 · a duplicate tab
-  strip renders twice bound to one state · the month select clips "Mon" to "Moı" · the Loom's
-  cost pill is dead while its tooltip says "Click to refresh" · "Set launcher icon" is offered
-  enabled and always 400s · locked skins are inert under a *stale success message* · the
-  schedule confirms "every 168h" beside a dropdown reading "1 week" · raw upstream exceptions
-  print verbatim into the UI · dead `#del-modal` markup sits beside a live destructive control
-  (it is what a crawl agent's XPath matched, deleting three accounts by mistake).
+- **Native `<select>`s are styled two inconsistent ways.** `.filters select` / `#preset-select` /
+  `select.p-sel` get `appearance:none` + a custom caret; `.pick-filters select`
+  (`pixai_gallery.py`), `.lv-sel` and `.sb-pick-filters select` (the Loom) keep the native OS
+  arrow. `accent-color` has no effect on `<select>`, so this needs a real styling pass rather
+  than a token. *(The checkbox half of this finding is fixed: `color-scheme: dark` +
+  `accent-color` on `:root` — see CHANGELOG.)*
+- **Two Loom widgets are invisible but report as visible.** The help FAB (`z-index:300`) and
+  Activity chip (`z-index:234`) are siblings of `#root` in `_LOOM_SHELL`, and `LoomV2`
+  unconditionally renders an opaque `z-index:400` `.lv-overlay` over them. Real bounding rects
+  and `visibility: visible`, so a DOM crawler marks them healthy.
+- **The Activity chip is a 79×31 click dead zone over a grid card's link** — on the *gallery*
+  page, which has its own `#jobs-fab` and no `.lv-overlay`. (Distinct from the entry above: on
+  the Loom an opaque overlay swallows those clicks first, so it cannot also be a dead zone
+  there. These were one entry until verification separated them.)
+- **Smaller:** upstream exceptions still print verbatim into the UI as a minor UX nit (34
+  `str(e)` sites) — but they are no longer an injection seam: the `innerHTML` sinks now escape
+  (`escH2`) or build text nodes, verified in a browser (see CHANGELOG).
 - **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
-  is unreachable dead markup and the variable name is a misnomer for "authorized". Behaviour is
-  correct; it will mislead the next reader.
-- **`mg-notify.js` requests `/branding/gen_nel.png` at two call sites and
-  `/branding/mascots/gen_nel.png` at another.** One of the two is wrong regardless of which art
-  exists.
+  is unreachable and the variable name is a misnomer for "authorized". This is *deliberate and
+  documented* at the call site — the front-door hook guarantees an authorized request reaches
+  that line — so it is a naming/clarity wart, not a bug. Renaming it touches auth-adjacent
+  template logic and wants an owner nod rather than a drive-by.
 
 - **No UI for removing an image from a collection.** The `/collection-remove` POST route exists
   with zero callers anywhere in the codebase. A real gap, not a design choice.
@@ -751,10 +749,6 @@ green throughout. Ranked; the V1-cluster CSS bug they were found alongside is al
   look the next time that stacking area changes. Low severity.
 - **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not roam between
   the home and work machines this project is already edited from.
-- **`master` is missing `CHANGELOG.md` and `LICENSE`**, and master's README still points at
-  five `docs/img/*.png` files that do not exist in its tree (only `docs/img/README.md` is
-  there). These reach master only when `loom-v2` merges.
-
 ### Machine-local layout (a standing drift hazard, not a bug)
 
 - The **live gallery server runs from the D: run-copy** (`D:\Moonglade Athenaeum\`), a separate
@@ -810,6 +804,11 @@ green throughout. Ranked; the V1-cluster CSS bug they were found alongside is al
   during the spike via Seedance's own upload endpoint, a temporary tunnel, or a short-lived
   presigned upload. Discipline: add the seam only when the second real provider lands, so two
   concrete cases shape it.
+- **Mio.2 — PixAI's agent surface.** Filed here by owner directive 2026-07-19, moved out of
+  Open owner calls: it is an epic-sized bet, not a pending decision. Cookie-authed — the `sk-`
+  Bearer 401s — and the contract is bankable free from the JS bundle, but integration means a
+  cookie-jar rewrite. Worth it only as a deliberate agent-UX bet. **Do not capture cookies
+  without owner direction.**
 - **Epic C — Publish & Community (core + web).** Roadmapped into the next core + web
   passes. Independent of A/B — no provider-seam prerequisite; it can move whenever core+web
   capacity allows. `createArtworkFromTaskV2`, `upsertArtwork` / `deleteArtwork`, `markArtwork`
@@ -899,6 +898,7 @@ surface: no visual build from prose alone.
 | [loom_selectshot](https://claude.ai/code/artifact/0d9c4e02-200e-44f9-982c-e3add482b905) | Selected-shot interaction model | **LOCKED** — shipped in V2 |
 | [Moonglade — Finalists In Action](https://claude.ai/code/artifact/b45a39a3-b6a8-4e73-9f62-e03cb390bd00) | Finalists in context: frames wrapping a real unlock, bars filling live, claim icons in the header chip | Current — pairs with `docs/ART.md` §3 (picks ledger) |
 | [Timeline Drawer — Wireframe v1](https://claude.ai/code/artifact/84be1748-2c7d-4304-967c-8ac22cd37687) | Timeline drawer detail | Reference only — the Shell Mockup is the pixel source |
+| [Web Import — Drop-zone Mockup v2](https://claude.ai/code/artifact/066d181e-1a6e-4f84-97c6-6e2b91c6f90d) | Pixel source of truth for web import (the LAST web-parity item): drop zone + browse; **adaptive populated states** — thumbnail review when few, a **capped 24-tile preview** when many (import is uncapped — the cap is only on the preview), folder/zip **summary cards** (never N rows); dupe-by-content-hash skip, add-to-collection, `source='local'` into `imported/` | **LOCKED** 2026-07-20 (owner-approved) — the build verifies against it; `PREVIEW_CAP=24`. Open per-build calls: cap number, folder-recursion, structure→collections |
 
 **Live tools & references**
 

@@ -2,8 +2,8 @@
 """Moonglade Athenaeum — web launcher + supervisor (no desktop GUI).
 
 Double-click to start the web gallery and open it in your browser, with NO terminal
-window and NO PySide6 GUI (.pyw runs under pythonw.exe). This is the "click to launch
-straight into the web interface" entry point.
+window (.pyw runs under pythonw.exe). This is the "click to launch straight into the
+web interface" entry point.
 
 It runs as a tiny SUPERVISOR: it starts pixai_gallery.py as a child and watches it.
 That's what makes the browser Stop / Restart buttons (Control Panel -> Server) work
@@ -53,18 +53,37 @@ if "--port" in SERVE_ARGS:
 
 # Single instance: if a Moonglade server is ALREADY answering on this port, don't start a second
 # one (on Windows SO_REUSEADDR lets two servers bind the same port and fight) -- just focus the
-# browser and bow out. A 200 from /api/ping means it's ours; anything else -> start fresh.
+# browser and bow out.
+#
+# We identify "ours" by the X-Moonglade response header, NOT a 200 status. /api/ping now sits
+# behind the login gate, so an unauthenticated probe (this launcher holds no session) gets a
+# 401 -- and urllib RAISES urllib.error.HTTPError on 401. The old code checked `status == 200`
+# under a bare `except`, so the raised 401 was swallowed as "nothing there" and a SECOND server
+# was started every single time one was already running. The header rides every response,
+# including that 401, so it still identifies our own server; a response without it is some other
+# service on this port, and a connection error is nothing at all.
 import urllib.request
-try:
-    with urllib.request.urlopen("http://localhost:{}/api/ping".format(PORT), timeout=1.5) as _r:
-        if _r.status == 200:
-            try:
-                webbrowser.open("http://localhost:{}/".format(PORT))
-            except Exception:
-                pass
-            sys.exit(0)
-except Exception:
-    pass                            # nothing (of ours) there -> start it below
+import urllib.error
+
+
+def _moonglade_on_port(port):
+    """True iff one of OUR servers is already answering on `port` (any HTTP status)."""
+    url = "http://localhost:{}/api/ping".format(port)
+    try:
+        with urllib.request.urlopen(url, timeout=1.5) as _r:
+            return _r.headers.get("X-Moonglade") is not None
+    except urllib.error.HTTPError as _e:      # answered with a status (e.g. the 401 gate) -> up
+        return _e.headers.get("X-Moonglade") is not None
+    except Exception:                          # refused / timeout / DNS -> nothing of ours there
+        return False
+
+
+if _moonglade_on_port(PORT):
+    try:
+        webbrowser.open("http://localhost:{}/".format(PORT))
+    except Exception:
+        pass
+    sys.exit(0)
 
 cmd = [sys.executable, os.path.join(here, "pixai_gallery.py")] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
@@ -73,16 +92,18 @@ env = dict(os.environ, MOONGLADE_SUPERVISED="1")
 def _open_when_ready():
     """Open the browser ONLY once the server actually answers -- a big backup builds thumbnails
     for several seconds before it binds the port, so a fixed delay opened the browser too early
-    ('connection refused'). Poll /api/ping up to 2 minutes, then open."""
-    import urllib.request
-    ping = "http://localhost:{}/api/ping".format(PORT)
+    ('connection refused'). Poll up to 2 minutes, then open.
+
+    Uses the SAME header check as the single-instance guard above: the gated /api/ping answers
+    an unauthenticated probe with 401, which urllib raises. The old `urlopen ... break` treated
+    that raise as 'not ready yet' and polled the full two minutes before opening the browser --
+    so the window opened ~2 min late against a server that was up in seconds. Keying on the
+    header fixes that too."""
     deadline = time.time() + 120
     while time.time() < deadline:
-        try:
-            urllib.request.urlopen(ping, timeout=1)
+        if _moonglade_on_port(PORT):
             break                   # server is up
-        except Exception:
-            time.sleep(0.5)
+        time.sleep(0.5)
     try:
         webbrowser.open("http://localhost:{}/".format(PORT))
     except Exception:

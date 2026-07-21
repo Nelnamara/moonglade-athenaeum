@@ -1,24 +1,19 @@
 # Architecture
 
-Moonglade Athenaeum is five Python modules around one SQLite catalog.
+Moonglade Athenaeum is four Python modules around one SQLite catalog.
 
 ```
 pixai_gallery_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
 pixai_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
 pixai_similar.py          "more like this" CLIP sidecar index (optional `pixeltable` dep)
 moonglade_mcp.py          local stdio MCP server: curation tools over the same helpers
-pixai_gui.py              PySide6 desktop app: every workflow as a tab (legacy — see below)
 ```
 
-`pixai_gallery_backup.py`, `pixai_gui.py`, and `moonglade_mcp.py` all import
-`pixai_gallery.py` for catalog access — so catalog logic lives in exactly one place.
-`pixai_similar.py` owns no catalog SQL; it's a sidecar index the gallery imports lazily
-inside the `/api/similar` handler, never at startup.
-
-`pixai_gui.py` is **legacy**: owner-approved for removal (2026-07-15). The forward
-architecture is two surfaces — the CLI and the web gallery. It imports `pixai_gallery`
-at module level, so changes to `pixai_gallery.py` need a **full GUI restart** — stopping
-and restarting just the gallery-server thread does not reload the module.
+`pixai_gallery_backup.py` and `moonglade_mcp.py` both import `pixai_gallery.py` for
+catalog access — so catalog logic lives in exactly one place. `pixai_similar.py` owns no
+catalog SQL; it's a sidecar index the gallery imports lazily inside the `/api/similar`
+handler, never at startup. The forward architecture is two surfaces — the CLI and the web
+gallery.
 
 ## Module reference
 
@@ -43,7 +38,7 @@ and restarting just the gallery-server thread does not reload the module.
 | `reconcile_catalog_with_disk()` | Repoint each catalog row's filename/batch at the surviving on-disk file |
 | `delete_task_gql()` | Replay the `deleteGenerationTask` persisted **mutation** (POST, not the GET listing path). VOID mutation: returns `null` on success, raises on error. Single-attempt — no retry, so a flaky network can't double-fire a delete |
 | `run_delete_tasks()` | Guarded `--delete-task` driver: dry-run by default, `--apply` + typed `delete` confirm (or `--yes`), counts deleted/failed. Leaves local files + `catalog.db` untouched |
-| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout (the GUI log pane captures it). No-op until enabled |
+| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout. No-op until enabled |
 | `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error |
 | `account_info()` / `run_account_info()` | Read-only account dashboard (credits/membership/subscription) via `gql_adhoc`. **Never moves money** — no payment/subscription mutations are implemented, by design |
 | `run_generate()` | `--generate`: create images via `createGenerationTask` (ad-hoc POST), poll, download, catalog as `source='api'`. Preview unless `--confirm`. `--task-id` recovers an already-created task for free |

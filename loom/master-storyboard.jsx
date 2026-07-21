@@ -427,7 +427,15 @@ const V2_STYLES = `
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
-.lv-top button,.lv-top label{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+/* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
+   anchor, not a button, so a button-only selector left it as an unstyled browser link --
+   rgb(0,0,238) on the dark bar, a measured 1.69:1 against a 4.5:1 floor, and the only way
+   out of the Loom. Found by a browser crawl; invisible to any DOM/network check because
+   the link works perfectly, it is just illegible.
+   NB: this whole block is a JS template literal -- no backticks in these comments. */
+.lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+.lv-top a{text-decoration:none;display:inline-block;}
+.lv-top a:hover{border-color:var(--accent);}
 .lv-top .lv-close{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
@@ -1400,7 +1408,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <FrameSlot which="close" frame={active.c.closeFrame} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("closeFrame", p)} />
         </div>
-        <div className="lv-tabs">{["Image", "Edit", "Reference", "Video"].map((t) => (<span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
+        {/* The Image/Edit/Reference/Video tab strip lives in the rail's .lv-sidehead
+            (like the left rail's Cast/Footage tabs), so `gen` must NOT render its own --
+            an identical strip here stacked a duplicate directly below the header one
+            whenever the right rail was expanded. Removed to match the left-rail pattern:
+            tabs in the header, content below without repeating them. */}
         {acct && (
           <div className="lv-bal">&#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
             {acct.claim_credits ? <span className="lv-balclaim"> &middot; +{acct.claim_credits} claimable</span> : null}</div>
@@ -1994,6 +2006,26 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       return await r.json();   // {cost, free, cards, note}
     } catch { return null; }
   };
+  // Fail-closed cost gate for the Image / Edit / Reference tabs -- the SAME guardrail
+  // generateShot (video) already runs, factored out so those three stop lying. They used
+  // to show a flat "a free card auto-applies; otherwise it spends credits" confirm that
+  // never actually checked: a shot with no covering card spent silently past an OK click.
+  // `priceBody` is the exact shape the matching submit endpoint receives, so /api/price
+  // prices precisely what will run. Fails CLOSED -- a null/failed price check still ASKS
+  // before spending, never waves it through. Returns true to proceed.
+  const confirmSpend = async (priceBody, label) => {
+    let pr = null;
+    try {
+      const r = await fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(priceBody) });
+      pr = await r.json();
+    } catch { pr = null; }
+    if (pr && pr.free) return true;                                    // a free card covers it: no spend, no prompt
+    if (pr && !pr.free && pr.cost != null) {
+      return window.confirm(`${label}\n\nNo free card covers it — it will spend ~${pr.cost.toLocaleString()} credits.\n\nGenerate anyway?`);
+    }
+    return window.confirm(`${label}\n\nCouldn't verify the cost or free-card coverage — it may spend credits.\n\nGenerate anyway?`);
+  };
   // Returns an explicit outcome ({ok:true,taskId} | {ok:false,reason}) instead of only
   // writing state -- batchGenerate's own submit-time tally needs a value it can read
   // immediately after await, not genState (a React state variable batchGenerate's closure
@@ -2169,21 +2201,45 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     }, "video");
   };
   // ---- In-Loom reference-image gen: reuse /api/generate (image), poll, then route the result into the shot ----
-  const pollImg = (cardId, tid) => {
+  // Shared drawer poll. pollShot has had a POLL_CEILING_MS guard since the
+  // give-up-timer pass; these drawer polls never did, so a task that never reached
+  // a terminal phase polled FOREVER -- and so did a persistently failing fetch,
+  // because the .catch re-scheduled too. The control stayed disabled and the tab
+  // kept hitting the server every few seconds with nothing to show for it.
+  //
+  // On hitting the ceiling this stops and reports rather than failing silently.
+  // It uses phase "error" deliberately: these three drawers render only
+  // submitting/running (busy) and error (message), with no "paused" affordance --
+  // that exists on shot cards only. So "error" is what unsticks the control AND
+  // surfaces the reason; the message says plainly that the task may still be
+  // running, because elapsed time alone is not evidence of failure.
+  const pollTaskWithCeiling = (tid, setState, cardId) => {
+    const startedAt = Date.now();
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
-      if (cls.phase === "done") setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-      else if (cls.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-      else setTimeout(tick, 4000);
-    }).catch(() => setTimeout(tick, 5000));
+      if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+      else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+      else again(4000);
+    }).catch(() => again(5000));
+    const again = (ms) => {
+      if (Date.now() - startedAt > POLL_CEILING_MS) {
+        setState((s) => ({ ...s, [cardId]: { phase: "error",
+          msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS) +
+               " — the task may still be running; check it on pixai.art (task " +
+               String(tid).slice(-6) + ")" } }));
+        return;
+      }
+      setTimeout(tick, ms);
+    };
     setTimeout(tick, 2500);
   };
+  const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
   const genImage = async (entry) => {
     const c = entry.c;
     const prompt = (c.imgPrompt || "").trim();
     if (!imgModel) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "pick a model first" } })); return; }
     if (!prompt) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter an image prompt" } })); return; }
-    if (!window.confirm(`Generate a reference image for ${c.title || "this shot"}?\n\nA matching free card auto-applies; otherwise it spends credits.`)) return;
+    if (!(await confirmSpend({ model_id: imgModel.model_id, prompt }, `Generate a reference image for ${c.title || "this shot"}?`))) return;
     setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -2208,18 +2264,11 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   };
   // Generic gen runner for the Edit/Reference tabs — submit -> poll -> stash -> route.
   // Parameterized on the state setter so the proven Image path above stays untouched.
-  const runGen = async (setState, cardId, endpoint, body, confirmMsg) => {
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
+  const runGen = async (setState, cardId, endpoint, body, priceBody, label) => {
+    if (priceBody && !(await confirmSpend(priceBody, label))) return;
     setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
-    const poll = (tid) => {
-      const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-        const cls = classifyTaskStatus(d);
-        if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-        else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        else setTimeout(tick, 4000);
-      }).catch(() => setTimeout(tick, 5000));
-      setTimeout(tick, 2500);
-    };
+    // Same unbounded-loop fix as pollImg -- see pollTaskWithCeiling's comment.
+    const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
     try {
       const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d = await r.json();
@@ -2242,8 +2291,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const instruction = (c.editPrompt || "").trim();
     if (!src) { setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "the open frame needs a gallery image first (route one from the Image tab, or pick it into the frame)" } })); return; }
     if (!instruction) { setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "describe the edit" } })); return; }
-    runGen(setGenEditState, c.id, "/api/edit", { source: src, instruction, edit_model: "edit-pro" },
-      `Edit the open frame of ${c.title || "this shot"}?\n\nAn Edit-Pro card auto-applies; otherwise it spends credits.`);
+    const editBody = { source: src, instruction, edit_model: "edit-pro" };
+    runGen(setGenEditState, c.id, "/api/edit", editBody, { mode: "edit", ...editBody },
+      `Edit the open frame of ${c.title || "this shot"}?`);
   };
   const genRef = (entry) => {
     const c = entry.c;
@@ -2251,8 +2301,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const prompt = (c.refPrompt || "").trim();
     if (!refs.length) { setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "add cast @image references (with gallery images) first" } })); return; }
     if (!prompt) { setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter a prompt" } })); return; }
-    runGen(setGenRefState, c.id, "/api/edit", { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" },
-      `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?\n\nA Reference-Pro card auto-applies; otherwise it spends credits.`);
+    const refBody = { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" };
+    runGen(setGenRefState, c.id, "/api/edit", refBody, { mode: "edit", ...refBody },
+      `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`);
   };
   // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
   // the submits don't collide. Each shot manages its own status/poll via generateShot.

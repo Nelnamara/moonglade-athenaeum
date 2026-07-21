@@ -20,6 +20,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import secrets
 import sqlite3
 import sys
@@ -347,17 +348,33 @@ _DEFAULT_SORT_SQL = "created_at DESC"
 def _like_pattern(term):
     r"""Translate a user search term into a SQL LIKE pattern.
 
-    * `*` -> `%` (any run) and `?` -> `_` (single char), so `night*` matches
-      anything starting with "night".
-    * A term with NO wildcard is treated as a substring (wrapped in `%...%`),
-      preserving the old broad-search behavior.
+    * `*` -> `%` (any run) and `?` -> `_` (single char).
+    * EVERY term is matched as a substring (wrapped in `%...%`), wildcard or not.
     * Literal `%`/`_`/`\` the user typed are escaped (LIKE uses ESCAPE '\').
+
+    A wildcard must never make a search return FEWER results than the same term
+    without it. That invariant is pinned by a test, and it used not to hold:
+    a term containing a wildcard became the WHOLE pattern, so `night*` compiled
+    to `night%` -- anchored to the start of the entire prompt string, not to a
+    word. So the app's own placeholder ("words, night* wildcard, or an id")
+    advertised a syntax that returned nothing on most libraries, and adding a
+    `*` to a working search silently emptied it: `sample` matched 24 rows,
+    `sampl*` matched 0. Found by a browser crawl typing the advertised example.
+
+    Interior wildcards still do real work, which is where they earn their keep:
+    `moon*light` -> `%moon%light%` matches "moonlight" and "moon and starlight"
+    alike, and `n?ght` -> `%n_ght%` still constrains a single character. A
+    leading or trailing star now simply collapses into the surrounding wrap, so
+    `night*` and `night` mean the same thing rather than opposite things.
     """
     t = term.strip().lower()
-    has_wild = "*" in t or "?" in t
     t = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     t = t.replace("*", "%").replace("?", "_")
-    return t if has_wild else "%" + t + "%"
+    # Collapse runs of % left by a leading/trailing star meeting the wrap. Purely
+    # cosmetic ('%%' and '%' match identically) but keeps logged queries readable.
+    # An escaped literal '\%' is not a run and is left alone by the negative
+    # lookbehind -- a user searching "50%" must still match a literal percent.
+    return re.sub(r"(?<!\\)%{2,}", "%", "%" + t + "%")
 
 
 def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
@@ -2461,6 +2478,18 @@ DESIGN_TOKENS_CSS = r"""
     /* Feat tier: gunmetal band + ruby glow (the agreed 5th tier -- NOT pink). */
     --gunmetal: #8a93a2; --gunmetal-deep: #4a515c;
     --ruby: #e0355e; --ruby-deep: #a11238;
+    /* Native controls (checkbox/radio/range/progress) default to the BROWSER's
+       accent -- Windows Chrome's is a bright blue that belongs to no skin here.
+       Three places had already set this one control at a time; declaring it on
+       :root covers every control app-wide, and because it is an inherited
+       property a skin that redefines --accent retints them for free. Per-control
+       overrides (e.g. the ruby unleash toggle) still win on specificity. */
+    accent-color: var(--accent);
+    /* accent-color only tints the CHECKED fill; an unchecked box, a native select
+       arrow and the scrollbars all keep light OS chrome without this. Every
+       surface in this app is dark, so declaring it once here is what actually
+       stops white checkboxes sitting on top of artwork. */
+    color-scheme: dark;
   }
   /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
      the meaningful subset of the palette; everything else inherits :root. Applied
@@ -2502,6 +2531,52 @@ ENHANCE_PLUGINS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Global 401 guard, injected into EVERY page head (BASE_HTML and _LOOM_SHELL).
+#
+# Why an interceptor and not a helper at each call site: there are ~90 fetch()
+# calls across pixai_gallery.py's inline JS, static/*.js and the Loom bundle, and
+# a browser crawl found that NOT ONE of them inspects response status. The gate
+# answers an expired session with a JSON 401 -- valid JSON -- so `r.json()`
+# resolves happily, `.catch` never fires, and callers read the error body as
+# data. Observed consequences: the job poller reads `d.phase` as undefined,
+# decides "still running", and re-polls every 3s FOREVER with the drawer pinned
+# on "Rendering under the eclipse..."; the picker renders "No images found" for
+# a full library; the Loom's pollImg/runGen loops never terminate.
+#
+# Wrapping fetch once covers all ~90 sites, including code inside the prebuilt
+# bundle that no call-site edit could reach, and cannot miss one the way a
+# 90-site refactor could.
+#
+# Defined ONCE here and injected into both shells. Today produced two separate
+# bugs from hand-synced duplicate copies (the Loom hook preamble, and a login
+# CSS block) -- not adding a third.
+_AUTH_401_GUARD_JS = r"""<script>/* Global 401 guard -- see _AUTH_401_GUARD_JS in pixai_gallery.py */
+(function(){
+  if (!window.fetch) return;
+  var orig = window.fetch, redirecting = false;
+  window.fetch = function(input, init){
+    return orig.apply(this, arguments).then(function(res){
+      try{
+        if (res && res.status === 401 && !redirecting) {
+          var url = new URL((typeof input === 'string' ? input : (input && input.url) || ''),
+                            location.href);
+          /* Same-origin only: a 401 from a third party is not our session. And
+             never bounce while already on /login, which would loop. */
+          if (url.origin === location.origin && location.pathname !== '/login') {
+            redirecting = true;
+            location.href = '/login?next=' +
+              encodeURIComponent(location.pathname + location.search);
+          }
+        }
+      }catch(e){ /* never let the guard break a real response */ }
+      return res;   /* hand the response back untouched -- callers are unchanged */
+    });
+  };
+})();
+</script>"""
+
+
 # The Loom (Seedance video storyboard tool) is served at /loom. Its React source
 # lives in loom/master-storyboard.jsx; this page loads React+Babel+picker-core from
 # locally-vendored files (loom/vendor/, served by /loom/vendor/<file>; zero network
@@ -2514,7 +2589,7 @@ _LOOM_SHELL = r"""<!DOCTYPE html>
 <title>The Loom - Moonglade Athenaeum</title>
 <script>/* apply saved skin before first paint (no FOUC) -- same key/origin the gallery
    header writes, so switching skin there re-colors the Loom too */
-try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>
+try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
 <style>
 __DESIGN_TOKENS__
 body { background: var(--base); margin: 0; }
@@ -2698,6 +2773,13 @@ def create_app(out_dir: Path):
     # ------------------------------------------------------------------
     _cli_path = str(Path(__file__).resolve().parent / "pixai_gallery_backup.py")
     _cli_dir = str(Path(__file__).resolve().parent)
+    # catalog media_id -> upload-kind media_id, for references sent from the gallery.
+    # PixAI refuses a generation-output id as an input (see resolve_img), so each
+    # referenced image is uploaded once and reused. Process-lifetime only and
+    # deliberately unbounded-but-tiny: one short string pair per image the owner has
+    # ever referenced this run. Losing it on restart just re-uploads, which is free.
+    _ref_upload_cache = {}
+
     _panel_lock = threading.Lock()
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
                   "rc": None, "started_at": None, "progress": None,
@@ -2725,19 +2807,65 @@ def create_app(out_dir: Path):
         "sync":          {"args": ["--sync"], "label": "Sync now — pull new + fill metadata", "destructive": False},
         "stats":         {"args": ["--catalog-stats"], "label": "Catalog stats", "destructive": False},
         "audit":         {"args": ["--audit", "--no-content"], "label": "Duplicate audit (fast, read-only)", "destructive": False},
+        # The "full audit" checkbox in the UI does NOT append a flag to the action above --
+        # it selects this separate whitelisted entry. Same for dedup-delete below. Keeping
+        # the client to a fixed set of action KEYS is what preserves the property the
+        # whole runner is built on (see _panel_run: "a WHITELISTED argv, never an
+        # arbitrary command"); letting a checkbox contribute argv would erode it.
+        "audit-full":    {"args": ["--audit"], "label": "Duplicate audit (full — byte-compare, slower)", "destructive": False},
+        "verify-dupes":  {"args": ["--verify-dupes"],
+                          "label": "Verify _duplicates/ is safe to delete", "destructive": False},
+        "rebuild-similar": {"args": ["--rebuild-similar"],
+                            "label": "Rebuild the Similar index (slow, needs pixeltable)",
+                            "destructive": False},
+        # --- Advanced sync (web parity step 2): the sync variants the bare "Sync now"
+        # (an INCREMENTAL --sync, i.e. --update --full-meta) can't do. Each is its own
+        # whitelisted KEY, exactly like audit-full/dedup-delete -- never argv the client
+        # assembles. `advanced: True` routes them to the Panel's own "Advanced" section and
+        # keeps them OUT of the scheduler dropdown (a full re-walk on a timer is a foot-gun,
+        # and test-pull's N has no home there). All three are read/append, never destructive.
+        "resync-full":   {"args": ["--full-meta"],
+                          "label": "Full re-walk — re-pull ALL history + metadata (non-incremental)",
+                          "destructive": False, "advanced": True},
+        "inventory":     {"args": ["--count"],
+                          "label": "Inventory count — tally account vs. backup (read-only, no download)",
+                          "destructive": False, "advanced": True},
+        # The ONLY parameterised action. `int_param` means _panel_run appends a single
+        # server-validated, clamped integer (the N for --max) -- not an arbitrary string,
+        # the same discipline as the scheduler's interval_hours. int_range bounds it.
+        "test-pull":     {"args": ["--max"], "int_param": True, "int_range": (1, 200),
+                          "int_default": 20,
+                          "label": "Test pull — fetch the N most-recent tasks",
+                          "destructive": False, "advanced": True},
         # (Export CSV isn't here on purpose -- in the browser it's a real DOWNLOAD via /export-csv,
         #  not a subprocess that writes catalog.csv into the backup folder.)
         "organize-dry":  {"args": ["--organize", "--dry-run"], "label": "Organize — preview (dry run)", "destructive": False},
         "dedup-dry":     {"args": ["--dedup"], "label": "Dedup — preview (dry run)", "destructive": False},
-        # --- background-only: full-feed scans, run by the scheduler, not a button ---
-        # (both re-walk the WHOLE history every run, no --update-style short-circuit --
-        # fine hourly/daily, wasteful to click after every incremental pull)
-        "sync-artworks":     {"args": ["--sync-artworks"], "label": "Sync published-artwork metadata", "destructive": False, "panel_visible": False},
-        "sync-videos":       {"args": ["--sync-videos"], "label": "Sync i2v videos (back up mp4s)", "destructive": False, "panel_visible": False},
+        # --- full-feed scans: they re-walk the WHOLE history every run, with no
+        # --update-style short-circuit. That is why they were originally scheduler-only.
+        # They now HAVE buttons (web parity: nothing should need the CLI), but the labels
+        # say "full re-walk" out loud so the cost is visible before clicking rather than
+        # discovered afterwards. ---
+        "sync-artworks":     {"args": ["--sync-artworks"],
+                              "label": "Sync published-artwork metadata (full re-walk)",
+                              "destructive": False},
+        "sync-videos":       {"args": ["--sync-videos"],
+                              "label": "Sync i2v videos — back up mp4s (full re-walk)",
+                              "destructive": False},
+        # reconcile-deleted deliberately keeps NO button: --sync already runs it as its
+        # final step (see run_sync's pipeline), so a button would be a second path to
+        # work that just happened, inviting someone to run it and wonder why nothing
+        # changed. It stays schedulable for anyone who wants it on its own cadence.
         "reconcile-deleted": {"args": ["--reconcile-deleted"], "label": "Reconcile deleted (flag cloud-removed rows)", "destructive": False, "panel_visible": False},
         # --- destructive: require confirm=true ---
         "organize":      {"args": ["--organize"], "label": "Organize into month folders", "destructive": True},
         "dedup-apply":   {"args": ["--dedup", "--apply"], "label": "Dedup — quarantine dupes to _duplicates/", "destructive": True},
+        # DELETES rather than quarantining, so it is strictly more dangerous than
+        # dedup-apply and carries the same destructive=True (confirm + localhost-only).
+        # Deliberately a separate key, not a flag the client can add -- see audit-full.
+        "dedup-delete":  {"args": ["--dedup", "--apply", "--dedup-delete"],
+                          "label": "Dedup — DELETE dupes outright (no _duplicates/ safety net)",
+                          "destructive": True},
         "rebuild-thumbs": {"args": ["--rebuild-thumbs"],
                            "label": "Rebuild ALL thumbnails — uniform quality + video posters",
                            "destructive": True},
@@ -2781,7 +2909,7 @@ def create_app(out_dir: Path):
             _log_job(jid, status=("failed" if status == "failed" else "done"),
                      error=("exited {}".format(rc) if status == "failed" else None))
 
-    def _panel_run(action):
+    def _panel_run(action, int_arg=None):
         import subprocess
         spec = PANEL_ACTIONS[action]
         # Worker count is a persisted panel setting (schedule.json), so BOTH manual
@@ -2791,8 +2919,21 @@ def create_app(out_dir: Path):
             workers = max(1, min(int(_load_sched().get("workers") or 4), 16))
         except (TypeError, ValueError):
             workers = 4
+        action_args = list(spec["args"])
+        if spec.get("int_param"):
+            # The ONLY variable part of any panel argv, and it is a single bounded
+            # integer, never a caller string: clamp int_arg into the action's declared
+            # range (falling back to its default when absent, e.g. a stray scheduler
+            # call), then append it. This is what lets test-pull carry an N without
+            # eroding _panel_run's "a WHITELISTED argv, never an arbitrary command".
+            lo, hi = spec["int_range"]
+            try:
+                n = max(lo, min(int(int_arg), hi))
+            except (TypeError, ValueError):
+                n = spec.get("int_default", lo)
+            action_args = action_args + [str(n)]
         argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v",
-                "--workers", str(workers)] + spec["args"]
+                "--workers", str(workers)] + action_args
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
         env = dict(os.environ, MOONGLADE_PROGRESS="1")
         proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
@@ -2803,7 +2944,7 @@ def create_app(out_dir: Path):
         job_id = "panel-" + uuid.uuid4().hex[:12]
         with _panel_lock:
             _panel_job.update(status="running", action=action, label=spec["label"],
-                              lines=["$ " + " ".join(spec["args"])], rc=None,
+                              lines=["$ " + " ".join(action_args)], rc=None,
                               started_at=None, progress=None, proc=proc, cancelled=False,
                               job_id=job_id)
         _log_job(job_id, status="running", type="panel", label=spec["label"])
@@ -2852,7 +2993,11 @@ def create_app(out_dir: Path):
                 s = _load_sched()
                 action = s.get("action")
                 if not s.get("enabled") or action not in PANEL_ACTIONS \
-                        or PANEL_ACTIONS[action]["destructive"]:
+                        or PANEL_ACTIONS[action]["destructive"] \
+                        or PANEL_ACTIONS[action].get("advanced"):
+                    # advanced actions are manual-run only (a full re-walk on a timer is a
+                    # foot-gun; test-pull needs an N the scheduler can't supply) -- backstop
+                    # to the dropdown already hiding them, in case an old schedule names one.
                     continue
                 interval = max(1, int(s.get("interval_hours") or 6)) * 3600
                 if _time.time() - (s.get("last_run") or 0) < interval:
@@ -2918,7 +3063,13 @@ def create_app(out_dir: Path):
         def _status(tid):
             if box["s"] is None:
                 box["s"] = core._make_session(None)
-            return core.generation_status(box["s"], tid)
+            # ["phase"], not the whole dict: resolve_orphan_jobs compares this return
+            # against ("done","failed"), and generation_status returns
+            # {status, phase, paid_credit}. Passing the dict straight through meant the
+            # comparison never matched, so the reaper resolved NOTHING -- it just
+            # returned 0 forever while looking healthy. The unit tests stubbed status_fn
+            # with the documented string, so nothing caught the caller disagreeing.
+            return core.generation_status(box["s"], tid)["phase"]
         try:
             core.resolve_orphan_jobs(out_dir, _status)
         except Exception:                          # noqa: BLE001
@@ -2994,7 +3145,7 @@ def create_app(out_dir: Path):
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
-<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>
+<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
 <style>
 __DESIGN_TOKENS__
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -3349,7 +3500,12 @@ __DESIGN_TOKENS__
   body.privacy-blur .card[data-nsfw="1"] img { filter: blur(28px); }
   body.privacy-blur .card:hover img { filter: none; }
   .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
-  .card .cb-wrap input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--lavender); cursor: pointer; }
+  /* --accent, not --lavender: the two are the same colour in the default skin, so this
+     read as correct, but a skin that retints --accent (nightfallen: #a678f0 vs a
+     --lavender of #c9a6ff) left these grid checkboxes on the old skin's purple. The
+     :root accent-color would already cover this -- the rule is kept only for the
+     18px sizing -- so it must not pin a colour that drifts from the active skin. */
+  .card .cb-wrap input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
   .card a.cover { position: absolute; inset: 0; z-index: 1; }
   .card .cb-wrap { z-index: 2; }
   .card .vbadge { position: absolute; top: 6px; right: 6px; z-index: 2; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 20px; pointer-events: none; }
@@ -3483,7 +3639,83 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
   </div>
 </div>
+<div class="modal-bg" id="export-modal">
+  <div class="modal">
+    <h2 style="color:var(--text);">Download <span id="export-n"></span></h2>
+    <p>Files download exactly as PixAI delivered them by default. Converting or embedding
+       happens <b>only in this download</b> &mdash; your archive and catalog are never changed.</p>
+    <div style="display:flex;flex-direction:column;gap:13px;margin-bottom:18px;">
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--overlay0);text-transform:uppercase;letter-spacing:.05em;">Format
+        <select id="export-fmt" class="gen-sel" style="text-transform:none;letter-spacing:0;">
+          <option value="original" selected>Original &mdash; no re-compression</option>
+          <option value="png">PNG</option>
+          <option value="jpeg">JPEG</option>
+        </select></label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;">
+        <input type="checkbox" id="export-embed"> Embed prompt &amp; ids into each file
+        <span style="color:var(--overlay0);font-size:11px;">(PNG/JPEG)</span></label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('export-modal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="doExportDownload()">&#8681; Download</button>
+    </div>
+  </div>
+</div>
+<div class="modal-bg" id="import-modal">
+  <div class="modal imp-modal">
+    <h2 style="color:var(--text);margin-bottom:4px;">Import into your library</h2>
+    <p style="margin-bottom:14px;">Bring local files into the catalog &mdash; copied into <b style="color:var(--text)">imported/</b> and tagged <b style="color:var(--text)">Imported (local)</b>. Nothing is uploaded to PixAI; this is your library, not a generation reference.</p>
+    <div id="imp-drop" class="imp-drop" onclick="ImportUI.browse()">
+      <div class="imp-ico">&#8593;</div>
+      <div class="imp-big">Drop images, a folder, or a .zip here</div>
+      <div class="imp-sub">or <span class="imp-link">browse files</span> &middot; <span class="imp-link" onclick="event.stopPropagation();ImportUI.browseFolder()">a folder</span></div>
+    </div>
+    <div id="imp-preview" style="display:none;">
+      <div class="imp-sum" id="imp-sum"></div>
+      <div id="imp-body"></div>
+      <label class="imp-orow"><span class="imp-lbl">Add to collection</span>
+        <select id="imp-collection" class="gen-sel" style="flex:1;">
+          <option value="">&mdash; none &mdash;</option>
+          {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select></label>
+    </div>
+    <div id="imp-result" class="imp-result" style="display:none;"></div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn" onclick="ImportUI.close()">Cancel</button>
+      <button class="btn btn-primary" id="imp-go" onclick="ImportUI.doImport()" style="display:none;">&#8593; Import</button>
+    </div>
+    <input type="file" id="imp-file" multiple accept="image/*,video/*,.zip" style="display:none" onchange="ImportUI.onPick(this.files)">
+    <input type="file" id="imp-folder" webkitdirectory style="display:none" onchange="ImportUI.onPick(this.files)">
+  </div>
+</div>
 <style>
+  .imp-modal{max-width:560px;width:92%;}
+  .imp-drop{border:2px dashed var(--surface1);border-radius:12px;padding:38px 20px;text-align:center;background:var(--surface0);cursor:pointer;transition:border-color .15s,background .15s;}
+  .imp-drop.hot{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 8%,var(--surface0));}
+  .imp-ico{font-size:30px;color:var(--lavender);line-height:1;}
+  .imp-big{font-size:14px;font-weight:600;margin:10px 0 3px;color:var(--text);}
+  .imp-sub{font-size:12.5px;color:var(--subtext);}
+  .imp-link{color:var(--lavender);text-decoration:underline;cursor:pointer;}
+  .imp-sum{font-size:12.5px;color:var(--subtext);margin-bottom:10px;}
+  .imp-sum b{color:var(--text);}
+  .imp-list{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;padding-right:2px;}
+  .imp-row{display:flex;align-items:center;gap:9px;background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:6px 8px;}
+  .imp-thumb{width:38px;height:38px;border-radius:5px;flex:none;background:var(--surface1);display:grid;place-items:center;font-size:15px;color:var(--subtext);overflow:hidden;}
+  .imp-thumb img{width:100%;height:100%;object-fit:cover;}
+  .imp-nm{flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
+  .imp-sz{font-size:10.5px;color:var(--subtext);flex:none;}
+  .imp-x{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:15px;line-height:1;flex:none;padding:0 2px;}
+  .imp-x:hover{color:var(--red);}
+  .imp-cap{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--gold);background:color-mix(in srgb,var(--gold) 8%,transparent);border:1px solid var(--gold);border-radius:8px;padding:6px 9px;margin-bottom:9px;line-height:1.4;}
+  .imp-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;}
+  .imp-tg{aspect-ratio:1;border-radius:5px;overflow:hidden;background:var(--surface1);display:grid;place-items:center;font-size:13px;color:var(--subtext);}
+  .imp-tg img{width:100%;height:100%;object-fit:cover;}
+  .imp-more{aspect-ratio:1;border-radius:5px;border:1px dashed var(--surface1);background:var(--surface0);display:grid;place-items:center;text-align:center;color:var(--subtext);font-size:10px;font-weight:600;line-height:1.1;}
+  .imp-orow{display:flex;align-items:center;gap:9px;margin-top:13px;}
+  .imp-lbl{font-size:11px;color:var(--overlay0);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;}
+  .imp-result{margin-top:12px;font-size:12.5px;padding:9px 11px;border-radius:8px;background:var(--surface0);border:1px solid var(--surface1);color:var(--text);line-height:1.5;}
+  .imp-result.ok{border-color:var(--emerald);}
+  .imp-result.err{border-color:var(--red);color:var(--red);}
   .ee-star{position:fixed;top:-40px;z-index:400;pointer-events:none;color:var(--lavender);text-shadow:0 0 14px rgba(182,146,230,.9),0 0 30px rgba(182,146,230,.5);animation:ee-fall linear forwards;}
   @keyframes ee-fall{to{transform:translateY(112vh) rotate(540deg);opacity:.05;}}
   .ee-toast{position:fixed;left:50%;top:15%;transform:translate(-50%,-50%);z-index:402;background:var(--mantle);border:1px solid var(--lavender);border-radius:14px;padding:16px 30px;font-size:19px;color:var(--text);text-align:center;box-shadow:0 0 70px rgba(182,146,230,.55);pointer-events:none;animation:ee-toast 6s ease forwards;}
@@ -3538,7 +3770,10 @@ document.addEventListener('DOMContentLoaded', function() {
     <option value="{{ y }}" {% if value and y|string == yr %}selected{% endif %}>{{ y }}</option>
     {% endfor %}
   </select>
-  <select name="{{ prefix }}_month" style="width:64px">
+  {# 70px, not 64: at 64 the "Mon" placeholder collided with the native dropdown
+     arrow and rendered as "Mo|" -- measured intrinsic width is 69px. The year
+     select beside it is 78px against a 71px intrinsic, so it was never affected. #}
+  <select name="{{ prefix }}_month" style="width:70px">
     <option value="">Mon</option>
     {% for mnum in range(1, 13) %}
     {% set mm = '%02d'|format(mnum) %}
@@ -3570,6 +3805,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
+    <button type="button" class="btn" onclick="ImportUI.open()" title="Import local files (images, a folder, or a .zip) into your library">&#8593; Import</button>
     <a class="btn b-loom" href="/loom" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     {% endif %}
     <button type="button" class="btn b-ach" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
@@ -3641,6 +3877,14 @@ document.addEventListener('DOMContentLoaded', function() {
       <option value="{{ c }}" {% if collection==c %}selected{% endif %}>{{ c }}</option>
       {% endfor %}
     </select>
+    {# Shown only while a collection is active. type=button so it never submits the filter
+       form; the name rides a data attribute (HTML-escaped, decoded via dataset) so a
+       collection name with quotes can't break the handler. #}
+    {% if collection %}
+    <button type="button" class="btn" style="margin-top:6px;font-size:12px;padding:5px 10px;"
+      data-coll="{{ collection }}" onclick="downloadCollection(this.dataset.coll)"
+      title="Download every item in this collection as a ZIP (optional convert/embed)">&#8681; Download collection</button>
+    {% endif %}
   </div>
   <div>
     <label>Sort</label><br>
@@ -4099,17 +4343,136 @@ function toggleSelectMode() {
     e.preventDefault(); e.stopPropagation();
   }, true);
 })();
+// The export dialog serves two entry points. _exportColl holds a collection name when the
+// download is "this whole collection", or null for a curated selection. Each opener sets it.
+var _exportColl = null;
 function downloadZip() {
+  // Curated SELECTION -> dialog -> doExportDownload() POSTs the picked media_ids.
   var sel = [...selGet()];
   if (!sel.length) return;
+  _exportColl = null;
+  document.getElementById('export-n').textContent = sel.length + ' item' + (sel.length===1?'':'s');
+  document.getElementById('export-modal').classList.add('open');
+}
+function downloadCollection(name) {
+  // Whole COLLECTION -> dialog -> doExportDownload() POSTs collection=<name>; the server
+  // resolves its full membership (every item, across pages), not the rendered checkboxes.
+  if (!name) return;
+  _exportColl = name;
+  document.getElementById('export-n').textContent = 'collection “' + name + '”';
+  document.getElementById('export-modal').classList.add('open');
+}
+function doExportDownload() {
+  var fmt = document.getElementById('export-fmt').value;
+  var embed = document.getElementById('export-embed').checked;
   var f = document.createElement('form');
   f.method = 'post'; f.action = '/export-zip';
-  sel.forEach(function(mid){
-    var i = document.createElement('input');
-    i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; f.appendChild(i);
-  });
+  if (_exportColl) {
+    var ic = document.createElement('input'); ic.type='hidden'; ic.name='collection'; ic.value=_exportColl; f.appendChild(ic);
+  } else {
+    var sel = [...selGet()];
+    if (!sel.length) return;
+    sel.forEach(function(mid){
+      var i = document.createElement('input');
+      i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; f.appendChild(i);
+    });
+  }
+  document.getElementById('export-modal').classList.remove('open');
+  var ff = document.createElement('input'); ff.type='hidden'; ff.name='fmt'; ff.value=fmt; f.appendChild(ff);
+  if (embed) { var fe = document.createElement('input'); fe.type='hidden'; fe.name='embed'; fe.value='1'; f.appendChild(fe); }
   document.body.appendChild(f); f.submit(); f.remove();
 }
+// --- Web import: drop local files -> POST /api/import-local (localhost-only route) ------------
+var ImportUI = (function(){
+  var CAP = 24;                 // preview is capped; the IMPORT itself is never capped
+  var files = [];               // File[]
+  var urls = [];                // objectURLs pending revoke
+  var IMG = /[.](png|jpe?g|webp|gif|bmp|avif)$/i, VID = /[.](mp4|webm|mov|m4v)$/i, ZIP = /[.]zip$/i;
+  function el(id){ return document.getElementById(id); }
+  function kind(f){ var n=f.name||''; return ZIP.test(n)?'zip':VID.test(n)?'video':IMG.test(n)?'image':'other'; }
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmtSize(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB'; if(b<1073741824)return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
+  function revoke(){ urls.forEach(function(u){ URL.revokeObjectURL(u); }); urls=[]; }
+  function reset(){ files=[]; revoke();
+    el('imp-drop').style.display=''; el('imp-preview').style.display='none';
+    el('imp-result').style.display='none'; el('imp-go').style.display='none';
+    var fi=el('imp-file'), fo=el('imp-folder'); if(fi)fi.value=''; if(fo)fo.value=''; }
+  function open(){ reset(); el('import-modal').classList.add('open'); }
+  function close(){ el('import-modal').classList.remove('open'); reset(); }
+  function browse(){ el('imp-file').click(); }
+  function browseFolder(){ el('imp-folder').click(); }
+  function onPick(list){ add(list); }
+  function add(list){
+    for(var i=0;i<list.length;i++){ var f=list[i];
+      if(kind(f)==='other') continue;                                  // skip non-media
+      if(files.some(function(x){ return x.name===f.name && x.size===f.size; })) continue;   // de-dupe
+      files.push(f);
+    }
+    render();
+  }
+  function remove(i){ files.splice(i,1); render(); }
+  function render(){
+    if(!files.length){ reset(); return; }
+    el('imp-drop').style.display='none'; el('imp-preview').style.display=''; el('imp-go').style.display='';
+    var nI=0,nV=0,nZ=0,bytes=0;
+    files.forEach(function(f){ var k=kind(f); if(k==='image')nI++; else if(k==='video')nV++; else if(k==='zip')nZ++; bytes+=f.size; });
+    var parts=[]; if(nI)parts.push(nI+' image'+(nI!==1?'s':'')); if(nV)parts.push(nV+' video'+(nV!==1?'s':'')); if(nZ)parts.push(nZ+' zip'+(nZ!==1?'s':''));
+    el('imp-sum').innerHTML='<b>'+files.length+' file'+(files.length!==1?'s':'')+'</b> &middot; '+parts.join(' &middot; ')+' &middot; '+fmtSize(bytes);
+    el('imp-go').textContent='↑ Import '+files.length+' file'+(files.length!==1?'s':'');
+    revoke();
+    var body=el('imp-body'), h, i;
+    if(files.length<=CAP){                                             // few -> reviewable list
+      h='<div class="imp-list">';
+      files.forEach(function(f,idx){
+        var badge=kind(f)==='video'?'▶':kind(f)==='zip'?'📦':'';
+        h+='<div class="imp-row" data-i="'+idx+'"><span class="imp-thumb">'+badge+'</span><span class="imp-nm">'+esc(f.name)+'</span><span class="imp-sz">'+fmtSize(f.size)+'</span><button class="imp-x" title="remove" onclick="ImportUI.remove('+idx+')">×</button></div>';
+      });
+      h+='</div>'; body.innerHTML=h;
+      files.forEach(function(f,idx){ if(kind(f)!=='image')return; var u=URL.createObjectURL(f); urls.push(u);
+        var row=body.querySelector('.imp-row[data-i="'+idx+'"]'); if(row){ var t=row.querySelector('.imp-thumb'); if(t)t.innerHTML='<img src="'+u+'">'; } });
+    } else {                                                           // many -> capped grid, all still import
+      h='<div class="imp-cap">ⓘ Preview capped at '+CAP+' &mdash; <b>all '+files.length+' will import</b> (only the preview is capped).</div><div class="imp-grid">';
+      for(i=0;i<CAP-1;i++){ var k=kind(files[i]); h+='<div class="imp-tg" data-i="'+i+'">'+(k==='video'?'▶':k==='zip'?'📦':'')+'</div>'; }
+      h+='<div class="imp-more">+'+(files.length-(CAP-1))+'<br>more</div></div>'; body.innerHTML=h;
+      for(i=0;i<CAP-1;i++){ if(kind(files[i])!=='image')continue; var u=URL.createObjectURL(files[i]); urls.push(u);
+        var cell=body.querySelector('.imp-tg[data-i="'+i+'"]'); if(cell)cell.innerHTML='<img src="'+u+'">'; }
+    }
+  }
+  function doImport(){
+    if(!files.length) return;
+    var go=el('imp-go'); go.disabled=true; go.textContent='Importing…';
+    var fd=new FormData();
+    files.forEach(function(f){ fd.append('files', f, f.name); });        // basename; server ignores any path
+    var coll=el('imp-collection').value; if(coll) fd.append('collection', coll);
+    // No CSRF token: same as the app's other fetch-based mutating APIs (/api/generate,
+    // /api/loom/generate, /api/delete) -- protected by SESSION_COOKIE_SAMESITE=Lax + the
+    // global front-door auth gate, and here additionally by the route's localhost-only check.
+    fetch('/api/import-local',{method:'POST',body:fd})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok,j:j}; }); })
+      .then(function(o){
+        go.disabled=false; go.textContent='↑ Import';
+        var res=el('imp-result'); res.style.display='';
+        if(!o.ok || o.j.error){ res.className='imp-result err'; res.textContent='⚠ '+((o.j&&o.j.error)||('import failed ('+o.ok+')')); return; }
+        var d=o.j;
+        res.className='imp-result ok';
+        res.innerHTML='✓ Imported <b>'+d.imported+'</b> file'+(d.imported!==1?'s':'')
+          +(d.skipped?' &middot; '+d.skipped+' skipped (already in library)':'')
+          +(d.collection?' &middot; added to “'+esc(d.collection)+'”':'')
+          +'. <a href="/" style="color:var(--lavender);font-weight:600;">Reload gallery →</a>';
+        el('imp-preview').style.display='none'; el('imp-go').style.display='none';
+      })
+      .catch(function(){ go.disabled=false; go.textContent='↑ Import';
+        var res=el('imp-result'); res.style.display=''; res.className='imp-result err'; res.textContent='⚠ network error'; });
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    var dz=el('imp-drop'); if(!dz) return;
+    ['dragenter','dragover'].forEach(function(e){ dz.addEventListener(e,function(ev){ ev.preventDefault(); dz.classList.add('hot'); }); });
+    dz.addEventListener('dragleave',function(ev){ ev.preventDefault(); dz.classList.remove('hot'); });
+    dz.addEventListener('drop',function(ev){ ev.preventDefault(); dz.classList.remove('hot');
+      if(ev.dataTransfer && ev.dataTransfer.files) add(ev.dataTransfer.files); });
+  });
+  return {open:open, close:close, browse:browse, browseFolder:browseFolder, onPick:onPick, remove:remove, doImport:doImport};
+})();
 function bulkReplacePrompt() {
   var sel = [...selGet()];
   if (!sel.length) return;
@@ -4699,47 +5062,16 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
     </div>
     <div id="gen-mode-video" style="display:none;">
-      <div class="gen-seg" style="margin-bottom:10px;">
-        <button id="vm-i2v" class="on" onclick="Gen.setVideoMode('i2v')">First frame</button>
-        <button id="vm-flf" onclick="Gen.setVideoMode('flf')">First + last</button>
-        <button id="vm-r2v" onclick="Gen.setVideoMode('r2v')">Multi-ref</button>
-      </div>
-      <div class="gen-lbl" id="video-slots-lbl">Source image (first frame)</div>
-      <div id="video-slots"></div>
-      <div style="display:flex;justify-content:flex-end;margin-top:8px;">
-        <button type="button" class="snip-btn" onclick="Snips.open(this, {get:Gen.videoPromptText, set:Gen.videoPromptSet})">&#9733; Snippets</button>
-      </div>
-      <div id="video-prompt" class="gen-ta gen-ce" contenteditable="true"
-           data-placeholder="Describe the motion &mdash; &lsquo;slow cinematic pan right, gentle waves&hellip;&rsquo;"></div>
-      <div class="gen-row" style="margin-top:8px;">
-        <div style="flex:1.4;"><div class="gen-lbl">Model</div>
-          <select id="video-model" class="gen-sel" onchange="Gen.videoCost()">
-            <option value="v4.0.1" selected>V4.0 Lite Preview &middot; multi-ref &middot; 15s &middot; audio</option>
-            <option value="v4.0">V4.0 Preview (full) &middot; top quality &middot; pricier</option>
-            <option value="v3.2">V3.2 &middot; audio &middot; prompt-following</option>
-            <option value="v3.0.2">V3.0 Lite &middot; complex motion</option>
-            <option value="v3.0">V3.0 &middot; high consistency</option>
-          </select></div>
-        <div style="flex:1;"><div class="gen-lbl">Duration (s)</div>
-          <select id="video-dur" class="gen-sel" onchange="Gen.videoCost()"><option>5</option><option>6</option><option>10</option><option>15</option></select></div>
-      </div>
-      <div class="gen-row" style="margin-top:8px;">
-        <div id="video-cam-wrap" style="flex:1;"><div class="gen-lbl">Camera</div>
-          <select id="video-cam" class="gen-sel">
-            <option value="unset">Auto</option><option value="zoom">Zoom</option>
-            <option value="pan">Pan</option><option value="tilt">Tilt</option>
-            <option value="roll">Roll</option><option value="horizontal">Horizontal</option>
-            <option value="vertical-pan">Vertical pan</option>
-          </select></div>
-        <div style="flex:1;"><div class="gen-lbl">Priority</div>
-          <select id="video-vmode" class="gen-sel"><option value="professional">Professional</option><option value="basic">Basic (cheaper)</option></select></div>
-      </div>
-      <label class="gen-check"><input type="checkbox" id="video-audio" onchange="Gen.videoAudioToggle()"> Generate audio <span style="color:var(--overlay0);">(V4.0 / V3.2 &middot; spoken lines in the prompt become voiceover)</span></label>
-      <div id="video-lang-wrap" style="display:none;margin-top:4px;"><div class="gen-lbl">Audio language</div>
-        <select id="video-lang" class="gen-sel"><option value="english">English</option><option value="japanese">Japanese</option><option value="chinese">Chinese</option><option value="korean">Korean</option><option value="none">SE only (no dialogue)</option></select></div>
-      <div class="gen-cost" id="video-cost" style="margin-top:10px;">Pick a source image to see the cost.</div>
-      <button id="video-go" class="gen-go" onclick="Gen.videoGenerate()">Generate video</button>
-      <div id="video-result" class="gen-result" style="display:none;"></div>
+      {# Migrated to the shared <mg-generate-drawer> web component (static/mg-generate-drawer.js) --
+         the SAME element the Loom already mounts in production. It renders the full-parity Video
+         form (6 image + 3 video + 1 audio refs, negative prompt, Channel, the full model roster
+         with capability gating) and owns its own submit/poll/result/pricing over
+         /api/loom/generate. NO data-loom-ctx here, so Camera + Basic/Professional show -- the
+         gallery mount, per the LOCKED artifact 74ad3fd0. The host wires the gallery Picker to the
+         element's mg-pick-request event, and Gen.addVideoRefs feeds picked images via prefill()
+         -- see Gen.init below. The old hand-rolled #gen-mode-video form (9 undifferentiated image
+         slots, 5-model select, no video/audio refs, no negative, no channel) is gone. #}
+      <mg-generate-drawer></mg-generate-drawer>
     </div>
   </div>
   <div id="model-flyout" aria-hidden="true" aria-label="Models and LoRAs">
@@ -4921,6 +5253,11 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script src="/static/picker-core.js"></script>
+<!-- The shared <mg-generate-drawer> now mounts in the gallery's Video tab too (not just the
+     Loom, which loads it in _LOOM_SHELL). It's picker-agnostic -- no mg-model-picker /
+     mg-gallery-picker dependency -- so this one script is all the gallery mount needs; the
+     host wires its mg-pick-request to the gallery Picker in the inline JS below. -->
+<script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
 var Contests = (function(){
@@ -5031,7 +5368,7 @@ var Picker = (function(){
   // Browse/filter/page/infinite-scroll logic lives in PickerCore now (shared with the
   // Loom's GalleryPick); this IIFE is a thin DOM-binding shim over it -- same ids, same
   // CSS, same 3 call sites, same behavior as before the refactor.
-  var cb=null, core=null;
+  var cb=null, core=null, forcedType='';   // forcedType: a caller-forced media filter for one open session (e.g. 'video')
   function el(id){return document.getElementById(id);}
   function readFilters(){
     var v=function(id){ var e=el(id); return e?e.value:''; };
@@ -5063,14 +5400,15 @@ var Picker = (function(){
     });
     return core;
   }
-  function open(callback){ cb=callback; el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
+  function open(callback, opts){ cb=callback; forcedType=(opts&&opts.type)||'';
+    el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
     el('pick-q').value=''; markLoading();
-    ensureCore().setFilters(Object.assign({q:''}, readFilters()));
+    ensureCore().setFilters(Object.assign({q:''}, readFilters(), {type:forcedType}));
     setTimeout(function(){el('pick-q').focus();},120);
     try{ el('pick-copy').checked = localStorage.getItem('pick-copyprompt')==='1'; }catch(e){} }
-  function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; }
+  function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; forcedType=''; }
   function onInput(){ ensureCore().setQuery(el('pick-q').value.trim()); }
-  function onFilter(){ markLoading(); ensureCore().setFilters(readFilters()); }
+  function onFilter(){ markLoading(); ensureCore().setFilters(Object.assign(readFilters(), {type:forcedType})); }
   function pick(m, thumb){
     try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
     var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'');
@@ -5589,7 +5927,8 @@ var Gen = (function(){
       var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
     el('gen-drawer').classList.toggle('wide', m==='video'||m==='edit');
     if(m==='edit'){ setEditModel(editModel); loadWorkflows().then(renderWorkflows); if(!presetsLoaded) loadPresets(); }
-    if(m==='video') renderVideoSlots();
+    // Video is the <mg-generate-drawer> web component now -- it self-renders on connect and
+    // owns its own state; nothing to (re)build here (the old renderVideoSlots is gone).
   }
   function setEditSub(s){
     ['edit','enhance','fix'].forEach(function(x){
@@ -5779,164 +6118,44 @@ var Gen = (function(){
         if(window.confirm('Run this Enhance tool? It spends credits (free cards do not cover Enhance workflows).')) run();
       });
   }
-  var vmode='i2v', vslots=[null];
-  function setVideoMode(m){
-    vmode=m;
-    ['i2v','flf','r2v'].forEach(function(x){ var b=el('vm-'+x); if(b) b.classList.toggle('on',x===m); });
-    var vp=el('video-prompt');
-    if(m==='i2v'){ vslots=[vslots[0]||null]; el('video-slots-lbl').textContent='Source image (first frame)';
-      vp.setAttribute('data-placeholder','Describe the motion \\u2014 \\u2018slow cinematic pan right, gentle waves\\u2026\\u2019'); }
-    else if(m==='flf'){ vslots=[vslots[0]||null,vslots[1]||null]; el('video-slots-lbl').textContent='Start & end frame';
-      vp.setAttribute('data-placeholder','Describe the transition from start frame to end frame\\u2026'); }
-    else { if(!vslots.length) vslots=[null]; el('video-slots-lbl').textContent='Reference images';
-      vp.setAttribute('data-placeholder','Type @image1 to cite a ref \\u2014 it becomes a chip \\u2014 \\u2018the girl from @image1 walks the pier\\u2026\\u2019'); }
-    var cam=el('video-cam-wrap'); if(cam) cam.style.visibility=(m==='r2v')?'hidden':'visible';
-    renderVideoSlots();
-  }
-  function renderVideoSlots(){
-    var wrap=el('video-slots'); if(!wrap) return; wrap.innerHTML=''; wrap.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
-    var refN=0;
-    vslots.forEach(function(s,i){
-      var box=document.createElement('div');
-      box.style.cssText='position:relative;width:78px;height:78px;border-radius:8px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;overflow:hidden;display:grid;place-items:center;color:var(--subtext);font-size:11px;text-align:center;';
-      if(s){
-        refN++;
-        var tag=(vmode==='flf'?(i===0?'start':'end'):'@image'+refN);
-        box.innerHTML='<img src="'+s.thumb+'" style="width:100%;height:100%;object-fit:cover;">'
-          +'<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.85);color:var(--lavender);font-size:9.5px;padding:1px 5px;border-radius:4px;">'+tag+'</span>'
-          +'<button type="button" class="vs-x" style="position:absolute;top:2px;right:2px;width:17px;height:17px;border-radius:50%;border:none;background:rgba(21,19,28,.85);color:var(--subtext);font-size:11px;line-height:1;cursor:pointer;padding:0;">&times;</button>';
-        box.querySelector('.vs-x').onclick=function(ev){ ev.stopPropagation(); hidePreview();
-          if(vmode==='r2v'){ vslots.splice(i,1); if(!vslots.length) vslots=[null]; } else vslots[i]=null;
-          renderVideoSlots(); };
-        box.onmouseenter=function(){ showRefPreview(s.media_id, box); };
-        box.onmouseleave=hidePreview;
-      }
-      else { box.textContent=(vmode==='flf'?(i===0?'+ start':'+ end'):'+ pick'); }
-      box.onclick=function(){ Picker.open(function(mid,thumb){ vslots[i]={media_id:mid,thumb:thumb}; renderVideoSlots(); }); };
-      wrap.appendChild(box);
-    });
-    if(vmode==='r2v' && vslots.length<9){
-      var add=document.createElement('button'); add.type='button'; add.textContent='+ add';
-      add.style.cssText='width:78px;height:78px;border-radius:8px;border:1px dashed var(--surface1);background:transparent;color:var(--subtext);cursor:pointer;font-size:11px;';
-      add.onclick=function(){ vslots.push(null); renderVideoSlots(); }; wrap.appendChild(add);
-    }
-    videoCost();
-  }
-  var vcostTimer=null, vpTimer=null;
-  function vpRefs(){
-    var map={}, n=0;
-    vslots.forEach(function(s){ if(s&&s.media_id){ n++; map['@image'+n]={thumb:s.thumb, mid:s.media_id}; } });
-    return map;
-  }
-  function vpMakeChip(tag, info){
-    var c=document.createElement('span'); c.className='vp-chip'; c.contentEditable='false';
-    c.setAttribute('data-ref', tag);
-    c.innerHTML=(info&&info.thumb?'<img src="'+info.thumb+'" alt="">':'')+tag;
-    if(info&&info.mid){ c.onmouseenter=function(){ showRefPreview(info.mid, c); }; c.onmouseleave=hidePreview; }
-    return c;
-  }
-  function vpChipify(final){
-    var vp=el('video-prompt'); if(!vp) return;
-    var map=vpRefs(), sel=window.getSelection();
-    var walker=document.createTreeWalker(vp, NodeFilter.SHOW_TEXT), nodes=[], tn;
-    while((tn=walker.nextNode())) nodes.push(tn);
-    var re=/@image\\d+/g;
-    nodes.forEach(function(node){
-      var t=node.nodeValue, m, found=[];
-      re.lastIndex=0;
-      while((m=re.exec(t))!==null){
-        if(!map[m[0]]) continue;
-        if(!final && m.index+m[0].length===t.length) continue;  // still typing at the end
-        found.push({i:m.index, tag:m[0]});
-      }
-      if(!found.length) return;
-      var caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer===node;
-      var frag=document.createDocumentFragment(), pos=0;
-      found.forEach(function(f){
-        if(f.i>pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
-        frag.appendChild(vpMakeChip(f.tag, map[f.tag]));
-        pos=f.i+f.tag.length;
-      });
-      var tail=document.createTextNode(t.slice(pos)); frag.appendChild(tail);
-      node.parentNode.replaceChild(frag, node);
-      if(caretHere){ var r=document.createRange(); r.setStart(tail, tail.length); r.collapse(true);
-        sel.removeAllRanges(); sel.addRange(r); }
-    });
-  }
-  function vpText(){
-    var vp=el('video-prompt'), out='';
-    (function walk(n){ n.childNodes.forEach(function(c){
-      if(c.nodeType===3) out+=c.nodeValue;
-      else if(c.classList&&c.classList.contains('vp-chip')) out+=c.getAttribute('data-ref');
-      else if(c.nodeName==='BR') out+='\\n';
-      else walk(c);
-    });})(vp);
-    return out.replace(/\\u00a0/g,' ').trim();
-  }
-  function videoPromptSet(v){ var vp=el('video-prompt'); if(!vp) return; vp.textContent=v||''; vpChipify(true); videoCost(); }
-  function vpOnInput(){ clearTimeout(vpTimer); vpTimer=setTimeout(function(){ vpChipify(false); videoCost(); }, 300); }
-  function videoPayload(){
-    return { mode:vmode.toUpperCase(), prompt:vpText(),
-      images:vslots.filter(function(s){return s&&s.media_id;}).map(function(s){return s.media_id;}),
-      duration:+el('video-dur').value, audio:el('video-audio').checked,
-      video_model:el('video-model').value,
-      camera_movement:(vmode!=='r2v'?el('video-cam').value:''),
-      quality:el('video-vmode').value,
-      audio_language:el('video-lang').value };
-  }
-  function videoAudioToggle(){ el('video-lang-wrap').style.display=el('video-audio').checked?'':'none'; videoCost(); }
-  function videoCost(){ clearTimeout(vcostTimer); vcostTimer=setTimeout(videoCostNow, 250); }
-  function videoCostNow(){
-    var cost=el('video-cost'); if(!cost) return;
-    var p=videoPayload();
-    if(!p.images.length){ cost.className='gen-cost'; cost.textContent='Pick a source image to see the cost.'; return; }
-    cost.className='gen-cost'; cost.textContent='Checking cost\\u2026'; var mine=++costSeq;
-    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
-      .then(function(r){return r.json();})
-      .then(function(d){ if(mine!==costSeq)return;
-        if(d.note){ cost.textContent=d.note; return; }
-        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
-        var n=d.cost!=null?d.cost.toLocaleString():'?';
-        if(d.free){ cost.className='gen-cost free';
-          cost.textContent='\\ud83c\\udfab FREE \\u2014 '+(d.card_name||'a video card')+' covers this'+(d.cards?' ('+d.cards+' left)':'')+' \\u00b7 saves ~'+n+' credits'; }
-        else { var big=(p.video_model==='v4.0');   // v4.0 full is ~2.5x Lite (14k/s -> 210k for 15s)
-          cost.className='gen-cost'+(big?' warn':'');
-          cost.textContent=(big?'\\u26a0 V4.0 full \\u2014 ~2.5\\u00d7 Lite \\u00b7 ':'')+'\\u2248 '+n+' credits'; }
-      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
-  }
+  function genDrawerEl(){ var w=el('gen-mode-video'); return w?w.querySelector('mg-generate-drawer'):null; }
   function addVideoRefs(refs){
-    refs=(refs||[]).slice(0,9); if(!refs.length) return;
+    // Gallery bulk-send ("make a video from these"): feed the picked images straight into
+    // the <mg-generate-drawer> via its prefill() -- the same shot-context entry the Loom
+    // uses. Image bank is 6 now (the full-parity split), not the old 9. >1 image -> Multi-ref.
+    refs=(refs||[]).slice(0,6); if(!refs.length) return;
     open(); setMode('video');
-    if(refs.length>1) setVideoMode('r2v');
-    var slots=refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; });
-    if(refs.length>1){ vslots=slots; }
-    else if(vmode==='r2v'){ vslots=[slots[0]]; }
-    else { vslots[0]=slots[0]; }
-    renderVideoSlots();
-  }
-  function videoGenerate(){
-    var p=videoPayload(), res=el('video-result');
-    if(!p.images.length){ res.style.display='block'; res.innerHTML='<span style="color:var(--red);font-size:12px;">Pick a source image first.</span>'; return; }
-    runTask('/api/loom/generate', p,
-            res, {past:'Rendered', btn:el('video-go'), busy:'Rendering\\u2026', idle:'Generate video'});
+    var drawer=genDrawerEl(); if(!drawer) return;
+    drawer.prefill({ mode: refs.length>1?'r2v':'i2v',
+                     images: refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; }) });
   }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
           renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
-          setVideoMode:setVideoMode, videoGenerate:videoGenerate, renderVideoSlots:renderVideoSlots,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           insertTriggers:insertTriggers, setSort:setSort, setCat:setCat,
-          setEditSub:setEditSub, setEditModel:setEditModel, addVideoRefs:addVideoRefs, videoCost:videoCost,
-          videoAudioToggle:videoAudioToggle,
-          vpOnInput:vpOnInput, vpChipify:vpChipify,
-          videoPromptText:vpText, videoPromptSet:videoPromptSet,
+          // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
+          // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
+          // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
+          // gone -- the component owns all of that now.
+          setEditSub:setEditSub, setEditModel:setEditModel, addVideoRefs:addVideoRefs,
           resetModelDefaults:resetModelDefaults,
           get selected(){return selected;}};
 })();
+// Gallery mount wiring for <mg-generate-drawer>: the component is picker-agnostic and fires
+// mg-pick-request (bubbling + composed) whenever a slot's "+ pick" is clicked. Open the
+// gallery Picker filtered to the requested kind (image | video -> /api/gallery-images type)
+// and hand the choice back through respond(media_id, thumb). Audio refs never arrive here --
+// the component uploads those directly (there is no gallery/catalog concept for a raw audio
+// file). One document-level listener; the drawer is the only source of this event.
+document.addEventListener('mg-pick-request', function(e){
+  var d=e.detail; if(!d||typeof d.respond!=='function') return;
+  Picker.open(function(mid, thumb){ d.respond(mid, thumb); }, d.kind==='video'?{type:'video'}:null);
+});
 var Tags = (function(){
   var items=[], hot=0, ta=null, timer=null, seq=0;
   function box(){ return document.getElementById('tag-suggest'); }
@@ -6073,9 +6292,8 @@ document.addEventListener('DOMContentLoaded', function(){
     var i=0; setInterval(function(){ i=(i+1)%lines.length; tl.style.opacity=0;
       setTimeout(function(){ tl.textContent=lines[i]; tl.style.opacity=1; }, 500); }, 9000); })();
   ['gen-prompt','gen-neg','edit-ins'].forEach(Tags.attach);
-  var vp=document.getElementById('video-prompt');
-  if(vp){ vp.addEventListener('input', Gen.vpOnInput);
-          vp.addEventListener('blur', function(){ Gen.vpChipify(true); }); }
+  // (#video-prompt + its chipify listeners are gone -- the <mg-generate-drawer> component
+  // owns the video prompt box and its own @ref chip handling now.)
   var asp=document.getElementById('gen-aspects');
   if(asp) asp.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b)return;
     asp.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
@@ -6239,6 +6457,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   <div class="detail-actions">
     {% if img_url %}
+    <a class="btn" href="{{ url_for('full_image', media_id=row.media_id) }}?dl=1">&#8681; Download</a>
     <a class="btn" href="{{ img_url }}" target="_blank">Open Full Size (local)</a>
     {% endif %}
     {% if row.url %}
@@ -6342,7 +6561,18 @@ function suggestPrompt(btn) {
   fetch('/api/suggest-prompt?media_id=' + encodeURIComponent(mid)).then(function(r){return r.json();}).then(function(d){
     btn.disabled = false; btn.textContent = old;
     var s = d.suggestions || [];
-    if (d.error || !s.length) { box.innerHTML = '<span style="color:var(--overlay0);">' + (d.error || 'No suggestion returned.') + '</span>'; return; }
+    if (d.error || !s.length) {
+      // d.error is a server-side str(e)[:200] -- an upstream exception string. Build it
+      // as a TEXT node, never innerHTML: this page (DETAIL_HTML) has no escaper in scope,
+      // and concatenating raw server text into innerHTML is an injection sink. textContent
+      // cannot inject, so no escaper is needed.
+      box.textContent = '';
+      var em = document.createElement('span');
+      em.style.color = 'var(--overlay0)';
+      em.textContent = d.error || 'No suggestion returned.';
+      box.appendChild(em);
+      return;
+    }
     box.innerHTML = '<div style="color:var(--overlay0);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Suggested prompt(s) &middot; click to copy</div>';
     s.forEach(function(t){
       var line = document.createElement('div');
@@ -6427,7 +6657,7 @@ function savePrompt() {
         <input type="hidden" name="mode" value="create">
         <div class="login-field">
           <label for="lf-user">Username</label>
-          <input id="lf-user" type="text" name="username" autocomplete="username" autofocus required>
+          <input id="lf-user" type="text" name="username" autocomplete="username" maxlength="64" autofocus required>
         </div>
         <div class="login-field">
           <label for="lf-pass">Password</label>
@@ -6450,7 +6680,7 @@ function savePrompt() {
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <div class="login-field">
           <label for="lf-user">Username</label>
-          <input id="lf-user" type="text" name="username" autocomplete="username" autofocus required>
+          <input id="lf-user" type="text" name="username" autocomplete="username" maxlength="64" autofocus required>
         </div>
         <div class="login-field">
           <label for="lf-pass">Password</label>
@@ -6731,6 +6961,11 @@ function savePrompt() {
   .p-stat .v.lav{color:var(--lavender);}
   .jobrow{display:flex;flex-wrap:wrap;gap:8px;}
   .jobbtn{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:9px 12px;cursor:pointer;color:var(--text);font-family:inherit;min-width:180px;}
+  /* Per-job option toggle. Sits inside its button but swallows the click, so ticking it
+     configures the run instead of starting one. */
+  .job-opt{display:flex;align-items:center;gap:5px;margin-top:5px;font-size:11.5px;color:var(--subtext);cursor:pointer;}
+  .job-opt input{margin:0;accent-color:var(--accent);cursor:pointer;}
+  .jobbtn.danger .job-opt{color:var(--red);}
   .jobbtn:hover{border-color:var(--lavender);}
   .jobbtn:disabled{opacity:.45;cursor:not-allowed;}
   .jobbtn .t{font-size:13px;font-weight:500;}
@@ -6758,8 +6993,13 @@ function savePrompt() {
   .htab.on{color:var(--lavender);border-bottom-color:var(--lavender);background:rgba(182,146,230,.06);}
   .ptab-view{display:none;}
   .ptab-view.on{display:block;}
-  .u-row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--surface0);border-radius:8px;border:1px solid var(--surface1);}
+  .u-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--surface0);border-radius:8px;border:1px solid var(--surface1);}
   .u-row + .u-row{margin-top:6px;}
+  /* The name flexes and truncates; the Remove button never shrinks or moves. This
+     is the layout half of the username-length fix -- new names are capped at 64,
+     but a legacy over-long name in config must still not push the button off-card. */
+  .u-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;color:var(--text);}
+  .u-row .btn{flex:none;}
   .u-you{font-size:11px;color:var(--accent);margin-left:8px;}
 </style>
 <header>
@@ -6794,6 +7034,11 @@ function savePrompt() {
     <div class="jobrow" id="jobs-safe"></div>
     <div style="font-size:12px;color:var(--overlay0);margin:16px 0 8px;">Changes files &middot; asks first</div>
     <div class="jobrow" id="jobs-danger"></div>
+    <details class="jobs-adv" style="margin-top:16px;">
+      <summary style="font-size:12px;color:var(--overlay0);cursor:pointer;user-select:none;">Advanced &middot; sync variants the one-click Sync doesn't cover</summary>
+      <div style="font-size:11.5px;color:var(--overlay0);margin:8px 0;line-height:1.5;">These re-walk the full account rather than the incremental default. Slower, all read/append (never delete).</div>
+      <div class="jobrow" id="jobs-advanced"></div>
+    </details>
     <div id="jobprog" class="jobprog" style="display:none;"><div class="jp-bar"><i></i></div><div class="jp-txt"></div></div>
     <div id="jobstatus"></div>
     <button type="button" id="job-stop" class="jobbtn danger" style="display:none;width:auto;min-width:0;margin-top:8px;" onclick="stopJob()"><span class="t">&#9632; Stop this job</span></button>
@@ -6890,7 +7135,7 @@ function savePrompt() {
     <div id="users-list">
       {% for u in web_users %}
       <div class="u-row" data-username="{{ u.username }}">
-        <span style="font-size:13.5px;color:var(--text);">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
+        <span class="u-name">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
         <button type="button" class="btn btn-danger" onclick="removeUser(this)">Remove</button>
       </div>
       {% else %}
@@ -6902,7 +7147,7 @@ function savePrompt() {
     <h2>Add user</h2>
     <form id="add-user-form" onsubmit="return addUser(event)">
       <div class="setup-row login-fields" style="max-width:380px;">
-        <input type="text" id="new-username" placeholder="Username" autocomplete="off" required>
+        <input type="text" id="new-username" placeholder="Username" autocomplete="off" maxlength="64" required>
         <input type="password" id="new-password" placeholder="Password" autocomplete="new-password" required>
         <input type="password" id="new-confirm" placeholder="Confirm password" autocomplete="new-password" required>
         <button type="submit" class="btn btn-primary">Add user</button>
@@ -6955,7 +7200,7 @@ function addUser(evt){
       // server-rendered row below passes `this` to removeUser() instead of
       // templating the username into an inline onclick string.
       var row=document.createElement('div'); row.className='u-row'; row.setAttribute('data-username', d.username);
-      var span=document.createElement('span'); span.style.cssText='font-size:13.5px;color:var(--text);'; span.textContent=d.username;
+      var span=document.createElement('span'); span.className='u-name'; span.textContent=d.username;
       var btn=document.createElement('button'); btn.type='button'; btn.className='btn btn-danger'; btn.textContent='Remove';
       btn.onclick=function(){ removeUser(btn); };
       row.appendChild(span); row.appendChild(btn);
@@ -6983,21 +7228,69 @@ function removeUser(btn){
       }
     }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
 }
+// Option toggles. A checkbox here does NOT add a flag to the request -- it swaps which
+// WHITELISTED action key gets sent, so the server still only ever accepts a fixed set of
+// keys and the "never an arbitrary command" property of _panel_run is untouched. Any
+// action listed as a `variant` is hidden from the button list so it can't also render as
+// its own button (the checkbox IS its entry point).
+var JOB_OPTIONS = {
+  'audit':       {variant:'audit-full',   label:'full (byte-compare — slower)',
+                  title:'Also hash file CONTENT to catch byte-identical duplicates saved under different ids (Class B). The default fast pass only finds the same id in two places.'},
+  'dedup-apply': {variant:'dedup-delete', label:'DELETE instead of quarantining',
+                  title:'Redundant copies are deleted outright instead of being moved to _duplicates/. There is no undo and no safety net -- run the preview and the verify step first.'}
+};
 function renderJobs(){
-  var safe=el('jobs-safe'), danger=el('jobs-danger');
+  var safe=el('jobs-safe'), danger=el('jobs-danger'), adv=el('jobs-advanced');
+  var variants={}; Object.keys(JOB_OPTIONS).forEach(function(k){ variants[JOB_OPTIONS[k].variant]=1; });
   ACTIONS.forEach(function(a){
+    if(variants[a.action]) return;              // reached via its checkbox, not its own button
+    var opt=JOB_OPTIONS[a.action];
     var b=document.createElement('button'); b.className='jobbtn'+(a.destructive?' danger':'');
     b.innerHTML='<span class="t">'+a.label+'</span>';
-    b.onclick=function(){ runJob(a); };
-    (a.destructive?danger:safe).appendChild(b);
+    var cb=null, numInput=null;
+    if(opt){
+      var wrap=document.createElement('label');
+      wrap.className='job-opt'; wrap.title=opt.title;
+      cb=document.createElement('input'); cb.type='checkbox';
+      wrap.appendChild(cb);
+      wrap.appendChild(document.createTextNode(' '+opt.label));
+      // Clicking the checkbox must not also fire the button it sits under.
+      wrap.onclick=function(ev){ ev.stopPropagation(); };
+      b.appendChild(wrap);
+    }
+    if(a.int_param){
+      // A single bounded integer (test-pull's N), clamped again server-side. Lives inside
+      // the button; interacting with it must not fire the run.
+      var rng=a.int_range||[1,200];
+      var nwrap=document.createElement('label'); nwrap.className='job-opt';
+      nwrap.appendChild(document.createTextNode('N '));
+      numInput=document.createElement('input'); numInput.type='number';
+      numInput.min=rng[0]; numInput.max=rng[1];
+      numInput.value=(a.int_default!=null?a.int_default:rng[0]);
+      numInput.style.width='56px';
+      nwrap.appendChild(numInput);
+      nwrap.onclick=function(ev){ ev.stopPropagation(); };
+      b.appendChild(nwrap);
+    }
+    b.onclick=function(){
+      var chosen=a;
+      if(opt && cb && cb.checked){
+        var alt=ACTIONS.concat(ALL_ACTIONS).filter(function(x){ return x.action===opt.variant; })[0];
+        if(alt) chosen=alt;
+      }
+      runJob(chosen, numInput ? numInput.value : null);
+    };
+    (a.advanced && adv ? adv : (a.destructive?danger:safe)).appendChild(b);
   });
 }
 var polling=false;
-function runJob(a){
+function runJob(a, n){
   if(a.destructive && !confirm('Run: '+a.label+'?\\n\\nThis changes files on disk (reversible). Continue?')) return;
-  fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a.action, confirm:true})})
+  var payload={action:a.action, confirm:true};
+  if(n!=null && n!=='') payload.n=n;           // only test-pull sends it; server clamps + ignores elsewhere
+  fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>'; return; }
+      if(d.error){ el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>'; return; }
       el('joblog').style.display='block'; if(!polling){ polling=true; poll(); }
     });
 }
@@ -7012,11 +7305,11 @@ function poll(){
         +'  ('+(p.pct!=null?p.pct:0)+'%)'+(p.new?('  \\u00b7 +'+p.new+' new'):'');
     } else { jp.style.display='none'; }
     var st=el('jobstatus'), stop=el('job-stop');
-    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+d.label+'\\u2026</span>'; stop.style.display=''; setButtons(true); setTimeout(poll,1000); }
+    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+escH2(d.label)+'\\u2026</span>'; stop.style.display=''; setButtons(true); setTimeout(poll,1000); }
     else { setButtons(false); polling=false; stop.style.display='none';
-      if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
-      else if(d.status==='cancelled'){ st.innerHTML='<span class="st-failed">\\u25a0 '+(d.label||'job')+' stopped by you</span>'; loadAcct(); }
-      else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
+      if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+escH2(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
+      else if(d.status==='cancelled'){ st.innerHTML='<span class="st-failed">\\u25a0 '+escH2(d.label||'job')+' stopped by you</span>'; loadAcct(); }
+      else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
     }
   }).catch(function(){ polling=false; setButtons(false); });
 }
@@ -7025,7 +7318,7 @@ function stopJob(){
   el('job-stop').disabled=true;
   fetch('/api/panel/cancel',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
     el('job-stop').disabled=false;
-    if(d.error) el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>';
+    if(d.error) el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>';
   }).catch(function(){ el('job-stop').disabled=false; });
 }
 function _acctPaint(d){
@@ -7048,21 +7341,21 @@ function importTask(){
   var tid=(document.getElementById('import-tid').value||'').trim();
   var st=document.getElementById('import-status');
   if(!/^\\d+$/.test(tid)){ st.innerHTML='<span class="st-failed">Enter a numeric task id.</span>'; return; }
-  st.innerHTML='<span class="st-running">\\u25c9 Pulling task '+tid+'\\u2026</span>';
+  st.innerHTML='<span class="st-running">\\u25c9 Pulling task '+escH2(tid)+'\\u2026</span>';
   fetch('/api/import-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid})})
     .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ st.innerHTML='<span class="st-failed">\\u26a0 '+d.error+'</span>'; return; }
+      if(d.error){ st.innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>'; return; }
       if(d.already){ var n=(d.media_ids||[]).length, mid=(d.media_ids||[])[0];
         st.innerHTML='<span class="st-done">\\u2713 Already in your gallery ('+n+' item'+(n===1?'':'s')+')'
           +(mid?' \\u2014 <a href="/image/'+mid+'" style="color:var(--lavender);text-decoration:underline;">view it \\u2192</a>':'')+'</span>'; return; }
       if(!d.saved){ st.innerHTML='<span class="st-failed">\\u26a0 Task resolved but no media to import.</span>'; return; }
-      st.innerHTML='<span class="st-done">\\u2713 Imported '+d.saved+' item(s) from task '+tid+' \\u2014 open the gallery to see it.</span>';
+      st.innerHTML='<span class="st-done">\\u2713 Imported '+d.saved+' item(s) from task '+escH2(tid)+' \\u2014 open the gallery to see it.</span>';
       document.getElementById('import-tid').value=''; loadAcct();
     }).catch(function(){ st.innerHTML='<span class="st-failed">\\u26a0 network error</span>'; });
 }
 function loadSchedule(){
   var sel=el('sch-action');
-  ALL_ACTIONS.filter(function(a){return !a.destructive;}).forEach(function(a){
+  ALL_ACTIONS.filter(function(a){return !a.destructive && !a.advanced;}).forEach(function(a){
     var o=document.createElement('option'); o.value=a.action; o.textContent=a.label; sel.appendChild(o); });
   fetch('/api/panel/schedule').then(function(r){return r.json();}).then(function(s){
     el('sch-enabled').checked=!!s.enabled;
@@ -7080,12 +7373,22 @@ function saveWorkers(){
       st.innerHTML='<span style="color:var(--emerald)">\\u2713 '+(s.workers||w)+' workers</span> \\u00b7 Sync + scheduled run';
     }).catch(function(){ st.textContent='\\u26a0 network error'; });
 }
+// Echo the interval using the dropdown's OWN label for that value, never a
+// re-formatted number: the confirmation used to read "every 168h" beside a
+// dropdown reading "1 week", so the app appeared to have saved something other
+// than what was picked. Reading the option back means the two cannot disagree
+// again, including for any interval added to the list later.
+function _schIntervalLabel(hours){
+  var opts=el('sch-interval').options;
+  for(var i=0;i<opts.length;i++){ if(+opts[i].value===+hours) return opts[i].text; }
+  return hours+'h';   // value not in the list (hand-edited config): show the raw number
+}
 function saveSchedule(){
   var body={enabled:el('sch-enabled').checked, action:el('sch-action').value, interval_hours:+el('sch-interval').value};
   fetch('/api/panel/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(s){
       if(s.error){ el('sch-status').textContent='\\u26a0 '+s.error; return; }
-      el('sch-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved'+(s.enabled?(' \\u00b7 every '+s.interval_hours+'h while open'):' \\u00b7 disabled')+'</span>';
+      el('sch-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved'+(s.enabled?(' \\u00b7 every '+_schIntervalLabel(s.interval_hours)+' while open'):' \\u00b7 disabled')+'</span>';
     }).catch(function(){ el('sch-status').textContent='\\u26a0 network error'; });
 }
 function _timeAgo(ts){
@@ -7173,14 +7476,20 @@ function loadSkins(){
       var c=document.createElement('div');
       c.style.cssText='width:150px;border:1px solid '+(active?'var(--accent)':'var(--surface1)')
         +';border-radius:11px;padding:9px;background:var(--surface0);'
-        +(s.earned?'cursor:pointer;':'opacity:.5;');
+        // A locked card was dimmed with opacity:.5, which composited its 10px
+        // description down to a measured 2.57:1 and its "locked" label to 1.88:1 --
+        // the latter under even the 3:1 large-text floor. .82 still reads as
+        // clearly inactive but keeps the text legible (measured 9.00 name /
+        // 4.77 desc / 4.77 locked). Re-measure if you change it; the label below
+        // also had to come off --overlay0, which is too dim to survive any dimming.
+        +(s.earned?'cursor:pointer;':'opacity:.82;');
       var sw=(SKIN_SW[s.id]||SKIN_SW.moonglade).map(function(h){
         return '<i style="flex:1;background:'+h+'"></i>'; }).join('');
       c.innerHTML='<div style="height:30px;border-radius:7px;display:flex;overflow:hidden;margin-bottom:7px;">'+sw+'</div>'
         +'<div style="font-size:12px;font-weight:600;color:var(--text);">'+escH(s.name)
         +(active?' <span style="color:var(--accent)">\\u2713</span>':'')+'</div>'
         +'<div style="font-size:10px;color:var(--subtext);margin-top:2px;">'+escH(s.desc)+'</div>'
-        +(s.earned?'':'<div style="font-size:10px;color:var(--overlay0);margin-top:3px;">\\ud83d\\udd12 locked</div>');
+        +(s.earned?'':'<div style="font-size:10px;color:var(--subtext);margin-top:3px;">\\ud83d\\udd12 locked</div>');
       if(s.earned) c.onclick=function(){ pickSkin(s.id); };
       g.appendChild(c);
     });
@@ -7194,7 +7503,13 @@ function pickSkin(id){
       try{ localStorage.setItem('skin', d.skin||'moonglade'); }catch(e){}
       if(d.skin && d.skin!=='moonglade') document.documentElement.setAttribute('data-skin', d.skin);
       else document.documentElement.removeAttribute('data-skin');
-      el('skin-status').innerHTML='<span style="color:var(--emerald)">\\u2713 skin applied suite-wide</span>';
+      // Transient confirmation: nothing else ever cleared #skin-status, so the "applied"
+      // line lingered indefinitely -- and since a LOCKED card is inert (no handler), a
+      // later click on one left the stale success showing, reading as though the locked
+      // skin had applied. Clear it after a few seconds; re-arm on each pick.
+      var st=el('skin-status'); st.innerHTML='<span style="color:var(--emerald)">\\u2713 skin applied suite-wide</span>';
+      if(window._skinMsgTimer) clearTimeout(window._skinMsgTimer);
+      window._skinMsgTimer=setTimeout(function(){ if(st) st.innerHTML=''; }, 3500);
       loadSkins();
     }).catch(function(){ el('skin-status').textContent='\\u26a0 network error'; });
 }
@@ -7378,9 +7693,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     username = (request.form.get("username") or "").strip()
                     password = request.form.get("password") or ""
                     confirm = request.form.get("confirm") or ""
+                    un_problem = core.username_problem(username)
                     pw_problem = core.password_problem(password)
-                    if not username:
-                        error = "Username is required."
+                    if un_problem:
+                        error = un_problem
                     elif pw_problem:
                         error = pw_problem
                     elif password != confirm:
@@ -7398,6 +7714,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         _establish_session(username)
                         return redirect(_safe_next(next_url) or url_for("index"))
                     error = "Invalid username or password."
+                    # If THIS failure is the one that tripped the lockout, say so now.
+                    # _login_try_acquire reserves the attempt up front and returns None
+                    # so the attempt may proceed -- which is right, a correct password
+                    # on the 5th try must still work -- but it means the request that
+                    # crosses the threshold otherwise renders the ordinary "invalid"
+                    # message and the user is locked WITHOUT BEING TOLD. They then wait,
+                    # retype the correct password, and get refused for 15 minutes with no
+                    # idea why. (The function's own docstring already promised to report
+                    # a lockout that "was just now triggered"; the code did not.)
+                    just_locked = _login_seconds_locked(ip)
+                    if just_locked is not None:
+                        mins = max(1, (just_locked + 59) // 60)
+                        error = ("Too many failed attempts from this address. "
+                                 "Try again in about {} minute{}.".format(
+                                     mins, "" if mins == 1 else "s"))
         if request.method == "POST":
             # A POST that fell through to an error above: always hand back a
             # FRESH CSRF token -- one that was just consumed or never matched
@@ -7529,7 +7860,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # actions -> Maintenance buttons (panel_visible only). all_actions -> the
         # scheduler dropdown, which needs the background-only jobs too (that's their
         # only home now that they're not buttons).
-        all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"]}
+        all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"],
+                        "advanced": v.get("advanced", False),
+                        "int_param": v.get("int_param", False),
+                        "int_default": v.get("int_default"),
+                        "int_range": v.get("int_range")}
                        for k, v in PANEL_ACTIONS.items()]
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
                   if v.get("panel_visible", True)]
@@ -7585,10 +7920,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
         confirm = str(body.get("confirm") or "")
-        if not username:
-            return jsonify({"error": "Username is required."}), 400
-        # Same core.password_problem() the /login bootstrap form and the
-        # --add-web-user CLI call -- one policy, three entry points, no drift.
+        # Same core.username_problem()/password_problem() the /login bootstrap form
+        # and the --add-web-user CLI call use -- one policy, three entry points, no
+        # drift. username_problem covers empty, over-length, and control chars.
+        un_problem = core.username_problem(username)
+        if un_problem:
+            return jsonify({"error": un_problem}), 400
         pw_problem = core.password_problem(password)
         if pw_problem:
             return jsonify({"error": pw_problem}), 400
@@ -7692,7 +8029,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if _panel_job["status"] == "running":
                 return jsonify({"error": "a job is already running"}), 409
         try:
-            _panel_run(action)
+            # `n` is only consumed by an int_param action (test-pull); _panel_run
+            # clamps it into range and ignores it otherwise, so passing it always is safe.
+            _panel_run(action, int_arg=body.get("n"))
             return jsonify({"ok": True, "action": action, "label": spec["label"]})
         except Exception as e:
             return jsonify({"error": str(e)[:200]}), 200
@@ -8323,39 +8662,88 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         p = find_image_file(out_dir, media_id, row.get("filename") if row else "")
         if not p or not p.exists():
             return "Not found", 404
-        resp = send_from_directory(str(p.parent), p.name, max_age=31536000)
+        # ?dl=1 -> force a SAVE with the real filename (the detail page's plain Download);
+        # without it, inline (the lightbox displays the image). Same file either way.
+        dl = bool(request.args.get("dl"))
+        resp = send_from_directory(str(p.parent), p.name, max_age=31536000,
+                                   as_attachment=dl, download_name=(p.name if dl else None))
         resp.headers["Cache-Control"] = _IMMUTABLE
         return resp
 
     @app.route("/export-zip", methods=["POST"])
     def export_zip():
-        # Stream a ZIP of the selected images' full-res files. Stored (no
-        # recompression) since images are already compressed.
+        # Stream a ZIP of the selected files. Default is STORED (no recompression) --
+        # they're already compressed. Optional export-time transforms: convert to
+        # PNG/JPEG (`fmt`) and/or embed prompt+ids into the file (`embed`). Both run on a
+        # COPY in a temp dir and are discarded after zipping -- the catalog and the
+        # originals on disk are NEVER touched, and a converted file never re-enters the
+        # catalog as a new row (the decided shape; the archive stays exactly as PixAI
+        # delivered it). Videos are always passed through as-is (Pillow can't transform mp4).
         import io
         import zipfile
-        ids = request.form.getlist("media_ids")
+        import shutil
+        import tempfile
+        import pixai_gallery_backup as core
+        # Two entry points: a curated SELECTION (media_ids from the grid) or a whole
+        # COLLECTION by name. For a collection we resolve its FULL membership here in SQL
+        # (up to the same 2000 cap) rather than trusting the rendered checkboxes -- "download
+        # this collection" must mean every item in it, even across pages the grid never
+        # loaded. There is no "zip the entire catalog" path: absent both, ids is empty -> 404.
+        coll = (request.form.get("collection") or "").strip()
+        if coll:
+            rows_c, _ = query_catalog(db_path, collection=coll, page=1, page_size=2000)
+            ids = [r["media_id"] for r in rows_c]
+        else:
+            ids = request.form.getlist("media_ids")
+        fmt = (request.form.get("fmt") or "original").lower()
+        if fmt not in ("original", "png", "jpeg"):
+            fmt = "original"
+        embed = (request.form.get("embed") or "") in ("1", "true", "on", "yes")
+        transforming = (fmt != "original") or embed
+        tmp = tempfile.mkdtemp(prefix="mg_export_") if transforming else None
         mem = io.BytesIO()
         n = 0
-        with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
-            seen_names = set()
-            for mid in ids[:2000]:  # safety cap
-                row = get_row(db_path, mid)
-                if not row:
-                    continue
-                p = find_image_file(out_dir, mid, row.get("filename"))
-                if not p or not p.exists():
-                    continue
-                name = p.name
-                if name in seen_names:
-                    name = "{}_{}".format(mid, p.name)
-                seen_names.add(name)
-                z.write(p, arcname=name)
-                n += 1
-        if not n:
-            return "No matching images found.", 404
-        mem.seek(0)
-        return send_file(mem, mimetype="application/zip", as_attachment=True,
-                         download_name="pixai_selection_{}.zip".format(n))
+        try:
+            with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
+                seen_names = set()
+                for mid in ids[:2000]:  # safety cap
+                    row = get_row(db_path, mid)
+                    if not row:
+                        continue
+                    p = find_image_file(out_dir, mid, row.get("filename"))
+                    if not p or not p.exists():
+                        continue
+                    src = p
+                    if tmp and not row.get("is_video"):
+                        # Transform a COPY only -- never the original file.
+                        work = Path(tmp) / p.name
+                        try:
+                            shutil.copy2(p, work)
+                            if fmt != "original":
+                                work, _note = core.convert_image(work, fmt, keep_original=False)
+                            if embed:
+                                core.embed_metadata(work, {
+                                    "prompt": row.get("prompt_full") or row.get("prompt") or "",
+                                    "media_id": mid, "task_id": row.get("task_id") or "",
+                                    "model": row.get("model") or "", "seed": row.get("seed") or "",
+                                    "date": row.get("created_at") or ""})
+                            src = work
+                        except Exception:
+                            src = p        # any transform failure -> ship the original untouched
+                    name = src.name
+                    if name in seen_names:
+                        name = "{}_{}".format(mid, src.name)
+                    seen_names.add(name)
+                    z.write(src, arcname=name)
+                    n += 1
+            if not n:
+                return "No matching images found.", 404
+            mem.seek(0)
+            return send_file(mem, mimetype="application/zip", as_attachment=True,
+                             download_name="pixai_selection_{}.zip".format(n))
+        finally:
+            if tmp:
+                shutil.rmtree(tmp, ignore_errors=True)   # bytes are already in `mem`
 
     # --- Generation surface (owner-only: local, or a logged-in LAN session) --
     # The Generate drawer talks to PixAI with the OWNER's API key and can spend
@@ -8525,6 +8913,46 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def _gen_session():
         import pixai_gallery_backup as core
         return core, core._make_session(None)
+
+    def _input_media_id(core, session, val):
+        """Turn whatever the client sent into a media_id PixAI will accept as an INPUT.
+
+        A media_id in our catalog identifies a generation OUTPUT, and PixAI refuses one
+        as an input -- invalid_media_id / invalid_reference_image_media_id, with a full
+        refund. Readable is NOT usable-as-input: verified 2026-07-20 that both a
+        month-old and a same-day catalog id still resolve fine through GET /v1/media, so
+        this is media KIND, not expiry.
+
+        We hold the file on disk (that is what the backup IS), so upload it and hand
+        PixAI an upload-kind id. Same free S3 handshake as --upload and /api/upload;
+        spends nothing. Cached per media_id for the process lifetime.
+
+        This lives at create_app scope, called by EVERY path that feeds a user-chosen
+        image to PixAI -- /api/loom/generate, /api/enhance, /api/edit, /api/fix. The
+        first fix for this bug only patched the video route, which left enhance/edit/fix
+        silently broken in exactly the same way; a shared helper is what stops the next
+        input path from reintroducing it.
+
+        Falls back to the value unchanged on ANY failure (no local copy, upload error)
+        so PixAI's own error surfaces rather than a mystery 'no reference'.
+        """
+        s = str(val or "").strip()
+        if not s or not s.isdigit():
+            return s                       # data: URLs and blanks are handled by callers
+        if s in _ref_upload_cache:
+            return _ref_upload_cache[s]
+        try:
+            row = get_row(db_path, s)
+            fp = find_image_file(out_dir, s, (row or {}).get("filename") or "")
+            if not fp or not fp.exists():
+                return s
+            mid = core.upload_media(session, str(fp))
+        except Exception:                  # noqa: BLE001 -- never 500 a generation over this
+            return s
+        if mid:
+            _ref_upload_cache[s] = str(mid)
+            return str(mid)
+        return s
 
     @app.route("/api/model-search")
     def api_model_search():
@@ -9260,6 +9688,84 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             except OSError:
                 pass
 
+    def _safe_extract_zip(zip_path, dest_dir):
+        """Extract a zip into dest_dir, dropping any member whose resolved path would escape
+        dest_dir (zip-slip). Localhost-only caller, but a crafted archive still shouldn't be
+        able to write outside the temp dir."""
+        import os as _os
+        import zipfile as _zip
+        import shutil as _sh
+        root = _os.path.realpath(dest_dir)
+        with _zip.ZipFile(zip_path) as z:
+            for m in z.namelist():
+                if m.endswith("/"):
+                    continue
+                target = _os.path.realpath(_os.path.join(dest_dir, m))
+                if target != root and not target.startswith(root + _os.sep):
+                    continue                          # zip-slip -> skip
+                _os.makedirs(_os.path.dirname(target), exist_ok=True)
+                with z.open(m) as src, open(target, "wb") as dst:
+                    _sh.copyfileobj(src, dst)
+
+    @app.route("/api/import-local", methods=["POST"])
+    def api_import_local():
+        """Import local files into the catalog as source='local' -- the web equivalent of the
+        CLI's --import-local. Accepts multipart `files` (images/videos); a `.zip` is expanded.
+
+        Localhost-only: it copies files into the backup (`imported/`) and shells out to build
+        thumbnails on the machine the SERVER process runs on -- a host-filesystem write, the
+        same trust tier as the destructive Panel jobs and /api/branding/shortcut, NOT the
+        broader logged-in-LAN auth. A LAN device must never be able to write files onto the
+        owner's machine. Nothing is uploaded to PixAI (that's /api/upload).
+
+        Saves the uploads to a temp dir (expanding any zip), then reuses
+        core.run_import_local (copy -> imported/ + catalog source='local' + thumbnail, path
+        dedup), tags an optional collection, and returns counts. Synchronous for now."""
+        if not _is_local_request():
+            return jsonify({"error": "this imports files onto the server's machine; localhost-only"}), 403
+        import os as _os
+        import tempfile
+        import shutil
+        from types import SimpleNamespace
+        import pixai_gallery_backup as core
+        files = request.files.getlist("files")
+        if not files:
+            return jsonify({"error": "no files"}), 400
+        collection = (request.form.get("collection") or "").strip()
+        tmp = tempfile.mkdtemp(prefix="mg_import_")
+        try:
+            saved = 0
+            for i, f in enumerate(files[:1000]):          # hard cap on one request
+                base = _os.path.basename(f.filename or "")
+                if not base:
+                    continue
+                # Own subdir per upload so two files sharing a basename don't collide in the
+                # temp dir; run_import_local then copies each into imported/ by basename, so the
+                # final names stay clean (matching the CLI's --import-local behavior).
+                sub = _os.path.join(tmp, str(i))
+                _os.makedirs(sub, exist_ok=True)
+                dest = _os.path.join(sub, base)
+                f.save(dest)
+                if base.lower().endswith(".zip"):
+                    try:
+                        _safe_extract_zip(dest, sub)
+                    finally:
+                        try: _os.unlink(dest)
+                        except OSError: pass
+                saved += 1
+            if not saved:
+                return jsonify({"error": "no usable files"}), 400
+            res = core.run_import_local(SimpleNamespace(out=str(out_dir), import_local=tmp))
+            mids = res.get("media_ids") or []
+            if collection and mids:
+                add_to_collection(db_path, mids, collection)
+            return jsonify({"ok": True, "imported": res["imported"], "skipped": res["skipped"],
+                            "collection": collection or None})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 200
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def _gen_args_from_payload(p):
         """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
         feeds to core._gen_parameters -- so web + CLI build identical params (one source
@@ -9306,11 +9812,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             pass
         return {}
 
-    def _edit_params_from_payload(core, p):
+    def _edit_params_from_payload(core, p, session=None):
         """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
         catalog media_id (the image being edited). A `preset` name swaps in a locally
         banked Toolbox preset (canned prompt + sceneId + its modelId). Returns None if
-        no source."""
+        no source.
+
+        `session` is REQUIRED for a real submit and deliberately omitted for pricing.
+        With it, every source id is run through _input_media_id -- a catalog id is a
+        generation OUTPUT and PixAI refuses it as an input. Without it, ids are left
+        alone: /api/price only needs the SHAPE to compute a cost, and uploading on every
+        cost check would upload the same file repeatedly while the user types."""
         p = p or {}
         src = str(p.get("source") or "").strip()
         if not src:
@@ -9345,6 +9857,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         spec = core.edit_model_by_id(model_id)
         if spec:
             media = media[:spec["max_refs"]] or [src]
+        if session is not None:            # real submit -- see the docstring
+            media = [_input_media_id(core, session, m) for m in media]
         return core.build_chat_edit_parameters(instruction, media, **kwargs)
 
     @app.route("/api/presets", methods=["GET", "POST"])
@@ -9444,7 +9958,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         edit). Read-only (no spend). Login required (any session, local or LAN)."""
         try:
             core, session = _gen_session()
-            params, no_card, note = _params_and_nocard(core, request.get_json(silent=True) or {})
+            body = request.get_json(silent=True) or {}
+            # Resolve a bare base model_id -> its current version, exactly as /api/generate
+            # does, so a caller that knows only the base model still gets a real cost +
+            # free-card check instead of a "pick a model" note. The Loom's Image tab is
+            # precisely that caller: its model picker emits {model_id, title} with no
+            # version_id, and its price check (confirmSpend) would otherwise always fall to
+            # "couldn't verify the cost". The web drawer already sends version_id, so this
+            # only fires for the model_id-only path.
+            if (not str(body.get("version_id") or "").strip()
+                    and str(body.get("model_id") or "").strip()
+                    and not body.get("mode")):
+                _vid = (core.resolve_version_meta(session, str(body["model_id"]).strip()) or {}).get("version_id") or ""
+                if _vid:
+                    body = {**body, "version_id": _vid}
+            params, no_card, note = _params_and_nocard(core, body)
             if params is None:
                 return jsonify({"cost": None, "free": False, "note": note})
             cost = core.price_task(session, params)
@@ -9506,7 +10034,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             from types import SimpleNamespace
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            params = _edit_params_from_payload(core, p)
+            params = _edit_params_from_payload(core, p, session)
             if params is None:
                 return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
@@ -9529,7 +10057,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             from types import SimpleNamespace
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            src = str(p.get("source") or "").strip()
+            src = _input_media_id(core, session, str(p.get("source") or "").strip())
             wid = str(p.get("workflow_id") or "").strip()
             plug = ENHANCE_PLUGINS.get(str(p.get("plugin") or "").strip())
             if not src:
@@ -9561,7 +10089,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            src = str(p.get("source") or "").strip()
+            src = _input_media_id(core, session, str(p.get("source") or "").strip())
             boxes = p.get("boxes") or []
             if not src:
                 return jsonify({"error": "pick an image first"}), 400
@@ -9834,8 +10362,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 s = str(val or "").strip()
                 if not s:
                     return ""
-                if s.isdigit():                       # already a PixAI media_id
-                    return s
+                if s.isdigit():
+                    # Shared with /api/enhance, /api/edit and /api/fix -- see
+                    # _input_media_id. A catalog id is a generation OUTPUT and PixAI
+                    # refuses it as an input, so upload the local file we hold.
+                    return _input_media_id(core, session, s)
                 if s.startswith("data:"):             # a Loom thumbnail -> upload it
                     try:
                         head, b64 = s.split(",", 1)
@@ -10172,6 +10703,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
         catalogs the result into this backup and returns media_ids + paid_credit. Read-only
         until done; login required."""
+        # Bound HERE, not inside the try: the except clause below names this module,
+        # and an except expression is evaluated while handling the exception -- so if
+        # _gen_session() were the thing that raised, a try-scoped name would turn a
+        # handled error into a NameError.
+        import pixai_gallery_backup as _core
         tid = (request.args.get("task_id") or "").strip()
         if not tid:
             return jsonify({"phase": "failed", "error": "task_id required"}), 400
@@ -10192,6 +10728,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 _log_job(tid, status="failed", error=(st.get("status") or "failed"))
                 return jsonify({"phase": "failed", "status": st["status"]})
             return jsonify({"phase": "running", "status": st["status"]})
+        except _core.EmptyOutputsError as e:
+            # TERMINAL, unlike the transient case below: PixAI already told us the
+            # task reached 'done', and collect then found its outputs empty. The task
+            # produced nothing and never will, so this MUST write an authoritative
+            # 'failed' -- without it the job spins on 'running' in the Jobs card
+            # forever. (Observed: an enhance submitted with an unusable input media id
+            # sat at 'running' indefinitely while PixAI considered it long finished.)
+            _log_job(tid, status="failed", error=str(e)[:200])
+            return jsonify({"phase": "failed", "error": str(e)[:200]}), 200
         except Exception as e:
             # A transient PixAI blip (5xx/429/timeout) raises here even though the task may
             # still be running -- or already finished. Do NOT write an authoritative 'failed'
@@ -10276,6 +10821,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     resp.headers["Vary"] = "Accept-Encoding"
         except Exception:
             pass
+        return resp
+
+    @app.after_request
+    def _identify_server(resp):
+        # Stamp EVERY response -- including the front door's 401 short-circuit -- with a
+        # stable marker the "Serve Gallery" launcher uses to tell "our server is already
+        # on this port" from "some other service is" (or nothing). It MUST ride the auth
+        # gate: the launcher probes /api/ping without a session and now gets a 401, not a
+        # 200, so a status-based check can't identify us. A fixed value, not __version__:
+        # the launcher only needs identity, and broadcasting the exact build on every
+        # response is needless disclosure for a public-repo app. after_request runs on
+        # responses returned by before_request (the gate returns, never raises), so the
+        # header lands on the 401 too -- pinned by test_web_auth.
+        resp.headers["X-Moonglade"] = "1"
         return resp
 
     return app
