@@ -1,20 +1,19 @@
 # How It Works
 
-Five Python modules around one SQLite catalog, plus the Loom's JS surface.
+Four Python modules around one SQLite catalog, plus the Loom's JS surface.
 
 ```
 pixai_gallery_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
 pixai_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
-pixai_gui.py              PySide6 desktop app: 9 workflow tabs, background threads
 pixai_similar.py          "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
 moonglade_mcp.py          local stdio MCP server: curation tools over the catalog
 loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite
 ```
 
-Both the engine and the GUI import `pixai_gallery.py` for catalog access — so
-catalog logic lives in exactly one place. The GUI no longer covers every workflow:
-the Loom, Control Panel, achievements, collections, contact sheet, `--watch` and
-`--claims` are web/CLI-only.
+The CLI engine and the MCP server both import `pixai_gallery.py` for catalog access — so
+catalog logic lives in exactly one place. The two surfaces are the CLI and the web gallery:
+the Loom, Control Panel, achievements, collections, and contact sheet are browser-only, and
+`--watch` / `--claims` are CLI-only.
 
 ## How it talks to PixAI — and why setup is just one key
 

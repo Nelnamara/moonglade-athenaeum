@@ -2,8 +2,8 @@
 """Moonglade Athenaeum — web launcher + supervisor (no desktop GUI).
 
 Double-click to start the web gallery and open it in your browser, with NO terminal
-window and NO PySide6 GUI (.pyw runs under pythonw.exe). This is the "click to launch
-straight into the web interface" entry point.
+window (.pyw runs under pythonw.exe). This is the "click to launch straight into the
+web interface" entry point.
 
 It runs as a tiny SUPERVISOR: it starts pixai_gallery.py as a child and watches it.
 That's what makes the browser Stop / Restart buttons (Control Panel -> Server) work
