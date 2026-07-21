@@ -31,6 +31,14 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Export the current filtered view to CSV, from the gallery grid.** The filtered-export
+  backend already shipped (an earlier blitz taught `/export-csv` to honour the grid's `?q=&model=…`
+  filter args) but had no way in — the only CSV link lived on the Control Panel and always dumped
+  the whole catalog, so a filtered view could not be exported at all. The grid's active-filter bar
+  now grows an **⬇ Export this view (CSV)** link that carries the live query string to
+  `/export-csv`, so you download exactly the rows you're looking at. It appears only when a filter
+  is active (the whole-catalog dump stays the Panel's job); the empty-filter path is byte-identical
+  to before. Exporting a *selection* of specific picked images is still a separate, unbuilt item.
 - **The last two video models are selectable: V2.7 (High Dynamics) and V3.0 Flash.** They had
   shipped visible-but-disabled on the theory that a submit needs a numeric top-level `modelId`,
   which we only had for five of the seven. That theory was wrong. Two free `--dump-params`
@@ -87,6 +95,17 @@ git tags. Full prose notes for tagged versions live on
   navigates a loaded preset via `location.href = '/' + query`, where a smuggled `//host` would
   resolve protocol-relative and turn a saved view into an off-site redirect; the server refuses
   those outright. A delete verb ships server-side (tested) with no UI control yet.
+- **The Loom's help button and Activity chip are visible again.** Both the `?` help FAB
+  (`z-index:300`) and the Activity chip (`#jobs-fab`, `z-index:234` from the shared `mg-notify.js`)
+  are body-level widgets that the Loom's opaque `.lv-overlay` (`z-index:400`) painted straight over
+  — invisible and unclickable on `/loom`, though the wiki documents both as usable there. A
+  Loom-scoped raise to 401/402 (in `_LOOM_SHELL`, so the gallery's own `#jobs-fab` keeps 234) floats
+  them over the board while staying under every modal/celebration tier that must cover them — the
+  frame picker, Sequence/Export/Import overlays (500), toasts (510), and the unlock moment (520/521).
+  The help FAB's own modal was raised too (it was buried at 301). One acknowledged residual: because
+  Deep Focus's veil and the nested hover-preview flyouts render *inside* the overlay's stacking atom,
+  the raised corner widgets now sit over those backdrops rather than under them — cosmetic only; the
+  real fix (hoisting those overlays to root level) is a deferred refactor.
 - **The Loom's gallery picker no longer ties the shell for z-index.** `<mg-gallery-picker>` sat
   at z-index 400 — exactly `.lv-overlay`'s own value — so the everyday frame/cast picker painted
   above the shell by DOM order alone, which is luck, not layering. Raised to 500, the shell's

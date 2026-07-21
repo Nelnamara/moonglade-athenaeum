@@ -2651,6 +2651,21 @@ body { background: var(--base); margin: 0; }
    the tie-break), so !important is the only way to reliably win without depending on load
    timing that could shift later. */
 #jobs-fab, #jobs-tray { bottom: 88px !important; }
+/* Lift the Activity chip (and the ? help FAB below, inline) above LoomV2's center view.
+   .lv-overlay (master-storyboard.jsx: position:fixed; inset:0; z-index:400; background:
+   var(--base) -- opaque) buries them: neither #root nor its .sb-root child forms a stacking
+   context, so that 400 competes in the ROOT context directly against these body-level FABs
+   (mg-notify.js gives them 234/235) and wins. 401/402 floats them over the board while staying
+   UNDER the modal/celebration tier that must keep covering them -- .sb-seq / .sb-pick-ov and the
+   frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 / .m2-conf (520/521).
+   Loom-only: this block ships only in _LOOM_SHELL, so the gallery's own #jobs-fab keeps 234.
+   !important for the same mg-notify.js cascade-timing reason as the bottom rule above. Known
+   residual (z-only can't fix it): Deep Focus's .lv-df-veil (450) and the nested 600 preview
+   flyouts render INSIDE .lv-overlay, so from the root they're part of the single 400 atom and
+   these corner FABs paint over them -- cosmetic only; the real fix hoists those overlays to
+   .sb-root level (owner-visible refactor, deferred). */
+#jobs-fab  { z-index: 401 !important; }
+#jobs-tray { z-index: 402 !important; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
@@ -2678,10 +2693,10 @@ window.storage = {
 </script>
 __RUNTIME_SCRIPT_BLOCK__
 <button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'docs'})})}catch(e){}"
-  style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
+  style="position:fixed;bottom:18px;right:18px;z-index:401;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="How The Loom works">?</button>
 <div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
-  style="position:fixed;inset:0;z-index:301;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
+  style="position:fixed;inset:0;z-index:402;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
   <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:var(--surface0);border:1px solid var(--surface1);border-radius:14px;padding:22px 26px;color:var(--text);font:13.5px/1.55 system-ui,sans-serif;">
     <h2 style="margin:0 0 4px;color:var(--text);">The Loom &mdash; quick guide</h2>
     <p style="color:var(--subtext);margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
@@ -4064,6 +4079,8 @@ document.addEventListener('DOMContentLoaded', function() {
     <a href="{{ c.url }}" title="Remove this filter">×</a></span>
   {% endfor %}
   <a class="clear-all" href="{{ url_for('index') }}">Clear all</a>
+  <a class="clear-all" href="{{ url_for('export_csv_download') }}?{{ request.query_string.decode('utf-8', 'replace') }}" download
+    title="Export exactly these filtered rows to CSV -- the whole-catalog dump stays on the Control Panel">&#11015; Export this view (CSV)</a>
 </div>
 {% endif %}
 

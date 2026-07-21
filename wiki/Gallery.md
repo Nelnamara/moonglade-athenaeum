@@ -53,6 +53,9 @@ The filter bar:
 - Per-page selector, thumbnail-size slider, saved filter presets, privacy blur. Saved
   views are stored server-side, so a view saved at the desktop is in the tablet's
   dropdown too — same follows-you behavior as your skin choice.
+- When any filter is active, the active-filter bar shows an **⬇ Export this view (CSV)**
+  link that downloads exactly the rows you're looking at. (The Control Panel's **Download
+  catalog (CSV)** is the whole-library dump.)
 
 Cards show a ▶ badge on videos and **AI** / **local** badges by source. **Videos play
 right in the lightbox** (and on the detail page), so you can browse a mixed grid of
