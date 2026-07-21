@@ -70,6 +70,15 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Loom's Image / Edit / Reference tabs now price-check before spending, like video does.**
+  The video shots already verified cost + free-card coverage via `/api/price` and confirmed any
+  credit spend (failing closed on an unverifiable price); the image/edit/reference generators
+  only showed a flat "a free card auto-applies; otherwise it spends credits" confirm that never
+  actually checked — a shot with no covering card spent silently past an OK click. A shared
+  `confirmSpend()` now routes all three through the same fail-closed gate, pricing the exact
+  submit body (so the number shown is what will run). `/api/price` also resolves a bare base
+  `model_id` → current version the way `/api/generate` does, so the Loom's model_id-only Image
+  picker gets a real cost instead of a "couldn't verify" fallback.
 - **Usernames are length-bounded.** A 300-char username pushed a live **Remove** button ~980px
   outside its card, and there was no server-side limit anywhere. New `username_problem()` caps
   at 64 characters and rejects control characters — one policy shared by the `/login` bootstrap
