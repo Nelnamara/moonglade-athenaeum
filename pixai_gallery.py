@@ -8180,11 +8180,40 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/panel/status")
     def api_panel_status():
+        """Live state of the running maintenance job, for the Panel's progress UI.
+
+        `lines` is LOOPBACK-ONLY; the rest of the payload is not. The two halves of this
+        response are different KINDS of data: status/action/label/rc/progress describe the
+        job, but `lines` is the maintenance subprocess's own stdout -- absolute paths out of
+        the owner's install, catalog internals, and whatever a CLI traceback happens to
+        print. That is host detail, and Moonglade is explicitly not single-user, so a
+        logged-in LAN account must not be able to poll it. See the Trust & Safety wiki page.
+
+        Found 2026-07-21 by an adversarial review: STARTING a destructive job was gated
+        (api_panel_run's `spec["destructive"] and not _is_local_request()`) and CANCELLING
+        one was gated (api_panel_cancel), but READING the output was a bare `@app.route`
+        with no tier check at all -- the one door in the set nobody had shut.
+
+        Deliberately NOT a whole-route LOCALHOST gate, which is the obvious-looking fix and
+        is wrong here: 14 of the 20 PANEL_ACTIONS are non-destructive, and a LAN account is
+        allowed to run every one of them (api_panel_run only requires loopback when
+        `spec["destructive"]`). Gating the whole route would let that account start a job
+        and then watch a progress UI that never moves, across all three pollers (the Panel,
+        the job tray, and the resume-on-load check). Redacting one field closes the leak
+        without taking away anything a LAN caller is entitled to. The tier table entry
+        therefore correctly stays LOGIN (tests/test_route_tiers.py).
+
+        The replacement line is a real line rather than `[]` so the log area explains itself
+        instead of just rendering blank, which reads as a bug -- the consumer at ~7385 does
+        `if (d.lines) { log.textContent = d.lines.join('\\n') }`, and `[]` is truthy in JS."""
+        local = _is_local_request()
         with _panel_lock:
+            lines = (list(_panel_job["lines"]) if local
+                     else ["(job output is shown only on the server's own screen)"])
             return jsonify({"status": _panel_job["status"], "action": _panel_job["action"],
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
                             "progress": _panel_job["progress"],
-                            "lines": list(_panel_job["lines"])})
+                            "lines": lines})
 
     @app.route("/api/watch/status")
     def api_watch_status():

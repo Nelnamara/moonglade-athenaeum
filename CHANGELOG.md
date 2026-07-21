@@ -49,6 +49,17 @@ git tags. Full prose notes for tagged versions live on
   it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
 ### Fixed
 
+- **`/api/panel/status` handed maintenance-job stdout to any logged-in account.** Starting a
+  destructive Panel job required loopback, and cancelling one required loopback — but *reading
+  the output* was a bare route with no tier check, so a logged-in account anywhere on your
+  network could poll `lines`: the maintenance subprocess's own stdout, absolute paths out of
+  your install and all. Moonglade is explicitly not single-user, so that mattered. `lines` is
+  now loopback-only; a LAN caller gets one line saying so. Deliberately **not** a whole-route
+  localhost gate — 14 of the 20 Panel actions are non-destructive and a LAN account is allowed
+  to run every one of them, so gating the route would have left them watching a progress bar
+  that never moves. Two tests pin both halves: the stdout stays hidden, and job state keeps
+  reaching the LAN.
+
 - **`V3.0 Flash` submitted a model string PixAI has never had.** The drawer shipped `v3.0f`, a
   guess; the real value is `v3.0.1`, confirmed by PixAI's own task detail ("Model Used: V3.0
   Flash") against that task's captured submit. The entry had been built from the correct model's
