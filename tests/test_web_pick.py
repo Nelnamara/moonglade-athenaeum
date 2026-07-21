@@ -461,6 +461,7 @@ def test_presets_import_and_use(tmp_path, monkeypatch):
     assert "prompt" not in lst["character-card"]          # GET never leaks the prompt body
     # price path uses the banked preset: canned prompt + sceneId + its model
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli.post("/api/price", json={"mode": "edit", "source": "55",
@@ -686,6 +687,7 @@ def test_edit_price_uses_selected_model(tmp_path, monkeypatch):
     """The Edit card's model picker drives the submitted modelId + valid option set:
     Reference Pro -> model 1948..., 4K/21:9, no quality; Edit Pro -> Edit Pro model + quality."""
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -725,6 +727,7 @@ def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch):
     """End-to-end: Reference Pro sent with Edit-Pro-style knobs (the preset-mismatch case) is
     clamped server-side to valid values before the params ever reach PixAI."""
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -738,6 +741,7 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
     """Multi-image references: the Edit card sends sources[] -> chat.mediaIds carries them all
     (primary first), capped to the model's ref limit; falls back to [source] when absent."""
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -766,13 +770,16 @@ def test_portrait_mobile_pass(tmp_path):
     assert "#gen-drawer.wide { width: 100%" in html or "#gen-drawer.wide" in html  # full-width sheet
 
 
-def test_video_v40_full_cost_warning(tmp_path):
-    """The Video card hard-warns when the pricier v4.0 full model is picked (14k/s vs
-    Lite's 5.5k -- a 15s clip is 210k credits), so it's never a silent surprise."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/").get_data(as_text=True)
-    assert ".gen-cost.warn" in html                 # the warn style
-    assert "V4.0 full" in html and "2.5" in html      # the ~2.5x-Lite warning text
+def test_video_v40_full_cost_warning():
+    """The Video form hard-warns when the pricier v4.0 full model is picked (14k/s vs Lite's
+    5.5k -- a 15s clip is 210k credits), so it's never a silent surprise. Since the drawer
+    swap the Video form IS the shared <mg-generate-drawer> component, so the warning lives in
+    that file (mgd-cost.warn), not the gallery's own inline HTML."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
+    assert ".mgd-cost.warn" in src                  # the warn style
+    assert "V4.0 full" in src and "2.5" in src        # the ~2.5x-Lite warning text
 
 
 def test_toasts_anchored_top_right(tmp_path):
@@ -797,6 +804,7 @@ def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch
     """/api/price mode=enhance builds panelplugin params (so cost can be shown), and the
     Enhance click carries a spend guardrail since free cards don't cover these workflows."""
     seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -825,6 +833,7 @@ def test_import_task_by_id(tmp_path, monkeypatch):
     authenticated non-local session against every registered route. It is deliberately
     LOGIN, not localhost: recovering your own finished media spends nothing."""
     called = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: called.update(tid=tid) or {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -849,6 +858,7 @@ def test_import_task_by_id(tmp_path, monkeypatch):
 def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     """The header balance surface exposes per-card breakdown + soonest expiry, claimable
     free credits, and the subscription cliff — the data the chip/badge/warnings render."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "account_info", lambda s: {
         "quotaAmount": 140, "subscription": {"endAt": "2026-07-27T00:00:00Z", "cancelAtPeriodEnd": True}})
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
@@ -870,6 +880,7 @@ def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
         {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
         {"id": "agent-startup-stamina", "amount": 15, "canClaim": False}])   # not ready -> skipped
     claimed = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "claim_reward", lambda s, cid: claimed.append(cid))
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     # An unauthenticated LAN request is refused -- checked first, while `cli` is still
@@ -879,6 +890,25 @@ def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
     d = cli.post("/api/claim").get_json()
     assert d["claimed"] == 1 and d["credits"] == 30000       # only the ready credit reward
     assert claimed == ["pixai-daily-credits"]
+
+
+def test_gallery_video_tab_is_the_shared_drawer_component(tmp_path):
+    """Web parity step 2 (the drawer swap): the gallery's Video tab is the shared
+    <mg-generate-drawer> web component now -- the same element the Loom mounts, giving the
+    gallery the full-parity Video form (6 image + 3 video + 1 audio refs, negative prompt,
+    Channel, full model roster) over the proven /api/loom/generate submit path. Pins the
+    script include, the mount point, and the host's mg-pick-request wiring, and asserts the
+    old hand-rolled form (9 image slots, 5-model select, no video/audio/negative/channel)
+    is gone -- so the swap can't silently regress back to simple mode."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "/static/mg-generate-drawer.js" in html              # component script on the gallery
+    assert "<mg-generate-drawer></mg-generate-drawer>" in html  # mounted in the Video tab
+    assert "mg-pick-request" in html                            # host wires the gallery Picker
+    # the old hand-rolled video form is gone
+    assert 'id="video-slots"' not in html
+    assert 'id="video-model"' not in html
+    assert "Gen.videoGenerate()" not in html
 
 
 def test_edit_card_has_reference_slots(tmp_path):
@@ -958,3 +988,51 @@ def test_service_worker_revalidates_thumbnails(tmp_path):
     hdr = cli.get("/thumbs/1.jpg").headers.get("Cache-Control", "")
     assert "immutable" not in hdr, (
         "thumbnails are rewritten in place; 'immutable' pins the stale one. Got: " + hdr)
+
+
+def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, monkeypatch):
+    """The Loom's Image / Edit / Reference tabs now price their REAL submit body through
+    /api/price before spending (confirmSpend, the same fail-closed gate the video shots use).
+    Each client shape must route to a priceable params object. If a key were wrong,
+    _params_and_nocard returns a `note` (params None), price_task is never called, and the
+    client guardrail degrades to a permanent "couldn't verify the cost" that can never show
+    the true credits/free-card state -- exactly the silent-spend seam this closes.
+
+    Bites: revert any of confirmSpend's price bodies to a mismatched key and the matching
+    cost assertion drops from 1200 to None."""
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 1200)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)  # no free card
+    # The Loom Image picker emits model_id only (no version_id); /api/price resolves it to a
+    # version the same way /api/generate does. Stub that resolve so the test needs no network.
+    monkeypatch.setattr(core, "resolve_version_meta",
+                        lambda s, mid: {"version_id": "ver_" + str(mid)})
+    cli = _authed_client(tmp_path, [_row(media_id="99", filename="b_99.png",
+                                         created_at="2025-01-01T00:00:00")])
+
+    # Image tab -> confirmSpend({model_id, prompt}); no `mode`, model_id-only -> generate branch
+    # after the version resolve above.
+    d = cli.post("/api/price", json={"model_id": "1709df", "prompt": "a moonwell"}).get_json()
+    assert d["cost"] == 1200 and d["free"] is False, \
+        "image price body did not route to a priceable gen (got {})".format(d)
+    assert seen["params"].get("modelId") == "ver_1709df", \
+        "the resolved version_id didn't reach price_task's params"
+
+    # Edit tab -> confirmSpend({mode:'edit', source, instruction, edit_model:'edit-pro'}).
+    base = {"mode": "edit", "source": "99", "instruction": "make it night"}
+    d = cli.post("/api/price", json={**base, "edit_model": "edit-pro"}).get_json()
+    assert d["cost"] == 1200, "edit price body did not route to a priceable edit (got {})".format(d)
+    edit_params = seen["params"]
+
+    # Reference tab -> confirmSpend({mode:'edit', source, sources, instruction, edit_model:'reference-pro'}).
+    d = cli.post("/api/price", json={"mode": "edit", "source": "99", "sources": ["99", "99"],
+                                     "instruction": "a still", "edit_model": "reference-pro"}).get_json()
+    assert d["cost"] == 1200, "reference (multi-source) body did not price (got {})".format(d)
+
+    # And edit_model actually threads: same source, only the model differs -> different params.
+    d = cli.post("/api/price", json={**base, "edit_model": "reference-pro"}).get_json()
+    assert d["cost"] == 1200
+    ref_params = seen["params"]
+    assert edit_params != ref_params, \
+        "edit-pro and reference-pro priced to identical params -- edit_model didn't thread through"

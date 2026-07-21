@@ -1,7 +1,6 @@
 requests
 truststore ; python_version >= "3.10"
 pillow
-PySide6
 websockets   # --watch / --watch-backup, and the web gallery's auto-starting live-mirror thread
 
 # gallery server (optional)

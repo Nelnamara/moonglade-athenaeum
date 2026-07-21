@@ -31,11 +31,18 @@ def test_like_plain_word_is_substring():
 
 
 def test_like_star_becomes_percent():
-    assert _like_pattern("night*") == "night%"
+    # A trailing star collapses into the substring wrap rather than anchoring the
+    # pattern to the start of the whole prompt. This assertion is the inverse of
+    # what it used to be ("night%") -- see _like_pattern's docstring: the old
+    # prefix semantics meant adding a wildcard could EMPTY a working search.
+    assert _like_pattern("night*") == "%night%"
+    assert _like_pattern("*night") == "%night%"
 
 
-def test_like_question_becomes_underscore():
-    assert _like_pattern("a?c") == "a_c"
+def test_like_interior_wildcards_still_constrain():
+    """Wildcards keep their power in the middle, which is where they're useful."""
+    assert _like_pattern("moon*light") == "%moon%light%"
+    assert _like_pattern("a?c") == "%a_c%"
 
 
 def test_like_escapes_literal_percent():
@@ -50,9 +57,25 @@ def test_substring_search_matches_both_night(db):
     assert total == 2  # "night elf" and "nighttime"
 
 
-def test_wildcard_prefix_search(db):
+def test_wildcard_search_matches_substring(db):
     rows, total = query_catalog(db, q="night*")
     assert total == 2
+
+
+def test_a_wildcard_never_narrows_a_search(db):
+    """THE invariant, and the one that was violated. Users expect a wildcard to
+    broaden a search or leave it alone -- never to shrink it. Previously a
+    wildcard turned the term into the whole pattern, anchored to the start of the
+    prompt, so `sample` matched 24 rows in the crawl fixture while `sampl*`
+    matched 0. Property-checked rather than spot-checked so a future change to
+    the pattern builder has to preserve it for every one of these shapes."""
+    for bare, wild in [("night", "night*"), ("night", "*night"), ("night", "nigh?"),
+                       ("elf", "elf*"), ("druid", "*druid*")]:
+        _, bare_total = query_catalog(db, q=bare)
+        _, wild_total = query_catalog(db, q=wild)
+        assert wild_total >= bare_total, (
+            "'{}' returned {} rows but '{}' returned only {} -- a wildcard must "
+            "never narrow a search".format(bare, bare_total, wild, wild_total))
 
 
 def test_multiword_is_anded(db):
@@ -324,6 +347,117 @@ def test_full_image_and_export_zip_routes(tmp_path):
     names = zipfile.ZipFile(io.BytesIO(z.data)).namelist()
     assert names == ["a_111.png"]
     assert client.post("/export-zip", data={"media_ids": "ghost"}).status_code == 404
+
+
+def test_export_zip_converts_format_without_touching_the_original(tmp_path):
+    """Convert-and-download: fmt=jpeg re-encodes into the ZIP only. THE decided-shape
+    guarantee -- the original file on disk is byte-for-byte unchanged and no converted copy
+    lands in the archive, so a download transform never re-enters the catalog."""
+    import io
+    import zipfile
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="111", filename="a_111.png", prompt_preview="a moonlit grove")])
+    (tmp_path / "images").mkdir()
+    src = tmp_path / "images" / "a_111.png"
+    Image.new("RGB", (8, 8), (120, 90, 200)).save(src, "PNG")
+    before = src.read_bytes()
+    client = login_client(tmp_path)
+
+    z = client.post("/export-zip", data={"media_ids": "111", "fmt": "jpeg"})
+    assert z.status_code == 200
+    assert zipfile.ZipFile(io.BytesIO(z.data)).namelist() == ["a_111.jpg"]   # converted in the ZIP
+    assert src.exists() and src.read_bytes() == before                       # original untouched
+    assert not (tmp_path / "images" / "a_111.jpg").exists()                  # no converted copy left on disk
+
+
+def test_export_zip_embeds_metadata_on_a_copy(tmp_path):
+    """fmt=png + embed writes the prompt/ids into the DOWNLOADED file's PNG text chunks --
+    on the temp copy, never the archived original."""
+    import io
+    import zipfile
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="222", filename="b_222.png", prompt_preview="silver stag")])
+    (tmp_path / "images").mkdir()
+    src = tmp_path / "images" / "b_222.png"
+    Image.new("RGB", (8, 8), (30, 40, 60)).save(src, "PNG")
+    before = src.read_bytes()
+    client = login_client(tmp_path)
+
+    z = client.post("/export-zip", data={"media_ids": "222", "fmt": "png", "embed": "1"})
+    assert z.status_code == 200
+    data = zipfile.ZipFile(io.BytesIO(z.data)).read("b_222.png")
+    im = Image.open(io.BytesIO(data))
+    assert im.text.get("media_id") == "222"          # metadata embedded in the downloaded copy
+    assert src.read_bytes() == before                # original untouched (no text chunks added)
+
+
+def test_export_zip_passes_videos_through_untransformed(tmp_path):
+    """A video in the selection is shipped as-is even with fmt set -- Pillow can't transform
+    an mp4, and the guard skips it rather than corrupting or dropping it."""
+    import io
+    import zipfile
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="v1", filename="videos/clip_v1.mp4", is_video="1")])
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "clip_v1.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42fake")
+    client = login_client(tmp_path)
+
+    z = client.post("/export-zip", data={"media_ids": "v1", "fmt": "jpeg", "embed": "1"})
+    assert z.status_code == 200
+    assert zipfile.ZipFile(io.BytesIO(z.data)).namelist() == ["clip_v1.mp4"]   # untouched extension
+
+
+def test_full_image_dl_forces_a_save_with_real_filename(tmp_path):
+    """The detail page's plain Download hits /full/<id>?dl=1 -> Content-Disposition attachment
+    with the real filename (browser saves it). Without ?dl it stays inline so the lightbox can
+    display it -- same file, two dispositions."""
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.png")])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a_1.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    cli = login_client(tmp_path)
+    assert "attachment" not in (cli.get("/full/1").headers.get("Content-Disposition") or "")
+    cd = cli.get("/full/1?dl=1").headers.get("Content-Disposition") or ""
+    assert "attachment" in cd and "a_1.png" in cd
+
+
+def test_export_zip_by_collection_resolves_full_membership(tmp_path):
+    """'Download collection' zips EVERY item in the named collection (resolved in SQL, all
+    pages), not the rendered selection -- and excludes non-members. No media_ids are sent."""
+    import io
+    import zipfile
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", collections="Trip"),
+        _row(media_id="2", filename="b_2.png", collections="Trip"),
+        _row(media_id="3", filename="c_3.png", collections="Other")])
+    (tmp_path / "images").mkdir()
+    for n in ("a_1.png", "b_2.png", "c_3.png"):
+        (tmp_path / "images" / n).write_bytes(b"\x89PNG\r\n\x1a\nx")
+    cli = login_client(tmp_path)
+    z = cli.post("/export-zip", data={"collection": "Trip"})
+    assert z.status_code == 200
+    names = set(zipfile.ZipFile(io.BytesIO(z.data)).namelist())
+    assert names == {"a_1.png", "b_2.png"}     # both Trip members; the Other one excluded
+
+
+def test_detail_page_has_plain_download(tmp_path):
+    """The detail page offers a plain one-click Download of the original (no convert here --
+    that lives in the bulk/collection flow)."""
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="55", filename="a_55.png", created_at="2025-01-01T00:00:00")])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a_55.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    html = login_client(tmp_path).get("/image/55").get_data(as_text=True)
+    assert "/full/55?dl=1" in html
 
 
 def test_collection_health_resolves_video_and_local_by_filename(tmp_path):

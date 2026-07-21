@@ -308,3 +308,32 @@ def test_save_config_leaves_no_temp_files(tmp_path):
     core.bump_web_user_session_epoch("alice")
     strays = list(core._config_path().parent.glob("config.json.tmp-*"))
     assert not strays, "atomic write left temp files behind: {}".format(strays)
+
+
+def test_the_failure_that_locks_you_out_says_so(tmp_path):
+    """Rate-limit off-by-one, found by a browser crawl: _login_try_acquire reserves the
+    attempt up front and returns None so it may PROCEED -- correct, since a right
+    password on the 5th try must still work -- but that meant the request which crossed
+    the threshold rendered the ordinary "invalid username or password" and the user was
+    locked WITHOUT BEING TOLD. They then retyped the correct password and were refused
+    for 15 minutes with no idea why.
+
+    The previous crawl never saw this because it stopped at four attempts.
+
+    Five attempts remain genuinely available; only the message changes."""
+    core.add_or_update_web_user("alice", "hunter2")
+    app = _client(tmp_path)
+    cli = app.test_client()
+    seen = []
+    for _ in range(5):
+        html = cli.get("/login").get_data(as_text=True)
+        r = cli.post("/login", data={"username": "alice", "password": "wrong",
+                                     "csrf": _csrf(html)})
+        seen.append(r.get_data(as_text=True))
+    # first four: the ordinary message, and NOT a lockout claim
+    for body in seen[:4]:
+        assert "Invalid username or password" in body
+        assert "Too many failed attempts" not in body
+    # the fifth is the one that locks -- it must say so rather than lying
+    assert "Too many failed attempts" in seen[4], (
+        "the attempt that triggered the lockout still reported a plain bad password")

@@ -58,6 +58,26 @@ def test_embedded_js_is_valid(client, tmp_path, path):
     assert rc == 0, f"{path} has invalid JS:\n{out.read_text(encoding='utf-8')}"
 
 
+@pytest.mark.parametrize("path", ["/", "/panel", "/health", "/duplicates", "/loom", "/login"])
+def test_every_page_carries_the_401_guard(client, path):
+    """A browser crawl found ~90 fetch() calls across the inline JS, static/*.js and
+    the Loom bundle, and NOT ONE inspected response status. The front door answers an
+    expired session with a JSON 401 -- valid JSON -- so r.json() resolves, .catch never
+    fires, and callers read the error body as data: the job poller decides "still
+    running" and re-polls forever, the picker renders "No images found" for a full
+    library.
+
+    The fix is one interceptor in the shared head rather than 90 call-site edits, so
+    what has to be guarded is its PRESENCE on every shell. Both BASE_HTML and
+    _LOOM_SHELL must carry it -- they are separate templates, and the Loom's bundle
+    contains fetch calls no call-site refactor could have reached. /login is included
+    deliberately: the guard must be there too and must NOT loop on itself."""
+    html = client.get(path).get_data(as_text=True)
+    assert "Global 401 guard" in html, "{} is missing the 401 interceptor".format(path)
+    assert "location.pathname !== '/login'" in html, (
+        "{}: the guard lost its /login loop-guard".format(path))
+
+
 def _hook_list(text, label):
     """Pull the hook names out of a `... { a, b, c } ... React` construct."""
     m = re.search(r"\{([^}]*)\}\s*(?:from\s*[\"']react[\"']|=\s*React)", text)

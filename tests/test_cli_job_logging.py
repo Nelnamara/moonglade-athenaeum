@@ -145,6 +145,11 @@ def test_generate_failure_logs_a_failed_cli_job_and_still_raises(monkeypatch, tm
     """Force the submit itself to blow up (as if the API rejected the task) and confirm
     the job goes to 'failed' with the error message, while main() still raises exactly
     as it would without any job logging."""
+    # --confirm submits, so the path builds a real session; stub it (no key in CI, and
+    # conftest now forces _cfg empty locally too) so execution reaches the patched
+    # gql_adhoc rather than dying at "No API key found" and logging THAT as the error.
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "gql_adhoc",
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("rejected")))
     monkeypatch.setattr(sys, "argv",

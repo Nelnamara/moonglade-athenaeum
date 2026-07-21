@@ -23,7 +23,7 @@ PixAI's site only shows a handful of images at a time and nothing older is easy 
 ## ⚡ Quickstart — one key, that's it
 
 ```bash
-pip install requests pillow PySide6 flask truststore websockets
+pip install requests pillow flask truststore websockets
 ```
 
 1. Generate an API key at **[platform.pixai.art](https://platform.pixai.art)** (lifetime up to ~2 years).
@@ -33,9 +33,9 @@ pip install requests pillow PySide6 flask truststore websockets
    ```
 3. Go:
    ```bash
-   python pixai_gui.py                      # desktop app, or…
-   python pixai_gallery_backup.py --count   # …headless: how many images you have
-   python pixai_gallery_backup.py           # back up everything
+   python pixai_gallery.py --out pixai_backup   # launch the web gallery (browse · generate · curate)
+   python pixai_gallery_backup.py --count       # …or headless: how many images you have
+   python pixai_gallery_backup.py               # back up everything
    ```
 
 That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everything else has working defaults. No DevTools, no token to recapture. *([Why so simple? →](../../wiki/How-It-Works))*
@@ -64,7 +64,7 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 |---|---|
 | **Back up everything** | Full-resolution downloads past the gallery limit · fast parallel workers · instant incremental `--update` · deduplicated SQLite catalog · image-to-video backup · published-artwork sync |
 | **Browse & search** | Local web gallery: wildcard prompt search, model/LoRA/tag/rating filters, date pickers, lightbox, ZIP export, saved views, privacy blur, mobile/PWA |
-| **Generate** | Full creation suite in the **web gallery** (dockable drawer: image · edit/enhance/fix · video with gallery-picked references), plus GUI and CLI — model + LoRA pickers, live cost preview, and **free generation cards auto-apply** so covered gens cost 0 credits; results drop straight into your catalog |
+| **Generate** | Full creation suite in the **web gallery** (dockable drawer: image · edit/enhance/fix · video with gallery-picked references), plus a matching CLI — model + LoRA pickers, live cost preview, and **free generation cards auto-apply** so covered gens cost 0 credits; results drop straight into your catalog |
 | **Curate** | **Collections** (group images/videos without moving files) · **Select mode** with drag-paint multi-select · star ratings · inline prompt edit · bulk find/replace |
 | **Stay in sync** | Instant incremental updates · live **event watch** (`--watch --watch-backup` auto-collects finishing gens) · bulk delete locally or cloud-side · `--reconcile-deleted` for cloud-deleted orphans · Collection Health dashboard |
 | **Run & control** | Web **Control Panel**: one-click maintenance jobs with a real progress bar and a Stop button, scheduled auto-backups, and **server Stop/Restart from the browser** · double-click `Serve Gallery` launcher · **make it yours**: pick your header mark + its animation, and set the Desktop launcher icon to match |
@@ -80,12 +80,6 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 
 ---
 
-## 🖥️ The desktop app
-
-A PySide6 GUI (`pixai_gui.py`) wraps the whole workflow — Download, Generate, Organize, Convert, Utilities, and a one-click Gallery launcher — with live logs and a dark theme. Prefer the terminal? Every backup and generation feature has a CLI flag (the curation and web-suite surfaces — collections, star ratings, saved views, the Loom, branding, achievements/skins, the Trophy Hall — are browser-only). Want a double-click launcher? Use **`Moonglade Athenaeum.pyw`** (no console window).
-
----
-
 ## 📚 Documentation
 
 Everything deep lives in the **[Wiki](../../wiki)**:
@@ -98,10 +92,10 @@ In-repo: [`docs/architecture.md`](docs/architecture.md) (how it's built), [`docs
 
 ## Requirements
 
-`requests` is the only hard dependency. `pillow` (thumbnails/convert), `PySide6` (GUI), `flask` (gallery), `truststore` (HTTPS behind AV/proxies), and `websockets` (`--watch` and the gallery's live-mirror) are recommended; `ffmpeg` on PATH is required for the Loom's export and frame handoff, and optional for video posters.
+`requests` is the only hard dependency. `pillow` (thumbnails/convert), `flask` (gallery), `truststore` (HTTPS behind AV/proxies), and `websockets` (`--watch` and the gallery's live-mirror) are recommended; `ffmpeg` on PATH is required for the Loom's export and frame handoff, and optional for video posters.
 
 ```bash
-pip install requests pillow PySide6 flask truststore websockets
+pip install requests pillow flask truststore websockets
 ```
 
 ---

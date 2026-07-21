@@ -1,0 +1,599 @@
+<title>Moonglade — Working Dashboard</title>
+<style>
+:root{
+  --bg:#f5f3f9; --surface:#ffffff; --surface2:#efe9f7; --border:#ddd3ee;
+  --text:#221c30; --subtext:#5c5470; --accent:#7c4fd1; --accent2:#2f9e78;
+  --danger:#c1395a; --warn:#b8862f; --code-bg:#f0ecf9; --pill-bg:#efe6ff;
+  --shadow: 0 1px 2px rgba(40,20,70,.06), 0 4px 16px rgba(40,20,70,.06);
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  --sans: ui-sans-serif, "Segoe UI", -apple-system, system-ui, sans-serif;
+  --serif: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#161320; --surface:#1f1a2e; --surface2:#251f38; --border:#382f52;
+    --text:#ece7f7; --subtext:#a99fc4; --accent:#b692e6; --accent2:#4fc99a;
+    --danger:#e0355e; --warn:#e0b34a; --code-bg:#150f22; --pill-bg:#2c2246;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#161320; --surface:#1f1a2e; --surface2:#251f38; --border:#382f52;
+  --text:#ece7f7; --subtext:#a99fc4; --accent:#b692e6; --accent2:#4fc99a;
+  --danger:#e0355e; --warn:#e0b34a; --code-bg:#150f22; --pill-bg:#2c2246;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+}
+:root[data-theme="light"]{
+  --bg:#f5f3f9; --surface:#ffffff; --surface2:#efe9f7; --border:#ddd3ee;
+  --text:#221c30; --subtext:#5c5470; --accent:#7c4fd1; --accent2:#2f9e78;
+  --danger:#c1395a; --warn:#b8862f; --code-bg:#f0ecf9; --pill-bg:#efe6ff;
+  --shadow: 0 1px 2px rgba(40,20,70,.06), 0 4px 16px rgba(40,20,70,.06);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+  font-size:15px;line-height:1.55;}
+a{color:var(--accent);}
+::selection{background:var(--accent);color:#fff;}
+.app{display:grid;grid-template-columns:260px 1fr;min-height:100vh;}
+@media (max-width:860px){.app{grid-template-columns:1fr;} .sidebar{position:static;height:auto;}}
+
+/* ---- Sidebar ---- */
+.sidebar{background:var(--surface);border-right:1px solid var(--border);
+  padding:20px 16px;position:sticky;top:0;height:100vh;overflow-y:auto;display:flex;flex-direction:column;gap:16px;}
+.brand{display:flex;flex-direction:column;gap:2px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.brand .name{font-family:var(--serif);font-size:20px;font-weight:700;letter-spacing:.2px;}
+.brand .tag{font-size:12.5px;color:var(--subtext);font-style:italic;}
+.searchbox{position:relative;}
+.searchbox input{width:100%;padding:9px 12px 9px 32px;border-radius:8px;border:1px solid var(--border);
+  background:var(--surface2);color:var(--text);font-size:13.5px;font-family:var(--sans);}
+.searchbox input:focus{outline:2px solid var(--accent);outline-offset:1px;}
+.searchbox svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);opacity:.55;pointer-events:none;}
+nav.tabs{display:flex;flex-direction:column;gap:2px;}
+nav.tabs button{all:unset;cursor:pointer;padding:9px 10px;border-radius:8px;font-size:14px;color:var(--text);
+  display:flex;align-items:center;gap:9px;}
+nav.tabs button:hover{background:var(--surface2);}
+nav.tabs button.active{background:var(--pill-bg);color:var(--accent);font-weight:600;}
+nav.tabs button .dot{width:7px;height:7px;border-radius:50%;background:var(--border);flex:none;}
+nav.tabs button.active .dot{background:var(--accent);}
+.sidebar-foot{margin-top:auto;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--subtext);}
+.sidebar-foot .row{display:flex;justify-content:space-between;gap:8px;padding:2px 0;}
+.sidebar-foot code{font-family:var(--mono);font-size:11.5px;}
+
+/* ---- Main ---- */
+main{padding:28px 34px 80px;max-width:980px;}
+section{display:none;}
+section.active{display:block;animation:fade .15s ease;}
+@keyframes fade{from{opacity:0;transform:translateY(2px);}to{opacity:1;}}
+h1{font-family:var(--serif);font-size:26px;margin:0 0 4px;}
+h1 + .sub{color:var(--subtext);font-size:14px;margin-bottom:22px;}
+h2{font-size:17px;margin:30px 0 10px;padding-top:14px;border-top:1px solid var(--border);}
+section > h2:first-of-type{border-top:none;padding-top:0;}
+h3{font-size:14.5px;margin:16px 0 8px;color:var(--accent);}
+p{margin:8px 0;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;
+  box-shadow:var(--shadow);margin-bottom:14px;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media (max-width:700px){.grid2{grid-template-columns:1fr;}}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:12px;
+  font-weight:600;background:var(--pill-bg);color:var(--accent);}
+.pill.done{background:rgba(79,201,154,.15);color:var(--accent2);}
+.pill.open{background:rgba(224,53,94,.13);color:var(--danger);}
+.pill.warn{background:rgba(224,179,74,.15);color:var(--warn);}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0;}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top;}
+th{color:var(--subtext);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+tr:hover td{background:var(--surface2);}
+code, .mono{font-family:var(--mono);font-size:.92em;background:var(--code-bg);padding:1px 5px;border-radius:4px;}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow-x:auto;}
+pre code{background:none;padding:0;}
+.tablewrap{overflow-x:auto;}
+ul.tight{margin:6px 0;padding-left:20px;}
+ul.tight li{margin:4px 0;}
+.checklist label{display:flex;gap:9px;align-items:flex-start;padding:6px 0;cursor:pointer;font-size:13.5px;}
+.checklist input[type=checkbox]{margin-top:3px;accent-color:var(--accent);}
+.checklist input:checked + span{color:var(--subtext);text-decoration:line-through;}
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;}
+.chip{border:1px solid var(--border);border-radius:9px;padding:9px 12px;font-size:13px;cursor:pointer;
+  background:var(--surface);transition:border-color .12s;}
+.chip:hover{border-color:var(--accent);}
+.chip.picked{border-color:var(--accent);background:var(--pill-bg);}
+.chip b{display:block;font-size:13.5px;margin-bottom:2px;}
+.chip span{color:var(--subtext);font-size:12px;}
+.callout{border-left:3px solid var(--accent);background:var(--surface2);padding:10px 14px;border-radius:0 8px 8px 0;
+  font-size:13.5px;margin:12px 0;}
+.callout.danger{border-color:var(--danger);}
+.callout.warn{border-color:var(--warn);}
+details{margin:8px 0;}
+details > summary{cursor:pointer;font-weight:600;padding:6px 0;}
+.hide{display:none !important;}
+.hitcount{font-size:12px;color:var(--subtext);padding:4px 2px 10px;}
+.mermaid{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;}
+</style>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="name">Moonglade</div>
+      <div class="tag">working dashboard — a library against the Void</div>
+    </div>
+    <div class="searchbox">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="search" type="text" placeholder="Search everything…" autocomplete="off">
+    </div>
+    <nav class="tabs" id="tabnav">
+      <button data-tab="dashboard" class="active"><span class="dot"></span>Dashboard</button>
+      <button data-tab="cli"><span class="dot"></span>CLI Reference</button>
+      <button data-tab="parity"><span class="dot"></span>GUI ⇄ Web ⇄ CLI Parity</button>
+      <button data-tab="loom"><span class="dot"></span>The Loom</button>
+      <button data-tab="hall"><span class="dot"></span>Trophy Hall</button>
+      <button data-tab="suite"><span class="dot"></span>Suite &amp; Docs Health</button>
+      <button data-tab="design"><span class="dot"></span>Design Tooling</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="row"><span>Branch</span><code>loom-v2</code></div>
+      <div class="row"><span>HEAD</span><code>0d07a9c</code></div>
+      <div class="row"><span>Tests</span><code>474 / 474</code></div>
+      <div class="row"><span>Updated</span><span id="updated-date">2026-07-15</span></div>
+    </div>
+  </aside>
+
+  <main>
+
+  <!-- ================= DASHBOARD ================= -->
+  <section id="tab-dashboard" class="active">
+    <h1>Dashboard</h1>
+    <div class="sub">Status at a glance. Update this page instead of re-reading chat scrollback. <b>Last updated: 2026-07-16.</b></div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Shipped today (2026-07-16)</h3>
+      <ul class="tight">
+        <li>Loom Phase 1 decisive extraction probe run for real (8-agent workflow, one worktree-isolation bug found + fixed mid-run) — state layer separates cleanly via the composed-hooks strategy, single-hook attempt shipped a real bug its own skeptic missed — <span class="pill done">done</span></li>
+        <li><b>Rebuild PARKED, not cancelled</b> — the probe showed state extraction doesn't need the render-tree merge, which weakens rather than validates the case for a full rebuild; composed extraction merged as a consolidation step instead (<code>ee4b33a</code>) — <span class="pill done">decided</span></li>
+        <li>Full V2 shell shipped for real (<code>c0c7399</code>): fixed Timeline drawer, tabbed Cast&amp;Assets/Footage left card, Generate drawer, all six old dockable panels gone — <span class="pill done">done</span></li>
+        <li>Three rounds of owner-reported shell bugs fixed same day: side-panel scroll clipping + Detailed cast rows made editable (<code>ba1c82e</code>); Detailed Cast&amp;Assets widened 2× + Simple-mode dead-click cards fixed (<code>48ac4dd</code>) — <span class="pill done">done</span></li>
+        <li><b>Generate drawer works with no shot selected</b> (<code>2874850</code>) — all four tabs (Image/Edit/Reference/Video) now support free/draft generation, with a "route into a shot" picker; reused the main gallery's own already-shot-agnostic engine rather than inventing anything new (a first pass got this wrong and was corrected — see the Loom tab) — <span class="pill done">done</span></li>
+        <li>Trophy Hall Figma mocks reviewed via the real (remote) Dev Mode MCP — structure matches the locked plan closely, several open questions sent back (see Hall tab)</li>
+        <li><b>Gallery search now matches task id / media id</b>, not just prompt text (<code>b1f7ee7</code>) — was a missing feature (only two columns were ever wired in), not a bug in existing matching — <span class="pill done">done</span></li>
+        <li><b>Health-vs-Panel image count mismatch root-caused and fixed</b> (<code>b1f7ee7</code>) — Health's disk scan was still counting <code>_deleted/</code> (recoverable trash) and <code>branding/</code> (UI assets) as "images on disk"; verified against the real D: catalog, gap was exactly explained by those two folders — <span class="pill done">done</span></li>
+        <li><b>Loom Generate panel side-scroll fixed</b> (<code>1322744</code>) — frame-slot header didn't fit the 320px drawer; widened the drawer + narrowed the @tag input specifically there — <span class="pill done">done</span></li>
+        <li><b>Video playback controls wired</b> (<code>1c319c2</code>) — V2's Timeline/Deep-Focus preview was hover-scrub-only by design, no play button existed; added one (honors the trim range). Classic Loom's sequence player had <code>autoPlay</code> without <code>muted</code>, fixed. A live-reproduction investigation could not reproduce "prev/next/close do nothing once playing" — flagged as needing a fresher, more specific repro if it persists — <span class="pill done">done</span></li>
+        <li><b>Draft generation exercised end-to-end with two real generations</b>, owner-authorized and reported per-cost: Image→cast (previewed 1,300, actual 200) and Video→attach-to-shot (previewed 27,500, actual 34,200). Both proven live, not just by code reading — <span class="pill done">done</span></li>
+        <li><b>Loom's own page scrollbar fought the internal panels</b> — locked body scroll while the V2 overlay is open; verified both open and close directions — <span class="pill done">done</span></li>
+        <li><b>Full top-down audit (4-agent workflow)</b> + docs reconciled repo-wide (CLAUDE.md, CHANGELOG.md, architecture.md, DOC_MAP.md, <code>docs/LOOM.md</code>, two wiki pages) — <span class="pill done">done</span></li>
+      </ul>
+    </div>
+
+    <h2>Evening sweep — 10 confirmed defects, none previously tracked (full detail: <code>docs/SWEEP_2026-07-16.md</code>)</h2>
+    <div class="card checklist">
+      <label><input type="checkbox"><span><b>Deep Focus edits visibly revert</b> — the modal renders a stale snapshot; typing is eaten while the board behind it silently updates. The one "broken"-severity find. Small fix (derive the live entry).</span></label>
+      <label><input type="checkbox"><span><b>Credit-spend confirm fails OPEN</b> — any /api/price failure (which returns 200 + cost:null on any server exception) submits a paid video generation with no confirmation. Fail-closed fix is a few lines.</span></label>
+      <label><input type="checkbox"><span><b>V2 has no shot deselect → draft mode is one-way</b> — click any shot while a draft renders and the attach flow is unreachable (found independently by two agents). Toggle-click + unbind button.</span></label>
+      <label><input type="checkbox"><span><b>Attaching a new clip keeps stale trims</b> — can hang the sequence player forever / feed export out-points past EOF; applies to draft attach, re-rolls, AND use-existing-video. Reset trims on resultMid change.</span></label>
+      <label><input type="checkbox"><span><b>Today's id-search floods short numeric terms</b> ('88' matched 13.9% of a test catalog by id chance — measured). Gate on isdigit+len≥8, match exactly.</span></label>
+      <label><input type="checkbox"><span><b>Panel stop-server spinner never stops</b> (missing <code>id="srv-spin"</code>, silent TypeError) + 4 smaller confirmed items (stale ShotPreview playing state on shot switch, __draft__ state leaking across projects, trim-drag during playback, delete-vs-autosave race).</span></label>
+      <label><input type="checkbox"><span><b>Public-repo hygiene (fresh-clone audit):</b> NO LICENSE file (owner picks the license); broken README screenshots on master; published wiki is v1.6-era; <code>websockets</code> missing from requirements; master has no CHANGELOG; error message points to nonexistent docs/setup.md; plain pytest fails without pixeltable.</span></label>
+      <label><input type="checkbox"><span><b>3 feature slates gathered</b> (Loom creator / gallery curator / PixAI power user + community) — 22 grounded, ranked candidates incl. persist-task-id-on-card, takes history, draft-quality pass, credit ledger, remix-from-lightbox, triage deck, smart collections. In the sweep doc.</span></label>
+    </div>
+
+    <h2>Still open — 2026-07-16 (prioritized from today's full audit)</h2>
+    <div class="card checklist">
+      <label><input type="checkbox"><span><b>V1→V2 Loom convergence punch list</b> (blocks retiring classic Loom) — wire <b>Play sequence</b> and <b>Export</b> into V2 (currently unreachable without switching back), then <b>batch "Generate all,"</b> then per-shot "other references." Smaller: Audio cue / Notes / Discreet toggle, manual status-cycle, Copy shot. See roadmap §6 for the full table.</span></label>
+      <label><input type="checkbox"><span><b>Video controls — true scope, corrected by owner:</b> what shipped (play/pause) was step one, not the ask. Real target: scrub (have it) + play/pause (have it) + <b>fast-forward/rewind, split, crop</b> — a modest base set, not a full editor.</span></label>
+      <label><input type="checkbox"><span><b>Loom theme/skin pass</b> — owner-flagged as next up: the Panel's 5 color schemes (Moonglade/Nightfallen/Moonlit Silver/Embercourt/Verdant Grove) don't reach the Loom at all yet. Framed as "the shell is functionally solid now, next is visual refinement."</span></label>
+      <label><input type="checkbox"><span><b>Two real early-dev drops, found by design (not padding):</b> Loom export silently discards audio (<code>a=0</code> hardcoded, unchanged since ~07-10, never reconnected even during today's rebuild talk about an audio timeline lane); file logging has been "a separate, still-open discussion" since ~06-22 and was never actually added to any tracker.</span></label>
+      <label><input type="checkbox"><span><b>Branch cleanup</b> — <code>generate-drawer</code>/<code>suite-polish</code>/<code>video-gen</code>/<code>master</code> are all 100% contained in <code>loom-v2</code>'s history (zero unique commits each) — safe deletes whenever wanted, local + origin. <code>loom-extract-hook</code> stays (the one intentionally-kept disproven attempt). Not deleted without a go-ahead.</span></label>
+      <label><input type="checkbox"><span><b>Gallery QoL</b> (8 concrete ideas, not already-built duplicates) — notably: no UI exists for removing an image from a collection even though the backend route does; saved-view presets are localStorage-only so they don't roam between your home/work machines. Full list in roadmap §6.</span></label>
+      <label><input type="checkbox"><span><b>Trophy Hall</b> — blocked on the owner's own Figma frame (ask for the URL, don't re-suggest the screenshot checklist); rename undecided; per-tile ornate frames + epic-tier art not made; "earned rewards" display shape TBD.</span></label>
+      <label><input type="checkbox"><span><b>Larger text/button size option</b> — desktop only, covers side panels AND the board's shot cards. Keep the current compact spec as default. Waiting on the theme pass above, not separately scoped.</span></label>
+      <label><input type="checkbox"><span>Classic Loom's sequence-player prev/next/close bug: the one confirmed defect (missing <code>muted</code>) is fixed, but a live-reproduction attempt couldn't reproduce the exact reported symptom — needs a fresh repro (browser, console errors) if it's still broken.</span></label>
+    </div>
+
+    <h2>Recommended next single focus</h2>
+    <div class="callout">The V1→V2 convergence punch list is the most consequential open thread — Play sequence + Export are the two things that actually force people back to classic Loom, and closing just those two (plus batch-generate) gets the "when do we kill V1" conversation to a real yes/no instead of a maybe. Everything else (theme pass, gallery QoL, Trophy Hall) is real but lower-stakes and can interleave around it.</div>
+
+    <h2>How this dashboard works</h2>
+    <p style="font-size:13.5px;color:var(--subtext)">This file lives at <code>docs/DASHBOARD.html</code> (gitignored — a working tool, not project documentation). I edit it in place and republish to the same link as things change, so this stays the one thing to keep open instead of chasing chat history or a pile of docs. Use the search box to filter every section at once. Each tab now carries its own "Last updated" line — if a tab's date looks old, treat its content as a snapshot from then, not current truth.</p>
+
+    <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--subtext);font-size:12.5px">Earlier — 2026-07-15 (superseded by the above, kept for the record)</summary>
+      <div class="card" style="margin-top:10px">
+        <ul class="tight">
+          <li>10-agent ground-truth audit (docs-vs-code, CLI map, PySide6 verdict, Loom verdict) — <span class="pill done">done</span></li>
+          <li>Trophy Hall reformat (<code>c877919</code>) reverted clean as <code>0a8da3a</code>, confirmed with a real rendered screenshot — <span class="pill done">done</span></li>
+          <li>15-agent comprehensive plan (site/suite research, GUI/CLI parity, Trophy Hall rebuild prep, Loom deep-dive) — <span class="pill done">done</span></li>
+          <li>8-agent design-skills scouting pass — <span class="pill done">done</span></li>
+          <li>Figma Dev Mode MCP confirmed live and authenticated — <span class="pill done">done</span> (later corrected 2026-07-16: that was true then, but had stopped working by the time it was actually used again — see Hall tab)</li>
+        </ul>
+        <p style="font-size:12.5px;color:var(--subtext)">Decided that day: 7 ungated local routes stay LAN-accessible by design; PySide6 deletion is a GO, sequenced after Panel additions; Trophy Hall rename shortlisted to 3; suite &amp; docs health items all closed; PixAI publish/community roadmapped as Epic C.</p>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================= CLI REFERENCE ================= -->
+  <section id="tab-cli">
+    <h1>CLI Reference</h1>
+    <div class="sub"><code>pixai_gallery_backup.py</code> — ~35 top-level commands. Dispatch precedence matters if you stack flags. <b>Reference snapshot, not individually dated — verify against the code if a specific flag matters.</b></div>
+
+    <div class="callout">Dispatch order (first match wins, regardless of flag order on the command line):
+    <code>--delete-task</code> → <code>--catalog-stats</code> → <code>--rebuild-similar</code> → <code>--export-csv</code> → <code>--sync-artworks</code> → <code>--sync-videos</code> → <code>--faststart-videos</code> → <code>--account</code> → <code>--cards</code> → <code>--contests</code> → <code>--watch</code> → <code>--claims</code>/<code>--claim</code> → <code>--reconcile-deleted</code> → <code>--import-local</code> → <code>--list-models</code> → <code>--generate</code> → <code>--generate-video</code> → <code>--reference-video</code> → <code>--enhance</code> → <code>--upload</code> → <code>--suggest-prompt</code> → <code>--edit-image</code> → <code>--fix-model-names</code> → <code>--audit</code> → <code>--dedup</code> → <code>--verify-dupes</code> → <code>--rebuild-thumbs</code> → <code>--sync</code> → <code>--backfill-meta</code> → <code>--backfill-full-meta</code> → <code>--convert-existing</code> → <code>--undo-organize</code> → <code>--organize</code> → <code>--probe</code> → <code>--count</code> → <i>nothing matched</i> → <code>run_download</code> (default).</div>
+
+    <h2>Global / shared flags</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Flag</th><th>Default</th><th>What it does</th></tr>
+      <tr><td><code>--out</code></td><td>pixai_backup</td><td>Backup root every command operates against</td></tr>
+      <tr><td><code>--token</code></td><td>—</td><td>One-run API key override (else config → env → token.txt)</td></tr>
+      <tr><td><code>-v / --verbose</code></td><td>off</td><td>Timestamped diagnostics</td></tr>
+      <tr><td><code>--workers</code></td><td>4</td><td>Parallel threads (1 = serial)</td></tr>
+      <tr><td><code>--page-size</code></td><td>250</td><td>Tasks/page; server errors above ~8-10k</td></tr>
+      <tr><td><code>--delay</code></td><td>0.4s</td><td>Delay between API calls</td></tr>
+      <tr><td><code>--max</code></td><td>0 (all)</td><td>Stop after N; also caps <code>--list-models</code> results</td></tr>
+      <tr><td><code>--variant</code></td><td>—</td><td><b>Dead — nothing reads it.</b> Real variant selection is unconditional inside <code>resolve_media()</code>.</td></tr>
+    </table></div>
+
+    <h2>Backup / sync</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Flag</th><th>What it does</th></tr>
+      <tr><td>(default, no flag)</td><td><code>run_download</code> — the bulk backup engine</td></tr>
+      <tr><td><code>--update</code></td><td>Incremental: stop once recent pages are fully on disk</td></tr>
+      <tr><td><code>--update-grace</code></td><td>Consecutive all-on-disk pages before stopping (default 2)</td></tr>
+      <tr><td><code>--accurate-count</code></td><td>Force a real API count instead of estimating</td></tr>
+      <tr><td><code>--collect-only</code></td><td>Catalog rows without downloading files</td></tr>
+      <tr><td><code>--full-meta</code></td><td>Also fetch full prompt/seed/model while downloading</td></tr>
+      <tr><td><code>--convert {png,jpeg}</code></td><td>Convert webp in place (needs Pillow)</td></tr>
+      <tr><td><code>--sync</code></td><td>One-shot: update+full-meta → fix-models → backfill → thumbnails → reconcile-deleted (broad except, by design — don't narrow it)</td></tr>
+      <tr><td><code>--catalog-stats</code></td><td>Catalog summary</td></tr>
+      <tr><td><code>--probe</code></td><td>Live connectivity/auth sanity check</td></tr>
+      <tr><td><code>--count</code></td><td>Live re-walk to tally true cloud totals. <b>Shares its argparse destination with <code>--batch-size</code></b> — passing both is last-flag-wins</td></tr>
+      <tr><td><code>--export-csv</code></td><td>Dump catalog.db → catalog.csv (disk write; the web's version is a browser download instead)</td></tr>
+      <tr><td><code>--backfill-meta</code> / <code>--backfill-full-meta [--with-loras]</code></td><td>Fill missing metadata on existing rows</td></tr>
+      <tr><td><code>--fix-model-names [--relabel-removed]</code></td><td>Re-resolve model id → name; relabel ids that no longer resolve</td></tr>
+      <tr><td><code>--reconcile-deleted</code></td><td>Flag rows deleted cloud-side</td></tr>
+      <tr><td><code>--sync-artworks [--with-videos]</code></td><td>Pull published-artwork metadata (title/likes/tags/nsfw) onto matching rows</td></tr>
+      <tr><td><code>--sync-videos</code></td><td>Resolve real mp4 for every i2v task (REST returns empty URLs for video — needs GraphQL)</td></tr>
+      <tr><td><code>--faststart-videos</code></td><td>Retrofit: move <code>moov</code> atom to front for iOS/Safari streaming</td></tr>
+      <tr><td><code>--import-local [DIR]</code></td><td>Catalog non-PixAI media as <code>source='local'</code></td></tr>
+      <tr><td><code>--rebuild-thumbs</code></td><td>Regenerate all thumbnails</td></tr>
+      <tr><td><code>--rebuild-similar</code></td><td>Rebuild CLIP similarity index (needs torch/pixeltable). <b>Top candidate for a web button</b> — <code>/api/similar</code> already ships and silently degrades without this</td></tr>
+    </table></div>
+
+    <h2>Organize / dedup</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Flag</th><th>What it does</th></tr>
+      <tr><td><code>--organize [--dry-run] [--embed-metadata]</code></td><td>Re-normalize into <code>YYYY-MM/&lt;slug&gt;_&lt;task_id&gt;_&lt;media_id&gt;</code>; writes reversible <code>organize_manifest.csv</code>. Alias: <code>--organize-adv</code></td></tr>
+      <tr><td><code>--undo-organize</code></td><td>Replay the manifest in reverse, then delete it. <b>No web route.</b></td></tr>
+      <tr><td><code>--convert-existing</code></td><td>Batch-convert every existing <code>.webp</code>. <b>No web route.</b></td></tr>
+      <tr><td><code>--audit [--no-content]</code></td><td>Read-only dupe scan: Class A (same media_id, &gt;1 location) + Class B (byte-identical). Web is hardcoded to <code>--no-content</code> (fast only)</td></tr>
+      <tr><td><code>--dedup [--apply] [--dedup-delete] [--no-content]</code></td><td>Quarantine (default) or delete Class A/B losers. Dry-run unless <code>--apply</code>. Web never passes <code>--dedup-delete</code> (always quarantines)</td></tr>
+      <tr><td><code>--verify-dupes [--restore-orphans]</code></td><td>Second-pass safety check on quarantined files. <b>No web route.</b></td></tr>
+    </table></div>
+
+    <h2>Creation (generate / edit / video / reference-video / enhance / upload)</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Flag</th><th>What it does</th></tr>
+      <tr><td><code>--confirm</code></td><td>Required to actually spend — everything else previews only</td></tr>
+      <tr><td><code>--task-id</code></td><td>Recover an already-submitted task for free instead of resubmitting</td></tr>
+      <tr><td><code>--dump-params</code></td><td>Print the real submit <code>parameters</code> of a recovered/completed task</td></tr>
+      <tr><td><code>--generate --model --width --height --steps --cfg --batch-size --seed --priority --mode --lora ID:W</code></td><td>Still-image gen. Default model Tsubaki.2. <code>--batch-size</code> shares a dest with top-level <code>--count</code></td></tr>
+      <tr><td><code>--generate-video --image --tail --duration --video-model --video-mode --audio --camera-movement</code></td><td>Image-to-video. Real default duration is <b>5s</b>, not the 15s the function's own docstring implies</td></tr>
+      <tr><td><code>--reference-video --ref-image/--ref-video/--ref-audio</code></td><td>Multi-reference video; cite as <code>@image1</code>/<code>@video1</code>/<code>@audio1</code> yourself in the prompt</td></tr>
+      <tr><td><code>--enhance --workflow-id ID</code> / <code>--filter-id ID</code></td><td>Panelplugin workflow or art filter. <b>Art filters have zero web route</b> — only the workflow half made it to the web</td></tr>
+      <tr><td><code>--edit-image --edit-src --edit-model --edit-resolution --edit-aspect --edit-quality</code></td><td>Instruct edit. CLI/GUI accept any model id; <b>web is hard-locked to 2 known models</b></td></tr>
+      <tr><td><code>--upload</code> / <code>--suggest-prompt</code></td><td>Free, no <code>--confirm</code> gate</td></tr>
+      <tr><td><code>--kaisuuken-id</code> / <code>--no-card</code></td><td>Force a specific free card / opt out of auto-apply. <b>No web control either way.</b></td></tr>
+    </table></div>
+
+    <h2>Account / claims / delete</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Flag</th><th>What it does</th></tr>
+      <tr><td><code>--account</code> / <code>--cards</code> / <code>--contests [--all-contests]</code></td><td>Read-only, never move money</td></tr>
+      <tr><td><code>--watch [--watch-seconds] [--watch-backup]</code></td><td>Live WS monitor. Web runs an always-on internal watcher instead — strictly better for the always-open-gallery case</td></tr>
+      <tr><td><code>--claims</code> / <code>--claim ID|all --confirm</code></td><td>List / claim ready daily rewards</td></tr>
+      <tr><td><code>--delete-task ID [...] --apply --yes</code></td><td>Irreversible cloud deletion. Single-attempt by design (no retry → no double-fire on flaky connection)</td></tr>
+    </table></div>
+
+    <h2>Known gotchas</h2>
+    <ul class="tight">
+      <li><code>--count</code> and <code>--batch-size</code> collide — one argparse destination, last-flag-wins</li>
+      <li><code>--reference-video</code>'s real default duration is 5s, not the documented 15s</li>
+      <li><code>--generate --batch-size N&gt;1</code> and multi-output <code>--edit-image</code> may only catalog the composite grid image, not individuals — <code>run_generate</code>/<code>run_edit_image</code> use an older grid-only extraction path; the fix (<code>_task_image_media()</code>) is already used and working elsewhere in the same file</li>
+      <li><code>--edit-model reference-pro</code> + <code>--edit-quality</code> can be sent together even though Reference Pro has no quality option — the clamp function exists but isn't called</li>
+      <li><code>--variant</code> does nothing at all</li>
+    </ul>
+  </section>
+
+  <!-- ================= PARITY ================= -->
+  <section id="tab-parity">
+    <h1>GUI ⇄ Web ⇄ CLI Parity</h1>
+    <div class="sub">Built by tracing every one of ~30 GUI buttons across all 9 tabs to its actual backing function, then checking both other surfaces directly. Deletion verdict: <span class="pill done">delete pixai_gui.py</span> <b>Audit dated 2026-07-15 — not re-verified since; the GUI itself hasn't changed, but re-check before acting if a lot of time has passed.</b></div>
+
+    <div class="callout"><b>Headline finding:</b> zero GUI-only capability mutates files, spends credits, or talks to the PixAI API. Every GUI button calls a <code>core.run_*</code>/<code>cmd_*</code> function that also has a real CLI flag. Two things are genuinely GUI-only, both trivial local conveniences:
+      <ul class="tight">
+        <li><b>"Recover deleted…" button</b> — opens <code>_deleted/</code> in Explorer. No CLI/web equivalent lists or browses it.</li>
+        <li><b>"Recently used models" quick-pick</b> — ranks your own models by generation frequency. No CLI/web equivalent (both do live PixAI-catalog search instead).</li>
+      </ul>
+    </div>
+
+    <h2>Real gap: the GUI has no Enhance tab at all</h2>
+    <p>Correction to an earlier pass — walking all 9 tabs found zero Enhance affordance in the GUI, while both CLI (<code>--enhance</code>) and web (<code>/api/enhance</code>, workflow half only) have it. A third category the "GUI-only vs CLI-only" framing didn't originally have room for.</p>
+
+    <h2>PySide6 deletion — <span class="pill done">GO, pending the web additions below</span></h2>
+    <p style="font-size:13.5px">Proceed with removal once the items marked <span class="pill done">Go</span> below are built. Four CLI-only capabilities weren't explicitly decided — elaborated below since you asked directly what's left once the GUI is gone.</p>
+
+    <h2>Elaborating: 4 CLI-only gaps not yet decided</h2>
+    <div class="card">
+      <p style="font-size:13.5px"><b>1. Import Local Media</b> — <span class="pill done">decided 2026-07-15</span>: stays, but needs a real mechanism, not a blind catalog dump. Owner wants a web button or drag-and-drop target accepting a single file, a folder, or a zip. Captured as <code>docs/REFINEMENTS.md</code> #24 — builds on the existing <code>source='local'</code> tag + dedicated <code>imported/</code> folder, so it's a front-end pass on an existing backend concept, not new plumbing.</p>
+      <p style="font-size:13.5px"><b>2. Forcing a specific free-card id</b> — not addressed; narrow/power-user enough that CLI-only-forever is a reasonable default unless you say otherwise.</p>
+      <p style="font-size:13.5px"><b>3. Uncapped full history walk / <code>--collect-only</code> / small test pulls</b> — <span class="pill done">agreed, worth a web dial</span>. Captured as <code>docs/REFINEMENTS.md</code> #25 — exact UI shape (Panel "Advanced" section vs. per-run options) still needs its own scoping pass.</p>
+      <p style="font-size:13.5px"><b>4. <code>--embed-metadata</code></b> — <span class="pill done">decided 2026-07-15</span>: not a bulk-Organize checkbox. Instead it becomes an option on the new convert/export flow (<code>docs/REFINEMENTS.md</code> #22) — check the box when exporting a single image or a collection zip, metadata gets burned into the exported file.</p>
+    </div>
+
+    <h2>Video negative prompts (I2V/FLF) — corrected, this is NOT a permanent wall</h2>
+    <div class="callout">I said "structurally cannot," which overclaimed. Actually checked the source: <code>build_video_parameters()</code> (the low-level builder, used by the raw CLI path) <b>already fully supports</b> a negative prompt — it's a working, tested, verified field (<code>i2v["negativePrompts"] = negative</code>). The gap is one layer up: <code>build_shot_video_params()</code> — the single shared adapter both the web Generate drawer <i>and</i> The Loom call — never received a <code>negative</code> parameter in its own signature, so nothing threads a value down into the builder that already knows how to send one. <b>Fix is small and scoped:</b> add <code>negative=""</code> to <code>build_shot_video_params()</code>'s signature, thread it to the two <code>build_video_parameters()</code> call sites inside it (I2V and FLF), wire a negative-prompt field into the drawer/Loom UI, done. <b>Real caveat:</b> this only applies to I2V/FLF. Reference-video (R2V) routes through a different builder (<code>build_reference_video_parameters()</code>) whose real, captured PixAI submit shape genuinely has no negative field at all — that one may be an actual API limitation, not just an unwired adapter, though that capture is from 2026-07-02 and could be worth re-verifying if it matters to you.</div>
+
+    <h2>Fix Model Names + relabel-removed — honest value assessment</h2>
+    <p style="font-size:13.5px">What it actually does: re-resolves a catalog row's raw model id into a readable name; <code>--relabel-removed</code> specifically catches ids that no longer resolve <i>at all</i> (the model was deprecated/removed from PixAI) and relabels them instead of leaving them blank/numeric. Sync already does the base re-resolve; it just never passes <code>--relabel-removed</code>. <b>My honest read:</b> this reads like exactly what you said — a gap-filler built during a period when your dev catalog had more model churn (early experimentation, models coming and going). I don't have solid data on how often a truly-removed model shows up in your <i>current, real</i> catalog today — the C: repo's own tiny test catalog isn't representative (18 rows, all blank model_name, not comparable to your real D: history). If you want a real number, I can check your actual D: catalog for currently-unresolved model names — cheap to do, just say the word. Otherwise: low but nonzero value, cheap to wire (`--relabel-removed` just needs to be added to Sync's internal call), not urgent.</p>
+
+    <h2>Convert — redesigned per your actual answer, not the original whole-library idea</h2>
+    <div class="callout done">BUILT 2026-07-20. The catalog stays exactly as PixAI delivers it — every download is an export-time transform on a temp copy; nothing converted ever enters the catalog as a new row. Shipped surfaces: <b>(1)</b> the gallery <b>detail page</b> got a plain one-click Download of the original (<code>/full/&lt;id&gt;?dl=1</code> → attachment; no convert dialog there by decision — a format picker on every single image is friction, and selecting that one image in the bulk flow covers the rare convert case). <b>(2)</b> a <b>"Download collection"</b> button (visible while a collection filter is active) zips the collection's full membership, resolved in SQL across pages. <b>(3, bonus)</b> a bulk <b>selection</b> dialog (Actions → Download ZIP) with opt-in convert (PNG/JPEG) + embed-metadata; default is Original = byte-identical. There is no "zip the whole catalog" path — selection or named-collection only.</div>
+
+    <h2>CLI-only capabilities that go dark if the GUI disappears and nothing else changes</h2>
+    <ul class="tight">
+      <li>The old whole-library <b>Convert tab</b> concept is retired — see the redesigned spec above instead</li>
+      <li><b>Full byte-level duplicate audit</b> (Class B) — <span class="pill done">Go</span>, web is hardcoded to fast/Class-A-only today</li>
+      <li><b>Verify Quarantine</b> — <span class="pill done">Go</span> (item 2 below); <b>Import Local Media</b> — not yet addressed</li>
+      <li>Standalone <b>Fix Model Names + relabel-removed</b> — see assessment above</li>
+      <li><b>Video negative prompts (I2V/FLF)</b> — see correction above; genuinely fixable, not addressed yet</li>
+      <li>Forcing a specific <b>free-card id</b> — not yet addressed</li>
+      <li><b>Uncapped full history walk</b>, <code>--collect-only</code>, small <code>--max N</code> test pulls — not yet addressed</li>
+      <li><b>Permanent dedup-delete</b> — <span class="pill done">Go</span> (item 5 below)</li>
+    </ul>
+
+    <h2>Prioritized web-Panel buttons — your decisions, 2026-07-15</h2>
+    <ol class="tight">
+      <li><code>--rebuild-similar</code> — <span class="pill done">Go — 100%, already seeing the need for it</span></li>
+      <li><code>--verify-dupes</code> + <code>--restore-orphans</code> — <span class="pill done">Go</span></li>
+      <li><code>--undo-organize</code> — <span class="pill done">Go</span></li>
+      <li>"Run now" trigger for <code>sync-artworks</code>/<code>sync-videos</code>/<code>reconcile-deleted</code> — <span class="pill done">Go</span> ("weird that it's hidden")</li>
+      <li>Full-audit toggle + <code>--dedup-delete</code> checkboxes on existing buttons — <span class="pill done">Go</span></li>
+      <li><code>--convert-existing</code> as a whole-library button — <span class="pill open">superseded</span> by the redesigned Convert spec above</li>
+      <li><code>--embed-metadata</code> checkbox on Organize — <span class="pill warn">not yet answered</span></li>
+    </ol>
+
+    <h2>Should stay CLI-only on purpose</h2>
+    <p style="font-size:13.5px;color:var(--subtext)"><code>--export-csv</code>/<code>--dump-params</code>/<code>--params-json</code> (scripting/RE primitives), <code>--probe</code>/<code>--count</code>/<code>--collect-only</code> (one-off diagnostics), <code>--token</code>/<code>--version</code>/<code>--yes</code> (CLI plumbing), <code>--watch</code> (superseded by the always-on server watcher), <code>--kaisuuken-id</code>/<code>--no-card</code> (deliberately simple on web, matching the site's own auto-apply behavior).</p>
+  </section>
+
+  <!-- ================= LOOM ================= -->
+  <section id="tab-loom">
+    <h1>The Loom</h1>
+    <div class="sub"><code>loom/master-storyboard.jsx</code> — 2,118 lines, zero JS test coverage, no build step (Babel-in-browser on every page load).</div>
+
+    <div class="callout done"><b>DECISION LOCKED 2026-07-16: rebuild.</b> A focused 7-agent adversarial audit (Sonnet/Opus/Fable mix) stress-tested the original consolidate-vs-rebuild plans from multiple angles — a skeptical re-read hunting for reasons rebuild was wrong, an off-the-shelf prior-art survey, a standalone-app survey, a render-architecture survey, and an adversarial stress-test — then a Fable synthesis and an Opus verify pass. Real finding: the "~600 good state-layer lines lift out cleanly" premise both original plans shared was false — the state layer is React-closure-bound, not a liftable slab — and real bugs live inside that "solid" layer too (not just the classic/V2 fork). Owner weighed the evidence and committed directly to rebuild rather than gating on a probe-first decision tree. <b>✅ Phase 0 shipped same day (commit <code>b4303f5</code>):</b> all bugs below fixed as shared helpers, no new tooling — see the checklist. Later phases (design pass from the owner's own Figma mocks → unified render tree) come next, not this section's old two-plan comparison, kept below for the record.</div>
+    <div class="callout"><b>Standalone-app note, corrected twice:</b> the real question is the WHOLE SUITE going standalone, not just the Loom — and the owner added real history: "The loom started standalone and its how we got in this mess." Treat as a cautionary data point for whenever that question gets its own real scoping pass. Not blocking anything current.</div>
+
+    <div class="callout done"><b>✅ SHIPPED 2026-07-16 (commit `c0c7399`, pushed) — the shell described below is now the live V2, not just an approved design.</b> DockablePanel/V2_DEFAULT/panel-layout persistence deleted entirely; nothing left is draggable. One real bug caught + fixed in live verification: the Timeline drag's release-snap read batched React state instead of a ref, so a fast drag could snap back instead of landing where released. Verified end-to-end in the browser: selected-shot binding across all regions, the Camera "+terms" popover opening + appending correctly, all 3 Timeline states via real drag, both sides' collapse-to-rail + re-expand. node --test 66/66, esbuild clean, pytest 474/474 unaffected, zero console errors.</div>
+    <div class="callout done"><b>✅ Two more owner-reported bugs fixed same day (commit `ba1c82e`, pushed):</b> (1) side panels didn't scroll — `.lv-side` clipped content with no scrollable child; fixed so `.lv-cast`/`.lv-gen`/`.lv-railicons` are the real scroll containers (measured 740px content in a 555px box, confirmed scrollable, not assumed). (2) Detailed cast view was just a relabeled copy of Simple — no longer editable. Fixed: Detailed now has V1-style real name/tag/kind/lock/remove fields (ported from classic Loom's existing row), Simple stays the compact glance card; renamed an asset live and confirmed it persisted and matched in both views. <b>Roadmapped, not built:</b> a larger text/button size option, on desktop — a legibility/density preference, NOT a phone/responsive ask (not raised at all here) — deferred until V2 gets its own visual/theming pass.</div>
+    <div class="callout done"><b>Design history — read the original V1 Edit Bay first.</b> The owner's own original standalone predecessor (<code>seedance-storyboard.jsx</code>, saved on their Desktop) turned out to be the key reference: a clean 4-component tree (App → CardView → CardEditor → FrameSlot) that most of Phase 0's bugs trace back to directly (the continuity check, the tag-numbering, dupCard's stale clone — none of these were "V2 drift," they were day-one limitations that never got revisited when generation/multi-project features got bolted on later). The real disease was never "two render trees" — it's that this codebase never had an owned data-model layer. Owner's verdict on V2 itself: "the entire design of the V2 is shit... V1 was more cohesive and had form and function. V2 tried to be something its not and never should be." New shell, replacing V2's six arbitrary draggable panels with three named regions plus the fixed timeline: <b>left</b> — Cast &amp; Assets card (Simple/Detailed density toggle) tabbed with Footage (browse-library button + drag-and-drop, confirmed scrollable once it fills), collapsible to an icon rail; <b>center</b> — the Acts &amp; Shots board, unchanged; <b>right</b> — the Generate drawer (Image/Video/Edit/Ref), collapsible to an icon rail, matching the gallery's own drawer layout; <b>top</b> — a genuinely <i>fixed</i> banner-attached Timeline drawer (never draggable, unlike every other panel), three states (hidden / slim default / pulled-down full with the video preview ABOVE the scrubber at a real 16:9). The Legend (camera/lighting/transition vocabulary) got no persistent home at all — revived as V1's original on-demand "+ terms" popover, per-field, only where Camera/Transition In/Transition Out actually live (video-only concepts; Image/Edit/Reference don't have them in the real app either). Panel snap/dock and multi-track timeline were both explicitly cut, not deferred — panel-dock only matters if a modular design is even adopted, and multi-track doesn't fit the tool's real job (build 5–15s scenes, stitch them, hand the result to a real video editor for post). Two pixel sources of truth, both interactive and owner-approved ("excellent design"): <a href="https://claude.ai/code/artifact/e41a3020-32fb-4baa-ae81-69814d5ee4c9" target="_blank">full shell mockup</a> and <a href="https://claude.ai/code/artifact/84be1748-2c7d-4304-967c-8ac22cd37687" target="_blank">Timeline-only wireframe</a> (superseded by the full shell, kept for reference).</div>
+
+    <div class="callout done"><b>Phase 1a — tooling + pure-core extraction — ✅ SHIPPED 2026-07-16 (commit <code>7231f83</code>, pushed).</b> First Node/npm toolchain ever in this repo: <code>loom/package.json</code> + esbuild bundling <code>master-storyboard.jsx</code> into <code>loom/dist/master-storyboard.bundle.js</code>, reachable via an opt-in <code>?bundle=1</code> flag — the in-browser Babel-standalone path stays the untouched default until the bundle earns trust. <code>flat</code>/<code>shotText</code>/<code>shotPayload</code>/tag-math/continuity/pricing extracted into a plain, React-free <code>loom/src/loom-core.js</code>, covered by 30 real <code>node --test</code> cases (including every Phase 0 edge case). Verified for real: node smoke-load of the bundle, the live Flask server hit both with and without <code>?bundle=1</code> in an actual browser (identical render, zero console errors, network trace confirmed Babel is skipped on the bundle path), and the full 474-test Python suite unaffected.</div>
+
+    <div class="callout warn"><b>Phase 1b — the decisive <code>useLoomProject</code> extraction — COMPLETED 2026-07-16, and it changed the plan. Rebuild is DEFERRED, not proceeding.</b> (First attempt failed on a worktree-isolation tooling bug — fixed, re-run succeeded cleanly.) Two independent agents each extracted the Loom's ~450-line state/mutation layer in isolated worktrees — single monolithic hook vs. four composed hooks — each reviewed by 2 independent adversarial skeptics, synthesized by Opus.<br><br><b>The single-hook attempt claimed "genuinely clean" and was wrong</b> — its own skeptics split, and the synthesis agent verified the dissenting one directly against the actual files: a real <code>ReferenceError: fmt is not defined</code> in <code>exportAll()</code> on the esbuild-bundle path (missing import, zero test coverage), plus a silent behavioral regression (<code>duplicateProject</code> now clears the V2 shot selection where the original code deliberately preserved it) that the self-report called "provably behavior-identical." <b>The skeptic that missed both is the exact "adversarial-verify quietly favors the flattering read" failure mode this decision has already been caught in twice before</b> — one layer deeper this time, inside the mechanism built to catch it.<br><br><b>The composed (four-hook) attempt did NOT claim clean up front, named three specific blockers honestly, and its account held up completely</b> under independent re-verification — no bug, no regression found (the other "skeptic" was a stub/failed run, correctly disregarded).<br><br><b>Real finding: the state layer genuinely can be extracted cleanly — via the composed strategy — without first merging classic+V2's render trees.</b> The actual unsolved hard part in both attempts is the state↔view coupling (shared gallery-picker DOM bridge, mid-poll status writes, per-render `entries`, shared V2-panel-layout storage, per-project selection reset) — exactly what a render-tree rebuild exists to solve, and this probe never tested that half at all. <b>Opus's recommendation: ship the composed extraction now as a consolidation step against the current fork — do not treat this as validating the render-tree rebuild.</b> That reduces rather than strengthens the rebuild's case, since its main justification (untangled state) is now achievable without it.<br><br><b>✅ MERGED 2026-07-16 (commit <code>ee4b33a</code> on <code>loom-v2</code>, pushed) — owner's call: merge composed, park the full rebuild.</b> Re-verified independently in the real repo after merging, not just trusted from the worktree: <code>node --test</code> 66/66, clean esbuild build, <code>python -m pytest</code> 474/474 (the worktree's own 467/7 was a fresh-checkout <code>config.json</code> artifact, confirmed environmental), a fresh <code>loom-verify</code> server hit live in-browser — real populated project, continuity-check state rendering correctly, zero console errors. <code>loom-extract-hook</code> kept unmerged as the record of the flawed attempt; both experimental worktree folders removed (content is safe in git history). <b>Rebuild status: PARKED, not cancelled</b> — the render-tree unification was never tested and stays undecided until it gets its own real probe. The shell/Timeline design work stays valid regardless of which way that eventually goes. See <code>docs/ROADMAP_LOOM_ACHIEVEMENTS.md</code> §1 for the full writeup.</div>
+
+    <h2>Historical: two-plan comparison (superseded by the rebuild decision above)</h2>
+    <h3>Current architecture — two hand-duplicated render trees</h3>
+    <pre class="mermaid">
+graph TD
+  A["App() root"] --> B["Classic: CardView / CardEditor<br/>STYLES CSS ~250 lines"]
+  A --> C["LoomV2: DockablePanel tree<br/>V2_STYLES CSS ~164 lines"]
+  B -. "duplicated near-verbatim" .-> C
+  B --> G["Shared: FrameSlot, ShotPreview, ProjectSwitcher<br/>(proof extraction already works)"]
+  C --> G
+  style G fill:#4fc99a33,stroke:#4fc99a
+    </pre>
+
+    <div class="grid2">
+      <div class="card">
+        <h3 style="margin-top:0">Missing in V2 vs. classic</h3>
+        <ul class="tight" style="font-size:13px">
+          <li><b>No Play, Export, or batch-Generate at all</b> — bigger gap than previously known</li>
+          <li>No per-shot "Other references" — Extend continuity is effectively unusable from V2</li>
+          <li>No Copy-shot, Notes, Transition in/out, Audio cue, Discreet toggle</li>
+          <li>Continuity linked/unlinked indicator doesn't exist in V2 at all</li>
+          <li>No responsive/mobile layout — only scale-to-fit a fixed canvas</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Missing in classic vs. V2</h3>
+        <ul class="tight" style="font-size:13px">
+          <li>Still-image Generate / Edit / Reference modes (V2-only)</li>
+          <li>Video-cast gallery picker (classic's is image-only)</li>
+          <li>Deep Focus modal, inline account-balance readout</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Bugs found (beyond the original two)</h3>
+    <ul class="tight">
+      <li><span class="pill done">fixed</span> <code>dupCard</code> now resets <code>resultMid</code>/<code>status</code>/<code>actualDur</code>/<code>trimIn</code>/<code>trimOut</code> on clone</li>
+      <li><span class="pill done">fixed</span> All <b>7</b> (not 4) tag-numbering call sites unified onto one <code>nextTag</code>/<code>maxTagNum</code> helper</li>
+      <li><span class="pill done">fixed</span> <code>CONNECT[c.connect]</code> guarded via <code>connectMeta()</code> — 3 call sites could throw on a stale/legacy value</li>
+      <li><span class="pill done">fixed</span> <code>importJSON</code> creates a new storyboard + confirms — used to silently clobber the open board, a real data-loss footgun</li>
+      <li><span class="pill done">fixed</span> <code>shotPayload</code>'s open/close frame fallback both defaulted to the same <code>@image9</code> tag on an untagged FLF shot — found during Phase 0 implementation, not in the original 5</li>
+      <li><code>mode==="FLF"</code> and <code>connect==="flf"</code> are uncoupled and can silently disagree — not yet fixed, later phase</li>
+      <li>Cost-preview guardrail is inconsistent — video gens get a real price check, image/edit/reference gens only get a generic confirm string — not yet fixed, later phase</li>
+      <li>No auto-wiring for "Extend" continuity despite the UI implying it — not yet fixed, later phase</li>
+      <li><code>routeImg</code> is <b>not dead code</b> — it's a missing prop (<code>setGenImgState</code> was never threaded to <code>LoomV2</code>), not a stub — later phase</li>
+    </ul>
+
+    <h2>Two plans, honestly compared</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3 style="margin-top:0">Consolidate <span class="pill warn">Large / multi-week</span></h3>
+        <p style="font-size:13px">7 phases, resequenced tests-first: extract pure logic + <code>node --test</code> (zero new tooling) → fix the 2(+2) bugs → port V2's 2 missing features → extract 5 shared component families → collapse 2 CSS systems → delete dead code → retire classic. Ships value every phase. <b>Render layer stays permanently hand-verified — no path to automated coverage, ever, by its own admission.</b></p>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Rebuild <span class="pill warn">~7–13 sessions + design pass + soak</span></h3>
+        <p style="font-size:13px">Keep ~600–650 lines of state/business logic near-as-is (genuinely solid). Throw away and rebuild ~1300 lines of render layer as one unified component tree — no classic/V2 fork, ever again. Adopt esbuild + Vitest (repo's first Node dependency). Built behind a flag; nothing live touched until cutover.</p>
+      </div>
+    </div>
+
+    <pre class="mermaid">
+graph TD
+  H["useLoomProject(projectId)<br/>the ONLY place state lives"] --> I[ContinuityBadge]
+  H --> J[ShotCard]
+  H --> K[ShotEditor]
+  H --> L[GeneratePanel]
+  H --> M[CastAssetsPanel]
+  H --> N[Timeline]
+  style H fill:#b692e633,stroke:#b692e6
+    </pre>
+
+    <div class="callout warn"><b>Where the auto-generated comparison overreached (corrected here):</b> it claimed the two plans "agree" on a day-one bug-fix bundle — they don't (2 vs. 4 tag algorithms named, and specific sequencing dependencies were ignored). It called one phase "zero risk" when its own source called it "Low." It compared a smaller "2–4 session scoped consolidate" against the full plan's "multi-week" as if competing estimates of the same scope — they're not.</div>
+
+    <div class="callout"><b>Steelman for NOT rebuilding, taken seriously:</b> this is a single-owner tool with no CI; your own working style is already hands-on end-to-end verification; a Node/npm toolchain is a first for this repo and a real new cross-machine drift axis; the test coverage rebuild buys might never actually get written on a solo project.</div>
+
+    <h2>Recommendation (historical — overtaken by events, kept for the record)</h2>
+    <p><b>Do the shared first move now, regardless of which way you lean:</b> extract the pure logic (<code>shotText</code>, <code>shotPayload</code>, tag-numbering, frame-handoff, <code>dupCard</code>) into a plain file, add <code>node --test</code> coverage, fix the agreed bugs. Cheap, uncontested, shippable regardless. Then hold the render-layer fork decision — rebuild vs. in-place extraction — until a locked Figma design artifact exists, since both paths need one anyway. You're leaning rebuild and the chassis is genuinely good — reasonable, once you get there.</p>
+    <div class="callout done">Overtaken 2026-07-16: the owner committed directly to rebuild without gating on this, shipped Phase 0, then locked the shell design off two real pixel mockups (see the callout above), and Phase 1's extraction probe is now running. This section stays only as a record of what was recommended before that happened.</div>
+  </section>
+
+  <!-- ================= TROPHY HALL ================= -->
+  <section id="tab-hall">
+    <h1>Trophy Hall</h1>
+    <div class="sub">Post-revert baseline: rewards in the 290px rail, plain <code>minmax(216px,1fr)</code> grid, left-border tier accent. No carousel in the live app — that's salvage-only, aspirational. <b>Last updated: 2026-07-16.</b></div>
+
+    <div class="callout done"><b>Real Figma mocks REVIEWED 2026-07-16 via the actual Dev Mode MCP (remote server), owner had since cleaned up the file.</b> First pass was via a plain logged-in browser tab (desktop Dev Mode MCP wasn't reachable then). Owner doesn't have a Pro seat, so set up Figma's <i>remote</i> MCP server instead (not the local desktop one) — confirmed live via <code>whoami</code> (real account, "starter" tier) and pulled real XML metadata + a clean screenshot, not just eyeballed pixels. <b>Structure match is even better than the first pass suggested</b> — header (title+icon, "18 of 46 earned · 3 of 11 feats · 385/960 pts", search, close button), 3 real tabs (Summary/All/Statistics), Recent Achievements + Progress Overview (left), Within Reach + "Relics Earned" chips (middle), Categories + mascot + "Keep going, The Void will not archive itself" flavor banner (right) — all present and correctly shaped, with nice on-brand naming touches ("Relics Earned," the Void line). <b>Mascot confirmed reused, not new art</b> — the layer is literally named <code>skin-changer__mascot_105</code>, pulled from the existing chibi library. <b>Two things resolved from the first pass:</b> the "two competing big screens" were just the Summary and All tabs of the same design, exactly as guessed; the generic "Figma design - image.png" layer naming from the messier first pass is gone now that it's cleaned up — this is a live, real Figma frame, not a flat pasted screenshot, so exact values ARE pullable via the MCP.<br><br><b>Real open items, sharper now:</b> (1) Only Summary has content — the "All" tab is a genuine empty frame (zero children) and "Statistics" doesn't even have its own frame yet, just a tab-row label; the standalone stats panel (images archived/videos/etc.) seen in the first pass isn't in the file anymore at all — need to know if that's next-up-to-build or was deliberately dropped. (2) The one achievement-card style shown (ornate gold/silver ring badge, "Claimant," tagged COMMON) is the only tier example in the file — no rare/epic/legendary comparison to check against the already-locked "frames signal tier" rule. Does this ring need a legendary/feat variant using the existing dedicated LEG6/FEAT13 frame assets, or is it meant to be the universal per-card frame with only the tag/color signaling tier? (3) A stray duplicate "Ach_recent" instance sits outside the main Root frame on the canvas — likely just editing leftover, flagged in case not intentional. (4) Header still literally says "Trophy Hall" — unclear if that supersedes the rename shortlist or is just not-yet-updated placeholder text. The 4-session screenshot checklist further down is still dead weight — left only as a record of what was proposed before real mocks were reviewed.</div>
+
+    <h2>Rename shortlist (as of 2026-07-15)</h2>
+    <div class="chip-row" id="rename-chips">
+      <div class="chip picked" data-name="The Vault Against the Void"><b>The Vault Against the Void</b><span>Your pick — its own tagline-style name</span></div>
+      <div class="chip picked" data-name="The Folio of Honors"><b>The Folio of Honors</b><span>Your pick — reuses existing in-fiction "folio" vocabulary</span></div>
+      <div class="chip picked" data-name="The Ledger of the World Tree"><b>The Ledger of the World Tree</b><span>Your own entry — banner subtext: "The Pillar of the Vault"</span></div>
+    </div>
+    <p id="rename-picked" style="font-size:13px;color:var(--subtext)">Shortlisted: The Vault Against the Void, The Folio of Honors, The Ledger of the World Tree</p>
+    <div class="callout"><b>My honest read on "The Ledger of the World Tree" / "The Pillar of the Vault":</b> the World Tree tie-in is genuinely good — it's a real personal/character connection (Balance Druid → Nordrassil), not generic Athenaeum voice, and that's worth more than another library synonym. The one thing I'd push back on: the name stacks three different metaphors at once — <i>Ledger</i> (a book/record), <i>World Tree</i> (a living, growing thing), and <i>Pillar of the Vault</i> (an architectural support inside a treasury) — three structural images competing for what the room actually "is." I'd pick one anchor image and let the other two support it rather than co-lead. Not telling you to drop it — just flagging it before it's locked.</div>
+
+    <h2>The ladder-carousel mechanic — rejected, filed for reference only</h2>
+    <div class="callout danger"><b>Your words: "didn't even work and looked like dogwater... was not what I asked for... one of those charge-ahead coding sessions with no design questions."</b> Correct, and noted plainly — this was built from prose memory in a single session with no design check-in, which is exactly the failure this whole audit exists to prevent. The CSS below is kept filed in case any piece of the raw math is ever useful, but it is <b>not a recommended starting point</b> for the rebuild. Treat the Figma mocks as the actual source of truth, full stop — not this.</div>
+    <details><summary>Filed CSS (reference only, not a recommendation)</summary><pre><code>.ach-ladder{grid-column:1/-1;background:var(--surface0);border:1px solid var(--surface1);
+  border-radius:11px;padding:6px 8px;}
+.lad-row{display:flex;align-items:flex-end;justify-content:center;gap:4px;padding:16px 4px 6px;flex-wrap:wrap;}
+.lad-rung{display:flex;flex-direction:column;align-items:center;gap:6px;transition:transform .18s,opacity .18s;}
+.lad-rung .ri{position:relative;width:60px;height:60px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:28px;background:var(--base);border:2px solid var(--surface1);overflow:hidden;}
+.lad-rung.current .ri{border-color:var(--lavender);
+  box-shadow:0 0 0 2px rgba(182,146,230,.3),0 0 26px 7px rgba(182,146,230,.55),0 0 48px 16px rgba(182,146,230,.22);}</code></pre>
+    <p style="font-size:12.5px;color:var(--subtext)">The "click-to-recenter / keyboard reachability / no-auto-advance" ideas that were listed alongside this were proposed <i>additions on top of this same rejected carousel</i> — never built, not live anywhere, and now moot along with the carousel itself unless the Figma mocks call for something similar.</p></details>
+
+    <h2>Tier framing — a wrong claim, retracted</h2>
+    <div class="callout danger"><b>You're right and I was wrong — retracting this one.</b> I stated the badge art's own ring color reliably encodes rarity tier (silver/blue-steel/amethyst-gold/royal-gold) and that a rebuild shouldn't "double up" with the dedicated frame assets. <b>Where that came from:</b> <code>docs/ART_PROMPTS.md</code>'s style-anchor section, which documents the tiered-ring look as the <i>prompt template's intent</i> — I (and the agent that first wrote this) treated that intent as if it were a confirmed fact about the actual shipped art, without anyone actually looking at the real PNGs. That's exactly the kind of ungrounded claim this whole session has been about catching. <b>Corrected:</b> the real generated badge art doesn't reliably carry a clean tier-coded ring — the dedicated 9-slice <b>frame</b> assets (<code>branding/frames/legendary.png</code> = LEG6, <code>feat.png</code> = FEAT13) are the actual, deliberate, credit-invested mechanism for signaling tier, and any rebuild should keep using them, not treat them as redundant.</div>
+  </section>
+
+  <!-- ================= SUITE & DOCS ================= -->
+  <section id="tab-suite">
+    <h1>Suite &amp; Docs Health</h1>
+    <div class="sub"><b>Last updated: 2026-07-15.</b> Everything below was done as of that date (this section previously flagged README screenshots as still-open — that was stale/contradicted by its own later entry; corrected, see the checklist).</div>
+
+    <h2>Ready to fix, high confidence, nothing lost — <span class="pill done">done 2026-07-15</span></h2>
+    <div class="card checklist">
+      <label><input type="checkbox" checked><span>Stray root <code>HEAD</code> file deleted (again). It's gitignored and untracked, so it isn't a git-tracking issue — something is actively re-creating a file at that path (you'd traced this from the work computer before and thought it was gone). If it comes back a third time, worth catching what writes to it rather than assuming it's fixed.</span></label>
+      <label><input type="checkbox" checked><span><code>CLAUDE.md</code>'s branch line fixed to <code>loom-v2</code></span></label>
+      <label><input type="checkbox" checked><span>README's 5 broken screenshot embeds removed (owner: "all pointed to pyside6 gui items") — real screenshots can go back in later if wanted</span></label>
+      <label><input type="checkbox" checked><span><code>wiki/</code> added to <code>DOC_MAP.md</code>'s catalog, with per-file staleness notes</span></label>
+      <label><input type="checkbox" checked><span><code>docs/architecture.md</code> reclassified Active in <code>DOC_MAP.md</code></span></label>
+      <label><input type="checkbox" checked><span>Test count synced to 474 in <code>CLAUDE.md</code>, <code>docs/architecture.md</code>, and <code>wiki/How-It-Works.md</code></span></label>
+      <label><input type="checkbox" checked><span><b>Security-boundary leak fixed:</b> <code>CLAUDE.md</code>'s "Architecture / request flow" section carried the exact RE-mechanism detail (persisted-query hash, header names, pagination internals) that was supposed to be excised from public docs on 2026-07-04 — that redaction only touched <code>docs/architecture.md</code>, never this file. Redacted to match, with a pointer to git-ignored <code>private/ARCHITECTURE_RE.md</code> for the real mechanism.</span></label>
+      <label><input type="checkbox" checked><span><code>docs/COHESION_DRAFTS.raw.txt</code> deleted (owner: "no idea what it is, kill it") — was untracked, stale, superseded by <code>SUITE_ARCHITECTURE_AUDIT.md</code></span></label>
+      <label><input type="checkbox" checked><span><code>achievements_roster_57.json</code> relabeled in <code>DOC_MAP.md</code> — confirmed by reading it: a design/content reference (bucket definitions, per-track names/metrics/roast flavor), not runtime-loaded. Owner's read was exactly right.</span></label>
+    </div>
+
+    <h2>Standing process fixed, not just this instance</h2>
+    <div class="callout done">Owner correction: wiki staleness was on me, not a neutral drift — there was a standing pre-1.9.1 practice of updating docs <i>and</i> the wiki together on every commit. It silently dropped because it was never actually written into <code>CLAUDE.md</code>'s checkpoint protocol, only followed by habit. Written down now so it can't drop the same way again. <b>The wiki content itself still needs a real catch-up pass</b> (Loom V2, Control Panel, branding/mascots, Trophy Hall are all undocumented on the published wiki) — tracked as its own task, not done tonight.</div>
+
+    <h2>Site research (public web only)</h2>
+    <ul class="tight" style="font-size:13.5px">
+      <li>Couldn't confirm "Tsubaki.3" or the compare-two-gens feature publicly — likely authenticated-app-only, consistent with your own notes</li>
+      <li>Confirmed: Tsubaki.2 went full public 2026-03-13; June 30–July 7 weekly update shipped (LoRA rebate cap removed, mobile draft autosave, tag autocomplete)</li>
+      <li>A capture-process draft for future site discoveries is ready, matching <code>DISCOVERIES.md</code>'s existing conventions</li>
+    </ul>
+  </section>
+
+  <!-- ================= DESIGN TOOLING ================= -->
+  <section id="tab-design">
+    <h1>Design Tooling</h1>
+    <div class="sub"><b>Last updated: 2026-07-16.</b> Status of everything installed/authenticated as of that date; corrected below after this row was found stale/wrong during this pass.</div>
+
+    <table>
+      <tr><th>Tool</th><th>Status</th><th>Notes</th></tr>
+      <tr><td>Figma <b>remote</b> MCP</td><td><span class="pill done">live</span></td><td>This is the one actually in use — <code>whoami</code> confirmed your real account/team. You don't have a Pro seat, so this is the Remote MCP Server setup, not the local Dev Mode desktop app. Used for real 2026-07-16 (Trophy Hall review): <code>get_screenshot</code>/<code>get_design_context</code> work; <code>get_metadata</code> is unreliable (can wrongly report "no children" on real content — prefer the other two). Write-back-to-canvas untested.</td></tr>
+      <tr><td>Figma Dev Mode MCP (local desktop)</td><td><span class="pill open">not confirmed live</span></td><td>This row previously (wrongly) claimed this was live — that was actually the remote server above. Requires a Pro seat you don't have; untested this account.</td></tr>
+      <tr><td>Claude Design / DesignSync</td><td><span class="pill warn">authenticated, unused</span></td><td>Zero projects created yet</td></tr>
+      <tr><td><code>frontend-design</code> (Anthropic)</td><td><span class="pill done">installed</span></td><td>First-party, framework-agnostic anti-AI-slop guidance</td></tr>
+      <tr><td><code>ui-design</code> + <code>visual-critique</code> (Owl-Listener)</td><td><span class="pill done">installed</span></td><td>Narrow slice of a 9-plugin marketplace — the other 7 + 4 companion repos skipped as low-relevance for a solo project</td></tr>
+      <tr><td><code>excalidraw-diagram</code></td><td><span class="pill done">installed</span></td><td>For architecture/data-flow docs (Loom shot-mechanics, gen⇄feed sync, MCP wiring) — never for actual UI layout</td></tr>
+      <tr><td>Canva plugin</td><td><span class="pill open">not authorized</span></td><td>—</td></tr>
+    </table>
+
+    <h2>The standing rule (docs/DESIGN_WORKFLOW.md)</h2>
+    <div class="callout">No user-visible design work proceeds from prose alone. Every visual build needs a pixel source of truth — a Figma frame, a Claude Design project, or a locked mockup — and verification means an actual rendered look compared against it, not a computed-style check. Born from the Trophy Hall incident; still the rule.</div>
+  </section>
+
+  </main>
+</div>
+
+<script>
+(function(){
+  // Mermaid <pre class="mermaid"> blocks render natively in the Artifact host — no library needed here.
+  // Everything below is delegated to document-level listeners (not bound to individual
+  // nodes) so it keeps working even if the host re-processes/re-renders the DOM after
+  // this script's first pass.
+
+  function activate(tab){
+    document.querySelectorAll('nav.tabs button').forEach(function(b){
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    document.querySelectorAll('main > section').forEach(function(s){
+      s.classList.toggle('active', s.id === 'tab-' + tab);
+      s.style.display = '';
+    });
+  }
+
+  var searching = false;
+
+  function clearSearch(){
+    searching = false;
+    document.querySelectorAll('tr, li, .chip, .card').forEach(function(el){ el.classList.remove('hide'); });
+    var active = document.querySelector('nav.tabs button.active');
+    activate(active ? active.dataset.tab : 'dashboard');
+  }
+
+  function runSearch(q){
+    q = q.trim().toLowerCase();
+    if (!q){ clearSearch(); return; }
+    searching = true;
+    document.querySelectorAll('main > section').forEach(function(s){ s.style.display = 'block'; });
+    document.querySelectorAll('main tr, main li, main .chip').forEach(function(el){
+      el.classList.toggle('hide', el.textContent.toLowerCase().indexOf(q) === -1);
+    });
+  }
+
+  document.addEventListener('input', function(e){
+    if (e.target && e.target.id === 'search') runSearch(e.target.value);
+  });
+
+  document.addEventListener('click', function(e){
+    var tabBtn = e.target.closest && e.target.closest('nav.tabs button');
+    if (tabBtn){ activate(tabBtn.dataset.tab); return; }
+
+    var chip = e.target.closest && e.target.closest('#rename-chips .chip');
+    if (chip){
+      chip.classList.toggle('picked');
+      var picked = Array.prototype.map.call(document.querySelectorAll('#rename-chips .chip.picked'), function(c){ return c.dataset.name; });
+      var out = document.getElementById('rename-picked');
+      if (out) out.textContent = picked.length ? ('Shortlisted: ' + picked.join(', ')) : 'Nothing shortlisted yet.';
+      return;
+    }
+  });
+})();
+</script>

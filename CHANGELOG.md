@@ -15,6 +15,169 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-07-20 — Web parity, gallery fixes, and the retired desktop GUI
+
+### Added
+
+- **Web import — bring local files into the library from the browser** (closes web/CLI parity;
+  unblocks the PySide6 GUI removal). A new **↑ Import** button (owner header, next to Generate)
+  opens a drop-zone modal: drop images, a folder, or a `.zip` — or browse files / browse folder.
+  The preview is adaptive — a removable thumbnail list for a handful, or a capped 24-tile grid
+  with a "+N more" tile for a big drop — and the cap is *only* on the preview: the whole
+  selection imports. Optionally tags everything to a collection. Server route
+  `POST /api/import-local` is **localhost-only** (it writes into `imported/` and shells
+  thumbnails on the server's machine — the same host-filesystem trust tier as the destructive
+  Panel jobs, never the broader logged-in-LAN auth), reuses the CLI's `run_import_local`
+  (copy → catalog `source='local'` → thumbnail, path-dedup), and expands zips with a zip-slip
+  guard. Nothing is uploaded to PixAI — this is the web twin of `--import-local`, distinct from
+  the PixAI `/api/upload`. Verified end-to-end in the browser: both preview states, a real
+  multi-file upload into a named collection landing as catalogued local rows on disk.
+- **Convert-and-download, on the surfaces the spec named.** Every download is an export-time
+  transform on a temporary copy — your archive and catalog are never changed, and a converted
+  file never re-enters the catalog. Three ways to reach it: the **detail page** has a plain
+  one-click Download of the original (`/full/<id>?dl=1` saves the file rather than opening it in
+  a tab); a **"Download collection"** button (shown while a collection filter is active) zips the
+  collection's *full* membership, resolved server-side across pages; and the bulk **selection**
+  Actions → Download ZIP opens an options dialog to convert to PNG/JPEG and/or embed the prompt +
+  ids. Convert is always opt-in — the default (Original, no embed) is byte-identical. Videos
+  always download as-is. There is no "zip the whole catalog" path — selection or named-collection
+  only.
+- **The gallery's Video generator is the full-parity form now.** The main-page Video tab was a
+  hand-rolled "simple mode" (9 undifferentiated image slots, a 5-model select, no video/audio
+  references, no negative prompt, no channel). It now mounts the shared `<mg-generate-drawer>`
+  web component — the same one the Loom uses — giving the gallery the full split (6 image + 3
+  video + 1 audio references), a negative prompt, the Channel control (Normal/Enhanced), and the
+  complete model roster with capability gating, over the proven `/api/loom/generate` submit
+  path. The video-reference slots browse your videos; "make a video from these" feeds the new
+  form directly. Negative prompt and channel thread through server-side (negative in multi-ref
+  is a PixAI API limitation, not ours). Retires ~130 lines of the old hand-rolled form.
+- **Web entry points for five CLI-only maintenance actions** (web parity step 1). The Control
+  Panel gained buttons for `--verify-dupes` and `--rebuild-similar`, surfaced `sync-artworks` /
+  `sync-videos` (labeled "(full re-walk)"), and gave the existing audit/dedup buttons their
+  missing variants — `audit-full` and `dedup-delete` — each as its own whitelisted action key.
+  Groundwork for retiring the desktop GUI: what the GUI could do, the web can now reach.
+- **Advanced sync options in the Control Panel** (web parity step 2). A collapsed "Advanced"
+  section exposes the three sync variants the incremental "Sync now" can't do: a full
+  non-incremental re-walk of all history (`--full-meta`), a read-only inventory count
+  (`--count`, no download), and a test pull of the N most-recent tasks (`--max N`). Each is its
+  own whitelisted action key; the test-pull's N is a single integer clamped server-side to
+  [1, 200], so the panel's "whitelisted argv, never an arbitrary command" guarantee holds with a
+  parameter in play. All three are read/append (never destructive) and kept off the scheduler.
+
+### Removed
+
+- **The legacy PySide6 desktop GUI is gone.** `pixai_gui.py` and its launcher
+  `Moonglade Athenaeum.pyw` are deleted, and the `PySide6` dependency dropped. The two
+  surfaces going forward are the **CLI** (`pixai_gallery_backup.py`) and the **web app**
+  (`pixai_gallery.py`) — every GUI business capability already had a CLI flag and usually a
+  web surface (a parity matrix confirmed zero GUI-only business capability), so nothing was
+  lost; the GUI's only exclusives were local conveniences (open the quarantine folder in the
+  OS file manager, a recently-used-models quick-pick). The web launcher `Serve Gallery.pyw`
+  and the desktop-shortcut branding feature (which targets *that* launcher, not the GUI) are
+  unaffected. Docs, wiki, CI comments, and the dependency list were scrubbed to match.
+
+### Security
+
+- **Error text is no longer an HTML-injection seam.** Several UI sinks concatenated a
+  server-side `str(e)[:200]` exception string — plus job labels and a reflected task id —
+  raw into `innerHTML`. The image detail page's "Suggest prompt" error now builds a text
+  node (that page has no escaper in scope); the Control Panel's job-status and import sinks
+  route every dynamic value through the `escH2` escaper. Proven in a browser: a crafted
+  `<img src=x onerror=…>` returned as the API error renders as literal text with the handler
+  never firing, and reverting the sink to `innerHTML` makes the same payload execute — so the
+  fix genuinely neutralises a live payload. (`mg-notify.js` was already clean.)
+
+### Fixed
+
+- **Gallery-started generation, enhance, edit, and fix were failing outright (and refunding) —
+  now fixed.** A catalog `media_id` is a generation *output*; the gallery drawer passed it
+  straight to PixAI as an *input*, which PixAI rejected (`invalid_media_id` /
+  `invalid_reference_image_media_id`) with a full credit refund — so every image, enhance, edit,
+  and fix started from the gallery failed. All four paths (`/api/generate`, `/api/enhance`,
+  `/api/edit`, `/api/fix`) now resolve the catalog id to its local file and upload it through
+  PixAI's free S3 handshake, so PixAI receives an id it accepts — routed through one shared
+  `_input_media_id()` helper.
+- **An expired session no longer hangs the app instead of sending you back to login.** Around 90
+  `fetch` call sites never checked the response status, so a `401` (expired login) resolved as if
+  it were data: the job poller re-polled every 3s forever with the drawer stuck on "Rendering
+  under the eclipse…", and the picker showed "No images found" for a full library. A single
+  same-origin fetch wrapper now catches a `401` and redirects to `/login?next=<where you were>`.
+- **Three more poll loops can no longer spin forever.** The Loom's `pollImg`, the Edit/Reference
+  `runGen` poll, and the Jobs tray poll (`mg-notify.js`) lacked the `POLL_CEILING_MS` guard that
+  `pollShot` already had, so a task that never reached a terminal state (or a persistently failing
+  request) re-polled every few seconds indefinitely with the Go button stuck disabled. They now
+  stop at the ceiling and report an error/stalled state.
+- **A trailing-`*` wildcard no longer empties your search.** `night*` compiled to an anchored
+  `LIKE 'night%'` that matched nothing (on a real library, `sample` → 24 rows, `sampl*` → 0),
+  silently blanking a working search even though the box advertises the wildcard. Every term is
+  now matched as a substring, so `night*` and `night` mean the same thing and a wildcard broadens
+  rather than narrows; interior wildcards (`moon*light`, `n?ght`) keep their power.
+- **The Loom's Image / Edit / Reference tabs now price-check before spending, like video does.**
+  The video shots already verified cost + free-card coverage via `/api/price` and confirmed any
+  credit spend (failing closed on an unverifiable price); the image/edit/reference generators
+  only showed a flat "a free card auto-applies; otherwise it spends credits" confirm that never
+  actually checked — a shot with no covering card spent silently past an OK click. A shared
+  `confirmSpend()` now routes all three through the same fail-closed gate, pricing the exact
+  submit body (so the number shown is what will run). `/api/price` also resolves a bare base
+  `model_id` → current version the way `/api/generate` does, so the Loom's model_id-only Image
+  picker gets a real cost instead of a "couldn't verify" fallback.
+- **Usernames are length-bounded.** A 300-char username pushed a live **Remove** button ~980px
+  outside its card, and there was no server-side limit anywhere. New `username_problem()` caps
+  at 64 characters and rejects control characters — one policy shared by the `/login` bootstrap
+  form, the Panel's Add-User, and `--add-web-user` — with a hard backstop in both account
+  writers so even the CLI can't persist an over-long name. The account row now truncates the
+  name with the Remove button pinned, so a legacy over-long name is contained too.
+- **The skin-picker confirmation no longer lingers.** "✓ skin applied suite-wide" was written to
+  the status line and never cleared, so it stayed on screen — and since a locked skin card is
+  inert, a later click on one left the stale success showing, reading as though it had applied.
+  The confirmation now clears after a few seconds.
+- **The Loom's right rail no longer shows the tab strip twice.** Image/Edit/Reference/Video was
+  rendered both in the rail header and again inside the generate panel, stacking a duplicate
+  whenever the rail was expanded. It now lives only in the header, matching the left rail.
+- **The `Serve Gallery` launcher no longer starts a second server on a port already in use.**
+  Its single-instance guard bowed out only on a `200` from `/api/ping`, but that route now
+  sits behind the login gate and answers an unauthenticated probe with `401`, which `urllib`
+  raises — the bare `except` swallowed it and launched a second server every time (on Windows
+  `SO_REUSEADDR` lets both bind the port and fight). Every response now carries an
+  `X-Moonglade` marker (including the gated `401`, which runs no view), and the launcher keys
+  off that: answered-with-marker → ours, connection-refused → nothing there. The browser-open
+  poller shared the same blind spot and opened ~2 minutes late; it now uses the same check.
+  No auth-boundary change — `/api/ping` stays gated.
+
+- **The login lockout no longer locks you out silently.** The 5th failed attempt set
+  `locked_until` but still rendered the ordinary "Invalid username or password", so you were
+  locked without being told — and the *correct* password was then refused for 15 minutes with
+  no stated reason. The attempt itself is unchanged (five real tries); only the message now
+  tells you what happened. `_login_try_acquire`'s own docstring already promised to report a
+  lockout that "was just now triggered".
+- **The Jobs card no longer strands a job at "running" forever.** Two independent defects, both
+  found by diagnosing one real stuck enhance:
+  - `resolve_orphan_jobs` compares its `status_fn` return against `("done","failed")`, but the
+    web caller passed `generation_status(...)` — which returns a *dict* — straight through. The
+    comparison never matched, so **the orphan reaper resolved nothing on every run** while
+    returning 0 and looking healthy. The unit tests stubbed `status_fn` with the documented
+    string, so they honoured a contract the only real caller broke.
+  - A task PixAI reports `done` whose outputs carry no media is terminal, but it fell into
+    `/api/task-status`'s catch-all `except`, which deliberately withholds a terminal event so a
+    transient 5xx cannot brick the card with a false failure. New `EmptyOutputsError`
+    (subclassing `PixAIError`, so existing handlers are unaffected) separates the two.
+- **Contrast and clipping, all measured in-browser rather than by eye:** the Loom's only exit
+  ("← Gallery") rendered as an unstyled browser link at **1.69:1** because `.lv-top` styled only
+  `button`/`label` and the control is an `<a>` — now **10.73:1**; locked skin cards used
+  `opacity:.5`, dropping their description to 2.57:1 and the "locked" label to **1.88:1** (under
+  even the large-text floor) — now `.82` with the label off `--overlay0`, measuring 9.00 / 4.77
+  / 4.77; and the month filter was 64px against a 69px intrinsic width, so "Mon" collided with
+  the native arrow and read "Mo|".
+- **Native controls follow the theme.** `accent-color` was set on three individual controls, so
+  everything else fell back to the browser's accent — bright blue on Windows Chrome. Declared
+  once on `:root` (inherited, so a skin retinting `--accent` retints them free), plus
+  `color-scheme: dark`, which is what actually stops *unchecked* boxes keeping white OS chrome
+  over artwork. A grid checkbox that pinned `--lavender` now uses `--accent`, so it no longer
+  drifts off-skin.
+- **The saved-schedule confirmation matches the dropdown.** Picking "1 week" confirmed "every
+  168h"; the status now reads the label back off the `<option>` rather than re-formatting the
+  number, so the two cannot disagree again.
+
 ## [2.0.0] - 2026-07-19 — Multi-account auth, Loom V2, and the Trophy Hall
 
 The first master update since 2026-07-07, carrying 179 commits: the Loom V2 rebuild, the
