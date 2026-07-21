@@ -3870,7 +3870,19 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endif %}
     <a class="btn b-health" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
     {% if logged_in_user %}
-    <a class="btn" href="{{ url_for('logout') }}" title="Signed in as {{ logged_in_user }} — sign out">&#128274; Sign out</a>
+    {# A POST form, not an <a href>: /logout revokes every outstanding session for
+       this account, and a bare GET that writes server state is reachable by any
+       cross-site link, window.open or link-prefetcher -- SESSION_COOKIE_SAMESITE=
+       "Lax" blocks a cross-site subresource but still sends the cookie on a
+       top-level GET navigation. Same hidden-csrf-field convention /login's form
+       uses. No styling needed: `* { margin: 0; padding: 0 }` (the reset near the
+       top of BASE_HTML) means the form adds nothing, `.head-nav > *` already gives
+       it the same flex treatment as its sibling buttons, and the .btn inside it is
+       a plain <button class="btn"> exactly like Generate/Import/Contests. #}
+    <form method="post" action="{{ url_for('logout') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="btn" title="Signed in as {{ logged_in_user }} — sign out (on every device)">&#128274; Sign out</button>
+    </form>
     {% endif %}
   </div>
 </header>
@@ -7841,8 +7853,37 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                       next_url=next_url, no_accounts=no_accounts,
                                       bootstrap_mode=bootstrap_mode)
 
-    @app.route("/logout")
+    @app.route("/logout", methods=["GET", "POST"])
     def logout():
+        """Sign out. A GET clears THIS browser's cookie and nothing else; a POST
+        carrying the session's csrf token ALSO revokes every other outstanding
+        session for this identity, by bumping its sess_epoch.
+
+        The split exists because the global revoke used to hang off a bare GET with
+        no token (docs/STATE.md's "/logout is a CSRF-able GET that revokes
+        globally"). SESSION_COOKIE_SAMESITE="Lax" already killed the
+        <img src=".../logout"> version of that -- a cross-site SUBRESOURCE carries
+        no cookie, so the handler saw an anonymous request and skipped the bump --
+        but Lax deliberately still sends the cookie on a cross-site TOP-LEVEL GET
+        navigation. Any page that got the owner to follow a link (or ran
+        location.href=, window.open, a meta refresh) signed them out on the desktop,
+        the phone and the tablet at once. Same for any link-prefetcher or crawler
+        that walks the header: a GET must not write server state, and this one did.
+        Lax blocks a cross-site POST outright, and the csrf field checked below is
+        the same session-bound token /login's form and the Panel's Users tab already
+        carry -- belt and braces, so this does not silently re-open if SameSite is
+        ever loosened for an HTTPS/reverse-proxy deployment.
+
+        What a cross-site GET can still do is drop this one browser's cookie. That
+        is the irreducible floor for any sign-out reachable by navigation, it writes
+        NOTHING server-side, and the user recovers by signing in again -- versus the
+        old behaviour, which kicked every other device they own.
+
+        `scope=this-device` on the POST skips the global revoke (sign out here
+        only). Its ABSENCE means global: a truncated or hand-built POST has to fail
+        toward MORE revocation, never less, because the whole mechanism exists to
+        kill a cookie captured off plain-HTTP LAN traffic (see
+        pixai_gallery_backup.get_web_user_session_epoch's docstring)."""
         import pixai_gallery_backup as core
         user = session.get("user")
         # A DEAD cookie must not be allowed to REVOKE. /logout is in _PUBLIC_PATHS so
@@ -7853,15 +7894,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # off the instant they signed back in: no credential needed, and recoverable
         # only by rotating AUTH_SECRET_KEY, which the owner has no signal to do.
         #
-        # The bump still happens BEFORE the local clear, so signing out revokes EVERY
-        # outstanding cookie for this username -- e.g. one captured off plain-HTTP LAN
-        # traffic before the click -- not just this browser's copy.
-        #
         # ORDER MATTERS: read `user` BEFORE calling _is_authorized_request(), which
         # calls session.clear() on the stale path. Swapping these two lines silently
         # disables the bump for everyone.
-        if user and _is_authorized_request():
-            core.bump_web_user_session_epoch(user)
+        authorized = bool(user) and _is_authorized_request()
+        if request.method == "POST" and authorized:
+            # _check_csrf is defined further down in this same create_app() closure
+            # (with the Panel's Users tab, its other caller); it is bound long before
+            # any request can reach this line.
+            #
+            # A bad token is a loud 400, NOT a quiet downgrade to a local-only sign
+            # out: if the header form ever stopped emitting the field, a silent
+            # downgrade would delete the global revoke and nothing would notice. The
+            # session is deliberately left INTACT -- the user reloads and clicks
+            # again. Note the token buys nothing against someone who already holds
+            # the cookie (Flask's session cookie is signed, not encrypted, so the
+            # token is readable inside it); the _is_authorized_request() check above
+            # is what stops a stolen-cookie replay, and it stays.
+            if not _check_csrf(request.form):
+                return ("Your session expired. Reload the page and try again.", 400)
+            if request.form.get("scope") != "this-device":
+                # BEFORE the local clear, so this revokes EVERY outstanding cookie
+                # for this username -- e.g. one captured off plain-HTTP LAN traffic
+                # before the click -- not just this browser's copy.
+                core.bump_web_user_session_epoch(user)
         # Unconditional and outside the guard: whoever holds an already-invalid cookie
         # must still be able to shed it locally. Client-side only, touches no server
         # state, and leaves the anonymous case a plain 302 no-op.
@@ -7984,11 +8040,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             web_users=core.list_web_users(), csrf=session["csrf"],
             current_username=session.get("user"))
 
-    def _check_panel_csrf(body):
-        """Shared CSRF check for the Users tab's mutating endpoints -- the exact
+    def _check_csrf(body):
+        """Shared CSRF check for this app's state-changing POSTs -- the Panel's
+        Users tab (a parsed JSON body) and /logout (request.form) -- using the exact
         same session-based token pattern /login's form uses (see that route's
-        docstring), reused here rather than reinvented: every state-changing form
-        in this app is meant to carry one."""
+        docstring), reused rather than reinvented: every state-changing form in this
+        app is meant to carry one. `body` only has to be .get()-able, so a dict and a
+        request.form MultiDict both work.
+
+        Called _check_panel_csrf until /logout became its second caller (the
+        CSRF-able-GET fix) -- the "panel" in the name had stopped being true."""
         submitted_csrf = str((body or {}).get("csrf") or "")
         live_csrf = session.get("csrf", "") or ""
         return bool(live_csrf) and secrets.compare_digest(submitted_csrf, live_csrf)
@@ -8014,7 +8075,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         Adversarial-review hardening, 2026-07-19 (same root cause as
         /api/users/remove's last-account race, see that route's docstring)."""
         body = request.get_json(silent=True) or {}
-        if not _check_panel_csrf(body):
+        if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         import pixai_gallery_backup as core
         username = str(body.get("username") or "").strip()
@@ -8054,7 +8115,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         either write landed, and both writes would go through -- leaving
         AUTH_USERS empty, the exact self-lockout this guard exists to prevent."""
         body = request.get_json(silent=True) or {}
-        if not _check_panel_csrf(body):
+        if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         username = str(body.get("username") or "").strip()
         import pixai_gallery_backup as core
@@ -8444,6 +8505,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
         catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
         can_delete_cloud = _is_local_request()
+        # The header's Sign out control is a POST form now (see INDEX_HTML), so this
+        # page has to carry the session's csrf token the same way /login's form and
+        # the Panel do. setdefault, never a fresh mint: _establish_session already set
+        # one at login, and overwriting it here would orphan the token baked into any
+        # other tab the user has open -- the exact bug /login's GET branch documents
+        # at length.
+        session.setdefault("csrf", secrets.token_hex(16))
 
         return render_template_string(
             INDEX_HTML,
@@ -8453,7 +8521,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             rows=page_rows, total=total, page=page, stats=stats,
             needs_key=needs_key, catalog_empty=catalog_empty,
             build_stamp=build_stamp, is_local=True, can_delete_cloud=can_delete_cloud,
-            logged_in_user=session.get("user"),
+            logged_in_user=session.get("user"), csrf=session["csrf"],
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
             date_from=date_from,

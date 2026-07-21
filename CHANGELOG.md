@@ -49,6 +49,18 @@ git tags. Full prose notes for tagged versions live on
   it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
 ### Fixed
 
+- **Signing out is a button press again, not something a link can do to you.** `/logout` was a
+  GET with no token that revoked *every* session for your account — so a page that got you to
+  follow a link, or a link-prefetcher walking the header, could sign you out on your desktop,
+  phone and tablet at once. (The `<img src=".../logout">` version never worked; `SameSite=Lax`
+  already stopped that. A top-level navigation is the one Lax deliberately still allows.) Now:
+  the header's **Sign out** is a POST carrying the same session token the login form uses, and
+  it still revokes everywhere — that's the point of it. A bare GET only clears the browser
+  you're sitting at and writes nothing on the server. `scope=this-device` opts out of the
+  global revoke; its *absence* means global, so a malformed request fails toward more
+  revocation, never less. A bad token is a visible error, never a quiet downgrade to a
+  local-only sign-out.
+
 - **`/manifest.webmanifest` is public now, and that removes a whole class of login bug.** The
   manifest handler returns a compile-time constant — app name, start URL, two colours, an inline
   icon — so there was never anything behind the gate to protect, and the login page is itself
