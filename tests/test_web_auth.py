@@ -25,6 +25,17 @@ def _csrf(html):
     return m.group(1)
 
 
+def _logout(cli):
+    """Sign out the way the header's form does: a POST carrying this session's csrf
+    token. /logout's GET is a LOCAL sign-out only (it clears this client's cookie and
+    writes nothing server-side) since the CSRF-able-GET fix, so any test about
+    REVOKING OTHER SESSIONS has to use the POST. The token comes from the live
+    session, not a scraped page: _establish_session mints a fresh one at login."""
+    with cli.session_transaction() as sess:
+        token = sess.get("csrf", "")
+    return cli.post("/logout", data={"csrf": token})
+
+
 LAN = "203.0.113.5"          # TEST-NET-3 -- a "some other device on the LAN" stand-in
 LAN2 = "203.0.113.9"
 
@@ -744,7 +755,7 @@ def test_logout_revokes_a_stolen_cookie_on_another_client(tmp_path):
     attacker = app.test_client()
     attacker.set_cookie("session", victim.get_cookie("session").value)
     assert attacker.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    victim.get("/logout")
+    _logout(victim)
     r = attacker.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
     assert r.status_code == 401
 

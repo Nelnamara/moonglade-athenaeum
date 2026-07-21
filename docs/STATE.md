@@ -550,14 +550,6 @@ marks 4/12/62/63/74; and **`mg-notify.js`'s mascot paths are consistent** — al
 `/branding/mascots/`. The genuine gap there is that no `login_nel.png` art exists, so the login
 page's `onerror` chain degrades to `gen_nel.png` as designed.*
 
-- **`/logout` is a CSRF-able GET that revokes globally.** No token, and it bumps `sess_epoch`,
-  so a cross-site *top-level navigation* (link, `window.open`, `location=`) signs the user out
-  on every device. Denial of convenience only. *Not* closed by the revocation fix — the
-  victim's cookie is still valid, so the bump proceeds legitimately. Fix is a POST + CSRF, or
-  splitting local sign-out from global revocation. **Note:** the `<img src=".../logout">`
-  vector originally cited here never worked — `SESSION_COOKIE_SAMESITE = "Lax"` predates the
-  crawl, so a cross-site subresource GET carries no cookie and the bump is skipped. The defect
-  is real; only its cheapest vector was wrong.
 - **Escape doesn't close the Loom's project or Export menus**, and their backdrop is a
   full-viewport `pointer-events:auto` veil — so the entire app is unclickable until the user
   happens to click outside. Deep Focus's own Escape handler works correctly in the same app.

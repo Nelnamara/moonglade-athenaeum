@@ -87,7 +87,8 @@ ROUTE_TIERS = {
     # -- the login surface: the only genuinely public tier -------------------
     ("login", "GET"): PUBLIC,
     ("login", "POST"): PUBLIC,
-    ("logout", "GET"): PUBLIC,
+    ("logout", "GET"): PUBLIC,        # local sign-out only -- writes no server state
+    ("logout", "POST"): PUBLIC,       # + the global revoke, gated on the session csrf
     ("branding", "GET"): PUBLIC,
 
     # -- LOCALHOST-ONLY: a logged-in LAN session is NOT enough ---------------
@@ -228,6 +229,7 @@ PUBLIC_EXPECTED_STATUS = {
     ("login", "GET"): {200},
     ("login", "POST"): {200},      # re-renders the form (no csrf) -- never a redirect
     ("logout", "GET"): {302},      # its own redirect to /login, not the front door's
+    ("logout", "POST"): {302},     # anonymous: nothing to revoke, so no csrf is demanded
     ("branding", "GET"): {404},    # missing art 404s; it must never redirect to /login
     ("manifest", "GET"): {200},    # a constant body -- anonymous callers get the real thing
 }
