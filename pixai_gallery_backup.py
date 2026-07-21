@@ -1406,6 +1406,27 @@ def convert_image(path, target, jpeg_quality=92, jpeg_bg="white", keep_original=
     return out_path, "ok"
 
 
+def _atomic_replace(tmp, dest, attempts=6, base_delay=0.15):
+    """`os.replace(tmp, dest)` with a short backoff retry on a transient Windows sharing
+    violation. On Windows, antivirus / the Search Indexer briefly opens a file the instant
+    it's created, so renaming a just-written `.part` file can raise
+    PermissionError [WinError 32] for a few hundred ms. A handful of retries clears it; a
+    file that's genuinely stuck still raises on the final attempt so the caller sees the real
+    error. No-op difference from a bare replace on POSIX (the violation never occurs there).
+
+    This is why a finished video could vanish from the panel: the poster download's rename
+    threw here, *before* the video row was cataloged, so the clip was pulled but never saved.
+    (Its callers now also treat a poster failure as non-fatal -- see _download_video_task.)"""
+    for i in range(attempts):
+        try:
+            os.replace(tmp, dest)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(base_delay * (i + 1))
+
+
 def download(session, url, stem, retries=3, convert=None,
              jpeg_quality=92, jpeg_bg="white", keep_webp=False):
     """stem is a Path WITHOUT extension. Returns (status, final_path_or_None)."""
@@ -1432,7 +1453,7 @@ def download(session, url, stem, retries=3, convert=None,
                     for chunk in r.iter_content(chunk_size=65536):
                         fh.write(chunk)
                         nbytes += len(chunk)
-                tmp.replace(dest)
+                _atomic_replace(tmp, dest)   # retry a transient Windows lock on the .part file
                 vlog("download {} -> {:,} bytes in {:.2f}s".format(
                     dest.name, nbytes, time.monotonic() - _t))
             if convert:
@@ -3120,21 +3141,24 @@ def run_sync_videos(args):
         thumb_path = thumb_dir / "{}.jpg".format(video_media_id)
         if thumb_path.exists():
             return
-        # Preferred: thumbnail the PixAI still-frame poster.
-        if poster_media_id:
-            url, _info = resolve_media(session, poster_media_id)
-            if url:
-                poster_tmp.mkdir(parents=True, exist_ok=True)
-                status, path = download(session, url, poster_tmp / str(poster_media_id))
-                if status in ("ok", "skip") and path:
-                    make_thumbnail(path, thumb_path)
-                    try:
-                        path.unlink()
-                    except OSError:
-                        pass
-        # Fallback (no poster, e.g. older i2v): first frame of the mp4 via ffmpeg.
-        if not thumb_path.exists() and video_path:
-            video_poster_thumb(video_path, thumb_path)
+        try:
+            # Preferred: thumbnail the PixAI still-frame poster.
+            if poster_media_id:
+                url, _info = resolve_media(session, poster_media_id)
+                if url:
+                    poster_tmp.mkdir(parents=True, exist_ok=True)
+                    status, path = download(session, url, poster_tmp / str(poster_media_id))
+                    if status in ("ok", "skip") and path:
+                        make_thumbnail(path, thumb_path)
+                        try:
+                            path.unlink()
+                        except OSError:
+                            pass
+            # Fallback (no poster, e.g. older i2v): first frame of the mp4 via ffmpeg.
+            if not thumb_path.exists() and video_path:
+                video_poster_thumb(video_path, thumb_path)
+        except Exception as e:                       # noqa: BLE001 -- poster is cosmetic, never abort the sync
+            print("  poster thumbnail failed for {} ({}); video still cataloged".format(video_media_id, e))
 
     # 2. Per task: getTaskById -> video outputs -> fileUrl -> download mp4.
     def _do_task(node):
@@ -4205,21 +4229,33 @@ def _download_video_task(session, result, task_id, out, args, params):
             "width": str(detail.get("width") or ""),
             "height": str(detail.get("height") or ""),
         })
+        # Poster thumbnail is COSMETIC -- it must never block cataloging the finished video.
+        # A transient Windows lock on the poster's temp file (WinError 32) used to raise from
+        # download() right here, before rows.append below, so the clip was pulled to videos/
+        # but never saved and the panel never showed it. A missing/failed thumb self-heals on
+        # the next --rebuild-thumbs / --sync.
         pm = o.get("poster_media_id")
         thumb_path = thumb_dir / "{}.jpg".format(vmid)
-        if pm:
-            purl, _pi = resolve_media(session, pm)
-            if purl:
-                ptmp = out / "gallery" / "_postertmp"
-                ptmp.mkdir(parents=True, exist_ok=True)
-                st, pp = download(session, purl, ptmp / str(pm))
-                if st in ("ok", "skip") and pp:
-                    make_thumbnail(pp, thumb_path)
-        # Poster-less (or poster fetch failed): ffmpeg the mp4's first frame, so the
-        # gallery never shows a blank tile waiting on a later sync. Matches _do_task /
-        # run_import_local; no-op if ffmpeg isn't on PATH.
-        if not thumb_path.exists():
-            video_poster_thumb(path, thumb_path)
+        try:
+            if pm:
+                purl, _pi = resolve_media(session, pm)
+                if purl:
+                    ptmp = out / "gallery" / "_postertmp"
+                    ptmp.mkdir(parents=True, exist_ok=True)
+                    st, pp = download(session, purl, ptmp / str(pm))
+                    if st in ("ok", "skip") and pp:
+                        make_thumbnail(pp, thumb_path)
+                        try:
+                            pp.unlink()              # don't leave poster temps to accumulate / be re-locked
+                        except OSError:
+                            pass
+            # Poster-less (or poster fetch failed): ffmpeg the mp4's first frame, so the
+            # gallery never shows a blank tile waiting on a later sync. Matches _do_task /
+            # run_import_local; no-op if ffmpeg isn't on PATH.
+            if not thumb_path.exists():
+                video_poster_thumb(path, thumb_path)
+        except Exception as e:                       # noqa: BLE001 -- poster is cosmetic, never abort the catalog
+            print("  poster thumbnail failed for {} ({}); video still cataloged".format(vmid, e))
         video_faststart(path)                        # iOS needs moov at the front to stream
         rows.append(full)
         saved.append(str(path))
