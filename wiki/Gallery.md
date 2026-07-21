@@ -50,7 +50,9 @@ The filter bar:
 - **Source** — All / PixAI history / Generated / Imported / **Deleted on PixAI**.
 - **Collection** — filter to a named [collection](Collections).
 - **Sort** — newest/oldest, rating, aesthetic, likes, resolution.
-- Per-page selector, thumbnail-size slider, saved filter presets, privacy blur.
+- Per-page selector, thumbnail-size slider, saved filter presets, privacy blur. Saved
+  views are stored server-side, so a view saved at the desktop is in the tablet's
+  dropdown too — same follows-you behavior as your skin choice.
 
 Cards show a ▶ badge on videos and **AI** / **local** badges by source. **Videos play
 right in the lightbox** (and on the detail page), so you can browse a mixed grid of

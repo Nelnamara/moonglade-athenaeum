@@ -4264,25 +4264,44 @@ function toggleBlur() {
   localStorage.setItem('gallery_privacy_blur', on ? '' : '1');
   applyBlur();
 }
-function presetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
-function refreshPresets() {
+// Saved views live SERVER-SIDE (/api/view-presets -> out_dir/view_presets.json) so a
+// view saved at the desktop exists on the tablet -- same follows-you contract as the
+// skin choice. localStorage ('gallery_presets') is only read once as the legacy store:
+// any set found there is merged up (server names win) and then cleared.
+var viewPresets = {};
+function legacyPresetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
+function renderPresets() {
   var s = document.getElementById('preset-select'); if (!s) return;
-  var p = presetsGet();
   s.innerHTML = '<option value="">Saved views…</option>';
-  Object.keys(p).forEach(function(n){ var o = document.createElement('option'); o.value = n; o.textContent = n; s.appendChild(o); });
+  Object.keys(viewPresets).sort().forEach(function(n){ var o = document.createElement('option'); o.value = n; o.textContent = n; s.appendChild(o); });
+}
+function refreshPresets() {
+  fetch('/api/view-presets').then(function(r){ return r.json(); }).then(function(d) {
+    viewPresets = (d && d.presets) || {};
+    var legacy = legacyPresetsGet();
+    if (Object.keys(legacy).length) {
+      fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({merge: legacy}) })
+        .then(function(r){ return r.json(); }).then(function(d2) {
+          if (d2 && d2.presets) viewPresets = d2.presets;
+          try { localStorage.removeItem('gallery_presets'); } catch(e) {}
+          renderPresets();
+        }).catch(function(){});
+    }
+    renderPresets();
+  }).catch(function(){ renderPresets(); });
 }
 function savePreset() {
   var n = prompt('Name this view (the current filters):'); if (!n) return;
-  var p = presetsGet(); p[n] = location.search || '?';
-  localStorage.setItem('gallery_presets', JSON.stringify(p)); refreshPresets();
+  fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: n, query: location.search || '?'}) })
+    .then(function(r){ return r.json(); }).then(function(d) {
+      if (d && d.presets) { viewPresets = d.presets; renderPresets(); }
+    }).catch(function(){});
 }
 function loadPreset(n) {
   if (!n) return;
-  if (n.charAt(0) === '✕') { // not used; reserved
-    return;
-  }
-  var p = presetsGet();
-  if (p[n] !== undefined) location.href = '/' + p[n];
+  if (viewPresets[n] !== undefined) location.href = '/' + viewPresets[n];
 }
 (function(){
   // On mobile, auto-open the filter bar if any filter is active so the user sees
@@ -10167,6 +10186,62 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                 "label": presets[name]["label"]})
             except Exception as e:
                 return jsonify({"error": str(e)[:200]}), 200
+
+    _view_presets_lock = threading.Lock()
+
+    def _view_presets_path():
+        return out_dir / "view_presets.json"
+
+    def _load_view_presets():
+        try:
+            if _view_presets_path().exists():
+                data = json.loads(_view_presets_path().read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {str(k): v for k, v in data.items() if isinstance(v, str)}
+        except (OSError, ValueError):
+            pass
+        return {}
+
+    def _ok_view_query(q):
+        # Presets navigate via location.href = '/' + query on load. Requiring the
+        # leading '?' (exactly what savePreset stores: location.search || '?') keeps
+        # every stored value a same-page filter string -- a bare '//host' would resolve
+        # protocol-relative and turn a saved view into an off-site redirect.
+        return isinstance(q, str) and q.startswith("?") and len(q) <= 4096
+
+    @app.route("/api/view-presets", methods=["GET", "POST"])
+    def api_view_presets():
+        """Saved-view presets (the gallery's "Saved views…" dropdown): {name: query
+        string}, stored server-side (out_dir/view_presets.json) so a view saved at the
+        desktop exists on the tablet -- the same install-wide, follows-you-everywhere
+        contract as the skin choice, and the same trust tier (login: small cosmetic
+        state, no spend, nothing destructive). They lived in localStorage before this,
+        one private set per browser; the client pushes a legacy set up through
+        POST {merge} once, server names winning ties. POST {name, query} saves one;
+        POST {delete: name} removes one (no UI for it yet -- the verb exists so the
+        select's reserved delete affordance has something to call)."""
+        with _view_presets_lock:
+            presets = _load_view_presets()
+            if request.method == "POST":
+                body = request.get_json(silent=True) or {}
+                if isinstance(body.get("merge"), dict):
+                    for k, v in body["merge"].items():
+                        k = str(k).strip()
+                        if k and k not in presets and _ok_view_query(v):
+                            presets[k] = v
+                elif body.get("delete") is not None:
+                    presets.pop(str(body.get("delete")), None)
+                else:
+                    name = str(body.get("name") or "").strip()
+                    if not name:
+                        return jsonify({"error": "name required"}), 400
+                    if not _ok_view_query(body.get("query")):
+                        return jsonify({"error": "query must be a '?…' filter string"}), 400
+                    presets[name] = body["query"]
+                tmp = _view_presets_path().with_suffix(".tmp")
+                tmp.write_text(json.dumps(presets, indent=1), encoding="utf-8")
+                os.replace(tmp, _view_presets_path())   # atomic: a torn write can't eat the set
+            return jsonify({"presets": presets})
 
     def _params_and_nocard(core, p):
         """Route a drawer payload to generate, edit, or video params. Returns (params,

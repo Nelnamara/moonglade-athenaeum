@@ -197,6 +197,8 @@ ROUTE_TIERS = {
     ("api_panel_schedule", "GET"): LOGIN,   # GET login-only, POST localhost -- see above
     ("api_presets", "GET"): LOGIN,
     ("api_presets", "POST"): LOGIN,
+    ("api_view_presets", "GET"): LOGIN,    # saved views roam desktop<->tablet: that IS the login tier
+    ("api_view_presets", "POST"): LOGIN,   # small cosmetic json in out_dir, same trust as api_skin
     ("api_snippets", "GET"): LOGIN,
     ("api_snippets", "POST"): LOGIN,
     ("api_branding", "GET"): LOGIN,
