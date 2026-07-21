@@ -988,3 +988,51 @@ def test_service_worker_revalidates_thumbnails(tmp_path):
     hdr = cli.get("/thumbs/1.jpg").headers.get("Cache-Control", "")
     assert "immutable" not in hdr, (
         "thumbnails are rewritten in place; 'immutable' pins the stale one. Got: " + hdr)
+
+
+def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, monkeypatch):
+    """The Loom's Image / Edit / Reference tabs now price their REAL submit body through
+    /api/price before spending (confirmSpend, the same fail-closed gate the video shots use).
+    Each client shape must route to a priceable params object. If a key were wrong,
+    _params_and_nocard returns a `note` (params None), price_task is never called, and the
+    client guardrail degrades to a permanent "couldn't verify the cost" that can never show
+    the true credits/free-card state -- exactly the silent-spend seam this closes.
+
+    Bites: revert any of confirmSpend's price bodies to a mismatched key and the matching
+    cost assertion drops from 1200 to None."""
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 1200)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)  # no free card
+    # The Loom Image picker emits model_id only (no version_id); /api/price resolves it to a
+    # version the same way /api/generate does. Stub that resolve so the test needs no network.
+    monkeypatch.setattr(core, "resolve_version_meta",
+                        lambda s, mid: {"version_id": "ver_" + str(mid)})
+    cli = _authed_client(tmp_path, [_row(media_id="99", filename="b_99.png",
+                                         created_at="2025-01-01T00:00:00")])
+
+    # Image tab -> confirmSpend({model_id, prompt}); no `mode`, model_id-only -> generate branch
+    # after the version resolve above.
+    d = cli.post("/api/price", json={"model_id": "1709df", "prompt": "a moonwell"}).get_json()
+    assert d["cost"] == 1200 and d["free"] is False, \
+        "image price body did not route to a priceable gen (got {})".format(d)
+    assert seen["params"].get("modelId") == "ver_1709df", \
+        "the resolved version_id didn't reach price_task's params"
+
+    # Edit tab -> confirmSpend({mode:'edit', source, instruction, edit_model:'edit-pro'}).
+    base = {"mode": "edit", "source": "99", "instruction": "make it night"}
+    d = cli.post("/api/price", json={**base, "edit_model": "edit-pro"}).get_json()
+    assert d["cost"] == 1200, "edit price body did not route to a priceable edit (got {})".format(d)
+    edit_params = seen["params"]
+
+    # Reference tab -> confirmSpend({mode:'edit', source, sources, instruction, edit_model:'reference-pro'}).
+    d = cli.post("/api/price", json={"mode": "edit", "source": "99", "sources": ["99", "99"],
+                                     "instruction": "a still", "edit_model": "reference-pro"}).get_json()
+    assert d["cost"] == 1200, "reference (multi-source) body did not price (got {})".format(d)
+
+    # And edit_model actually threads: same source, only the model differs -> different params.
+    d = cli.post("/api/price", json={**base, "edit_model": "reference-pro"}).get_json()
+    assert d["cost"] == 1200
+    ref_params = seen["params"]
+    assert edit_params != ref_params, \
+        "edit-pro and reference-pro priced to identical params -- edit_model didn't thread through"

@@ -9958,7 +9958,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         edit). Read-only (no spend). Login required (any session, local or LAN)."""
         try:
             core, session = _gen_session()
-            params, no_card, note = _params_and_nocard(core, request.get_json(silent=True) or {})
+            body = request.get_json(silent=True) or {}
+            # Resolve a bare base model_id -> its current version, exactly as /api/generate
+            # does, so a caller that knows only the base model still gets a real cost +
+            # free-card check instead of a "pick a model" note. The Loom's Image tab is
+            # precisely that caller: its model picker emits {model_id, title} with no
+            # version_id, and its price check (confirmSpend) would otherwise always fall to
+            # "couldn't verify the cost". The web drawer already sends version_id, so this
+            # only fires for the model_id-only path.
+            if (not str(body.get("version_id") or "").strip()
+                    and str(body.get("model_id") or "").strip()
+                    and not body.get("mode")):
+                _vid = (core.resolve_version_meta(session, str(body["model_id"]).strip()) or {}).get("version_id") or ""
+                if _vid:
+                    body = {**body, "version_id": _vid}
+            params, no_card, note = _params_and_nocard(core, body)
             if params is None:
                 return jsonify({"cost": None, "free": False, "note": note})
             cost = core.price_task(session, params)

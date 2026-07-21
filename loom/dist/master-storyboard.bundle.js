@@ -2218,6 +2218,32 @@ Your currently-open board is left untouched.`)) return;
         return null;
       }
     };
+    const confirmSpend = async (priceBody, label) => {
+      let pr = null;
+      try {
+        const r = await fetch("/api/price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(priceBody)
+        });
+        pr = await r.json();
+      } catch {
+        pr = null;
+      }
+      if (pr && pr.free) return true;
+      if (pr && !pr.free && pr.cost != null) {
+        return window.confirm(`${label}
+
+No free card covers it \u2014 it will spend ~${pr.cost.toLocaleString()} credits.
+
+Generate anyway?`);
+      }
+      return window.confirm(`${label}
+
+Couldn't verify the cost or free-card coverage \u2014 it may spend credits.
+
+Generate anyway?`);
+    };
     const generateShot = async (entry, opts = {}) => {
       const c = entry.c;
       const p = shotPayload2(entry);
@@ -2375,9 +2401,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter an image prompt" } }));
         return;
       }
-      if (!window.confirm(`Generate a reference image for ${c.title || "this shot"}?
-
-A matching free card auto-applies; otherwise it spends credits.`)) return;
+      if (!await confirmSpend({ model_id: imgModel.model_id, prompt }, `Generate a reference image for ${c.title || "this shot"}?`)) return;
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
       try {
         const r = await fetch("/api/generate", {
@@ -2407,8 +2431,8 @@ A matching free card auto-applies; otherwise it spends credits.`)) return;
       else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
       setGenImgState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
     };
-    const runGen = async (setState, cardId, endpoint, body, confirmMsg) => {
-      if (confirmMsg && !window.confirm(confirmMsg)) return;
+    const runGen = async (setState, cardId, endpoint, body, priceBody, label) => {
+      if (priceBody && !await confirmSpend(priceBody, label)) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
@@ -2447,14 +2471,14 @@ A matching free card auto-applies; otherwise it spends credits.`)) return;
         setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "describe the edit" } }));
         return;
       }
+      const editBody = { source: src, instruction, edit_model: "edit-pro" };
       runGen(
         setGenEditState,
         c.id,
         "/api/edit",
-        { source: src, instruction, edit_model: "edit-pro" },
-        `Edit the open frame of ${c.title || "this shot"}?
-
-An Edit-Pro card auto-applies; otherwise it spends credits.`
+        editBody,
+        { mode: "edit", ...editBody },
+        `Edit the open frame of ${c.title || "this shot"}?`
       );
     };
     const genRef = (entry) => {
@@ -2469,14 +2493,14 @@ An Edit-Pro card auto-applies; otherwise it spends credits.`
         setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter a prompt" } }));
         return;
       }
+      const refBody = { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" };
       runGen(
         setGenRefState,
         c.id,
         "/api/edit",
-        { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" },
-        `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?
-
-A Reference-Pro card auto-applies; otherwise it spends credits.`
+        refBody,
+        { mode: "edit", ...refBody },
+        `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`
       );
     };
     const batchGenerate = async (entries) => {
