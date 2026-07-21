@@ -28,8 +28,13 @@ Where the live truth is:
   `ART.md` is stale.
 - **`MODEL_DECK_2026-07-11.md`** — dated external research (Civitai / HuggingFace / Pinokio).
   Decays on its own schedule; re-verify before relying on it, especially for the Nel-LoRA run.
-- **`STATE_OF_THE_SUITE_2026-07-10.md`** — a 2026-07-10 code-verified snapshot. The first of three
-  attempts at a single state doc; `STATE.md` is the third.
+- **`STATE_OF_THE_SUITE_2026-07-10.md`** + **`STATE_OF_THE_SUITE_2026-07-10.html`** — a 2026-07-10
+  code-verified snapshot, in both the markdown and the rendered-dashboard form it was written in.
+  The first of three attempts at a single state doc; `STATE.md` is the third. The pair was split by
+  accident (the `.html` sat in live `docs/` until 2026-07-21); they belong together and neither is
+  maintained. The `.html` carries one 2026-07-20 edit made before it was filed here — the PySide6
+  desktop-GUI rows were dropped when that GUI was removed — so it is a snapshot with one correction,
+  not a pristine one.
 - **`SUITE_ARCHITECTURE_AUDIT_2026-07-13.md`** — the 2026-07-13 cohesion audit. Its direction was
   acted on (the `mg-*` web components shipped); kept as the record of why.
 - **`SWEEP_2026-07-16.md`** — the 2026-07-16 defect sweep. All 10 defects are fixed; kept as the
