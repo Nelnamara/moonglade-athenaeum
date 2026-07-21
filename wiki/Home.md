@@ -9,9 +9,12 @@ New here? Start with **[Setup](Setup)** — it takes one API key and about a min
 - **[Backing Up](Backing-Up)** — download your history, incremental updates, organizing files.
 - **[The Gallery](Gallery)** — browse, search, filter, rate, the lightbox.
 - **[Generating Images](Generating)** — create images via the API (the web Generate drawer + CLI).
+- **[The Loom](The-Loom)** — the storyboard surface: acts, shots, frame handoff, and video generation.
 - **[Collections & Curation](Collections)** — Select mode, drag-paint, Collections.
 - **[Deleting & Cloud Sync](Deleting)** — local vs cloud delete, reconcile orphans.
 - **[Collection Health](Health)** — the analytics dashboard.
+- **[Control Panel](Control-Panel)** — maintenance jobs, the scheduler, sync options, accounts.
+- **[Trophy Hall](Trophy-Hall)** — achievements, ladders, points, and skins.
 
 ## Reference
 - **[How It Works](How-It-Works)** — architecture, the API, why setup is one key.
