@@ -63,7 +63,22 @@ git tags. Full prose notes for tagged versions live on
   it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
 ### Fixed
 
-- **Images could render permanently broken after signing out on another device.** The offline
+- **The Loom's gallery picker no longer ties the shell for z-index.** `<mg-gallery-picker>` sat
+  at z-index 400 — exactly `.lv-overlay`'s own value — so the everyday frame/cast picker painted
+  above the shell by DOM order alone, which is luck, not layering. Raised to 500, the shell's
+  established full-screen-modal tier: above the overlay and Deep Focus's veil, below the
+  notification toasts (510) and the unlock moment (520). The same fix `.sb-pick-ov` got a day
+  earlier, closing out the z-400 sibling that review had found. The gallery loads the same
+  script but never mounts the element yet, so the change has exactly one live surface.
+- **`tools/name_inventory.py` was silently missing the launcher — and every machine-local
+  file.** Two blind spots in the tool that sizes the `pixai_* → moonglade_*` rename: it split
+  `git ls-files` output on whitespace, shattering `Serve Gallery.pyw` into two nonexistent
+  paths that the read-error catch then swallowed without a word — dropping the launcher, one of
+  the exact files the rename must not miss (now NUL-delimited via `-z`); and it walked tracked
+  files only, blind to untracked and git-ignored files. It now also counts
+  untracked-but-unignored files plus an existence-guarded machine-local set
+  (`.claude/launch.json` · `config.json` · `serve.txt` · `private/`), reporting those
+  separately since the rename branch can't fix them — each machine has to. The offline
   image cache only refused to store *failed* responses — but a request for an image you're no
   longer signed in for isn't a failure, it's a redirect to the login page, which arrives as a
   perfectly successful 200. The login page then got stored under the image's own address. For
