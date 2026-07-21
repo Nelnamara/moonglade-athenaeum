@@ -17,6 +17,19 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Web import — bring local files into the library from the browser** (closes web/CLI parity;
+  unblocks the PySide6 GUI removal). A new **↑ Import** button (owner header, next to Generate)
+  opens a drop-zone modal: drop images, a folder, or a `.zip` — or browse files / browse folder.
+  The preview is adaptive — a removable thumbnail list for a handful, or a capped 24-tile grid
+  with a "+N more" tile for a big drop — and the cap is *only* on the preview: the whole
+  selection imports. Optionally tags everything to a collection. Server route
+  `POST /api/import-local` is **localhost-only** (it writes into `imported/` and shells
+  thumbnails on the server's machine — the same host-filesystem trust tier as the destructive
+  Panel jobs, never the broader logged-in-LAN auth), reuses the CLI's `run_import_local`
+  (copy → catalog `source='local'` → thumbnail, path-dedup), and expands zips with a zip-slip
+  guard. Nothing is uploaded to PixAI — this is the web twin of `--import-local`, distinct from
+  the PixAI `/api/upload`. Verified end-to-end in the browser: both preview states, a real
+  multi-file upload into a named collection landing as catalogued local rows on disk.
 - **Convert-and-download, on the surfaces the spec named.** Every download is an export-time
   transform on a temporary copy — your archive and catalog are never changed, and a converted
   file never re-enters the catalog. Three ways to reach it: the **detail page** has a plain

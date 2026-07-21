@@ -57,13 +57,24 @@ python pixai_gallery_backup.py --sync-artworks --with-videos
 
 ## Importing your own media
 
+From the **CLI**:
+
 ```bash
 python pixai_gallery_backup.py --import-local         # catalog files dropped into the backup
 python pixai_gallery_backup.py --import-local <DIR>   # copy an external folder in
 ```
 
-Tagged `source='local'`; videos get an ffmpeg poster if available. Shows under
-**Source → Imported** in the gallery.
+Or from the **gallery** — click **↑ Import** in the header (next to Generate) to open the
+drop-zone window. Drop images, a folder, or a `.zip` (or browse), review the preview, optionally
+add everything to a collection, and import. A big drop previews a capped grid, but the whole
+selection is imported. Web import runs on the machine the gallery is hosted from, so the button
+only appears for a local (same-machine) session — a LAN device can browse and generate but can't
+write files onto the host.
+
+Either way: files are copied into `imported/`, tagged `source='local'`, and given an ffmpeg
+poster if available (videos). They show under **Source → Imported** in the gallery. Nothing is
+uploaded to PixAI — this is your own library, separate from sending a file to PixAI as a
+generation reference.
 
 ## Organizing files
 
