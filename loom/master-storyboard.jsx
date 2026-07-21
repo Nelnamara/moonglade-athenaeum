@@ -59,8 +59,6 @@ const STYLES = `
   color:var(--ink);min-height:100vh;padding:0 0 80px;-webkit-font-smoothing:antialiased}
 .sb-mono{font-family:ui-monospace,monospace}.sb-disp{font-family:system-ui,sans-serif;font-weight:800}
 
-.sb-top{position:sticky;top:0;z-index:30;background:rgba(0,0,0,.5);backdrop-filter:blur(10px);
-  border-bottom:1px solid var(--line);padding:14px 20px}
 .sb-topgrid{display:flex;gap:18px;align-items:center;flex-wrap:wrap;max-width:1320px;margin:0 auto}
 .sb-brand{display:flex;align-items:baseline;gap:10px;flex:1 1 auto;min-width:0}
 .sb-brand h1{font-size:19px;font-weight:800;letter-spacing:-.02em;margin:0;white-space:nowrap}
@@ -127,10 +125,6 @@ const STYLES = `
 .sb-actmeta{font-family:ui-monospace,monospace;font-size:12px;color:var(--ink3)}
 
 .sb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px}
-.sb-card{background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden;
-  display:flex;flex-direction:column;transition:border-color .15s,box-shadow .15s}
-.sb-card:hover{border-color:var(--line2)}
-.sb-card.open{box-shadow:var(--shadow);border-color:var(--amber-d);grid-column:1/-1}
 
 .sb-shotprev{position:relative;margin-top:8px;border-radius:8px;overflow:hidden;
   background:#000;cursor:col-resize;max-width:460px}
@@ -172,7 +166,10 @@ const STYLES = `
 .sb-exp-bar{height:9px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;overflow:hidden}
 .sb-exp-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--gold));transition:width .3s}
 .sb-exp-txt{font-size:13px;color:var(--ink);text-align:center;font-family:ui-monospace,monospace}
-.sb-pick-ov{position:fixed;inset:0;z-index:400;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
+/* 500, not 400: ImportCollection opens ON TOP of the V2 shell, and .lv-overlay is also 400 --
+   at a tie it only stayed above because it happens to render later in App's child order.
+   500 clears both that and Deep Focus's .lv-df-veil (450) outright. */
+.sb-pick-ov{position:fixed;inset:0;z-index:500;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
 .sb-pick-box{width:920px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
 .sb-pick-head{display:flex;align-items:center;gap:9px}
 .sb-pick-t{font-size:15px;font-weight:700;white-space:nowrap}
@@ -300,8 +297,7 @@ const STYLES = `
 .sb-helpbox b{color:var(--amber)}
 .sb-empty{text-align:center;color:var(--ink3);padding:30px;font-size:13px}
 
-@media (max-width:560px){.sb-grid{grid-template-columns:1fr}.sb-main,.sb-top,.sb-wrap{padding-left:13px;padding-right:13px}
-  .sb-twoframes{flex-direction:column}.sb-conn-mid{align-self:flex-start;padding:0}}
+@media (max-width:560px){.sb-conn-mid{align-self:flex-start;padding:0}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 `;
@@ -684,6 +680,15 @@ class V2Boundary extends React.Component {
 // All project state/actions arrive bundled as `api` (built once in App).
 function ProjectSwitcher({ api }) {
   const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
+  // Escape closes it, same as Deep Focus's handler in LoomV2. Without this the only way out
+  // is a click, and .sb-projveil is a full-viewport pointer-events layer -- so until you
+  // find somewhere to click, nothing else in the app responds at all.
+  useEffect(() => {
+    if (!projMenu) return;
+    const onKey = (ev) => { if (ev.key === "Escape") setProjMenu(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [projMenu, setProjMenu]);
   return (
     <div className="sb-projwrap">
       <button className="sb-projbtn" onClick={() => { setProjMenu((v) => !v); readProjList(); }}
@@ -719,6 +724,13 @@ function ProjectSwitcher({ api }) {
 // either file back; importBackup sniffs which one it got.
 function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling }) {
   const [open, setOpen] = useState(false);
+  // Escape closes it -- same reason as ProjectSwitcher above: this menu reuses .sb-projveil.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (ev) => { if (ev.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
   return (
     <div className="sb-projwrap">
       <button className="sb-projbtn" onClick={() => setOpen((v) => !v)}

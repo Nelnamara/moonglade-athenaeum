@@ -51,6 +51,14 @@ def test_panel_page_renders_with_actions(tmp_path):
     for shown in ("sync-videos", "sync-artworks"):
         assert '"action": "{}"'.format(shown) in buttons_json
         assert "full re-walk" in buttons_json
+    # undo-organize / restore-orphans were the last two CLI-only maintenance actions;
+    # they must RENDER a button (not merely be runnable), which is the point of adding
+    # them -- and render among the DESTRUCTIVE ones, since both move files on disk.
+    import json
+    by_action = {a["action"]: a for a in json.loads(buttons_json)}
+    for shown in ("undo-organize", "restore-orphans"):
+        assert shown in by_action, "{} has no Maintenance button".format(shown)
+        assert by_action[shown]["destructive"] is True
     # reconcile-deleted deliberately stays button-less -- NOT an oversight. --sync already
     # runs it as its final step (run_sync's pipeline), so a button would be a second path
     # to work that just happened, inviting someone to run it and wonder why nothing
@@ -684,6 +692,12 @@ def test_new_parity_actions_spawn_the_right_whitelisted_argv(tmp_path, monkeypat
         ("sync-videos",     ["--sync-videos"],                        False),
         ("sync-artworks",   ["--sync-artworks"],                      False),
         ("dedup-delete",    ["--dedup", "--apply", "--dedup-delete"], True),
+        # The last two CLI-only maintenance actions. Both MOVE files on the server's
+        # own disk, so both are destructive (confirm + localhost). --restore-orphans
+        # is a no-op on its own: it only takes effect alongside --verify-dupes, so the
+        # whitelisted argv must carry both flags.
+        ("undo-organize",   ["--undo-organize"],                      True),
+        ("restore-orphans", ["--verify-dupes", "--restore-orphans"],  True),
     ]
     import time
     for action, expected, destructive in cases:
