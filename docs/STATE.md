@@ -451,17 +451,17 @@ What's still CLI-only, tracked so the web surface stays complete:
 
 Ranked, with the reason each sits where it does.
 
-1. **The naming pass** (`pixai_* → moonglade_*`) — sized 2026-07-21: **468 in-scope references
-   across 97 files** (156 imports + 312 strings), a focused 4–6 hours. Do it on its own branch in
-   its own session, and do these first: (a) fix `tools/name_inventory.py`, which walks
-   `git ls-files` and so misses ~4% and is blind to the git-ignored `.claude/launch.json`;
-   (b) clear the runway — `loom-v2` currently leads `master`, and a rename that moves this much
-   makes a later rebase miserable. Two traps: `pixai_gallery` is a strict prefix of
-   `pixai_gallery_backup` **and** `pixai_backup` is the output directory named in every install's
-   `config.json`, so a prefix-wildcard sweep silently repoints people's archives at nothing; and
-   both modules are runnable scripts invoked as `python pixai_*.py` in ~116 documented commands,
-   the launchers and the Panel's subprocess runner — an import-only shim leaves the whole suite
-   green while breaking every one of those.
+1. **The naming pass** (`pixai_* → moonglade_*`) — a focused 4–6 hours;
+   `python tools/name_inventory.py modules` sizes the live surface, including the machine-local
+   git-ignored files (`.claude/launch.json` · `config.json` · `serve.txt` · `private/`) the
+   branch can't fix and each machine must touch itself. Do it on its own branch in its own
+   session, after clearing the runway — `loom-v2` currently leads `master`, and a rename that
+   moves this much makes a later rebase miserable. Two traps: `pixai_gallery` is a strict prefix
+   of `pixai_gallery_backup` **and** `pixai_backup` is the output directory named in every
+   install's `config.json`, so a prefix-wildcard sweep silently repoints people's archives at
+   nothing; and both modules are runnable scripts invoked as `python pixai_*.py` in ~116
+   documented commands, the launchers and the Panel's subprocess runner — an import-only shim
+   leaves the whole suite green while breaking every one of those.
 2. **The Design Pass** (below) — one body of work, not five separate ones.
 
 ### The Design Pass (consolidated)
@@ -573,13 +573,6 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   that line — so it is a naming/clarity wart, not a bug. Renaming it touches auth-adjacent
   template logic and wants an owner nod rather than a drive-by.
 
-- **`<mg-gallery-picker>` shares z-index 400 with the Loom's `.lv-overlay`**, so which one wins is
-  decided by DOM order alone (`static/mg-gallery-picker.js:37` vs `loom/master-storyboard.jsx:416`).
-  This is the everyday frame/cast picker, so the tie is reachable in normal use. `.sb-pick-ov` —
-  which an earlier version of this entry named — is **not** the problem: it was raised to 500
-  (`master-storyboard.jsx:172`) with a comment at 169-171 explaining that exact choice, and this
-  bullet was still describing the pre-fix state. Found 2026-07-21 by an adversarial review that
-  went looking for the z-400 sibling this entry had misidentified.
 - **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not follow the
   owner between the devices that share one server — the desktop and the tablet. (The work
   machine is dev/test and runs no gallery, so cross-*install* sync is not the gap; same-server
