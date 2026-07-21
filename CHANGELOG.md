@@ -17,11 +17,16 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
-- **Convert-and-download on the ZIP export.** "Download ZIP" now opens a small options dialog:
-  convert the selection to PNG or JPEG, and/or embed the prompt + ids into each file. Both are
-  download-time transforms applied to temporary copies — your archive and catalog are never
-  changed, and a converted file never re-enters the catalog. Videos always download as-is. The
-  default (Original, no embed) is unchanged.
+- **Convert-and-download, on the surfaces the spec named.** Every download is an export-time
+  transform on a temporary copy — your archive and catalog are never changed, and a converted
+  file never re-enters the catalog. Three ways to reach it: the **detail page** has a plain
+  one-click Download of the original (`/full/<id>?dl=1` saves the file rather than opening it in
+  a tab); a **"Download collection"** button (shown while a collection filter is active) zips the
+  collection's *full* membership, resolved server-side across pages; and the bulk **selection**
+  Actions → Download ZIP opens an options dialog to convert to PNG/JPEG and/or embed the prompt +
+  ids. Convert is always opt-in — the default (Original, no embed) is byte-identical. Videos
+  always download as-is. There is no "zip the whole catalog" path — selection or named-collection
+  only.
 - **The gallery's Video generator is the full-parity form now.** The main-page Video tab was a
   hand-rolled "simple mode" (9 undifferentiated image slots, a 5-model select, no video/audio
   references, no negative prompt, no channel). It now mounts the shared `<mg-generate-drawer>`
