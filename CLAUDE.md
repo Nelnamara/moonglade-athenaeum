@@ -191,7 +191,7 @@ recently within hours of a "correction." All tests must pass before merging to m
 ## Current state
 
 Current state is not tracked here — it rots when two files both describe "now". See **`docs/STATE.md`**
-(what's shipped / in flight / next / open owner calls / known defects / the Loom V1→V2 gap list / the
+(what's shipped / in flight / next / open owner calls / known defects / the
 locked-artifact ledger). Version, branch lead, and release status are commands, not prose — `STATE.md`
 names them. Owner: Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev. Branch strategy: feature
 branches, merge to master with `--no-ff`, tag releases.

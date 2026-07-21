@@ -380,8 +380,7 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 ## In flight
 
-- Gated on nothing, ready whenever there's capacity: further V2 shell work, the Loom
-  visual-refinement pass, and the video-control base set.
+- Gated on nothing, ready whenever there's capacity: further V2 shell work.
 
 ---
 
@@ -400,14 +399,6 @@ reads as zero accounts and drops the install into bootstrap mode.
   git-ignored local dashboard.)
 
 ### The Loom — other
-
-- **Export carries real audio.** Segments with a detected audio stream (`probe_has_audio`) trim
-  and concat it; segments without one get matching-duration synthesized silence (`anullsrc`) so
-  the track can't desync across a boundary. `ffmpeg`'s `concat` filter requires its input pads
-  interleaved per segment (`[v0][a0][v1][a1]...`), not grouped by stream type — a real ffmpeg
-  constraint, not a style choice. A multi-track audio lane remains out of scope (see below).
-- **Visual-refinement pass.** The skin system already reaches the Loom, so what's left is
-  polish against a real design pass, not wiring.
 - **Opt-in larger text/button scale** covering *both* the V2 shell's side panels and the
   board's `.lv-card` shot cards, as one consistent option. Desktop-only, not a responsive ask.
   The compact spec stays the default in both places. Likely a compact/comfortable toggle
@@ -418,108 +409,10 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
-- `<mg-generate-drawer>` (`static/mg-generate-drawer.js` + its harness
-  `static/mg-generate-drawer.html`) is the third shared component: the **Video tab**, at
-  FULL PixAI Multi-ref parity per the locked mockup — 6 image + 3 video + 1 audio ref slot
-  (video slots show real poster thumbs; audio uploads directly via `/api/upload`, no gallery
-  picker involved since audio isn't catalogued), negative prompt (i2vPro only — referenceVideo
-  has no such field, a genuine PixAI API gap, not an oversight), Channel (Normal/Enhanced,
-  PixAI's own wording, defaults Normal), and the full 7-model roster with capability chips
-  (2 models ship disabled pending a `--dump-params` capture: V3.0 Flash, V2.7). It owns the
-  whole lifecycle (form → `/api/price` cost → `/api/loom/generate` submit → `/api/task-status`
-  poll → result strip) and stays picker-agnostic via `mg-pick-request` (carries a `kind` hint
-  so a host filters image vs. video picks; `mg-submit`/`mg-result`/`mg-error` report the run;
-  `mg-dirty` fires on a genuine hand-edit to the prompt box, distinct from a programmatic
-  `prefill()`; `setRefs()`/`prefill()` are the bridge/shot-context entries, `prefill()` taking
-  `video_refs`/`audio_ref`/`negative`/`is_private`, snapping an out-of-range duration to the
-  nearest real option rather than leaving the `<select>` on no match). Server-side,
-  `build_shot_video_params()` threads `negative`/`is_private` through to both builders, and
-  `/api/price`'s video branch accepts ANY reference kind alone for R2V (was image-only — a
-  video- or audio-only Multi-ref used to silently mis-price as "pick a source image").
-  **Mounted in the Loom's Video tab** (`master-storyboard.jsx`'s `LoomV2`): Mode, Continuity,
-  the raw prompt, Duration, and Camera/Lighting/Transition in/out stay Loom-native fields
-  (structured, feed the reel/export/FLF-continuity coupling unchanged) sitting above the
-  drawer as a weave strip; the drawer's own prompt box shows `shotText()`'s live composition
-  and re-syncs on any weave-field change UNLESS the owner has hand-typed in it since
-  (`mg-dirty`-tracked), with an explicit "↺ re-sync from shot" override. `mg-submit`/
-  `mg-result`/`mg-error` write into `genState` (board card's live status badge) and
-  `setCardStatus` (`pendingTaskId` for tab-close resume, `resultMid`/`actualDur` for the
-  finished clip landing on the shot) via two new handlers (`onVideoSubmit`/`onVideoResult`/
-  `onVideoError`) threaded down from the parent component, mirroring exactly what
-  `generateShot`/`pollShot` already write for every other generation path — same board/resume
-  behavior regardless of which UI submitted. **Per-model mode gating shipped 2026-07-18**,
-  off the completed 7-model capability matrix (`private/GENERATOR_SURFACE.md`): the mode
-  segment (First Frame / First & Last Frames / Multi-Reference) now shows only the modes a
-  selected model actually supports (Multi-Reference is V4.0-pair-only; First & Last is the
-  three V3.0-generation models; V2.7/V3.0 Flash are First-Frame-only), auto-switching off an
-  invalid mode rather than allowing a submit shape PixAI's own UI never offers. Same pass:
-  model roster reordered to PixAI's real order (V4.0 Preview before V4.0 Lite Preview — was
-  backwards), frame slots relabeled to PixAI's exact "Start Frame" / "End Frame (Optional)"
-  (End renders as its own block, confirming leaving it empty already submits fine), the
-  "Priority" control renamed "Basic / Professional" (PixAI's real tab pair, not a speed
-  setting), and the Camera-movement dropdown uses PixAI's real option wording. Verified live
-  (all 3 gating tiers clicked through, zero console errors) — see the convergence mockup v3
-  in the artifact ledger below. **R2V's image/video banks auto-populate from the
-  shot's cast + other refs**, via `buildShotPayload` (loom-core.js) — the exact tag-sorted
-  composition `shotText()`'s "@imageN" / "Keep consistent" citations are written against. This
-  is load-bearing, not a convenience: an initial build left these banks empty for the owner to
-  fill by hand, which silently broke the citations already in the composed prompt (a hand-filled
-  slot order that doesn't match the text's tag numbering binds "@image1" to the wrong image, or
-  to nothing — wrong output with no error, found and fixed same day, 2026-07-18). Continuity
-  "extend" adds the previous shot's clip as an extra video ref on top. Audio refs are the one
-  gap `buildShotPayload` never covered, before or now — that's pre-existing, not new. Live-
-  verified against a real project with real cast: a resolvable cast member (real `mediaId`)
-  correctly lands in slot 1 matching the prompt's `@image1`; an unresolvable placeholder cast
-  member (no image ever attached) is correctly excluded from the image array while still
-  listed in the prompt text, matching the old system's own behavior exactly. Also verified:
-  mode/duration sync (incl. the out-of-range-duration snap bug found and fixed live), prompt
-  composition + hand-edit-wins + re-sync, the real picker bridge (type-filtered, real pick
-  landed in the slot), and the submit/result event chain correctly updating the board card
-  (status badge, thumbnail, duration) — all with zero console errors. **The gallery keeps its
-  own working Video tab** — adoption there is a later, live-QA'd swap, same as the model-picker
-  precedent.
-- **BLOCKER found 2026-07-18, Mode resolved 2026-07-18 (live-tested against a real project):**
-  the Loom's Video tab showed its own Mode chips / Duration chips / Prompt textarea / audio
-  checkbox+language chips ABOVE the mounted drawer, duplicating fields the drawer also owns —
-  the "convoluted... multiple sets of the same button groups" state the owner flagged (and the
-  root cause of a real bug: clicking the drawer's own mode segment never wrote back to the
-  card, so the segment visibly "bounced back" the moment anything re-triggered the prefill
-  sync). **Mode is fixed and the legacy Continuity-panel Mode chips are deleted outright** —
-  the drawer's own mode-segment buttons (First Frame / First & Last Frames / Multi-Reference)
-  are now the single source of truth for a bound shot's mode. A new `mg-mode-commit` event
-  fires ONLY from a direct user click on those buttons (never from the drawer's internal
-  `_setMode()`, which `prefill()`/`_applyModelGating()`/`setRefs()` also call — dispatching
-  from those would create a host↔drawer sync loop); the host listener maps the drawer's 3-value
-  `r2v` to the card's `R2V` (never `V2V` — the drawer has no V2V concept, and at the real submit
-  layer V2V/R2V already resolve to the identical generation path) and routes through the
-  existing, tested `setShotMode` reducer, so its Continuity-reset coupling
-  (`connect:"flf"→"new"`) keeps firing exactly as before. A guard skips the write when the
-  drawer's collapsed display already matches the card's mode, specifically so a redundant click
-  on an already-highlighted Multi-Reference button can't silently clobber an existing **V2V**
-  shot down to R2V — Deep Focus's own, deliberately separate Mode chips are now the sole
-  remaining way to set a card to V2V, left in place on purpose (no `<mg-generate-drawer>` is
-  mounted in that modal). A second gap an adversarial review caught before this shipped: model
-  gating (`_applyModelGating`) can force the drawer to submit a mode different from what the
-  card believes, with no write-back at change-time (browsing models must not silently corrupt a
-  card's real mode) — closed by reconciling `card.mode` from the actually-submitted payload's
-  mode in the existing `mg-submit` listener, the one moment the true mode is known for certain.
-  **Duration + audio also resolved 2026-07-18 (design-mockup pass):** the Continuity panel's
-  Duration chips and Generate-audio checkbox + Audio-language chips are deleted outright —
-  the drawer's own Duration select and Generate-audio/Audio-language controls are now the
-  single source of truth, mirroring Mode's exact pattern. A new `mg-duration-commit` event
-  (fired only from a real user change on the drawer's Duration `<select>`, never from
-  `prefill()`'s plain `.value=` assignment, which never fires a native `change` event) and a
-  shared `mg-audio-commit` event (fired from a new `_userToggleAudioGen()` wrapper around the
-  Generate-audio checkbox, mirroring `_setMode()`/`_userSetMode()`'s split so `prefill()`'s
-  own programmatic sync can't re-dispatch, plus a brand-new change listener on the
-  Audio-language select which previously had none at all) write straight onto `c.duration`/
-  `c.audioGen`/`c.audioLanguage` as plain field patches — confirmed via full grep that neither
-  field has any cross-field coupling the way Mode/Connect or the prompt override do, so no new
-  reducer was needed. `shotPayload`/`shotText`/`generateShot`/`batchGenerate` needed zero
-  changes (verified, not assumed): they already read these fields directly off the card. The
-  dead `AUDIO_LANGUAGES` const was deleted alongside its only remaining reference. Designed
-  then adversarially reviewed (Workflow tool) before shipping.
-  **The Prompt textarea is the one piece deliberately held back, owner's explicit call
+- **2 video models ship disabled** in `<mg-generate-drawer>`'s 7-model roster — **V3.0
+  Flash** and **V2.7** — pending a `--dump-params` capture of their real submit shape
+  (`static/mg-generate-drawer.js`).
+- **The Prompt textarea is the one piece deliberately held back, owner's explicit call
   2026-07-18:** it is still the **only write site for `c.prompt` in the entire app** (no Deep
   Focus equivalent) — a "base" string `shotText()` keeps recomposing alongside every later
   Camera/Lighting/cast edit. The drawer's own composed-prompt box only ever writes
@@ -539,49 +432,6 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 - `<mg-cost-badge>` remains unbuilt. Nothing exists in `static/` for it.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
-- **`static/mg-notify.js` (2026-07-18, the fifth shared file)** carries the achievement-toast
-  celebration system (`Ach`), the general-purpose corner `Toast`, and the Job activity tracker
-  (`Jobs` + `JobsCard`) — extracted verbatim from the gallery's own inline `<script>`, now the
-  **single source** for all three (the gallery's inline copies were deleted; both surfaces load
-  `<script src="/static/mg-notify.js">`). Unlike the other four shared files this isn't a
-  custom element — `Ach`/`Toast`/`Jobs`/`JobsCard` are plain global IIFEs operating on
-  `document.body`/`getElementById`, matching exactly what they were inline; it self-injects one
-  `<style>` tag so a single script tag carries both behavior and styling. The Loom's shell now
-  carries `#jobs-fab`/`#jobs-tray` anchors (the achievement-toast path needs no anchor at all —
-  `_mkMoment`/`celebrate` build their own DOM from scratch, confirmed by reading `render()`'s
-  own defensive `if(el)` guards; only the VISIBLE Job Tracker card needs somewhere to render
-  into). `Ach.open()`/`close()` gained a null-guard (the original was unguarded, and a global
-  Escape-key listener calls `close()` on every keypress app-wide — would have thrown in any
-  host without the Achievements modal, found live-testing before it shipped). `Jobs` gained a
-  new `register(id,label)` — registers with the server activity log without starting a second
-  polling loop, for hosts (the Loom) whose own generation flow already owns a hardened,
-  independently-completing poll loop (`pollShot`/`_poll`) and would otherwise double-poll the
-  same task; both `generateShot` and the Loom's `onVideoSubmit` (the drawer's `mg-submit`
-  handler) now call it, closing the confirmed gap that `/api/loom/generate` never logged a job
-  at submission time on its own (client-side only, by this app's own architecture — the Python
-  route itself was never the gap). `.ach-m2`/`#mg-toasts` z-index raised (430/420 → 520/510) so
-  a celebration or completion toast is never silently swallowed by the Loom's own full-screen
-  overlays (Deep Focus veil z-index 450, Sequence Player z-index 500 — both everyday
-  interactions the gallery doesn't have). The Job Tracker's default bottom-left position
-  collides with the Loom's own left Cast panel (confirmed via live measurement: an open tray
-  covers the top of the "+ add from gallery"/"Import collection" buttons once that panel is
-  scrolled to its end) — fixed with a `!important`-scoped `bottom:88px` override living in
-  `_LOOM_SHELL`'s own `<style>` block (an ID-selector tie against the script's JS-injected
-  style otherwise silently loses regardless of source order, confirmed by trying the
-  non-`!important` version first and finding it did nothing); the gallery's own position is
-  untouched. `.ach-modal` is shared base chrome for THREE modals (`#ach-modal`/
-  `#contest-modal`/`#art-modal`, not achievement-exclusive) — flagged with an explicit comment
-  so a future edit doesn't scope or drop it independently of Contests/YourArt. Designed then
-  adversarially reviewed (Workflow tool) before shipping; the review caught the drawer-wiring
-  location (moved off `mg-generate-drawer.js`, which must stay host-agnostic, onto the Loom's
-  own `onVideoSubmit`), the missing `seen{}` de-dupe guard on `register()`, the shared
-  `.ach-modal` coupling, and the untested tray-collision claim (which turned out to be real).
-  Full suite green (`python -m pytest -q`), including a new Python smoke test asserting the
-  Loom shell carries the script tag and both anchors. Live-verified: Trophy Hall + Contests/YourArt modals render
-  correctly on the gallery with zero regressions, `Jobs.register()` round-trips through the
-  real `/api/jobs` endpoint into a rendered tray row, the tray-collision fix measured clean
-  (0px overlap, was 12.7px), z-index values confirmed above the Loom's overlay ceiling, zero
-  console errors anywhere.
 
 ### Achievements
 
@@ -594,15 +444,9 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 What's still CLI-only, tracked so the web surface stays complete:
 
 - **`--restore-orphans` and `--undo-organize` have no Panel button** — the two remaining
-  CLI-only maintenance actions. (`sync-artworks` / `sync-videos` / `reconcile-deleted` run via
-  `/api/panel/run` and the scheduler but render no button by design, `panel_visible: False`.)
-  (`PANEL_ACTIONS` in `pixai_gallery.py`.)
-- ~~**Web import into the catalog.**~~ ✅ **Shipped 2026-07-20.** The **↑ Import** button (owner
-  header) opens a drop-zone modal (drop images / a folder / a `.zip`, or browse), with an adaptive
-  preview (thumbnail list when few, capped 24-tile grid when many — import is uncapped) and
-  add-to-collection. `POST /api/import-local` is localhost-only (host-filesystem write tier),
-  reuses `run_import_local` (`source='local'` → `imported/` → thumbnail, path-dedup), and expands
-  zips with a zip-slip guard. This was the last web-parity item.
+  CLI-only maintenance actions. (`reconcile-deleted` runs via `/api/panel/run` and the
+  scheduler but renders no button by design, `panel_visible: False`; `sync-artworks` and
+  `sync-videos` DO render buttons.) (`PANEL_ACTIONS` in `pixai_gallery.py`.)
 
 ---
 
@@ -610,18 +454,13 @@ What's still CLI-only, tracked so the web surface stays complete:
 
 Ranked, with the reason each sits where it does.
 
-1. **Web parity** — ✅ **COMPLETE 2026-07-20.** ✅ force-full-resync (Advanced Panel) · ✅
-   video/audio reference slots in the live gallery drawer's Multi-ref (the `<mg-generate-drawer>`
-   swap) · ✅ convert-and-download for `/export-zip` · ✅ web import into the catalog (the
-   drop-zone modal + `/api/import-local`). The two surfaces are the CLI and the web app.
-2. **Gallery QoL easy wins** — chiefly the collection-remove UI: `/collection-remove` exists
-   with **zero callers**, so the route is already written and only the UI is missing.
-3. **The 401 batch and the search wildcard** — ✅ both shipped 2026-07-19. What remains of
-   the 401 finding is the poll-ceiling half (see Known defects).
-4. **The naming pass** (`pixai_* → moonglade_*`) — sequenced here for *timing*, not value:
-   it is cleanest immediately after a merge while `master` and the working branch are
-   identical. Size it with `python tools/name_inventory.py modules` before committing to it.
-5. **The Design Pass** (below) — one body of work, not five separate ones.
+1. **Gallery QoL easy wins** — chiefly the collection-remove UI: `/collection-remove`
+   exists with **zero callers**, so the route is already written and only the UI is missing.
+2. **The naming pass** (`pixai_* → moonglade_*`) — sequenced for *timing*, not value:
+   cleanest while `master` and the working branch are identical, which they are right now
+   (both at the v2.1.1 merge). Unblocked. Size it with
+   `python tools/name_inventory.py modules` first.
+3. **The Design Pass** (below) — one body of work, not five separate ones.
 
 ### The Design Pass (consolidated)
 
@@ -768,17 +607,15 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
 
 ## Later epics
 
-- **Render-tree unification is done** — there is one Loom render tree (the V2 shell); the classic
-  tree it would have been merged with is gone (retired 2026-07-17). Nothing is filed under a
-  "rebuild" umbrella. Remaining Loom render-layer cleanup is ordinary dead-CSS pruning: the
-  `STYLES` block still carries classic-only `sb-*` rules (e.g. `.sb-top`, `.sb-card`) alongside the
-  live shared ones (`.sb-shotprev`, `.sb-frame*`, `ProjectSwitcher`, the export/picker overlays) —
-  safe to prune when convenient, not a blocker.
-- **Loom tooling.** React + esbuild + Vitest/RTL is the combo. Preact is an optional later
-  spike; Svelte and hand-rolled vanilla+signals are rejected for a solo-dev migration of
-  untested code; canvas is not needed for the reel at this scale. If docking is ever needed
-  again, Dockview and FlexLayout (both mature, MIT-licensed, actively maintained) are the
-  candidate replacements for hand-rolled docking chrome.
+- **Dead-CSS pruning in the Loom.** The `STYLES` block still carries classic-only `sb-*`
+  rules (e.g. `.sb-top`, `.sb-card`) alongside the live shared ones (`.sb-shotprev`,
+  `.sb-frame*`, `ProjectSwitcher`, the export/picker overlays) — safe to prune when
+  convenient, not a blocker.
+- **Loom tooling (banked).** Preact remains an optional later spike; Svelte and
+  hand-rolled vanilla+signals are rejected for a solo-dev migration of untested code;
+  canvas is not needed for the reel at this scale. Docking (Dockview / FlexLayout) stays a
+  banked pick, but its precondition is closed — nothing in V2 is draggable/resizable/
+  persisted, and the Timeline is a fixed drawer by design.
 - **A multi-track timeline** (layered clips + a visible audio lane) is out of scope. The tool's
   job is building 5–15s scenes and stitching them cohesively; the stitched output goes to a
   real video editor for post. Per-shot audio cues aligned to their own timeline segment cover
