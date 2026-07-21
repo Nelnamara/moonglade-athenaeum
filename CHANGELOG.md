@@ -61,6 +61,20 @@ git tags. Full prose notes for tagged versions live on
   component. Renders the credit cost of a pending generation and whether a free card covers it,
   in five states (idle · checking · free · paid · couldn't verify). Host-neutral like its siblings:
   it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
+### Changed
+
+- **95 dead CSS rules pruned from the Loom** — the classic (V1) render tree's leftovers.
+  Retiring classic deleted its components but not their styles: 84 rules in `STYLES` (the
+  classic header, board grid, card slate/body, editor rows, cast chips, reel bar, the old
+  hand-rolled picker grid) plus 11 pre-redesign leftovers in `V2_STYLES` styled markup nothing
+  renders anymore. Removed mechanically: every class token in a deleted rule was verified
+  absent from the JSX, the Flask module, every `static/*.js`, and the Loom's `src`/`test`
+  trees, with dynamically-constructed class names (`"sb-tick " + status` and friends) audited
+  by hand — a rule survived unless *every* selector in it was provably unmatchable. `STYLES`
+  shrank 39%; shared classes the Export dialog, ImportCollection, and Deep Focus still use
+  (`.sb-pick-ov`, `.sb-field`, `.sb-btn`, …) are untouched, and the served bundle was rebuilt
+  in the same commit (the stale-bundle gate enforces this now).
+
 ### Fixed
 
 - **Saved views now follow you between devices.** The gallery's "Saved views…" presets lived in
