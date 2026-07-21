@@ -587,9 +587,20 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   that line — so it is a naming/clarity wart, not a bug. Renaming it touches auth-adjacent
   template logic and wants an owner nod rather than a drive-by.
 
-- **`ImportCollection`'s `.sb-pick-ov` overlay shares z-index 400 with `.lv-overlay`** rather than
-  a clean 500-over-400 hierarchy — it relies on DOM paint order, which holds today. Worth a live
-  look the next time that stacking area changes. Low severity.
+- **`<mg-gallery-picker>` shares z-index 400 with the Loom's `.lv-overlay`**, so which one wins is
+  decided by DOM order alone (`static/mg-gallery-picker.js:37` vs `loom/master-storyboard.jsx:416`).
+  This is the everyday frame/cast picker, so the tie is reachable in normal use. `.sb-pick-ov` —
+  which an earlier version of this entry named — is **not** the problem: it was raised to 500
+  (`master-storyboard.jsx:172`) with a comment at 169-171 explaining that exact choice, and this
+  bullet was still describing the pre-fix state. Found 2026-07-21 by an adversarial review that
+  went looking for the z-400 sibling this entry had misidentified.
+- **`/api/panel/status` returns raw maintenance-job stdout to any logged-in account**
+  (`pixai_gallery.py:8181`). Launching a destructive Panel job is correctly LOCALHOST-gated
+  (`spec["destructive"] and not _is_local_request()`, 8126), but *reading the output* is a bare
+  `@app.route` with no tier check — so a LOGIN-tier account on the network can poll
+  `_panel_job["lines"]`, the CLI subprocess's own stdout, including host filesystem paths. This
+  matters because the app is explicitly not single-user. Surfaced 2026-07-21 as a side-finding
+  while triaging the `str(e)` sites; it is a larger disclosure surface than the item that found it.
 - **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not roam between
   the home and work machines this project is already edited from.
 ### Machine-local layout (a standing drift hazard, not a bug)
