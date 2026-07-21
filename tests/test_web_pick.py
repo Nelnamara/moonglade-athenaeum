@@ -645,6 +645,36 @@ def test_export_csv_downloads_as_attachment(tmp_path):
     assert sum(1 for ln in lines[1:] if ln.strip()) == 2  # both rows exported
 
 
+def test_export_csv_honours_the_gallery_filters(tmp_path):
+    """Export used to mean "the whole library" no matter what the grid was showing, so
+    exporting a search gave you everything. It now reads the SAME filter args the index
+    route does; a request with none of them still dumps the whole catalog."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", prompt_preview="night elf",
+             model_name="WAI", rating="5", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", prompt_preview="daylight city",
+             model_name="WAI", rating="1", created_at="2025-02-01T00:00:00"),
+        _row(media_id="3", filename="c_3.png", prompt_preview="night market",
+             model_name="Other", rating="3", created_at="2026-01-01T00:00:00"),
+    ])
+
+    import csv
+
+    def ids(qs=""):
+        r = cli.get("/export-csv" + qs)
+        assert r.status_code == 200 and r.mimetype == "text/csv"
+        rows = list(csv.DictReader(io.StringIO(r.get_data(as_text=True))))
+        return {row["media_id"] for row in rows}
+
+    assert ids() == {"1", "2", "3"}                          # no filters -> everything
+    assert ids("?q=night") == {"1", "3"}                     # search
+    assert ids("?model=WAI") == {"1", "2"}                   # dropdown filter
+    assert ids("?q=night&model=WAI") == {"1"}                # filters combine, as in the grid
+    assert ids("?rating_min=3") == {"1", "3"}                # numeric filter is validated, not raw
+    assert ids("?from_year=2026") == {"3"}                   # Year dropdown with no Month
+    assert ids("?q=nothingmatchesthis") == set()             # empty result is a header-only CSV
+
+
 def test_branding_absent_is_404(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
