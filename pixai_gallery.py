@@ -539,6 +539,44 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
         con.close()
 
 
+def _filters_from_args(args):
+    """Pull the gallery grid's filter set out of a request query string, keyed by
+    query_catalog()'s own parameter names (the index route reads exactly these args --
+    see its body, including the Year+Month dropdown pair a date filter arrives as).
+
+    Only filters actually PRESENT come back, so an empty dict means "no filtering at
+    all" and a caller can take the whole catalog instead. Values are validated the same
+    way index() validates them, since they reach SQL."""
+    def _ym(prefix, month_default):
+        y = args.get(prefix + "_year", "")
+        m = args.get(prefix + "_month", "")
+        return "{}-{}".format(y, m or month_default) if y else ""
+
+    try:
+        rating_min = max(0, min(5, int(args.get("rating_min", 0))))
+    except ValueError:
+        rating_min = 0
+    media_type = args.get("media", "")
+    source = args.get("source", "")
+    found = {
+        "q":              args.get("q", ""),
+        "model":          args.get("model", ""),
+        "batch":          args.get("batch", ""),
+        "date_from":      _ym("from", "01"),
+        "date_to":        _ym("to", "12"),
+        "rating_min":     rating_min,
+        "published_only": args.get("published") == "1",
+        "art_tag":        args.get("tag", ""),
+        "lora":           args.get("lora", ""),
+        "media_type":     media_type if media_type in ("image", "video") else "",
+        "source":         source if source in ("online", "api", "local", "deleted") else "",
+        "collection":     args.get("collection", ""),
+    }
+    # Every default here is falsy (""/0/False), so dropping falsy values is exactly
+    # "drop the filters the user didn't set".
+    return {k: v for k, v in found.items() if v}
+
+
 def catalog_counts(db_path):
     """At-a-glance header stats: image count, video count, distinct collections.
     Cheap COUNTs over the catalog. Fails soft to zeros."""
@@ -2859,6 +2897,12 @@ def create_app(out_dir: Path):
         "reconcile-deleted": {"args": ["--reconcile-deleted"], "label": "Reconcile deleted (flag cloud-removed rows)", "destructive": False, "panel_visible": False},
         # --- destructive: require confirm=true ---
         "organize":      {"args": ["--organize"], "label": "Organize into month folders", "destructive": True},
+        # organize's inverse: replays organize_manifest.csv backwards, then deletes the
+        # manifest. Destructive for exactly the reason organize is -- it MOVES the owner's
+        # files on the server's own disk -- and there is no second manifest to undo the undo.
+        "undo-organize": {"args": ["--undo-organize"],
+                          "label": "Undo organize — move files back to their old paths",
+                          "destructive": True},
         "dedup-apply":   {"args": ["--dedup", "--apply"], "label": "Dedup — quarantine dupes to _duplicates/", "destructive": True},
         # DELETES rather than quarantining, so it is strictly more dangerous than
         # dedup-apply and carries the same destructive=True (confirm + localhost-only).
@@ -2866,6 +2910,14 @@ def create_app(out_dir: Path):
         "dedup-delete":  {"args": ["--dedup", "--apply", "--dedup-delete"],
                           "label": "Dedup — DELETE dupes outright (no _duplicates/ safety net)",
                           "destructive": True},
+        # The write-enabled twin of verify-dupes above (--restore-orphans does nothing on
+        # its own -- it only takes effect alongside --verify-dupes). Its own key rather
+        # than a checkbox on verify-dupes, same reason as audit-full. Recovery, not loss --
+        # it moves quarantined files with no surviving keeper back into images/ -- but
+        # still an unlogged file move on the host, so it's gated like the rest.
+        "restore-orphans": {"args": ["--verify-dupes", "--restore-orphans"],
+                            "label": "Verify quarantine + restore orphans to images/",
+                            "destructive": True},
         "rebuild-thumbs": {"args": ["--rebuild-thumbs"],
                            "label": "Rebuild ALL thumbnails — uniform quality + video posters",
                            "destructive": True},
@@ -7993,13 +8045,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def export_csv_download():
         """Download the catalog as a CSV -- from the browser you get a real file (Downloads),
         not a copy silently written into the backup folder. Built in memory. Authorized only.
-        (The CLI --export-csv still writes to disk on purpose, for scripting.)"""
+        (The CLI --export-csv still writes to disk on purpose, for scripting.)
+
+        Honours the gallery grid's OWN filter query string (?q=&model=&collection=&rating_min=
+        &media=&from_year=...), so exporting from a filtered view exports that view rather
+        than the whole library. With no filter args it stays the full dump it has always
+        been -- load_catalog, not query_catalog, because the latter's `filename != ''`
+        would quietly drop rows whose file isn't on disk yet."""
         import io
         import datetime
+        filters = _filters_from_args(request.args)
+        if filters:
+            # query_catalog paginates: count the matches first, then take that many in a
+            # single page, so a filtered export is never silently truncated. `sort` isn't a
+            # filter (it never changes WHICH rows match) so it's passed separately -- and
+            # an unknown value falls back to the default order inside query_catalog.
+            _, total = query_catalog(db_path, page=1, page_size=1, **filters)
+            rows, _ = query_catalog(db_path, page=1, page_size=max(total, 1),
+                                    sort=request.args.get("sort", "newest"), **filters)
+        else:
+            rows = load_catalog(db_path)
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=CATALOG_FIELDS)
         writer.writeheader()
-        for r in load_catalog(db_path):
+        for r in rows:
             writer.writerow({f: r.get(f, "") for f in CATALOG_FIELDS})
         mem = io.BytesIO(buf.getvalue().encode("utf-8"))
         mem.seek(0)
