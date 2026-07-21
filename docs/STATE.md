@@ -387,6 +387,18 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 ## Next
 
+### Documentation
+
+- **The published `wiki/` has a real catch-up backlog.** Four current areas are undocumented
+  there: **The Loom** (V2 shell + generation), the **Control Panel** (maintenance jobs, the
+  scheduler, Advanced sync options, Users), **Trophy Hall / achievements**, and
+  **branding / mascots**. `wiki/` today is only Backing-Up · Collections · Deleting · FAQ ·
+  Gallery · Generating · Health · How-It-Works · Setup · Troubleshooting · Trust-and-Safety. This
+  is a discrete deliverable, distinct from CLAUDE.md's go-forward "update the wiki on every
+  commit" rule — that rule is what makes the backlog a live obligation, not a nice-to-have.
+  (Surfaced 2026-07-20 by a DASHBOARD↔STATE reconciliation; the item had lived only in the
+  git-ignored local dashboard.)
+
 ### The Loom — other
 
 - **Export carries real audio.** Segments with a detected audio stream (`probe_has_audio`) trim
@@ -749,6 +761,15 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   look the next time that stacking area changes. Low severity.
 - **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not roam between
   the home and work machines this project is already edited from.
+- **In-Loom image / edit / reference generation doesn't price-check the way video does.** The
+  video path (`generateShot` / `batchGenerate`) calls `priceShot()` and shows the real cost +
+  free-card coverage before spending (and fails CLOSED on an unverifiable price), but
+  `genImage` / `genEdit` / `genRef` fire only a generic `window.confirm(… "otherwise it spends
+  credits")` with no number (`loom/master-storyboard.jsx` ~2222). May well be **intentional** —
+  image/edit/ref gens are usually free-carded and cheap, so precise pricing is reserved for
+  expensive video — so this is an **owner call**: unify on `priceShot`, or keep the light
+  confirm. No console error / correct HTTP, so a crawl never caught it. (Surfaced 2026-07-20 by
+  the DASHBOARD↔STATE reconciliation.)
 ### Machine-local layout (a standing drift hazard, not a bug)
 
 - The **live gallery server runs from the D: run-copy** (`D:\Moonglade Athenaeum\`), a separate
