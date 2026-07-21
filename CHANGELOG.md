@@ -63,6 +63,16 @@ git tags. Full prose notes for tagged versions live on
   it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
 ### Fixed
 
+- **Saved views now follow you between devices.** The gallery's "Saved views…" presets lived in
+  each browser's own localStorage, so a view saved at the desktop simply didn't exist on the
+  tablet sharing the same server. They now persist server-side (`/api/view-presets` →
+  `out_dir/view_presets.json`, atomic write, login tier) — the same follows-you-everywhere
+  contract as the skin choice. Any legacy localStorage set is merged up automatically on first
+  load (server names win ties, so two browsers migrating in sequence can't fight over whose
+  stale copy sticks) and then cleared. Stored queries must be `?…` filter strings — the client
+  navigates a loaded preset via `location.href = '/' + query`, where a smuggled `//host` would
+  resolve protocol-relative and turn a saved view into an off-site redirect; the server refuses
+  those outright. A delete verb ships server-side (tested) with no UI control yet.
 - **The Loom's gallery picker no longer ties the shell for z-index.** `<mg-gallery-picker>` sat
   at z-index 400 — exactly `.lv-overlay`'s own value — so the everyday frame/cast picker painted
   above the shell by DOM order alone, which is luck, not layering. Raised to 500, the shell's
@@ -70,6 +80,11 @@ git tags. Full prose notes for tagged versions live on
   notification toasts (510) and the unlock moment (520). The same fix `.sb-pick-ov` got a day
   earlier, closing out the z-400 sibling that review had found. The gallery loads the same
   script but never mounts the element yet, so the change has exactly one live surface.
+- **Escape closes the Loom's project and Export menus.** Both popovers sit behind a
+  full-viewport click-catching veil, so until this the only way out was finding somewhere to
+  click — the rest of the app was dead until you did. They now close on Escape exactly like
+  Deep Focus always has. (Shipped in the 2026-07-21 small-wins blitz; this entry was recorded
+  after the fact — the fix predates it.)
 - **`tools/name_inventory.py` was silently missing the launcher — and every machine-local
   file.** Two blind spots in the tool that sizes the `pixai_* → moonglade_*` rename: it split
   `git ls-files` output on whitespace, shattering `Serve Gallery.pyw` into two nonexistent
