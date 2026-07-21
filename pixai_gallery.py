@@ -3822,6 +3822,14 @@ document.addEventListener('DOMContentLoaded', function() {
       <option value="{{ c }}" {% if collection==c %}selected{% endif %}>{{ c }}</option>
       {% endfor %}
     </select>
+    {# Shown only while a collection is active. type=button so it never submits the filter
+       form; the name rides a data attribute (HTML-escaped, decoded via dataset) so a
+       collection name with quotes can't break the handler. #}
+    {% if collection %}
+    <button type="button" class="btn" style="margin-top:6px;font-size:12px;padding:5px 10px;"
+      data-coll="{{ collection }}" onclick="downloadCollection(this.dataset.coll)"
+      title="Download every item in this collection as a ZIP (optional convert/embed)">&#8681; Download collection</button>
+    {% endif %}
   </div>
   <div>
     <label>Sort</label><br>
@@ -4280,25 +4288,41 @@ function toggleSelectMode() {
     e.preventDefault(); e.stopPropagation();
   }, true);
 })();
+// The export dialog serves two entry points. _exportColl holds a collection name when the
+// download is "this whole collection", or null for a curated selection. Each opener sets it.
+var _exportColl = null;
 function downloadZip() {
-  // Opens the export-options dialog (format + embed); doExportDownload() does the POST.
+  // Curated SELECTION -> dialog -> doExportDownload() POSTs the picked media_ids.
   var sel = [...selGet()];
   if (!sel.length) return;
+  _exportColl = null;
   document.getElementById('export-n').textContent = sel.length + ' item' + (sel.length===1?'':'s');
   document.getElementById('export-modal').classList.add('open');
 }
+function downloadCollection(name) {
+  // Whole COLLECTION -> dialog -> doExportDownload() POSTs collection=<name>; the server
+  // resolves its full membership (every item, across pages), not the rendered checkboxes.
+  if (!name) return;
+  _exportColl = name;
+  document.getElementById('export-n').textContent = 'collection “' + name + '”';
+  document.getElementById('export-modal').classList.add('open');
+}
 function doExportDownload() {
-  var sel = [...selGet()];
-  if (!sel.length) return;
-  document.getElementById('export-modal').classList.remove('open');
   var fmt = document.getElementById('export-fmt').value;
   var embed = document.getElementById('export-embed').checked;
   var f = document.createElement('form');
   f.method = 'post'; f.action = '/export-zip';
-  sel.forEach(function(mid){
-    var i = document.createElement('input');
-    i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; f.appendChild(i);
-  });
+  if (_exportColl) {
+    var ic = document.createElement('input'); ic.type='hidden'; ic.name='collection'; ic.value=_exportColl; f.appendChild(ic);
+  } else {
+    var sel = [...selGet()];
+    if (!sel.length) return;
+    sel.forEach(function(mid){
+      var i = document.createElement('input');
+      i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; f.appendChild(i);
+    });
+  }
+  document.getElementById('export-modal').classList.remove('open');
   var ff = document.createElement('input'); ff.type='hidden'; ff.name='fmt'; ff.value=fmt; f.appendChild(ff);
   if (embed) { var fe = document.createElement('input'); fe.type='hidden'; fe.name='embed'; fe.value='1'; f.appendChild(fe); }
   document.body.appendChild(f); f.submit(); f.remove();
@@ -6287,6 +6311,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   <div class="detail-actions">
     {% if img_url %}
+    <a class="btn" href="{{ url_for('full_image', media_id=row.media_id) }}?dl=1">&#8681; Download</a>
     <a class="btn" href="{{ img_url }}" target="_blank">Open Full Size (local)</a>
     {% endif %}
     {% if row.url %}
@@ -8491,7 +8516,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         p = find_image_file(out_dir, media_id, row.get("filename") if row else "")
         if not p or not p.exists():
             return "Not found", 404
-        resp = send_from_directory(str(p.parent), p.name, max_age=31536000)
+        # ?dl=1 -> force a SAVE with the real filename (the detail page's plain Download);
+        # without it, inline (the lightbox displays the image). Same file either way.
+        dl = bool(request.args.get("dl"))
+        resp = send_from_directory(str(p.parent), p.name, max_age=31536000,
+                                   as_attachment=dl, download_name=(p.name if dl else None))
         resp.headers["Cache-Control"] = _IMMUTABLE
         return resp
 
@@ -8509,7 +8538,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         import shutil
         import tempfile
         import pixai_gallery_backup as core
-        ids = request.form.getlist("media_ids")
+        # Two entry points: a curated SELECTION (media_ids from the grid) or a whole
+        # COLLECTION by name. For a collection we resolve its FULL membership here in SQL
+        # (up to the same 2000 cap) rather than trusting the rendered checkboxes -- "download
+        # this collection" must mean every item in it, even across pages the grid never
+        # loaded. There is no "zip the entire catalog" path: absent both, ids is empty -> 404.
+        coll = (request.form.get("collection") or "").strip()
+        if coll:
+            rows_c, _ = query_catalog(db_path, collection=coll, page=1, page_size=2000)
+            ids = [r["media_id"] for r in rows_c]
+        else:
+            ids = request.form.getlist("media_ids")
         fmt = (request.form.get("fmt") or "original").lower()
         if fmt not in ("original", "png", "jpeg"):
             fmt = "original"
