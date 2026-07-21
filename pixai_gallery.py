@@ -2666,6 +2666,23 @@ body { background: var(--base); margin: 0; }
    .sb-root level (owner-visible refactor, deferred). */
 #jobs-fab  { z-index: 401 !important; }
 #jobs-tray { z-index: 402 !important; }
+
+/* Clearance under the ? help FAB, which is the cost of making it visible at all.
+   #eb-help-btn is position:fixed bottom:18px + 38px tall, so it floats over the
+   bottom-right ~56px of the viewport -- and on /loom the bottom-right IS the Generate
+   drawer (.lv-side.right is 560px wide). .mgd-go and <mg-cost-badge> sit in .lv-gen's
+   NORMAL FLOW, not a pinned footer, so once the drawer is scrolled to its end -- the
+   ordinary position right before you submit -- the FAB covered the right edge of the
+   Generate button and clipped the tail of the cost readout ("· saves ~84,000 credits",
+   the expiry sub-line). This project's standing rule is to report the real cost of every
+   generation, so a partly-obscured cost line is not an acceptable trade for a visible
+   help button.
+   Padding, not another z-index change: the FAB SHOULD stay on top, the content just
+   needs somewhere to scroll to. 64px = the FAB's 56px footprint + breathing room.
+   #root out-specifies the .lv-gen rule in master-storyboard.jsx's STYLES regardless of
+   which <style> React injects first -- and keeping it here rather than in the jsx means
+   the FAB and its clearance live together, and no bundle rebuild is needed. */
+#root .lv-gen { padding-bottom: 64px; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
@@ -4281,10 +4298,11 @@ function toggleBlur() {
   localStorage.setItem('gallery_privacy_blur', on ? '' : '1');
   applyBlur();
 }
-// Saved views live SERVER-SIDE (/api/view-presets -> out_dir/view_presets.json) so a
-// view saved at the desktop exists on the tablet -- same follows-you contract as the
-// skin choice. localStorage ('gallery_presets') is only read once as the legacy store:
-// any set found there is merged up (server names win) and then cleared.
+// Saved views live SERVER-SIDE (/api/view-presets -> out_dir/view_presets/<account>.json)
+// so a view saved at the desktop exists on the tablet. Scoped to YOUR account, not the
+// install: a saved view is a stored search, not a theme. localStorage ('gallery_presets')
+// is only read once as the legacy store: any set found there is merged up (existing names
+// win) and then cleared.
 var viewPresets = {};
 function legacyPresetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
 function renderPresets() {
@@ -10206,18 +10224,57 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     _view_presets_lock = threading.Lock()
 
-    def _view_presets_path():
+    # Saved views are PER-ACCOUNT, one file each under out_dir/view_presets/.
+    #
+    # They shipped install-wide (a single out_dir/view_presets.json) by analogy with
+    # /api/skin, which is the right analogy for a THEME and the wrong one here: a skin is
+    # a cosmetic preference, whereas a saved view is a stored search -- names and query
+    # strings that say what someone looks for in their own library. Moonglade is
+    # explicitly not single-user (the repo is public and has real external users), so on
+    # any install with more than one account, install-wide means every account reads, and
+    # can overwrite or delete, every other account's saved searches.
+    #
+    # For the case this feature was built for -- one owner, desktop and tablet, same
+    # account against one server -- per-account behaves identically. Nothing is lost.
+    def _view_presets_dir():
+        d = out_dir / "view_presets"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _view_presets_path(user):
+        from urllib.parse import quote
+        # quote(safe="") so a username can never escape the directory or collide: every
+        # path separator, dot and space becomes a percent-escape. Same technique as the
+        # Loom's kv store (_loom_kv_path).
+        return _view_presets_dir() / (quote(str(user), safe="") + ".json")
+
+    def _legacy_view_presets_path():
         return out_dir / "view_presets.json"
 
-    def _load_view_presets():
+    def _read_presets_file(p):
         try:
-            if _view_presets_path().exists():
-                data = json.loads(_view_presets_path().read_text(encoding="utf-8"))
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     return {str(k): v for k, v in data.items() if isinstance(v, str)}
         except (OSError, ValueError):
             pass
         return {}
+
+    def _load_view_presets(user):
+        """This account's saved views, falling back to the legacy shared file.
+
+        The fallback is deliberately READ-ONLY and needs no migration flag. An account
+        with no file of its own yet sees whatever the old shared file held -- exactly what
+        it saw before this change, so nothing disappears -- and the moment it saves, it
+        gets its own file and diverges. No "who owns the legacy set" question, and no
+        first-loader-claims-it race, which is the trap a migration flag would have walked
+        into. Once every account has saved once, out_dir/view_presets.json is inert and
+        can be deleted by hand."""
+        own = _view_presets_path(user)
+        if own.exists():
+            return _read_presets_file(own)
+        return _read_presets_file(_legacy_view_presets_path())
 
     def _ok_view_query(q):
         # Presets navigate via location.href = '/' + query on load. Requiring the
@@ -10229,16 +10286,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/view-presets", methods=["GET", "POST"])
     def api_view_presets():
         """Saved-view presets (the gallery's "Saved views…" dropdown): {name: query
-        string}, stored server-side (out_dir/view_presets.json) so a view saved at the
-        desktop exists on the tablet -- the same install-wide, follows-you-everywhere
-        contract as the skin choice, and the same trust tier (login: small cosmetic
-        state, no spend, nothing destructive). They lived in localStorage before this,
-        one private set per browser; the client pushes a legacy set up through
-        POST {merge} once, server names winning ties. POST {name, query} saves one;
-        POST {delete: name} removes one (no UI for it yet -- the verb exists so the
-        select's reserved delete affordance has something to call)."""
+        string}, stored server-side under out_dir/view_presets/ so a view saved at the
+        desktop exists on the tablet. Login tier (no spend, nothing destructive), and
+        scoped to ONE ACCOUNT -- see _view_presets_dir() for why a saved search is not
+        the same kind of thing as the install-wide skin choice. They lived in
+        localStorage before this, one private set per browser; the client pushes a legacy
+        set up through POST {merge} once, existing names winning ties. POST {name, query}
+        saves one; POST {delete: name} removes one (no UI for it yet -- the verb exists so
+        the select's reserved delete affordance has something to call).
+
+        The account comes from the SESSION and is never accepted from the request body:
+        a client that could name its own key could read and overwrite anyone's set, which
+        would give back the exact cross-account exposure the per-account split removes."""
+        user = str(session.get("user") or "")
+        if not user:
+            # Unreachable through the front door (/api/ is gated), so this is belt and
+            # braces -- but the per-account contract must fail closed rather than fall
+            # back to a shared or empty-named file if that ever stops being true.
+            return jsonify({"error": "authentication required"}), 401
         with _view_presets_lock:
-            presets = _load_view_presets()
+            presets = _load_view_presets(user)
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
                 if isinstance(body.get("merge"), dict):
@@ -10255,9 +10322,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     if not _ok_view_query(body.get("query")):
                         return jsonify({"error": "query must be a '?…' filter string"}), 400
                     presets[name] = body["query"]
-                tmp = _view_presets_path().with_suffix(".tmp")
+                dest = _view_presets_path(user)
+                tmp = dest.with_suffix(".tmp")
                 tmp.write_text(json.dumps(presets, indent=1), encoding="utf-8")
-                os.replace(tmp, _view_presets_path())   # atomic: a torn write can't eat the set
+                os.replace(tmp, dest)   # atomic: a torn write can't eat the set
             return jsonify({"presets": presets})
 
     def _params_and_nocard(core, p):
