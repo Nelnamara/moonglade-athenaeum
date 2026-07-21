@@ -395,15 +395,10 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 ### Documentation
 
-- **The published `wiki/` has a real catch-up backlog.** Four current areas are undocumented
-  there: **The Loom** (V2 shell + generation), the **Control Panel** (maintenance jobs, the
-  scheduler, Advanced sync options, Users), **Trophy Hall / achievements**, and
-  **branding / mascots**. `wiki/` today is only Backing-Up · Collections · Deleting · FAQ ·
-  Gallery · Generating · Health · How-It-Works · Setup · Troubleshooting · Trust-and-Safety. This
-  is a discrete deliverable, distinct from CLAUDE.md's go-forward "update the wiki on every
-  commit" rule — that rule is what makes the backlog a live obligation, not a nice-to-have.
-  (Surfaced 2026-07-20 by a DASHBOARD↔STATE reconciliation; the item had lived only in the
-  git-ignored local dashboard.)
+- **`wiki/` is still missing a branding / mascots page.** The Loom, Control Panel, and Trophy
+  Hall pages landed 2026-07-21, closing three of the four gaps a DASHBOARD↔STATE reconciliation
+  surfaced 2026-07-20. Branding/mascots (marks, banner marks, the mascot chain, the Desktop
+  shortcut writer) is the one still undocumented in `wiki/`.
 
 ### The Loom — other
 - **Opt-in larger text/button scale** covering *both* the V2 shell's side panels and the
@@ -416,9 +411,6 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
-- **2 video models ship disabled** in `<mg-generate-drawer>`'s 7-model roster — **V3.0
-  Flash** and **V2.7** — pending a `--dump-params` capture of their real submit shape
-  (`static/mg-generate-drawer.js`).
 - **The Prompt textarea is the one piece deliberately held back, owner's explicit call
   2026-07-18:** it is still the **only write site for `c.prompt` in the entire app** (no Deep
   Focus equivalent) — a "base" string `shotText()` keeps recomposing alongside every later
@@ -431,19 +423,11 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   simplification, or give base-prompt editing a new home in Deep Focus (mirroring exactly how
   Deep Focus stayed the sole remaining way to set a card to V2V after Mode's own chips were
   deleted). Not a blocker on anything else shipping.
-- The opt-in pre-built Loom bundle (`/loom?bundle=1`, `loom/dist/master-storyboard.bundle.js`,
-  `npm run build` in `loom/`) must be rebuilt whenever `master-storyboard.jsx` changes, or that
-  path keeps serving whatever bug the default Babel-in-browser path already fixed — flagged by
-  an adversarial review 2026-07-18, rebuilt as part of the Mode fix landing. Not yet on any
-  automated rebuild step; still a manual reminder.
-- `<mg-cost-badge>` is **built and verified** (`static/mg-cost-badge.js` + its harness page) but
-  **mounted nowhere in the app**. Six live `/api/price` consumers still each hand-roll their own
-  cost display: the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`, shared by the gallery
-  Video tab and the Loom), three in `pixai_gallery.py` (Image, Edit, and the picker path), and the
-  Loom's `priceShot` + `confirmSpend` — with `loom/src/loom-core.js` owning the aggregate summary
-  behind the cost-to-finish pill. Consolidating them is the open work, and it is a spend-safety
-  surface: six copies of "is this free or does it cost 27,500 credits" is the drift shape this
-  codebase has been bitten by before.
+- `<mg-cost-badge>` now covers **four of six** hand-rolled cost displays: the drawer's
+  `.mgd-cost` (`static/mg-generate-drawer.js`, shared by the gallery Video tab and the Loom) and
+  three in `pixai_gallery.py` (Image, Edit, and the picker path) — consolidated 2026-07-21. Still
+  separate: the Loom's own `priceShot` + `confirmSpend` confirm dialog, and
+  `loom/src/loom-core.js`'s aggregate summary behind the cost-to-finish pill.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
 
@@ -557,9 +541,6 @@ marks 4/12/62/63/74; and **`mg-notify.js`'s mascot paths are consistent** — al
 `/branding/mascots/`. The genuine gap there is that no `login_nel.png` art exists, so the login
 page's `onerror` chain degrades to `gen_nel.png` as designed.*
 
-- **Escape doesn't close the Loom's project or Export menus**, and their backdrop is a
-  full-viewport `pointer-events:auto` veil — so the entire app is unclickable until the user
-  happens to click outside. Deep Focus's own Escape handler works correctly in the same app.
 - **Service-worker registration fails on the login page.** `/sw.js` is gated, so a signed-out
   page gets a redirect and Chrome refuses a redirected worker script. It registers on the next
   navigation after signing in; the thumbnail cache simply arms late.
@@ -615,10 +596,6 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
 
 ## Later epics
 
-- **Dead-CSS pruning in the Loom.** The `STYLES` block still carries classic-only `sb-*`
-  rules (e.g. `.sb-top`, `.sb-card`) alongside the live shared ones (`.sb-shotprev`,
-  `.sb-frame*`, `ProjectSwitcher`, the export/picker overlays) — safe to prune when
-  convenient, not a blocker.
 - **Loom tooling (banked).** Preact remains an optional later spike; Svelte and
   hand-rolled vanilla+signals are rejected for a solo-dev migration of untested code;
   canvas is not needed for the reel at this scale. Docking (Dockview / FlexLayout) stays a
