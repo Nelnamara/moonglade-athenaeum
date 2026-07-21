@@ -175,21 +175,32 @@
   };
 
   // Full site roster, in PixAI's real model-picker order -- newest first, V2.7 last
-  // (private/GENERATOR_SURFACE.md per-model matrix, owner screenshots 2026-07-18; our
-  // V4.0 pair was previously reversed). Only the five with a real numeric modelId in
-  // VIDEO_MODELS (pixai_gallery_backup.py) are selectable -- PixAI resolves "Unknown or
-  // removed model" without one, and no free card can match. The other two ship
-  // visible-but-disabled so the roster is honest about what exists without offering a
-  // guaranteed-fail submit; enable once each gets one --dump-params capture (free,
-  // read-only) off a real recovered task.
+  // (private/VIDEO_MODELS.md `/config/tools` dump, owner screenshots 2026-07-18; our
+  // V4.0 pair was previously reversed).
+  //
+  // All seven are selectable as of 2026-07-21. V2.7 and V3.0 Flash shipped disabled on the
+  // theory that a submit needs a numeric top-level modelId from VIDEO_MODELS, which we had
+  // for only five. Two free --dump-params captures off real recovered tasks disproved it:
+  // both carried modelId 1648918127446573124 -- "Moonbeam v1.0", an IMAGE checkpoint, i.e.
+  // whatever the site's image picker happened to hold -- and PixAI rendered them anyway.
+  // Three read-only price probes then settled it: v2.7 and v3.0.1 priced DIFFERENTLY
+  // (~56,000 vs ~44,800 for 10s) off an IDENTICAL modelId, and dropping modelId entirely
+  // priced the same. `i2vPro.model` is what resolves the engine; the numeric modelId does
+  // not. Neither is card-eligible (the free cards are V4.0-specific), so the cost badge
+  // correctly reads "no card" -- that is honest, not a failure.
+  //
+  // 'v3.0f' was never a real value: whoever added V3.0 Flash took its tags from
+  // private/VIDEO_MODELS.md's `v3.0.1` row but typed the value as a guess. PixAI's own task
+  // detail for 2036215858630781665 reads "Model Used: V3.0 Flash" and its submit says
+  // `model: "v3.0.1"`.
   var MODELS = [
     { value: 'v4.0', label: 'V4.0 Preview', caps: ['multi-ref', 'audio', '15s', 'top quality', '~2.5× cost'] },
     { value: 'v4.0.1', label: 'V4.0 Lite Preview', caps: ['multi-ref', 'audio', '15s', 'end-frame'] },
     { value: 'v3.2', label: 'V3.2', caps: ['audio', 'prompt-following'] },
     { value: 'v3.0.2', label: 'V3.0 Lite', caps: ['complex motion', 'cheap'] },
     { value: 'v3.0', label: 'V3.0 (High Consistency)', caps: ['high-consistency', 'action presets', 'start/end'] },
-    { value: 'v3.0f', label: 'V3.0 Flash', caps: ['multi-shot'], disabled: true },
-    { value: 'v2.7', label: 'V2.7 (High Dynamics)', caps: ['camera moves', 'dynamic'], disabled: true }
+    { value: 'v3.0.1', label: 'V3.0 Flash', caps: ['multi-shot', 'hires', 'fastest', 'no card'] },
+    { value: 'v2.7', label: 'V2.7 (High Dynamics)', caps: ['camera moves', 'dynamic', 'no card'] }
   ];
 
   // Per-model reference/frame-mode gating -- which of our i2v/flf/r2v vmode buttons a given
@@ -204,9 +215,16 @@
     'v3.2': ['i2v', 'flf'],
     'v3.0.2': ['i2v', 'flf'],
     'v3.0': ['i2v', 'flf'],
-    'v3.0f': ['i2v'],
+    'v3.0.1': ['i2v'],
     'v2.7': ['i2v']
   };
+
+  // Per-model MAX duration. 15s is exclusive to the v4.0 pair (private/VIDEO_MODELS.md:
+  // "Duration: 5 / 10 for all; 15s exclusive to v4.0 series"). Before V2.7 / V3.0 Flash
+  // were selectable this map wasn't needed -- every enabled model happened to allow 15s.
+  // Enabling them without it would newly expose a 15s option that PixAI does not support
+  // on those engines, at ~84,000 credits for a V2.7 clip with no card to cover it.
+  var MODEL_MAXDUR = { 'v4.0': 15, 'v4.0.1': 15 };   // absent => 10s cap
 
   // Matches the server's VIDEO_DURATIONS / _snap_video_duration exactly -- prefill() snaps
   // to the nearest of these so an out-of-range shot duration (e.g. a hand-typed "8") can
@@ -444,6 +462,18 @@
         b.style.display = allowed.indexOf(b.getAttribute('data-vmode')) === -1 ? 'none' : '';
       });
       if (allowed.indexOf(this._mode) === -1) this._setMode(allowed[0]);
+
+      // Duration options past this model's cap are disabled AND hidden -- hiding alone is
+      // not enough, a hidden <option> stays keyboard-selectable and still submits. Setting
+      // .value programmatically fires no 'change', so this never emits a spurious
+      // mg-duration-commit (that event is contractually user-initiated only).
+      var maxDur = MODEL_MAXDUR[this._model.value] || 10;
+      this._dur.querySelectorAll('option').forEach(function (o) {
+        var over = (+o.value) > maxDur;
+        o.disabled = over;
+        o.hidden = over;
+      });
+      if ((+this._dur.value) > maxDur) this._dur.value = String(maxDur);
     }
 
     // ---- primary (image) bank rendering: i2v/flf's _slots, r2v's _imgSlots --------
