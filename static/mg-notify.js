@@ -712,12 +712,30 @@
       register(id, label);
       poll(id, cb);
     }
-    function poll(id, cb){
+    // 6h ceiling, matching the Loom's POLL_CEILING_MS. This loop had NONE: a task
+    // that never reached a terminal phase re-polled every 3s forever, and so did a
+    // persistently failing fetch, because the .catch re-scheduled too. A browser
+    // crawl caught it pinned on "Rendering under the eclipse..." with the Go button
+    // permanently disabled while the tab hammered the server indefinitely.
+    // Reports 'stalled' rather than 'failed': elapsed time is not evidence the task
+    // died, only that this tab has stopped watching. A reload picks it up again.
+    var POLL_CEILING_MS = 6 * 60 * 60 * 1000;
+    function poll(id, cb, startedAt){
+      var t0 = startedAt || Date.now();
+      function again(ms){
+        if(Date.now() - t0 > POLL_CEILING_MS){
+          if(cb) cb('stalled', {phase:'stalled', error:'Stopped checking after 6h — the task may '+
+            'still be running. Reload to resume watching, or check it on pixai.art.'});
+          if(window.JobsCard) JobsCard.refresh();
+          return;
+        }
+        setTimeout(function(){ poll(id, cb, t0); }, ms);
+      }
       fetch('/api/task-status?task_id='+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){
         if(d.phase==='done'){ if(cb) cb('done', d); if(window.JobsCard) JobsCard.refresh(); }
         else if(d.phase==='failed'){ if(cb) cb('failed', d); if(window.JobsCard) JobsCard.refresh(); }
-        else { if(cb) cb('running', d); setTimeout(function(){ poll(id, cb); }, 3000); }
-      }).catch(function(){ setTimeout(function(){ poll(id, cb); }, 4000); });
+        else { if(cb) cb('running', d); again(3000); }
+      }).catch(function(){ again(4000); });
     }
     return {track:track, register:register};
   })();

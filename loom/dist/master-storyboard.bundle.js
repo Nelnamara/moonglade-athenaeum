@@ -808,7 +808,15 @@ ${"=".repeat(48)}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
-.lv-top button,.lv-top label{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+/* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
+   anchor, not a button, so a button-only selector left it as an unstyled browser link --
+   rgb(0,0,238) on the dark bar, a measured 1.69:1 against a 4.5:1 floor, and the only way
+   out of the Loom. Found by a browser crawl; invisible to any DOM/network check because
+   the link works perfectly, it is just illegible.
+   NB: this whole block is a JS template literal -- no backticks in these comments. */
+.lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
+.lv-top a{text-decoration:none;display:inline-block;}
+.lv-top a:hover{border-color:var(--accent);}
 .lv-top .lv-close{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
@@ -1595,7 +1603,7 @@ ${"=".repeat(48)}
           openPick,
           onPatch: (p) => patchFrame("closeFrame", p)
         }
-      )), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t))), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement("mg-generate-drawer", { ref: bindGenDrawer, style: { display: tab === "Video" ? "" : "none" } }), videoTrailer);
+      )), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement("mg-generate-drawer", { ref: bindGenDrawer, style: { display: tab === "Video" ? "" : "none" } }), videoTrailer);
     }
     const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), /* @__PURE__ */ React.createElement("details", { className: "lv-look", open: !!(project.look || "").trim() }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F3A8} Project look", (project.look || "").trim() ? "" : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 a style line added to every shot")), /* @__PURE__ */ React.createElement(
       "textarea",
@@ -2210,6 +2218,32 @@ Your currently-open board is left untouched.`)) return;
         return null;
       }
     };
+    const confirmSpend = async (priceBody, label) => {
+      let pr = null;
+      try {
+        const r = await fetch("/api/price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(priceBody)
+        });
+        pr = await r.json();
+      } catch {
+        pr = null;
+      }
+      if (pr && pr.free) return true;
+      if (pr && !pr.free && pr.cost != null) {
+        return window.confirm(`${label}
+
+No free card covers it \u2014 it will spend ~${pr.cost.toLocaleString()} credits.
+
+Generate anyway?`);
+      }
+      return window.confirm(`${label}
+
+Couldn't verify the cost or free-card coverage \u2014 it may spend credits.
+
+Generate anyway?`);
+    };
     const generateShot = async (entry, opts = {}) => {
       const c = entry.c;
       const p = shotPayload2(entry);
@@ -2335,15 +2369,27 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         });
       }, "video");
     };
-    const pollImg = (cardId, tid) => {
+    const pollTaskWithCeiling = (tid, setState, cardId) => {
+      const startedAt = Date.now();
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
         const cls = classifyTaskStatus(d);
-        if (cls.phase === "done") setGenImgState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-        else if (cls.phase === "failed") setGenImgState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        else setTimeout(tick, 4e3);
-      }).catch(() => setTimeout(tick, 5e3));
+        if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+        else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+        else again(4e3);
+      }).catch(() => again(5e3));
+      const again = (ms) => {
+        if (Date.now() - startedAt > POLL_CEILING_MS) {
+          setState((s) => ({ ...s, [cardId]: {
+            phase: "error",
+            msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS) + " \u2014 the task may still be running; check it on pixai.art (task " + String(tid).slice(-6) + ")"
+          } }));
+          return;
+        }
+        setTimeout(tick, ms);
+      };
       setTimeout(tick, 2500);
     };
+    const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
     const genImage = async (entry) => {
       const c = entry.c;
       const prompt = (c.imgPrompt || "").trim();
@@ -2355,9 +2401,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter an image prompt" } }));
         return;
       }
-      if (!window.confirm(`Generate a reference image for ${c.title || "this shot"}?
-
-A matching free card auto-applies; otherwise it spends credits.`)) return;
+      if (!await confirmSpend({ model_id: imgModel.model_id, prompt }, `Generate a reference image for ${c.title || "this shot"}?`)) return;
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
       try {
         const r = await fetch("/api/generate", {
@@ -2387,18 +2431,10 @@ A matching free card auto-applies; otherwise it spends credits.`)) return;
       else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
       setGenImgState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
     };
-    const runGen = async (setState, cardId, endpoint, body, confirmMsg) => {
-      if (confirmMsg && !window.confirm(confirmMsg)) return;
+    const runGen = async (setState, cardId, endpoint, body, priceBody, label) => {
+      if (priceBody && !await confirmSpend(priceBody, label)) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
-      const poll = (tid) => {
-        const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
-          const cls = classifyTaskStatus(d);
-          if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-          else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-          else setTimeout(tick, 4e3);
-        }).catch(() => setTimeout(tick, 5e3));
-        setTimeout(tick, 2500);
-      };
+      const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
         const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const d = await r.json();
@@ -2435,14 +2471,14 @@ A matching free card auto-applies; otherwise it spends credits.`)) return;
         setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "describe the edit" } }));
         return;
       }
+      const editBody = { source: src, instruction, edit_model: "edit-pro" };
       runGen(
         setGenEditState,
         c.id,
         "/api/edit",
-        { source: src, instruction, edit_model: "edit-pro" },
-        `Edit the open frame of ${c.title || "this shot"}?
-
-An Edit-Pro card auto-applies; otherwise it spends credits.`
+        editBody,
+        { mode: "edit", ...editBody },
+        `Edit the open frame of ${c.title || "this shot"}?`
       );
     };
     const genRef = (entry) => {
@@ -2457,14 +2493,14 @@ An Edit-Pro card auto-applies; otherwise it spends credits.`
         setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter a prompt" } }));
         return;
       }
+      const refBody = { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" };
       runGen(
         setGenRefState,
         c.id,
         "/api/edit",
-        { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" },
-        `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?
-
-A Reference-Pro card auto-applies; otherwise it spends credits.`
+        refBody,
+        { mode: "edit", ...refBody },
+        `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`
       );
     };
     const batchGenerate = async (entries) => {

@@ -314,3 +314,147 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
     core._download_video_task(object(), {}, "T2", tmp_path, SimpleNamespace(name_length=60), {})
     assert called == [], "poster present -> ffmpeg fallback should be skipped"
     assert (tmp_path / "gallery" / "thumbs" / "V2.jpg").exists()
+
+
+# ---- gallery references must be uploaded, not passed through (regression) ----
+
+def test_gallery_catalog_ref_is_uploaded_not_passed_through(tmp_path, monkeypatch):
+    """PRODUCTION BUG, 2026-07-20: every generation started from the gallery failed with
+    PixAI's invalid_media_id / invalid_reference_image_media_id and a full refund, while
+    the same thing from the Loom worked.
+
+    A media_id in our catalog identifies a generation OUTPUT, and PixAI will not accept
+    one as a generation INPUT. It is NOT expiry -- both a month-old and a same-day id
+    resolve fine through GET /v1/media -- it is media kind: readable is not usable-as-input.
+
+    The Loom escaped it by accident: it sends data: thumbnails, which the route already
+    uploaded, yielding an upload-kind id. The gallery sends bare catalog ids, so it could
+    never reach that branch.
+
+    Pins the fix: a catalog id whose file we hold on disk must be uploaded, and the
+    UPLOADED id is what reaches PixAI."""
+    from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+
+    (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
+    img = tmp_path / "2025-01" / "shot_733917871331404290.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "733917871331404290", "filename": "2025-01/shot_733917871331404290.png",
+        "created_at": "2026-06-18T05:24:56Z"}])
+
+    uploaded, submitted = [], {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "upload_media",
+                        lambda session, path, **k: uploaded.append(str(path)) or "999000111222")
+    monkeypatch.setattr(core, "submit_generation",
+                        lambda session, params: submitted.update(params) or "task-1")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/loom/generate", json={
+        "mode": "I2V", "prompt": "test", "images": ["733917871331404290"], "duration": 5})
+    assert r.status_code == 200, r.get_data(as_text=True)
+
+    assert uploaded, "the catalog reference was passed through instead of uploaded"
+    assert img.name in uploaded[0]
+    # The UPLOADED id must be what PixAI receives -- not the catalog id that it rejects.
+    assert submitted["i2vPro"]["mediaId"] == "999000111222"
+
+
+def test_gallery_ref_upload_is_cached_per_media_id(tmp_path, monkeypatch):
+    """Referencing the same image twice in one R2V must upload it once, not per slot."""
+    from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+
+    (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
+    img = tmp_path / "2025-01" / "a_555.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "555", "filename": "2025-01/a_555.png", "created_at": "2026-06-18T05:24:56Z"}])
+
+    calls, submitted = [], {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "upload_media",
+                        lambda session, path, **k: calls.append(1) or "777")
+    monkeypatch.setattr(core, "submit_generation",
+                        lambda session, params: submitted.update(params) or "t")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/loom/generate", json={
+        "mode": "R2V", "prompt": "x", "images": ["555", "555"], "duration": 5})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert len(calls) == 1, "same media_id uploaded {} times".format(len(calls))
+    assert submitted["referenceVideo"]["referenceImageMediaIds"] == ["777", "777"]
+
+
+def _seed_one(tmp_path, mid="733917871331404290"):
+    from pixai_gallery import CATALOG_FIELDS, save_catalog
+    (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "2025-01" / ("s_%s.png" % mid)).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": mid, "filename": "2025-01/s_%s.png" % mid,
+        "created_at": "2026-06-18T05:24:56Z"}])
+    return mid
+
+
+def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
+    """The first fix for the invalid_media_id bug patched ONLY the video route, leaving
+    /api/enhance, /api/edit and /api/fix silently broken the same way -- the owner's next
+    enhance died on it. PixAI refuses a generation-OUTPUT id as an INPUT on every one of
+    these paths, so all four must resolve through _input_media_id.
+
+    Parametrised deliberately: a new input endpoint that forgets to resolve is the exact
+    way this returns, and this fails by name when it does."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = _seed_one(tmp_path)
+    seen = {}
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "upload_media", lambda s, path, **k: "999000111222")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "submit_generation",
+                        lambda s, params: seen.update(params=params) or "t1")
+    monkeypatch.setattr(core, "submit_fixer",
+                        lambda s, src, boxes: seen.update(fix_src=src) or "t2")
+    monkeypatch.setattr(core, "build_panelplugin_parameters",
+                        lambda src, wid: seen.update(enh_src=src) or {"p": 1})
+
+    cli = login_test_client(create_app(tmp_path))
+
+    # 1. video
+    assert cli.post("/api/loom/generate", json={"mode": "I2V", "prompt": "x",
+                    "images": [mid], "duration": 5}).status_code == 200
+    assert seen["params"]["i2vPro"]["mediaId"] == "999000111222"
+
+    # 2. enhance -- the path the owner's stuck job died on
+    cli.post("/api/enhance", json={"source": mid, "workflow_id": "wf1"})
+    assert seen.get("enh_src") == "999000111222", "enhance passed the raw catalog id"
+
+    # 3. fix
+    cli.post("/api/fix", json={"source": mid, "boxes": [{"x": 1, "y": 1, "w": 2, "h": 2}]})
+    assert seen.get("fix_src") == "999000111222", "fix passed the raw catalog id"
+
+    # 4. edit
+    seen.pop("params", None)
+    cli.post("/api/edit", json={"source": mid, "instruction": "make it night"})
+    chat = (seen.get("params") or {}).get("chat") or {}
+    ids = str(chat)
+    assert "999000111222" in ids and mid not in ids, "edit passed the raw catalog id"
+
+
+def test_pricing_never_uploads(tmp_path, monkeypatch):
+    """/api/price only needs the SHAPE to compute a cost. Resolving there would upload
+    the same file over and over while the user types, so _edit_params_from_payload
+    takes `session` only on the real submit path."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = _seed_one(tmp_path, "555111222333")
+    uploads = []
+    monkeypatch.setattr(core, "upload_media", lambda *a, **k: uploads.append(1) or "nope")
+    cli = login_test_client(create_app(tmp_path))
+    cli.post("/api/price", json={"mode": "edit", "source": mid, "instruction": "x"})
+    cli.post("/api/price", json={"mode": "I2V", "images": [mid], "duration": 5})
+    assert not uploads, "pricing uploaded {} time(s) -- it must not".format(len(uploads))

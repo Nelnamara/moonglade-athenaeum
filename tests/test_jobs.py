@@ -279,3 +279,83 @@ def test_jobs_endpoints_are_localhost_only(tmp_path):
     assert _lan(cli, "post", "/api/jobs/dismiss", json={"job_id": "j1"}).status_code == 401
     # ...and nothing was written by those rejected calls
     assert [j["job_id"] for j in core.read_jobs(tmp_path)] == ["j1"]
+
+
+def test_reaper_accepts_what_generation_status_actually_returns(tmp_path):
+    """THE BUG THIS EXISTS FOR: resolve_orphan_jobs compares status_fn's return against
+    ("done","failed"), and every test above stubs status_fn with the documented STRING.
+    The real web caller passed core.generation_status(...) straight through, which
+    returns {status, phase, paid_credit} -- a dict is never in that tuple, so the reaper
+    silently resolved nothing and returned 0 on every run while looking perfectly
+    healthy. Nothing caught it: the unit tests honoured a contract the only real caller
+    broke, and the failure mode was "quietly does nothing", which no assertion was
+    watching for. Feed it the REAL shape and require the job to actually resolve."""
+    core.append_job_event(tmp_path, "2035858031750209359", status="running",
+                          type="generate", label="Enhanced")
+
+    def _status(tid):                       # exactly generation_status()'s return shape
+        return {"status": "completed", "phase": "done", "paid_credit": 0}
+
+    n = core.resolve_orphan_jobs(tmp_path, _status)
+    assert n == 1, "reaper ignored generation_status()'s real dict return"
+    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    assert by_id["2035858031750209359"]["status"] == "done"
+
+
+def test_reaper_still_leaves_running_jobs_alone_in_dict_form(tmp_path):
+    """The dict tolerance must not turn every lookup terminal -- a genuinely running
+    task stays running."""
+    core.append_job_event(tmp_path, "777", status="running", type="generate")
+    n = core.resolve_orphan_jobs(
+        tmp_path, lambda tid: {"status": "processing", "phase": "running"})
+    assert n == 0
+    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["777"]["status"] == "running"
+
+
+def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypatch):
+    """A task PixAI calls 'done' whose outputs carry no media is TERMINAL -- it produced
+    nothing and never will. /api/task-status used to let that fall into the catch-all
+    `except`, which deliberately withholds a terminal event so a transient 5xx can't
+    brick the card with a false failure. Correct for a blip, wrong here: the job spun on
+    'running' forever. (Real case: an enhance submitted with an unusable input media id
+    sat at 'running' while PixAI considered it long finished.) EmptyOutputsError exists
+    solely to tell those two apart at this catch site."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "555", "type": "generate", "label": "Enhanced"})
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "completed", "phase": "done",
+                                        "paid_credit": 0})
+
+    def _boom(*a, **k):
+        raise core.EmptyOutputsError("task completed but no media ids found")
+    monkeypatch.setattr(core, "collect_generation", _boom)
+
+    r = cli.get("/api/task-status?task_id=555")
+    assert r.get_json()["phase"] == "failed"
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["555"]
+    assert job["status"] == "failed", "empty-output task left spinning at 'running'"
+
+
+def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeypatch):
+    """The other half of the same contract, and the reason a bare `except PixAIError`
+    would have been the wrong fix: an ordinary error during collect (5xx/429/timeout,
+    which surfaces as a plain PixAIError) must still leave the job at its last-known
+    state, because the task has probably succeeded and a sticky 'failed' would brick the
+    card. Only EmptyOutputsError is terminal."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "556", "type": "generate", "label": "Enhanced"})
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "completed", "phase": "done",
+                                        "paid_credit": 0})
+
+    def _blip(*a, **k):
+        raise core.PixAIError("503 Service Unavailable")
+    monkeypatch.setattr(core, "collect_generation", _blip)
+
+    cli.get("/api/task-status?task_id=556")
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["556"]
+    assert job["status"] == "running", "a transient blip wrote a sticky false failure"

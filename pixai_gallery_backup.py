@@ -36,7 +36,7 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 import argparse
 import csv
@@ -93,6 +93,26 @@ except Exception:
 
 class PixAIError(Exception):
     """Raised instead of sys.exit() so the GUI and tests can catch errors cleanly."""
+
+
+class EmptyOutputsError(PixAIError):
+    """PixAI reported the task TERMINAL (phase 'done') but its outputs carry no
+    media -- the task produced nothing and never will.
+
+    This exists to be distinguishable from an ordinary PixAIError at a catch
+    site, NOT to carry different information. The web poller's collect step has
+    to tell two failures apart that look identical through a bare `except`:
+
+      * a transient 5xx/429/timeout, where the task is probably fine and writing
+        a terminal 'failed' would brick the Jobs card with a sticky false
+        failure for a generation that actually succeeded; and
+      * this, where the task is genuinely over and empty, and NOT writing a
+        terminal event leaves the job spinning on 'running' forever.
+
+    Before this split the poller treated both as the first case, so a real
+    empty-output task (e.g. one submitted with an unusable input media id) hung
+    in the Jobs card indefinitely. Subclasses PixAIError so every existing
+    `except PixAIError` keeps catching it unchanged."""
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +360,12 @@ def list_web_users():
 # off the keyboard, and the perennial favourites.
 MIN_WEB_PASSWORD_LEN = 8
 
+# Usernames are bounded so a pathological one can't wreck the account-list layout
+# (a 300-char name pushed a live Remove button ~980px outside its card) or bloat
+# config.json. 64 is generous for a display name yet safely short; the account row
+# also truncates in CSS as a second line of defence for any legacy over-long name.
+MAX_WEB_USERNAME_LEN = 64
+
 _COMMON_PASSWORDS = frozenset({
     "password", "password1", "passw0rd", "12345678", "123456789", "1234567890",
     "qwertyui", "qwerty123", "letmein1", "welcome1", "iloveyou", "admin123",
@@ -375,6 +401,22 @@ def password_problem(password):
     return None
 
 
+def username_problem(username):
+    """Return a human-readable reason `username` is unacceptable for a web-login
+    account, or None if it passes. Mirrors password_problem(): one policy, rendered
+    verbatim at every entry point (the /login bootstrap form, the Panel's
+    /api/users/add, and --add-web-user), so the rule can't drift between them.
+    Callers strip first; this assumes an already-stripped value but tolerates one."""
+    u = (username or "").strip()
+    if not u:
+        return "Username is required."
+    if len(u) > MAX_WEB_USERNAME_LEN:
+        return "Username must be at most {} characters.".format(MAX_WEB_USERNAME_LEN)
+    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in u):
+        return "Username can't contain control characters."
+    return None
+
+
 def add_or_update_web_user(username, password):
     """Hash `password` (werkzeug, scrypt) and add/update `username` in config.json's
     AUTH_USERS. Only the hash ever touches disk -- the plaintext password passed in
@@ -391,6 +433,11 @@ def add_or_update_web_user(username, password):
     username = (username or "").strip()
     if not username:
         raise ValueError("username must not be empty")
+    # Hard backstop for EVERY writer, including the --add-web-user CLI path that
+    # doesn't go through username_problem() -- length is enforced at the one place
+    # the account actually gets written, so nothing can persist an over-long name.
+    if len(username) > MAX_WEB_USERNAME_LEN:
+        raise ValueError("username must be at most {} characters".format(MAX_WEB_USERNAME_LEN))
     if not password:
         raise ValueError("password must not be empty")
     with _accounts_lock:
@@ -423,6 +470,8 @@ def add_web_user_if_new(username, password):
     username = (username or "").strip()
     if not username:
         raise ValueError("username must not be empty")
+    if len(username) > MAX_WEB_USERNAME_LEN:          # same backstop as add_or_update_web_user
+        raise ValueError("username must be at most {} characters".format(MAX_WEB_USERNAME_LEN))
     if not password:
         raise ValueError("password must not be empty")
     with _accounts_lock:
@@ -911,6 +960,15 @@ def resolve_orphan_jobs(out_dir, status_fn):
             phase = status_fn(jid)
         except Exception:                          # noqa: BLE001 -- one bad lookup must not stop the rest
             continue
+        if isinstance(phase, dict):
+            # Tolerate a caller handing us generation_status()'s whole
+            # {status, phase, paid_credit} dict rather than the phase string. A real
+            # caller did exactly that and this loop silently matched nothing for every
+            # job, every time. Raising instead would not have helped -- the per-job
+            # `except Exception` above swallows errors by design, so a contract
+            # violation here is INVISIBLE rather than loud. Accepting both shapes is
+            # what actually makes that failure mode impossible.
+            phase = phase.get("phase")
         if phase in _JOBS_TERMINAL:
             append_job_event(out_dir, jid, status=phase,
                              error=("task " + phase if phase == "failed" else None))
@@ -3368,7 +3426,10 @@ def run_import_local(args):
         save_catalog(db_path, rows)
     print("Imported {} new local file(s){}; {} already cataloged.".format(
         made, " (copied into the backup)" if external else "", skipped))
-    return {"imported": made, "skipped": skipped}
+    # media_ids of the rows created THIS run -- the web importer uses them to tag an
+    # optional collection; CLI callers that only read imported/skipped are unaffected.
+    return {"imported": made, "skipped": skipped,
+            "media_ids": [r["media_id"] for r in rows]}
 
 
 _GEN_MUTATION = ("mutation createGenerationTask($parameters: JSONObject!) {"
@@ -4037,7 +4098,7 @@ def run_generate(args):
             mids.append(str(v["mediaId"]))
     mids = list(dict.fromkeys(mids))
     if not mids:
-        raise PixAIError("task completed but no media ids found")
+        raise EmptyOutputsError("task completed but no media ids found")
 
     # Prefer the task's actual metadata (authoritative, and the only source when
     # recovering by --task-id); fall back to the params we submitted.
@@ -4107,7 +4168,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     generically. Returns the list of saved file paths."""
     outs, shared = video_outputs(result)
     if not outs:
-        raise PixAIError("video task completed but no video outputs found")
+        raise EmptyOutputsError("video task completed but no video outputs found")
     detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
     sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
@@ -4215,7 +4276,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     outputs = result.get("outputs") or {}
     media = _task_image_media(outputs)
     if not media:
-        raise PixAIError("task completed but no media ids found")
+        raise EmptyOutputsError("task completed but no media ids found")
     from pixai_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     img_dir = out / "images"
@@ -4670,7 +4731,7 @@ def run_edit_image(args):
         mids.append(str(m))
     mids = list(dict.fromkeys(mids))
     if not mids:
-        raise PixAIError("edit task completed but no media ids found")
+        raise EmptyOutputsError("edit task completed but no media ids found")
 
     fm = extract_full_meta(result)
     chat = (params.get("chat") or {}) if isinstance(params, dict) else {}
@@ -6380,10 +6441,12 @@ def main():
                          "poster-less videos via ffmpeg, and sweep orphaned thumbs. "
                          "Overwrites in place -- the gallery never goes blank.")
     ap.add_argument("--sync", action="store_true",
-                    help="One-shot sync: incremental pull WITH full metadata "
-                         "(equivalent to --update --full-meta), then re-resolve any "
-                         "unlabeled model names, then fill any catalog rows still "
-                         "missing prompts/seeds/models. Idempotent.")
+                    help="One-shot sync, in five steps: incremental pull WITH full metadata "
+                         "(equivalent to --update --full-meta), re-resolve any unlabeled "
+                         "model names, fill any catalog rows still missing "
+                         "prompts/seeds/models, build any missing preview thumbnails, and "
+                         "reconcile rows deleted on PixAI. Every step is idempotent, so "
+                         "re-running on a clean catalog costs almost nothing.")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="print timestamped diagnostics (per-page fetch, per-image "
                          "resolve/download timing, disk-scan time) so you can see what a "

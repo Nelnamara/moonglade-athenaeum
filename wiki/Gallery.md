@@ -9,8 +9,8 @@ python pixai_gallery.py --out pixai_backup --host 0.0.0.0 --https   # LAN + PWA
 python pixai_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
 ```
 
-…or use the GUI **Gallery** tab (Launch/Stop, port, LAN, HTTPS). It's a viewer of
-`catalog.db` + your files, but can also make authenticated API calls for prune /
+…or double-click **`Serve Gallery.pyw`** for a no-console launcher. The gallery is a
+viewer of `catalog.db` + your files, but can also make authenticated API calls for prune /
 reconcile (see [Deleting & Sync](Deleting)).
 
 ## The header
