@@ -8874,8 +8874,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # off the ETag, and it never blocks paint (the cached bytes render immediately).
         # LAN viewers over plain http get no service worker at all (secure-context only) --
         # for them the route's short max-age + ETag is what bounds staleness.
+        # v4: `resp.ok` is NOT a sufficient cache guard, because a GATED response here is
+        # not a failure -- it is a 200. /thumbs/, /img/ and /full/ are not under
+        # _JSON_GATE_PREFIXES, so an unauthorized request for one gets the front door's
+        # `redirect(url_for("login", ...))`, and an <img> subresource has redirect mode
+        # "follow" -- the browser follows it and hands the worker the LOGIN PAGE with
+        # status 200, ok===true, redirected===true. That HTML then gets written into Cache
+        # Storage under the IMAGE's url.
+        #
+        # On /thumbs/ it self-heals (stale-while-revalidate overwrites on the next good
+        # fetch). On /img/ and /full/ it does not: that branch is `r=>r||fetch(...)`,
+        # cache-first with no revalidation on a hit, so those images render broken from
+        # then on -- surviving re-login, reloads and server restarts, curable only by
+        # Ctrl+Shift+R or this cache-name bump.
+        #
+        # The trigger is routine, not exotic: the header's Sign out is a GLOBAL revoke
+        # (bump_web_user_session_epoch), so signing out on the desktop kills the tablet's
+        # session while its grid is still lazy-loading. Same shape as the v1 bug (froze
+        # 404s) and the v2 bug (pinned stale posters), one status code over.
         sw = (
-            "const C='pixai-img-v3';\n"
+            "const C='pixai-img-v4';\n"
             "self.addEventListener('install',e=>self.skipWaiting());\n"
             "self.addEventListener('activate',e=>e.waitUntil(\n"
             "  caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k))))\n"
@@ -8888,12 +8906,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             " if(!isThumb&&!isOrig) return;\n"
             " if(isOrig){\n"
             "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(\n"
-            "   r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;}))));\n"
+            "   r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok&&!resp.redirected)c.put(e.request,resp.clone());return resp;}))));\n"
             "  return;\n"
             " }\n"
             " e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>{\n"
             "  const n=fetch(e.request,{cache:'no-cache'})\n"
-            "          .then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;})\n"
+            "          .then(resp=>{if(resp&&resp.ok&&!resp.redirected)c.put(e.request,resp.clone());return resp;})\n"
             "          .catch(()=>r);\n"
             "  return r||n;\n"
             " })));\n"

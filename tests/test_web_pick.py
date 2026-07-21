@@ -995,7 +995,7 @@ def test_lightbox_video_uses_load_not_premature_seek(tmp_path):
 # force-healed by a bump, so the live cache name may never be any of them again:
 #   v1 -- froze 404s in (blank video tile until a hard-refresh)
 #   v2 -- cache-first on /thumbs/, which pinned the stale poster --rebuild-thumbs repairs
-_POISONED_CACHES = ("pixai-img-v1", "pixai-img-v2")
+_POISONED_CACHES = ("pixai-img-v1", "pixai-img-v2", "pixai-img-v3")
 
 
 def test_service_worker_never_caches_misses(tmp_path):
@@ -1015,6 +1015,45 @@ def test_service_worker_never_caches_misses(tmp_path):
     assert m.group(1) not in _POISONED_CACHES, (
         "cache name {} shipped a poisoning bug -- bump it so held clients self-heal"
         .format(m.group(1)))
+
+
+def test_service_worker_never_caches_a_followed_login_redirect(tmp_path):
+    """`resp.ok` alone is not a cache guard here, because a GATED media response is a 200.
+
+    /thumbs/, /img/ and /full/ are not under _JSON_GATE_PREFIXES, so the front door answers
+    an unauthorized request for one with `redirect(url_for("login", ...))`. An <img>
+    subresource has redirect mode "follow", so the browser follows it and hands the worker
+    the LOGIN PAGE at status 200 / ok===true / redirected===true -- which the old guard
+    happily wrote into Cache Storage under the image's own URL.
+
+    On /img/ and /full/ that branch is cache-first with no revalidation (`r||fetch`), so the
+    poisoned entry is served forever: through re-login, reloads and restarts, curable only
+    by Ctrl+Shift+R. The trigger is ordinary -- Sign out is a global revoke, so signing out
+    on the desktop kills the tablet's session mid-lazy-load.
+
+    Bite: drop either `!resp.redirected` and this fails, naming the branch.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    sw = cli.get("/sw.js").get_data(as_text=True)
+
+    writes = re.findall(r"if\(resp&&resp\.ok([^)]*)\)c\.put\(", sw)
+    assert len(writes) == 2, (
+        "expected exactly two cache writes (originals + thumbnails), found {} -- if a third "
+        "was added it needs the same redirect guard".format(len(writes)))
+    for i, guard in enumerate(writes):
+        assert "!resp.redirected" in guard, (
+            "cache write #{} writes any ok response, including a login page reached by "
+            "following the front door's 302. Add `&&!resp.redirected`.".format(i + 1))
+
+    # And prove the premise rather than asserting it: a gated media URL really does answer
+    # with a redirect whose target is a 200, which is the response shape being guarded.
+    anon = create_app(tmp_path).test_client()
+    r = anon.get("/img/2025-01/a_1.png")
+    assert r.status_code in (301, 302, 303, 307, 308), (
+        "the front door no longer redirects gated media -- if it now 401s, resp.ok would "
+        "catch it and this guard's rationale needs revisiting")
+    assert "/login" in (r.headers.get("Location") or "")
 
 
 def test_service_worker_revalidates_thumbnails(tmp_path):
