@@ -15,6 +15,20 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Changed
+
+- **Every cost display in the app is now the same component.** `<mg-cost-badge>` was built and
+  then mounted nowhere while four surfaces each hand-rolled their own "is this free or does it
+  cost credits" line — the one surface whose entire job is stopping an accidental 27,500-credit
+  click. They are now one component: the Generate drawer (shared by the gallery's Video tab and
+  the Loom), the gallery's Image and Edit tabs, and the picker. What you'll notice: the gallery's
+  FREE line gains the card's name, how many are left, and when it expires (matching what the
+  drawer already showed); and where a failed price check used to read as a neutral "cost
+  unavailable", it now says plainly, in red, that the cost couldn't be verified and generating
+  may spend credits. The V4.0-full caution stays **red** — a 15s clip is ~210,000 credits, and
+  the app's loudest warning was not going to get quieter as a side effect of a refactor.
+  Cost changes are now announced to screen readers.
+
 ### Added
 
 - **The last two video models are selectable: V2.7 (High Dynamics) and V3.0 Flash.** They had

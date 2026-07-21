@@ -808,8 +808,26 @@ def test_video_v40_full_cost_warning():
     import pathlib
     src = (pathlib.Path(__file__).resolve().parent.parent
            / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
-    assert ".mgd-cost.warn" in src                  # the warn style
+    assert ('mg-generate-drawer mg-cost-badge[data-state="paid"][data-warn]'
+            '{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}') in src   # still RED
     assert "V4.0 full" in src and "2.5" in src        # the ~2.5x-Lite warning text
+
+
+def test_cost_badge_ships_with_every_price_surface(tmp_path):
+    """Every surface that renders a live cost is a <mg-cost-badge> now, and every page carrying
+    one MUST also load static/mg-cost-badge.js. A custom element whose definition never loads is
+    an inert <div>: setChecking()/setPrice() throw, the cost line freezes on its idle hint, and
+    the Go button beside it still spends. That failure is silent and it is on the spend path, so
+    the pairing gets a test rather than a convention -- the same reasoning that put the drawer's
+    own script tag under test above."""
+    import pixai_gallery as pg
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert '<mg-cost-badge id="gen-cost"' in html        # gallery Generate tab
+    assert '<mg-cost-badge id="edit-cost"' in html       # gallery Edit tab
+    assert '/static/mg-cost-badge.js' in html            # ...and the definition they need
+    assert '/static/mg-cost-badge.js' in pg._LOOM_SHELL  # the Loom's drawer needs it too
 
 
 def test_toasts_anchored_top_right(tmp_path):

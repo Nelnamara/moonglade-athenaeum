@@ -2658,6 +2658,10 @@ __BABEL_LIB_TAG__
 <script src="/static/picker-core.js"></script>
 <script src="/static/mg-model-picker.js"></script>
 <script src="/static/mg-gallery-picker.js"></script>
+<!-- Before the drawer, deliberately: <mg-generate-drawer>'s cost line IS <mg-cost-badge> as of
+     the consolidation, so the Loom's Video tab needs this file for a shot's cost to render at
+     all. Same pairing the gallery shell above documents at length. -->
+<script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
 </head><body>
@@ -4868,9 +4872,12 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-row{display:flex;gap:8px;}
   .gen-sel{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12.5px;}
   .gen-check{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:12px;margin-top:8px;cursor:pointer;}
-  .gen-cost{margin:12px 0 8px;padding:8px 10px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12.5px;color:var(--text);}
-  .gen-cost.free{border-color:var(--emerald);color:var(--emerald);}
-  .gen-cost.warn{border-color:var(--red);color:var(--red);}
+  /* The two lines that used .gen-cost (Generate + Edit) are <mg-cost-badge> now, which brings
+     its own box -- padding/radius/border/font were lifted from this rule verbatim when the
+     component was written, so the swap is pixel-identical apart from the badge's explicit
+     line-height 1.4 (this rule inherited the page's `normal`). .gen-cost.warn was already
+     dead: nothing in this file ever set it. Deleted rather than left as an unused rule --
+     stale copies of the cost styling are the exact drift the consolidation exists to end. */
   .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
   .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
   .gen-ce{min-height:66px;white-space:pre-wrap;overflow-y:auto;max-height:180px;}
@@ -5077,7 +5084,7 @@ document.addEventListener('DOMContentLoaded', function(){
         <input id="gen-seed" class="gen-sel" type="number" placeholder="random" autocomplete="off" style="width:100%;"></div>
       <label class="gen-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it (paidCredit 0) — verified against a real Turbo gen."><input type="checkbox" id="gen-hp"> High priority &middot; Turbo (faster)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
-      <div id="gen-cost" class="gen-cost">Pick a model to see the cost.</div>
+      <mg-cost-badge id="gen-cost" hint="Pick a model to see the cost." card-label="a card"></mg-cost-badge>
       <button id="gen-go" class="gen-go" onclick="Gen.generate()" disabled>Generate</button>
       <div id="gen-result" class="gen-result" style="display:none;"></div>
     </div>
@@ -5119,7 +5126,7 @@ document.addEventListener('DOMContentLoaded', function(){
         <select id="edit-aspect" class="gen-sel"></select>
         <div class="gen-lbl">Reference images <span id="edit-ref-cap" style="text-transform:none;color:var(--subtext);"></span></div>
         <div id="edit-refs" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
-        <div id="edit-cost" class="gen-cost">Pick an image to see the cost.</div>
+        <mg-cost-badge id="edit-cost" hint="Pick an image to see the cost." card-label="an Edit card"></mg-cost-badge>
         <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
         <div id="edit-result" class="gen-result" style="display:none;"></div>
       </div>
@@ -5350,10 +5357,19 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script src="/static/picker-core.js"></script>
+<!-- <mg-cost-badge> is the one renderer for "this costs N credits / a free card covers it"
+     (static/mg-cost-badge.js). Loaded FIRST because it is a hard dependency of three things on
+     this page: the Generate and Edit tabs' own cost lines below, and <mg-generate-drawer>'s
+     .mgd-cost. Without it those elements never upgrade, their setChecking()/setPrice() calls
+     throw, and the cost line freezes on its idle hint while the Go button beside it still
+     spends -- a silent failure on the spend path, which is why the pairing has a test
+     (test_web_pick.py::test_cost_badge_ships_with_every_price_surface) and not just a habit. -->
+<script src="/static/mg-cost-badge.js"></script>
 <!-- The shared <mg-generate-drawer> now mounts in the gallery's Video tab too (not just the
      Loom, which loads it in _LOOM_SHELL). It's picker-agnostic -- no mg-model-picker /
-     mg-gallery-picker dependency -- so this one script is all the gallery mount needs; the
-     host wires its mg-pick-request to the gallery Picker in the inline JS below. -->
+     mg-gallery-picker dependency -- so this one script plus the badge above is all the gallery
+     mount needs; the host wires its mg-pick-request to the gallery Picker in the inline JS
+     below. -->
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
@@ -5970,17 +5986,21 @@ var Gen = (function(){
       loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
   function refreshCost(){
     updateDimNote();
-    if(!(selected&&selected.version_id)) return;
-    var cost=el('gen-cost'); cost.className='gen-cost'; cost.textContent='Checking cost\\u2026';
+    var cost=el('gen-cost');
+    // Was a bare early `return` that left whatever the line last said on screen. Harmless in
+    // practice (`selected` is only ever assigned, never cleared) but clear() is the honest
+    // shape and it costs nothing to be right here.
+    if(!(selected&&selected.version_id)){ cost.clear(); return; }
+    cost.setChecking();
     var mine=++costSeq;
     fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})
       .then(function(r){return r.json();})
-      .then(function(d){ if(mine!==costSeq)return;
-        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
-        var n = d.cost!=null ? d.cost.toLocaleString() : '?';
-        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 '+(d.card_name||'a card')+' covers this (saves ~'+n+' credits)'; }
-        else { cost.textContent='\\u2248 '+n+' credits'; }
-      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
+      // Same split as editCost above: the host owns the fetch/debounce/stale-guard, the badge
+      // owns every state's wording and colour. This tab had TWO fail-open branches, both now
+      // gone: an unpriceable {cost:null, free:false} response rendered "~ ? credits", and a
+      // server `note` was never handled at all so it fell into that same string.
+      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
+      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
   }
   function debouncedCost(){ clearTimeout(costTimer); costTimer=setTimeout(refreshCost,250); }
   function renderResult(res, d, past){
@@ -6122,17 +6142,23 @@ var Gen = (function(){
   }
   function editCost(){
     var cost=el('edit-cost');
-    if(!editSrc()){ cost.className='gen-cost'; cost.textContent='Pick an image to see the cost.'; return; }
-    cost.className='gen-cost'; cost.textContent='Checking cost\\u2026'; var mine=++costSeq;
+    if(!editSrc()){ cost.clear(); return; }
+    cost.setChecking();
+    var mine=++costSeq;
     fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(editPayload())})
       .then(function(r){return r.json();})
-      .then(function(d){ if(mine!==costSeq)return;
-        if(d.note){ cost.textContent=d.note; return; }
-        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
-        var n=d.cost!=null?d.cost.toLocaleString():'?';
-        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 '+(d.card_name||'an Edit card')+' covers this (saves ~'+n+' credits)'; }
-        else { cost.textContent='\\u2248 '+n+' credits'; }
-      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
+      // <mg-cost-badge> owns the whole classification now (idle / checking / free / paid /
+      // could-not-verify), so this function keeps only what a HOST must own: the request, the
+      // 250ms debounce (debEditCost) and the stale-response guard. Not just tidying -- the
+      // branch this replaces rendered a {cost:null, free:false} response as the price-shaped
+      // "~ ? credits". That shape is NOT rare: price_task() in pixai_gallery_backup.py fails
+      // soft and returns None on any /v2/task-price error, so a transient PixAI hiccup used to
+      // put a neutral, price-looking string on the one line whose job is to say whether this
+      // spends money. The badge renders it red instead.
+      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
+      // setPrice(null), NOT clear(): a failed fetch is could-not-verify, never "not priced
+      // yet". Conflating the two is exactly what the old neutral "cost unavailable" did.
+      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
   }
   function debEditCost(){ clearTimeout(costTimer); costTimer=setTimeout(editCost,250); }
   function edit(){
