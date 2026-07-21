@@ -761,14 +761,14 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   look the next time that stacking area changes. Low severity.
 - **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not roam between
   the home and work machines this project is already edited from.
-- **In-Loom image / edit / reference generation doesn't price-check the way video does.** The
-  video path (`generateShot` / `batchGenerate`) calls `priceShot()` and shows the real cost +
-  free-card coverage before spending (and fails CLOSED on an unverifiable price), but
-  `genImage` / `genEdit` / `genRef` fire only a generic `window.confirm(… "otherwise it spends
-  credits")` with no number (`loom/master-storyboard.jsx` ~2222). May well be **intentional** —
-  image/edit/ref gens are usually free-carded and cheap, so precise pricing is reserved for
-  expensive video — so this is an **owner call**: unify on `priceShot`, or keep the light
-  confirm. No console error / correct HTTP, so a crawl never caught it. (Surfaced 2026-07-20 by
+- **In-Loom image / edit / reference generation doesn't price-check the way video does — TO FIX
+  (queued 2026-07-20).** The video path (`generateShot` / `batchGenerate`) calls `priceShot()`
+  and shows the real cost + free-card coverage before spending (and fails CLOSED on an
+  unverifiable price), but `genImage` / `genEdit` / `genRef` fire only a generic
+  `window.confirm(… "otherwise it spends credits")` with no number (`loom/master-storyboard.jsx`
+  ~2222). Owner expected this to already behave like video — **not** intentional — so the fix is
+  to give the image/edit/ref paths the same real price check + free-card coverage + fail-closed
+  behavior. No console error / correct HTTP, so a crawl never caught it. (Surfaced 2026-07-20 by
   the DASHBOARD↔STATE reconciliation.)
 ### Machine-local layout (a standing drift hazard, not a bug)
 
@@ -919,6 +919,7 @@ surface: no visual build from prose alone.
 | [loom_selectshot](https://claude.ai/code/artifact/0d9c4e02-200e-44f9-982c-e3add482b905) | Selected-shot interaction model | **LOCKED** — shipped in V2 |
 | [Moonglade — Finalists In Action](https://claude.ai/code/artifact/b45a39a3-b6a8-4e73-9f62-e03cb390bd00) | Finalists in context: frames wrapping a real unlock, bars filling live, claim icons in the header chip | Current — pairs with `docs/ART.md` §3 (picks ledger) |
 | [Timeline Drawer — Wireframe v1](https://claude.ai/code/artifact/84be1748-2c7d-4304-967c-8ac22cd37687) | Timeline drawer detail | Reference only — the Shell Mockup is the pixel source |
+| [Web Import — Drop-zone Mockup v2](https://claude.ai/code/artifact/066d181e-1a6e-4f84-97c6-6e2b91c6f90d) | Pixel source of truth for web import (the LAST web-parity item): drop zone + browse; **adaptive populated states** — thumbnail review when few, a **capped 24-tile preview** when many (import is uncapped — the cap is only on the preview), folder/zip **summary cards** (never N rows); dupe-by-content-hash skip, add-to-collection, `source='local'` into `imported/` | **LOCKED** 2026-07-20 (owner-approved) — the build verifies against it; `PREVIEW_CAP=24`. Open per-build calls: cap number, folder-recursion, structure→collections |
 
 **Live tools & references**
 
