@@ -597,12 +597,12 @@ Sequenced **ahead of** the PySide6 GUI removal so nothing CLI-only goes dark.
   CLI-only maintenance actions. (`sync-artworks` / `sync-videos` / `reconcile-deleted` run via
   `/api/panel/run` and the scheduler but render no button by design, `panel_visible: False`.)
   (`PANEL_ACTIONS` in `pixai_gallery.py`.)
-- **Web import into the catalog.** `--import-local [DIR]` is CLI-only and a blind scan-and-add
-  with no preview or confirm step. No web route imports into the catalog (`/api/upload` sends a
-  file to PixAI for use as a generation reference; `/api/import-task` banks a Toolbox task id).
-  Wanted: a button or drag-and-drop target accepting a single file, a folder, or a zip, with a
-  preview/confirm step before commit. Builds on existing conventions — the `source='local'`
-  catalog tag and the `imported/` folder already exist.
+- ~~**Web import into the catalog.**~~ ✅ **Shipped 2026-07-20.** The **↑ Import** button (owner
+  header) opens a drop-zone modal (drop images / a folder / a `.zip`, or browse), with an adaptive
+  preview (thumbnail list when few, capped 24-tile grid when many — import is uncapped) and
+  add-to-collection. `POST /api/import-local` is localhost-only (host-filesystem write tier),
+  reuses `run_import_local` (`source='local'` → `imported/` → thumbnail, path-dedup), and expands
+  zips with a zip-slip guard. This was the last web-parity item.
 
 ---
 
@@ -612,10 +612,11 @@ Ranked, with the reason each sits where it does. Ordering changed once already w
 owner pointed out that **web parity gates GUI removal** — anything only reachable from the
 PySide6 GUI or the CLI needs a web equivalent *before* that GUI can go.
 
-1. **Web parity** — ✅ force-full-resync (Advanced Panel) · ✅ video/audio reference slots in the
-   live gallery drawer's Multi-ref (the `<mg-generate-drawer>` swap) · ✅ convert-and-download for
-   `/export-zip` · **remaining: web import into the catalog** (needs a locked drop-zone mockup
-   first — net-new UI). That last item is all that stands between here and the PySide6 removal.
+1. **Web parity** — ✅ **COMPLETE 2026-07-20.** ✅ force-full-resync (Advanced Panel) · ✅
+   video/audio reference slots in the live gallery drawer's Multi-ref (the `<mg-generate-drawer>`
+   swap) · ✅ convert-and-download for `/export-zip` · ✅ web import into the catalog (the
+   drop-zone modal + `/api/import-local`). Nothing CLI-only stands in front of the PySide6
+   removal now — that removal (item below) is unblocked.
 2. **Gallery QoL easy wins** — chiefly the collection-remove UI: `/collection-remove` exists
    with **zero callers**, so the route is already written and only the UI is missing.
 3. **The 401 batch and the search wildcard** — ✅ both shipped 2026-07-19. What remains of
@@ -668,9 +669,9 @@ coherent visual effort and should be scoped and executed together rather than pi
   owner-confirmed; the code still runs the original (common = steel-blue `#9fbad6`, with
   `--gunmetal #8a93a2` / `--ruby #e0355e`).
 - **PySide6 GUI removal** (`pixai_gui.py` + `Moonglade Athenaeum.pyw`) is decided but **not
-  executed** — both files are present. The GO is gated on the web-parity work landing first —
-  see **Priority order** above, where parity is ranked #1 precisely because it
-  unblocks this. Owner, 2026-07-19: *"Pending the web parity solutions."* A GUI/web/CLI parity matrix confirmed zero GUI-only business capability; the only
+  executed** — both files are present. **Now UNBLOCKED: the web-parity gate cleared 2026-07-20
+  (web import was the last item).** Owner, 2026-07-19: *"Pending the web parity solutions"* — that
+  condition is met. A GUI/web/CLI parity matrix confirmed zero GUI-only business capability; the only
   GUI-only items are two local conveniences (an "open `_deleted/` in Explorer" button and a
   "recently-used models" quick-pick). The phase-out is surgical — strip the redundant spend
   surfaces (the Generate/Video/Edit clones, which are strictly worse and have no cost/free-card
