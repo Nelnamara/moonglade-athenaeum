@@ -458,3 +458,62 @@ def test_pricing_never_uploads(tmp_path, monkeypatch):
     cli.post("/api/price", json={"mode": "edit", "source": mid, "instruction": "x"})
     cli.post("/api/price", json={"mode": "I2V", "images": [mid], "duration": 5})
     assert not uploads, "pricing uploaded {} time(s) -- it must not".format(len(uploads))
+
+
+def test_atomic_replace_retries_a_transient_windows_lock(monkeypatch, tmp_path):
+    """os.replace on a just-written .part file can raise PermissionError [WinError 32] for a
+    few hundred ms while antivirus / the Search Indexer holds it. _atomic_replace retries past
+    the transient lock and succeeds -- and still re-raises if a file is genuinely stuck, so it
+    never silently loses data. This is the root of the vanishing-video bug: the poster's rename
+    threw here, before the clip was cataloged."""
+    import pytest
+    monkeypatch.setattr(core.time, "sleep", lambda *_a, **_k: None)   # don't actually wait
+    real = core.os.replace
+
+    src = tmp_path / "poster.jpg.part"; src.write_text("x")
+    dst = tmp_path / "poster.jpg"
+    n = {"c": 0}
+    def flaky(s, d):
+        n["c"] += 1
+        if n["c"] < 3:                               # locked for the first two attempts
+            raise PermissionError(32, "The process cannot access the file")
+        return real(s, d)
+    monkeypatch.setattr(core.os, "replace", flaky)
+    core._atomic_replace(src, dst)
+    assert dst.exists() and n["c"] == 3, "should retry past the transient lock, then succeed"
+
+    # A permanently-stuck file still surfaces the real error rather than losing the write.
+    stuck = tmp_path / "b.part"; stuck.write_text("y")
+    monkeypatch.setattr(core.os, "replace",
+                        lambda s, d: (_ for _ in ()).throw(PermissionError(32, "stuck")))
+    with pytest.raises(PermissionError):
+        core._atomic_replace(stuck, tmp_path / "b.jpg", attempts=3)
+
+
+def test_download_video_task_catalogs_video_even_if_poster_fails(monkeypatch, tmp_path):
+    """A WinError 32 on the poster's temp-file rename used to raise from download() BEFORE the
+    video row was appended, so a finished clip was pulled to videos/ but never cataloged -- and
+    the panel never showed the result. The poster is cosmetic; the video must still catalog.
+    Bites: without the try/except around the poster block, _download_video_task raises here and
+    save_catalog is never reached."""
+    from pathlib import Path
+    monkeypatch.setattr(core, "video_outputs",
+                        lambda r: ([{"video_media_id": "V7", "poster_media_id": "P7", "seed": 1}],
+                                   {"prompt": "p", "duration": 5}))
+    monkeypatch.setattr(core, "media_file_gql", lambda s, m: {"fileUrl": "http://x/v.mp4"})
+    monkeypatch.setattr(core, "resolve_media", lambda s, m: ("http://x/poster.png", {}))
+
+    def _dl(session, url, stem, **kw):
+        if "poster" in url:                          # the poster download hits the Windows lock
+            raise PermissionError(32, "The process cannot access the file ... .jpg.part")
+        p = Path(str(stem) + ".mp4"); p.write_bytes(b"\x00\x00\x00\x18ftypmp42"); return "ok", p
+    monkeypatch.setattr(core, "download", _dl)
+    monkeypatch.setattr(core, "video_poster_thumb", lambda v, t: False)
+    monkeypatch.setattr(core, "video_faststart", lambda p: None)
+
+    saved = []
+    monkeypatch.setattr(core, "save_catalog", lambda db, rows: saved.extend(rows))
+
+    core._download_video_task(object(), {}, "T7", tmp_path, SimpleNamespace(name_length=60), {})
+    assert any(r.get("media_id") == "V7" and r.get("is_video") == "1" for r in saved), \
+        "the finished video must be cataloged even when the poster thumbnail fails"

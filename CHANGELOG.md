@@ -15,6 +15,20 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-07-20 — Windows poster-lock fix
+
+### Fixed
+
+- **A finished video no longer vanishes from the panel when its poster thumbnail hits a Windows
+  file-lock.** On Windows, antivirus / the Search Indexer briefly locks a just-written file, so
+  the atomic rename of the poster's `.part` temp could throw `PermissionError [WinError 32]` — and
+  because that happened *before* the video row was written, the clip downloaded to `videos/` but
+  was never cataloged, so the Loom/Jobs panel never showed the completed result. Two guards:
+  `download()`'s rename now retries a transient lock (`_atomic_replace`, a short backoff), and
+  poster-thumbnail generation is now fail-soft in both the web collect (`_download_video_task`) and
+  the CLI `--sync-videos` path — a poster failure logs and moves on, and the video is always
+  cataloged (a missing thumb self-heals on the next `--rebuild-thumbs` / `--sync`).
+
 ## [2.1.0] - 2026-07-20 — Web parity, gallery fixes, and the retired desktop GUI
 
 ### Added
