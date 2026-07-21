@@ -414,6 +414,52 @@ def test_export_zip_passes_videos_through_untransformed(tmp_path):
     assert zipfile.ZipFile(io.BytesIO(z.data)).namelist() == ["clip_v1.mp4"]   # untouched extension
 
 
+def test_full_image_dl_forces_a_save_with_real_filename(tmp_path):
+    """The detail page's plain Download hits /full/<id>?dl=1 -> Content-Disposition attachment
+    with the real filename (browser saves it). Without ?dl it stays inline so the lightbox can
+    display it -- same file, two dispositions."""
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.png")])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a_1.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    cli = login_client(tmp_path)
+    assert "attachment" not in (cli.get("/full/1").headers.get("Content-Disposition") or "")
+    cd = cli.get("/full/1?dl=1").headers.get("Content-Disposition") or ""
+    assert "attachment" in cd and "a_1.png" in cd
+
+
+def test_export_zip_by_collection_resolves_full_membership(tmp_path):
+    """'Download collection' zips EVERY item in the named collection (resolved in SQL, all
+    pages), not the rendered selection -- and excludes non-members. No media_ids are sent."""
+    import io
+    import zipfile
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", collections="Trip"),
+        _row(media_id="2", filename="b_2.png", collections="Trip"),
+        _row(media_id="3", filename="c_3.png", collections="Other")])
+    (tmp_path / "images").mkdir()
+    for n in ("a_1.png", "b_2.png", "c_3.png"):
+        (tmp_path / "images" / n).write_bytes(b"\x89PNG\r\n\x1a\nx")
+    cli = login_client(tmp_path)
+    z = cli.post("/export-zip", data={"collection": "Trip"})
+    assert z.status_code == 200
+    names = set(zipfile.ZipFile(io.BytesIO(z.data)).namelist())
+    assert names == {"a_1.png", "b_2.png"}     # both Trip members; the Other one excluded
+
+
+def test_detail_page_has_plain_download(tmp_path):
+    """The detail page offers a plain one-click Download of the original (no convert here --
+    that lives in the bulk/collection flow)."""
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="55", filename="a_55.png", created_at="2025-01-01T00:00:00")])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a_55.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    html = login_client(tmp_path).get("/image/55").get_data(as_text=True)
+    assert "/full/55?dl=1" in html
+
+
 def test_collection_health_resolves_video_and_local_by_filename(tmp_path):
     """A video / imported row's media_id is synthetic (or a video id the image-only
     walk never sees), so 'missing' must resolve by filename too -- not over-report."""
