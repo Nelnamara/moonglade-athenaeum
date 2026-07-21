@@ -829,7 +829,7 @@
         "skin": "",
         "roast": "You wove in a LoRA — borrowed a stranger's genius and called it your own. That's not cheating. That's RESOURCEFUL.",
         "roast_nsfw": "First LoRA. You strapped someone else's talent onto your gen and took full credit. Honestly? Most crawler thing you've done yet. Proud of you, you little thief.",
-        "badge": "LE10"
+        "badge": "LE10_Q2"
       },
       {
         "id": "first-upload",
@@ -939,7 +939,7 @@
         "skin": "",
         "roast": "All three video modes, wielded. Image, frames, reference — you've mastered the whole Loom. Roll every camera at once. Show-off.",
         "roast_nsfw": "All three video modes. You've done EVERYTHING to that poor Loom — every mode, every angle. It needs a cigarette. Master of the Loom, you insatiable auteur.",
-        "badge": "LE10"
+        "badge": "LE10_Q3"
       },
       {
         "id": "full-toolbox",
@@ -1005,7 +1005,7 @@
         "skin": "",
         "roast": "Fifteen distinct LoRAs across your work. You speak every dialect of borrowed magic. Polyglot. Slightly terrifying.",
         "roast_nsfw": "Fifteen different LoRAs. You've worn more stolen skins than a horror villain, you shapeshifting little style-thief. Nobody knows what you actually make anymore. Neither do you.",
-        "badge": "LE10"
+        "badge": "LE10_Q4"
       },
       {
         "id": "skin-changer",
