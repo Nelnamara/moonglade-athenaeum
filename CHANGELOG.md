@@ -15,6 +15,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-07-20 — Web parity, gallery fixes, and the retired desktop GUI
+
 ### Added
 
 - **Web import — bring local files into the library from the browser** (closes web/CLI parity;
