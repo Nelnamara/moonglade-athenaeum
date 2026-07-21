@@ -556,14 +556,15 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   arrow. `accent-color` has no effect on `<select>`, so this needs a real styling pass rather
   than a token. *(The checkbox half of this finding is fixed: `color-scheme: dark` +
   `accent-color` on `:root` — see CHANGELOG.)*
-- **Two Loom widgets are invisible but report as visible.** The help FAB (`z-index:300`) and
-  Activity chip (`z-index:234`) are siblings of `#root` in `_LOOM_SHELL`, and `LoomV2`
-  unconditionally renders an opaque `z-index:400` `.lv-overlay` over them. Real bounding rects
-  and `visibility: visible`, so a DOM crawler marks them healthy.
 - **The Activity chip is a 79×31 click dead zone over a grid card's link** — on the *gallery*
-  page, which has its own `#jobs-fab` and no `.lv-overlay`. (Distinct from the entry above: on
-  the Loom an opaque overlay swallows those clicks first, so it cannot also be a dead zone
-  there. These were one entry until verification separated them.)
+  page, which has its own `#jobs-fab` and no `.lv-overlay`. (On the Loom the widgets are now
+  lifted above `.lv-overlay` — see CHANGELOG — so this is a gallery-only placement nit.)
+- **Cosmetic residual from that Loom widget lift:** the raised corner FABs (`#jobs-fab`/
+  `#eb-help-btn` at 401/402) render *inside* the root stacking context, while Deep Focus's
+  `.lv-df-veil` (450) and the nested `mgd`/model preview flyouts (600) render *inside*
+  `.lv-overlay`'s 400 atom — so the corner widgets paint over those backdrops instead of under
+  them. A z-index-only fix can't resolve it; the real fix hoists `.lv-df-veil` (and the nested
+  preview flyouts) up to `.sb-root` level as root-level siblings. Owner-visible refactor, deferred.
 - **Smaller:** upstream exceptions still print verbatim into the UI as a minor UX nit (34
   `str(e)` sites) — but they are no longer an injection seam: the `innerHTML` sinks now escape
   (`escH2`) or build text nodes, verified in a browser (see CHANGELOG).
@@ -642,9 +643,10 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   capture *is* surfaced.)
 - **Gallery QoL backlog**, each verified absent from the code: rate/delete from inside the
   lightbox without closing it; bulk "set rating" on a selection; an unrated-only filter; export
-  just the current search/selection instead of the whole catalog; a random/shuffle sort; a
-  manual side-by-side two-image compare (distinct from the algorithmic Similar search); and
-  roaming saved-view presets.
+  the current **selection** (specific picked media_ids) to CSV — a bigger surface than the
+  filtered-view export, which now ships (the grid's "Export this view" link → the filter-honoring
+  `/export-csv`); a random/shuffle sort; and a manual side-by-side two-image compare (distinct
+  from the algorithmic Similar search).
 - **WoW-style casting-bar frame art** is a banked candidate for a themed generation/render
   progress bar, plus ladder-achievement and Panel job progress. The art is the FRAME; the
   dynamic fill composites inside via 9-slice so ornate ends don't stretch. Prefer the cleaner
