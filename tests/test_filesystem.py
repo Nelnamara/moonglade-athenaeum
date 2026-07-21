@@ -130,7 +130,8 @@ def test_import_local_scans_and_is_idempotent(tmp_path):
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "art.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
     res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
-    assert res == {"imported": 2, "skipped": 0}
+    assert res["imported"] == 2 and res["skipped"] == 0
+    assert len(res["media_ids"]) == 2                      # the web importer tags a collection off these
     rows = {r["filename"]: r for r in _load_cat(tmp_path / "catalog.db")}
     assert rows["videos/myclip.mp4"]["source"] == "local"
     assert rows["videos/myclip.mp4"]["is_video"] == "1"

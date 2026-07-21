@@ -9542,6 +9542,84 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             except OSError:
                 pass
 
+    def _safe_extract_zip(zip_path, dest_dir):
+        """Extract a zip into dest_dir, dropping any member whose resolved path would escape
+        dest_dir (zip-slip). Localhost-only caller, but a crafted archive still shouldn't be
+        able to write outside the temp dir."""
+        import os as _os
+        import zipfile as _zip
+        import shutil as _sh
+        root = _os.path.realpath(dest_dir)
+        with _zip.ZipFile(zip_path) as z:
+            for m in z.namelist():
+                if m.endswith("/"):
+                    continue
+                target = _os.path.realpath(_os.path.join(dest_dir, m))
+                if target != root and not target.startswith(root + _os.sep):
+                    continue                          # zip-slip -> skip
+                _os.makedirs(_os.path.dirname(target), exist_ok=True)
+                with z.open(m) as src, open(target, "wb") as dst:
+                    _sh.copyfileobj(src, dst)
+
+    @app.route("/api/import-local", methods=["POST"])
+    def api_import_local():
+        """Import local files into the catalog as source='local' -- the web equivalent of the
+        CLI's --import-local. Accepts multipart `files` (images/videos); a `.zip` is expanded.
+
+        Localhost-only: it copies files into the backup (`imported/`) and shells out to build
+        thumbnails on the machine the SERVER process runs on -- a host-filesystem write, the
+        same trust tier as the destructive Panel jobs and /api/branding/shortcut, NOT the
+        broader logged-in-LAN auth. A LAN device must never be able to write files onto the
+        owner's machine. Nothing is uploaded to PixAI (that's /api/upload).
+
+        Saves the uploads to a temp dir (expanding any zip), then reuses
+        core.run_import_local (copy -> imported/ + catalog source='local' + thumbnail, path
+        dedup), tags an optional collection, and returns counts. Synchronous for now."""
+        if not _is_local_request():
+            return jsonify({"error": "this imports files onto the server's machine; localhost-only"}), 403
+        import os as _os
+        import tempfile
+        import shutil
+        from types import SimpleNamespace
+        import pixai_gallery_backup as core
+        files = request.files.getlist("files")
+        if not files:
+            return jsonify({"error": "no files"}), 400
+        collection = (request.form.get("collection") or "").strip()
+        tmp = tempfile.mkdtemp(prefix="mg_import_")
+        try:
+            saved = 0
+            for i, f in enumerate(files[:1000]):          # hard cap on one request
+                base = _os.path.basename(f.filename or "")
+                if not base:
+                    continue
+                # Own subdir per upload so two files sharing a basename don't collide in the
+                # temp dir; run_import_local then copies each into imported/ by basename, so the
+                # final names stay clean (matching the CLI's --import-local behavior).
+                sub = _os.path.join(tmp, str(i))
+                _os.makedirs(sub, exist_ok=True)
+                dest = _os.path.join(sub, base)
+                f.save(dest)
+                if base.lower().endswith(".zip"):
+                    try:
+                        _safe_extract_zip(dest, sub)
+                    finally:
+                        try: _os.unlink(dest)
+                        except OSError: pass
+                saved += 1
+            if not saved:
+                return jsonify({"error": "no usable files"}), 400
+            res = core.run_import_local(SimpleNamespace(out=str(out_dir), import_local=tmp))
+            mids = res.get("media_ids") or []
+            if collection and mids:
+                add_to_collection(db_path, mids, collection)
+            return jsonify({"ok": True, "imported": res["imported"], "skipped": res["skipped"],
+                            "collection": collection or None})
+        except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 200
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def _gen_args_from_payload(p):
         """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
         feeds to core._gen_parameters -- so web + CLI build identical params (one source
