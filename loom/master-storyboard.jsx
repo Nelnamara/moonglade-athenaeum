@@ -290,11 +290,6 @@ const STYLES = `
   flex:none;display:grid;place-items:center;font-size:16px;cursor:pointer;overflow:hidden}
 .sb-assetprev img{width:100%;height:100%;object-fit:cover}.sb-assetprev.discreet img{filter:blur(8px)}
 
-.sb-helpbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;font-size:12.5px;color:var(--ink2);line-height:1.65;margin-top:12px}
-.sb-helpbox h4{margin:0 0 8px;color:var(--ink);font-family:system-ui,sans-serif;font-size:14px}
-.sb-helpbox h4:not(:first-child){margin-top:14px}
-.sb-helpbox code{font-family:ui-monospace,monospace;color:var(--cyan);font-size:12px}
-.sb-helpbox b{color:var(--amber)}
 .sb-empty{text-align:center;color:var(--ink3);padding:30px;font-size:13px}
 
 @media (max-width:560px){.sb-conn-mid{align-self:flex-start;padding:0}}
@@ -305,7 +300,6 @@ const STYLES = `
 const MODES = ["I2V", "R2V", "V2V", "FLF"];   // T2V retired: these video models need an input frame/ref
 // PixAI's real audio-language enum (private/GENERATOR_SURFACE.md, VIDEO_MODELS.md) --
 const MODE_HINT = {
-  T2V: "Text only — describe the whole scene",
   I2V: "Image-to-video — ref is first frame; prompt only motion",
   R2V: "Reference-to-video — lock identity/style/motion via @tags",
   V2V: "Video edit / extend an existing clip",
