@@ -17,6 +17,21 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The last two video models are selectable: V2.7 (High Dynamics) and V3.0 Flash.** They had
+  shipped visible-but-disabled on the theory that a submit needs a numeric top-level `modelId`,
+  which we only had for five of the seven. That theory was wrong. Two free `--dump-params`
+  captures off real rendered tasks both carried an **image** checkpoint's id in `modelId`, and
+  three read-only price probes settled it: the two models price *differently* (~56,000 vs
+  ~44,800 credits for 10s) off an *identical* `modelId`, and dropping `modelId` entirely prices
+  the same. `i2vPro.model` resolves the engine; the numeric id does not. Neither model is
+  card-eligible — your free cards are V4.0-specific — so the cost badge honestly reads "no free
+  card" rather than pretending otherwise.
+- **Per-model duration caps in the Generate drawer.** 15s is exclusive to the V4.0 pair, but the
+  duration control offered 5/6/10/15 for every model. Harmless while every enabled model allowed
+  15s; enabling V2.7 and V3.0 Flash would have newly exposed an unsupported 15s option at roughly
+  84,000 credits with no card to cover it. Over-cap options are now disabled *and* hidden — hiding
+  alone leaves an `<option>` keyboard-selectable and still submittable.
+
 - **You can take images back out of a collection from the UI.** `/collection-remove` had existed
   for a while with **zero callers** — the whole feature was written except the way in. While a
   collection filter is active, Actions gains **“− Remove from «name»”**, which takes the selected
@@ -32,6 +47,15 @@ git tags. Full prose notes for tagged versions live on
   component. Renders the credit cost of a pending generation and whether a free card covers it,
   in five states (idle · checking · free · paid · couldn't verify). Host-neutral like its siblings:
   it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
+### Fixed
+
+- **`V3.0 Flash` submitted a model string PixAI has never had.** The drawer shipped `v3.0f`, a
+  guess; the real value is `v3.0.1`, confirmed by PixAI's own task detail ("Model Used: V3.0
+  Flash") against that task's captured submit. The entry had been built from the correct model's
+  tags with an invented value — it would have failed on the first real submit.
+
+### Added
+
 - **`tools/build_roster_board.py`** — renders the achievement roster JSON into one self-contained
   HTML board for review. Read-only; it never writes the roster back.
 - **A real stale-bundle gate.** `loom/dist/master-storyboard.bundle.js` is committed and served
