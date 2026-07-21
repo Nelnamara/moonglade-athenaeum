@@ -7886,7 +7886,22 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # traversal already rejected (see branding()); there's no user data,
     # credential, or spend behind it, so it carries the same public trust
     # tier as /login itself, not a re-opened security gap.
-    _PUBLIC_PATHS = frozenset({"/login", "/logout"})
+    # /manifest.webmanifest joined this set on 2026-07-21, on the same reasoning as
+    # /branding/ and then some. Its handler builds a compile-time CONSTANT -- app name,
+    # start_url "/", two hex colours and an inline data: URI SVG icon. There is no code
+    # path in it that reflects a user, a catalog, an install path or a credential, so
+    # there is nothing to withhold. The "but it fingerprints the install" objection dies
+    # on inspection: /login is itself public and renders branded HTML that identifies
+    # this app far more loudly than a manifest ever could.
+    #
+    # The positive reason to make it public is stronger than the neutral one. A browser
+    # fires this request BY ITSELF the instant the login page loads, and the front door
+    # answered it with a redirect to /login?next=/manifest.webmanifest -- which is
+    # exactly the traffic that produced the csrf-overwrite bug documented at the GET
+    # branch of login() ("Your session expired", unconditionally, on every submit).
+    # setdefault fixed the symptom; letting these self-fired static assets through is
+    # what removes the category.
+    _PUBLIC_PATHS = frozenset({"/login", "/logout", "/manifest.webmanifest"})
     _PUBLIC_PREFIXES = ("/branding/",)
     # Routes whose EXISTING contract (long before this hook existed) was JSON,
     # not an HTML page -- these get a JSON 401 instead of a login redirect, so a

@@ -49,6 +49,16 @@ git tags. Full prose notes for tagged versions live on
   it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
 ### Fixed
 
+- **`/manifest.webmanifest` is public now, and that removes a whole class of login bug.** The
+  manifest handler returns a compile-time constant — app name, start URL, two colours, an inline
+  icon — so there was never anything behind the gate to protect, and the login page is itself
+  public and identifies the app far more loudly than a manifest could. What gating it *did* buy
+  was a self-inflicted redirect: your browser requests the manifest on its own the instant the
+  login page loads, the front door answered `302 -> /login?next=/manifest.webmanifest`, and that
+  incidental traffic is what used to overwrite the login form's CSRF token and produce "Your
+  session expired" on every attempt. `/sw.js` deliberately stays gated — serving the worker
+  script is a separate question from what the worker caches.
+
 - **`/api/panel/status` handed maintenance-job stdout to any logged-in account.** Starting a
   destructive Panel job required loopback, and cancelling one required loopback — but *reading
   the output* was a bare route with no tier check, so a logged-in account anywhere on your
