@@ -2006,6 +2006,26 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       return await r.json();   // {cost, free, cards, note}
     } catch { return null; }
   };
+  // Fail-closed cost gate for the Image / Edit / Reference tabs -- the SAME guardrail
+  // generateShot (video) already runs, factored out so those three stop lying. They used
+  // to show a flat "a free card auto-applies; otherwise it spends credits" confirm that
+  // never actually checked: a shot with no covering card spent silently past an OK click.
+  // `priceBody` is the exact shape the matching submit endpoint receives, so /api/price
+  // prices precisely what will run. Fails CLOSED -- a null/failed price check still ASKS
+  // before spending, never waves it through. Returns true to proceed.
+  const confirmSpend = async (priceBody, label) => {
+    let pr = null;
+    try {
+      const r = await fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(priceBody) });
+      pr = await r.json();
+    } catch { pr = null; }
+    if (pr && pr.free) return true;                                    // a free card covers it: no spend, no prompt
+    if (pr && !pr.free && pr.cost != null) {
+      return window.confirm(`${label}\n\nNo free card covers it — it will spend ~${pr.cost.toLocaleString()} credits.\n\nGenerate anyway?`);
+    }
+    return window.confirm(`${label}\n\nCouldn't verify the cost or free-card coverage — it may spend credits.\n\nGenerate anyway?`);
+  };
   // Returns an explicit outcome ({ok:true,taskId} | {ok:false,reason}) instead of only
   // writing state -- batchGenerate's own submit-time tally needs a value it can read
   // immediately after await, not genState (a React state variable batchGenerate's closure
@@ -2219,7 +2239,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const prompt = (c.imgPrompt || "").trim();
     if (!imgModel) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "pick a model first" } })); return; }
     if (!prompt) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter an image prompt" } })); return; }
-    if (!window.confirm(`Generate a reference image for ${c.title || "this shot"}?\n\nA matching free card auto-applies; otherwise it spends credits.`)) return;
+    if (!(await confirmSpend({ model_id: imgModel.model_id, prompt }, `Generate a reference image for ${c.title || "this shot"}?`))) return;
     setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -2244,8 +2264,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   };
   // Generic gen runner for the Edit/Reference tabs — submit -> poll -> stash -> route.
   // Parameterized on the state setter so the proven Image path above stays untouched.
-  const runGen = async (setState, cardId, endpoint, body, confirmMsg) => {
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
+  const runGen = async (setState, cardId, endpoint, body, priceBody, label) => {
+    if (priceBody && !(await confirmSpend(priceBody, label))) return;
     setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
     // Same unbounded-loop fix as pollImg -- see pollTaskWithCeiling's comment.
     const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
@@ -2271,8 +2291,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const instruction = (c.editPrompt || "").trim();
     if (!src) { setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "the open frame needs a gallery image first (route one from the Image tab, or pick it into the frame)" } })); return; }
     if (!instruction) { setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "describe the edit" } })); return; }
-    runGen(setGenEditState, c.id, "/api/edit", { source: src, instruction, edit_model: "edit-pro" },
-      `Edit the open frame of ${c.title || "this shot"}?\n\nAn Edit-Pro card auto-applies; otherwise it spends credits.`);
+    const editBody = { source: src, instruction, edit_model: "edit-pro" };
+    runGen(setGenEditState, c.id, "/api/edit", editBody, { mode: "edit", ...editBody },
+      `Edit the open frame of ${c.title || "this shot"}?`);
   };
   const genRef = (entry) => {
     const c = entry.c;
@@ -2280,8 +2301,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const prompt = (c.refPrompt || "").trim();
     if (!refs.length) { setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "add cast @image references (with gallery images) first" } })); return; }
     if (!prompt) { setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter a prompt" } })); return; }
-    runGen(setGenRefState, c.id, "/api/edit", { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" },
-      `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?\n\nA Reference-Pro card auto-applies; otherwise it spends credits.`);
+    const refBody = { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" };
+    runGen(setGenRefState, c.id, "/api/edit", refBody, { mode: "edit", ...refBody },
+      `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`);
   };
   // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
   // the submits don't collide. Each shot manages its own status/poll via generateShot.
