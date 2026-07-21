@@ -93,12 +93,10 @@ present — fixes corporate/antivirus HTTPS interception.
 
 ## Module map, functions, catalog schema
 
-Five modules, one shared SQLite catalog, on-disk layout, and the full function/helper
+Four modules, one shared SQLite catalog, on-disk layout, and the full function/helper
 reference all live in **`docs/architecture.md`** — do not restate them here; that's how
 this file drifted (a stale "three-file" table, a wrong function shape) badly enough that
-`tests/test_docs_dont_hardcode_counts.py` had to exist. `pixai_gui.py` is legacy and its
-module-cache quirk (needs a full app restart on `pixai_gallery.py` changes) is documented
-there too.
+`tests/test_docs_dont_hardcode_counts.py` had to exist.
 
 ---
 
@@ -152,7 +150,7 @@ shipped bug.
 
 ## Verbose logging (`-v` / `--verbose`)
 
-- `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. No-op until enabled. GUI exposes it as a "Verbose logging" checkbox in the top bar (persisted in settings). NOT a full logging framework — file logging is a separate, still-open discussion.
+- `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. No-op until enabled; turn it on with the `-v` / `--verbose` flag. NOT a full logging framework — file logging is a separate, still-open discussion.
 
 ## Recapture procedure (when PixAI changes their frontend)
 

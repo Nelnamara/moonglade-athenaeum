@@ -12,7 +12,6 @@ pip install -r requirements.txt
 |---|---|
 | `requests` | all network operations (required) |
 | `pillow` | thumbnails, conversion, metadata embedding |
-| `PySide6` | the desktop GUI (`pixai_gui.py`) |
 | `flask` | the local web gallery (`pixai_gallery.py`) |
 | `websockets` | `--watch` / `--watch-backup`, and the web gallery's auto-starting live-mirror thread |
 | `truststore` | optional — fixes HTTPS cert errors behind corporate proxies / AV |
@@ -77,11 +76,8 @@ as a password reset for an existing name. Companions: `--list-web-users` shows w
 `--remove-web-user <name>` deletes one. (Remove the last account and the first-run bootstrap
 re-opens on the server machine — a deliberate escape hatch, not a bug.)
 
-Desktop app (legacy — the PySide6 GUI is being folded into the web app):
-```bash
-python pixai_gui.py
-```
-Double-click launcher (no console): **`Moonglade Athenaeum.pyw`**.
+Prefer a double-click, no-console launcher? Use **`Serve Gallery.pyw`** — it starts the web
+gallery (and supervises it) without a terminal window.
 
 Headless:
 ```bash

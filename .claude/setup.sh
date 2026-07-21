@@ -7,11 +7,8 @@
 # app, and was reduced to purely static reading. This script gives it teeth.
 #
 # The dependency list is deliberately IDENTICAL to .github/workflows/tests.yml's
-# install step, including the two omissions, so a reviewer's environment matches
+# install step, including the one omission, so a reviewer's environment matches
 # the one CI actually gates on:
-#   - PySide6 is NOT installed. No test imports pixai_gui (the legacy desktop
-#     GUI), and pulling in Qt just to sit unused invites headless-display
-#     flakiness.
 #   - pixeltable is NOT installed. It is a heavy, optional, GPU-oriented dep;
 #     tests/test_similar.py skips itself cleanly without it via importorskip.
 # If you change one list, change the other.

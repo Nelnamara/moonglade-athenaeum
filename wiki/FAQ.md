@@ -66,8 +66,8 @@ No. Lookups are by `media_id`, so files can live in any subfolder.
 [Collections](Collections) are catalog-based and survive Organize too.
 
 **How do I update?**
-`git pull`. If using the GUI, **fully quit and reopen it** (Stop/Launch doesn't
-reload the code) — see [Troubleshooting](Troubleshooting).
+`git pull`, then **restart the gallery server** so it loads the new code (Stop/Restart, or
+relaunch `Serve Gallery.pyw`) and hard-refresh the browser — see [Troubleshooting](Troubleshooting).
 
 **Something broke after a PixAI change.**
 See [Troubleshooting](Troubleshooting): update to the latest release first, or open an

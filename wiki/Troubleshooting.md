@@ -19,13 +19,13 @@ manually in `config.json` as a fallback.
 
 ## "Invalid modelId" when generating
 You used a **model** id where a **version** id is required. Don't paste from a
-`pixai.art/model/<id>` URL — use the **Model** dropdown or **Search PixAI…** (they
-resolve the version id). See [Generating](Generating).
+`pixai.art/model/<id>` URL — use the drawer's **model search** or the CLI's
+`--list-models` (they resolve the version id). See [Generating](Generating).
 
 ## "unknown inferenceProfile …"
-The chosen **Mode** isn't supported by that model type. On the **CLI** (`--generate`) and the
-desktop GUI, this is harmless — the tool auto-falls-back to the model's default and generates
-anyway (a rejected submit costs no credits). The **web app's Generate drawer and the Loom**
+The chosen **Mode** isn't supported by that model type. On the **CLI** (`--generate`) this is
+harmless — the tool auto-falls-back to the model's default and generates anyway (a rejected
+submit costs no credits). The **web app's Generate drawer and the Loom**
 don't have that fallback — there, an unsupported Mode surfaces as a plain error with nothing
 auto-retried. Leave Mode on **Auto** to avoid it everywhere.
 
@@ -34,9 +34,9 @@ Behind antivirus or a corporate proxy: `pip install truststore` (Python 3.10+). 
 tool uses it automatically when present.
 
 ## The gallery shows old behavior after I updated
-The GUI imports the gallery module **once at startup** — Stop/Launch on the Gallery
-tab restarts the *thread*, not the *code*. After `git pull`, **fully quit and reopen
-the GUI**, then hard-refresh the browser (Ctrl+F5).
+After `git pull`, **restart the gallery server** so it loads the new code — Stop/Restart
+from the browser, or relaunch **`Serve Gallery.pyw`**. Then **hard-refresh the browser
+(Ctrl+F5)** to clear the cached front-end (or the service worker).
 
 ## Videos won't show a poster
 Posters need `ffmpeg` on your PATH. Without it, videos still back up and play; they
