@@ -118,9 +118,12 @@ card, if nothing is selected):
 video you already have in your gallery and it's attached straight onto the shot as its
 finished clip.
 
-The Loom is **localhost-only** — the board *and* generation. Another device on your network can
-browse the gallery, but the header's **▰ The Loom** button is hidden for it and `/loom` answers
-*"The Loom is localhost-only."* (403) — it can't look, and it can't spend.
+The Loom needs a **signed-in session**, the same as the rest of the app — it is *not*
+localhost-only. A logged-in device on your network can open `/loom`, build a board, and generate,
+exactly as it can use the Generate drawer; that is the point of the login. What stays stricter is
+the small set of actions that write to the server's own disk or delete irreversibly from PixAI —
+the destructive Control Panel jobs, cloud bulk-delete, writing the API key or launcher icon, and
+importing local files. See [Trust & Safety](../wiki/Trust-and-Safety.md).
 
 ## Storyboards (multiple projects)
 
