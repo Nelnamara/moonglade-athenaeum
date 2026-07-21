@@ -762,15 +762,6 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   look the next time that stacking area changes. Low severity.
 - **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not roam between
   the home and work machines this project is already edited from.
-- **In-Loom image / edit / reference generation doesn't price-check the way video does — TO FIX
-  (queued 2026-07-20).** The video path (`generateShot` / `batchGenerate`) calls `priceShot()`
-  and shows the real cost + free-card coverage before spending (and fails CLOSED on an
-  unverifiable price), but `genImage` / `genEdit` / `genRef` fire only a generic
-  `window.confirm(… "otherwise it spends credits")` with no number (`loom/master-storyboard.jsx`
-  ~2222). Owner expected this to already behave like video — **not** intentional — so the fix is
-  to give the image/edit/ref paths the same real price check + free-card coverage + fail-closed
-  behavior. No console error / correct HTTP, so a crawl never caught it. (Surfaced 2026-07-20 by
-  the DASHBOARD↔STATE reconciliation.)
 ### Machine-local layout (a standing drift hazard, not a bug)
 
 - The **live gallery server runs from the D: run-copy** (`D:\Moonglade Athenaeum\`), a separate
