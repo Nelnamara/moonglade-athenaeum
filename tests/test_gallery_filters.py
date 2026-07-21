@@ -307,6 +307,38 @@ def test_collection_add_route(tmp_path):
     assert by["m1"]["collections"] == "Moonlit"
 
 
+def test_collection_remove_route_and_ui(tmp_path):
+    """The remove path end to end: the button only appears while a collection filter
+    is active (that's what tells it WHICH collection to remove from), and the route
+    drops the label without touching the row."""
+    from pixai_gallery import load_catalog, add_to_collection
+    from tests.conftest import login_client
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_row(media_id="m1", filename="a.png"), _row(media_id="m2", filename="b.png")])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a.png").write_bytes(b"x")
+    (tmp_path / "images" / "b.png").write_bytes(b"x")
+    add_to_collection(db, ["m1", "m2"], "Moonlit")
+    client = login_client(tmp_path)
+
+    # No collection filter -> no remove entry (nothing to remove FROM).
+    assert b"bulkRemoveCollection(this.dataset.coll)" not in client.get("/").data
+    # Collection filter active -> the entry is rendered, carrying that collection.
+    page = client.get("/?collection=Moonlit").data
+    assert b"bulkRemoveCollection(this.dataset.coll)" in page
+    assert b'data-coll="Moonlit"' in page
+
+    r = client.post("/collection-remove",
+                    data={"media_ids": ["m1"], "name": "Moonlit", "back": "/?collection=Moonlit"})
+    assert r.status_code == 302 and "uncollected=1" in r.headers["Location"]
+    by = {x["media_id"]: x for x in load_catalog(db)}
+    assert by["m1"]["collections"] == ""      # label gone
+    assert by["m2"]["collections"] == "Moonlit"   # untouched
+    assert query_catalog(db, collection="Moonlit")[1] == 1
+    # the redirect target renders the confirmation banner
+    assert b"Removed 1 item(s) from the collection" in client.get(r.headers["Location"]).data
+
+
 def test_deleted_remote_filter(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [

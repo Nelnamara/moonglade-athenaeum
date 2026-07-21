@@ -15,6 +15,33 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Added
+
+- **You can take images back out of a collection from the UI.** `/collection-remove` had existed
+  for a while with **zero callers** — the whole feature was written except the way in. While a
+  collection filter is active, Actions gains **“− Remove from «name»”**, which takes the selected
+  items out of *that* collection (the one the grid is already showing, so there's no "remove from
+  which?" ambiguity). It's a label change only: no files are deleted and nothing leaves your PixAI
+  account, and the confirm says so. A banner reports how many left.
+- **Three new wiki pages** — **The Loom** (acts/shots, the frame handoff, cast & assets, generating
+  a shot, Deep Focus, the two different Exports), **Control Panel** (every maintenance job with its
+  real label, the risk tiers, the scheduler, Advanced sync, Users, the Activity log), and
+  **Trophy Hall** (the ten evolution ladders and their rungs, milestones, masteries, and how rarity
+  and points actually compute). All written against the code rather than the older docs.
+- **`<mg-cost-badge>`** (`static/mg-cost-badge.js` + harness) — the last unbuilt shared web
+  component. Renders the credit cost of a pending generation and whether a free card covers it,
+  in five states (idle · checking · free · paid · couldn't verify). Host-neutral like its siblings:
+  it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
+- **`tools/build_roster_board.py`** — renders the achievement roster JSON into one self-contained
+  HTML board for review. Read-only; it never writes the roster back.
+- **A real stale-bundle gate.** `loom/dist/master-storyboard.bundle.js` is committed and served
+  verbatim by `/loom?bundle=1`, but nothing forced a rebuild — edit the `.jsx`, forget
+  `npm run build`, and that route quietly serves old code (exactly how a blank-page bug once
+  shipped). CI now rebuilds and fails if the committed bundle differs, with a message telling you
+  what to run; a pytest mirror does the same locally and restores from a snapshot so a stale bundle
+  is *reported*, never silently fixed. Both layers were negative-tested by corrupting the bundle on
+  purpose. The narrower hook-preamble check stays.
+
 ## [2.1.1] - 2026-07-20 — Windows poster-lock fix
 
 ### Fixed

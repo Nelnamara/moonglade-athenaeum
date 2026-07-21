@@ -454,13 +454,18 @@ What's still CLI-only, tracked so the web surface stays complete:
 
 Ranked, with the reason each sits where it does.
 
-1. **Gallery QoL easy wins** — chiefly the collection-remove UI: `/collection-remove`
-   exists with **zero callers**, so the route is already written and only the UI is missing.
-2. **The naming pass** (`pixai_* → moonglade_*`) — sequenced for *timing*, not value:
-   cleanest while `master` and the working branch are identical, which they are right now
-   (both at the v2.1.1 merge). Unblocked. Size it with
-   `python tools/name_inventory.py modules` first.
-3. **The Design Pass** (below) — one body of work, not five separate ones.
+1. **The naming pass** (`pixai_* → moonglade_*`) — sized 2026-07-21: **468 in-scope references
+   across 97 files** (156 imports + 312 strings), a focused 4–6 hours. Do it on its own branch in
+   its own session, and do these first: (a) fix `tools/name_inventory.py`, which walks
+   `git ls-files` and so misses ~4% and is blind to the git-ignored `.claude/launch.json`;
+   (b) clear the runway — `loom-v2` currently leads `master`, and a rename that moves this much
+   makes a later rebase miserable. Two traps: `pixai_gallery` is a strict prefix of
+   `pixai_gallery_backup` **and** `pixai_backup` is the output directory named in every install's
+   `config.json`, so a prefix-wildcard sweep silently repoints people's archives at nothing; and
+   both modules are runnable scripts invoked as `python pixai_*.py` in ~116 documented commands,
+   the launchers and the Panel's subprocess runner — an import-only shim leaves the whole suite
+   green while breaking every one of those.
+2. **The Design Pass** (below) — one body of work, not five separate ones.
 
 ### The Design Pass (consolidated)
 
@@ -582,8 +587,6 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   that line — so it is a naming/clarity wart, not a bug. Renaming it touches auth-adjacent
   template logic and wants an owner nod rather than a drive-by.
 
-- **No UI for removing an image from a collection.** The `/collection-remove` POST route exists
-  with zero callers anywhere in the codebase. A real gap, not a design choice.
 - **`ImportCollection`'s `.sb-pick-ov` overlay shares z-index 400 with `.lv-overlay`** rather than
   a clean 500-over-400 hierarchy — it relies on DOM paint order, which holds today. Worth a live
   look the next time that stacking area changes. Low severity.
