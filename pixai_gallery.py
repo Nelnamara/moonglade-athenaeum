@@ -3661,7 +3661,61 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
   </div>
 </div>
+<div class="modal-bg" id="import-modal">
+  <div class="modal imp-modal">
+    <h2 style="color:var(--text);margin-bottom:4px;">Import into your library</h2>
+    <p style="margin-bottom:14px;">Bring local files into the catalog &mdash; copied into <b style="color:var(--text)">imported/</b> and tagged <b style="color:var(--text)">Imported (local)</b>. Nothing is uploaded to PixAI; this is your library, not a generation reference.</p>
+    <div id="imp-drop" class="imp-drop" onclick="ImportUI.browse()">
+      <div class="imp-ico">&#8593;</div>
+      <div class="imp-big">Drop images, a folder, or a .zip here</div>
+      <div class="imp-sub">or <span class="imp-link">browse files</span> &middot; <span class="imp-link" onclick="event.stopPropagation();ImportUI.browseFolder()">a folder</span></div>
+    </div>
+    <div id="imp-preview" style="display:none;">
+      <div class="imp-sum" id="imp-sum"></div>
+      <div id="imp-body"></div>
+      <label class="imp-orow"><span class="imp-lbl">Add to collection</span>
+        <select id="imp-collection" class="gen-sel" style="flex:1;">
+          <option value="">&mdash; none &mdash;</option>
+          {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select></label>
+    </div>
+    <div id="imp-result" class="imp-result" style="display:none;"></div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn" onclick="ImportUI.close()">Cancel</button>
+      <button class="btn btn-primary" id="imp-go" onclick="ImportUI.doImport()" style="display:none;">&#8593; Import</button>
+    </div>
+    <input type="file" id="imp-file" multiple accept="image/*,video/*,.zip" style="display:none" onchange="ImportUI.onPick(this.files)">
+    <input type="file" id="imp-folder" webkitdirectory style="display:none" onchange="ImportUI.onPick(this.files)">
+  </div>
+</div>
 <style>
+  .imp-modal{max-width:560px;width:92%;}
+  .imp-drop{border:2px dashed var(--surface1);border-radius:12px;padding:38px 20px;text-align:center;background:var(--surface0);cursor:pointer;transition:border-color .15s,background .15s;}
+  .imp-drop.hot{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 8%,var(--surface0));}
+  .imp-ico{font-size:30px;color:var(--lavender);line-height:1;}
+  .imp-big{font-size:14px;font-weight:600;margin:10px 0 3px;color:var(--text);}
+  .imp-sub{font-size:12.5px;color:var(--subtext);}
+  .imp-link{color:var(--lavender);text-decoration:underline;cursor:pointer;}
+  .imp-sum{font-size:12.5px;color:var(--subtext);margin-bottom:10px;}
+  .imp-sum b{color:var(--text);}
+  .imp-list{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;padding-right:2px;}
+  .imp-row{display:flex;align-items:center;gap:9px;background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:6px 8px;}
+  .imp-thumb{width:38px;height:38px;border-radius:5px;flex:none;background:var(--surface1);display:grid;place-items:center;font-size:15px;color:var(--subtext);overflow:hidden;}
+  .imp-thumb img{width:100%;height:100%;object-fit:cover;}
+  .imp-nm{flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
+  .imp-sz{font-size:10.5px;color:var(--subtext);flex:none;}
+  .imp-x{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:15px;line-height:1;flex:none;padding:0 2px;}
+  .imp-x:hover{color:var(--red);}
+  .imp-cap{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--gold);background:color-mix(in srgb,var(--gold) 8%,transparent);border:1px solid var(--gold);border-radius:8px;padding:6px 9px;margin-bottom:9px;line-height:1.4;}
+  .imp-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;}
+  .imp-tg{aspect-ratio:1;border-radius:5px;overflow:hidden;background:var(--surface1);display:grid;place-items:center;font-size:13px;color:var(--subtext);}
+  .imp-tg img{width:100%;height:100%;object-fit:cover;}
+  .imp-more{aspect-ratio:1;border-radius:5px;border:1px dashed var(--surface1);background:var(--surface0);display:grid;place-items:center;text-align:center;color:var(--subtext);font-size:10px;font-weight:600;line-height:1.1;}
+  .imp-orow{display:flex;align-items:center;gap:9px;margin-top:13px;}
+  .imp-lbl{font-size:11px;color:var(--overlay0);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;}
+  .imp-result{margin-top:12px;font-size:12.5px;padding:9px 11px;border-radius:8px;background:var(--surface0);border:1px solid var(--surface1);color:var(--text);line-height:1.5;}
+  .imp-result.ok{border-color:var(--emerald);}
+  .imp-result.err{border-color:var(--red);color:var(--red);}
   .ee-star{position:fixed;top:-40px;z-index:400;pointer-events:none;color:var(--lavender);text-shadow:0 0 14px rgba(182,146,230,.9),0 0 30px rgba(182,146,230,.5);animation:ee-fall linear forwards;}
   @keyframes ee-fall{to{transform:translateY(112vh) rotate(540deg);opacity:.05;}}
   .ee-toast{position:fixed;left:50%;top:15%;transform:translate(-50%,-50%);z-index:402;background:var(--mantle);border:1px solid var(--lavender);border-radius:14px;padding:16px 30px;font-size:19px;color:var(--text);text-align:center;box-shadow:0 0 70px rgba(182,146,230,.55);pointer-events:none;animation:ee-toast 6s ease forwards;}
@@ -3751,6 +3805,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
+    <button type="button" class="btn" onclick="ImportUI.open()" title="Import local files (images, a folder, or a .zip) into your library">&#8593; Import</button>
     <a class="btn b-loom" href="/loom" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     {% endif %}
     <button type="button" class="btn b-ach" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
@@ -4327,6 +4382,97 @@ function doExportDownload() {
   if (embed) { var fe = document.createElement('input'); fe.type='hidden'; fe.name='embed'; fe.value='1'; f.appendChild(fe); }
   document.body.appendChild(f); f.submit(); f.remove();
 }
+// --- Web import: drop local files -> POST /api/import-local (localhost-only route) ------------
+var ImportUI = (function(){
+  var CAP = 24;                 // preview is capped; the IMPORT itself is never capped
+  var files = [];               // File[]
+  var urls = [];                // objectURLs pending revoke
+  var IMG = /[.](png|jpe?g|webp|gif|bmp|avif)$/i, VID = /[.](mp4|webm|mov|m4v)$/i, ZIP = /[.]zip$/i;
+  function el(id){ return document.getElementById(id); }
+  function kind(f){ var n=f.name||''; return ZIP.test(n)?'zip':VID.test(n)?'video':IMG.test(n)?'image':'other'; }
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmtSize(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB'; if(b<1073741824)return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
+  function revoke(){ urls.forEach(function(u){ URL.revokeObjectURL(u); }); urls=[]; }
+  function reset(){ files=[]; revoke();
+    el('imp-drop').style.display=''; el('imp-preview').style.display='none';
+    el('imp-result').style.display='none'; el('imp-go').style.display='none';
+    var fi=el('imp-file'), fo=el('imp-folder'); if(fi)fi.value=''; if(fo)fo.value=''; }
+  function open(){ reset(); el('import-modal').classList.add('open'); }
+  function close(){ el('import-modal').classList.remove('open'); reset(); }
+  function browse(){ el('imp-file').click(); }
+  function browseFolder(){ el('imp-folder').click(); }
+  function onPick(list){ add(list); }
+  function add(list){
+    for(var i=0;i<list.length;i++){ var f=list[i];
+      if(kind(f)==='other') continue;                                  // skip non-media
+      if(files.some(function(x){ return x.name===f.name && x.size===f.size; })) continue;   // de-dupe
+      files.push(f);
+    }
+    render();
+  }
+  function remove(i){ files.splice(i,1); render(); }
+  function render(){
+    if(!files.length){ reset(); return; }
+    el('imp-drop').style.display='none'; el('imp-preview').style.display=''; el('imp-go').style.display='';
+    var nI=0,nV=0,nZ=0,bytes=0;
+    files.forEach(function(f){ var k=kind(f); if(k==='image')nI++; else if(k==='video')nV++; else if(k==='zip')nZ++; bytes+=f.size; });
+    var parts=[]; if(nI)parts.push(nI+' image'+(nI!==1?'s':'')); if(nV)parts.push(nV+' video'+(nV!==1?'s':'')); if(nZ)parts.push(nZ+' zip'+(nZ!==1?'s':''));
+    el('imp-sum').innerHTML='<b>'+files.length+' file'+(files.length!==1?'s':'')+'</b> &middot; '+parts.join(' &middot; ')+' &middot; '+fmtSize(bytes);
+    el('imp-go').textContent='↑ Import '+files.length+' file'+(files.length!==1?'s':'');
+    revoke();
+    var body=el('imp-body'), h, i;
+    if(files.length<=CAP){                                             // few -> reviewable list
+      h='<div class="imp-list">';
+      files.forEach(function(f,idx){
+        var badge=kind(f)==='video'?'▶':kind(f)==='zip'?'📦':'';
+        h+='<div class="imp-row" data-i="'+idx+'"><span class="imp-thumb">'+badge+'</span><span class="imp-nm">'+esc(f.name)+'</span><span class="imp-sz">'+fmtSize(f.size)+'</span><button class="imp-x" title="remove" onclick="ImportUI.remove('+idx+')">×</button></div>';
+      });
+      h+='</div>'; body.innerHTML=h;
+      files.forEach(function(f,idx){ if(kind(f)!=='image')return; var u=URL.createObjectURL(f); urls.push(u);
+        var row=body.querySelector('.imp-row[data-i="'+idx+'"]'); if(row){ var t=row.querySelector('.imp-thumb'); if(t)t.innerHTML='<img src="'+u+'">'; } });
+    } else {                                                           // many -> capped grid, all still import
+      h='<div class="imp-cap">ⓘ Preview capped at '+CAP+' &mdash; <b>all '+files.length+' will import</b> (only the preview is capped).</div><div class="imp-grid">';
+      for(i=0;i<CAP-1;i++){ var k=kind(files[i]); h+='<div class="imp-tg" data-i="'+i+'">'+(k==='video'?'▶':k==='zip'?'📦':'')+'</div>'; }
+      h+='<div class="imp-more">+'+(files.length-(CAP-1))+'<br>more</div></div>'; body.innerHTML=h;
+      for(i=0;i<CAP-1;i++){ if(kind(files[i])!=='image')continue; var u=URL.createObjectURL(files[i]); urls.push(u);
+        var cell=body.querySelector('.imp-tg[data-i="'+i+'"]'); if(cell)cell.innerHTML='<img src="'+u+'">'; }
+    }
+  }
+  function doImport(){
+    if(!files.length) return;
+    var go=el('imp-go'); go.disabled=true; go.textContent='Importing…';
+    var fd=new FormData();
+    files.forEach(function(f){ fd.append('files', f, f.name); });        // basename; server ignores any path
+    var coll=el('imp-collection').value; if(coll) fd.append('collection', coll);
+    // No CSRF token: same as the app's other fetch-based mutating APIs (/api/generate,
+    // /api/loom/generate, /api/delete) -- protected by SESSION_COOKIE_SAMESITE=Lax + the
+    // global front-door auth gate, and here additionally by the route's localhost-only check.
+    fetch('/api/import-local',{method:'POST',body:fd})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok,j:j}; }); })
+      .then(function(o){
+        go.disabled=false; go.textContent='↑ Import';
+        var res=el('imp-result'); res.style.display='';
+        if(!o.ok || o.j.error){ res.className='imp-result err'; res.textContent='⚠ '+((o.j&&o.j.error)||('import failed ('+o.ok+')')); return; }
+        var d=o.j;
+        res.className='imp-result ok';
+        res.innerHTML='✓ Imported <b>'+d.imported+'</b> file'+(d.imported!==1?'s':'')
+          +(d.skipped?' &middot; '+d.skipped+' skipped (already in library)':'')
+          +(d.collection?' &middot; added to “'+esc(d.collection)+'”':'')
+          +'. <a href="/" style="color:var(--lavender);font-weight:600;">Reload gallery →</a>';
+        el('imp-preview').style.display='none'; el('imp-go').style.display='none';
+      })
+      .catch(function(){ go.disabled=false; go.textContent='↑ Import';
+        var res=el('imp-result'); res.style.display=''; res.className='imp-result err'; res.textContent='⚠ network error'; });
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    var dz=el('imp-drop'); if(!dz) return;
+    ['dragenter','dragover'].forEach(function(e){ dz.addEventListener(e,function(ev){ ev.preventDefault(); dz.classList.add('hot'); }); });
+    dz.addEventListener('dragleave',function(ev){ ev.preventDefault(); dz.classList.remove('hot'); });
+    dz.addEventListener('drop',function(ev){ ev.preventDefault(); dz.classList.remove('hot');
+      if(ev.dataTransfer && ev.dataTransfer.files) add(ev.dataTransfer.files); });
+  });
+  return {open:open, close:close, browse:browse, browseFolder:browseFolder, onPick:onPick, remove:remove, doImport:doImport};
+})();
 function bulkReplacePrompt() {
   var sel = [...selGet()];
   if (!sel.length) return;
