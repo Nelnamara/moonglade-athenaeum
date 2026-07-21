@@ -63,6 +63,17 @@ git tags. Full prose notes for tagged versions live on
   it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
 ### Fixed
 
+- **Images could render permanently broken after signing out on another device.** The offline
+  image cache only refused to store *failed* responses — but a request for an image you're no
+  longer signed in for isn't a failure, it's a redirect to the login page, which arrives as a
+  perfectly successful 200. The login page then got stored under the image's own address. For
+  thumbnails that healed itself on the next load; for full-size images it never did, because
+  those are served from cache without re-checking — so they stayed broken through re-login,
+  reloads and restarts, fixable only with a hard refresh. The trigger was ordinary: Sign out
+  revokes every device, so signing out at the desktop while the tablet was still loading its
+  grid was enough. The cache now refuses redirected responses, and its version was bumped so
+  anything already holding a poisoned entry clears itself.
+
 - **The gallery refuses to become the second server on a port.** Windows lets a new server
   bind a port that another process is *actively serving* — both then hold it, and requests land
   on whichever the OS picks. The practical effect is that you change something, reload, and read

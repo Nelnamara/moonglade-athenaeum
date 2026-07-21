@@ -345,9 +345,16 @@ users.
 ## Access & accounts
 
 The gallery is **default-deny**. One `@app.before_request` hook (`_enforce_front_door()`)
-gates every route; the public surface is exactly three things — `/login`, `/logout`, and
-`/branding/` (static cosmetic art the login page itself needs). There is **no localhost
-bypass**: login is required from `127.0.0.1` exactly as from a LAN address.
+gates every route; the public surface is exactly four things — `/login`, `/logout`,
+`/branding/` (static cosmetic art the login page itself needs), and `/manifest.webmanifest`
+(a compile-time constant the browser fetches unprompted from the login page). There is **no
+localhost bypass**: login is required from `127.0.0.1` exactly as from a LAN address.
+
+Spend-capable routes are **LOGIN**, not localhost — `/api/generate`, `/api/edit`,
+`/api/enhance`, `/api/fix` and `/api/loom/generate` are all reachable by any signed-in
+session, which is deliberate (the tablet generates). LOCALHOST is reserved for writes to the
+server's own disk, credential writes, and irreversible cloud deletion. `tests/test_route_tiers.py`
+is the authority.
 
 **Three tiers.** PUBLIC (the three above) · LOGIN (everything else — any signed-in session,
 local or LAN; this is what makes tablet generation work) · LOCALHOST (a signed-in session
@@ -586,15 +593,10 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   (`master-storyboard.jsx:172`) with a comment at 169-171 explaining that exact choice, and this
   bullet was still describing the pre-fix state. Found 2026-07-21 by an adversarial review that
   went looking for the z-400 sibling this entry had misidentified.
-- **`/api/panel/status` returns raw maintenance-job stdout to any logged-in account**
-  (`pixai_gallery.py:8181`). Launching a destructive Panel job is correctly LOCALHOST-gated
-  (`spec["destructive"] and not _is_local_request()`, 8126), but *reading the output* is a bare
-  `@app.route` with no tier check — so a LOGIN-tier account on the network can poll
-  `_panel_job["lines"]`, the CLI subprocess's own stdout, including host filesystem paths. This
-  matters because the app is explicitly not single-user. Surfaced 2026-07-21 as a side-finding
-  while triaging the `str(e)` sites; it is a larger disclosure surface than the item that found it.
-- **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not roam between
-  the home and work machines this project is already edited from.
+- **Saved-view presets are localStorage-only** (`gallery_presets`), so they do not follow the
+  owner between the devices that share one server — the desktop and the tablet. (The work
+  machine is dev/test and runs no gallery, so cross-*install* sync is not the gap; same-server
+  roaming is.)
 ### Machine-local layout (a standing drift hazard, not a bug)
 
 - The **live gallery server runs from the D: run-copy** (`D:\Moonglade Athenaeum\`), a separate
