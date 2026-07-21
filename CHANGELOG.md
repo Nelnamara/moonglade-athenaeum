@@ -63,6 +63,15 @@ git tags. Full prose notes for tagged versions live on
   it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
 ### Fixed
 
+- **The gallery refuses to become the second server on a port.** Windows lets a new server
+  bind a port that another process is *actively serving* — both then hold it, and requests land
+  on whichever the OS picks. The practical effect is that you change something, reload, and read
+  a stale answer with no error anywhere; it has cost this project two debugging sessions chasing
+  fixes that had actually worked, in a process nobody was talking to. Startup now probes the port
+  first and stops with an explanation and the command to find the offender. The launcher had this
+  check all along — it just lived only in the launcher, so starting the server directly walked
+  straight past it. `--allow-port-reuse` opts back in.
+
 - **Signing out is a button press again, not something a link can do to you.** `/logout` was a
   GET with no token that revoked *every* session for your account — so a page that got you to
   follow a link, or a link-prefetcher walking the header, could sign you out on your desktop,

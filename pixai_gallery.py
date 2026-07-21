@@ -11089,6 +11089,54 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+def port_owner(host, port, timeout=0.4):
+    """Who, if anyone, is already listening on (host, port)?
+
+    Returns "" if the port is free, "moonglade" if the thing answering is one of
+    our own servers, and "other" if something is listening but isn't us.
+
+    This exists because `app.run()` will NOT tell you. Werkzeug's dev server sets
+    allow_reuse_address, and on Windows SO_REUSEADDR does something Unix does not:
+    it lets a second socket bind a port that is ACTIVELY SERVING, rather than only
+    reclaiming one stuck in TIME_WAIT. Both processes then hold :PORT and requests
+    land on whichever the OS feels like -- so you edit a file, reload, and get the
+    OLD server's response with no error anywhere. That is not hypothetical; it has
+    burned this project twice (docs/STATE.md's verification notes), each time
+    costing a debugging session chasing a "fix that didn't work" which had in fact
+    worked perfectly in a process nobody was talking to.
+
+    `Serve Gallery.pyw` already probes the X-Moonglade header to decide "one of our
+    servers is already up here" before launching. That check lived ONLY in the
+    launcher, so `python pixai_gallery.py --port N` -- how every script, test
+    harness and background agent starts this thing -- walked straight past it.
+    Same probe, moved to where it cannot be bypassed.
+
+    The header is the right signal rather than the status code: /api/ping sits
+    behind the login gate and answers 401, so "did it 200" would read a live
+    gated server as a dead port (see tests/test_web_auth.py's
+    test_every_response_carries_the_server_marker, which pins exactly this)."""
+    import socket
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    try:
+        with socket.create_connection((probe_host, port), timeout=timeout):
+            pass
+    except OSError:
+        return ""                      # nothing there -- free to bind
+    # Something is listening. Ask whether it is ours. Any failure here (HTTPS on
+    # the other end, a non-HTTP service, a hang) means "listening but not
+    # identifiably ours", which is still a refusal -- never a green light.
+    try:
+        from urllib.request import urlopen
+        with urlopen("http://{}:{}/api/ping".format(probe_host, port), timeout=timeout) as r:
+            return "moonglade" if r.headers.get("X-Moonglade") else "other"
+    except Exception as e:                                  # noqa: BLE001
+        hdrs = getattr(e, "headers", None)                  # HTTPError IS a response
+        if hdrs is not None and hdrs.get("X-Moonglade"):
+            return "moonglade"
+        return "other"
+
+
 def main():
     ap = argparse.ArgumentParser(description="Local PixAI gallery server.")
     ap.add_argument("--out", default="pixai_backup",
@@ -11096,6 +11144,10 @@ def main():
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (default 127.0.0.1; use 0.0.0.0 for LAN)")
+    ap.add_argument("--allow-port-reuse", action="store_true",
+                    help="start even if something is already listening on --port. Off by "
+                         "default because Windows lets a SECOND server bind an actively "
+                         "serving port, after which requests hit either one at random.")
     ap.add_argument("--https", action="store_true",
                     help="serve over self-signed HTTPS (needed for PWA install / service "
                          "worker on a phone over LAN; requires the 'cryptography' package; "
@@ -11152,6 +11204,26 @@ def main():
             print("--https needs the 'cryptography' package:  pip install cryptography\n"
                   "Falling back to HTTP.")
 
+    # REFUSE to become the second server on this port -- see port_owner()'s docstring
+    # for why the OS will happily let us, and what that silently costs.
+    if not getattr(args, "allow_port_reuse", False):
+        owner = port_owner(args.host, args.port)
+        if owner:
+            who = ("another Moonglade server is ALREADY serving"
+                   if owner == "moonglade" else "something else is listening")
+            print("\nRefusing to start: {} on port {}.\n".format(who, args.port), file=sys.stderr)
+            if owner == "moonglade":
+                print("  Open the one that's already running:  http://localhost:{}/\n"
+                      .format(args.port), file=sys.stderr)
+            print("  Find it:  netstat -ano | findstr :{}      (then: taskkill /F /PID <pid>)\n"
+                  "  Or just use a different port:  --port {}\n"
+                  "\n"
+                  "  Starting anyway would bind a SECOND server to the same port -- Windows\n"
+                  "  allows that -- and requests would land on either one at random. Pass\n"
+                  "  --allow-port-reuse if you genuinely want that.\n".format(args.port, args.port + 1),
+                  file=sys.stderr)
+            return 2
+
     app = create_app(out_dir)
     url = "{}://{}:{}/".format(
         scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)
@@ -11167,4 +11239,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # sys.exit(main()) rather than a bare main(): the port pre-flight signals refusal
+    # with `return 2`, and a bare call would discard it and exit 0 -- so a wrapper
+    # script would read "server started fine" from a server that refused to start.
+    sys.exit(main())
