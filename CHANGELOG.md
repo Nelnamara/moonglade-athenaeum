@@ -49,6 +49,11 @@ git tags. Full prose notes for tagged versions live on
   path. The video-reference slots browse your videos; "make a video from these" feeds the new
   form directly. Negative prompt and channel thread through server-side (negative in multi-ref
   is a PixAI API limitation, not ours). Retires ~130 lines of the old hand-rolled form.
+- **Web entry points for five CLI-only maintenance actions** (web parity step 1). The Control
+  Panel gained buttons for `--verify-dupes` and `--rebuild-similar`, surfaced `sync-artworks` /
+  `sync-videos` (labeled "(full re-walk)"), and gave the existing audit/dedup buttons their
+  missing variants — `audit-full` and `dedup-delete` — each as its own whitelisted action key.
+  Groundwork for retiring the desktop GUI: what the GUI could do, the web can now reach.
 - **Advanced sync options in the Control Panel** (web parity step 2). A collapsed "Advanced"
   section exposes the three sync variants the incremental "Sync now" can't do: a full
   non-incremental re-walk of all history (`--full-meta`), a read-only inventory count
@@ -82,6 +87,29 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Gallery-started generation, enhance, edit, and fix were failing outright (and refunding) —
+  now fixed.** A catalog `media_id` is a generation *output*; the gallery drawer passed it
+  straight to PixAI as an *input*, which PixAI rejected (`invalid_media_id` /
+  `invalid_reference_image_media_id`) with a full credit refund — so every image, enhance, edit,
+  and fix started from the gallery failed. All four paths (`/api/generate`, `/api/enhance`,
+  `/api/edit`, `/api/fix`) now resolve the catalog id to its local file and upload it through
+  PixAI's free S3 handshake, so PixAI receives an id it accepts — routed through one shared
+  `_input_media_id()` helper.
+- **An expired session no longer hangs the app instead of sending you back to login.** Around 90
+  `fetch` call sites never checked the response status, so a `401` (expired login) resolved as if
+  it were data: the job poller re-polled every 3s forever with the drawer stuck on "Rendering
+  under the eclipse…", and the picker showed "No images found" for a full library. A single
+  same-origin fetch wrapper now catches a `401` and redirects to `/login?next=<where you were>`.
+- **Three more poll loops can no longer spin forever.** The Loom's `pollImg`, the Edit/Reference
+  `runGen` poll, and the Jobs tray poll (`mg-notify.js`) lacked the `POLL_CEILING_MS` guard that
+  `pollShot` already had, so a task that never reached a terminal state (or a persistently failing
+  request) re-polled every few seconds indefinitely with the Go button stuck disabled. They now
+  stop at the ceiling and report an error/stalled state.
+- **A trailing-`*` wildcard no longer empties your search.** `night*` compiled to an anchored
+  `LIKE 'night%'` that matched nothing (on a real library, `sample` → 24 rows, `sampl*` → 0),
+  silently blanking a working search even though the box advertises the wildcard. Every term is
+  now matched as a substring, so `night*` and `night` mean the same thing and a wildcard broadens
+  rather than narrows; interior wildcards (`moon*light`, `n?ght`) keep their power.
 - **The Loom's Image / Edit / Reference tabs now price-check before spending, like video does.**
   The video shots already verified cost + free-card coverage via `/api/price` and confirmed any
   credit spend (failing closed on an unverifiable price); the image/edit/reference generators
