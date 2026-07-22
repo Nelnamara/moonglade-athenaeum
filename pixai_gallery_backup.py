@@ -4235,11 +4235,14 @@ def run_generate(args):
     result = task_detail_gql(session, task_id) or {}
     _maybe_dump_params(args, result)
     outputs = result.get("outputs") or {}
-    mids = []
-    if outputs.get("mediaId"):
-        mids.append(str(outputs["mediaId"]))
-    for m in outputs.get("batchMediaIds") or []:
-        mids.append(str(m))
+    # _task_image_media prefers outputs.batch[] (the real individual images) over
+    # outputs.mediaId (the composite grid PixAI returns for any batchSize>1 task) --
+    # reading mediaId/batchMediaIds directly here used to save only the grid and
+    # silently drop every individual image on a multi-image generation (audit:
+    # fail-open/unfiled-workflow-findings, 2026-07-21).
+    media = _task_image_media(outputs)
+    seeds = dict(media)
+    mids = [mid for mid, _ in media]
     for v in outputs.get("videos") or []:
         if v.get("mediaId"):
             mids.append(str(v["mediaId"]))
@@ -4281,7 +4284,7 @@ def run_generate(args):
             "prompt_full": prompt,
             "prompt_preview": (prompt or "")[:100],
             "negative_prompt": _pick("negative_prompt", "negativePrompts"),
-            "seed": _pick("seed", "seed"),
+            "seed": seeds.get(mid) or _pick("seed", "seed"),   # per-image seed on a batch
             "steps": _pick("steps", "samplingSteps"),
             "cfg_scale": _pick("cfg_scale", "cfgScale"),
             "model_id": _pick("model_id", "modelId"),
@@ -4890,12 +4893,11 @@ def run_edit_image(args):
     result = task_detail_gql(session, task_id) or {}
     _maybe_dump_params(args, result)
     outputs = result.get("outputs") or {}
-    mids = []
-    if outputs.get("mediaId"):
-        mids.append(str(outputs["mediaId"]))
-    for m in outputs.get("batchMediaIds") or []:
-        mids.append(str(m))
-    mids = list(dict.fromkeys(mids))
+    # Same fix as run_generate: outputs.batch[] holds the real individual images on
+    # a batchSize>1 edit; outputs.mediaId alone is the composite grid.
+    media = _task_image_media(outputs)
+    seeds = dict(media)
+    mids = [mid for mid, _ in media]
     _outputs_or_raise(result, mids, "edit task completed but no media ids found")
 
     fm = extract_full_meta(result)
@@ -4916,7 +4918,7 @@ def run_edit_image(args):
             continue
         full = {f: "" for f in CATALOG_FIELDS}
         full.update({
-            "task_id": str(task_id), "media_id": mid,
+            "task_id": str(task_id), "media_id": mid, "seed": seeds.get(mid, ""),
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
             "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
