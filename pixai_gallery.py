@@ -2630,7 +2630,13 @@ _LOOM_SHELL = r"""<!DOCTYPE html>
 try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
 <style>
 __DESIGN_TOKENS__
-body { background: var(--base); margin: 0; }
+/* font-family here, not just in .sb-root: anything mounted OUTSIDE #root inherits from
+   body, and this shell deliberately mounts things there -- the Activity chip and tray, the
+   toast stack, the ? FAB. Without it they fell back to the browser default font while the
+   gallery's BASE_HTML gave them system-ui, so the same components looked different on the
+   two pages. mg-notify now also states its own family (it is host-neutral and shouldn't
+   depend on this), but the shell should not be handing anything an unstyled baseline. */
+body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
 /* The shared Job Tracker (static/mg-notify.js) defaults #jobs-fab/#jobs-tray to
    bottom:14px;left:14px -- fine on the gallery's own layout, but in the Loom the left Cast
    panel's own "+ add from gallery"/"Import collection" buttons live at the BOTTOM of that
