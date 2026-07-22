@@ -17,6 +17,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **A zero-byte file left by an interrupted download used to be permanent.** Nothing would
+  ever re-download it — `--update`, `--sync`, and a full re-walk all treated it as
+  "already have this one" — and the gallery would serve the empty file back if a filename
+  match hit it first. All three sites now check size, not just that a file exists.
+  `--dedup --apply --dedup-delete` could also pick an empty file as the "keeper" and
+  hard-delete the real image with no safety net; a zero-byte file can no longer enter that
+  comparison at all.
 - **`READ_ONLY` now actually stops every CLI path that can spend credits.** It already covered
   the web app; on the CLI, five commands — `--generate`, `--generate-video`,
   `--reference-video`, `--enhance`, `--edit-image` — built their own submit call instead of

@@ -1467,6 +1467,18 @@ def download(session, url, stem, retries=3, convert=None,
                     for chunk in r.iter_content(chunk_size=65536):
                         fh.write(chunk)
                         nbytes += len(chunk)
+                if nbytes == 0:
+                    # A 200 with an empty body -- a truncated connection, not a real
+                    # image. Promoting this to `dest` would create a permanent,
+                    # unrecoverable zero-byte file: the startup resume index treats any
+                    # non-.part file with the right extension as "already done" (see the
+                    # matching guard there), so it would never be retried by --update,
+                    # --sync, or a full re-walk. Fail this attempt instead, through the
+                    # same retry/backoff path as any other network failure below.
+                    tmp.unlink()
+                    vlog("download {} -> empty response body ({:.2f}s), retrying".format(
+                        stem.name, time.monotonic() - _t))
+                    raise requests.RequestException("empty response body")
                 _atomic_replace(tmp, dest)   # retry a transient Windows lock on the .part file
                 vlog("download {} -> {:,} bytes in {:.2f}s".format(
                     dest.name, nbytes, time.monotonic() - _t))
@@ -2159,6 +2171,18 @@ def audit_collection(out_dir, content=True, progress=None):
             size = p.stat().st_size
         except OSError:
             continue
+        if size == 0:
+            # A 0-byte file (an interrupted download, same failure mode as invariant 3's
+            # resume-index bug) must never enter by_mid/by_size: with bucket priority as
+            # the ONLY keeper-selection signal, an empty file in the "batches" bucket
+            # outranks a real image in "images" and gets chosen as the survivor. Under
+            # plain --dedup that is recoverable (the auto-verify pass below flags it,
+            # "REVIEW NEEDED"); under --dedup --apply --dedup-delete there is no verify
+            # step at all, so it silently hard-deletes the only real copy. Excluding it
+            # here means it can never become a keeper OR a loser -- it simply isn't part
+            # of any duplicate group, which is also correct: an empty file isn't a
+            # duplicate of anything.
+            continue
         per_bucket[bucket] += 1
         by_mid[mid].append((p, rel, bucket, size))
         by_size[size].append((p, rel, bucket, mid))
@@ -2168,7 +2192,12 @@ def audit_collection(out_dir, content=True, progress=None):
     def _keeper(items, key_bucket):
         # items: list of tuples; key_bucket(item) -> bucket name. Prefer organized,
         # then shortest path (stable), so the canonical copy is deterministic.
-        return min(items, key=lambda it: (_BUCKET_PRIORITY.get(key_bucket(it), 9),
+        # A zero-byte item (it[3] is size on the by_mid tuple shape) can never win --
+        # False < True, so "is empty" sorts before every real bucket/path comparison.
+        # Defense in depth: the loop above already excludes zero-byte files from ever
+        # reaching `items` at all, so this branch should be unreachable in practice.
+        return min(items, key=lambda it: (it[3] == 0,
+                                          _BUCKET_PRIORITY.get(key_bucket(it), 9),
                                           len(str(it[1]))))
 
     # ---- Class A: same media_id across >1 distinct bucket -------------------
@@ -6031,11 +6060,24 @@ def run_download(args, progress=None):
             name = e.name
             if name.endswith(".part") or os.path.splitext(name)[1].lower() not in _IMAGE_EXTS:
                 continue
-            already_done += 1
             try:
-                disk_bytes += e.stat().st_size
+                size = e.stat().st_size
             except OSError:
-                pass
+                size = None
+            # A zero-byte file (an interrupted download that got far enough to create
+            # the file but not to write it) must NOT count as "already done" here --
+            # indexing it means it is skipped FOREVER: no --update/--sync ever
+            # re-attempts a media_id already in this index, and
+            # reconcile_catalog_with_disk's strict matcher (pixai_gallery.py) finds
+            # nothing wrong either, so the row's filename is left pointing at a dead
+            # file with no signal to the user. A stat() race (size is None) is treated
+            # as fine, matching prior behaviour -- we can't tell either way, and this
+            # index has always erred toward "already done" on an unreadable stat.
+            if size == 0:
+                continue
+            already_done += 1
+            if size is not None:
+                disk_bytes += size
             on_disk_by_mid.setdefault(media_id_of(name), Path(e.path))
         vlog("startup disk scan: {} image files ({}) indexed in {:.2f}s".format(
             already_done, _format_size(disk_bytes), time.monotonic() - _t_scan))
