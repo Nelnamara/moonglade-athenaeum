@@ -2618,17 +2618,6 @@ DESIGN_TOKENS_CSS = r"""
   }
 """
 
-# One-click enhance plugins for the Edit tab. `detail-fix` is the VERIFIED workflowId
-# (fired for real 2026-07-02). `hand-fix` / `face-fix` use workflowNames mined from the
-# app bundle -- unverified until fired, but a rejected panelplugin submit costs no credits,
-# so they're safe to offer and confirm live. More arrive once we have the full catalog.
-ENHANCE_PLUGINS = {
-    "detail-fix": {"label": "Detail fix", "workflow_id": "1797414829336369706"},
-    "hand-fix":   {"label": "Fix hands",  "workflow_name": "mymusise/hand-fix"},
-    "face-fix":   {"label": "Fix face",   "workflow_name": "kyo/face-detailer"},
-}
-
-
 # ---------------------------------------------------------------------------
 # Global 401 guard, injected into EVERY page head (BASE_HTML and _LOOM_SHELL).
 #
@@ -10702,25 +10691,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             p = request.get_json(silent=True) or {}
             src = _input_media_id(core, session, str(p.get("source") or "").strip())
             wid = str(p.get("workflow_id") or "").strip()
-            plug = ENHANCE_PLUGINS.get(str(p.get("plugin") or "").strip())
             if not src:
                 return jsonify({"error": "pick an image first"}), 400
-            if wid:
-                params = core.build_panelplugin_parameters(src, wid)
-            elif plug:
-                params = core.build_panelplugin_parameters(
-                    src, plug.get("workflow_id", ""), workflow_name=plug.get("workflow_name", ""))
-            else:
+            if not wid:
                 return jsonify({"error": "pick an enhance workflow"}), 400
+            params = core.build_panelplugin_parameters(src, wid)
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
             telem_bump("enhances", out_dir=out_dir)       # first-enhance milestone
             telem_set_add("tools", "enhance", out_dir=out_dir)
-            telem_set_add("enhance_workflows",           # Enhance Adept: distinct rituals
-                          wid or (plug or {}).get("workflow_id")     # card + catalog runs of the
-                          or (plug or {}).get("workflow_name")       # same workflow share one key
-                          or str(p.get("plugin") or ""), out_dir=out_dir)
+            telem_set_add("enhance_workflows", wid, out_dir=out_dir)  # Enhance Adept: distinct rituals
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": str(e)[:300]}), 200

@@ -108,6 +108,16 @@ git tags. Full prose notes for tagged versions live on
   before any card is attached or credits spent; a mismatch is a 400, not a submit.
   CLI `--lora` has no equivalent check yet — narrower scope, left open.
 
+### Removed
+
+- **`ENHANCE_PLUGINS` and the dead `plugin=` branch of `/api/enhance`.** Unlike
+  `is_lora_compatible` above, this one really was just dead code, not a gap to wire
+  in: the Edit tab's Enhance UI has only ever sent `workflow_id`, never `plugin`, so
+  the dict's three entries were unreachable. `hand-fix`/`face-fix` are superseded by
+  the real, working box-based `/api/fix` (`submit_fixer`); `detail-fix`'s workflow is
+  already reachable the normal way, through the same `workflow_id` path every other
+  Enhance workflow uses.
+
 ### Known issue (not fixed — deliberately left for the design pass)
 
 - **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
