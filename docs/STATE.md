@@ -471,7 +471,16 @@ coherent visual effort and should be scoped and executed together rather than pi
 
 - The **Trophy Hall redesign**, blocked on the owner's own Figma frame.
 - The **Loom visual-refinement pass** — the skin system already reaches the Loom, so what
-  remains is refinement rather than plumbing.
+  remains is refinement rather than plumbing. Its whole palette funnels through a six-line
+  alias block at the top of `master-storyboard.jsx`'s `STYLES` (`--bg`/`--panel`/`--ink`/
+  `--amber`/`--cyan`/`--coral`, each one `var()` hop from a skin token), so retinting is
+  editing six lines rather than auditing hundreds of rules.
+  - **Deep Focus previews are too small to read what you attached** (owner, 2026-07-21).
+    `.sb-frameprev` is `height:84px` and `.sb-refprev` is a `64×48` thumbnail, so a frame or
+    an @tag reference is often unidentifiable at a glance. The real constraint is not those
+    two rules: `.lv-df` is `width:min(640px,92vw)`, so the panel itself caps how large any
+    preview can get. Treat this as "how wide should Deep Focus be, and what does it show at
+    that width", not as a one-number bump.
 - The **gallery search-bar redesign**, blocked on owner input.
 - The **owner's layout/function note-taking pass**, which gates several deferred items.
 - Epic-tier frame art, per-tile ornate frames, the "earned rewards" display, the
