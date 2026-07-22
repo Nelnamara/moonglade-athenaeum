@@ -1,6 +1,8 @@
 """Achievements & skins: milestone computation from local catalog stats + the
 persisted cosmetic state + the /api/achievements and /api/skin routes. All local,
 read-only catalog data (no network, no spend)."""
+from pathlib import Path
+
 import pixai_gallery as g
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
@@ -124,6 +126,22 @@ def test_state_roundtrip_and_soft_fail(tmp_path):
 def _client(tmp_path, rows):
     save_catalog(tmp_path / "catalog.db", rows)
     return login_client(tmp_path), tmp_path
+
+
+def test_ach_grid_stacks_its_sections_instead_of_tiling_them():
+    """Real regression, caught by the owner on the live D: install after the 2026-07-22
+    redesign shipped: #ach-grid still carried the PRE-redesign '.ach-grid' class, whose CSS
+    was `display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr))` -- correct
+    for the OLD layout, where every direct child really was one ~216px .ach-card tile, but
+    wrong for the new one, where every direct child is a full-width section (the carousel,
+    the ladder row, each .hall-block). The auto-fill grid was auto-placing those full-width
+    sections into narrow tiled columns instead of stacking them, producing a scrambled,
+    overlapping render -- invisible to every check this session ran BEFORE the owner looked
+    at the real thing, because none of them checked cross-element geometry (innerText and
+    getComputedStyle on individual elements were all individually correct)."""
+    notify_js = (Path(__file__).resolve().parent.parent / "static" / "mg-notify.js").read_text(encoding="utf-8")
+    assert "'.ach-grid{display:flex;flex-direction:column" in notify_js
+    assert "grid-template-columns:repeat(auto-fill,minmax(216px,1fr))" not in notify_js
 
 
 def test_the_hall_was_renamed_the_folio_of_honors(tmp_path):
