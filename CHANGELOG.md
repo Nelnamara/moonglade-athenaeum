@@ -95,6 +95,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Activity card, chip and toasts used a different typeface on The Loom than in the
+  gallery.** They set their own text size but not their own typeface, so they picked up
+  whatever the surrounding page used — and the Loom's page never specified one, leaving them
+  on the browser's default font. Same components, two different looks depending on where you
+  opened them. They now carry their own typeface, and the Loom's page sets a baseline for
+  anything else mounted alongside them.
+
 - **The Activity card was showing internal identifiers instead of words.** Every job run from
   a terminal read "Cli" underneath it — not a word — because the row printed the internal job
   type verbatim. Terminal runs also carried raw command names as their title, so
