@@ -358,12 +358,25 @@ session, which is deliberate (the tablet generates). LOCALHOST is reserved for w
 server's own disk, credential writes, and irreversible cloud deletion. `tests/test_route_tiers.py`
 is the authority.
 
-**Three tiers.** PUBLIC (the three above) · LOGIN (everything else — any signed-in session,
+**Three tiers.** PUBLIC (the four above) · LOGIN (everything else — any signed-in session,
 local or LAN; this is what makes tablet generation work) · LOCALHOST (a signed-in session
-*and* a loopback address). Only five routes are LOCALHOST, and each acts on the server's own
-files or deletes irreversibly from PixAI: `api_panel_run` (destructive actions only),
-`api_panel_cancel`, `api_panel_schedule` POST, `api_setup_save_key`, `api_branding_shortcut`.
+*and* a loopback address). Eight routes are LOCALHOST — `tests/test_route_tiers.py`'s
+`ROUTE_TIERS` is the authority, not this count; re-derive it from there rather than trust
+this prose if the two ever disagree. Each acts on the server's own files, mints a new
+account, or deletes irreversibly from PixAI: `api_panel_run` (destructive actions only),
+`api_panel_cancel`, `api_panel_schedule` POST, `api_setup_save_key`,
+`api_branding_shortcut`, `delete_tasks_bulk`, `api_import_local`, `api_users_add`.
 `/api/server/stop` and `/restart` are deliberately LOGIN, by owner decision.
+
+`api_users_remove` doesn't fit either bucket cleanly and is declared LOGIN with a nuance
+the tier table can't express structurally: removing your OWN account is allowed from any
+signed-in session (it can only harm the caller), removing anyone ELSE's is refused unless
+the request is local — enforced inside the handler against `session["user"]`, not by tier.
+Fixed 2026-07-22 after being flagged and deliberately left for the owner the day before:
+previously any LAN session could remove *any* account by name (guard was only "not the
+last one left"), so a borrowed-tablet guest could evict the owner and — before the
+matching `api_users_add` fix — register itself a fresh, persistent login in the same
+motion. Owner's explicit choice on scope: self-removal stays LAN-reachable.
 
 The tier table is **enforced, not documented**: `tests/test_route_tiers.py` enumerates
 `app.url_map`, fails any route that declares no tier, and — critically — asserts a LOCALHOST
@@ -372,7 +385,10 @@ three gate regressions ship in one week. Verified to fail when the gate is broke
 
 **First run** creates the first account through the login page itself, offered only to a
 loopback request while zero accounts exist, so a LAN device can never claim it. Ongoing
-management is **Panel → Users**. `--add-web-user` remains a recovery path only.
+management is **Panel → Users** — adding an account, or removing one that isn't yours, from
+the server's own machine; removing your own account works from anywhere. `--add-web-user`
+remains a recovery path only (it's also currently the *only* way to reset a forgotten
+password — see Next).
 
 **Passwords:** 8-character minimum with a weak-password blocklist (repeated characters,
 sequential runs, common list), NIST-shaped — length is the control, no composition rules.
@@ -443,9 +459,17 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
 What's still CLI-only, tracked so the web surface stays complete:
 
-- Nothing. `--restore-orphans` and `--undo-organize` were the last two, and both now render
-  Panel buttons. (`reconcile-deleted` runs via `/api/panel/run` and the scheduler but renders
-  no button by design, `panel_visible: False`.) (`PANEL_ACTIONS` in `pixai_gallery.py`.)
+- **Password reset.** The only way to reset a forgotten password today is
+  `python pixai_gallery_backup.py --add-web-user` on the server machine (it *adds or
+  updates*, so re-running it for an existing username doubles as a reset — `wiki/Setup.md`
+  documents this). Owner request, 2026-07-22: give this a home in the Panel's Users tab
+  too, so a forgotten password doesn't require CLI access. Would need its own trust call
+  (self-only, like `api_users_remove`'s self-removal carve-out? or LOCALHOST like adding a
+  new account?) rather than inheriting one by default — not decided yet, not started.
+- (`--restore-orphans` and `--undo-organize` were the last CLI-only *maintenance* actions,
+  and both now render Panel buttons. `reconcile-deleted` runs via `/api/panel/run` and the
+  scheduler but renders no button by design, `panel_visible: False`. `PANEL_ACTIONS` in
+  `pixai_gallery.py`.)
 
 ---
 
@@ -631,28 +655,6 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   registration on a cert-error origin, and plain HTTP has no `caches` at all. If it does not
   install there, three user-facing promises are wrong and the Cache Storage entry above is moot.
   One command against a real tablet settles it; it has never been run.
-- **A signed-in LAN account can delete the OWNER's own named account, and then register a new
-  one for itself.** This was first filed as "`/panel` lists every account username" — a naming
-  choice that understated it into sounding like enumeration. It's write access:
-  `api_users_remove` (`pixai_gallery.py:8239`) is LOGIN-tier and its only guard is refusing to
-  remove the *last* account (`remove_web_user_guarded`) — nothing stops a caller from removing
-  any *other* specific account by name, including the owner's. On the borrowed-tablet LAN story
-  this app is built around, that means a guest can evict the owner and mint themselves a
-  persistent login, all from the Panel's Users tab.
-  **Not decided as of 2026-07-21.** `api_users_add`/`api_users_remove`'s own docstrings assert
-  "every account carries equal trust" as the reason both sit at LOGIN tier — real code, not
-  invented — but that principle was reasoned about for the *creative* capabilities (generate,
-  browse, curate), and whether it was ever weighed against "a guest can delete you specifically"
-  is a different question the code doesn't answer. Two live options: (a) move
-  `api_users_add`/`api_users_remove` behind `_is_local_request()`, 2 lines each, mirroring
-  `api_setup_save_key`; or (b) keep them LOGIN and say so explicitly as a considered call, the
-  way `/api/server/stop` already is. Needs the owner's answer, not a drive-by pick.
-  Username *visibility* on the same page (who's on the account) is the smaller, separate half of
-  the original finding and stays LOGIN-tier regardless of how the above is answered — reading
-  the roster isn't the same action as deleting from it.
-  The same page's `library at {{ out_dir }}` host-path disclosure — a different kind of fact
-  entirely, the server's own machine rather than a peer account — **was fixed 2026-07-21**:
-  withheld from non-local callers, same pattern as `/api/panel/status`'s `lines` field.
 - **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
   is unreachable and the variable name is a misnomer for "authorized". This is *deliberate and
   documented* at the call site — the front-door hook guarantees an authorized request reaches
