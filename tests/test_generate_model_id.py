@@ -46,3 +46,62 @@ def test_generate_without_model_id_uses_client_version(tmp_path, monkeypatch):
     r = client.post("/api/generate", json={"version_id": "V-DIRECT", "prompt": "x"})
     assert r.status_code == 200, r.data
     assert seen["model"] == "V-DIRECT"
+
+
+# ---- is_lora_compatible as a real server-side spend gate --------------------
+# is_lora_compatible() had zero production callers -- the drawer's own client-side
+# loraIncompat()/anyIncompat() only disabled the Go button, so a direct POST to
+# /api/generate (bypassing the UI entirely) had no equivalent check and could burn
+# real credits/a card on a submission PixAI's own backend rejects for an architecture
+# mismatch (audit: orphaned-surfaces, high, 2026-07-21).
+
+def test_generate_rejects_incompatible_lora_without_spending(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k:
+                        [{"id": "V1", "modelId": "M1", "modelType": "SDXL_MODEL"}])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    spent = []
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: spent.append(1))
+    monkeypatch.setattr(core, "submit_generation", lambda s, params: spent.append(1) or "t")
+
+    client = login_client(tmp_path)
+    r = client.post("/api/generate", json={
+        "model_id": "M1", "prompt": "a cat",
+        "loras": [{"version_id": "L1", "weight": 0.7, "lora_base_type": "DIT7B_MODEL"}]})
+    assert r.status_code == 400                   # early return, like the model/prompt checks beside it
+    assert "architecture" in r.get_json().get("error", "")
+    assert not spent                              # never reached _apply_kaisuuken or submit_generation
+
+
+def test_generate_allows_compatible_lora(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k:
+                        [{"id": "V1", "modelId": "M1", "modelType": "SDXL_MODEL"}])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "_gen_parameters", lambda args: {"modelId": args.model})
+    monkeypatch.setattr(core, "submit_generation", lambda s, params: "t")
+
+    client = login_client(tmp_path)
+    r = client.post("/api/generate", json={
+        "model_id": "M1", "prompt": "a cat",
+        "loras": [{"version_id": "L1", "weight": 0.7, "lora_base_type": "SDXL_MODEL"}]})
+    assert r.status_code == 200, r.data
+    assert r.get_json().get("task_id") == "t"
+
+
+def test_generate_lora_check_trusts_client_model_type_when_no_model_id_sent(tmp_path, monkeypatch):
+    """Backward-compat mirror of test_generate_without_model_id_uses_client_version: no
+    model_id means no server-side resolve, so the client-sent model_type is what gets
+    checked -- proportionate here since this gate only protects the caller's own spend,
+    not a security boundary between users."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    spent = []
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: spent.append(1))
+    monkeypatch.setattr(core, "submit_generation", lambda s, params: spent.append(1) or "t")
+
+    client = login_client(tmp_path)
+    r = client.post("/api/generate", json={
+        "version_id": "V-DIRECT", "model_type": "SDXL_MODEL", "prompt": "x",
+        "loras": [{"version_id": "L1", "weight": 0.7, "lora_base_type": "DIT7B_MODEL"}]})
+    assert r.status_code == 400
+    assert "architecture" in r.get_json().get("error", "")
+    assert not spent
