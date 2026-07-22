@@ -25,6 +25,17 @@ def _csrf(html):
     return m.group(1)
 
 
+def _logout(cli):
+    """Sign out the way the header's form does: a POST carrying this session's csrf
+    token. /logout's GET is a LOCAL sign-out only (it clears this client's cookie and
+    writes nothing server-side) since the CSRF-able-GET fix, so any test about
+    REVOKING OTHER SESSIONS has to use the POST. The token comes from the live
+    session, not a scraped page: _establish_session mints a fresh one at login."""
+    with cli.session_transaction() as sess:
+        token = sess.get("csrf", "")
+    return cli.post("/logout", data={"csrf": token})
+
+
 LAN = "203.0.113.5"          # TEST-NET-3 -- a "some other device on the LAN" stand-in
 LAN2 = "203.0.113.9"
 
@@ -744,7 +755,7 @@ def test_logout_revokes_a_stolen_cookie_on_another_client(tmp_path):
     attacker = app.test_client()
     attacker.set_cookie("session", victim.get_cookie("session").value)
     assert attacker.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    victim.get("/logout")
+    _logout(victim)
     r = attacker.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
     assert r.status_code == 401
 
@@ -890,7 +901,10 @@ _PREVIOUSLY_UNGATED_HTML_GET = [
     "/video-file/does-not-exist",
     "/full/does-not-exist",
     "/badge-thumb/does-not-exist.png",
-    "/manifest.webmanifest",
+    # /manifest.webmanifest left this list on 2026-07-21 -- it went public, like
+    # /branding/ before it, and has its own carve-out test below. /sw.js stays:
+    # serving the worker script is a separate decision from serving the manifest,
+    # because the worker CACHES, and cache-survives-sign-out is unsettled.
     "/sw.js",
 ]
 _PREVIOUSLY_UNGATED_HTML_POST = [
@@ -967,3 +981,39 @@ def test_branding_stays_public_unauthenticated(tmp_path, remote_addr):
     cli = _client(tmp_path).test_client()
     r = cli.get("/branding/does-not-exist.png", environ_overrides={"REMOTE_ADDR": remote_addr})
     assert r.status_code == 404
+
+
+@pytest.mark.parametrize("remote_addr", [LAN, "127.0.0.1"])
+def test_manifest_stays_public_unauthenticated(tmp_path, remote_addr):
+    """The second deliberate carve-out, added 2026-07-21 on the same reasoning as
+    /branding/ above: the manifest handler returns a compile-time CONSTANT -- app
+    name, start_url, two hex colours, an inline data: URI icon. No user data, no
+    catalog, no install path, nothing to withhold. And /login is itself public and
+    identifies this app far more loudly than a manifest could, so gating it bought
+    no secrecy.
+
+    What it DID buy was a self-inflicted bug. The browser requests this file on its
+    own the moment the login page loads, and the front door answered with
+    302 -> /login?next=/manifest.webmanifest -- the same incidental traffic that
+    silently overwrote session["csrf"] and made every login attempt fail with "Your
+    session expired" (see login()'s GET branch, which now uses setdefault). Letting
+    the self-fired static assets through is what removes that whole category.
+
+    Anonymous, from LAN or localhost, must get the real manifest -- never a redirect.
+    """
+    cli = _client(tmp_path).test_client()
+    r = cli.get("/manifest.webmanifest", environ_overrides={"REMOTE_ADDR": remote_addr})
+    assert r.status_code == 200, (
+        "anonymous request for the manifest got {} -- if it redirected, the route "
+        "fell back off _PUBLIC_PATHS".format(r.status_code))
+    assert r.mimetype == "application/manifest+json"
+    body = r.get_json(force=True)   # force=: the mimetype is manifest+json, not application/json
+    assert body["name"] == "Moonglade Athenaeum"
+    # The point of the carve-out is that this body is a CONSTANT. If a future edit
+    # starts folding real state into it (a username, the out_dir, a catalog count),
+    # the public tier stops being free and this assertion is where that gets caught.
+    assert set(body) == {"name", "short_name", "start_url", "display",
+                         "background_color", "theme_color", "icons"}, (
+        "the manifest grew a new key -- it is served ANONYMOUSLY now, so re-check that "
+        "whatever was added carries no user, install or credential detail before "
+        "widening this assertion.")

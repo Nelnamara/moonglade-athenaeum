@@ -539,6 +539,44 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
         con.close()
 
 
+def _filters_from_args(args):
+    """Pull the gallery grid's filter set out of a request query string, keyed by
+    query_catalog()'s own parameter names (the index route reads exactly these args --
+    see its body, including the Year+Month dropdown pair a date filter arrives as).
+
+    Only filters actually PRESENT come back, so an empty dict means "no filtering at
+    all" and a caller can take the whole catalog instead. Values are validated the same
+    way index() validates them, since they reach SQL."""
+    def _ym(prefix, month_default):
+        y = args.get(prefix + "_year", "")
+        m = args.get(prefix + "_month", "")
+        return "{}-{}".format(y, m or month_default) if y else ""
+
+    try:
+        rating_min = max(0, min(5, int(args.get("rating_min", 0))))
+    except ValueError:
+        rating_min = 0
+    media_type = args.get("media", "")
+    source = args.get("source", "")
+    found = {
+        "q":              args.get("q", ""),
+        "model":          args.get("model", ""),
+        "batch":          args.get("batch", ""),
+        "date_from":      _ym("from", "01"),
+        "date_to":        _ym("to", "12"),
+        "rating_min":     rating_min,
+        "published_only": args.get("published") == "1",
+        "art_tag":        args.get("tag", ""),
+        "lora":           args.get("lora", ""),
+        "media_type":     media_type if media_type in ("image", "video") else "",
+        "source":         source if source in ("online", "api", "local", "deleted") else "",
+        "collection":     args.get("collection", ""),
+    }
+    # Every default here is falsy (""/0/False), so dropping falsy values is exactly
+    # "drop the filters the user didn't set".
+    return {k: v for k, v in found.items() if v}
+
+
 def catalog_counts(db_path):
     """At-a-glance header stats: image count, video count, distinct collections.
     Cheap COUNTs over the catalog. Fails soft to zeros."""
@@ -2592,7 +2630,13 @@ _LOOM_SHELL = r"""<!DOCTYPE html>
 try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
 <style>
 __DESIGN_TOKENS__
-body { background: var(--base); margin: 0; }
+/* font-family here, not just in .sb-root: anything mounted OUTSIDE #root inherits from
+   body, and this shell deliberately mounts things there -- the Activity chip and tray, the
+   toast stack, the ? FAB. Without it they fell back to the browser default font while the
+   gallery's BASE_HTML gave them system-ui, so the same components looked different on the
+   two pages. mg-notify now also states its own family (it is host-neutral and shouldn't
+   depend on this), but the shell should not be handing anything an unstyled baseline. */
+body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
 /* The shared Job Tracker (static/mg-notify.js) defaults #jobs-fab/#jobs-tray to
    bottom:14px;left:14px -- fine on the gallery's own layout, but in the Loom the left Cast
    panel's own "+ add from gallery"/"Import collection" buttons live at the BOTTOM of that
@@ -2613,6 +2657,38 @@ body { background: var(--base); margin: 0; }
    the tie-break), so !important is the only way to reliably win without depending on load
    timing that could shift later. */
 #jobs-fab, #jobs-tray { bottom: 88px !important; }
+/* Lift the Activity chip (and the ? help FAB below, inline) above LoomV2's center view.
+   .lv-overlay (master-storyboard.jsx: position:fixed; inset:0; z-index:400; background:
+   var(--base) -- opaque) buries them: neither #root nor its .sb-root child forms a stacking
+   context, so that 400 competes in the ROOT context directly against these body-level FABs
+   (mg-notify.js gives them 234/235) and wins. 401/402 floats them over the board while staying
+   UNDER the modal/celebration tier that must keep covering them -- .sb-seq / .sb-pick-ov and the
+   frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 / .m2-conf (520/521).
+   Loom-only: this block ships only in _LOOM_SHELL, so the gallery's own #jobs-fab keeps 234.
+   !important for the same mg-notify.js cascade-timing reason as the bottom rule above. Known
+   residual (z-only can't fix it): Deep Focus's .lv-df-veil (450) and the nested 600 preview
+   flyouts render INSIDE .lv-overlay, so from the root they're part of the single 400 atom and
+   these corner FABs paint over them -- cosmetic only; the real fix hoists those overlays to
+   .sb-root level (owner-visible refactor, deferred). */
+#jobs-fab  { z-index: 401 !important; }
+#jobs-tray { z-index: 402 !important; }
+
+/* Clearance under the ? help FAB, which is the cost of making it visible at all.
+   #eb-help-btn is position:fixed bottom:18px + 38px tall, so it floats over the
+   bottom-right ~56px of the viewport -- and on /loom the bottom-right IS the Generate
+   drawer (.lv-side.right is 560px wide). .mgd-go and <mg-cost-badge> sit in .lv-gen's
+   NORMAL FLOW, not a pinned footer, so once the drawer is scrolled to its end -- the
+   ordinary position right before you submit -- the FAB covered the right edge of the
+   Generate button and clipped the tail of the cost readout ("· saves ~84,000 credits",
+   the expiry sub-line). This project's standing rule is to report the real cost of every
+   generation, so a partly-obscured cost line is not an acceptable trade for a visible
+   help button.
+   Padding, not another z-index change: the FAB SHOULD stay on top, the content just
+   needs somewhere to scroll to. 64px = the FAB's 56px footprint + breathing room.
+   #root out-specifies the .lv-gen rule in master-storyboard.jsx's STYLES regardless of
+   which <style> React injects first -- and keeping it here rather than in the jsx means
+   the FAB and its clearance live together, and no bundle rebuild is needed. */
+#root .lv-gen { padding-bottom: 64px; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
@@ -2620,6 +2696,10 @@ __BABEL_LIB_TAG__
 <script src="/static/picker-core.js"></script>
 <script src="/static/mg-model-picker.js"></script>
 <script src="/static/mg-gallery-picker.js"></script>
+<!-- Before the drawer, deliberately: <mg-generate-drawer>'s cost line IS <mg-cost-badge> as of
+     the consolidation, so the Loom's Video tab needs this file for a shot's cost to render at
+     all. Same pairing the gallery shell above documents at length. -->
+<script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
 </head><body>
@@ -2636,17 +2716,17 @@ window.storage = {
 </script>
 __RUNTIME_SCRIPT_BLOCK__
 <button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'docs'})})}catch(e){}"
-  style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
+  style="position:fixed;bottom:18px;right:18px;z-index:401;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="How The Loom works">?</button>
 <div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
-  style="position:fixed;inset:0;z-index:301;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
+  style="position:fixed;inset:0;z-index:402;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
   <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:var(--surface0);border:1px solid var(--surface1);border-radius:14px;padding:22px 26px;color:var(--text);font:13.5px/1.55 system-ui,sans-serif;">
     <h2 style="margin:0 0 4px;color:var(--text);">The Loom &mdash; quick guide</h2>
     <p style="color:var(--subtext);margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
     <p><b>Acts &amp; Shots.</b> Your video is a list of <i>acts</i>, each holding <i>shot cards</i>. The reel bar tracks total runtime against your target. Add a shot, give it a duration, and write what happens.</p>
-    <p><b>Modes.</b> Each shot has a generation mode: <b>T2V</b> text-only &middot; <b>I2V</b> animate from one image &middot; <b>FLF</b> morph from a start frame to an end frame &middot; <b>R2V</b> multi-reference (cast + scenes) &middot; <b>V2V</b> extend/transform an existing clip.</p>
+    <p><b>Modes.</b> Each shot has a generation mode: <b>I2V</b> animate from one image &middot; <b>FLF</b> morph from a start frame to an end frame &middot; <b>R2V</b> multi-reference (cast + scenes) &middot; <b>V2V</b> extend/transform an existing clip. (Text-only T2V is retired &mdash; these video models all need an input frame or reference.)</p>
     <p><b>Cast &amp; Assets.</b> Reusable references. Cite them in shot text as <b>@image1 @video1 @audio1</b> (lowercase). "Lock appearance" keeps a character consistent across shots.</p>
-    <p><b>Frame handoff.</b> Every card has an open and close frame. "&#8627; inherit prev close" chains one shot's last frame into the next shot's first &mdash; the &#10003;/&#9888; dots show whether the chain is intact.</p>
+    <p><b>Frame handoff.</b> Every card has an open and close frame. "&#8627; inherit prev close" chains one shot's last frame into the next shot's first, so the cut is continuous; once a shot has rendered, the same button offers "&#9986; splice" to take its real last frame instead.</p>
     <p><b>&#9654; Generate shot.</b> Renders the card on PixAI's video engine (V4.0): your cast + frames upload in @-order, the shot text becomes the prompt, and the finished clip lands in the gallery catalog &mdash; free when a V4.0 card covers it. Status shows on the card; "open clip &#8599;" plays it.</p>
     <p><b>Copy shot.</b> The same assembled prompt, to your clipboard &mdash; paste it into any Seedance-style generator. The board is engine-agnostic by design: plan here, render anywhere.</p>
     <p><b>Saving.</b> The board autosaves to the gallery server (survives restarts). Backup .json / export .txt live in the header.</p>
@@ -2859,6 +2939,12 @@ def create_app(out_dir: Path):
         "reconcile-deleted": {"args": ["--reconcile-deleted"], "label": "Reconcile deleted (flag cloud-removed rows)", "destructive": False, "panel_visible": False},
         # --- destructive: require confirm=true ---
         "organize":      {"args": ["--organize"], "label": "Organize into month folders", "destructive": True},
+        # organize's inverse: replays organize_manifest.csv backwards, then deletes the
+        # manifest. Destructive for exactly the reason organize is -- it MOVES the owner's
+        # files on the server's own disk -- and there is no second manifest to undo the undo.
+        "undo-organize": {"args": ["--undo-organize"],
+                          "label": "Undo organize — move files back to their old paths",
+                          "destructive": True},
         "dedup-apply":   {"args": ["--dedup", "--apply"], "label": "Dedup — quarantine dupes to _duplicates/", "destructive": True},
         # DELETES rather than quarantining, so it is strictly more dangerous than
         # dedup-apply and carries the same destructive=True (confirm + localhost-only).
@@ -2866,6 +2952,14 @@ def create_app(out_dir: Path):
         "dedup-delete":  {"args": ["--dedup", "--apply", "--dedup-delete"],
                           "label": "Dedup — DELETE dupes outright (no _duplicates/ safety net)",
                           "destructive": True},
+        # The write-enabled twin of verify-dupes above (--restore-orphans does nothing on
+        # its own -- it only takes effect alongside --verify-dupes). Its own key rather
+        # than a checkbox on verify-dupes, same reason as audit-full. Recovery, not loss --
+        # it moves quarantined files with no surviving keeper back into images/ -- but
+        # still an unlogged file move on the host, so it's gated like the rest.
+        "restore-orphans": {"args": ["--verify-dupes", "--restore-orphans"],
+                            "label": "Verify quarantine + restore orphans to images/",
+                            "destructive": True},
         "rebuild-thumbs": {"args": ["--rebuild-thumbs"],
                            "label": "Rebuild ALL thumbnails — uniform quality + video posters",
                            "destructive": True},
@@ -3674,10 +3768,19 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="imp-sum" id="imp-sum"></div>
       <div id="imp-body"></div>
       <label class="imp-orow"><span class="imp-lbl">Add to collection</span>
-        <select id="imp-collection" class="gen-sel" style="flex:1;">
+        <select id="imp-collection" class="gen-sel" style="flex:1;" onchange="ImportUI.onCollectionChange()">
           <option value="">&mdash; none &mdash;</option>
           {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          <option value="__new__">&#65291; New collection&hellip;</option>
         </select></label>
+      {# A collection is just a name applied to rows (add_to_collection), so an unseen name
+         creates one -- this row is purely the way in, which the dropdown alone never gave.
+         Reuses .gen-sel: it is a box style (background/border/radius/padding/font), not a
+         select-specific one, so it dresses the input identically with no new CSS. #}
+      <label class="imp-orow" id="imp-newcoll-row" style="display:none;">
+        <span class="imp-lbl">New collection</span>
+        <input id="imp-newcoll" class="gen-sel" style="flex:1;" maxlength="120"
+               placeholder="name it &mdash; it&rsquo;s created when the import lands"></label>
     </div>
     <div id="imp-result" class="imp-result" style="display:none;"></div>
     <div class="modal-actions" style="margin-top:16px;">
@@ -3818,7 +3921,19 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endif %}
     <a class="btn b-health" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
     {% if logged_in_user %}
-    <a class="btn" href="{{ url_for('logout') }}" title="Signed in as {{ logged_in_user }} — sign out">&#128274; Sign out</a>
+    {# A POST form, not an <a href>: /logout revokes every outstanding session for
+       this account, and a bare GET that writes server state is reachable by any
+       cross-site link, window.open or link-prefetcher -- SESSION_COOKIE_SAMESITE=
+       "Lax" blocks a cross-site subresource but still sends the cookie on a
+       top-level GET navigation. Same hidden-csrf-field convention /login's form
+       uses. No styling needed: `* { margin: 0; padding: 0 }` (the reset near the
+       top of BASE_HTML) means the form adds nothing, `.head-nav > *` already gives
+       it the same flex treatment as its sibling buttons, and the .btn inside it is
+       a plain <button class="btn"> exactly like Generate/Import/Contests. #}
+    <form method="post" action="{{ url_for('logout') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="btn" title="Signed in as {{ logged_in_user }} — sign out (on every device)">&#128274; Sign out</button>
+    </form>
     {% endif %}
   </div>
 </header>
@@ -3996,6 +4111,8 @@ document.addEventListener('DOMContentLoaded', function() {
     <a href="{{ c.url }}" title="Remove this filter">×</a></span>
   {% endfor %}
   <a class="clear-all" href="{{ url_for('index') }}">Clear all</a>
+  <a class="clear-all" href="{{ url_for('export_csv_download') }}?{{ request.query_string.decode('utf-8', 'replace') }}" download
+    title="Export exactly these filtered rows to CSV -- the whole-catalog dump stays on the Control Panel">&#11015; Export this view (CSV)</a>
 </div>
 {% endif %}
 
@@ -4006,6 +4123,10 @@ document.addEventListener('DOMContentLoaded', function() {
 {% if request.args.get('collected') %}
 <div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--emerald, #4fc99a);border-radius:4px;color:var(--text);font-size:13px;">
   Added {{ request.args.get('collected') }} image(s) to the collection.</div>
+{% endif %}
+{% if request.args.get('uncollected') %}
+<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--emerald, #4fc99a);border-radius:4px;color:var(--text);font-size:13px;">
+  Removed {{ request.args.get('uncollected') }} item(s) from the collection. Files are untouched.</div>
 {% endif %}
 {% if request.args.get('deleted') %}
 <div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--red);border-radius:4px;color:var(--text);font-size:13px;">
@@ -4054,6 +4175,14 @@ document.addEventListener('DOMContentLoaded', function() {
     <button class="btn btn-primary" id="actions-btn" onclick="toggleActionsMenu(event)">Actions <span id="act-n"></span> &#9662;</button>
     <div class="actions-menu" id="actions-menu">
       <button onclick="bulkAddCollection();closeActionsMenu()">&#43; Add to collection</button>
+      {# Only meaningful while a collection filter is active -- "remove from WHICH one?"
+         has no answer otherwise. Same conditional shape as the "Download collection"
+         button in the filter bar, and the name rides a data attribute (HTML-escaped,
+         read back via dataset) so a name with quotes can't break the handler. #}
+      {% if collection %}
+      <button data-coll="{{ collection }}" onclick="bulkRemoveCollection(this.dataset.coll);closeActionsMenu()"
+              title="Take the selected items out of this collection (a label only -- no files are deleted)">&#8722; Remove from &ldquo;{{ collection }}&rdquo;</button>
+      {% endif %}
       <button onclick="bulkSendVideo();closeActionsMenu()">&#9654; Send to Video</button>
       <button onclick="bulkSendCast();closeActionsMenu()">&#9648; Send to The Loom (cast)</button>
       <button onclick="bulkContactSheet();closeActionsMenu()">&#128424; Print sheet</button>
@@ -4184,25 +4313,45 @@ function toggleBlur() {
   localStorage.setItem('gallery_privacy_blur', on ? '' : '1');
   applyBlur();
 }
-function presetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
-function refreshPresets() {
+// Saved views live SERVER-SIDE (/api/view-presets -> out_dir/view_presets/<account>.json)
+// so a view saved at the desktop exists on the tablet. Scoped to YOUR account, not the
+// install: a saved view is a stored search, not a theme. localStorage ('gallery_presets')
+// is only read once as the legacy store: any set found there is merged up (existing names
+// win) and then cleared.
+var viewPresets = {};
+function legacyPresetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
+function renderPresets() {
   var s = document.getElementById('preset-select'); if (!s) return;
-  var p = presetsGet();
   s.innerHTML = '<option value="">Saved views…</option>';
-  Object.keys(p).forEach(function(n){ var o = document.createElement('option'); o.value = n; o.textContent = n; s.appendChild(o); });
+  Object.keys(viewPresets).sort().forEach(function(n){ var o = document.createElement('option'); o.value = n; o.textContent = n; s.appendChild(o); });
+}
+function refreshPresets() {
+  fetch('/api/view-presets').then(function(r){ return r.json(); }).then(function(d) {
+    viewPresets = (d && d.presets) || {};
+    var legacy = legacyPresetsGet();
+    if (Object.keys(legacy).length) {
+      fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({merge: legacy}) })
+        .then(function(r){ return r.json(); }).then(function(d2) {
+          if (d2 && d2.presets) viewPresets = d2.presets;
+          try { localStorage.removeItem('gallery_presets'); } catch(e) {}
+          renderPresets();
+        }).catch(function(){});
+    }
+    renderPresets();
+  }).catch(function(){ renderPresets(); });
 }
 function savePreset() {
   var n = prompt('Name this view (the current filters):'); if (!n) return;
-  var p = presetsGet(); p[n] = location.search || '?';
-  localStorage.setItem('gallery_presets', JSON.stringify(p)); refreshPresets();
+  fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: n, query: location.search || '?'}) })
+    .then(function(r){ return r.json(); }).then(function(d) {
+      if (d && d.presets) { viewPresets = d.presets; renderPresets(); }
+    }).catch(function(){});
 }
 function loadPreset(n) {
   if (!n) return;
-  if (n.charAt(0) === '✕') { // not used; reserved
-    return;
-  }
-  var p = presetsGet();
-  if (p[n] !== undefined) location.href = '/' + p[n];
+  if (viewPresets[n] !== undefined) location.href = '/' + viewPresets[n];
 }
 (function(){
   // On mobile, auto-open the filter bar if any filter is active so the user sees
@@ -4385,6 +4534,10 @@ function doExportDownload() {
 // --- Web import: drop local files -> POST /api/import-local (localhost-only route) ------------
 var ImportUI = (function(){
   var CAP = 24;                 // preview is capped; the IMPORT itself is never capped
+  // Sentinel for the "＋ New collection…" option. Double-underscored so it cannot collide
+  // with a real collection name, and it is never sent to the server -- chosenCollection()
+  // resolves it to the typed name (or refuses) before the request is built.
+  var NEW_COLL = '__new__';
   var files = [];               // File[]
   var urls = [];                // objectURLs pending revoke
   var IMG = /[.](png|jpe?g|webp|gif|bmp|avif)$/i, VID = /[.](mp4|webm|mov|m4v)$/i, ZIP = /[.]zip$/i;
@@ -4396,7 +4549,11 @@ var ImportUI = (function(){
   function reset(){ files=[]; revoke();
     el('imp-drop').style.display=''; el('imp-preview').style.display='none';
     el('imp-result').style.display='none'; el('imp-go').style.display='none';
-    var fi=el('imp-file'), fo=el('imp-folder'); if(fi)fi.value=''; if(fo)fo.value=''; }
+    var fi=el('imp-file'), fo=el('imp-folder'); if(fi)fi.value=''; if(fo)fo.value='';
+    // The collection choice is per-import, not sticky: reset() runs on both open() and
+    // close(), so a name typed for one batch can't silently ride along on the next.
+    var cs=el('imp-collection'), cn=el('imp-newcoll'), cr=el('imp-newcoll-row');
+    if(cs)cs.value=''; if(cn)cn.value=''; if(cr)cr.style.display='none'; }
   function open(){ reset(); el('import-modal').classList.add('open'); }
   function close(){ el('import-modal').classList.remove('open'); reset(); }
   function browse(){ el('imp-file').click(); }
@@ -4438,12 +4595,29 @@ var ImportUI = (function(){
         var cell=body.querySelector('.imp-tg[data-i="'+i+'"]'); if(cell)cell.innerHTML='<img src="'+u+'">'; }
     }
   }
+  function onCollectionChange(){
+    var isNew=el('imp-collection').value===NEW_COLL;
+    el('imp-newcoll-row').style.display=isNew?'':'none';
+    if(isNew) el('imp-newcoll').focus();
+  }
+  // Resolve the dropdown to a real collection name, or '' for none. Returns null when the
+  // user picked "New collection…" and left it blank -- doImport treats that as "not ready"
+  // rather than silently importing uncollected, which is the failure you'd only notice
+  // later, looking for files that went somewhere else.
+  function chosenCollection(){
+    var sel=el('imp-collection').value;
+    if(sel!==NEW_COLL) return sel;
+    var name=(el('imp-newcoll').value||'').trim();
+    return name || null;
+  }
   function doImport(){
     if(!files.length) return;
+    var coll=chosenCollection();
+    if(coll===null){ el('imp-newcoll').focus(); el('imp-newcoll').placeholder='give the collection a name first'; return; }
     var go=el('imp-go'); go.disabled=true; go.textContent='Importing…';
     var fd=new FormData();
     files.forEach(function(f){ fd.append('files', f, f.name); });        // basename; server ignores any path
-    var coll=el('imp-collection').value; if(coll) fd.append('collection', coll);
+    if(coll) fd.append('collection', coll);
     // No CSRF token: same as the app's other fetch-based mutating APIs (/api/generate,
     // /api/loom/generate, /api/delete) -- protected by SESSION_COOKIE_SAMESITE=Lax + the
     // global front-door auth gate, and here additionally by the route's localhost-only check.
@@ -4471,7 +4645,7 @@ var ImportUI = (function(){
     dz.addEventListener('drop',function(ev){ ev.preventDefault(); dz.classList.remove('hot');
       if(ev.dataTransfer && ev.dataTransfer.files) add(ev.dataTransfer.files); });
   });
-  return {open:open, close:close, browse:browse, browseFolder:browseFolder, onPick:onPick, remove:remove, doImport:doImport};
+  return {open:open, close:close, browse:browse, browseFolder:browseFolder, onPick:onPick, remove:remove, doImport:doImport, onCollectionChange:onCollectionChange};
 })();
 function bulkReplacePrompt() {
   var sel = [...selGet()];
@@ -4500,6 +4674,27 @@ function bulkAddCollection() {
   add('back', location.href); add('name', name.trim());
   sel.forEach(function(mid){ add('media_ids', mid); });
   localStorage.removeItem('gallery_sel');   // consume the selection so the NEXT collection starts fresh
+  document.body.appendChild(f); f.submit();
+}
+// Mirror of bulkAddCollection for the other direction. The collection is NOT prompted for:
+// this button only exists while a collection filter is active, so the target is the one the
+// grid is already showing -- passed in from the button's data attribute.
+function bulkRemoveCollection(name) {
+  var sel = [...selGet()];
+  if (!sel.length) { alert('Select one or more images/videos first (check the boxes, or "Select all"), then use Remove from collection.'); return; }
+  if (!name) return;
+  if (!confirm('Remove ' + sel.length + ' item(s) from the collection \\u201c' + name + '\\u201d?\\n\\n'
+    + 'Only the collection label is removed \\u2014 no files are deleted and nothing leaves your PixAI account.')) return;
+  var f = document.createElement('form');
+  f.method = 'post'; f.action = '/collection-remove';
+  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
+  // Strip the one-shot banner param before it becomes `back`: removing twice in a row
+  // would otherwise stack ?uncollected=3&uncollected=1 and the banner (which reads the
+  // FIRST value) would report the stale count.
+  var back = new URL(location.href); back.searchParams.delete('uncollected');
+  add('back', back.pathname + back.search); add('name', name);
+  sel.forEach(function(mid){ add('media_ids', mid); });
+  localStorage.removeItem('gallery_sel');   // consume the selection: those rows are about to leave this view
   document.body.appendChild(f); f.submit();
 }
 function confirmBulkDelete() {
@@ -4771,9 +4966,12 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-row{display:flex;gap:8px;}
   .gen-sel{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12.5px;}
   .gen-check{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:12px;margin-top:8px;cursor:pointer;}
-  .gen-cost{margin:12px 0 8px;padding:8px 10px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12.5px;color:var(--text);}
-  .gen-cost.free{border-color:var(--emerald);color:var(--emerald);}
-  .gen-cost.warn{border-color:var(--red);color:var(--red);}
+  /* The two lines that used .gen-cost (Generate + Edit) are <mg-cost-badge> now, which brings
+     its own box -- padding/radius/border/font were lifted from this rule verbatim when the
+     component was written, so the swap is pixel-identical apart from the badge's explicit
+     line-height 1.4 (this rule inherited the page's `normal`). .gen-cost.warn was already
+     dead: nothing in this file ever set it. Deleted rather than left as an unused rule --
+     stale copies of the cost styling are the exact drift the consolidation exists to end. */
   .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
   .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
   .gen-ce{min-height:66px;white-space:pre-wrap;overflow-y:auto;max-height:180px;}
@@ -4980,7 +5178,7 @@ document.addEventListener('DOMContentLoaded', function(){
         <input id="gen-seed" class="gen-sel" type="number" placeholder="random" autocomplete="off" style="width:100%;"></div>
       <label class="gen-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it (paidCredit 0) — verified against a real Turbo gen."><input type="checkbox" id="gen-hp"> High priority &middot; Turbo (faster)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
-      <div id="gen-cost" class="gen-cost">Pick a model to see the cost.</div>
+      <mg-cost-badge id="gen-cost" hint="Pick a model to see the cost." card-label="a card"></mg-cost-badge>
       <button id="gen-go" class="gen-go" onclick="Gen.generate()" disabled>Generate</button>
       <div id="gen-result" class="gen-result" style="display:none;"></div>
     </div>
@@ -5022,7 +5220,7 @@ document.addEventListener('DOMContentLoaded', function(){
         <select id="edit-aspect" class="gen-sel"></select>
         <div class="gen-lbl">Reference images <span id="edit-ref-cap" style="text-transform:none;color:var(--subtext);"></span></div>
         <div id="edit-refs" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
-        <div id="edit-cost" class="gen-cost">Pick an image to see the cost.</div>
+        <mg-cost-badge id="edit-cost" hint="Pick an image to see the cost." card-label="an Edit card"></mg-cost-badge>
         <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
         <div id="edit-result" class="gen-result" style="display:none;"></div>
       </div>
@@ -5253,10 +5451,19 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script src="/static/picker-core.js"></script>
+<!-- <mg-cost-badge> is the one renderer for "this costs N credits / a free card covers it"
+     (static/mg-cost-badge.js). Loaded FIRST because it is a hard dependency of three things on
+     this page: the Generate and Edit tabs' own cost lines below, and <mg-generate-drawer>'s
+     .mgd-cost. Without it those elements never upgrade, their setChecking()/setPrice() calls
+     throw, and the cost line freezes on its idle hint while the Go button beside it still
+     spends -- a silent failure on the spend path, which is why the pairing has a test
+     (test_web_pick.py::test_cost_badge_ships_with_every_price_surface) and not just a habit. -->
+<script src="/static/mg-cost-badge.js"></script>
 <!-- The shared <mg-generate-drawer> now mounts in the gallery's Video tab too (not just the
      Loom, which loads it in _LOOM_SHELL). It's picker-agnostic -- no mg-model-picker /
-     mg-gallery-picker dependency -- so this one script is all the gallery mount needs; the
-     host wires its mg-pick-request to the gallery Picker in the inline JS below. -->
+     mg-gallery-picker dependency -- so this one script plus the badge above is all the gallery
+     mount needs; the host wires its mg-pick-request to the gallery Picker in the inline JS
+     below. -->
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
@@ -5873,17 +6080,21 @@ var Gen = (function(){
       loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
   function refreshCost(){
     updateDimNote();
-    if(!(selected&&selected.version_id)) return;
-    var cost=el('gen-cost'); cost.className='gen-cost'; cost.textContent='Checking cost\\u2026';
+    var cost=el('gen-cost');
+    // Was a bare early `return` that left whatever the line last said on screen. Harmless in
+    // practice (`selected` is only ever assigned, never cleared) but clear() is the honest
+    // shape and it costs nothing to be right here.
+    if(!(selected&&selected.version_id)){ cost.clear(); return; }
+    cost.setChecking();
     var mine=++costSeq;
     fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})
       .then(function(r){return r.json();})
-      .then(function(d){ if(mine!==costSeq)return;
-        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
-        var n = d.cost!=null ? d.cost.toLocaleString() : '?';
-        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 '+(d.card_name||'a card')+' covers this (saves ~'+n+' credits)'; }
-        else { cost.textContent='\\u2248 '+n+' credits'; }
-      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
+      // Same split as editCost above: the host owns the fetch/debounce/stale-guard, the badge
+      // owns every state's wording and colour. This tab had TWO fail-open branches, both now
+      // gone: an unpriceable {cost:null, free:false} response rendered "~ ? credits", and a
+      // server `note` was never handled at all so it fell into that same string.
+      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
+      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
   }
   function debouncedCost(){ clearTimeout(costTimer); costTimer=setTimeout(refreshCost,250); }
   function renderResult(res, d, past){
@@ -6025,17 +6236,23 @@ var Gen = (function(){
   }
   function editCost(){
     var cost=el('edit-cost');
-    if(!editSrc()){ cost.className='gen-cost'; cost.textContent='Pick an image to see the cost.'; return; }
-    cost.className='gen-cost'; cost.textContent='Checking cost\\u2026'; var mine=++costSeq;
+    if(!editSrc()){ cost.clear(); return; }
+    cost.setChecking();
+    var mine=++costSeq;
     fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(editPayload())})
       .then(function(r){return r.json();})
-      .then(function(d){ if(mine!==costSeq)return;
-        if(d.note){ cost.textContent=d.note; return; }
-        if(d.error){ cost.textContent='\\u26a0 '+d.error; return; }
-        var n=d.cost!=null?d.cost.toLocaleString():'?';
-        if(d.free){ cost.className='gen-cost free'; cost.textContent='\\u2713 FREE \\u2014 '+(d.card_name||'an Edit card')+' covers this (saves ~'+n+' credits)'; }
-        else { cost.textContent='\\u2248 '+n+' credits'; }
-      }).catch(function(){ if(mine!==costSeq)return; cost.textContent='cost unavailable'; });
+      // <mg-cost-badge> owns the whole classification now (idle / checking / free / paid /
+      // could-not-verify), so this function keeps only what a HOST must own: the request, the
+      // 250ms debounce (debEditCost) and the stale-response guard. Not just tidying -- the
+      // branch this replaces rendered a {cost:null, free:false} response as the price-shaped
+      // "~ ? credits". That shape is NOT rare: price_task() in pixai_gallery_backup.py fails
+      // soft and returns None on any /v2/task-price error, so a transient PixAI hiccup used to
+      // put a neutral, price-looking string on the one line whose job is to say whether this
+      // spends money. The badge renders it red instead.
+      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
+      // setPrice(null), NOT clear(): a failed fetch is could-not-verify, never "not priced
+      // yet". Conflating the two is exactly what the old neutral "cost unavailable" did.
+      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
   }
   function debEditCost(){ clearTimeout(costTimer); costTimer=setTimeout(editCost,250); }
   function edit(){
@@ -7756,8 +7973,37 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                       next_url=next_url, no_accounts=no_accounts,
                                       bootstrap_mode=bootstrap_mode)
 
-    @app.route("/logout")
+    @app.route("/logout", methods=["GET", "POST"])
     def logout():
+        """Sign out. A GET clears THIS browser's cookie and nothing else; a POST
+        carrying the session's csrf token ALSO revokes every other outstanding
+        session for this identity, by bumping its sess_epoch.
+
+        The split exists because the global revoke used to hang off a bare GET with
+        no token (docs/STATE.md's "/logout is a CSRF-able GET that revokes
+        globally"). SESSION_COOKIE_SAMESITE="Lax" already killed the
+        <img src=".../logout"> version of that -- a cross-site SUBRESOURCE carries
+        no cookie, so the handler saw an anonymous request and skipped the bump --
+        but Lax deliberately still sends the cookie on a cross-site TOP-LEVEL GET
+        navigation. Any page that got the owner to follow a link (or ran
+        location.href=, window.open, a meta refresh) signed them out on the desktop,
+        the phone and the tablet at once. Same for any link-prefetcher or crawler
+        that walks the header: a GET must not write server state, and this one did.
+        Lax blocks a cross-site POST outright, and the csrf field checked below is
+        the same session-bound token /login's form and the Panel's Users tab already
+        carry -- belt and braces, so this does not silently re-open if SameSite is
+        ever loosened for an HTTPS/reverse-proxy deployment.
+
+        What a cross-site GET can still do is drop this one browser's cookie. That
+        is the irreducible floor for any sign-out reachable by navigation, it writes
+        NOTHING server-side, and the user recovers by signing in again -- versus the
+        old behaviour, which kicked every other device they own.
+
+        `scope=this-device` on the POST skips the global revoke (sign out here
+        only). Its ABSENCE means global: a truncated or hand-built POST has to fail
+        toward MORE revocation, never less, because the whole mechanism exists to
+        kill a cookie captured off plain-HTTP LAN traffic (see
+        pixai_gallery_backup.get_web_user_session_epoch's docstring)."""
         import pixai_gallery_backup as core
         user = session.get("user")
         # A DEAD cookie must not be allowed to REVOKE. /logout is in _PUBLIC_PATHS so
@@ -7768,15 +8014,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # off the instant they signed back in: no credential needed, and recoverable
         # only by rotating AUTH_SECRET_KEY, which the owner has no signal to do.
         #
-        # The bump still happens BEFORE the local clear, so signing out revokes EVERY
-        # outstanding cookie for this username -- e.g. one captured off plain-HTTP LAN
-        # traffic before the click -- not just this browser's copy.
-        #
         # ORDER MATTERS: read `user` BEFORE calling _is_authorized_request(), which
         # calls session.clear() on the stale path. Swapping these two lines silently
         # disables the bump for everyone.
-        if user and _is_authorized_request():
-            core.bump_web_user_session_epoch(user)
+        authorized = bool(user) and _is_authorized_request()
+        if request.method == "POST" and authorized:
+            # _check_csrf is defined further down in this same create_app() closure
+            # (with the Panel's Users tab, its other caller); it is bound long before
+            # any request can reach this line.
+            #
+            # A bad token is a loud 400, NOT a quiet downgrade to a local-only sign
+            # out: if the header form ever stopped emitting the field, a silent
+            # downgrade would delete the global revoke and nothing would notice. The
+            # session is deliberately left INTACT -- the user reloads and clicks
+            # again. Note the token buys nothing against someone who already holds
+            # the cookie (Flask's session cookie is signed, not encrypted, so the
+            # token is readable inside it); the _is_authorized_request() check above
+            # is what stops a stolen-cookie replay, and it stays.
+            if not _check_csrf(request.form):
+                return ("Your session expired. Reload the page and try again.", 400)
+            if request.form.get("scope") != "this-device":
+                # BEFORE the local clear, so this revokes EVERY outstanding cookie
+                # for this username -- e.g. one captured off plain-HTTP LAN traffic
+                # before the click -- not just this browser's copy.
+                core.bump_web_user_session_epoch(user)
         # Unconditional and outside the guard: whoever holds an already-invalid cookie
         # must still be able to shed it locally. Client-side only, touches no server
         # state, and leaves the anonymous case a plain 302 no-op.
@@ -7801,7 +8062,22 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # traversal already rejected (see branding()); there's no user data,
     # credential, or spend behind it, so it carries the same public trust
     # tier as /login itself, not a re-opened security gap.
-    _PUBLIC_PATHS = frozenset({"/login", "/logout"})
+    # /manifest.webmanifest joined this set on 2026-07-21, on the same reasoning as
+    # /branding/ and then some. Its handler builds a compile-time CONSTANT -- app name,
+    # start_url "/", two hex colours and an inline data: URI SVG icon. There is no code
+    # path in it that reflects a user, a catalog, an install path or a credential, so
+    # there is nothing to withhold. The "but it fingerprints the install" objection dies
+    # on inspection: /login is itself public and renders branded HTML that identifies
+    # this app far more loudly than a manifest ever could.
+    #
+    # The positive reason to make it public is stronger than the neutral one. A browser
+    # fires this request BY ITSELF the instant the login page loads, and the front door
+    # answered it with a redirect to /login?next=/manifest.webmanifest -- which is
+    # exactly the traffic that produced the csrf-overwrite bug documented at the GET
+    # branch of login() ("Your session expired", unconditionally, on every submit).
+    # setdefault fixed the symptom; letting these self-fired static assets through is
+    # what removes the category.
+    _PUBLIC_PATHS = frozenset({"/login", "/logout", "/manifest.webmanifest"})
     _PUBLIC_PREFIXES = ("/branding/",)
     # Routes whose EXISTING contract (long before this hook existed) was JSON,
     # not an HTML page -- these get a JSON 401 instead of a login redirect, so a
@@ -7884,11 +8160,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             web_users=core.list_web_users(), csrf=session["csrf"],
             current_username=session.get("user"))
 
-    def _check_panel_csrf(body):
-        """Shared CSRF check for the Users tab's mutating endpoints -- the exact
+    def _check_csrf(body):
+        """Shared CSRF check for this app's state-changing POSTs -- the Panel's
+        Users tab (a parsed JSON body) and /logout (request.form) -- using the exact
         same session-based token pattern /login's form uses (see that route's
-        docstring), reused here rather than reinvented: every state-changing form
-        in this app is meant to carry one."""
+        docstring), reused rather than reinvented: every state-changing form in this
+        app is meant to carry one. `body` only has to be .get()-able, so a dict and a
+        request.form MultiDict both work.
+
+        Called _check_panel_csrf until /logout became its second caller (the
+        CSRF-able-GET fix) -- the "panel" in the name had stopped being true."""
         submitted_csrf = str((body or {}).get("csrf") or "")
         live_csrf = session.get("csrf", "") or ""
         return bool(live_csrf) and secrets.compare_digest(submitted_csrf, live_csrf)
@@ -7914,7 +8195,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         Adversarial-review hardening, 2026-07-19 (same root cause as
         /api/users/remove's last-account race, see that route's docstring)."""
         body = request.get_json(silent=True) or {}
-        if not _check_panel_csrf(body):
+        if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         import pixai_gallery_backup as core
         username = str(body.get("username") or "").strip()
@@ -7954,7 +8235,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         either write landed, and both writes would go through -- leaving
         AUTH_USERS empty, the exact self-lockout this guard exists to prevent."""
         body = request.get_json(silent=True) or {}
-        if not _check_panel_csrf(body):
+        if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         username = str(body.get("username") or "").strip()
         import pixai_gallery_backup as core
@@ -7993,13 +8274,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def export_csv_download():
         """Download the catalog as a CSV -- from the browser you get a real file (Downloads),
         not a copy silently written into the backup folder. Built in memory. Authorized only.
-        (The CLI --export-csv still writes to disk on purpose, for scripting.)"""
+        (The CLI --export-csv still writes to disk on purpose, for scripting.)
+
+        Honours the gallery grid's OWN filter query string (?q=&model=&collection=&rating_min=
+        &media=&from_year=...), so exporting from a filtered view exports that view rather
+        than the whole library. With no filter args it stays the full dump it has always
+        been -- load_catalog, not query_catalog, because the latter's `filename != ''`
+        would quietly drop rows whose file isn't on disk yet."""
         import io
         import datetime
+        filters = _filters_from_args(request.args)
+        if filters:
+            # query_catalog paginates: count the matches first, then take that many in a
+            # single page, so a filtered export is never silently truncated. `sort` isn't a
+            # filter (it never changes WHICH rows match) so it's passed separately -- and
+            # an unknown value falls back to the default order inside query_catalog.
+            _, total = query_catalog(db_path, page=1, page_size=1, **filters)
+            rows, _ = query_catalog(db_path, page=1, page_size=max(total, 1),
+                                    sort=request.args.get("sort", "newest"), **filters)
+        else:
+            rows = load_catalog(db_path)
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=CATALOG_FIELDS)
         writer.writeheader()
-        for r in load_catalog(db_path):
+        for r in rows:
             writer.writerow({f: r.get(f, "") for f in CATALOG_FIELDS})
         mem = io.BytesIO(buf.getvalue().encode("utf-8"))
         mem.seek(0)
@@ -8078,11 +8376,40 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/panel/status")
     def api_panel_status():
+        """Live state of the running maintenance job, for the Panel's progress UI.
+
+        `lines` is LOOPBACK-ONLY; the rest of the payload is not. The two halves of this
+        response are different KINDS of data: status/action/label/rc/progress describe the
+        job, but `lines` is the maintenance subprocess's own stdout -- absolute paths out of
+        the owner's install, catalog internals, and whatever a CLI traceback happens to
+        print. That is host detail, and Moonglade is explicitly not single-user, so a
+        logged-in LAN account must not be able to poll it. See the Trust & Safety wiki page.
+
+        Found 2026-07-21 by an adversarial review: STARTING a destructive job was gated
+        (api_panel_run's `spec["destructive"] and not _is_local_request()`) and CANCELLING
+        one was gated (api_panel_cancel), but READING the output was a bare `@app.route`
+        with no tier check at all -- the one door in the set nobody had shut.
+
+        Deliberately NOT a whole-route LOCALHOST gate, which is the obvious-looking fix and
+        is wrong here: 14 of the 20 PANEL_ACTIONS are non-destructive, and a LAN account is
+        allowed to run every one of them (api_panel_run only requires loopback when
+        `spec["destructive"]`). Gating the whole route would let that account start a job
+        and then watch a progress UI that never moves, across all three pollers (the Panel,
+        the job tray, and the resume-on-load check). Redacting one field closes the leak
+        without taking away anything a LAN caller is entitled to. The tier table entry
+        therefore correctly stays LOGIN (tests/test_route_tiers.py).
+
+        The replacement line is a real line rather than `[]` so the log area explains itself
+        instead of just rendering blank, which reads as a bug -- the consumer at ~7385 does
+        `if (d.lines) { log.textContent = d.lines.join('\\n') }`, and `[]` is truthy in JS."""
+        local = _is_local_request()
         with _panel_lock:
+            lines = (list(_panel_job["lines"]) if local
+                     else ["(job output is shown only on the server's own screen)"])
             return jsonify({"status": _panel_job["status"], "action": _panel_job["action"],
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
                             "progress": _panel_job["progress"],
-                            "lines": list(_panel_job["lines"])})
+                            "lines": lines})
 
     @app.route("/api/watch/status")
     def api_watch_status():
@@ -8298,6 +8625,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
         catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
         can_delete_cloud = _is_local_request()
+        # The header's Sign out control is a POST form now (see INDEX_HTML), so this
+        # page has to carry the session's csrf token the same way /login's form and
+        # the Panel do. setdefault, never a fresh mint: _establish_session already set
+        # one at login, and overwriting it here would orphan the token baked into any
+        # other tab the user has open -- the exact bug /login's GET branch documents
+        # at length.
+        session.setdefault("csrf", secrets.token_hex(16))
 
         return render_template_string(
             INDEX_HTML,
@@ -8307,7 +8641,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             rows=page_rows, total=total, page=page, stats=stats,
             needs_key=needs_key, catalog_empty=catalog_empty,
             build_stamp=build_stamp, is_local=True, can_delete_cloud=can_delete_cloud,
-            logged_in_user=session.get("user"),
+            logged_in_user=session.get("user"), csrf=session["csrf"],
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
             date_from=date_from,
@@ -8537,11 +8871,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/collection-remove", methods=["POST"])
     def collection_remove():
+        # Same shape as /collection-add, including the one-shot count in the query
+        # string: `back` normally carries the collection filter the removal happened
+        # under, so the reloaded grid is missing those rows and the banner is the only
+        # thing that says how many left. `uncollected` (not `removed`, which the
+        # cloud-delete banner already owns) keeps the two banners independent.
         back = request.form.get("back") or url_for("index")
         ids = request.form.getlist("media_ids")
         name = request.form.get("name", "")
-        remove_from_collection(db_path, ids, name)
-        return redirect(back)
+        n = remove_from_collection(db_path, ids, name)
+        sep = "&" if "?" in back else "?"
+        return redirect("{}{}uncollected={}".format(back, sep, n))
 
     @app.route("/bulk-replace-prompt", methods=["POST"])
     def bulk_replace():
@@ -8628,8 +8968,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # off the ETag, and it never blocks paint (the cached bytes render immediately).
         # LAN viewers over plain http get no service worker at all (secure-context only) --
         # for them the route's short max-age + ETag is what bounds staleness.
+        # v4: `resp.ok` is NOT a sufficient cache guard, because a GATED response here is
+        # not a failure -- it is a 200. /thumbs/, /img/ and /full/ are not under
+        # _JSON_GATE_PREFIXES, so an unauthorized request for one gets the front door's
+        # `redirect(url_for("login", ...))`, and an <img> subresource has redirect mode
+        # "follow" -- the browser follows it and hands the worker the LOGIN PAGE with
+        # status 200, ok===true, redirected===true. That HTML then gets written into Cache
+        # Storage under the IMAGE's url.
+        #
+        # On /thumbs/ it self-heals (stale-while-revalidate overwrites on the next good
+        # fetch). On /img/ and /full/ it does not: that branch is `r=>r||fetch(...)`,
+        # cache-first with no revalidation on a hit, so those images render broken from
+        # then on -- surviving re-login, reloads and server restarts, curable only by
+        # Ctrl+Shift+R or this cache-name bump.
+        #
+        # The trigger is routine, not exotic: the header's Sign out is a GLOBAL revoke
+        # (bump_web_user_session_epoch), so signing out on the desktop kills the tablet's
+        # session while its grid is still lazy-loading. Same shape as the v1 bug (froze
+        # 404s) and the v2 bug (pinned stale posters), one status code over.
         sw = (
-            "const C='pixai-img-v3';\n"
+            "const C='pixai-img-v4';\n"
             "self.addEventListener('install',e=>self.skipWaiting());\n"
             "self.addEventListener('activate',e=>e.waitUntil(\n"
             "  caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k))))\n"
@@ -8642,12 +9000,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             " if(!isThumb&&!isOrig) return;\n"
             " if(isOrig){\n"
             "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(\n"
-            "   r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;}))));\n"
+            "   r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok&&!resp.redirected)c.put(e.request,resp.clone());return resp;}))));\n"
             "  return;\n"
             " }\n"
             " e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>{\n"
             "  const n=fetch(e.request,{cache:'no-cache'})\n"
-            "          .then(resp=>{if(resp&&resp.ok)c.put(e.request,resp.clone());return resp;})\n"
+            "          .then(resp=>{if(resp&&resp.ok&&!resp.redirected)c.put(e.request,resp.clone());return resp;})\n"
             "          .catch(()=>r);\n"
             "  return r||n;\n"
             " })));\n"
@@ -9904,6 +10262,112 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             except Exception as e:
                 return jsonify({"error": str(e)[:200]}), 200
 
+    _view_presets_lock = threading.Lock()
+
+    # Saved views are PER-ACCOUNT, one file each under out_dir/view_presets/.
+    #
+    # They shipped install-wide (a single out_dir/view_presets.json) by analogy with
+    # /api/skin, which is the right analogy for a THEME and the wrong one here: a skin is
+    # a cosmetic preference, whereas a saved view is a stored search -- names and query
+    # strings that say what someone looks for in their own library. Moonglade is
+    # explicitly not single-user (the repo is public and has real external users), so on
+    # any install with more than one account, install-wide means every account reads, and
+    # can overwrite or delete, every other account's saved searches.
+    #
+    # For the case this feature was built for -- one owner, desktop and tablet, same
+    # account against one server -- per-account behaves identically. Nothing is lost.
+    def _view_presets_dir():
+        d = out_dir / "view_presets"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _view_presets_path(user):
+        from urllib.parse import quote
+        # quote(safe="") so a username can never escape the directory or collide: every
+        # path separator, dot and space becomes a percent-escape. Same technique as the
+        # Loom's kv store (_loom_kv_path).
+        return _view_presets_dir() / (quote(str(user), safe="") + ".json")
+
+    def _legacy_view_presets_path():
+        return out_dir / "view_presets.json"
+
+    def _read_presets_file(p):
+        try:
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {str(k): v for k, v in data.items() if isinstance(v, str)}
+        except (OSError, ValueError):
+            pass
+        return {}
+
+    def _load_view_presets(user):
+        """This account's saved views, falling back to the legacy shared file.
+
+        The fallback is deliberately READ-ONLY and needs no migration flag. An account
+        with no file of its own yet sees whatever the old shared file held -- exactly what
+        it saw before this change, so nothing disappears -- and the moment it saves, it
+        gets its own file and diverges. No "who owns the legacy set" question, and no
+        first-loader-claims-it race, which is the trap a migration flag would have walked
+        into. Once every account has saved once, out_dir/view_presets.json is inert and
+        can be deleted by hand."""
+        own = _view_presets_path(user)
+        if own.exists():
+            return _read_presets_file(own)
+        return _read_presets_file(_legacy_view_presets_path())
+
+    def _ok_view_query(q):
+        # Presets navigate via location.href = '/' + query on load. Requiring the
+        # leading '?' (exactly what savePreset stores: location.search || '?') keeps
+        # every stored value a same-page filter string -- a bare '//host' would resolve
+        # protocol-relative and turn a saved view into an off-site redirect.
+        return isinstance(q, str) and q.startswith("?") and len(q) <= 4096
+
+    @app.route("/api/view-presets", methods=["GET", "POST"])
+    def api_view_presets():
+        """Saved-view presets (the gallery's "Saved views…" dropdown): {name: query
+        string}, stored server-side under out_dir/view_presets/ so a view saved at the
+        desktop exists on the tablet. Login tier (no spend, nothing destructive), and
+        scoped to ONE ACCOUNT -- see _view_presets_dir() for why a saved search is not
+        the same kind of thing as the install-wide skin choice. They lived in
+        localStorage before this, one private set per browser; the client pushes a legacy
+        set up through POST {merge} once, existing names winning ties. POST {name, query}
+        saves one; POST {delete: name} removes one (no UI for it yet -- the verb exists so
+        the select's reserved delete affordance has something to call).
+
+        The account comes from the SESSION and is never accepted from the request body:
+        a client that could name its own key could read and overwrite anyone's set, which
+        would give back the exact cross-account exposure the per-account split removes."""
+        user = str(session.get("user") or "")
+        if not user:
+            # Unreachable through the front door (/api/ is gated), so this is belt and
+            # braces -- but the per-account contract must fail closed rather than fall
+            # back to a shared or empty-named file if that ever stops being true.
+            return jsonify({"error": "authentication required"}), 401
+        with _view_presets_lock:
+            presets = _load_view_presets(user)
+            if request.method == "POST":
+                body = request.get_json(silent=True) or {}
+                if isinstance(body.get("merge"), dict):
+                    for k, v in body["merge"].items():
+                        k = str(k).strip()
+                        if k and k not in presets and _ok_view_query(v):
+                            presets[k] = v
+                elif body.get("delete") is not None:
+                    presets.pop(str(body.get("delete")), None)
+                else:
+                    name = str(body.get("name") or "").strip()
+                    if not name:
+                        return jsonify({"error": "name required"}), 400
+                    if not _ok_view_query(body.get("query")):
+                        return jsonify({"error": "query must be a '?…' filter string"}), 400
+                    presets[name] = body["query"]
+                dest = _view_presets_path(user)
+                tmp = dest.with_suffix(".tmp")
+                tmp.write_text(json.dumps(presets, indent=1), encoding="utf-8")
+                os.replace(tmp, dest)   # atomic: a torn write can't eat the set
+            return jsonify({"presets": presets})
+
     def _params_and_nocard(core, p):
         """Route a drawer payload to generate, edit, or video params. Returns (params,
         no_card, note). note is set (params None) when something's missing."""
@@ -10843,6 +11307,54 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+def port_owner(host, port, timeout=0.4):
+    """Who, if anyone, is already listening on (host, port)?
+
+    Returns "" if the port is free, "moonglade" if the thing answering is one of
+    our own servers, and "other" if something is listening but isn't us.
+
+    This exists because `app.run()` will NOT tell you. Werkzeug's dev server sets
+    allow_reuse_address, and on Windows SO_REUSEADDR does something Unix does not:
+    it lets a second socket bind a port that is ACTIVELY SERVING, rather than only
+    reclaiming one stuck in TIME_WAIT. Both processes then hold :PORT and requests
+    land on whichever the OS feels like -- so you edit a file, reload, and get the
+    OLD server's response with no error anywhere. That is not hypothetical; it has
+    burned this project twice (docs/STATE.md's verification notes), each time
+    costing a debugging session chasing a "fix that didn't work" which had in fact
+    worked perfectly in a process nobody was talking to.
+
+    `Serve Gallery.pyw` already probes the X-Moonglade header to decide "one of our
+    servers is already up here" before launching. That check lived ONLY in the
+    launcher, so `python pixai_gallery.py --port N` -- how every script, test
+    harness and background agent starts this thing -- walked straight past it.
+    Same probe, moved to where it cannot be bypassed.
+
+    The header is the right signal rather than the status code: /api/ping sits
+    behind the login gate and answers 401, so "did it 200" would read a live
+    gated server as a dead port (see tests/test_web_auth.py's
+    test_every_response_carries_the_server_marker, which pins exactly this)."""
+    import socket
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    try:
+        with socket.create_connection((probe_host, port), timeout=timeout):
+            pass
+    except OSError:
+        return ""                      # nothing there -- free to bind
+    # Something is listening. Ask whether it is ours. Any failure here (HTTPS on
+    # the other end, a non-HTTP service, a hang) means "listening but not
+    # identifiably ours", which is still a refusal -- never a green light.
+    try:
+        from urllib.request import urlopen
+        with urlopen("http://{}:{}/api/ping".format(probe_host, port), timeout=timeout) as r:
+            return "moonglade" if r.headers.get("X-Moonglade") else "other"
+    except Exception as e:                                  # noqa: BLE001
+        hdrs = getattr(e, "headers", None)                  # HTTPError IS a response
+        if hdrs is not None and hdrs.get("X-Moonglade"):
+            return "moonglade"
+        return "other"
+
+
 def main():
     ap = argparse.ArgumentParser(description="Local PixAI gallery server.")
     ap.add_argument("--out", default="pixai_backup",
@@ -10850,6 +11362,10 @@ def main():
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (default 127.0.0.1; use 0.0.0.0 for LAN)")
+    ap.add_argument("--allow-port-reuse", action="store_true",
+                    help="start even if something is already listening on --port. Off by "
+                         "default because Windows lets a SECOND server bind an actively "
+                         "serving port, after which requests hit either one at random.")
     ap.add_argument("--https", action="store_true",
                     help="serve over self-signed HTTPS (needed for PWA install / service "
                          "worker on a phone over LAN; requires the 'cryptography' package; "
@@ -10906,6 +11422,26 @@ def main():
             print("--https needs the 'cryptography' package:  pip install cryptography\n"
                   "Falling back to HTTP.")
 
+    # REFUSE to become the second server on this port -- see port_owner()'s docstring
+    # for why the OS will happily let us, and what that silently costs.
+    if not getattr(args, "allow_port_reuse", False):
+        owner = port_owner(args.host, args.port)
+        if owner:
+            who = ("another Moonglade server is ALREADY serving"
+                   if owner == "moonglade" else "something else is listening")
+            print("\nRefusing to start: {} on port {}.\n".format(who, args.port), file=sys.stderr)
+            if owner == "moonglade":
+                print("  Open the one that's already running:  http://localhost:{}/\n"
+                      .format(args.port), file=sys.stderr)
+            print("  Find it:  netstat -ano | findstr :{}      (then: taskkill /F /PID <pid>)\n"
+                  "  Or just use a different port:  --port {}\n"
+                  "\n"
+                  "  Starting anyway would bind a SECOND server to the same port -- Windows\n"
+                  "  allows that -- and requests would land on either one at random. Pass\n"
+                  "  --allow-port-reuse if you genuinely want that.\n".format(args.port, args.port + 1),
+                  file=sys.stderr)
+            return 2
+
     app = create_app(out_dir)
     url = "{}://{}:{}/".format(
         scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)
@@ -10921,4 +11457,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # sys.exit(main()) rather than a bare main(): the port pre-flight signals refusal
+    # with `return 2`, and a bare call would discard it and exit 0 -- so a wrapper
+    # script would read "server started fine" from a server that refused to start.
+    sys.exit(main())

@@ -34,7 +34,12 @@
 
   var STYLE_ID = 'mg-gallery-picker-style';
   var CSS = [
-    'mg-gallery-picker{position:fixed;inset:0;z-index:400;display:flex;align-items:center;',
+    /* 500, not 400: the one live mount (the Loom) renders this as a root-level sibling
+       OVER its .lv-overlay shell, which is also 400 -- an equal z-index only wins by DOM
+       order, which is luck, not layering (same fix as the Loom's own .sb-pick-ov). 500 is
+       the shell's established full-screen-modal tier: above the overlay and Deep Focus's
+       veil, below mg-notify's toasts (510) and the unlock moment (520). */
+    'mg-gallery-picker{position:fixed;inset:0;z-index:500;display:flex;align-items:center;',
     ' justify-content:center;padding:20px;background:rgba(6,4,16,.76);font:13px/1.4 system-ui,sans-serif;}',
     'mg-gallery-picker .mg-pk-box{width:920px;max-width:94vw;height:82vh;background:var(--mantle,#131024);',
     ' border:1px solid var(--surface1,#3a3460);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px;}',

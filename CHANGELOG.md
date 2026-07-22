@@ -15,6 +15,226 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-21 — Security fixes, the last two video models, and a sharper Loom
+
+### Changed
+
+- **Every cost display in the app is now the same component.** `<mg-cost-badge>` was built and
+  then mounted nowhere while four surfaces each hand-rolled their own "is this free or does it
+  cost credits" line — the one surface whose entire job is stopping an accidental 27,500-credit
+  click. They are now one component: the Generate drawer (shared by the gallery's Video tab and
+  the Loom), the gallery's Image and Edit tabs, and the picker. What you'll notice: the gallery's
+  FREE line gains the card's name, how many are left, and when it expires (matching what the
+  drawer already showed); and where a failed price check used to read as a neutral "cost
+  unavailable", it now says plainly, in red, that the cost couldn't be verified and generating
+  may spend credits. The V4.0-full caution stays **red** — a 15s clip is ~210,000 credits, and
+  the app's loudest warning was not going to get quieter as a side effect of a refactor.
+  Cost changes are now announced to screen readers.
+
+### Added
+
+- **The shot's prompt is editable in Deep Focus.** Until now the base prompt — the text that
+  keeps recomposing as you change Camera, Lighting and cast — could only be written from the
+  right-hand panel. Double-click a card and it's there, between the mode row and the frames,
+  in the same reading order as the panel. Editing it clears an active drawer override and says
+  so, the same way the panel already does.
+- **You can create a collection while importing.** The "Add to collection" dropdown gained a
+  **＋ New collection…** option: name it in the box that appears and it's created as the import
+  lands. Previously you had to import loose and re-collect afterwards. Leaving the name blank
+  won't quietly import into nothing — it asks you to name it first.
+
+- **Export the current filtered view to CSV, from the gallery grid.** The filtered-export
+  backend already shipped (an earlier blitz taught `/export-csv` to honour the grid's `?q=&model=…`
+  filter args) but had no way in — the only CSV link lived on the Control Panel and always dumped
+  the whole catalog, so a filtered view could not be exported at all. The grid's active-filter bar
+  now grows an **⬇ Export this view (CSV)** link that carries the live query string to
+  `/export-csv`, so you download exactly the rows you're looking at. It appears only when a filter
+  is active (the whole-catalog dump stays the Panel's job); the empty-filter path is byte-identical
+  to before. Exporting a *selection* of specific picked images is still a separate, unbuilt item.
+- **The last two video models are selectable: V2.7 (High Dynamics) and V3.0 Flash.** They had
+  shipped visible-but-disabled on the theory that a submit needs a numeric top-level `modelId`,
+  which we only had for five of the seven. That theory was wrong. Two free `--dump-params`
+  captures off real rendered tasks both carried an **image** checkpoint's id in `modelId`, and
+  three read-only price probes settled it: the two models price *differently* (~56,000 vs
+  ~44,800 credits for 10s) off an *identical* `modelId`, and dropping `modelId` entirely prices
+  the same. `i2vPro.model` resolves the engine; the numeric id does not. Neither model is
+  card-eligible — your free cards are V4.0-specific — so the cost badge honestly reads "no free
+  card" rather than pretending otherwise.
+- **Per-model duration caps in the Generate drawer.** 15s is exclusive to the V4.0 pair, but the
+  duration control offered 5/6/10/15 for every model. Harmless while every enabled model allowed
+  15s; enabling V2.7 and V3.0 Flash would have newly exposed an unsupported 15s option at roughly
+  84,000 credits with no card to cover it. Over-cap options are now disabled *and* hidden — hiding
+  alone leaves an `<option>` keyboard-selectable and still submittable.
+
+- **You can take images back out of a collection from the UI.** `/collection-remove` had existed
+  for a while with **zero callers** — the whole feature was written except the way in. While a
+  collection filter is active, Actions gains **“− Remove from «name»”**, which takes the selected
+  items out of *that* collection (the one the grid is already showing, so there's no "remove from
+  which?" ambiguity). It's a label change only: no files are deleted and nothing leaves your PixAI
+  account, and the confirm says so. A banner reports how many left.
+- **Three new wiki pages** — **The Loom** (acts/shots, the frame handoff, cast & assets, generating
+  a shot, Deep Focus, the two different Exports), **Control Panel** (every maintenance job with its
+  real label, the risk tiers, the scheduler, Advanced sync, Users, the Activity log), and
+  **Trophy Hall** (the ten evolution ladders and their rungs, milestones, masteries, and how rarity
+  and points actually compute). All written against the code rather than the older docs.
+- **`<mg-cost-badge>`** (`static/mg-cost-badge.js` + harness) — the last unbuilt shared web
+  component. Renders the credit cost of a pending generation and whether a free card covers it,
+  in five states (idle · checking · free · paid · couldn't verify). Host-neutral like its siblings:
+  it never fetches, the host pushes an `/api/price` response in. **Not mounted anywhere yet.**
+### Changed
+
+- **95 dead CSS rules pruned from the Loom** — the classic (V1) render tree's leftovers.
+  Retiring classic deleted its components but not their styles: 84 rules in `STYLES` (the
+  classic header, board grid, card slate/body, editor rows, cast chips, reel bar, the old
+  hand-rolled picker grid) plus 11 pre-redesign leftovers in `V2_STYLES` styled markup nothing
+  renders anymore. Removed mechanically: every class token in a deleted rule was verified
+  absent from the JSX, the Flask module, every `static/*.js`, and the Loom's `src`/`test`
+  trees, with dynamically-constructed class names (`"sb-tick " + status` and friends) audited
+  by hand — a rule survived unless *every* selector in it was provably unmatchable. `STYLES`
+  shrank 39%; shared classes the Export dialog, ImportCollection, and Deep Focus still use
+  (`.sb-pick-ov`, `.sb-field`, `.sb-btn`, …) are untouched, and the served bundle was rebuilt
+  in the same commit (the stale-bundle gate enforces this now).
+
+### Fixed
+
+- **The Activity card, chip and toasts used a different typeface on The Loom than in the
+  gallery.** They set their own text size but not their own typeface, so they picked up
+  whatever the surrounding page used — and the Loom's page never specified one, leaving them
+  on the browser's default font. Same components, two different looks depending on where you
+  opened them. They now carry their own typeface, and the Loom's page sets a baseline for
+  anything else mounted alongside them.
+
+- **The Activity card was showing internal identifiers instead of words.** Every job run from
+  a terminal read "Cli" underneath it — not a word — because the row printed the internal job
+  type verbatim. Terminal runs also carried raw command names as their title, so
+  "generate-video" sat in the list next to real sentences, and the completion toast popped
+  "generate-video — done". Sources now read Terminal / Control Panel / Generate, and terminal
+  jobs are titled in words: Image generation, Video render, Library sync, Incremental update,
+  Full backup.
+
+- **Saved views belong to your account, not to the whole install.** They shipped in a single
+  shared file, by analogy with the skin choice — which is right for a theme and wrong for a
+  saved search, since a view's name and query say what you look for in your own library. On an
+  install with more than one login, everyone could read, overwrite and delete everyone else's.
+  Now one file per account. Nothing is lost on upgrade: an account with no file of its own
+  still reads the old shared set until its first save.
+- **The Loom's ? help button no longer covers the Generate button or the cost readout.** Making
+  it visible put a fixed circle in the bottom-right — which on `/loom` is where the Generate
+  drawer lives — so scrolling the drawer to the end, right before submitting, tucked the edge of
+  the Generate button and the tail of the cost line underneath it. The drawer now keeps clear
+  space beneath its content.
+
+- **Saved views now follow you between devices.** The gallery's "Saved views…" presets lived in
+  each browser's own localStorage, so a view saved at the desktop simply didn't exist on the
+  tablet sharing the same server. They now persist server-side (`/api/view-presets` →
+  `out_dir/view_presets.json`, atomic write, login tier) — the same follows-you-everywhere
+  contract as the skin choice. Any legacy localStorage set is merged up automatically on first
+  load (server names win ties, so two browsers migrating in sequence can't fight over whose
+  stale copy sticks) and then cleared. Stored queries must be `?…` filter strings — the client
+  navigates a loaded preset via `location.href = '/' + query`, where a smuggled `//host` would
+  resolve protocol-relative and turn a saved view into an off-site redirect; the server refuses
+  those outright. A delete verb ships server-side (tested) with no UI control yet.
+- **The Loom's help button and Activity chip are visible again.** Both the `?` help FAB
+  (`z-index:300`) and the Activity chip (`#jobs-fab`, `z-index:234` from the shared `mg-notify.js`)
+  are body-level widgets that the Loom's opaque `.lv-overlay` (`z-index:400`) painted straight over
+  — invisible and unclickable on `/loom`, though the wiki documents both as usable there. A
+  Loom-scoped raise to 401/402 (in `_LOOM_SHELL`, so the gallery's own `#jobs-fab` keeps 234) floats
+  them over the board while staying under every modal/celebration tier that must cover them — the
+  frame picker, Sequence/Export/Import overlays (500), toasts (510), and the unlock moment (520/521).
+  The help FAB's own modal was raised too (it was buried at 301). One acknowledged residual: because
+  Deep Focus's veil and the nested hover-preview flyouts render *inside* the overlay's stacking atom,
+  the raised corner widgets now sit over those backdrops rather than under them — cosmetic only; the
+  real fix (hoisting those overlays to root level) is a deferred refactor.
+- **The Loom's gallery picker no longer ties the shell for z-index.** `<mg-gallery-picker>` sat
+  at z-index 400 — exactly `.lv-overlay`'s own value — so the everyday frame/cast picker painted
+  above the shell by DOM order alone, which is luck, not layering. Raised to 500, the shell's
+  established full-screen-modal tier: above the overlay and Deep Focus's veil, below the
+  notification toasts (510) and the unlock moment (520). The same fix `.sb-pick-ov` got a day
+  earlier, closing out the z-400 sibling that review had found. The gallery loads the same
+  script but never mounts the element yet, so the change has exactly one live surface.
+- **Escape closes the Loom's project and Export menus.** Both popovers sit behind a
+  full-viewport click-catching veil, so until this the only way out was finding somewhere to
+  click — the rest of the app was dead until you did. They now close on Escape exactly like
+  Deep Focus always has. (Shipped in the 2026-07-21 small-wins blitz; this entry was recorded
+  after the fact — the fix predates it.)
+- **`tools/name_inventory.py` was silently missing the launcher — and every machine-local
+  file.** Two blind spots in the tool that sizes the `pixai_* → moonglade_*` rename: it split
+  `git ls-files` output on whitespace, shattering `Serve Gallery.pyw` into two nonexistent
+  paths that the read-error catch then swallowed without a word — dropping the launcher, one of
+  the exact files the rename must not miss (now NUL-delimited via `-z`); and it walked tracked
+  files only, blind to untracked and git-ignored files. It now also counts
+  untracked-but-unignored files plus an existence-guarded machine-local set
+  (`.claude/launch.json` · `config.json` · `serve.txt` · `private/`), reporting those
+  separately since the rename branch can't fix them — each machine has to. The offline
+  image cache only refused to store *failed* responses — but a request for an image you're no
+  longer signed in for isn't a failure, it's a redirect to the login page, which arrives as a
+  perfectly successful 200. The login page then got stored under the image's own address. For
+  thumbnails that healed itself on the next load; for full-size images it never did, because
+  those are served from cache without re-checking — so they stayed broken through re-login,
+  reloads and restarts, fixable only with a hard refresh. The trigger was ordinary: Sign out
+  revokes every device, so signing out at the desktop while the tablet was still loading its
+  grid was enough. The cache now refuses redirected responses, and its version was bumped so
+  anything already holding a poisoned entry clears itself.
+
+- **The gallery refuses to become the second server on a port.** Windows lets a new server
+  bind a port that another process is *actively serving* — both then hold it, and requests land
+  on whichever the OS picks. The practical effect is that you change something, reload, and read
+  a stale answer with no error anywhere; it has cost this project two debugging sessions chasing
+  fixes that had actually worked, in a process nobody was talking to. Startup now probes the port
+  first and stops with an explanation and the command to find the offender. The launcher had this
+  check all along — it just lived only in the launcher, so starting the server directly walked
+  straight past it. `--allow-port-reuse` opts back in.
+
+- **Signing out is a button press again, not something a link can do to you.** `/logout` was a
+  GET with no token that revoked *every* session for your account — so a page that got you to
+  follow a link, or a link-prefetcher walking the header, could sign you out on your desktop,
+  phone and tablet at once. (The `<img src=".../logout">` version never worked; `SameSite=Lax`
+  already stopped that. A top-level navigation is the one Lax deliberately still allows.) Now:
+  the header's **Sign out** is a POST carrying the same session token the login form uses, and
+  it still revokes everywhere — that's the point of it. A bare GET only clears the browser
+  you're sitting at and writes nothing on the server. `scope=this-device` opts out of the
+  global revoke; its *absence* means global, so a malformed request fails toward more
+  revocation, never less. A bad token is a visible error, never a quiet downgrade to a
+  local-only sign-out.
+
+- **`/manifest.webmanifest` is public now, and that removes a whole class of login bug.** The
+  manifest handler returns a compile-time constant — app name, start URL, two colours, an inline
+  icon — so there was never anything behind the gate to protect, and the login page is itself
+  public and identifies the app far more loudly than a manifest could. What gating it *did* buy
+  was a self-inflicted redirect: your browser requests the manifest on its own the instant the
+  login page loads, the front door answered `302 -> /login?next=/manifest.webmanifest`, and that
+  incidental traffic is what used to overwrite the login form's CSRF token and produce "Your
+  session expired" on every attempt. `/sw.js` deliberately stays gated — serving the worker
+  script is a separate question from what the worker caches.
+
+- **`/api/panel/status` handed maintenance-job stdout to any logged-in account.** Starting a
+  destructive Panel job required loopback, and cancelling one required loopback — but *reading
+  the output* was a bare route with no tier check, so a logged-in account anywhere on your
+  network could poll `lines`: the maintenance subprocess's own stdout, absolute paths out of
+  your install and all. Moonglade is explicitly not single-user, so that mattered. `lines` is
+  now loopback-only; a LAN caller gets one line saying so. Deliberately **not** a whole-route
+  localhost gate — 14 of the 20 Panel actions are non-destructive and a LAN account is allowed
+  to run every one of them, so gating the route would have left them watching a progress bar
+  that never moves. Two tests pin both halves: the stdout stays hidden, and job state keeps
+  reaching the LAN.
+
+- **`V3.0 Flash` submitted a model string PixAI has never had.** The drawer shipped `v3.0f`, a
+  guess; the real value is `v3.0.1`, confirmed by PixAI's own task detail ("Model Used: V3.0
+  Flash") against that task's captured submit. The entry had been built from the correct model's
+  tags with an invented value — it would have failed on the first real submit.
+
+### Added
+
+- **`tools/build_roster_board.py`** — renders the achievement roster JSON into one self-contained
+  HTML board for review. Read-only; it never writes the roster back.
+- **A real stale-bundle gate.** `loom/dist/master-storyboard.bundle.js` is committed and served
+  verbatim by `/loom?bundle=1`, but nothing forced a rebuild — edit the `.jsx`, forget
+  `npm run build`, and that route quietly serves old code (exactly how a blank-page bug once
+  shipped). CI now rebuilds and fails if the committed bundle differs, with a message telling you
+  what to run; a pytest mirror does the same locally and restores from a snapshot so a stale bundle
+  is *reported*, never silently fixed. Both layers were negative-tested by corrupting the bundle on
+  purpose. The narrower hook-preamble check stays.
+
 ## [2.1.1] - 2026-07-20 — Windows poster-lock fix
 
 ### Fixed
