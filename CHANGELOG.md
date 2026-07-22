@@ -15,6 +15,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-21 — Security fixes, the last two video models, and a sharper Loom
+
 ### Changed
 
 - **Every cost display in the app is now the same component.** `<mg-cost-badge>` was built and
