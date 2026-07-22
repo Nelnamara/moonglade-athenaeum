@@ -5424,11 +5424,18 @@ def _target_model_id(parameters):
                or (parameters.get("chat") or {}).get("modelId") or "").strip()
 
 
-def match_kaisuuken(session, parameters, enrich=False):
+def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
     """POST /v2/kaisuuken/check with a generation's `parameters` and return the single
     nearest-expiry matching TICKET as {id, expiresAt, templateId, total} -- or None when
     no card matches. READ-ONLY: this only *checks*; the card is consumed later, when the
-    task is submitted with the returned id attached. Fails soft (returns None).
+    task is submitted with the returned id attached. Fails soft (returns None) by default
+    -- fine for every read-only/preview/display caller, where a glitched check should not
+    block the UI.
+
+    `raise_on_error=True` re-raises instead of swallowing the failure into None. The one
+    caller that needs this is `_apply_kaisuuken`'s spend-time check: there, a transient
+    check failure and "genuinely no card matches" must NOT collapse into the same outcome,
+    because that outcome is "proceed and spend real credits."
 
     `enrich=True` cross-references /kaisuuken/summary to (a) PREFER the card locked to this
     generation's own model when more than one template is eligible -- so an Edit gen spends
@@ -5441,6 +5448,8 @@ def match_kaisuuken(session, parameters, enrich=False):
         data = _rest_post(session, "/kaisuuken/check",
                           {"type": "generation-task", "parameters": parameters}) or {}
     except (PixAIError, ValueError):
+        if raise_on_error:
+            raise
         return None
     matches = data.get("matches") or []
     if not matches:
@@ -5650,7 +5659,15 @@ def _apply_kaisuuken(session, params, args):
     """Attach a free-card ticket id (`kaisuukenId`) to `params` in place, mirroring the
     web client. Precedence: explicit --kaisuuken-id > --no-card (skip) > auto-match via
     /v2/kaisuuken/check. Returns the attached id ('' if none). The card is only consumed
-    when the task is actually submitted; this just picks the id. Logs what it did."""
+    when the task is actually submitted; this just picks the id. Logs what it did.
+
+    The auto-match check retries once on failure, then ABORTS (raises PixAIError) rather
+    than falling through to "no card -> pay credits". match_kaisuuken's normal fail-soft
+    contract is right for read-only/preview callers, but wrong here: this is the last
+    check before real money moves, and a transient glitch is not the same fact as "no
+    free card exists" -- treating them the same silently spends credits on a generation
+    that may have just been shown as free. Aborting surfaces the problem instead of
+    guessing with the user's money (audit: `fail-open`, 2026-07-21)."""
     explicit = (getattr(args, "kaisuuken_id", "") or "").strip()
     if explicit:
         params["kaisuukenId"] = explicit
@@ -5659,7 +5676,22 @@ def _apply_kaisuuken(session, params, args):
     if getattr(args, "no_card", False):
         print("  --no-card: not using a free card (this WILL spend credits).")
         return ""
-    best = match_kaisuuken(session, params, enrich=True)   # prefer the model-matching card
+    best = None
+    check_err = None
+    for attempt in range(2):
+        try:
+            best = match_kaisuuken(session, params, enrich=True, raise_on_error=True)
+            check_err = None
+            break
+        except (PixAIError, ValueError) as e:
+            check_err = e
+            if attempt == 0:
+                time.sleep(1.5)
+    if check_err is not None:
+        raise PixAIError(
+            "free-card check failed twice ({}); refusing to guess and silently spend "
+            "credits. Retry, or pass --no-card to proceed and pay credits "
+            "deliberately.".format(check_err))
     if best and best.get("id"):
         params["kaisuukenId"] = best["id"]
         print("  free card matches ({}) -> attaching it; this costs 0 credits "
