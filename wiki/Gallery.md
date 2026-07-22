@@ -21,8 +21,9 @@ A row of frosted glow-pill buttons, one hue per destination:
   [Generating](Generating).
 - **▰ The Loom** — the storyboard for multi-clip video (acts, shots, cast, frame handoff),
   at `/loom`. Also [Generating](Generating); full manual in `docs/LOOM.md`.
-- **🏆** — the Trophy Hall: achievements, points, and earnable skins. It opens as a
-  maximized overlay over the gallery, not a separate page (`Esc` closes it).
+- **🏆** — [The Folio of Honors](Folio-of-Honors): achievements, points, and earnable
+  skins. It opens as a maximized overlay over the gallery, not a separate page (`Esc`
+  closes it).
 - **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing.
 - **⚙ Panel** — the Control Panel at `/panel`: maintenance jobs with live logs and progress,
   the scheduler, server Stop/Restart, branding.

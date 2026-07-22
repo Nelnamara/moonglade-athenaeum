@@ -122,13 +122,13 @@ Related: `feedback_artifact_sandbox`, `feedback_cohesion`, `feedback_design_inte
 > artifact) and verification includes a "does it match the source" pass. This extends the
 > CLAUDE.md checkpoint protocol.
 
-**Origin:** a shipped, owner-approved surface (the Trophy Hall) was once reformatted from prose
-roadmap notes — ladder carousel, toast-styled tiles, rewards bar — and landed off the owner's
-locked visual target: locked work undone, without permission, because prose specs are lossy and
-get re-interpreted every session. The checkpoint protocol alone did not prevent it. Separately,
-the owner had asked about Figma tooling on 3+ occasions and was dismissed — that dismissal is a
-banked never-repeat. Full incident record: `CHANGELOG.md`; the revert and the still-open Hall
-redesign are covered below.
+**Origin:** a shipped, owner-approved surface (the Trophy Hall, since renamed the Folio of
+Honors) was once reformatted from prose roadmap notes — ladder carousel, toast-styled tiles,
+rewards bar — and landed off the owner's locked visual target: locked work undone, without
+permission, because prose specs are lossy and get re-interpreted every session. The checkpoint
+protocol alone did not prevent it. Separately, the owner had asked about Figma tooling on 3+
+occasions and was dismissed — that dismissal is a banked never-repeat. Full incident record:
+`CHANGELOG.md`; the revert and the eventual redesign are covered below.
 
 ### The standard
 
@@ -154,28 +154,32 @@ redesign are covered below.
 **The working pipeline:** owner designs/locks a frame in Figma (screenshotted real app assets are
 fine) → pastes the frame URL → Claude implements from the frame → verifies against it → owner QA.
 
-### Trophy Hall — two owner calls the revert didn't resolve
-
-**Owner already has Figma mocks of the intended Trophy Hall**, built from screenshots of real app
-assets — **ask for the frame URL**, do not re-suggest the screenshot-decomposition checklist; they
-are the source of truth for the Hall redesign (still open; see `docs/STATE.md` → Open owner
-calls).
+### The Folio of Honors (formerly Trophy Hall) — redesign shipped 2026-07-22
 
 The revert (`0a8da3a` reverts `c877919`) restored the pre-reformat Hall — the chosen path
 (Option A); the alternative, rebuilding from the Figma mock and treating the reformat as
-throwaway scaffolding (Option B), was not taken. Backend infra from the same arc — earn-date
-persistence, the badge thumb-cache — lived in earlier commits and survived the revert:
-`43014ef`'s mystery-tile wiring predates the reformat and is still live. The revert did not touch
-either of the two items below, and both are real owner calls for whoever builds the actual
-redesign:
+throwaway scaffolding (Option B), was not taken at the time. It **was** taken later: the owner
+delivered a finished redesign as a full code export (React/Tailwind, Figma Make), built partly
+from the legendary/feat frame slice values Claude had handed off earlier that same night —
+confirmed byte-for-byte identical tier-triad colors to what the toast already shipped, a strong
+signal it carried real values through rather than approximating. Ported to this app's actual
+vanilla JS/CSS (not adopted as React — the app has no other React surface besides the Loom) and
+verified against live data in-browser before shipping. Also renamed Trophy Hall → **The Folio of
+Honors** in the same pass, the owner's pick off `docs/STATE.md`'s shortlist.
 
-1. **Feats invisible until first earn was the ORIGINAL owner-approved spec** ("the whole feats
-   section stays cloaked until the first feat lands"). Mystery-tile art (`43014ef`) exists for
-   masked feat CARDS, but the whole-SECTION cloak still hides feats entirely on a zero-feat
-   gallery. **Owner call for the rebuild: lift the section cloak so unearned feats show as
-   mystery tiles** — that appears to be the actual intent.
-2. **Badges/mascots/frames are machine-local** (`out_dir/branding/`, on the home run copy). A test
-   gallery without that art falls back to emoji — that's absent assets, not killed branding.
+Backend infra from the original arc — earn-date persistence, the badge thumb-cache — lived in
+earlier commits and survived both the revert and the redesign: `43014ef`'s mystery-tile wiring
+predates the reformat and is still live, unchanged, in the new design too. Of the two owner
+calls the revert left unresolved:
+
+1. **Feats invisible until first earn** ("the whole feats section stays cloaked until the first
+   feat lands") — **deliberately left untouched by the 2026-07-22 redesign.** This is a behavior
+   question, not a visual one, and the owner did not ask for it to change — folding it into the
+   redesign commit would be exactly the "restyling a shipped surface without an explicit go"
+   mistake this doc exists to prevent. Still open; still needs its own owner call if the intent
+   really is to lift the section cloak rather than the whole-section hide.
+2. **Badges/mascots/frames are machine-local** (`out_dir/branding/`, on the home run copy) —
+   unaffected by the redesign, still true.
 
 ### Model strategy (owner's credit-efficiency guidance)
 
