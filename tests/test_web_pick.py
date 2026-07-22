@@ -1002,6 +1002,30 @@ def test_gallery_video_tab_is_the_shared_drawer_component(tmp_path):
     assert "Gen.videoGenerate()" not in html
 
 
+def test_gallery_video_tab_registers_with_the_job_tracker(tmp_path):
+    """Audit 2026-07-21, B4: the drawer swap above wired mg-pick-request but not mg-submit
+    or mg-result, so a Video tab generation never showed up in the Activity card and never
+    refreshed the header's credit balance -- both things every OTHER tab (Generate/Edit/Fix,
+    still the pre-migration runTask()) already gets for free. The drawer polls and renders
+    its OWN result inline regardless (self-contained, same as the Loom's mount), which is
+    exactly why this was invisible: the generation itself always looked like it worked.
+
+    Bite: remove either listener and this fails, naming which one.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    # Checked as the exact listener registrations, not bare substrings -- Acct.refresh() in
+    # particular already appears twice elsewhere on this page (runTask's own callback), so
+    # "Acct.refresh() in html" alone would pass even with this entire fix reverted.
+    assert "document.addEventListener('mg-submit', function(e){" in html, (
+        "no mg-submit listener -- a Video tab generation never reaches the Activity card")
+    assert "window.Jobs.register(d.task_id, 'Rendered')" in html, (
+        "mg-submit fires but nothing registers the job with the Activity tracker")
+    assert "document.addEventListener('mg-result', function(){ Acct.refresh(); });" in html, (
+        "no mg-result listener calling Acct.refresh() -- the header credit balance never "
+        "refreshes after a Video tab generation completes")
+
+
 def test_edit_card_has_reference_slots(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
