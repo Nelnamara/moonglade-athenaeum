@@ -174,8 +174,12 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 ## The web suite
 
 The Flask gallery (`pixai_gallery.py`) is a full creation suite, not just a browser.
-Everything spend-capable is **localhost-gated** (`_is_local_request`) — LAN browsers can
-look, only the owner's machine can spend.
+Spend-capable routes are **LOGIN**-tier, not localhost: `/api/generate`, `/api/edit`,
+`/api/enhance`, `/api/fix` and `/api/loom/generate` are reachable by any signed-in session,
+because generating from the tablet is the point. **LOCALHOST** (`_is_local_request`) is
+reserved for a different category — writes to the server's own filesystem, credential writes,
+and irreversible cloud deletion. `tests/test_route_tiers.py` declares every route's tier and
+asserts it against a live request, so it is the authority when prose and code disagree.
 
 - **Generate drawer** (header ✦, dockable, persisted position): three tabs — *Generate*
   (base model + LoRA chips with weights, model/LoRA flyout with a hover preview card, live

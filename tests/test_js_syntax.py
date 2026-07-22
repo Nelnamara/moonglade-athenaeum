@@ -102,7 +102,13 @@ def test_loom_hook_preamble_matches_source_in_every_delivery_path():
     not the bundle's mount, and the default path was fine, so the opt-in path was broken
     alone and silently. Found by a browser crawl, not by any test.
 
-    build.mjs now derives its list from the source. This test pins the remaining two."""
+    build.mjs now derives its list from the source. This test pins the remaining two.
+
+    NOTE this catches only preamble drift -- a stale bundle whose hook list happens to
+    still match sails through. The full staleness gate is
+    test_committed_loom_bundle_matches_a_fresh_build below (and the "Fail if the
+    committed bundle is stale" step in .github/workflows/tests.yml, which is the
+    authoritative one because CI always has the pinned toolchain)."""
     root = Path(__file__).resolve().parent.parent
     jsx = root / "loom" / "master-storyboard.jsx"
     if not jsx.is_file():
@@ -133,6 +139,79 @@ def test_loom_hook_preamble_matches_source_in_every_delivery_path():
             "master-storyboard.jsx.\n  jsx imports : {}\n  bundle has  : {}\n"
             "Run `npm run build` in loom/ and commit the result."
             .format(src_hooks, _hook_list(bm.group(0), "the bundle")))
+
+
+def test_committed_loom_bundle_matches_a_fresh_build(tmp_path):
+    """loom/dist/master-storyboard.bundle.js is COMMITTED and served verbatim by
+    /loom?bundle=1, and nothing forces a rebuild: change master-storyboard.jsx, forget
+    `npm run build`, and that route quietly keeps serving the old code. The preamble
+    test above only notices when the drift reaches the React hook list -- every other
+    edit (a fixed handler, a renamed field, a new panel) leaves the stale bundle
+    completely invisible.
+
+    So: rebuild, and require the fresh output to equal the committed file. That works
+    because esbuild's output is deterministic -- no banner, no timestamp, no build id,
+    and module-path comments use forward slashes on every platform (verified: a Windows
+    rebuild reproduced the Linux-built committed artifact byte for byte). Only line
+    endings are normalized here, for checkouts where git materialized the file as CRLF.
+
+    This is the LOCAL mirror of the real gate, which is the "Fail if the committed
+    bundle is stale" step in .github/workflows/tests.yml -- that one runs after `npm ci`
+    so its esbuild is exactly the version pinned in loom/package-lock.json, and it
+    compares via `git status`, i.e. against the committed blob rather than the working
+    tree. Here we skip unless the toolchain is actually present, so a plain
+    `pip install -r ... && pytest` checkout (and the Python CI job, which never runs
+    `npm ci`) is unaffected.
+
+    build.mjs only knows one output path, so this necessarily rebuilds in place; the
+    original bytes are restored afterwards, and a stale bundle is REPORTED, never
+    silently fixed. Set MOONGLADE_SKIP_LOOM_BUILD=1 to opt out entirely."""
+    root = Path(__file__).resolve().parent.parent
+    loom = root / "loom"
+    bundle = loom / "dist" / "master-storyboard.bundle.js"
+    script = loom / "scripts" / "build.mjs"
+
+    if os.environ.get("MOONGLADE_SKIP_LOOM_BUILD"):
+        pytest.skip("MOONGLADE_SKIP_LOOM_BUILD is set")
+    if NODE is None:
+        pytest.skip("node not installed")
+    if not script.is_file() or not bundle.is_file():
+        pytest.skip("loom/ build tooling or dist bundle not present in this checkout")
+    if not (loom / "node_modules" / "esbuild").is_dir():
+        pytest.skip("loom/node_modules missing -- run `npm ci` in loom/ to enable this check")
+
+    committed = bundle.read_bytes()
+    out = tmp_path / "build.out"
+    try:
+        # Same spawn shape as test_embedded_js_is_valid: real file handles + DEVNULL
+        # stdin, because some sandboxes can't duplicate pytest's captured handles.
+        try:
+            with open(out, "w", encoding="utf-8") as fh, open(os.devnull) as nul:
+                rc = subprocess.call([NODE, str(script)], cwd=str(loom),
+                                     stdin=nul, stdout=fh, stderr=subprocess.STDOUT)
+        except OSError as e:
+            pytest.skip("cannot spawn node in this environment: {}".format(e))
+        log = out.read_text(encoding="utf-8", errors="replace")
+        assert rc == 0, "loom's `npm run build` failed, so the bundle can't be " \
+                        "checked for staleness:\n" + log
+        fresh = bundle.read_bytes()
+    finally:
+        if bundle.read_bytes() != committed:
+            bundle.write_bytes(committed)   # leave the checkout exactly as we found it
+
+    def _norm(b):
+        return b.replace(b"\r\n", b"\n")
+
+    assert _norm(fresh) == _norm(committed), (
+        "loom/dist/master-storyboard.bundle.js is STALE -- it does not match a fresh "
+        "build of loom/master-storyboard.jsx.\n"
+        "  committed: {:,} bytes\n  rebuilt  : {:,} bytes\n"
+        "/loom?bundle=1 serves the committed file, so it is serving code that no "
+        "longer matches the source.\n"
+        "Fix: `cd loom && npm run build`, then commit loom/dist/.\n"
+        "(If you DID rebuild, your local esbuild may differ from the version pinned in "
+        "loom/package-lock.json -- run `npm ci` in loom/ first.)"
+        .format(len(committed), len(fresh)))
 
 
 def test_no_real_newline_inside_confirm_string(client):

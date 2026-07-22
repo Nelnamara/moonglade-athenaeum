@@ -25,8 +25,14 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
 - **Be reached by anyone who hasn't signed in.** As of **v2.0.0** the gallery is default-deny:
   every route except the login page itself requires an account, and that applies on the
   machine running the server exactly as it does over the network. Nothing is browsable
-  anonymously. Sessions are signed cookies over scrypt-hashed passwords, rate-limited per
-  address, and signing out revokes every outstanding session for that account on every device.
+  anonymously — the only things served without an account are the login page itself and the
+  static pieces it needs to render: your branding art and the web-app manifest, neither of
+  which carries any library content. Sessions are signed cookies over scrypt-hashed passwords,
+  rate-limited per address. **Sign out** signs you out *everywhere* — it revokes every
+  outstanding session for that account on every device, which is what makes it the right thing
+  to press if you think a session was captured. (Simply visiting the sign-out URL, rather than
+  pressing the button, only clears the browser you're sitting at; nothing that merely *links*
+  to it can knock your other devices offline.)
   Account creation is **closed after the first local bootstrap**: the login page mints the very
   first account (only from the server's own machine, only while none exist), then never offers
   signup again. New accounts come only from **Panel → Users** (any signed-in session) or the

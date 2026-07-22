@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>&lt;mg-cost-badge&gt; — standalone verification</title>
+<style>
+  /* A minimal slice of the app's DESIGN_TOKENS so the component renders on its own.
+     In the real app these come from DESIGN_TOKENS_CSS; here they're inlined for isolation. */
+  :root{
+    --base:#0c0a1c; --mantle:#131024; --surface0:#211f3a; --surface1:#3a3460;
+    --overlay0:#6a6088; --text:#d6d2e2; --subtext:#9a93ab; --accent:#b692e6;
+    --lavender:#b692e6; --emerald:#4fc99a; --peach:#fab387; --red:#f38ba8;
+  }
+  body{background:var(--base);color:var(--text);font:14px/1.5 system-ui,sans-serif;
+    margin:0;padding:26px;max-width:640px;}
+  h1{font-size:18px;margin:0 0 4px;}
+  p{color:var(--subtext);font-size:13px;}
+  code{background:var(--surface0);border:1px solid var(--surface1);border-radius:5px;padding:1px 6px;}
+  .card{background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;padding:18px;margin-top:16px;}
+  .card h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin:0 0 8px;font-weight:700;}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  .row button{background:var(--surface0);border:1px solid var(--surface1);color:var(--text);
+    border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;}
+  .row button:hover{border-color:var(--accent);}
+  .pillbar{display:flex;align-items:center;gap:10px;}
+  textarea{width:100%;box-sizing:border-box;background:var(--surface0);border:1px solid var(--surface1);
+    border-radius:6px;color:var(--text);padding:7px 9px;font:12px/1.4 ui-monospace,monospace;min-height:74px;}
+  #out{margin-top:14px;font-family:ui-monospace,monospace;font-size:12px;color:var(--accent);
+    background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:10px 12px;
+    white-space:pre-wrap;max-height:220px;overflow-y:auto;}
+  ol{color:var(--subtext);font-size:13px;padding-left:20px;}
+  ol code{color:var(--text);}
+</style>
+</head>
+<body>
+  <h1>&lt;mg-cost-badge&gt; — standalone verification</h1>
+  <p>Isolates the shared cost/free-card badge from both hosts. The component <b>never fetches</b>
+  — the host feeds it a parsed <code>/api/price</code> response — so every state below is driven
+  by a button, and no state here can spend anything. The last card does call the real,
+  read-only <code>/api/price</code> (serve the gallery, open this at
+  <code>/static/mg-cost-badge.html</code> on the same machine) to prove the live response shape
+  classifies correctly.</p>
+
+  <div class="card">
+    <h2>Block (a drawer's cost line)</h2>
+    <mg-cost-badge id="b" hint="Pick a source image to see the cost."></mg-cost-badge>
+    <div class="row">
+      <button data-act="clear">not priced yet</button>
+      <button data-act="note">server note</button>
+      <button data-act="checking">checking…</button>
+      <button data-act="free">free (card covers)</button>
+      <button data-act="free-noname">free (no card name)</button>
+      <button data-act="paid">paid</button>
+      <button data-act="paid-warn">paid + warn</button>
+      <button data-act="zero">settled zero</button>
+      <button data-act="err-server">server error</button>
+      <button data-act="err-fetch">fetch failed (null)</button>
+      <button data-act="err-empty">empty response</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Compact (a toolbar pill) — mirrors every push above</h2>
+    <div class="pillbar">
+      <mg-cost-badge id="p" compact hint="—"></mg-cost-badge>
+      <span style="color:var(--subtext);font-size:12px;">← same data, <code>compact</code> attribute</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Live <code>/api/price</code> (read-only — prices, never submits)</h2>
+    <textarea id="body">{"mode":"I2V","images":["1"],"duration":5,"quality":"basic","video_model":"v4.0.1"}</textarea>
+    <div class="row"><button id="send">POST /api/price → setPrice(response)</button></div>
+    <p style="margin:8px 0 0;">The badge is fed whatever comes back; a network/JSON failure is
+    handed in as <code>null</code>, which is the could-not-verify state.</p>
+  </div>
+
+  <div id="out">mg-cost events: (none yet)</div>
+
+  <ol>
+    <li><b>Only</b> "free (card covers)" is emerald and says FREE; "settled zero" says
+      <code>0 credits</code> in neutral chrome — a real zero is not a free card.</li>
+    <li>All three error buttons render <b>red</b> and warn that generating may spend credits —
+      never a quiet neutral line and never "0".</li>
+    <li>"not priced yet", "server note" and "checking…" are muted and clearly <em>not</em> a price.</li>
+    <li>The free state shows the card name, cards left, what it saves, and the card's expiry
+      (hover it for the exact date); a never-expiring card shows no expiry line at all.</li>
+    <li>Every push logs one <code>mg-cost</code> event below — check <code>settled</code> is true
+      <b>only</b> for free/paid; that flag is what a fail-closed spend gate reads.</li>
+  </ol>
+
+  <script src="/static/mg-cost-badge.js"></script>
+  <script>
+    var badges = [document.getElementById('b'), document.getElementById('p')];
+    var out = document.getElementById('out');
+    var lines = [];
+    function log(s) {
+      lines.unshift(new Date().toTimeString().slice(0, 8) + '  ' + s);
+      out.textContent = lines.slice(0, 30).join('\n');
+    }
+    // Log from ONE badge only (both get identical data) so the event list stays readable.
+    badges[0].addEventListener('mg-cost', function (e) {
+      log('mg-cost  state=' + e.detail.state + '  settled=' + e.detail.settled +
+          '  cost=' + e.detail.cost + '\n  text=' + e.detail.text);
+    });
+
+    function push(fn) { badges.forEach(fn); }
+    var ISO_SOON = new Date(Date.now() + 3 * 86400000).toISOString();
+
+    var ACTS = {
+      clear:       function (b) { b.removeAttribute('warn'); b.clear(); },
+      note:        function (b) { b.removeAttribute('warn'); b.setPrice({ cost: null, free: false, note: 'pick a model' }); },
+      checking:    function (b) { b.removeAttribute('warn'); b.setChecking(); },
+      free:        function (b) { b.removeAttribute('warn'); b.setPrice({ cost: 84000, free: true, cards: 3, card_name: 'Video V4.0 Lite Only', card_expires: ISO_SOON }); },
+      'free-noname': function (b) { b.removeAttribute('warn'); b.setPrice({ cost: 12000, free: true, cards: null, card_name: null, card_expires: null }); },
+      paid:        function (b) { b.removeAttribute('warn'); b.setPrice({ cost: 84000, free: false, cards: null, card_name: null, card_expires: null }); },
+      'paid-warn': function (b) { b.setAttribute('warn', 'V4.0 full — ~2.5× Lite'); b.setPrice({ cost: 210000, free: false }); },
+      zero:        function (b) { b.removeAttribute('warn'); b.setPrice({ cost: 0, free: false }); },
+      'err-server':function (b) { b.removeAttribute('warn'); b.setPrice({ error: 'not signed in', cost: null }); },
+      'err-fetch': function (b) { b.removeAttribute('warn'); b.setPrice(null); },
+      'err-empty': function (b) { b.removeAttribute('warn'); b.setPrice({ cost: null, free: false }); }
+    };
+    document.querySelectorAll('.row button[data-act]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        log('host → ' + btn.getAttribute('data-act'));
+        push(ACTS[btn.getAttribute('data-act')]);
+      });
+    });
+
+    document.getElementById('send').addEventListener('click', function () {
+      var body = document.getElementById('body').value;
+      push(function (b) { b.removeAttribute('warn'); b.setChecking(); });
+      log('POST /api/price  ' + body);
+      fetch('/api/price', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { log('← ' + JSON.stringify(d)); push(function (b) { b.setPrice(d); }); })
+        .catch(function () { log('← fetch failed'); push(function (b) { b.setPrice(null); }); });
+    });
+  </script>
+</body>
+</html>

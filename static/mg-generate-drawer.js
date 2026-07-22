@@ -127,9 +127,19 @@
     'mg-generate-drawer .mgd-cap.hot{color:var(--emerald,#4fc99a);border-color:var(--emerald,#4fc99a);}',
     'mg-generate-drawer .mgd-cap.crown{color:#e08fd6;border-color:#e08fd6;}',
     'mg-generate-drawer .mgd-check{display:flex;align-items:center;gap:7px;color:var(--subtext,#9a93ab);font-size:12px;margin-top:8px;cursor:pointer;}',
-    'mg-generate-drawer .mgd-cost{margin:12px 0 8px;padding:8px 10px;border-radius:6px;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);font-size:12.5px;color:var(--text,#d6d2e2);}',
-    'mg-generate-drawer .mgd-cost.free{border-color:var(--emerald,#4fc99a);color:var(--emerald,#4fc99a);}',
-    'mg-generate-drawer .mgd-cost.warn{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}',
+    /* The cost line is <mg-cost-badge> now (static/mg-cost-badge.js). It brings its own box --
+       padding/radius/border/font were lifted from the old .mgd-cost verbatim on purpose, so
+       this swap is pixel-identical -- and its own emerald `free` / red `error` states, so
+       those two rules are gone rather than duplicated. ONE thing has to be re-stated: this
+       drawer has always painted the V4.0-full caution RED (via the old warn rule on the
+       cost box), while the shared
+       badge's default `warn` colour is amber/--peach. Overriding it keeps the migration a
+       PURE refactor -- the loudest cost warning in the app (a 15s V4.0-full clip is ~210,000
+       credits) must not get quieter as a side effect of a consolidation. Host tag + element +
+       two attributes beats the badge's own rule on specificity, so this wins regardless of
+       <style> injection order. If red-vs-amber is ever settled the other way, DELETE this
+       rule -- do not re-fork the badge. */
+    'mg-generate-drawer mg-cost-badge[data-state="paid"][data-warn]{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}',
     'mg-generate-drawer .mgd-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender,#b692e6);color:var(--base,#0c0a1c);font-size:13.5px;font-weight:600;cursor:pointer;}',
     'mg-generate-drawer .mgd-go:hover{opacity:.9;}',
     'mg-generate-drawer .mgd-go:disabled{opacity:.4;cursor:not-allowed;}',
@@ -175,21 +185,32 @@
   };
 
   // Full site roster, in PixAI's real model-picker order -- newest first, V2.7 last
-  // (private/GENERATOR_SURFACE.md per-model matrix, owner screenshots 2026-07-18; our
-  // V4.0 pair was previously reversed). Only the five with a real numeric modelId in
-  // VIDEO_MODELS (pixai_gallery_backup.py) are selectable -- PixAI resolves "Unknown or
-  // removed model" without one, and no free card can match. The other two ship
-  // visible-but-disabled so the roster is honest about what exists without offering a
-  // guaranteed-fail submit; enable once each gets one --dump-params capture (free,
-  // read-only) off a real recovered task.
+  // (private/VIDEO_MODELS.md `/config/tools` dump, owner screenshots 2026-07-18; our
+  // V4.0 pair was previously reversed).
+  //
+  // All seven are selectable as of 2026-07-21. V2.7 and V3.0 Flash shipped disabled on the
+  // theory that a submit needs a numeric top-level modelId from VIDEO_MODELS, which we had
+  // for only five. Two free --dump-params captures off real recovered tasks disproved it:
+  // both carried modelId 1648918127446573124 -- "Moonbeam v1.0", an IMAGE checkpoint, i.e.
+  // whatever the site's image picker happened to hold -- and PixAI rendered them anyway.
+  // Three read-only price probes then settled it: v2.7 and v3.0.1 priced DIFFERENTLY
+  // (~56,000 vs ~44,800 for 10s) off an IDENTICAL modelId, and dropping modelId entirely
+  // priced the same. `i2vPro.model` is what resolves the engine; the numeric modelId does
+  // not. Neither is card-eligible (the free cards are V4.0-specific), so the cost badge
+  // correctly reads "no card" -- that is honest, not a failure.
+  //
+  // 'v3.0f' was never a real value: whoever added V3.0 Flash took its tags from
+  // private/VIDEO_MODELS.md's `v3.0.1` row but typed the value as a guess. PixAI's own task
+  // detail for 2036215858630781665 reads "Model Used: V3.0 Flash" and its submit says
+  // `model: "v3.0.1"`.
   var MODELS = [
     { value: 'v4.0', label: 'V4.0 Preview', caps: ['multi-ref', 'audio', '15s', 'top quality', '~2.5× cost'] },
     { value: 'v4.0.1', label: 'V4.0 Lite Preview', caps: ['multi-ref', 'audio', '15s', 'end-frame'] },
     { value: 'v3.2', label: 'V3.2', caps: ['audio', 'prompt-following'] },
     { value: 'v3.0.2', label: 'V3.0 Lite', caps: ['complex motion', 'cheap'] },
     { value: 'v3.0', label: 'V3.0 (High Consistency)', caps: ['high-consistency', 'action presets', 'start/end'] },
-    { value: 'v3.0f', label: 'V3.0 Flash', caps: ['multi-shot'], disabled: true },
-    { value: 'v2.7', label: 'V2.7 (High Dynamics)', caps: ['camera moves', 'dynamic'], disabled: true }
+    { value: 'v3.0.1', label: 'V3.0 Flash', caps: ['multi-shot', 'hires', 'fastest', 'no card'] },
+    { value: 'v2.7', label: 'V2.7 (High Dynamics)', caps: ['camera moves', 'dynamic', 'no card'] }
   ];
 
   // Per-model reference/frame-mode gating -- which of our i2v/flf/r2v vmode buttons a given
@@ -204,9 +225,16 @@
     'v3.2': ['i2v', 'flf'],
     'v3.0.2': ['i2v', 'flf'],
     'v3.0': ['i2v', 'flf'],
-    'v3.0f': ['i2v'],
+    'v3.0.1': ['i2v'],
     'v2.7': ['i2v']
   };
+
+  // Per-model MAX duration. 15s is exclusive to the v4.0 pair (private/VIDEO_MODELS.md:
+  // "Duration: 5 / 10 for all; 15s exclusive to v4.0 series"). Before V2.7 / V3.0 Flash
+  // were selectable this map wasn't needed -- every enabled model happened to allow 15s.
+  // Enabling them without it would newly expose a 15s option that PixAI does not support
+  // on those engines, at ~84,000 credits for a V2.7 clip with no card to cover it.
+  var MODEL_MAXDUR = { 'v4.0': 15, 'v4.0.1': 15 };   // absent => 10s cap
 
   // Matches the server's VIDEO_DURATIONS / _snap_video_duration exactly -- prefill() snaps
   // to the nearest of these so an out-of-range shot duration (e.g. a hand-typed "8") can
@@ -277,7 +305,7 @@
     '<label class="mgd-check"><input type="checkbox" class="mgd-audio"> Generate audio <span class="mgd-note">(spoken lines in the prompt become voiceover)</span></label>' +
     '<div class="mgd-lang-wrap" style="display:none;margin-top:4px;"><div class="mgd-lbl">Audio language</div>' +
       '<select class="mgd-sel mgd-lang"><option value="english">English</option><option value="japanese">Japanese</option><option value="chinese">Chinese</option><option value="korean">Korean</option><option value="none">SE only (no dialogue)</option></select></div>' +
-    '<div class="mgd-cost" style="margin-top:10px;">Pick a source image to see the cost.</div>' +
+    '<mg-cost-badge class="mgd-cost" style="margin-top:10px;" hint="Pick a source image to see the cost." card-label="a video card"></mg-cost-badge>' +
     '<button type="button" class="mgd-go">Generate video</button>' +
     '<div class="mgd-result"></div>' +
     '<div class="mgd-preview" aria-hidden="true"></div>';
@@ -329,6 +357,17 @@
       this._pollTimer = null;
       this._dirty = false;       // true from the first keystroke since the last commit/sync
       this._rendering = false;   // true while THIS drawer's own submit/poll is in flight
+      // HARD DEPENDENCY, new as of the cost-badge consolidation: MARKUP contains a
+      // <mg-cost-badge>, and an undefined custom element is an inert <div>-alike whose
+      // setChecking()/setPrice() would throw inside _costNow -- leaving the cost line frozen on
+      // its idle hint next to a Go button that still spends. This element previously had NO
+      // component dependencies at all (the gallery's own script-tag comment says so), so a
+      // future host mounting it somewhere new deserves to be told at load time rather than at
+      // spend time. The enforcing guard is the pytest that pairs the two <script> tags on every
+      // page (test_cost_badge_ships_with_every_price_surface); this is the console breadcrumb.
+      if (!(window.customElements && customElements.get('mg-cost-badge'))) {
+        console.error('<mg-generate-drawer>: /static/mg-cost-badge.js is not loaded — the cost line will not render. Load it before this file.');
+      }
       this.innerHTML = MARKUP;
       this._slotsLbl = this.querySelector('.mgd-slots-lbl');
       this._slotsWrap = this.querySelector('.mgd-imgslots');
@@ -444,6 +483,18 @@
         b.style.display = allowed.indexOf(b.getAttribute('data-vmode')) === -1 ? 'none' : '';
       });
       if (allowed.indexOf(this._mode) === -1) this._setMode(allowed[0]);
+
+      // Duration options past this model's cap are disabled AND hidden -- hiding alone is
+      // not enough, a hidden <option> stays keyboard-selectable and still submits. Setting
+      // .value programmatically fires no 'change', so this never emits a spurious
+      // mg-duration-commit (that event is contractually user-initiated only).
+      var maxDur = MODEL_MAXDUR[this._model.value] || 10;
+      this._dur.querySelectorAll('option').forEach(function (o) {
+        var over = (+o.value) > maxDur;
+        o.disabled = over;
+        o.hidden = over;
+      });
+      if ((+this._dur.value) > maxDur) this._dur.value = String(maxDur);
     }
 
     // ---- primary (image) bank rendering: i2v/flf's _slots, r2v's _imgSlots --------
@@ -778,32 +829,38 @@
       this._costTimer = setTimeout(function () { self._costNow(); }, 250);
     }
 
+    // The cost line is <mg-cost-badge> (static/mg-cost-badge.js) and this method is now purely
+    // the HOST half of that component's contract: it owns the network call, the 250ms debounce
+    // (_debCost) and the _costSeq stale-response guard, and the badge owns every state's
+    // wording and colour. Nothing about the request, the debounce or the abort-on-stale
+    // behaviour changed -- only who renders the answer.
     _costNow() {
       var cost = this._cost, self = this;
       var p = this.payload();
-      if (!this._hasAnyRef(p)) {
-        cost.className = 'mgd-cost';
-        cost.textContent = (this._mode === 'r2v') ? 'Pick at least one reference to see the cost.' : 'Pick a source image to see the cost.';
-        return;
-      }
-      cost.className = 'mgd-cost'; cost.textContent = 'Checking cost…';
+      // Mode-dependent idle label, same two strings as before, handed over as the badge's
+      // `hint` attribute instead of written straight into textContent.
+      cost.setAttribute('hint', (this._mode === 'r2v') ? 'Pick at least one reference to see the cost.' : 'Pick a source image to see the cost.');
+      if (!this._hasAnyRef(p)) { cost.removeAttribute('warn'); cost.clear(); return; }
+      // v4.0 full is ~2.5x Lite (14k/s -> 210k for a 15s clip). Set BEFORE the response lands
+      // so the badge's `paid` branch renders the caution inline; the badge deliberately ignores
+      // `warn` in every other state, so a free/idle/error render is unaffected by it. The red
+      // (not amber) colour is re-asserted by this file's own CSS override -- see that rule.
+      if (p.video_model === 'v4.0') cost.setAttribute('warn', 'V4.0 full — ~2.5× Lite');
+      else cost.removeAttribute('warn');
+      cost.setChecking();
       var mine = ++this._costSeq;
       fetch('/api/price', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) })
         .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (mine !== self._costSeq) return;
-          if (d.note) { cost.textContent = d.note; return; }
-          if (d.error) { cost.textContent = '⚠ ' + d.error; return; }
-          var n = d.cost != null ? d.cost.toLocaleString() : '?';
-          if (d.free) {
-            cost.className = 'mgd-cost free';
-            cost.textContent = '🎫 FREE — ' + (d.card_name || 'a video card') + ' covers this' + (d.cards ? ' (' + d.cards + ' left)' : '') + ' · saves ~' + n + ' credits';
-          } else {
-            var big = (p.video_model === 'v4.0');   // v4.0 full is ~2.5x Lite (14k/s -> 210k for 15s)
-            cost.className = 'mgd-cost' + (big ? ' warn' : '');
-            cost.textContent = (big ? '⚠ V4.0 full — ~2.5× Lite · ' : '') + '≈ ' + n + ' credits';
-          }
-        }).catch(function () { if (mine !== self._costSeq) return; cost.textContent = 'cost unavailable'; });
+        // One line replaces the whole note/error/free/paid ladder. Two states get louder on
+        // purpose: a {cost:null, free:false} response (which price_task returns whenever
+        // PixAI's /v2/task-price errors -- it fails soft and returns None) used to render as
+        // the price-shaped '≈ ? credits', and now reads as could-not-verify.
+        .then(function (d) { if (mine === self._costSeq) cost.setPrice(d); })
+        // setPrice(null) is NOT clear(): a failed fetch is the could-not-verify state, which
+        // the badge renders red and words as "generating may spend credits". The old text here
+        // was a neutral lowercase 'cost unavailable' -- indistinguishable from "cheap", on the
+        // one surface where being unclear costs real credits.
+        .catch(function () { if (mine === self._costSeq) cost.setPrice(null); });
     }
 
     // ---- submit -> poll -> result (the gallery runTask flow, self-contained) ----

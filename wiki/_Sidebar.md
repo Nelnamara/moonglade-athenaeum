@@ -7,9 +7,12 @@
 - [Backing Up](Backing-Up)
 - [The Gallery](Gallery)
 - [Generating](Generating)
+- [The Loom](The-Loom)
 - [Collections](Collections)
 - [Deleting & Sync](Deleting)
 - [Collection Health](Health)
+- [Control Panel](Control-Panel)
+- [Trophy Hall](Trophy-Hall)
 
 **Reference**
 - [How It Works](How-It-Works)
