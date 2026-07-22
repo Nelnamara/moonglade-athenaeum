@@ -48,6 +48,13 @@ git tags. Full prose notes for tagged versions live on
   going through the guarded choke point, so setting `READ_ONLY` in `config.json` and running
   any of them with `--confirm` still reached PixAI. Each now refuses itself before the
   free-card check or an upload runs, not just before the final submit.
+- **The gallery's Video tab stopped showing up in the Activity card.** When it moved onto
+  the shared `<mg-generate-drawer>` component, it lost the two listeners every other
+  create tab (Image, Edit, Fix) still has: registering the new task with the Job Tracker,
+  and refreshing your credit balance once it finishes. The drawer renders its own inline
+  result, which is why this went unnoticed — the generation itself worked fine, it just
+  never reached the Activity card or updated your balance on completion. The Loom's own
+  mount already wired this correctly; the gallery now mirrors it.
 
 ## [2.2.0] - 2026-07-21 — Security fixes, the last two video models, and a sharper Loom
 
