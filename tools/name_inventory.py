@@ -34,10 +34,41 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SKIP_SUFFIX = {".png", ".jpg", ".jpeg", ".webp", ".ico", ".db", ".ogg", ".mp4", ".zip"}
 
+# Git-ignored files the rename must STILL touch. They exist per machine, not in the
+# repo, so the rename branch can't fix them -- each machine has to, and the sizing has
+# to count them or the naming pass walks past them (.claude/launch.json invokes
+# pixai_gallery.py; config.json names the pixai_backup out dir; private/ docs cite the
+# modules throughout). Existence-guarded: any subset may be absent on a given machine.
+IGNORED_IN_SCOPE = [".claude/launch.json", "config.json", "serve.txt", "private"]
 
-def tracked_files():
-    out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout
-    return [ROOT / f for f in out.split()]
+
+def _git_files(*args):
+    # -z (NUL-delimited) is load-bearing: a whitespace .split() on plain output
+    # shattered "Serve Gallery.pyw" into two nonexistent paths, and read()'s OSError
+    # catch turned that into a silent skip of the launcher -- one of the exact files
+    # the rename must not miss (it invokes pixai_gallery by name).
+    out = subprocess.run(["git", "ls-files", "-z", *args], cwd=ROOT,
+                         capture_output=True, text=True).stdout
+    return [f for f in out.split("\0") if f]
+
+
+def inventory_files():
+    """(path, machine_local) for every file the rename surface can hide in: tracked,
+    untracked-but-unignored, and the per-machine git-ignored set above."""
+    files = [(ROOT / f, False) for f in _git_files()]
+    files += [(ROOT / f, False) for f in _git_files("--others", "--exclude-standard")]
+    for extra in IGNORED_IN_SCOPE:
+        p = ROOT / extra
+        if p.is_file():
+            files.append((p, True))
+        elif p.is_dir():
+            files += [(q, True) for q in sorted(p.rglob("*")) if q.is_file()]
+    seen, uniq = set(), []
+    for p, local in files:
+        if p not in seen:
+            seen.add(p)
+            uniq.append((p, local))
+    return uniq
 
 
 def read(p):
@@ -51,7 +82,8 @@ def modules():
     """Size the pixai_* -> moonglade_* rename surface."""
     pat = re.compile(r"\bpixai_[a-z_]+\b")
     names, byfile, buckets, filesof = Counter(), Counter(), Counter(), {}
-    for p in tracked_files():
+    local_rels, local_refs = set(), 0
+    for p, machine_local in inventory_files():
         if p.suffix in SKIP_SUFFIX:
             continue
         hits = pat.findall(read(p))
@@ -61,6 +93,9 @@ def modules():
         byfile[rel] = len(hits)
         for h in hits:
             names[h] += 1
+        if machine_local:
+            local_rels.add(rel)
+            local_refs += len(hits)
         kind = ("code" if p.suffix == ".py" else
                 "js" if p.suffix in (".js", ".jsx") else
                 "docs" if p.suffix == ".md" else
@@ -79,9 +114,13 @@ def modules():
     for k, c in buckets.most_common():
         print("  {:6} {:5} refs across {:3} files".format(k, c, len(filesof[k])))
     print("\n  TOTAL {} references in {} files".format(sum(buckets.values()), len(byfile)))
+    if local_rels:
+        print("  ...of which {} sit in {} machine-local git-ignored file(s): the rename"
+              "\n  branch can't fix those; each machine must (IGNORED_IN_SCOPE above)."
+              .format(local_refs, len(local_rels)))
     print("\n=== heaviest files ===")
     for f, c in byfile.most_common(10):
-        print("  {:5}  {}".format(c, f))
+        print("  {:5}  {}{}".format(c, f, "   <-- machine-local" if f in local_rels else ""))
 
 
 # PixAI's own vocabulary, as RE'd into our submit paths. Values here are the ones we
