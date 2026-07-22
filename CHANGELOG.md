@@ -37,6 +37,23 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Folio of Honors rendered as a scrambled, overlapping mess on first ship.** `#ach-grid`
+  still carried its pre-redesign CSS class, whose rule forced every direct child into a
+  ~216px tiled grid column — correct for the old flat card layout, wrong for the new one,
+  where every direct child is a full-width section (the carousel, the ladder row, each
+  section group). Those sections were being auto-placed into narrow tiles instead of
+  stacking, which is what actually showed up on screen. Fixed to a plain vertical stack;
+  also removed ~30 CSS rules confirmed dead in the new render code, left behind from the old
+  design and part of what caused the confusion.
+
+### Known issue (not fixed — deliberately left for the design pass)
+
+- **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
+  Reported right after the layout fix above; not yet confirmed whether this is a real gating
+  bug or a visual artifact of the (now-fixed) overlap bug making two different cards' text
+  read as one. Owner wants to look at it himself before any further changes — see
+  `docs/STATE.md`'s Folio of Honors section for what's on record.
+
 - **A signed-in LAN account could evict the owner's own account, and register a fresh one
   for itself.** The only guard on removing an account was "not the last one left" — nothing
   stopped a caller from removing any *other* account by name, including yours, or from
