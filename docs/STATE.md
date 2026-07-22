@@ -282,25 +282,40 @@ users.
   of PixAI's ComfyUI catalog into `#enh-list`. The Fix sub-tab is a separate box-coordinate
   hand/face fixer (`/api/fix` → `submit_fixer`).
 
-## Achievements / Trophy Hall
+## Achievements / The Folio of Honors
 
-- The Trophy Hall is a **maximized overlay** grown from `#ach-modal` — Summary / All /
-  Statistics tabs, main grid, right rail (category nav, Within Reach, Rewards Earned, mascot
-  alcove), collapsible sections, search, mobile stacking. All Hall CSS is scoped to
-  `.ach-hall` so the contest/art modals sharing `.ach-panel` are untouched (8836086, 911b2ef).
-  The rail carries the rewards; the grid tiles are plain.
+- **Renamed from "Trophy Hall" 2026-07-22** (owner's pick off the shortlist). Same
+  **maximized overlay** grown from `#ach-modal` — Summary / All / Statistics tabs, main
+  grid, right rail (category nav — now click-to-filter, not just scroll-to — Within Reach,
+  Relics, mascot alcove), collapsible sections, search, mobile stacking. All Hall CSS is
+  scoped to `.ach-hall` so the contest/art modals sharing `.ach-panel` are untouched.
+- **Redesigned the same day**, from the owner's own Figma Make export (built partly from
+  the legendary/feat frame slice values handed off earlier that night — confirmed
+  byte-for-byte identical tier-triad colors to what the toast already shipped). The All tab
+  now leads with an auto-rotating carousel showcasing the active ladder's tiers, a
+  ladder-badge selector row (all 10 tracks), the selected ladder's tiers as cards, then
+  every ladder grouped under a glowing pill divider, then Milestones/Masteries/Feats the
+  same way. Real badge art (`/badge-thumb/<id>.png`) throughout, not placeholder images —
+  each ladder's badge is its first rung's art, chosen deliberately over the top (spoiler)
+  tier's. `pixai_gallery.py`'s `ACHIEVEMENTS`/`compute_achievements()` gained `track`/
+  `rung`/`rungs_total` per ladder achievement plus a top-level `ladders` list (`LADDER_TRACKS`)
+  so the client can group without a second hand-maintained id→name map.
 - Points are tier base + 5×(rung−1), driven by `_TIER_POINTS` (common 5 / rare 10 / epic 25 /
   legendary 50 / feat 0) and a derived `_ACH_RUNG`; feats score 0 so the total never hints at
   a hidden feat. Points render on the toast, tiles, and a Warband-style header total.
-- 9-slice tier frames wrap the unlock toast for **legendary and feat only**; grid tiles carry
-  no frame. Adding epic is a one-key change to the framed map in `_mkMoment`.
+- **9-slice tier frames now wrap legendary/feat grid tiles too, not just the unlock toast**
+  — the 2026-07-22 redesign's explicit answer to the open "frame the current modal cards, or
+  defer" question. Same served frame assets (`/branding/frames/legendary.png` / `feat.png`)
+  and slice values as the toast, applied via a `.hall-frame` overlay div rather than
+  `border-image` on the card itself (the card needs its own border for the non-framed
+  tiers). Adding epic is still a one-key change to the framed-tier set.
 - Per-criteria checklists render on the two closed-universe set masteries (Full Toolbox =
   edit/enhance/fix; Master of the Loom = i2v/flf/r2v) via `_ACH_CRITERIA` /
   `achievement_criteria`. Open-ended sets stay count-only.
 - `achievements.json` carries `earned_at:{id:iso}` for earned ids only (no hidden-feat leak),
   fail-soft; `/badge-thumb/<id>.png` serves lazy ~256px copies into `branding/_thumbs`.
 - Masked feats show the cloaked-Nel art in full color (not grayscaled); name and description
-  stay masked server-side (43014ef).
+  stay masked server-side.
 - The canonical roster is `docs/achievements_roster_57.json`: 57 achievements, `art_candidate`
   assigned on every one. Badge and mascot art serves from the D: branding tree
   (`D:\Moonglade Athenaeum\pixai_backup\branding\`); the pre-57 badge originals are preserved
@@ -494,8 +509,10 @@ Ranked, with the reason each sits where it does.
 
 Grouped by owner decision 2026-07-19: these were tracked as separate items but are one
 coherent visual effort and should be scoped and executed together rather than piecemeal.
+**The Folio of Honors redesign (formerly listed here) shipped 2026-07-22 on its own** —
+it had a finished design in hand while the other two didn't, so it went ahead rather than
+waiting; the "together" grouping still applies to what's left below.
 
-- The **Trophy Hall redesign**, blocked on the owner's own Figma frame.
 - The **Loom visual-refinement pass** — the skin system already reaches the Loom, so what
   remains is refinement rather than plumbing. Its whole palette funnels through a six-line
   alias block at the top of `master-storyboard.jsx`'s `STYLES` (`--bg`/`--panel`/`--ink`/
@@ -509,26 +526,19 @@ coherent visual effort and should be scoped and executed together rather than pi
     that width", not as a one-number bump.
 - The **gallery search-bar redesign**, blocked on owner input.
 - The **owner's layout/function note-taking pass**, which gates several deferred items.
-- Epic-tier frame art, per-tile ornate frames, the "earned rewards" display, the
-  toast-badge-to-home-marker motion, and toast tier colours vs shipped badge art — all
-  previously filed individually under Open owner calls.
+- Epic-tier frame art, the "earned rewards" display, the toast-badge-to-home-marker motion,
+  and toast tier colours vs shipped badge art — all previously filed individually under
+  Open owner calls. (Per-tile ornate frames shipped with the Folio of Honors redesign,
+  2026-07-22 — no longer on this list.)
 
 ---
 
 ## Open owner calls
 
-- **Trophy Hall redesign** is blocked on the owner's own Figma frame. Ask for the frame URL; do
-  not re-suggest the screenshot-decomposition checklist. The Figma plugin is live and
-  authenticated. (`docs/STANDARDS.md` Part 2.)
-- **Trophy Hall rename** undecided. Shortlist: *The Vault Against the Void* / *The Folio of
-  Honors* / *The Ledger of the World Tree* (banner subtext: "The Pillar of the Vault").
 - **Epic-tier frame art** undecided. The owner wants epic to read "deep-purple WoW epic /
   tier-gear," leaning Nelnamara's Dreamwalker feathers + Balance-Druid Moonfire flair, without
   out-shouting legendary-gold or feat-ruby. Enabling it is a one-key change: the framed map in
   `_mkMoment` takes `epic:1` once art exists.
-- **Per-tile ornate frames** are unbuilt — the unlock toast has them, grid tiles do not
-  (`border-image` is scoped to `.ach-m2`; there's no rule on `.ach-card`). Open question: frame
-  the current modal cards, or defer until Hall tiles become mini-toasts?
 - **"Earned rewards" as its own display** — shape TBD.
 - **"Toast badge grows to its home marker"** needs the owner to finish articulating it before
   it is buildable.
@@ -772,7 +782,7 @@ surface: no visual build from prose alone.
   gallery and the React Loom mount. "No framework" means *no build step / framework-neutral
   shared widgets* — **not** "no framework": the Loom is React by design. Migration order in
   `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
-- **The Trophy Hall's form factor is a maximized overlay**, not a page or route: grow the
+- **The Folio of Honors' form factor is a maximized overlay**, not a page or route: grow the
   existing `#ach-modal` to full-screen — instant open, gallery stays mounted behind, ESC out,
   animates from the trophy button. Owner screenshots tune the INTERIOR only; the form factor is
   settled.

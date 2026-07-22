@@ -15,7 +15,7 @@
    path (Ach's toastNew/celebrate/_mkMoment) needs NO anchor at all -- it builds its own DOM
    from scratch and fires automatically via this file's own DOMContentLoaded listener. Toast's
    own #mg-toasts container is also self-created (see Toast.box() below) -- no anchor needed.
-   The achievement MODAL (Trophy Hall, #ach-modal) is intentionally NOT included in this file's
+   The achievement MODAL (the Folio of Honors, #ach-modal) is intentionally NOT included in this file's
    anchor requirements -- a host that wants the full modal must still add that HTML separately;
    Ach.open()/close() are guarded (see below) so they simply no-op if #ach-modal is absent,
    rather than crashing a host that only wants toasts + the tracker.
@@ -89,81 +89,216 @@
     '.ach-nar:hover{transform:scale(1.12);border-color:var(--lavender);}',
     '.ach-unleash{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--ruby);margin-left:12px;cursor:pointer;user-select:none;border:1px solid var(--ruby-deep);border-radius:999px;padding:3px 10px;background:rgba(224,53,94,.08);}',
     '.ach-unleash input{accent-color:var(--ruby);}',
+    // ---- The Folio of Honors (Trophy Hall redesign, 2026-07-22) -- design source: the
+    // owner's Figma Make export, built from the legendary/feat frame slice values handed
+    // off earlier the same night. Tier-triad colors (--tc/--tcl/--tcd) below are the SAME
+    // hex values as .ach-m2's toast triads (see above) confirmed byte-for-byte identical --
+    // one set defined here too rather than sharing across scopes, since .ach-m2's are
+    // deliberately scoped and this keeps that scoping intact. Everything else uses the
+    // app's real design tokens (var(--lavender) etc.), NOT the mockup's fixed hex, so the
+    // Hall keeps retinting per active skin like the rest of the app -- the mockup itself
+    // had no skin system to be aware of.
     '.ach-hall.open{align-items:center;padding:3vh 3vw;}',
-    '.ach-hall .ach-panel{width:96vw;max-width:1400px;height:94vh;max-height:960px;padding:0;display:flex;flex-direction:column;overflow:hidden;transform-origin:top right;animation:hall-in .28s cubic-bezier(.16,.84,.34,1.06);}',
+    '.ach-hall .ach-panel{width:96vw;max-width:1320px;height:94vh;max-height:860px;padding:0;display:flex;flex-direction:column;overflow:hidden;background:linear-gradient(160deg,var(--mantle) 0%,var(--base) 100%);transform-origin:top right;animation:hall-in .28s cubic-bezier(.16,.84,.34,1.06);}',
     '@keyframes hall-in{from{opacity:0;transform:scale(.93) translateY(-12px);}to{opacity:1;transform:none;}}',
     '@media (prefers-reduced-motion: reduce){ .ach-hall .ach-panel{animation:none;} }',
     '.ach-hall .ach-x{position:static;font-size:24px;flex:none;}',
-    '.hall-head{display:flex;align-items:center;gap:15px;padding:14px 20px;flex:none;border-bottom:1px solid var(--surface1);background:linear-gradient(180deg,var(--surface0),transparent);}',
-    '.hall-title{font-size:20px;font-weight:700;color:var(--text);display:flex;align-items:center;white-space:nowrap;}',
+    '.hall-head{display:flex;align-items:center;gap:13px;padding:12px 20px;flex:none;border-bottom:1px solid var(--surface1);background:linear-gradient(180deg,var(--surface0),transparent);}',
+    '.hall-title{font-size:19px;font-weight:700;color:var(--text);display:flex;align-items:center;white-space:nowrap;}',
+    // the narrator avatar doubles as the Folio's header mascot -- restyled with a glow ring
+    // to match the new look, but still the SAME clickable poke-the-narrator Easter egg
+    // (Ach.poke() -> the Triggered feat); the mockup has no way to know about that, so this
+    // keeps the real feature rather than swapping in an inert decorative image.
+    '.ach-hall .ach-nar{width:36px;height:36px;border:2px solid rgba(182,146,230,.85);box-shadow:0 0 0 2px rgba(120,60,200,.45),0 0 9px rgba(182,146,230,.7),0 0 20px rgba(120,60,200,.3);}',
     '.hall-score{font-size:12.5px;color:var(--subtext);white-space:nowrap;}',
     '.hall-score b{color:var(--lavender);font-variant-numeric:tabular-nums;}',
-    '.hall-search{margin-left:auto;background:var(--base);border:1px solid var(--surface1);border-radius:999px;color:var(--text);font-size:12.5px;padding:7px 14px;width:200px;max-width:32vw;outline:none;}',
+    '.hall-search{margin-left:auto;background:var(--base);border:1px solid var(--surface1);border-radius:999px;color:var(--text);font-size:12.5px;padding:7px 14px;width:190px;max-width:30vw;outline:none;}',
     '.hall-search:focus{border-color:var(--lavender);}',
     '.hall-tabs{display:flex;gap:4px;padding:8px 20px 0;border-bottom:1px solid var(--surface1);flex:none;}',
     '.htab{background:none;border:none;color:var(--subtext);font-size:13px;font-weight:600;cursor:pointer;padding:8px 14px;border-radius:8px 8px 0 0;border-bottom:2px solid transparent;}',
     '.htab:hover{color:var(--text);}',
-    '.htab.on{color:var(--lavender);border-bottom-color:var(--lavender);background:rgba(182,146,230,.06);}',
-    '.hall-body{flex:1;display:grid;grid-template-columns:1fr 290px;min-height:0;}',
+    '.htab.on{color:var(--lavender);border-bottom-color:var(--lavender);background:rgba(182,146,230,.08);}',
+    '.hall-body{flex:1;display:grid;grid-template-columns:1fr 260px;min-height:0;}',
     '.hall-main{overflow-y:auto;padding:18px 20px 28px;min-width:0;}',
-    '.hall-rail{overflow-y:auto;border-left:1px solid var(--surface1);background:rgba(0,0,0,.14);padding:16px 15px 22px;display:flex;flex-direction:column;gap:18px;}',
+    '.hall-rail{overflow-y:auto;border-left:1px solid var(--surface1);background:rgba(0,0,0,.16);padding:0;display:flex;flex-direction:column;min-height:0;}',
+    '.rail-scroll{flex:1;min-height:0;overflow-y:auto;padding:16px 15px;display:flex;flex-direction:column;gap:18px;}',
+    '.rail-pinned{flex:none;padding:13px 15px;border-top:1px solid var(--surface1);}',
     '.ach-hall .ach-grid{margin-top:0;}',
     '.hall-sec-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--overlay0);margin:0 0 11px;}',
+    '.hall-sec-h .cnt{margin-left:6px;font-weight:500;color:var(--overlay0);text-transform:none;letter-spacing:normal;}',
     '.hall-block{margin-bottom:26px;}',
     '.hall-recent{display:flex;flex-direction:column;gap:8px;}',
-    '.hall-recent .rrow{display:flex;align-items:center;gap:11px;background:var(--surface0);border:1px solid var(--surface1);border-left-width:3px;border-radius:10px;padding:9px 12px;}',
-    '.hall-recent .rrow img{width:38px;height:38px;object-fit:contain;flex:none;}',
+    '.hall-recent .rrow{display:flex;align-items:center;gap:11px;background:var(--surface0);border:1px solid var(--surface1);border-radius:10px;padding:9px 12px;}',
+    '.hall-recent .rrow img{width:38px;height:38px;border-radius:8px;object-fit:cover;flex:none;}',
     '.hall-recent .rrow .rt{flex:1;min-width:0;}',
     '.hall-recent .rrow .rn{font-size:13px;font-weight:650;color:var(--text);}',
     '.hall-recent .rrow .rd{font-size:10.5px;color:var(--overlay0);margin-top:1px;}',
     '.hall-recent .rrow .rp{font-size:11px;font-weight:700;color:var(--gold);font-variant-numeric:tabular-nums;flex:none;}',
-    '.hall-prog{display:flex;flex-direction:column;gap:11px;}',
+    '.hall-prog{display:flex;flex-direction:column;gap:11px;padding:11px;border-radius:10px;background:rgba(0,0,0,.14);border:1px solid var(--surface1);}',
     '.prow{display:flex;align-items:center;gap:11px;font-size:12px;}',
-    '.prow .pl{width:132px;color:var(--subtext);flex:none;}',
-    '.prow .pbar{flex:1;height:8px;border-radius:5px;background:var(--surface1);overflow:hidden;}',
-    '.prow .pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--lavender),var(--emerald,#4fc99a));border-radius:5px;}',
-    '.prow .pv{width:66px;text-align:right;color:var(--overlay0);font-variant-numeric:tabular-nums;flex:none;}',
+    '.prow .pl{width:150px;color:var(--subtext);flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+    '.prow .pbar{flex:1;height:6px;border-radius:5px;background:var(--surface1);overflow:hidden;}',
+    '.prow .pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--lavender),var(--emerald,#4fc99a));border-radius:5px;transition:width .5s;}',
+    '.prow .pv{width:52px;text-align:right;color:var(--overlay0);font-variant-numeric:tabular-nums;flex:none;}',
     '.rail-h{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--overlay0);margin:0 0 9px;}',
     '.rail-nav{display:flex;flex-direction:column;gap:2px;}',
-    '.rail-nav a{font-size:12.5px;color:var(--subtext);text-decoration:none;padding:6px 9px;border-radius:7px;display:flex;justify-content:space-between;cursor:pointer;}',
+    '.rail-nav a{font-size:12.5px;color:var(--subtext);text-decoration:none;padding:7px 9px;border-radius:7px;display:flex;justify-content:space-between;cursor:pointer;border:1px solid transparent;}',
     '.rail-nav a:hover{background:var(--surface0);color:var(--text);}',
+    '.rail-nav a.on{background:rgba(91,61,158,.22);border-color:rgba(91,61,158,.4);color:var(--lavender);}',
     '.rail-nav a .c{color:var(--overlay0);font-variant-numeric:tabular-nums;}',
+    '.rail-div{height:1px;margin:2px 0;background:linear-gradient(90deg,transparent,rgba(182,146,230,.55) 30%,rgba(182,146,230,.75) 50%,rgba(182,146,230,.55) 70%,transparent);box-shadow:0 0 8px rgba(182,146,230,.35);flex:none;}',
     '.rail-mascot{text-align:center;}',
-    '.rail-mascot img{width:118px;max-width:68%;filter:drop-shadow(0 6px 14px rgba(0,0,0,.5));}',
-    '.rail-mascot .bubble{font-size:11.5px;font-style:italic;color:var(--subtext);background:var(--surface0);border:1px solid var(--surface1);border-radius:10px;padding:7px 11px;margin-top:4px;line-height:1.4;}',
+    '.rail-mascot img{width:100%;max-width:180px;filter:drop-shadow(0 6px 16px rgba(120,60,200,.3));}',
+    '.rail-mascot .bubble{font-size:11.5px;font-style:italic;color:var(--subtext);background:var(--surface0);border:1px solid var(--surface1);border-radius:10px;padding:7px 11px;margin-top:4px;line-height:1.4;text-align:center;}',
     '.rail-reach .rc{display:flex;align-items:center;gap:9px;margin-bottom:10px;}',
+    '.rail-reach .rc:last-child{margin-bottom:0;}',
     '.rail-reach .rc .ri{width:30px;height:30px;flex:none;display:flex;align-items:center;justify-content:center;font-size:17px;position:relative;filter:grayscale(1) brightness(.85);}',
     '.rail-reach .rc .ri img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}',
     '.rail-reach .rc .rb{flex:1;min-width:0;}',
     '.rail-reach .rc .rbn{font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
     '.rail-reach .rc .rbar{height:5px;border-radius:3px;background:var(--surface1);margin-top:4px;overflow:hidden;}',
-    '.rail-reach .rc .rbar i{display:block;height:100%;background:var(--emerald,#4fc99a);}',
+    '.rail-reach .rc .rbar i{display:block;height:100%;background:linear-gradient(90deg,#7b3fbf,#c060e8);}',
     '.rail-reach .rc .rbp{font-size:9.5px;color:var(--overlay0);margin-top:2px;font-variant-numeric:tabular-nums;}',
     '.rail-rewards{display:flex;flex-wrap:wrap;gap:7px;}',
     '.rail-rewards .chip{font-size:11px;color:var(--gold);border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:999px;padding:4px 10px;}',
-    '.rail-foot{font-size:10.5px;color:var(--overlay0);line-height:1.5;border-top:1px solid var(--surface1);padding-top:12px;margin-top:auto;}',
+    '.rail-foot{font-size:11px;color:var(--overlay0);line-height:1.5;text-align:center;}',
     '.rail-foot a{color:var(--lavender);}',
-    '.hall-stats{columns:2;column-gap:26px;}',
-    '.hall-stat{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--surface0);break-inside:avoid;}',
-    '.hall-stat .sl{color:var(--subtext);} .hall-stat .sv{color:var(--text);font-weight:650;font-variant-numeric:tabular-nums;}',
+    // ---- Relics (read-only skins display; picking a skin still lives in the Control Panel,
+    // that decision is unchanged -- these rows are informational, no onclick) ----
+    '.hall-relics{display:flex;flex-direction:column;gap:2px;}',
+    '.relic-row{display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:8px;border:1px solid var(--surface1);background:rgba(0,0,0,.18);opacity:.5;}',
+    '.relic-row.unlocked{opacity:1;}',
+    '.relic-row.active{border-color:rgba(155,128,198,.6);background:rgba(91,61,158,.14);}',
+    '.relic-row .rsw{display:flex;gap:2px;flex:none;}',
+    '.relic-row .rsw i{width:9px;height:9px;border-radius:2px;}',
+    '.relic-row .rnm{font-size:12px;font-weight:600;color:var(--subtext);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+    '.relic-row.active .rnm,.relic-row.unlocked .rnm{color:var(--text);}',
+    '.relic-row .rck{color:var(--lavender);font-size:12px;flex:none;}',
+    '.relic-row .rlk{color:var(--overlay0);font-size:11px;flex:none;}',
+    // ---- Statistics tab: summary cards + by-rarity + ladder-completion breakdowns ----
+    '.hall-statcards{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-bottom:22px;}',
+    '.hall-statcard{padding:13px 14px;border-radius:11px;background:var(--surface0);border:1px solid var(--surface1);}',
+    '.hall-statcard .scl{font-size:11px;color:var(--overlay0);text-transform:uppercase;letter-spacing:.05em;}',
+    '.hall-statcard .scv{font-size:21px;font-weight:700;color:var(--text);line-height:1.25;margin-top:2px;font-variant-numeric:tabular-nums;}',
+    '.hall-statcard .scs{font-size:11.5px;color:var(--subtext);margin-top:2px;}',
+    '.hall-rarity-row{display:flex;align-items:center;gap:11px;margin-bottom:9px;}',
+    '.hall-rarity-row .rl{width:76px;flex:none;font-size:12px;text-transform:capitalize;}',
+    '.hall-rarity-row .rbar{flex:1;height:5px;border-radius:3px;background:var(--surface1);overflow:hidden;}',
+    '.hall-rarity-row .rbar i{display:block;height:100%;border-radius:3px;transition:width .5s;}',
+    '.hall-rarity-row .rv{width:44px;text-align:right;color:var(--overlay0);font-size:12px;font-variant-numeric:tabular-nums;flex:none;}',
+    '.hall-ladder-row{display:flex;align-items:center;gap:11px;margin-bottom:7px;}',
+    '.hall-ladder-row img{width:19px;height:19px;border-radius:5px;object-fit:cover;flex:none;opacity:.75;}',
+    '.hall-ladder-row .ll{width:158px;flex:none;font-size:12px;color:var(--subtext);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+    '.hall-ladder-row .lbar{flex:1;height:4px;border-radius:3px;background:var(--surface1);overflow:hidden;}',
+    '.hall-ladder-row .lbar i{display:block;height:100%;background:linear-gradient(90deg,#5b3d9e,#9b59b6);border-radius:3px;}',
+    '.hall-ladder-row .lv{width:40px;text-align:right;color:var(--overlay0);font-size:12px;font-variant-numeric:tabular-nums;flex:none;}',
+    // ---- Ladder tier-triad tokens, scoped to the Hall (kept separate from .ach-m2's own
+    // copy on purpose -- see the top-of-block note) ----
+    '.ach-hall .t-common{--tc:#9fbad6;--tcl:#dbe8f5;--tcd:#5f7c9e;}',
+    '.ach-hall .t-rare{--tc:#7fb0f4;--tcl:#d2e4ff;--tcd:#4a72b8;}',
+    '.ach-hall .t-epic{--tc:#c69cff;--tcl:#ead9ff;--tcd:#8a5cc4;}',
+    '.ach-hall .t-legendary{--tc:#e8cb7c;--tcl:#fff4d1;--tcd:#b3924a;}',
+    '.ach-hall .t-feat{--tc:var(--ruby,#e0355e);--tcl:#f6b8c9;--tcd:var(--ruby-deep,#a11238);}',
+    // ---- Ladder badges (the selector row above the tier grid) ----
+    '.hall-ladders{display:grid;grid-template-columns:repeat(5,1fr);gap:11px;}',
+    '.ladder-badge{cursor:pointer;user-select:none;display:flex;flex-direction:column;align-items:center;gap:5px;}',
+    '.ladder-badge .lb-img{position:relative;width:100%;aspect-ratio:1/1;border-radius:13px;overflow:hidden;transition:outline-color .15s,box-shadow .15s;outline:2px solid transparent;outline-offset:2px;}',
+    '.ladder-badge .lb-img img{width:100%;height:100%;object-fit:cover;transition:transform .18s;}',
+    '.ladder-badge:hover .lb-img img{transform:scale(1.08);}',
+    '.ladder-badge.zero .lb-img{filter:grayscale(.75) brightness(.45);}',
+    '.ladder-badge.on .lb-img{outline-color:var(--tc);box-shadow:0 0 16px -2px var(--tc);}',
+    '.ladder-badge .lb-pips{display:flex;gap:2px;}',
+    '.ladder-badge .lb-pips i{width:5px;height:5px;border-radius:50%;background:var(--surface1);}',
+    '.ladder-badge .lb-name{font-size:12.5px;text-align:center;color:var(--subtext);line-height:1.2;}',
+    '.ladder-badge.on .lb-name{color:var(--lavender);}',
+    // ---- The carousel (auto-rotating showcase for the active ladder) ----
+    '.hall-carousel{position:relative;border-radius:15px;overflow:hidden;background:linear-gradient(135deg,var(--surface0) 0%,var(--mantle) 100%);border:1px solid var(--surface1);box-shadow:0 12px 34px rgba(0,0,0,.4);margin-bottom:22px;}',
+    '.hall-carousel::before{content:"";position:absolute;top:0;left:0;right:0;height:5px;background:linear-gradient(90deg,transparent,var(--tc) 22%,var(--tcl) 50%,var(--tc) 78%,transparent);z-index:1;transition:background .5s;}',
+    '.hc-row{display:flex;min-height:150px;}',
+    '.hc-cap{position:relative;flex:none;width:108px;display:flex;align-items:center;justify-content:center;border-right:1px solid var(--surface1);background:radial-gradient(ellipse 110% 80% at 50% 110%,color-mix(in srgb, var(--tc) 16%, transparent) 0%,transparent 65%);transition:background .5s;}',
+    '.hc-cap .hc-float{position:relative;animation:hc-float 4s ease-in-out infinite;}',
+    '@keyframes hc-float{0%,100%{transform:translateY(0);}50%{transform:translateY(-7px);}}',
+    '.hc-ring{position:absolute;inset:0;margin:auto;width:88px;height:88px;border-radius:50%;box-shadow:0 0 0 3px var(--tc),0 0 18px var(--tc);opacity:.7;transition:box-shadow .5s;}',
+    '.hc-badge{width:88px;height:88px;border-radius:14px;overflow:hidden;filter:drop-shadow(0 0 10px var(--tc));}',
+    '.hc-badge img{width:100%;height:100%;object-fit:cover;}',
+    '.hc-cap.zero .hc-ring{box-shadow:0 0 0 3px rgba(58,52,96,.6);opacity:1;}',
+    '.hc-cap.zero .hc-badge{filter:grayscale(.75) brightness(.4);}',
+    '.hc-body{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;padding:16px 18px;gap:5px;}',
+    '.hc-eyebrow{font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:var(--tc);transition:color .4s;}',
+    '.hc-name{font:700 21px/1.1 Georgia,"Times New Roman",serif;color:var(--text);}',
+    '.hc-desc{font-size:12.5px;font-style:italic;color:var(--subtext);max-width:420px;line-height:1.4;}',
+    '.hc-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:2px;}',
+    '.hc-tierpill{font:800 11px/1 sans-serif;text-transform:uppercase;letter-spacing:.07em;padding:3px 9px;border-radius:6px;color:#241c10;background:linear-gradient(180deg,var(--tcl),var(--tc) 50%,var(--tcd));}',
+    '.ach-hall .t-feat .hc-tierpill{background:linear-gradient(180deg,#c7ccd6,var(--gunmetal,#8a93a2) 50%,var(--gunmetal-deep,#4a515c));color:#171a20;}',
+    '.hc-ptspill{font-size:11.5px;color:var(--gold);background:rgba(230,200,120,.1);border:1px solid #6b5330;border-radius:7px;padding:3px 9px;}',
+    '.hc-thresh{font-size:11px;color:var(--overlay0);}',
+    '.hc-nav{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding-right:14px;flex:none;}',
+    '.hc-nav button{width:26px;height:26px;border-radius:50%;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);cursor:pointer;display:flex;align-items:center;justify-content:center;}',
+    '.hc-nav button:hover{filter:brightness(1.3);color:var(--text);}',
+    '.hc-pips{display:flex;gap:5px;padding:9px 18px;border-top:1px solid var(--surface1);}',
+    '.hc-pips button{width:6px;height:6px;padding:0;border-radius:999px;border:none;cursor:pointer;background:var(--surface1);transition:width .2s,background .2s;}',
+    '.hc-pips button.on{width:16px;background:var(--tc);}',
+    '.hc-pips button.done{background:color-mix(in srgb, var(--tc) 45%, var(--surface1));}',
+    '@media (prefers-reduced-motion: reduce){ .hc-cap .hc-float{animation:none;} }',
+    // ---- Glowing pill section divider (ladder groups inside "All Ladder Tiers", plus the
+    // Milestones/Masteries/Feats headers) ----
+    '.hall-pilldiv{display:flex;align-items:center;gap:9px;margin:0 0 12px;}',
+    '.hall-pilldiv .pd-line{height:1px;flex:1;background:linear-gradient(90deg,transparent,rgba(182,146,230,.5));box-shadow:0 0 6px rgba(182,146,230,.3);}',
+    '.hall-pilldiv .pd-line.r{background:linear-gradient(90deg,rgba(182,146,230,.5),transparent);}',
+    '.hall-pilldiv .pd-pill{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;background:linear-gradient(180deg,#4a3f72 0%,#2e2454 50%,#1e1840 100%);border:1px solid rgba(182,146,230,.35);box-shadow:0 0 10px rgba(182,146,230,.2),inset 0 1px 0 rgba(255,255,255,.08);white-space:nowrap;}',
+    '.hall-pilldiv .pd-pill img{width:14px;height:14px;border-radius:4px;object-fit:cover;opacity:.85;}',
+    '.hall-pilldiv .pd-pill .pd-nm{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#b692e6;}',
+    '.hall-pilldiv .pd-pill .pd-ct{font-size:12.5px;color:rgba(182,146,230,.5);}',
+    '.hall-pilldiv.feats .pd-pill .pd-nm{color:var(--ruby);}',
+    // ---- Tier / milestone / mastery / feat cards ----
+    '.hall-cardgrid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}',
+    '.hall-card{position:relative;display:flex;align-items:center;gap:11px;padding:12px;border-radius:11px;background:rgba(28,18,50,.5);border:1px solid var(--surface1);min-height:70px;transition:background .12s,box-shadow .12s;}',
+    '.hall-card:hover{background:rgba(44,30,72,.5);}',
+    '.hall-card.locked{opacity:.7;}',
+    '.hall-card.earned{box-shadow:0 0 14px -4px var(--tc);}',
+    '.hall-card.framed{border:none;}',
+    '.hall-card .hcd-ico{position:relative;flex:none;width:42px;height:42px;border-radius:10px;overflow:hidden;filter:grayscale(1) brightness(.75);display:flex;align-items:center;justify-content:center;font-size:22px;background:color-mix(in srgb, var(--tc) 12%, transparent);border:1px solid color-mix(in srgb, var(--tc) 25%, transparent);}',
+    '.hall-card.earned .hcd-ico{filter:none;}',
+    // .hcd-badge OVERLAYS the emoji text above (position:absolute) rather than sitting next
+    // to it -- a successful load fully covers the emoji; onerror="this.remove()" (a plain,
+    // non-interpolated attribute -- see card()'s comment) reveals it underneath for free.
+    '.hall-card .hcd-ico .hcd-badge{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;}',
+    '.hall-card .hcd-body{flex:1;min-width:0;}',
+    '.hall-card .hcd-top{display:flex;align-items:center;gap:6px;}',
+    '.hall-card .hcd-nm{font-size:13.5px;font-weight:650;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+    '.hall-card .hcd-ds{font-size:12px;color:var(--subtext);line-height:1.35;margin-top:1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}',
+    '.hall-card .hcd-sub{font-size:11px;color:var(--overlay0);margin-top:2px;}',
+    '.hall-card .hcd-side{flex:none;text-align:right;}',
+    '.hall-card .hcd-pts{font-size:11.5px;font-weight:650;border-radius:999px;padding:2px 8px;margin-bottom:3px;background:rgba(60,43,99,.6);color:#9b80c6;}',
+    '.hall-card .hcd-date{font-size:11px;color:var(--overlay0);}',
+    '.hall-tierpill-mini{font:800 10px/1 sans-serif;text-transform:uppercase;letter-spacing:.08em;padding:2px 7px;border-radius:999px;color:#1a1530;background:linear-gradient(180deg,var(--tcl) 0%,var(--tc) 50%,var(--tcd) 100%);box-shadow:0 0 6px color-mix(in srgb, var(--tc) 40%, transparent);flex:none;}',
+    '.ach-hall .t-feat .hall-tierpill-mini{background:linear-gradient(180deg,#c7ccd6 0%,#8a93a2 50%,#4a515c 100%);}',
+    '.hall-card.hidden-feat .hcd-nm{color:var(--overlay0);}',
+    '.hall-card.hidden-feat .hcd-ds{color:#3e3459;}',
+    '.hall-card.hidden-feat .hcd-ico{filter:none;background:rgba(25,16,42,.8);border:1px solid var(--surface1);}',
+    '.hall-card .hcd-crit{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:5px;}',
+    '.hall-card .hcd-crit span{font-size:10px;color:var(--overlay0);display:inline-flex;align-items:center;gap:3px;white-space:nowrap;}',
+    '.hall-card .hcd-crit span.on{color:var(--emerald,#7ee0a8);font-weight:600;}',
+    '.hall-card .hcd-bar{height:5px;border-radius:3px;background:var(--surface1);margin-top:6px;overflow:hidden;}',
+    '.hall-card .hcd-bar i{display:block;height:100%;background:var(--accent);border-radius:3px;}',
+    '.hall-card .hcd-bar+.hcd-num{font-size:10px;color:var(--overlay0);margin-top:2px;font-variant-numeric:tabular-nums;}',
+    '.hall-card .hcd-roast{grid-column:1/-1;font-size:10.5px;color:#c9b8e6;line-height:1.4;margin-top:6px;padding:5px 8px;background:rgba(182,146,230,.07);border-left:2px solid var(--lavender);border-radius:0 7px 7px 0;font-style:italic;}',
+    '.hall-card .hcd-bannerflag{font-size:10px;color:var(--gold);margin-top:4px;}',
+    // 9-slice frame overlay for legendary/feat CARDS (same technique + real served frame
+    // assets the unlock toast already uses -- see .ach-m2 .t-legendary .tframe below --
+    // extending it to grid tiles was an explicit, decided change from the prior "toast only"
+    // behavior, per the 2026-07-22 redesign).
+    '.hall-frame{position:absolute;inset:-5px;pointer-events:none;z-index:2;border-style:solid;border-color:transparent;}',
+    '.hall-frame.legendary{border-width:16px 14px;border-image-source:url(/branding/frames/legendary.png);border-image-slice:16.8% 13.3% 16.8% 13%;border-image-outset:0;}',
+    '.hall-frame.feat{border-width:16px 13px;border-image-source:url(/branding/frames/feat.png);border-image-slice:15.8% 10.3% 16.8% 10%;border-image-outset:0;}',
+    // ---- Section collapse chevron (reused on the ladder-groups + milestone/mastery/feat
+    // pill dividers, and the classic Evolution Ladders flat section for the "All" view) ----
     '.ach-hall .ach-sect{cursor:pointer;user-select:none;}',
     '.ach-hall .ach-sect .chev{margin-left:auto;color:var(--overlay0);font-size:11px;transition:transform .15s;}',
     '.ach-hall .ach-sect.collapsed .chev{transform:rotate(-90deg);}',
     '.hall-empty{color:var(--overlay0);font-size:12px;font-style:italic;padding:8px 0;}',
-    '@media(max-width:860px){ .ach-hall.open{padding:0;} .ach-hall .ach-panel{width:100vw;height:100vh;max-height:none;border-radius:0;} .hall-body{grid-template-columns:1fr;} .hall-rail{border-left:none;border-top:1px solid var(--surface1);} .hall-search{width:120px;} .hall-stats{columns:1;} }',
+    '@media(max-width:860px){ .ach-hall.open{padding:0;} .ach-hall .ach-panel{width:100vw;height:100vh;max-height:none;border-radius:0;} .hall-body{grid-template-columns:1fr;} .hall-rail{border-left:none;border-top:1px solid var(--surface1);} .hall-search{width:120px;} .hall-cardgrid,.hall-ladders{grid-template-columns:repeat(2,1fr);} .hall-statcards{grid-template-columns:1fr;} .hc-row{flex-direction:column;} .hc-cap{width:100%;border-right:none;border-bottom:1px solid var(--surface1);padding:14px 0;} .hc-nav{display:none;} }',
     '.ach-bannerflag{font-size:10px;color:var(--gold);margin-top:4px;}',
-    '.ach-skinhd{font-size:15px;font-weight:700;color:var(--text);margin-top:24px;}',
-    '.ach-skinnote{font-size:10.5px;font-weight:400;color:var(--overlay0);margin-left:6px;}',
-    '.ach-skins{display:flex;flex-wrap:wrap;gap:10px;margin-top:11px;}',
-    '.ach-skin{width:150px;border:1px solid var(--surface1);border-radius:11px;padding:9px;cursor:pointer;background:var(--surface0);transition:border-color .12s,transform .12s;}',
-    '.ach-skin:hover{transform:translateY(-2px);}',
-    '.ach-skin.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}',
-    '.ach-skin.locked{opacity:.5;cursor:not-allowed;}',
-    '.ach-skin .sw{height:34px;border-radius:7px;display:flex;overflow:hidden;margin-bottom:7px;}',
-    '.ach-skin .sw i{flex:1;}',
-    '.ach-skin .snm{font-size:12px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:5px;}',
-    '.ach-skin .sds{font-size:10px;color:var(--subtext);margin-top:2px;line-height:1.3;}',
-    '.ach-skin .slock{font-size:10px;color:var(--overlay0);}',
     // ---- toast v2 (the LOCKED design, artifact 335ef4e7) -- z-index raised 430->520 (see
     // top-of-file comment) so it always renders above the Loom's own full-screen overlays.
     '.ach-m2{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;}',
@@ -325,7 +460,7 @@
                   verdant:['#0a1410','#5fd39a','#4fc99a','#c8e6a8'] };
     var data=null;
     // open()/close() are guarded (unlike the original inline version) so a host that loads
-    // this file WITHOUT the #ach-modal Trophy Hall skeleton (e.g. the Loom, which only wants
+    // this file WITHOUT the #ach-modal Folio of Honors skeleton (e.g. the Loom, which only wants
     // toasts + the Job tracker) doesn't crash -- close() in particular is reachable from the
     // global Escape-key listener below on every keypress, app-wide, whether or not the modal
     // exists on the current page.
@@ -343,32 +478,59 @@
     function unleashed(){ try{ return localStorage.getItem('unleash')==='1'; }catch(e){ return false; } }
     function setUnleash(on){ try{ localStorage.setItem('unleash', on?'1':'0'); }catch(e){}
       if(data) render(data); }
+    function tierPill(tier){ return '<span class="hall-tierpill-mini t-'+esc(tier)+'">'+esc(tier)+'</span>'; }
+    // ---- The Folio of Honors card (tier / milestone / mastery / feat). Legendary and feat
+    // cards get the 9-slice frame overlay -- extended from the unlock toast to grid tiles
+    // here, a deliberate change from the prior "toast only" behavior (2026-07-22 redesign,
+    // per docs/STATE.md's Per-tile ornate frames open question). Masked hidden feats arrive
+    // from the server ALREADY sanitized (id/name/desc replaced server-side in api_achievements
+    // -- see that route) so this function never has to know a real hidden feat's identity.
     function card(d,a){
       var masked=a.hidden&&!a.earned;
+      var isFeat=a.tier==='feat';
+      var framed=(a.tier==='legendary'||isFeat)&&!masked;
       var c=document.createElement('div');
-      c.className='ach-card t-'+a.tier+(a.earned?' earned':' locked')+(masked?' masked':'');
+      c.className='hall-card t-'+a.tier+(a.earned?' earned':' locked')+(masked?' hidden-feat':'')+(framed?' framed':'');
       c.setAttribute('data-q',(a.name+' '+a.desc+' '+a.tier).toLowerCase());
-      var ico=a.earned?('<img class="ico-badge" src="/badge-thumb/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon))
-        :masked?'<img class="ico-badge" src="/branding/mystery/secret_feat.png" onerror="this.remove()">'+esc(a.icon)
-        :esc(a.icon);
-      var body='<div class="ico">'+ico+'</div><div class="bd"><div class="nm">'+esc(a.name)+'</div>'
-        +'<div class="ds">'+esc(a.desc)+'</div><span class="tier">'+esc(a.tier)+'</span>'
-        +(a.points?'<span class="ach-pts">'+a.points+' pts</span>':'');
-      if(a.criteria&&a.criteria.length){ body+='<div class="ach-crit">'+a.criteria.map(function(x){
+      // The badge <img> OVERLAYS the always-present escaped emoji text (same technique the
+      // old .ico/.ico-badge pair used) rather than swapping textContent in from an inline
+      // onerror attribute string -- interpolating a.icon into an event-handler ATTRIBUTE via
+      // JSON.stringify would break (and, worse, be a real injection point) the moment any
+      // icon value ever contained a double-quote. a.icon is currently always a short trusted
+      // emoji from the server, but this way the safety doesn't depend on that staying true.
+      var ico;
+      if(masked){
+        ico='<div class="hcd-ico"><img class="hcd-badge" src="/branding/mystery/secret_feat.png" onerror="this.remove()">'+esc(a.icon)+'</div>';
+      } else if(a.earned){
+        ico='<div class="hcd-ico"><img class="hcd-badge" src="/badge-thumb/'+esc(a.id)+'.png" onerror="this.remove()">'+esc(a.icon)+'</div>';
+      } else {
+        ico='<div class="hcd-ico emoji">'+esc(a.icon)+'</div>';
+      }
+      var sub=(a.bucket==='ladder'&&a.ladderName)?(esc(a.ladderName)+' &middot; '+esc(fmt(a.threshold))):'';
+      var body=(framed?'<div class="hall-frame '+(isFeat?'feat':'legendary')+'"></div>':'')+ico
+        +'<div class="hcd-body"><div class="hcd-top"><span class="hcd-nm">'+(masked?'???':esc(a.name))+'</span>'
+        +(masked?'':tierPill(isFeat?'feat':a.tier))+'</div>'
+        +'<div class="hcd-ds">'+(masked?'Hidden until earned':esc(a.desc))+'</div>'
+        +(sub?'<div class="hcd-sub">'+sub+'</div>':'');
+      if(a.criteria&&a.criteria.length){ body+='<div class="hcd-crit">'+a.criteria.map(function(x){
         return '<span class="'+(x.done?'on':'')+'">'+(x.done?'&#10003;':'&#9675;')+' '+esc(x.label)+'</span>'; }).join('')+'</div>'; }
-      if(a.skin) body+='<div class="unlk">&#9733; unlocks '+esc(skinName(d,a.skin))+' skin</div>';
-      if(a.banner_reward) body+='<div class="ach-bannerflag">&#9873; unlocks a banner</div>';
+      if(a.skin) body+='<div class="hcd-bannerflag">&#9733; unlocks '+esc(skinName(d,a.skin))+' skin</div>';
+      if(a.banner_reward) body+='<div class="hcd-bannerflag">&#9873; unlocks a banner</div>';
       if(a.earned){ var hot=unleashed()&&a.roast_nsfw, rr=hot?a.roast_nsfw:a.roast;
-        if(rr) body+='<div class="ach-roast'+(hot?' hot':'')+'">'+esc(rr)+'</div>'; }
+        if(rr) body+='<div class="hcd-roast'+(hot?' hot':'')+'">'+esc(rr)+'</div>'; }
       if(!a.earned && !masked){ var pct=Math.min(100,Math.round(a.current/a.threshold*100));
-        body+='<div class="ach-bar"><i style="width:'+pct+'%"></i></div>'
-            +'<div class="ach-num">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div>'; }
-      body+='</div>'; c.innerHTML=body;
+        body+='<div class="hcd-bar"><i style="width:'+pct+'%"></i></div>'
+            +'<div class="hcd-num">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div>'; }
+      body+='</div>';
+      var ea=(d.earned_at||{})[a.id];
+      body+='<div class="hcd-side"><div class="hcd-pts">'+(a.points?'+'+a.points:(isFeat?'feat':''))+'</div>'
+        +'<div class="hcd-date">'+(a.earned&&ea?esc(ea):'')+'</div></div>';
+      c.innerHTML=body;
       if(a.earned){ c.classList.add('clickable'); c.title='Replay this celebration';
         c.onclick=function(){ celebrate(a); }; }
       return c;
     }
-    var _cur='summary';
+    var _cur='summary', _activeBucket=null, _actLadder=null, _actIdx=0, _actTimer=null;
     function tab(name){
       _cur=name;
       var map={summary:'ach-summary',all:'ach-grid',stats:'ach-stats'};
@@ -376,11 +538,20 @@
       var tabs=el('ach-tabs'); if(tabs) tabs.querySelectorAll('.htab').forEach(function(b){
         b.classList.toggle('on', b.getAttribute('data-tab')===name); });
     }
-    function jump(bucket){ tab('all'); var s=el('sect-'+bucket); if(s) s.scrollIntoView({behavior:'smooth',block:'start'}); }
+    // jump(bucket) TOGGLES a category filter (clicking the same bucket again clears it) and
+    // switches to All -- richer than the old scroll-to-section behavior, matching the
+    // sidebar's new click-to-filter design. Re-renders grid+rail so both the filtered
+    // content and the .rail-nav active highlight stay in sync.
+    function jump(bucket){
+      _activeBucket=(_activeBucket===bucket)?null:bucket;
+      tab('all');
+      if(data){ renderGrid(data); renderRail(data); }
+    }
     function search(q){
       q=(q||'').trim().toLowerCase(); if(q) tab('all');
       var g=el('ach-grid'); if(!g) return;
-      g.querySelectorAll('.ach-card').forEach(function(cd){
+      var top=el('hall-ladder-top'); if(top) top.style.display=q?'none':'';
+      g.querySelectorAll('.hall-card').forEach(function(cd){
         var hay=cd.getAttribute('data-q')||''; cd.style.display=(!q||hay.indexOf(q)>=0)?'':'none'; });
     }
     function render(d){
@@ -399,20 +570,115 @@
       renderSummary(d); renderGrid(d); renderStats(d); renderRail(d);
       tab(_cur);
     }
+    // Groups the flat ladder-bucket achievements by track (using the top-level 'ladders'
+    // list for display name + a stable order), sorted by rung. Each group's representative
+    // image is its FIRST rung's badge -- always earnable/appropriate to show regardless of
+    // how far the player has actually gotten, unlike using the top (spoiler) tier's art.
+    function buildLadderGroups(d){
+      var byTrack={};
+      (d.achievements||[]).forEach(function(a){ if(a.bucket==='ladder'){
+        (byTrack[a.track]=byTrack[a.track]||[]).push(a); } });
+      Object.keys(byTrack).forEach(function(t){ byTrack[t].sort(function(x,y){return x.rung-y.rung;}); });
+      return (d.ladders||[]).map(function(t){
+        var tiers=byTrack[t.id]||[];
+        return {id:t.id, name:t.name, tiers:tiers,
+                img: tiers.length ? '/badge-thumb/'+encodeURIComponent(tiers[0].id)+'.png' : ''};
+      }).filter(function(l){return l.tiers.length;});
+    }
+    function renderCarousel(d, ladders){
+      var host=el('hall-carousel-slot'); if(!host) return;
+      if(_actTimer){ clearInterval(_actTimer); _actTimer=null; }
+      if(!ladders.length){ host.innerHTML=''; return; }
+      if(!_actLadder || !ladders.some(function(l){return l.id===_actLadder;})){ _actLadder=ladders[0].id; _actIdx=0; }
+      var ladder=ladders.filter(function(l){return l.id===_actLadder;})[0]||ladders[0];
+      if(_actIdx>=ladder.tiers.length) _actIdx=0;
+      var tier=ladder.tiers[_actIdx];
+      var earnedCount=ladder.tiers.filter(function(t){return t.earned;}).length;
+      var ea=(d.earned_at||{})[tier.id];
+      var html='<div class="hall-carousel t-'+tier.tier+'"><div class="hc-row">'
+        +'<div class="hc-cap'+(tier.earned?'':' zero')+'"><div class="hc-float"><div class="hc-ring"></div>'
+        +'<div class="hc-badge"><img src="'+esc(ladder.img)+'" alt=""></div></div></div>'
+        +'<div class="hc-body">'
+        +'<div class="hc-eyebrow">'+esc(ladder.name)+'&ensp;&middot;&ensp;'+earnedCount+'/'+ladder.tiers.length+' tiers</div>'
+        +'<div class="hc-name">'+esc(tier.name)+'</div>'
+        +'<div class="hc-desc">'+esc(tier.desc)+'</div>'
+        +'<div class="hc-meta">'+tierPill(tier.tier).replace('hall-tierpill-mini','hc-tierpill')
+        +(tier.points?'<span class="hc-ptspill">+'+tier.points+' pts</span>':'')
+        +'<span class="hc-thresh">'+esc(fmt(tier.threshold))+(tier.earned&&ea?' &middot; earned '+esc(ea):'')+'</span></div>'
+        +'</div><div class="hc-nav"><button data-dir="-1" aria-label="Previous tier">&#8249;</button>'
+        +'<button data-dir="1" aria-label="Next tier">&#8250;</button></div></div>'
+        +'<div class="hc-pips">'+ladder.tiers.map(function(t,i){
+          return '<button class="'+(i===_actIdx?'on':(t.earned?'done':''))+'" data-i="'+i+'" aria-label="'+esc(t.name)+'"></button>'; }).join('')
+        +'</div></div>';
+      host.innerHTML=html;
+      var root=host.querySelector('.hall-carousel');
+      root.querySelectorAll('.hc-nav button').forEach(function(b){
+        b.onclick=function(){ _actIdx=(_actIdx+parseInt(b.getAttribute('data-dir'),10)+ladder.tiers.length)%ladder.tiers.length;
+          renderCarousel(d, ladders); }; });
+      root.querySelectorAll('.hc-pips button').forEach(function(b){
+        b.onclick=function(){ _actIdx=parseInt(b.getAttribute('data-i'),10); renderCarousel(d, ladders); }; });
+      _actTimer=setInterval(function(){ _actIdx=(_actIdx+1)%ladder.tiers.length; renderCarousel(d, ladders); }, 3500);
+    }
     function renderGrid(d){
-      var all=d.achievements||[]; var g=el('ach-grid'); if(!g) return; g.innerHTML='';
-      BUCKETS.forEach(function(b){
-        if(b[0]==='feat' && !d.feats_revealed) return;                       // the feats stay cloaked
+      var all=d.achievements||[]; var g=el('ach-grid'); if(!g) return;
+      if(_actTimer){ clearInterval(_actTimer); _actTimer=null; }
+      var showLadders=!_activeBucket||_activeBucket==='ladder';
+      var ladders=buildLadderGroups(d);
+      var html='';
+      if(showLadders && ladders.length){
+        html+='<div id="hall-carousel-slot"></div>'
+          +'<div id="hall-ladder-top"><div class="hall-ladders">'+ladders.map(function(l){
+            var ec=l.tiers.filter(function(t){return t.earned;}).length;
+            return '<div class="ladder-badge t-'+(l.tiers.filter(function(t){return t.earned;})
+                .sort(function(x,y){return {common:0,rare:1,epic:2,legendary:3}[y.tier]-{common:0,rare:1,epic:2,legendary:3}[x.tier];})[0]||{tier:'common'}).tier
+                +(l.id===_actLadder?' on':'')+(ec?'':' zero')+'" data-ladder="'+esc(l.id)+'">'
+              +'<div class="lb-img"><img src="'+esc(l.img)+'" alt=""></div>'
+              +'<div class="lb-pips">'+l.tiers.map(function(t){return '<i style="'+(t.earned?'background:var(--tc)':'')+'"></i>';}).join('')+'</div>'
+              +'<div class="lb-name">'+esc(l.name)+'</div></div>';
+          }).join('')+'</div></div>';
+        var activeLadder=ladders.filter(function(l){return l.id===(_actLadder||ladders[0].id);})[0]||ladders[0];
+        html+='<div class="hall-block"><div class="hall-sec-h">'+esc(activeLadder.name)
+          +' <span class="cnt">'+activeLadder.tiers.filter(function(t){return t.earned;}).length+'/'+activeLadder.tiers.length+' earned</span></div>'
+          +'<div class="hall-cardgrid" id="hall-active-tiers"></div></div>';
+        html+='<div class="hall-block"><div class="hall-sec-h">All Ladder Tiers</div><div id="hall-all-ladders"></div></div>';
+      }
+      var flatSections=[['milestone','Milestones'],['mastery','Masteries'],['feat','Feats of the Athenaeum']]
+        .filter(function(b){ return (!_activeBucket||_activeBucket===b[0]) && (b[0]!=='feat'||d.feats_revealed); });
+      flatSections.forEach(function(b){ html+='<div class="hall-block" id="hall-flat-'+b[0]+'"></div>'; });
+      g.innerHTML=html;
+      // populate the DOM-node-built pieces (card() returns real elements, cheaper to append
+      // than to serialize achievement flavor text -- including roasts -- through innerHTML twice)
+      if(showLadders && ladders.length){
+        var atHost=el('hall-active-tiers');
+        if(atHost) activeLadder.tiers.forEach(function(t){ atHost.appendChild(card(d, Object.assign({}, t, {ladderName:activeLadder.name}))); });
+        var allHost=el('hall-all-ladders');
+        if(allHost) ladders.forEach(function(l){
+          var pd=document.createElement('div'); pd.className='hall-pilldiv'; pd.innerHTML=
+            '<div class="pd-line"></div><div class="pd-pill"><img src="'+esc(l.img)+'" alt="">'
+            +'<span class="pd-nm">'+esc(l.name)+'</span><span class="pd-ct">'
+            +l.tiers.filter(function(t){return t.earned;}).length+'/'+l.tiers.length+'</span></div><div class="pd-line r"></div>';
+          allHost.appendChild(pd);
+          var grid=document.createElement('div'); grid.className='hall-cardgrid';
+          l.tiers.forEach(function(t){ grid.appendChild(card(d, Object.assign({}, t, {ladderName:l.name}))); });
+          allHost.appendChild(grid);
+        });
+        g.querySelectorAll('.ladder-badge').forEach(function(b){
+          b.onclick=function(){ _actLadder=b.getAttribute('data-ladder'); _actIdx=0; renderGrid(data); }; });
+        renderCarousel(d, ladders);
+      }
+      flatSections.forEach(function(b){
+        var host=el('hall-flat-'+b[0]); if(!host) return;
         var rows=all.filter(function(a){return (a.bucket||'ladder')===b[0];});
         if(!rows.length) return;
-        var h=document.createElement('div'); h.className='ach-sect'+(b[0]==='feat'?' feats':''); h.id='sect-'+b[0];
-        h.innerHTML=esc(b[1])+' <span class="cnt">'+rows.filter(function(a){return a.earned;}).length
-          +'/'+rows.length+'</span><span class="chev">&#9660;</span>';
-        h.onclick=function(){ h.classList.toggle('collapsed'); var hide=h.classList.contains('collapsed');
-          g.querySelectorAll('.card-'+b[0]).forEach(function(cd){ cd.style.display=hide?'none':''; }); };
-        g.appendChild(h);
-        rows.forEach(function(a){ var cd=card(d,a); cd.classList.add('card-'+b[0]); g.appendChild(cd); });
+        var pd=document.createElement('div'); pd.className='hall-pilldiv'+(b[0]==='feat'?' feats':'');
+        pd.innerHTML='<div class="pd-line"></div><div class="pd-pill"><span class="pd-nm">'+esc(b[1])+'</span>'
+          +'<span class="pd-ct">'+rows.filter(function(a){return a.earned;}).length+'/'+rows.length+'</span></div><div class="pd-line r"></div>';
+        host.appendChild(pd);
+        var grid=document.createElement('div'); grid.className='hall-cardgrid';
+        rows.forEach(function(a){ grid.appendChild(card(d,a)); });
+        host.appendChild(grid);
       });
+      if(!g.children.length) g.innerHTML='<div class="hall-empty">Nothing matches this filter.</div>';
     }
     function renderSummary(d){
       var host=el('ach-summary'); if(!host) return; var all=d.achievements||[]; var ea=d.earned_at||{};
@@ -430,7 +696,7 @@
         return '<div class="prow"><div class="pl">'+esc(label)+'</div><div class="pbar"><i style="width:'+pct+'%"></i></div><div class="pv">'+e+' / '+t+'</div></div>'; }
       h+=bar('Overall', all.filter(function(a){return a.tier!=='feat'&&a.earned;}).length, all.filter(function(a){return a.tier!=='feat';}).length);
       BUCKETS.forEach(function(b){
-        if(b[0]==='feat' && !d.feats_revealed) return;
+        if(b[0]==='feat' && !d.feats_revealed) return;   // feats stay cloaked until the first one lands -- deliberately not shown here either
         var rows=all.filter(function(a){return (a.bucket||'ladder')===b[0];});
         if(rows.length) h+=bar(b[1], rows.filter(function(a){return a.earned;}).length, rows.length);
       });
@@ -441,39 +707,91 @@
       distinct_keywords:'Distinct keywords',edits:'Edits',enhances:'Enhances',uploads:'Uploads',culled:'Culled',
       days_used:'Days visited',lora_used:'LoRA uses',lora_distinct:'Distinct LoRAs',storyboards:'Loom shots',
       similar_uses:'More-like-this uses',claims:'Rewards claimed',free_cards_applied:'Free cards used'};
+    var RARITY_ORDER=['common','rare','epic','legendary'];
+    var RARITY_HEX={common:'#9fbad6',rare:'#7fb0f4',epic:'#c69cff',legendary:'#e8cb7c'};
     function renderStats(d){
-      var host=el('ach-stats'); if(!host) return; var m=d.metrics||{};
-      var keys=Object.keys(STAT_LABELS).filter(function(k){return (k in m) && m[k];});
-      if(!keys.length){ host.innerHTML='<div class="hall-empty">No stats yet.</div>'; return; }
-      var h='<div class="hall-stats">';
-      keys.forEach(function(k){ h+='<div class="hall-stat"><span class="sl">'+esc(STAT_LABELS[k])+'</span><span class="sv">'+fmt(m[k])+'</span></div>'; });
-      host.innerHTML=h+'</div>';
-    }
-    function renderRail(d){
-      var host=el('ach-rail'); if(!host) return; var all=d.achievements||[]; var h='';
-      h+='<div><div class="rail-h">Categories</div><div class="rail-nav">';
+      var host=el('ach-stats'); if(!host) return; var all=d.achievements||[];
+      var nonFeat=all.filter(function(a){return a.tier!=='feat';});
+      var earnedN=nonFeat.filter(function(a){return a.earned;}).length;
+      var feats=all.filter(function(a){return a.tier==='feat';});
+      var h='<div class="hall-statcards">'
+        +'<div class="hall-statcard"><div class="scl">Achieved</div><div class="scv">'+earnedN+'/'+nonFeat.length+'</div>'
+        +'<div class="scs">'+(nonFeat.length?Math.round(earnedN/nonFeat.length*100):0)+'% complete</div></div>'
+        +'<div class="hall-statcard"><div class="scl">Points Earned</div><div class="scv">'+fmt(d.earned_points||0)+'</div>'
+        +'<div class="scs">of '+fmt(d.possible_points||0)+' possible</div></div>'
+        +'<div class="hall-statcard"><div class="scl">Feats Earned</div><div class="scv">'
+        +(d.feats_revealed?feats.filter(function(a){return a.earned;}).length+'/'+feats.length:'???')+'</div>'
+        +'<div class="scs">prestige &middot; no points</div></div></div>';
+      h+='<div class="hall-block"><div class="hall-sec-h">By Bucket</div><div class="hall-prog">';
       BUCKETS.forEach(function(b){
         if(b[0]==='feat' && !d.feats_revealed) return;
         var rows=all.filter(function(a){return (a.bucket||'ladder')===b[0];});
         if(!rows.length) return;
-        h+='<a data-jump="'+b[0]+'">'+esc(b[1])+'<span class="c">'+rows.filter(function(a){return a.earned;}).length+'/'+rows.length+'</span></a>';
+        var e=rows.filter(function(a){return a.earned;}).length, pct=Math.round(e/rows.length*100);
+        h+='<div class="prow"><div class="pl">'+esc(b[1])+'</div><div class="pbar"><i style="width:'+pct+'%"></i></div><div class="pv">'+e+' / '+rows.length+'</div></div>';
       });
       h+='</div></div>';
+      h+='<div class="hall-block"><div class="hall-sec-h">By Rarity</div>';
+      RARITY_ORDER.forEach(function(r){
+        var rows=all.filter(function(a){return a.tier===r;});
+        if(!rows.length) return;
+        var e=rows.filter(function(a){return a.earned;}).length, pct=Math.round(e/rows.length*100);
+        h+='<div class="hall-rarity-row"><span class="rl">'+esc(r)+'</span><div class="rbar"><i style="width:'+pct+'%;background:'+RARITY_HEX[r]+'"></i></div><span class="rv">'+e+'/'+rows.length+'</span></div>';
+      });
+      h+='</div>';
+      var ladders=buildLadderGroups(d);
+      if(ladders.length){
+        h+='<div class="hall-block"><div class="hall-sec-h">Ladder Completion</div>';
+        ladders.forEach(function(l){
+          var e=l.tiers.filter(function(t){return t.earned;}).length, pct=Math.round(e/l.tiers.length*100);
+          h+='<div class="hall-ladder-row"><img src="'+esc(l.img)+'" alt=""><span class="ll">'+esc(l.name)+'</span>'
+            +'<div class="lbar"><i style="width:'+pct+'%"></i></div><span class="lv">'+e+'/'+l.tiers.length+'</span></div>';
+        });
+        h+='</div>';
+      }
+      var keys=Object.keys(STAT_LABELS).filter(function(k){return (k in (d.metrics||{})) && d.metrics[k];});
+      if(keys.length){
+        h+='<div class="hall-block"><div class="hall-sec-h">Raw Metrics</div><div class="hall-stats">';
+        keys.forEach(function(k){ h+='<div class="hall-stat"><span class="sl">'+esc(STAT_LABELS[k])+'</span><span class="sv">'+fmt(d.metrics[k])+'</span></div>'; });
+        h+='</div></div>';
+      }
+      host.innerHTML=h;
+    }
+    function renderRail(d){
+      var host=el('ach-rail'); if(!host) return; var all=d.achievements||[];
+      var top='<div class="rail-scroll">';
+      top+='<div><div class="rail-h">Categories</div><div class="rail-nav">';
+      BUCKETS.forEach(function(b){
+        if(b[0]==='feat' && !d.feats_revealed) return;
+        var rows=all.filter(function(a){return (a.bucket||'ladder')===b[0];});
+        if(!rows.length) return;
+        top+='<a data-jump="'+b[0]+'" class="'+(_activeBucket===b[0]?'on':'')+'">'+esc(b[1])+'<span class="c">'+rows.filter(function(a){return a.earned;}).length+'/'+rows.length+'</span></a>';
+      });
+      top+='</div></div><div class="rail-div"></div>';
       var reach=all.filter(function(a){return !a.earned && !a.hidden && a.threshold>0;})
         .map(function(a){ return {a:a,pct:Math.min(99,Math.round(a.current/a.threshold*100))}; })
         .sort(function(x,y){return y.pct-x.pct;}).slice(0,3);
-      h+='<div><div class="rail-h">Within Reach</div><div class="rail-reach">';
+      top+='<div><div class="rail-h">Within Reach</div><div class="rail-reach">';
       if(reach.length){ reach.forEach(function(r){ var a=r.a;
-        h+='<div class="rc"><div class="ri">'+esc(a.icon)+'</div><div class="rb"><div class="rbn">'+esc(a.name)+'</div>'
+        top+='<div class="rc"><div class="ri">'+esc(a.icon)+'</div><div class="rb"><div class="rbn">'+esc(a.name)+'</div>'
           +'<div class="rbar"><i style="width:'+r.pct+'%"></i></div><div class="rbp">'+fmt(a.current)+' / '+fmt(a.threshold)+'</div></div></div>'; });
-      } else { h+='<div class="hall-empty">All caught up.</div>'; }
-      h+='</div></div>';
-      var rewards=(d.skins||[]).filter(function(s){return s.earned && !s.free;});
-      if(rewards.length){ h+='<div><div class="rail-h">Rewards Earned</div><div class="rail-rewards">';
-        rewards.forEach(function(s){ h+='<span class="chip">&#127912; '+esc(s.name)+'</span>'; }); h+='</div></div>'; }
-      h+='<div class="rail-mascot"><img src="/branding/mascots/gen_nel.png" onerror="this.remove()"><div class="bubble">Keep going. The Void will not archive itself.</div></div>';
-      h+='<div class="rail-foot">Skins live in the <a href="/panel">Control Panel</a> now &middot; earn epics to unlock more.</div>';
-      host.innerHTML=h;
+      } else { top+='<div class="hall-empty">All caught up.</div>'; }
+      top+='</div></div>';
+      top+='<div class="rail-mascot"><img src="/branding/mascots/gen_nel.png" onerror="this.remove()"><div class="bubble">Keep going. The Void will not archive itself.</div></div>';
+      top+='</div>';
+      // Relics: read-only display of all 5 skins, locked+unlocked -- picking one still lives
+      // in the Control Panel only, unchanged decision; these rows have no onclick on purpose.
+      var pinned='<div class="rail-pinned"><div class="rail-h">Relics</div><div class="hall-relics">';
+      (d.skins||[]).forEach(function(s){
+        var sw=SKIN_SW[s.id]||[];
+        var active=s.id===d.skin;
+        pinned+='<div class="relic-row'+(s.earned?' unlocked':'')+(active?' active':'')+'" title="'+esc(s.desc||'')+'">'
+          +'<div class="rsw">'+sw.map(function(c){return '<i style="background:'+c+'"></i>';}).join('')+'</div>'
+          +'<span class="rnm">'+esc(s.name)+'</span>'
+          +(active?'<span class="rck">&#10003;</span>':(!s.earned?'<span class="rlk">&#128274;</span>':''))+'</div>';
+      });
+      pinned+='</div><div class="rail-foot">Skins live in the <a href="/panel">Control Panel</a> now &middot; earn epics to unlock more.</div></div>';
+      host.innerHTML=top+pinned;
       host.querySelectorAll('[data-jump]').forEach(function(el2){ el2.onclick=function(){ jump(el2.getAttribute('data-jump')); }; });
     }
     function skinName(d,id){ var s=(d.skins||[]).filter(function(x){return x.id===id;})[0]; return s?s.name:id; }

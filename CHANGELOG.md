@@ -15,6 +15,26 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Changed
+
+- **Trophy Hall is now The Folio of Honors, with a full visual redesign.** The owner's
+  pick off the standing rename shortlist, shipped alongside a redesign built from a
+  finished Figma Make export — itself built partly from the legendary/feat frame
+  dimensions handed off earlier the same night (confirmed byte-for-byte identical
+  tier-triad colors to what the unlock celebration already shipped). The All tab now
+  leads with an auto-rotating carousel showcasing the active ladder's tiers, a badge row
+  to jump between all 10 ladders, and every ladder/Milestones/Masteries/Feats grouped
+  under a glowing divider. Legendary and feat cards carry the same ornate 9-slice frame
+  the unlock celebration always has — extended to the grid for the first time, a
+  deliberate change from "toast only." The sidebar's category list now filters in place
+  instead of just scrolling to a section, and Relics (skins) show all five with lock/
+  active state, not just the ones you've already unlocked. The Statistics tab gained
+  achieved/points/feats summary cards plus by-rarity and per-ladder-completion
+  breakdowns. Ported to this app's existing vanilla JS/CSS rather than adopted as React
+  (the Loom stays the only React surface); real badge art throughout, not the export's
+  placeholder images. Backend gained `track`/`rung`/`rungs_total` per ladder achievement
+  and a `ladders` list so the client doesn't need a second hand-maintained id→name map.
+
 ### Fixed
 
 - **A signed-in LAN account could evict the owner's own account, and register a fresh one

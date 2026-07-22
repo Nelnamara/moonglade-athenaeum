@@ -30,7 +30,7 @@ def test_compute_earns_by_threshold_and_flags_newly():
 
 
 def test_ladder_achievements_carry_track_rung_and_rungs_total():
-    """The Trophy Hall's ladder carousel/grid groups achievements by track and
+    """The Folio of Honors' ladder carousel/grid groups achievements by track and
     orders them by rung -- added 2026-07-22 for the redesign. Non-ladder
     achievements (milestone/mastery/feat) must NOT carry these fields at all,
     not just leave them empty, so the frontend can use their presence as the
@@ -124,6 +124,15 @@ def test_state_roundtrip_and_soft_fail(tmp_path):
 def _client(tmp_path, rows):
     save_catalog(tmp_path / "catalog.db", rows)
     return login_client(tmp_path), tmp_path
+
+
+def test_the_hall_was_renamed_the_folio_of_honors(tmp_path):
+    """2026-07-22 owner decision, off the STATE.md rename shortlist -- guards against a
+    straggler reference surviving a future edit to the modal skeleton in pixai_gallery.py."""
+    cli, _ = _client(tmp_path, [])
+    html = cli.get("/").get_data(as_text=True)
+    assert "The Folio of Honors" in html
+    assert "Trophy Hall" not in html
 
 
 def test_api_achievements_marks_seen_once(tmp_path):

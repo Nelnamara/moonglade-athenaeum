@@ -1353,7 +1353,7 @@ _SKIN_IDS = {s["id"] for s in SKINS}
 # The 10 Evolution Ladder tracks each ladder achievement's 'track' field points at
 # (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields, sourced from
 # docs/achievements_roster_57.json's roster.tracks). Single source of truth for
-# ladder display names -- the Trophy Hall's carousel/ladder-grid groups by this,
+# ladder display names -- the Folio of Honors' carousel/ladder-grid groups by this,
 # not a second hand-maintained id->name map in the frontend.
 LADDER_TRACKS = [
     {"id": "archive",     "name": "The Archive",           "metric": "images"},
@@ -1678,7 +1678,7 @@ def save_ach_state(out_dir, state):
 
 def _badge_thumb(out_dir, aid, size=256):
     """Lazily cache a ~size px copy of a badge master and return its Path. The 57
-    badge masters are 2000px (~300 MB total); the Trophy Hall renders these thumbs so
+    badge masters are 2000px (~300 MB total); the Folio of Honors renders these thumbs so
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
     trouble, so a tile always resolves to *something*."""
@@ -5409,9 +5409,9 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="mg-toasts" aria-live="polite"></div>
 <div id="snip-menu"></div>
 <div id="ach-modal" class="ach-modal ach-hall" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
-  <div class="ach-panel" role="dialog" aria-label="Trophy Hall">
+  <div class="ach-panel" role="dialog" aria-label="The Folio of Honors">
     <div class="hall-head">
-      <div class="hall-title">&#127942; <b>Trophy Hall</b>
+      <div class="hall-title">&#127942; <b>The Folio of Honors</b>
         <img class="ach-nar" id="ach-nar" src="/branding/mascots/gen_nel.png" title="the narrator"
           alt="the narrator" onclick="Ach.poke()" onerror="this.remove()"><span id="ach-unleash-slot"></span></div>
       <div class="hall-score" id="ach-progress">&hellip;</div>
@@ -7278,7 +7278,7 @@ function savePrompt() {
   .jp-bar{height:10px;border-radius:6px;background:var(--surface1);overflow:hidden;}
   .jp-bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-soft));transition:width .4s ease;}
   .jp-txt{font-size:11.5px;color:var(--subtext);margin-top:5px;font-variant-numeric:tabular-nums;}
-  /* Panel tab bar -- same .htab/.htab.on visual language as the Trophy Hall's
+  /* Panel tab bar -- same .htab/.htab.on visual language as the Folio of Honors'
      Summary/All/Statistics tabs (static/mg-notify.js's injected styles), copied
      rather than shared via a <script src> because mg-notify.js also wires up the
      Jobs tray/Achievement modals that this page doesn't otherwise use; see
@@ -9597,7 +9597,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/badge-thumb/<aid>.png")
     def badge_thumb(aid):
-        """Cached ~256px badge for the Trophy Hall tiles (masters stay the source of
+        """Cached ~256px badge for the Folio of Honors tiles (masters stay the source of
         truth). Lazily generated on first hit; path-safe (no slashes via <aid>)."""
         from flask import send_from_directory, abort
         if not aid or "/" in aid or "\\" in aid or ".." in aid:
