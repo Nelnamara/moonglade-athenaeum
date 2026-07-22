@@ -77,6 +77,17 @@ git tags. Full prose notes for tagged versions live on
   use the same helper, and pick up each image's real per-batch seed in the process
   instead of the shared submitted one.
 
+- **The published GitHub wiki was 4 releases stale.** README calls it "full
+  documentation," but it was frozen at 2026-07-17: still told new users to
+  `pip install PySide6` and run the deleted GUI, said nothing about the login wall
+  v2.0.0 added to every path including localhost, and was missing three pages
+  entirely (The-Loom, Control-Panel, Folio of Honors) that only ever existed in the
+  repo's own `wiki/` folder. Pushed the current, fact-checked `wiki/` source to the
+  live wiki (10 pages updated, 3 added). Confirmed with the owner before publishing,
+  since it's a public surface outside this session's standing repo-push permission.
+  Still open: whether to automate this push (a CI job on tag) so it can't silently
+  drift a second time — decision D-10 in `docs/AUDIT_2026-07-21.md`.
+
 ### Known issue (not fixed — deliberately left for the design pass)
 
 - **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
