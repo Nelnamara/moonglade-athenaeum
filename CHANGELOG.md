@@ -96,6 +96,18 @@ git tags. Full prose notes for tagged versions live on
   server through the wildcard host and require it to be recognized, which only
   passes if the rewrite genuinely happened.
 
+- **`is_lora_compatible()`, the LoRA/model architecture-mismatch spend gate, was never
+  actually called anywhere.** Its own docstring says why it exists: a mismatched LoRA
+  is rejected server-side by PixAI, burning a real generation or free card. The
+  drawer's client-side `loraIncompat()`/`anyIncompat()` already resolve the same
+  model_type/lora_base_type and disable Generate on a mismatch — but that's advisory
+  only, and a direct POST to `/api/generate` bypassing the UI had no equivalent check
+  at all. The server now runs the same check for real: `model_type` (server-resolved
+  when a model_id is sent, same call already made for version resolution) and each
+  LoRA's `lora_base_type` (now sent alongside `version_id`/`weight`) get validated
+  before any card is attached or credits spent; a mismatch is a 400, not a submit.
+  CLI `--lora` has no equivalent check yet — narrower scope, left open.
+
 ### Known issue (not fixed — deliberately left for the design pass)
 
 - **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
