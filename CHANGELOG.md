@@ -88,6 +88,14 @@ git tags. Full prose notes for tagged versions live on
   Still open: whether to automate this push (a CI job on tag) so it can't silently
   drift a second time — decision D-10 in `docs/AUDIT_2026-07-21.md`.
 
+- **A test guarding the port pre-flight's wildcard-host handling couldn't actually
+  catch a regression.** `test_wildcard_bind_addresses_probe_loopback` probed a free
+  port and asserted `""` — but a wildcard host (`0.0.0.0`/`::`/`""`) returns `""`
+  against a free port whether or not `port_owner` rewrites it to `127.0.0.1` first,
+  since a connection to a free port refuses either way. Rewritten to probe a live
+  server through the wildcard host and require it to be recognized, which only
+  passes if the rewrite genuinely happened.
+
 ### Known issue (not fixed — deliberately left for the design pass)
 
 - **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
