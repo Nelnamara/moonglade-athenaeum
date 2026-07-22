@@ -615,6 +615,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 1, 'rungs_total': 5,
      'roast': "Oh look — you saved ONE picture. A single file, hauled out of the howling void like a wet kitten from a storm drain. The Athenaeum is technically no longer empty. We're all so proud. (We are not.)",
      'roast_nsfw': 'One goddamn picture. You clawed a single file out of the void and you want a PARADE? Sit down. This is the part where you either quit or become insufferable. Placing bets now.',
     },
@@ -627,6 +628,7 @@ ACHIEVEMENTS = [
      'threshold': 1000,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 2, 'rungs_total': 5,
      'roast': 'A thousand images. You\'ve officially crossed from "hobby" into "someone should keep an eye on this one." The shelves groan. So do we.',
      'roast_nsfw': "A thousand. A THOUSAND. Who hurt you? Whatever it was, you're filling the hole with JPEGs and honestly? Respect. Keep bleeding pixels, you beautiful disaster.",
     },
@@ -639,6 +641,7 @@ ACHIEVEMENTS = [
      'threshold': 10000,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 3, 'rungs_total': 5,
      'skin': 'moonlit',
      'roast': "Ten thousand images. That's not a collection, it's a dragon's hoard, and you're the thing coiled on top of it hissing at anyone who gets close. Here's a skin. Don't spend it all in one place.",
      'roast_nsfw': 'Ten THOUSAND, you absolute hoarding gremlin. A dragon would look at this pile and go "okay, that\'s a bit much." Here\'s a shiny new skin, you magnificent pack rat. Now go outside. (You won\'t.)',
@@ -652,6 +655,7 @@ ACHIEVEMENTS = [
      'threshold': 25000,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 4, 'rungs_total': 5,
      'roast': "Twenty-five thousand images. You've squirreled away enough pixels to repaint a small moon and you're not even winded. Somewhere a hard drive is quietly weeping. The numbers only go up from here, hoarder.",
      'roast_nsfw': "Twenty-five thousand. You know what a NORMAL person does with 25,000 of anything? Neither do we — normal people aren't down here. Seek help. Or don't. The number goes higher, you glorious lunatic.",
     },
@@ -664,6 +668,7 @@ ACHIEVEMENTS = [
      'threshold': 50000,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 5, 'rungs_total': 5,
      'banner_reward': True,
      'roast': "Fifty thousand works. You didn't fill a library. You BECAME one. Take the banner — you've earned the right to fly it over the smoking ruins of your free time.",
      'roast_nsfw': "Fifty. Thousand. You're not archiving art anymore, you're a load-bearing wall of the internet. Here's your banner, you unhinged monument. Hang it next to your regrets.",
@@ -677,6 +682,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 1, 'rungs_total': 4,
      'roast': 'Your first video. It moves! Sort of! A miracle of modern spite. The Loom hums to life and immediately judges your framing.',
      'roast_nsfw': "One video. It moved. Congratulations, you found the button. The Loom is technically impressed, which for the Loom means it didn't openly laugh in your face.",
     },
@@ -689,6 +695,7 @@ ACHIEVEMENTS = [
      'threshold': 10,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 2, 'rungs_total': 4,
      'roast': "Ten videos woven. You're getting the hang of making moonlight dance. It doesn't dance WELL, but it dances, and that's more than most manage.",
      'roast_nsfw': "Ten. You keep making the pixels wiggle and somehow it's working. Nobody's more surprised than us. Keep weaving, you weird little puppeteer.",
     },
@@ -701,6 +708,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 3, 'rungs_total': 4,
      'skin': 'ember',
      'roast': 'Fifty videos. You run the Loom now. Roll camera, take your skin, and try not to let the power go to your head. (Too late.)',
      'roast_nsfw': 'Fifty videos and an ego to match. Fine, DIRECTOR, here\'s your skin. Yell "action" one more time and we\'re revoking your parking spot.',
@@ -714,6 +722,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 4, 'rungs_total': 4,
      'roast': "A hundred videos. You've built a picture-house out of moonlight and stubbornness. The critics are speechless. (There are no critics. There's just us, and we're tired.)",
      'roast_nsfw': "A hundred. You built a whole damn film festival down here out of spite and free cards. Take a bow, you pretentious little auteur. The projector's still cheaper than therapy.",
     },
@@ -726,6 +735,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 1, 'rungs_total': 4,
      'roast': "You made your first thing IN the app instead of just hoarding other people's. A spark. Fragile. Adorable. Do it again.",
      'roast_nsfw': 'First gen. You finally made something yourself instead of squatting on a pile of downloads. Look at you, a real boy. Do it 500 more times, Pinocchio.',
     },
@@ -738,6 +748,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 2, 'rungs_total': 4,
      'roast': "A hundred generations. The forge knows your name now. You're not good yet, but you're loud, and down here that counts for something.",
      'roast_nsfw': "A hundred gens. You've fed the machine enough to call it a habit. The forge tolerates you — which is more than most people can say about you.",
     },
@@ -750,6 +761,7 @@ ACHIEVEMENTS = [
      'threshold': 500,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 3, 'rungs_total': 4,
      'roast': "Five hundred forged. You've stopped asking the forge for permission. Bold. It respects that. Mostly.",
      'roast_nsfw': "Five hundred. You and the forge are basically married, and like most marriages it's mostly you feeding it money. Congratulations, Forgemaster.",
     },
@@ -762,6 +774,7 @@ ACHIEVEMENTS = [
      'threshold': 1000,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 4, 'rungs_total': 4,
      'roast': "A thousand creations pulled from the dark. You don't use the forge anymore — you ARE the forge. Terrifying. Keep going.",
      'roast_nsfw': "A thousand gens made with your own two grubby hands. You've ascended from user to menace to legend. The forge fears you now. Good.",
     },
@@ -774,6 +787,7 @@ ACHIEVEMENTS = [
      'threshold': 10,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'vault', 'rung': 1, 'rungs_total': 2,
      'roast': "Ten collections. You've started imposing ORDER on the hoard. Cute. The hoard wins eventually, but we admire the delusion.",
      'roast_nsfw': 'Ten collections. Oh, you think you can organize this disaster? Adorable. Sort away, you obsessive little librarian. The chaos is patient.',
     },
@@ -786,6 +800,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'vault', 'rung': 2, 'rungs_total': 2,
      'roast': "Fifty collections. Everything has a place, a wing, a label. You've weaponized tidiness and we're a little scared.",
      'roast_nsfw': "Fifty collections. You've turned organizing into a personality disorder and honestly it's working. Grand Curator. The shelves salute. The shelves are also terrified.",
     },
@@ -798,6 +813,7 @@ ACHIEVEMENTS = [
      'threshold': 25,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'menagerie', 'rung': 1, 'rungs_total': 2,
      'skin': 'verdant',
      'roast': "Twenty-five distinct models summoned. A whole zoo of borrowed hands doing your bidding. Here's a skin for the ringmaster.",
      'roast_nsfw': "Twenty-five models. You've been AROUND, you promiscuous little summoner. Here's a skin. Wash your hands between models — we don't know where they've been.",
@@ -811,6 +827,7 @@ ACHIEVEMENTS = [
      'threshold': 75,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'menagerie', 'rung': 2, 'rungs_total': 2,
      'roast': "Seventy-five distinct models. You've summoned a pantheon of styles to one table. They do not get along. You don't care. Legendary.",
      'roast_nsfw': "Seventy-five models. That's not a menagerie, it's a whole UN of art styles and you're the exhausted translator. Legendary, you insatiable collector.",
     },
@@ -823,6 +840,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'index', 'rung': 1, 'rungs_total': 3,
      'roast': "Fifty pieces tagged. You've begun labeling the chaos. The labels already lie, but the effort is noted.",
      'roast_nsfw': "Fifty tags. You've started the Sisyphean horror of labeling everything. It will never end. You will never stop. Welcome to hell, scribe.",
     },
@@ -835,6 +853,7 @@ ACHIEVEMENTS = [
      'threshold': 500,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'index', 'rung': 2, 'rungs_total': 3,
      'roast': "Five hundred tagged. You speak fluent metadata now. Not a useful language, but it's yours.",
      'roast_nsfw': "Five hundred tags. You spent real hours of your one finite life typing keywords. We're not judging. (We're judging. It's just impressed judging.)",
     },
@@ -847,6 +866,7 @@ ACHIEVEMENTS = [
      'threshold': 2500,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'index', 'rung': 3, 'rungs_total': 3,
      'roast': "Twenty-five hundred tags. Every piece labeled, cross-referenced, catalogued. You've out-nerded the library itself. Bow.",
      'roast_nsfw': 'Twenty-five HUNDRED. You\'ve tagged more than most museums and you did it for FUN. There\'s no word for what you are. "Catalogus Magnus" is us being polite.',
     },
@@ -859,6 +879,7 @@ ACHIEVEMENTS = [
      'threshold': 10,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'gallery', 'rung': 1, 'rungs_total': 2,
      'roast': "You showed your art to STRANGERS. On purpose. Ten times. Bold, for someone whose drafts we've all seen. The doors swing open.",
      'roast_nsfw': "Ten works published. You keep showing strangers your stuff — that's either confidence or a cry for help, and down here we don't distinguish. Doors open, exhibitionist.",
     },
@@ -871,6 +892,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'gallery', 'rung': 2, 'rungs_total': 2,
      'roast': "A hundred works published. You've thrown open a whole gallery. The wine is imaginary, the crowd is polite, and you've never been prouder. Insufferable.",
      'roast_nsfw': 'A hundred publishes. You\'ve made "look at my art" a full-time bit. The crowd\'s fake, the wine\'s fake, and your confidence is somehow REAL. Terrifying. Cheers.',
     },
@@ -883,6 +905,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'restoration', 'rung': 1, 'rungs_total': 3,
      'roast': "Your first edit. You reached into a finished piece and CHANGED it, like a god with commitment issues. He'd be proud.",
      'roast_nsfw': 'First edit. You looked at a finished image and said "no." That\'s the spirit — nothing\'s ever done, nothing\'s ever good enough. Welcome to the disease, Restorer.',
     },
@@ -895,6 +918,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'restoration', 'rung': 2, 'rungs_total': 3,
      'roast': 'Fifty edits. You don\'t accept "finished" anymore. Everything\'s a draft. Everything can be fixed. This is a problem. It\'s also art.',
      'roast_nsfw': "Fifty edits. You've never left well enough alone in your damn life, have you? Keep tinkering, gremlin. The image begs for mercy. Denied.",
     },
@@ -907,6 +931,7 @@ ACHIEVEMENTS = [
      'threshold': 200,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'restoration', 'rung': 3, 'rungs_total': 3,
      'roast': 'Two hundred edits. You bend finished work to your will like it owes you money. Masterworker. The pixels have stopped resisting.',
      'roast_nsfw': "Two hundred edits. The images just do what you say out of fear now. You've broken them. You've broken YOURSELF. Masterful, you relentless bastard.",
     },
@@ -919,6 +944,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'sweep', 'rung': 1, 'rungs_total': 2,
      'roast': 'You DELETED something. On purpose. A crawler who trims the hoard instead of drowning in it? Rare. Suspicious. Noted.',
      'roast_nsfw': 'You deleted something?! Voluntarily?! Who ARE you? A hoarder that culls is a unicorn, and unicorns unsettle us. Do it again, freak.',
     },
@@ -931,6 +957,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'sweep', 'rung': 2, 'rungs_total': 2,
      'roast': "A hundred pieces culled. You've learned the hardest lesson in the Athenaeum: not everything deserves to be kept. Ruthless. Good.",
      'roast_nsfw': 'A hundred culled. Look at you playing god with the delete key, you ruthless little executioner. The trash is FULL and your standards are HIGH. Respect.',
     },
@@ -943,6 +970,7 @@ ACHIEVEMENTS = [
      'threshold': 7,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'vigil', 'rung': 1, 'rungs_total': 2,
      'roast': "Seven days at the shelves. You keep coming back. Either dedication or a lack of hobbies. We won't ask which.",
      'roast_nsfw': "Seven days straight. You keep crawling back down here like it owes you something. It doesn't. Neither do we. See you tomorrow, addict.",
     },
@@ -955,6 +983,7 @@ ACHIEVEMENTS = [
      'threshold': 30,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'vigil', 'rung': 2, 'rungs_total': 2,
      'roast': "Thirty days. A full moon's cycle of showing up. The Athenaeum has stopped locking the doors. It knows you'll be back.",
      'roast_nsfw': "Thirty days. This isn't a hobby, it's a relationship, and frankly it's the healthiest one either of us has. See you tomorrow. You'll be here.",
     },
@@ -1321,6 +1350,24 @@ SKINS = [
 ]
 _SKIN_IDS = {s["id"] for s in SKINS}
 
+# The 10 Evolution Ladder tracks each ladder achievement's 'track' field points at
+# (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields, sourced from
+# docs/achievements_roster_57.json's roster.tracks). Single source of truth for
+# ladder display names -- the Trophy Hall's carousel/ladder-grid groups by this,
+# not a second hand-maintained id->name map in the frontend.
+LADDER_TRACKS = [
+    {"id": "archive",     "name": "The Archive",           "metric": "images"},
+    {"id": "loom",        "name": "The Loom",               "metric": "videos"},
+    {"id": "forge",       "name": "The Moonforge",          "metric": "local_gens"},
+    {"id": "vault",       "name": "The Stacks",             "metric": "collections"},
+    {"id": "menagerie",   "name": "The Menagerie",          "metric": "models"},
+    {"id": "index",       "name": "The Index",              "metric": "tagged"},
+    {"id": "gallery",     "name": "The Gallery",            "metric": "published"},
+    {"id": "restoration", "name": "The Restoration Wing",   "metric": "edits"},
+    {"id": "sweep",       "name": "The Great Sweep",        "metric": "culled"},
+    {"id": "vigil",       "name": "The Vigil",              "metric": "days_used"},
+]
+
 # ---------------------------------------------------------------------------
 # Branding: the banner mark (the animated icon beside the title) is one of the
 # owner's own cut marks in out_dir/branding/marks/, chosen + animated from the
@@ -1566,6 +1613,10 @@ def compute_achievements(metrics, seen=(), sets=None):
             "banner_reward": bool(a.get("banner_reward")), "points": achievement_points(a),
             "roast": a.get("roast", ""), "roast_nsfw": a.get("roast_nsfw", ""),
         }
+        if a.get("bucket") == "ladder":
+            entry["track"] = a["track"]
+            entry["rung"] = a["rung"]
+            entry["rungs_total"] = a["rungs_total"]
         if a["id"] in crit:
             entry["criteria"] = crit[a["id"]]
         achs.append(entry)
@@ -1589,7 +1640,7 @@ def compute_achievements(metrics, seen=(), sets=None):
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
     earned_points = sum(x["points"] for x in achs if x["earned"])
     possible_points = sum(x["points"] for x in achs)
-    return {"achievements": achs, "skins": skins, "newly": newly,
+    return {"achievements": achs, "skins": skins, "ladders": LADDER_TRACKS, "newly": newly,
             "earned_points": earned_points, "possible_points": possible_points}
 
 

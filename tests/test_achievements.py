@@ -29,6 +29,49 @@ def test_compute_earns_by_threshold_and_flags_newly():
     assert out2["newly"] == [] and by["archivist"]["earned"] is True
 
 
+def test_ladder_achievements_carry_track_rung_and_rungs_total():
+    """The Trophy Hall's ladder carousel/grid groups achievements by track and
+    orders them by rung -- added 2026-07-22 for the redesign. Non-ladder
+    achievements (milestone/mastery/feat) must NOT carry these fields at all,
+    not just leave them empty, so the frontend can use their presence as the
+    'this is a ladder tier' signal."""
+    out = g.compute_achievements({}, [])
+    by = {a["id"]: a for a in out["achievements"]}
+    fl = by["first-light"]
+    assert fl["bucket"] == "ladder"
+    assert fl["track"] == "archive" and fl["rung"] == 1 and fl["rungs_total"] == 5
+    non_ladder = next(a for a in out["achievements"] if a["bucket"] != "ladder")
+    assert "track" not in non_ladder and "rung" not in non_ladder and "rungs_total" not in non_ladder
+
+
+def test_ladders_list_matches_every_ladder_achievements_track():
+    """The top-level 'ladders' list is the source of truth for track display
+    names -- every ladder achievement's 'track' id must resolve to one of
+    them, and every track must have at least one achievement (an orphaned
+    track, or a track id typo on an achievement, would silently break the
+    carousel for that ladder)."""
+    out = g.compute_achievements({}, [])
+    ladder_ids = {t["id"] for t in out["ladders"]}
+    assert len(ladder_ids) == 10
+    achievement_tracks = {a["track"] for a in out["achievements"] if a["bucket"] == "ladder"}
+    assert achievement_tracks == ladder_ids
+
+
+def test_ladder_rungs_are_contiguous_within_each_track():
+    """Each track's rungs must run 1..rungs_total with no gaps or duplicates --
+    the carousel's tier-pip navigation assumes a dense, correctly-ordered
+    sequence, not sparse/scrambled rung numbers."""
+    out = g.compute_achievements({}, [])
+    by_track = {}
+    for a in out["achievements"]:
+        if a["bucket"] == "ladder":
+            by_track.setdefault(a["track"], []).append(a)
+    for track, rows in by_track.items():
+        rungs = sorted(r["rung"] for r in rows)
+        assert rungs == list(range(1, len(rows) + 1)), track
+        assert all(r["rungs_total"] == len(rows) for r in rows), track
+
+
 def test_epic_feats_unlock_skins():
     free = {s["id"] for s in g.compute_achievements({}, [])["skins"] if s["earned"]}
     assert free == {"moonglade", "nightfallen"}          # the two free skins
