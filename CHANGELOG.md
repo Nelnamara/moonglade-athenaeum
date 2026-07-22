@@ -15,6 +15,15 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+
+- **`READ_ONLY` now actually stops every CLI path that can spend credits.** It already covered
+  the web app; on the CLI, five commands — `--generate`, `--generate-video`,
+  `--reference-video`, `--enhance`, `--edit-image` — built their own submit call instead of
+  going through the guarded choke point, so setting `READ_ONLY` in `config.json` and running
+  any of them with `--confirm` still reached PixAI. Each now refuses itself before the
+  free-card check or an upload runs, not just before the final submit.
+
 ## [2.2.0] - 2026-07-21 — Security fixes, the last two video models, and a sharper Loom
 
 ### Changed

@@ -61,13 +61,14 @@ for handing the tool to someone else — add this to your `config.json`:
 { "READ_ONLY": true }
 ```
 
-With it set, every one of the four functions that can actually mutate your account
-(submitting a generation, submitting a hand/face fix, deleting a task, claiming a reward)
-refuses itself with a clear error — from the CLI *or* the web app, and **regardless of
-`--confirm`, `--apply`, or `--yes`**. Those flags exist to skip prompts on a run you already
-trust; `READ_ONLY` is for a run you don't want to trust yet, so it overrides them rather than
-just changing their default. Browsing, backing up, and searching your existing catalog all
-keep working normally — only the account-mutating paths refuse.
+With it set, every path that can actually mutate your account — submitting a generation
+(image, video, reference video, an edit, or an enhance), submitting a hand/face fix, deleting
+a task, or claiming a reward — refuses itself with a clear error, **regardless of `--confirm`,
+`--apply`, or `--yes`**, whether you triggered it from the CLI or the web app. Those flags
+exist to skip prompts on a run you already trust; `READ_ONLY` is for a run you don't want to
+trust yet, so it overrides them rather than just changing their default. Browsing, backing up,
+and searching your existing catalog all keep working normally — only the account-mutating
+paths refuse.
 
 `READ_ONLY` does **not** cover purely local operations (`--organize`, `--dedup`) — those never
 touch the network in the first place, so there's no account to protect. They're safe in a
