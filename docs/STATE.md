@@ -558,9 +558,17 @@ marks 4/12/62/63/74; and **`mg-notify.js`'s mascot paths are consistent** — al
 `/branding/mascots/`. The genuine gap there is that no `login_nel.png` art exists, so the login
 page's `onerror` chain degrades to `gen_nel.png` as designed.*
 
-- **Service-worker registration fails on the login page.** `/sw.js` is gated, so a signed-out
-  page gets a redirect and Chrome refuses a redirected worker script. It registers on the next
-  navigation after signing in; the thumbnail cache simply arms late.
+- **The service worker does not register while you sit on the login page — and that is the
+  decided behaviour, not an open defect.** `/sw.js` stays LOGIN-gated on purpose (owner call
+  2026-07-21, taken alongside making `/manifest.webmanifest` public). Making it public would
+  arm a fetch handler and an origin-scoped Cache Storage in browsers belonging to people who
+  never authenticate, over routes they cannot read anyway — nothing bought.
+  The cost is one navigation: registration fails at the 302 and `register('/sw.js').catch()`
+  swallows it, so the thumbnail cache arms on the first authorized navigation instead of on
+  the login page. Note the mechanism, because an earlier version of this entry had it wrong
+  and the wrong version invites the wrong fix: a worker *script* fetch uses redirect mode
+  `"error"`, so it never generates the `/login?next=` hit that justified making the manifest
+  public. Do not "fix" this by allowlisting `/sw.js`.
 - **Native `<select>`s are styled two inconsistent ways.** `.filters select` / `#preset-select` /
   `select.p-sel` get `appearance:none` + a custom caret; `.pick-filters select`
   (`pixai_gallery.py`), `.lv-sel` and `.sb-pick-filters select` (the Loom) keep the native OS
@@ -576,9 +584,41 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   `.lv-overlay`'s 400 atom — so the corner widgets paint over those backdrops instead of under
   them. A z-index-only fix can't resolve it; the real fix hoists `.lv-df-veil` (and the nested
   preview flyouts) up to `.sb-root` level as root-level siblings. Owner-visible refactor, deferred.
-- **Smaller:** upstream exceptions still print verbatim into the UI as a minor UX nit (34
-  `str(e)` sites) — but they are no longer an injection seam: the `innerHTML` sinks now escape
-  (`escH2`) or build text nodes, verified in a browser (see CHANGELOG).
+- **Upstream exceptions print verbatim into the UI — a LAN disclosure, not the "minor UX nit"
+  this entry used to call it.** 38 `str(e)`/`repr(e)` sites in `pixai_gallery.py`, 27 of them
+  reaching a `jsonify`/`flash` body. What lands there can include absolute paths out of the
+  owner's install, SQLite internals, and upstream API errors; the threat model is a LOGIN-tier
+  account on the network that is not the owner. Not an injection seam — the `innerHTML` sinks
+  escape (`escH2`) or build text nodes — but the content itself is the problem.
+  **A fix was drafted 2026-07-21 and rejected**: its redaction regex `[^\s'\"<>|]*` stops at
+  the first space, so `C:\Users\John Smith\AppData\…` still emitted the account name, which is
+  the entire stated harm. Its two tests used space-free paths and would have shipped green.
+  Re-spin as literal prefix replacement over `expanduser("~")` / `gettempdir()` / `sys.prefix`
+  / `getcwd()` / `out_dir`, longest-first, with a spaced-username case. Triage rather than
+  blanket-convert: some sites are legitimately useful diagnostics.
+- **Cache Storage outlives sign-out.** It is scoped to the ORIGIN, not the session, and the
+  service worker answers `/img/` and `/full/` cache-first — a cache hit never reaches the
+  server, so the front door never sees it. Every original and thumbnail the last session
+  actually viewed stays readable on that browser profile after signing out, by pasting the URL
+  back or via DevTools → Application → Cache Storage. Irrelevant on the owner's own phone; a
+  real disclosure on the borrowed tablet this app's LAN story is built around, and
+  `wiki/Trust-and-Safety.md`'s "Nothing is browsable anonymously" does not account for it.
+  **A fix was drafted 2026-07-21 and rejected** for two falsehoods: purging from the login page
+  assumed "whoever is looking at it is unauthorized", but `login()` has no signed-in
+  short-circuit, so a bookmark or Back press would wipe a signed-in user's whole thumbnail
+  cache; and its wiki wording was false on the documented `--host 0.0.0.0 --https` path, where
+  no worker registers at all. Settle that path first (below), since it may moot this entirely.
+- **Nobody has ever verified the PWA installs on the documented LAN path.** `wiki/Gallery.md`,
+  `wiki/FAQ.md` and `README.md` all promise PWA install, and all document the tablet launch as
+  `--host 0.0.0.0 --https` — werkzeug's `adhoc` self-signed cert. Browsers refuse service-worker
+  registration on a cert-error origin, and plain HTTP has no `caches` at all. If it does not
+  install there, three user-facing promises are wrong and the Cache Storage entry above is moot.
+  One command against a real tablet settles it; it has never been run.
+- **`/panel` lists every account username to any LOGIN-tier caller** (`web_users=core.list_web_users()`
+  passed to the template). On an install with more than one account, any signed-in user can
+  enumerate the others. Flagged in passing by a 2026-07-21 review and left unowned; filed here
+  so it stops being a parenthetical. Same page also renders `library at {{ out_dir }}`, a host
+  path, to the same audience.
 - **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
   is unreachable and the variable name is a misnomer for "authorized". This is *deliberate and
   documented* at the call site — the front-door hook guarantees an authorized request reaches
