@@ -17,6 +17,14 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Recovering a failed task said "completed."** If PixAI itself marked a task
+  failed/cancelled/rejected, every recovery path (`--dump-params`, the web gallery's
+  "⬇ Import", the CLI's own `--generate`/`--generate-video`/`--edit-image` recovery)
+  still said *"task completed but no media ids found"* — which reads as a Moonglade bug
+  even though the credits were already spent and PixAI genuinely rejected the task. The
+  message now says which of the two actually happened. `--dump-params` also prints the
+  task's status now, not just what was submitted — the params alone can't tell you
+  whether PixAI ever ran the task, which is usually the whole reason you're recovering it.
 - **A zero-byte file left by an interrupted download used to be permanent.** Nothing would
   ever re-download it — `--update`, `--sync`, and a full re-walk all treated it as
   "already have this one" — and the gallery would serve the empty file back if a filename
