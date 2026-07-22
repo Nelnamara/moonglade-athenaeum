@@ -891,6 +891,27 @@ def test_generate_card_has_seed_field(tmp_path):
     assert 'id="gen-seed"' in html and "seed:(el('gen-seed')" in html   # UI + payload wire the seed
 
 
+def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
+    """A LoRA whose /api/model-version lookup never resolves (still pending, or
+    permanently failed) used to just vanish from payload()'s loras filter -- the
+    generation submitted anyway, spending full credits on a result silently missing
+    a LoRA the user believed was included, with nothing on screen but an hourglass
+    that never explained itself (audit: fail-open, 2026-07-21). Fixed: the lookup's
+    failure path is distinguished from success (entry.failed), Go is gated on every
+    added LoRA having actually resolved, and generate() refuses to submit even if
+    something got the disabled button clicked anyway."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    # The silent-drop shape must be gone: a bare `.catch(function(){ renderLoras(); });`
+    # right after the model-version fetch, with no failed-state tracking at all.
+    assert ".catch(function(){ renderLoras(); });" not in html
+    assert "entry.failed=true" in html
+    assert "entry.failed=!entry.version_id" in html
+    assert "function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }" in html
+    assert "anyIncompat() || anyLoraUnresolved()" in html          # Go button gate
+    assert "if(anyLoraUnresolved()){ el('gen-lora-note').scrollIntoView" in html   # submit-time guard
+
+
 def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch):
     """/api/price mode=enhance builds panelplugin params (so cost can be shown), and the
     Enhance click carries a spend guardrail since free cards don't cover these workflows."""
