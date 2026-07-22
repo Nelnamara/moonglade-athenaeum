@@ -540,6 +540,19 @@ coherent visual effort and should be scoped and executed together rather than pi
 
 ---
 
+## The audit board
+
+**`docs/AUDIT_2026-07-21.md` is the live backlog.** A 16-lens, 33-agent audit of the code and
+every scattered document, run against v2.2.0 with an adversarial reviewer per lens: 227 findings,
+51 killed on refutation, ~82 surviving work items with a `file:line` each. It supersedes the
+per-defect bullets below for anything it covers, and it carries what four other documents had
+each been holding separately.
+
+It is **not** archived and must not be moved to `docs/archive/` until it is empty. That is the
+precise mechanism by which `SWEEP_2026-07-16.md` lost three sections of live content: archived
+with work still in it, and `CLAUDE.md` makes `docs/archive/` "historical record, never current
+fact", so roughly twenty items became contractually invisible until this audit went looking.
+
 ## Known defects
 
 *Found 2026-07-19 by a Playwright browser crawl (185 controls, 60 screenshots reviewed by eye).
