@@ -696,7 +696,38 @@ fact", so roughly twenty items became contractually invisible until this audit w
   explicit-confirm gated like delete. The gate is deliberateness, not cost: publishing is free.
   Never a background or automatic action, never default-on for a batch. Like/follow only if a
   concrete use appears. Distinct from `--sync-artworks`, which is read-only published-history
-  sync.
+  sync. The rest of the reachable read-only community surface, scouted 2026-07-04 and never
+  folded in here: per-artwork view counts (dwarf likes — 345 views vs. 4 likes on one probed
+  post), lifetime task/credit/follower stats off `me{}`, the full contest catalog (now partly
+  surfaced — see the recovered bullet below), a notifications/engagement feed (LIKE/FOLLOW only,
+  no actor identity), and server bookmarks-to-local-collections. Two ops relevant to the
+  picker-favorites item below — `listMyBookmarkedGenerationModels` / `listUserLikedGenerationModel`
+  — are named as real operations in `private/API_OPERATIONS.md`, but a dated 2026-07-04 recon in
+  `private/APP_OPERATIONS_FULL.md` found the equivalent surface **absent on the Query root**;
+  neither doc has an actual captured response for them. This is a live contradiction, not a
+  known-good op — it needs a probe before it's scoped, not an assumption in either direction.
+- **Recovered from the 2026-07-16 persona sweep.** `docs/archive/SWEEP_2026-07-16.md`'s "PixAI
+  power user + community member" persona bucket held live, unactioned feature requests that went
+  invisible when the file was archived — the same failure the audit-board reconciliation already
+  fixed once (see "The audit board" above), recurring in a section that reconciliation never
+  reached. Checked against the current code 2026-07-22; still genuinely open: **credit ledger**
+  (`paidCredit` is fetched per-task but never written to the catalog — no spend charts, no
+  cost-per-model); **remix from the lightbox** (load an image's full recipe — prompt/negative/
+  model/LoRAs/size/seed — back into the Generate drawer; no matching code found under any name);
+  **model/LoRA favorites + recents in the picker**, originally scoped local-only ("server-stored
+  like Snippets") — the owner's 2026-07-22 ask wants these sourced from the user's real PixAI
+  bookmarks instead, which folds this into the Epic C contradiction noted above rather than
+  making it a free-standing small item; **prompt-matrix queue runs** (same prompt across models/
+  LoRA-weight sweeps); **a real card-utilization digest** ("what's free today, on which model" +
+  expired-unused tracking — `--cards`/`--claims` expose the raw balances this would sit on top
+  of, but the digest view itself doesn't exist); **contest deadline tracking + shortlist-to-
+  collection staging** (the contest catalog browser shipped since — official/community tabs,
+  `/api/contests` — but staging for the future publish pipeline didn't); **metadata recovery for
+  hand-made folders** (matching browser-saved PixAI files back to tasks by filename/hash).
+  Already shipped and correctly dropped from this list: the first-run wizard, `CONTRIBUTING.md`,
+  CI, and the `READ_ONLY` config flag. **The sweep's other two persona buckets (Loom video
+  creator, gallery curator — 18 more bullets) have not had this same check yet** and carry the
+  identical risk until someone does.
 - **BlurHash grid placeholders** — deferred at low ROI; a small banked item, not an epic. The
   `blurhash` column exists and is populated from `extra.imageBlurHash`, but stays empty until
   `--sync-artworks` runs, covers published rows only, and needs a JS decoder that does not
