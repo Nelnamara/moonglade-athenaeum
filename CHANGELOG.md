@@ -17,6 +17,16 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **A signed-in LAN account could evict the owner's own account, and register a fresh one
+  for itself.** The only guard on removing an account was "not the last one left" — nothing
+  stopped a caller from removing any *other* account by name, including yours, or from
+  creating a brand-new one afterward. Adding an account, and removing anyone but yourself,
+  now require the request to come from the machine running the gallery; removing your own
+  account still works from anywhere, since that can only affect the person doing it. The
+  Panel's Users tab reflects this directly — a LAN session no longer sees an "Add user" form
+  or a "Remove" button on rows that aren't its own, rather than offering a control that
+  would just 403.
+
 - **The wiki said the Generate drawer and web import were more restricted than they
   actually are.** `wiki/Generating.md` claimed the Generate drawer was localhost-only —
   it's actually reachable from any signed-in device, including over the LAN, by

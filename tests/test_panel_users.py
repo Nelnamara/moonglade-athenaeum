@@ -12,6 +12,9 @@ from pixai_gallery import create_app
 
 from tests.conftest import login_client, login_test_client
 
+LAN = "203.0.113.5"      # TEST-NET-3 -- the "some other device on the LAN" stand-in,
+                         # same address tests/test_route_tiers.py uses.
+
 
 def _panel_csrf(html):
     m = re.search(r'var CSRF = "([^"]+)";', html)
@@ -142,6 +145,22 @@ def test_add_user_requires_valid_csrf(tmp_path):
     assert core.list_web_users() == [{"username": "tester"}]
 
 
+def test_add_user_refuses_a_lan_session(tmp_path):
+    """api_users_add is LOCALHOST-only as of 2026-07-22: a LAN session can no longer
+    mint a new, persistent account for itself -- half of the fix for STATE.md's
+    "evict the owner, then register a new one for itself" finding. The other half
+    is api_users_remove refusing a LAN session that tries to remove anyone but
+    itself -- see test_remove_user_refuses_a_lan_session_removing_someone_else."""
+    cli = login_client(tmp_path)
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/add", environ_overrides={"REMOTE_ADDR": LAN}, json={
+        "username": "intruder", "password": "hunter2222", "confirm": "hunter2222",
+        "csrf": csrf})
+    assert r.status_code == 403
+    assert "localhost-only" in r.get_json()["error"]
+    assert core.list_web_users() == [{"username": "tester"}]   # nothing was created
+
+
 def test_remove_user_end_to_end(tmp_path):
     core.add_or_update_web_user("doomed", "pw-doomed")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
@@ -169,6 +188,61 @@ def test_remove_last_account_is_refused(tmp_path):
     html = cli.get("/panel").get_data(as_text=True)
     csrf = _panel_csrf(html)
     r = cli.post("/api/users/remove", json={"username": "onlyone", "csrf": csrf})
+    assert r.status_code == 400
+    assert "last remaining account" in r.get_json()["error"]
+    assert core.list_web_users() == [{"username": "onlyone"}]
+
+
+def test_remove_user_refuses_a_lan_session_removing_someone_else(tmp_path):
+    """The other half of the same fix: a LAN session can no longer remove ANY
+    other account by name -- previously the only guard was "not the last account
+    left," which let a borrowed-tablet guest evict the owner specifically."""
+    core.add_or_update_web_user("victim", "pw-victim-account")
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
+                 json={"username": "victim", "csrf": csrf})
+    assert r.status_code == 403
+    assert "localhost-only" in r.get_json()["error"]
+    assert {u["username"] for u in core.list_web_users()} == {"tester", "victim"}
+
+
+def test_remove_user_allows_a_lan_session_removing_itself(tmp_path):
+    """Self-removal is the deliberate carve-out: it can only harm the caller, so
+    it stays reachable from a LAN session even though removing anyone else does
+    not -- the owner's explicit choice when this fix was scoped, 2026-07-22."""
+    core.add_or_update_web_user("other", "pw-other-account")
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
+                 json={"username": "tester", "csrf": csrf})
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True
+    assert {u["username"] for u in core.list_web_users()} == {"other"}
+
+
+def test_lan_self_removal_kills_the_callers_own_session_immediately(tmp_path):
+    """Removing your own account revokes your own session on the very next
+    request -- get_web_user_session_epoch() returns None once the account is
+    gone, and _is_authorized_request() re-checks that on every call. Confirms
+    the caller can't keep acting as a user that no longer exists."""
+    core.add_or_update_web_user("other", "pw-other-account")
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
+                 json={"username": "tester", "csrf": csrf})
+    assert r.status_code == 200
+    r2 = cli.get("/panel")
+    assert r2.status_code in (301, 302, 303, 307, 308)   # bounced to /login, not served
+
+
+def test_remove_last_account_is_refused_even_as_lan_self_removal(tmp_path):
+    """The last-account guard applies to LAN self-removal too -- self-removal
+    being allowed for a LAN session doesn't bypass "never leave zero accounts.\""""
+    cli = login_client(tmp_path, username="onlyone", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
+                 json={"username": "onlyone", "csrf": csrf})
     assert r.status_code == 400
     assert "last remaining account" in r.get_json()["error"]
     assert core.list_web_users() == [{"username": "onlyone"}]
@@ -229,14 +303,75 @@ def test_concurrent_remove_of_two_different_accounts_cannot_empty_the_list(tmp_p
 
 
 def test_users_endpoints_require_login(tmp_path):
-    """Same front-door gate as every other /api/ route -- no special-casing needed
-    here (per the design brief: every account has equal trust, no admin tier)."""
+    """Both routes need a valid session before anything else -- the SAME front-door
+    gate as every other /api/ route, no special-casing. This is a lower bar than
+    either route's own LOCALHOST-flavored check (see test_add_user_refuses_a_lan_session
+    and test_remove_user_refuses_a_lan_session_removing_someone_else): a session-less
+    caller gets refused here regardless of address, before those checks ever run."""
     core.add_or_update_web_user("alice", "hunter2")
     cli = create_app(tmp_path).test_client()
-    LAN = "203.0.113.5"
     r = cli.post("/api/users/add", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"username": "x", "password": "pw123456", "confirm": "pw123456"})
     assert r.status_code == 401
     r2 = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
                   json={"username": "alice"})
     assert r2.status_code == 401
+
+
+def _row_html(html, username):
+    """Slice out one <div class="u-row">...</div> block. Safe as non-greedy .*?
+    because a row never nests another <div> inside it (just a <span> and maybe a
+    <button>) -- the first </div> reached IS the row's own closing tag."""
+    m = re.search(r'<div class="u-row" data-username="{}">.*?</div>'.format(re.escape(username)),
+                  html, re.S)
+    assert m, "no row rendered for username {!r}".format(username)
+    return m.group(0)
+
+
+def test_add_user_form_hidden_for_a_lan_session(tmp_path):
+    """Would-always-fail controls are hidden rather than shown-then-403'd -- the
+    server-side gate in api_users_add is what actually enforces this; this test
+    is about not walking a LAN user into a dead-end confirm dialog."""
+    cli = login_client(tmp_path)
+    html = cli.get("/panel", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    assert 'id="add-user-form"' not in html
+    assert "Only the machine running the gallery can add new accounts" in html
+
+
+def test_add_user_form_shown_for_a_local_session(tmp_path):
+    cli = login_client(tmp_path)
+    html = cli.get("/panel").get_data(as_text=True)   # loopback by default
+    assert 'id="add-user-form"' in html
+    assert "restricted to the machine running the gallery" in html
+
+
+def test_remove_button_hidden_on_other_rows_for_a_lan_session(tmp_path):
+    """A LAN session can still remove its OWN row (see
+    test_remove_user_allows_a_lan_session_removing_itself) -- only OTHER rows'
+    Remove buttons are withheld, matching what api_users_remove will actually
+    accept from that same session."""
+    core.add_or_update_web_user("other", "pw-other-account")
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    html = cli.get("/panel", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    assert "removeUser(this)" in _row_html(html, "tester")
+    assert "removeUser(this)" not in _row_html(html, "other")
+
+
+def test_remove_button_shown_on_every_row_for_a_local_session(tmp_path):
+    core.add_or_update_web_user("other", "pw-other-account")
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    html = cli.get("/panel").get_data(as_text=True)   # loopback by default
+    assert "removeUser(this)" in _row_html(html, "tester")
+    assert "removeUser(this)" in _row_html(html, "other")
+
+
+def test_remove_user_js_distinguishes_self_from_other(tmp_path):
+    """The confirm-dialog wording (and the redirect-to-/login after success) only
+    make sense read as "you" for a self-removal -- checked as the exact source
+    strings, not a vague substring, since generic wording like "signed out" would
+    still be present even if this branch were reverted."""
+    cli = login_client(tmp_path)
+    html = cli.get("/panel").get_data(as_text=True)
+    assert "var isSelf = !!row.querySelector('.u-you');" in html
+    assert "You will be signed out immediately, on every device." in html
+    assert "if(isSelf){ location.href='/login'; return; }" in html

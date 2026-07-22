@@ -71,7 +71,9 @@ _REDIRECT_CODES = (301, 302, 303, 307, 308)
 # Adding a route to pixai_gallery.py? Add it here too, or
 # test_every_registered_route_declares_a_tier fails and names it. Pick the tier
 # by what the handler can DO, not by what feels convenient:
-#   LOGIN     -- browse the library, spend the owner's credits, manage accounts.
+#   LOGIN     -- browse the library, spend the owner's credits, manage your OWN
+#                account. Managing OTHER accounts (adding one, removing one that
+#                isn't yours) is LOCALHOST -- see api_users_add/_remove.
 #   LOCALHOST -- irreversible cloud deletion, writes to config.json (which holds
 #                PIXAI_API_KEY / AUTH_SECRET_KEY / AUTH_USERS), file-moving
 #                maintenance, or shelling out on the SERVER machine. A logged-in
@@ -102,6 +104,7 @@ ROUTE_TIERS = {
     ("api_setup_save_key", "POST"): LOCALHOST,      # rewrites config.json
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
     ("api_import_local", "POST"): LOCALHOST,         # writes files into the backup + shells thumbnails
+    ("api_users_add", "POST"): LOCALHOST,           # mints a new persistent login (2026-07-22)
 
     # -- LOGIN: any authorized session ---------------------------------------
     ("index", "GET"): LOGIN,
@@ -205,7 +208,13 @@ ROUTE_TIERS = {
     ("api_branding", "POST"): LOGIN,
     ("api_skin", "POST"): LOGIN,
     ("api_ach_event", "POST"): LOGIN,
-    ("api_users_add", "POST"): LOGIN,
+    # api_users_remove is LOGIN, not LOCALHOST, because it is genuinely reachable
+    # for a LAN session -- but ONLY to remove its OWN account; removing anyone
+    # else is refused with the same 403 a LOCALHOST route would give, enforced
+    # inside the handler on the submitted username vs session["user"], not by
+    # tier. The two generic tier tests below can't express "reachable, but only
+    # for this one argument value" -- see tests/test_panel_users.py for the
+    # LAN-self-succeeds / LAN-other-refused pair that actually covers it.
     ("api_users_remove", "POST"): LOGIN,
 
     # FINDING (2026-07-19, unresolved at the time this file was written):
@@ -665,9 +674,10 @@ def test_panel_withholds_the_server_install_path_from_lan(app, tmp_path):
     detail that tier does not justify.
 
     Deliberately narrower than that fix, though: usernames on this same page (S2's other
-    half) are NOT touched here. Account management is LOGIN-tier on purpose --
-    api_users_add/_remove's own docstrings say every account in this app's model already
-    carries equal trust -- so a fellow account's username is not the kind of fact this
+    half) are NOT touched here. Reading the roster stays LOGIN-tier on purpose, even
+    though WRITING to it no longer is (api_users_add/_remove were tightened 2026-07-22 --
+    see their own docstrings): seeing a fellow account's username is a different, much
+    smaller question than adding or removing one, and it is not the kind of fact this
     route needs to hide. A host filesystem path is a different kind of fact entirely: it
     identifies the SERVER's machine, not a peer account.
     """
