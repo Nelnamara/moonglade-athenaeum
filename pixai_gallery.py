@@ -2651,6 +2651,38 @@ body { background: var(--base); margin: 0; }
    the tie-break), so !important is the only way to reliably win without depending on load
    timing that could shift later. */
 #jobs-fab, #jobs-tray { bottom: 88px !important; }
+/* Lift the Activity chip (and the ? help FAB below, inline) above LoomV2's center view.
+   .lv-overlay (master-storyboard.jsx: position:fixed; inset:0; z-index:400; background:
+   var(--base) -- opaque) buries them: neither #root nor its .sb-root child forms a stacking
+   context, so that 400 competes in the ROOT context directly against these body-level FABs
+   (mg-notify.js gives them 234/235) and wins. 401/402 floats them over the board while staying
+   UNDER the modal/celebration tier that must keep covering them -- .sb-seq / .sb-pick-ov and the
+   frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 / .m2-conf (520/521).
+   Loom-only: this block ships only in _LOOM_SHELL, so the gallery's own #jobs-fab keeps 234.
+   !important for the same mg-notify.js cascade-timing reason as the bottom rule above. Known
+   residual (z-only can't fix it): Deep Focus's .lv-df-veil (450) and the nested 600 preview
+   flyouts render INSIDE .lv-overlay, so from the root they're part of the single 400 atom and
+   these corner FABs paint over them -- cosmetic only; the real fix hoists those overlays to
+   .sb-root level (owner-visible refactor, deferred). */
+#jobs-fab  { z-index: 401 !important; }
+#jobs-tray { z-index: 402 !important; }
+
+/* Clearance under the ? help FAB, which is the cost of making it visible at all.
+   #eb-help-btn is position:fixed bottom:18px + 38px tall, so it floats over the
+   bottom-right ~56px of the viewport -- and on /loom the bottom-right IS the Generate
+   drawer (.lv-side.right is 560px wide). .mgd-go and <mg-cost-badge> sit in .lv-gen's
+   NORMAL FLOW, not a pinned footer, so once the drawer is scrolled to its end -- the
+   ordinary position right before you submit -- the FAB covered the right edge of the
+   Generate button and clipped the tail of the cost readout ("· saves ~84,000 credits",
+   the expiry sub-line). This project's standing rule is to report the real cost of every
+   generation, so a partly-obscured cost line is not an acceptable trade for a visible
+   help button.
+   Padding, not another z-index change: the FAB SHOULD stay on top, the content just
+   needs somewhere to scroll to. 64px = the FAB's 56px footprint + breathing room.
+   #root out-specifies the .lv-gen rule in master-storyboard.jsx's STYLES regardless of
+   which <style> React injects first -- and keeping it here rather than in the jsx means
+   the FAB and its clearance live together, and no bundle rebuild is needed. */
+#root .lv-gen { padding-bottom: 64px; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
@@ -2678,10 +2710,10 @@ window.storage = {
 </script>
 __RUNTIME_SCRIPT_BLOCK__
 <button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'docs'})})}catch(e){}"
-  style="position:fixed;bottom:18px;right:18px;z-index:300;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
+  style="position:fixed;bottom:18px;right:18px;z-index:401;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="How The Loom works">?</button>
 <div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
-  style="position:fixed;inset:0;z-index:301;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
+  style="position:fixed;inset:0;z-index:402;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
   <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:var(--surface0);border:1px solid var(--surface1);border-radius:14px;padding:22px 26px;color:var(--text);font:13.5px/1.55 system-ui,sans-serif;">
     <h2 style="margin:0 0 4px;color:var(--text);">The Loom &mdash; quick guide</h2>
     <p style="color:var(--subtext);margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
@@ -4064,6 +4096,8 @@ document.addEventListener('DOMContentLoaded', function() {
     <a href="{{ c.url }}" title="Remove this filter">×</a></span>
   {% endfor %}
   <a class="clear-all" href="{{ url_for('index') }}">Clear all</a>
+  <a class="clear-all" href="{{ url_for('export_csv_download') }}?{{ request.query_string.decode('utf-8', 'replace') }}" download
+    title="Export exactly these filtered rows to CSV -- the whole-catalog dump stays on the Control Panel">&#11015; Export this view (CSV)</a>
 </div>
 {% endif %}
 
@@ -4264,25 +4298,45 @@ function toggleBlur() {
   localStorage.setItem('gallery_privacy_blur', on ? '' : '1');
   applyBlur();
 }
-function presetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
-function refreshPresets() {
+// Saved views live SERVER-SIDE (/api/view-presets -> out_dir/view_presets/<account>.json)
+// so a view saved at the desktop exists on the tablet. Scoped to YOUR account, not the
+// install: a saved view is a stored search, not a theme. localStorage ('gallery_presets')
+// is only read once as the legacy store: any set found there is merged up (existing names
+// win) and then cleared.
+var viewPresets = {};
+function legacyPresetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
+function renderPresets() {
   var s = document.getElementById('preset-select'); if (!s) return;
-  var p = presetsGet();
   s.innerHTML = '<option value="">Saved views…</option>';
-  Object.keys(p).forEach(function(n){ var o = document.createElement('option'); o.value = n; o.textContent = n; s.appendChild(o); });
+  Object.keys(viewPresets).sort().forEach(function(n){ var o = document.createElement('option'); o.value = n; o.textContent = n; s.appendChild(o); });
+}
+function refreshPresets() {
+  fetch('/api/view-presets').then(function(r){ return r.json(); }).then(function(d) {
+    viewPresets = (d && d.presets) || {};
+    var legacy = legacyPresetsGet();
+    if (Object.keys(legacy).length) {
+      fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({merge: legacy}) })
+        .then(function(r){ return r.json(); }).then(function(d2) {
+          if (d2 && d2.presets) viewPresets = d2.presets;
+          try { localStorage.removeItem('gallery_presets'); } catch(e) {}
+          renderPresets();
+        }).catch(function(){});
+    }
+    renderPresets();
+  }).catch(function(){ renderPresets(); });
 }
 function savePreset() {
   var n = prompt('Name this view (the current filters):'); if (!n) return;
-  var p = presetsGet(); p[n] = location.search || '?';
-  localStorage.setItem('gallery_presets', JSON.stringify(p)); refreshPresets();
+  fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: n, query: location.search || '?'}) })
+    .then(function(r){ return r.json(); }).then(function(d) {
+      if (d && d.presets) { viewPresets = d.presets; renderPresets(); }
+    }).catch(function(){});
 }
 function loadPreset(n) {
   if (!n) return;
-  if (n.charAt(0) === '✕') { // not used; reserved
-    return;
-  }
-  var p = presetsGet();
-  if (p[n] !== undefined) location.href = '/' + p[n];
+  if (viewPresets[n] !== undefined) location.href = '/' + viewPresets[n];
 }
 (function(){
   // On mobile, auto-open the filter bar if any filter is active so the user sees
@@ -10167,6 +10221,112 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                 "label": presets[name]["label"]})
             except Exception as e:
                 return jsonify({"error": str(e)[:200]}), 200
+
+    _view_presets_lock = threading.Lock()
+
+    # Saved views are PER-ACCOUNT, one file each under out_dir/view_presets/.
+    #
+    # They shipped install-wide (a single out_dir/view_presets.json) by analogy with
+    # /api/skin, which is the right analogy for a THEME and the wrong one here: a skin is
+    # a cosmetic preference, whereas a saved view is a stored search -- names and query
+    # strings that say what someone looks for in their own library. Moonglade is
+    # explicitly not single-user (the repo is public and has real external users), so on
+    # any install with more than one account, install-wide means every account reads, and
+    # can overwrite or delete, every other account's saved searches.
+    #
+    # For the case this feature was built for -- one owner, desktop and tablet, same
+    # account against one server -- per-account behaves identically. Nothing is lost.
+    def _view_presets_dir():
+        d = out_dir / "view_presets"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _view_presets_path(user):
+        from urllib.parse import quote
+        # quote(safe="") so a username can never escape the directory or collide: every
+        # path separator, dot and space becomes a percent-escape. Same technique as the
+        # Loom's kv store (_loom_kv_path).
+        return _view_presets_dir() / (quote(str(user), safe="") + ".json")
+
+    def _legacy_view_presets_path():
+        return out_dir / "view_presets.json"
+
+    def _read_presets_file(p):
+        try:
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {str(k): v for k, v in data.items() if isinstance(v, str)}
+        except (OSError, ValueError):
+            pass
+        return {}
+
+    def _load_view_presets(user):
+        """This account's saved views, falling back to the legacy shared file.
+
+        The fallback is deliberately READ-ONLY and needs no migration flag. An account
+        with no file of its own yet sees whatever the old shared file held -- exactly what
+        it saw before this change, so nothing disappears -- and the moment it saves, it
+        gets its own file and diverges. No "who owns the legacy set" question, and no
+        first-loader-claims-it race, which is the trap a migration flag would have walked
+        into. Once every account has saved once, out_dir/view_presets.json is inert and
+        can be deleted by hand."""
+        own = _view_presets_path(user)
+        if own.exists():
+            return _read_presets_file(own)
+        return _read_presets_file(_legacy_view_presets_path())
+
+    def _ok_view_query(q):
+        # Presets navigate via location.href = '/' + query on load. Requiring the
+        # leading '?' (exactly what savePreset stores: location.search || '?') keeps
+        # every stored value a same-page filter string -- a bare '//host' would resolve
+        # protocol-relative and turn a saved view into an off-site redirect.
+        return isinstance(q, str) and q.startswith("?") and len(q) <= 4096
+
+    @app.route("/api/view-presets", methods=["GET", "POST"])
+    def api_view_presets():
+        """Saved-view presets (the gallery's "Saved views…" dropdown): {name: query
+        string}, stored server-side under out_dir/view_presets/ so a view saved at the
+        desktop exists on the tablet. Login tier (no spend, nothing destructive), and
+        scoped to ONE ACCOUNT -- see _view_presets_dir() for why a saved search is not
+        the same kind of thing as the install-wide skin choice. They lived in
+        localStorage before this, one private set per browser; the client pushes a legacy
+        set up through POST {merge} once, existing names winning ties. POST {name, query}
+        saves one; POST {delete: name} removes one (no UI for it yet -- the verb exists so
+        the select's reserved delete affordance has something to call).
+
+        The account comes from the SESSION and is never accepted from the request body:
+        a client that could name its own key could read and overwrite anyone's set, which
+        would give back the exact cross-account exposure the per-account split removes."""
+        user = str(session.get("user") or "")
+        if not user:
+            # Unreachable through the front door (/api/ is gated), so this is belt and
+            # braces -- but the per-account contract must fail closed rather than fall
+            # back to a shared or empty-named file if that ever stops being true.
+            return jsonify({"error": "authentication required"}), 401
+        with _view_presets_lock:
+            presets = _load_view_presets(user)
+            if request.method == "POST":
+                body = request.get_json(silent=True) or {}
+                if isinstance(body.get("merge"), dict):
+                    for k, v in body["merge"].items():
+                        k = str(k).strip()
+                        if k and k not in presets and _ok_view_query(v):
+                            presets[k] = v
+                elif body.get("delete") is not None:
+                    presets.pop(str(body.get("delete")), None)
+                else:
+                    name = str(body.get("name") or "").strip()
+                    if not name:
+                        return jsonify({"error": "name required"}), 400
+                    if not _ok_view_query(body.get("query")):
+                        return jsonify({"error": "query must be a '?…' filter string"}), 400
+                    presets[name] = body["query"]
+                dest = _view_presets_path(user)
+                tmp = dest.with_suffix(".tmp")
+                tmp.write_text(json.dumps(presets, indent=1), encoding="utf-8")
+                os.replace(tmp, dest)   # atomic: a torn write can't eat the set
+            return jsonify({"presets": presets})
 
     def _params_and_nocard(core, p):
         """Route a drawer payload to generate, edit, or video params. Returns (params,
