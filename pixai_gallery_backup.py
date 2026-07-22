@@ -36,7 +36,7 @@ QUICK START
   python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
-__version__ = "2.1.1"
+__version__ = "2.2.0"
 
 import argparse
 import csv
@@ -3572,6 +3572,11 @@ VIDEO_MODELS = {
     "v3.2":   {"model_id": "1961182207978260675", "label": "V3.2"},
     "v3.0.2": {"model_id": "2014412117889628958", "label": "V3.0 Lite"},
     "v3.0":   {"model_id": "1919508300549460046", "label": "V3.0"},
+    # No numeric modelId published for these two, and none is needed -- `i2vPro.model`
+    # resolves the engine (see build_video_parameters). Listed so the roster is complete
+    # and video_model_id() returns '' for them deliberately, not by accident.
+    "v3.0.1": {"model_id": "", "label": "V3.0 Flash"},
+    "v2.7":   {"model_id": "", "label": "V2.7 (High Dynamics)"},
 }
 
 
@@ -3590,10 +3595,20 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     """Build createGenerationTask's `parameters` for an image-to-video (i2vPro) job.
 
     VERIFIED against a real card-covered submit (2026-07-06 via --dump-params): the shape
-    is a top-level `modelId` (REQUIRED -- resolved from `model` via VIDEO_MODELS; omitting
-    it made PixAI log "Unknown or removed model" and NO free card could match) + the
-    `i2vPro` block + privacy/preview flags. There is NO `channel` field. `media_id` =
-    source/first frame; `tail_media_id` (optional) = last frame for FLF interpolation.
+    is a top-level `modelId` + the `i2vPro` block + privacy/preview flags. There is NO
+    `channel` field. `media_id` = source/first frame; `tail_media_id` (optional) = last
+    frame for FLF interpolation.
+
+    `modelId` is NOT what selects the engine -- `i2vPro.model` is. Corrected 2026-07-21
+    after two free --dump-params captures + three read-only price probes: two real tasks
+    (v2.7 and v3.0.1) both carried modelId 1648918127446573124, an IMAGE checkpoint, and
+    rendered fine; the two models then priced DIFFERENTLY (~56,000 vs ~44,800 for 10s) off
+    that IDENTICAL modelId, and omitting modelId altogether priced the same as sending it.
+    The earlier "REQUIRED" note came from a v4.0 submit where dropping modelId lost the
+    free-card match -- that is a CARD-MATCHING requirement, not a model-resolution one, so
+    we still send it whenever VIDEO_MODELS knows one. When it doesn't (v2.7, v3.0.1 -- no
+    numeric id published and no card covers them anyway) the key is OMITTED rather than
+    sent empty: absent is the shape the probe actually exercised; `modelId: ""` is not.
 
     NOTE: video costs FAR more than images (~27.5k credits for a 5s V4.0 clip), so
     submission stays gated behind explicit --confirm. This builder spends nothing.
@@ -3622,8 +3637,10 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
         "isPrivate": bool(is_private),
         "enablePreview": True,
         "hidePrompts": False,
-        "modelId": str(model_id or video_model_id(model)),   # REQUIRED -- see docstring
     }
+    _mid = str(model_id or video_model_id(model))
+    if _mid:                                  # omit rather than send "" -- see docstring
+        params["modelId"] = _mid
     if kaisuuken_id:
         params["kaisuukenId"] = str(kaisuuken_id)   # spend a free card instead of credits
     return params
@@ -6874,7 +6891,7 @@ def main():
             run_list_models(args)
             return
         if args.generate:
-            _job = _cli_job_start(out, "generate")
+            _job = _cli_job_start(out, "Image generation")
             try:
                 run_generate(args)
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
@@ -6883,7 +6900,7 @@ def main():
             _cli_job_finish(out, _job)
             return
         if getattr(args, "generate_video", False):
-            _job = _cli_job_start(out, "generate-video")
+            _job = _cli_job_start(out, "Video render")
             try:
                 run_generate_video(args)
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
@@ -6935,7 +6952,7 @@ def main():
             # a --sync run spawned as a subprocess. Also re-point args.progress at a
             # job-aware callback so the download/thumbnail progress ticks below feed
             # throttled heartbeats into the same job (purely additive -- see _make_progress).
-            _job = _cli_job_start(out, "sync")
+            _job = _cli_job_start(out, "Library sync")
             if _job:
                 args.progress = _make_progress(out, _job)
             try:
@@ -6999,7 +7016,7 @@ def main():
         # passes no `progress` kwarg today, so run_download's own `sys.stdout.isatty()`
         # fallback draws the \r bar directly -- wiring progress in would change that
         # existing terminal-output behavior (it would print unconditionally, tty or not).
-        _job = _cli_job_start(out, "update" if getattr(args, "update", False) else "download")
+        _job = _cli_job_start(out, "Incremental update" if getattr(args, "update", False) else "Full backup")
         try:
             run_download(args)
         except Exception as e:                           # noqa: BLE001 -- re-raised below unchanged

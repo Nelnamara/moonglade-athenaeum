@@ -645,6 +645,79 @@ def test_export_csv_downloads_as_attachment(tmp_path):
     assert sum(1 for ln in lines[1:] if ln.strip()) == 2  # both rows exported
 
 
+def test_export_csv_honours_the_gallery_filters(tmp_path):
+    """Export used to mean "the whole library" no matter what the grid was showing, so
+    exporting a search gave you everything. It now reads the SAME filter args the index
+    route does; a request with none of them still dumps the whole catalog."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", prompt_preview="night elf",
+             model_name="WAI", rating="5", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", prompt_preview="daylight city",
+             model_name="WAI", rating="1", created_at="2025-02-01T00:00:00"),
+        _row(media_id="3", filename="c_3.png", prompt_preview="night market",
+             model_name="Other", rating="3", created_at="2026-01-01T00:00:00"),
+    ])
+
+    import csv
+
+    def ids(qs=""):
+        r = cli.get("/export-csv" + qs)
+        assert r.status_code == 200 and r.mimetype == "text/csv"
+        rows = list(csv.DictReader(io.StringIO(r.get_data(as_text=True))))
+        return {row["media_id"] for row in rows}
+
+    assert ids() == {"1", "2", "3"}                          # no filters -> everything
+    assert ids("?q=night") == {"1", "3"}                     # search
+    assert ids("?model=WAI") == {"1", "2"}                   # dropdown filter
+    assert ids("?q=night&model=WAI") == {"1"}                # filters combine, as in the grid
+    assert ids("?rating_min=3") == {"1", "3"}                # numeric filter is validated, not raw
+    assert ids("?from_year=2026") == {"3"}                   # Year dropdown with no Month
+    assert ids("?q=nothingmatchesthis") == set()             # empty result is a header-only CSV
+
+
+def test_grid_export_link_appears_only_when_filtered(tmp_path):
+    """The filtered-export backend (above) shipped with no way to REACH it: the only CSV link
+    lived on the Control Panel and always dumped the whole catalog. The gallery grid now grows
+    an 'Export this view' link -- but ONLY inside the {% if chips %} active-filter bar, so an
+    unfiltered grid still routes people to the Panel's full dump instead of a redundant one."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", prompt_preview="night elf", model_name="WAI",
+             created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", prompt_preview="daylight", model_name="WAI",
+             created_at="2025-02-01T00:00:00"),
+    ])
+    plain = cli.get("/").get_data(as_text=True)
+    assert "Export this view" not in plain and "/export-csv?" not in plain   # unfiltered: none
+    filtered = cli.get("/?q=night").get_data(as_text=True)
+    assert "Export this view" in filtered                                    # filtered: it shows
+    assert "/export-csv?" in filtered and "q=night" in filtered              # carries the query
+
+
+def test_grid_export_link_drives_the_filtered_export_end_to_end(tmp_path):
+    """The link must carry the LIVE query string, so following it exports exactly the filtered
+    view -- this proves the reachability wiring end to end, not just the backend (which its own
+    test above already covers)."""
+    import re
+    import html as htmlmod
+    import csv
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", prompt_preview="night elf", model_name="WAI",
+             created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", prompt_preview="daylight city", model_name="WAI",
+             created_at="2025-02-01T00:00:00"),
+        _row(media_id="3", filename="c_3.png", prompt_preview="night market", model_name="Other",
+             created_at="2026-01-01T00:00:00"),
+    ])
+    grid = cli.get("/?q=night&model=WAI").get_data(as_text=True)
+    m = re.search(r'href="(/export-csv\?[^"]+)"', grid)
+    assert m, "filtered grid did not render an /export-csv link"
+    href = htmlmod.unescape(m.group(1))          # Jinja escaped & -> &amp; in the attribute
+    r = cli.get(href)
+    assert r.status_code == 200 and r.mimetype == "text/csv"
+    ids = {row["media_id"] for row in csv.DictReader(io.StringIO(r.get_data(as_text=True)))}
+    assert ids == {"1"}                          # q=night AND model=WAI -> only row 1
+
+
 def test_branding_absent_is_404(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -778,8 +851,26 @@ def test_video_v40_full_cost_warning():
     import pathlib
     src = (pathlib.Path(__file__).resolve().parent.parent
            / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
-    assert ".mgd-cost.warn" in src                  # the warn style
+    assert ('mg-generate-drawer mg-cost-badge[data-state="paid"][data-warn]'
+            '{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}') in src   # still RED
     assert "V4.0 full" in src and "2.5" in src        # the ~2.5x-Lite warning text
+
+
+def test_cost_badge_ships_with_every_price_surface(tmp_path):
+    """Every surface that renders a live cost is a <mg-cost-badge> now, and every page carrying
+    one MUST also load static/mg-cost-badge.js. A custom element whose definition never loads is
+    an inert <div>: setChecking()/setPrice() throw, the cost line freezes on its idle hint, and
+    the Go button beside it still spends. That failure is silent and it is on the spend path, so
+    the pairing gets a test rather than a convention -- the same reasoning that put the drawer's
+    own script tag under test above."""
+    import pixai_gallery as pg
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert '<mg-cost-badge id="gen-cost"' in html        # gallery Generate tab
+    assert '<mg-cost-badge id="edit-cost"' in html       # gallery Edit tab
+    assert '/static/mg-cost-badge.js' in html            # ...and the definition they need
+    assert '/static/mg-cost-badge.js' in pg._LOOM_SHELL  # the Loom's drawer needs it too
 
 
 def test_toasts_anchored_top_right(tmp_path):
@@ -947,7 +1038,7 @@ def test_lightbox_video_uses_load_not_premature_seek(tmp_path):
 # force-healed by a bump, so the live cache name may never be any of them again:
 #   v1 -- froze 404s in (blank video tile until a hard-refresh)
 #   v2 -- cache-first on /thumbs/, which pinned the stale poster --rebuild-thumbs repairs
-_POISONED_CACHES = ("pixai-img-v1", "pixai-img-v2")
+_POISONED_CACHES = ("pixai-img-v1", "pixai-img-v2", "pixai-img-v3")
 
 
 def test_service_worker_never_caches_misses(tmp_path):
@@ -967,6 +1058,45 @@ def test_service_worker_never_caches_misses(tmp_path):
     assert m.group(1) not in _POISONED_CACHES, (
         "cache name {} shipped a poisoning bug -- bump it so held clients self-heal"
         .format(m.group(1)))
+
+
+def test_service_worker_never_caches_a_followed_login_redirect(tmp_path):
+    """`resp.ok` alone is not a cache guard here, because a GATED media response is a 200.
+
+    /thumbs/, /img/ and /full/ are not under _JSON_GATE_PREFIXES, so the front door answers
+    an unauthorized request for one with `redirect(url_for("login", ...))`. An <img>
+    subresource has redirect mode "follow", so the browser follows it and hands the worker
+    the LOGIN PAGE at status 200 / ok===true / redirected===true -- which the old guard
+    happily wrote into Cache Storage under the image's own URL.
+
+    On /img/ and /full/ that branch is cache-first with no revalidation (`r||fetch`), so the
+    poisoned entry is served forever: through re-login, reloads and restarts, curable only
+    by Ctrl+Shift+R. The trigger is ordinary -- Sign out is a global revoke, so signing out
+    on the desktop kills the tablet's session mid-lazy-load.
+
+    Bite: drop either `!resp.redirected` and this fails, naming the branch.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    sw = cli.get("/sw.js").get_data(as_text=True)
+
+    writes = re.findall(r"if\(resp&&resp\.ok([^)]*)\)c\.put\(", sw)
+    assert len(writes) == 2, (
+        "expected exactly two cache writes (originals + thumbnails), found {} -- if a third "
+        "was added it needs the same redirect guard".format(len(writes)))
+    for i, guard in enumerate(writes):
+        assert "!resp.redirected" in guard, (
+            "cache write #{} writes any ok response, including a login page reached by "
+            "following the front door's 302. Add `&&!resp.redirected`.".format(i + 1))
+
+    # And prove the premise rather than asserting it: a gated media URL really does answer
+    # with a redirect whose target is a 200, which is the response shape being guarded.
+    anon = create_app(tmp_path).test_client()
+    r = anon.get("/img/2025-01/a_1.png")
+    assert r.status_code in (301, 302, 303, 307, 308), (
+        "the front door no longer redirects gated media -- if it now 401s, resp.ok would "
+        "catch it and this guard's rationale needs revisiting")
+    assert "/login" in (r.headers.get("Location") or "")
 
 
 def test_service_worker_revalidates_thumbnails(tmp_path):
@@ -1036,3 +1166,54 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
     ref_params = seen["params"]
     assert edit_params != ref_params, \
         "edit-pro and reference-pro priced to identical params -- edit_model didn't thread through"
+
+
+# ---------------------------------------------------------------------------
+# Import: creating a collection on the way in
+# ---------------------------------------------------------------------------
+
+def test_import_modal_can_create_a_collection_on_import(tmp_path):
+    """The dropdown could only pick a collection that already existed, so importing into a
+    NEW one meant importing uncollected first and re-collecting afterwards. A collection is
+    just a name applied to rows (add_to_collection), so an unseen name creates one -- the
+    only thing missing was the way in.
+
+    The sentinel must never reach the server as a collection name: chosenCollection()
+    resolves it to the typed value before the request is built.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+
+    assert 'value="__new__"' in html, "no '+ New collection' option in the import dropdown"
+    assert 'id="imp-newcoll"' in html, "the option exists but there is nowhere to type the name"
+    assert 'ImportUI.onCollectionChange()' in html, "picking the option reveals nothing"
+
+    # The sentinel is resolved client-side, never appended as a collection name.
+    assert "chosenCollection" in html
+    assert "fd.append('collection', coll)" in html, (
+        "the import still appends the raw <select> value -- '__new__' would be sent as a "
+        "literal collection name")
+
+
+def test_import_modal_refuses_to_import_into_an_unnamed_new_collection(tmp_path):
+    """Picking "New collection…" and leaving it blank must not fall through to importing
+    uncollected -- that is the failure you notice later, hunting for files that went
+    somewhere else. chosenCollection() returns null for that state and doImport stops.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(coll===null)" in html, (
+        "doImport does not distinguish 'no collection chosen' from 'new collection, name "
+        "still blank' -- a blank name would silently import uncollected")
+
+
+def test_import_collection_choice_does_not_persist_between_imports(tmp_path):
+    """reset() runs on both open() and close(), so a name typed for one batch cannot ride
+    along on the next -- collection choice is per-import, not sticky."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(cs)cs.value=''" in html and "if(cn)cn.value=''" in html, (
+        "reset() leaves the collection selection or the typed new-collection name behind")

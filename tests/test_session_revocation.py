@@ -68,6 +68,31 @@ def _replay(app, stolen, path="/api/jobs"):
     return cli.get(path, environ_overrides={"REMOTE_ADDR": LAN})
 
 
+def _logout(cli, **extra):
+    """Sign out the way the header's form does: a POST carrying this session's csrf
+    token. Since the CSRF-able-GET fix, /logout's GET is a LOCAL sign-out only (it
+    clears this client's cookie and writes nothing server-side), so every test in
+    this file that is about REVOCATION has to use the POST or it asserts nothing.
+    The token comes from the live session rather than a scraped page because
+    _establish_session mints a FRESH one at login -- the token on the login page is
+    already stale by the time the client is authenticated."""
+    with cli.session_transaction() as sess:
+        token = sess.get("csrf", "")
+    return cli.post("/logout", data=dict({"csrf": token}, **extra))
+
+
+def _replay_logout(app, stolen, token):
+    """Replay a stolen cookie at /logout the way an attacker actually would: a POST
+    carrying the csrf token that was baked into that same cookie. Flask's session
+    cookie is signed but NOT encrypted, so a thief holding the cookie also holds its
+    token -- the csrf field is no defence against this and was never meant to be.
+    The _is_authorized_request() check inside logout() is (defect D2 above)."""
+    cli = app.test_client()                 # FRESH client -- see the trap above
+    cli.set_cookie("session", stolen)       # raw saved value, not a live cookie
+    return cli.post("/logout", data={"csrf": token},
+                    environ_overrides={"REMOTE_ADDR": LAN})
+
+
 # --- D1: the epoch must never rewind ---------------------------------------
 
 def test_recreated_account_does_not_resurrect_an_old_cookie(tmp_path):
@@ -77,7 +102,7 @@ def test_recreated_account_does_not_resurrect_an_old_cookie(tmp_path):
     victim = _login(app)
     stolen = _steal(victim)
     assert _replay(app, stolen).status_code == 200          # live
-    victim.get("/logout")
+    _logout(victim)
     assert _replay(app, stolen).status_code == 401          # revoked
     core.remove_web_user("alice")                            # the exact owner
     core.add_or_update_web_user("alice", "hunter2")          # recovery action
@@ -97,7 +122,7 @@ def test_recreated_account_via_panel_api_does_not_resurrect(tmp_path):
     app = _client(tmp_path)
     victim = _login(app)
     stolen = _steal(victim)
-    victim.get("/logout")
+    _logout(victim)
     assert _replay(app, stolen).status_code == 401
     core.remove_web_user("alice")
     assert core.add_web_user_if_new("alice", "hunter2") is True
@@ -172,18 +197,20 @@ def test_dead_cookie_cannot_bump_epoch_via_logout(tmp_path):
     app = _client(tmp_path)
     victim = _login(app)
     stolen = _steal(victim)
-    victim.get("/logout")
+    with victim.session_transaction() as sess:
+        token = sess["csrf"]                # the token baked INTO the stolen cookie
+    _logout(victim)
     assert _replay(app, stolen).status_code == 401
 
     frozen = core.get_web_user_session_epoch("alice")
     for _ in range(5):
-        _replay(app, stolen, path="/logout")
+        _replay_logout(app, stolen, token)
     assert core.get_web_user_session_epoch("alice") == frozen, \
         "a revoked cookie must not be able to revoke"
 
     victim2 = _login(app)
     for _ in range(5):
-        _replay(app, stolen, path="/logout")
+        _replay_logout(app, stolen, token)
     assert victim2.get("/api/jobs").status_code == 200, \
         "the victim must stay signed in while a dead cookie is replayed"
 
@@ -199,7 +226,7 @@ def test_logout_still_revokes_every_outstanding_cookie(tmp_path):
     stolen = _steal(victim)
     other = _login(app)                       # a second, independent live session
     assert _replay(app, stolen).status_code == 200
-    other.get("/logout")                      # signing out from ANOTHER browser
+    _logout(other)                            # signing out from ANOTHER browser
     assert _replay(app, stolen).status_code == 401
 
 
@@ -214,6 +241,71 @@ def test_anonymous_logout_is_still_a_noop(tmp_path):
     assert r.status_code in (301, 302, 303, 307, 308)
     assert core.get_web_user_session_epoch("alice") == before_epoch
     assert core._config_path().read_bytes() == before_bytes
+
+
+# --- D4: a GET must never write server state --------------------------------
+
+def test_get_logout_signs_out_only_this_browser(tmp_path):
+    """THE CSRF-able-GET fix. /logout's GET used to bump sess_epoch, so any page that
+    got the owner to follow a cross-site link -- or any link-prefetcher walking the
+    header -- signed them out on every device. SESSION_COOKIE_SAMESITE="Lax" blocks
+    the <img src=".../logout"> version of that (a cross-site subresource carries no
+    cookie) but deliberately still sends the cookie on a top-level GET navigation.
+
+    A GET must now clear THIS client's cookie and write nothing server-side.
+
+    Bite: restore the bump on the GET path and both of the last two assertions fail."""
+    core.add_or_update_web_user("alice", "hunter2")
+    app = _client(tmp_path)
+    victim = _login(app)
+    other = _login(app)                       # the owner's phone, still signed in
+    before_epoch = core.get_web_user_session_epoch("alice")
+
+    r = victim.get("/logout")
+    assert r.status_code in (301, 302, 303, 307, 308)
+    assert victim.get("/api/jobs").status_code == 401     # this browser IS signed out
+    assert other.get("/api/jobs").status_code == 200, \
+        "a GET /logout must not sign the user out on their other devices"
+    assert core.get_web_user_session_epoch("alice") == before_epoch
+
+
+def test_post_logout_without_a_valid_csrf_token_revokes_nothing(tmp_path):
+    """The POST carries the same session-bound token /login's form and the Panel's
+    Users tab carry. A bad one is a loud 400 that leaves the session INTACT -- not a
+    quiet downgrade to a local sign-out, which is how the global revoke would
+    silently disappear if the header form ever stopped emitting the field."""
+    core.add_or_update_web_user("alice", "hunter2")
+    app = _client(tmp_path)
+    victim = _login(app)
+    other = _login(app)
+    before_epoch = core.get_web_user_session_epoch("alice")
+
+    r = victim.post("/logout", data={"csrf": "forged-token-not-in-session"})
+    assert r.status_code == 400
+    assert core.get_web_user_session_epoch("alice") == before_epoch
+    assert victim.get("/api/jobs").status_code == 200, \
+        "a refused logout must leave the user signed in, not half-signed-out"
+
+    # ... and the real, token-carrying POST still revokes globally.
+    _logout(victim)
+    assert core.get_web_user_session_epoch("alice") != before_epoch
+    assert other.get("/api/jobs").status_code == 401
+
+
+def test_post_logout_scope_this_device_leaves_other_sessions_alone(tmp_path):
+    """The split the fix introduces: an explicit scope=this-device POST signs out
+    here only. Its ABSENCE means global -- a truncated or hand-built POST has to fail
+    toward MORE revocation, never less."""
+    core.add_or_update_web_user("alice", "hunter2")
+    app = _client(tmp_path)
+    victim = _login(app)
+    other = _login(app)
+    before_epoch = core.get_web_user_session_epoch("alice")
+
+    _logout(victim, scope="this-device")
+    assert victim.get("/api/jobs").status_code == 401
+    assert other.get("/api/jobs").status_code == 200
+    assert core.get_web_user_session_epoch("alice") == before_epoch
 
 
 # --- D3: the bump must be lock-protected -----------------------------------

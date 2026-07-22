@@ -87,7 +87,8 @@ ROUTE_TIERS = {
     # -- the login surface: the only genuinely public tier -------------------
     ("login", "GET"): PUBLIC,
     ("login", "POST"): PUBLIC,
-    ("logout", "GET"): PUBLIC,
+    ("logout", "GET"): PUBLIC,        # local sign-out only -- writes no server state
+    ("logout", "POST"): PUBLIC,       # + the global revoke, gated on the session csrf
     ("branding", "GET"): PUBLIC,
 
     # -- LOCALHOST-ONLY: a logged-in LAN session is NOT enough ---------------
@@ -110,7 +111,12 @@ ROUTE_TIERS = {
     ("duplicates", "GET"): LOGIN,
     ("loom", "GET"): LOGIN,
     ("contact_sheet", "GET"): LOGIN,
-    ("manifest", "GET"): LOGIN,
+    # The manifest body is a compile-time constant (no user data, no install paths), and
+    # the browser fetches it unprompted from the public login page -- gating it only bought
+    # a self-inflicted redirect. /sw.js is the same CLASS of asset but is NOT bundled in
+    # with it: serving the worker script is a separate question from what the worker
+    # caches, and the cache-survives-sign-out concern has to be settled on its own.
+    ("manifest", "GET"): PUBLIC,
     ("service_worker", "GET"): LOGIN,
     # Flask's own static endpoint is NOT special-cased away here on purpose.
     # `if rule.endpoint == "static": continue` is the single most common way a
@@ -191,6 +197,8 @@ ROUTE_TIERS = {
     ("api_panel_schedule", "GET"): LOGIN,   # GET login-only, POST localhost -- see above
     ("api_presets", "GET"): LOGIN,
     ("api_presets", "POST"): LOGIN,
+    ("api_view_presets", "GET"): LOGIN,    # saved views roam desktop<->tablet: that IS the login tier
+    ("api_view_presets", "POST"): LOGIN,   # small cosmetic json in out_dir, same trust as api_skin
     ("api_snippets", "GET"): LOGIN,
     ("api_snippets", "POST"): LOGIN,
     ("api_branding", "GET"): LOGIN,
@@ -223,7 +231,9 @@ PUBLIC_EXPECTED_STATUS = {
     ("login", "GET"): {200},
     ("login", "POST"): {200},      # re-renders the form (no csrf) -- never a redirect
     ("logout", "GET"): {302},      # its own redirect to /login, not the front door's
+    ("logout", "POST"): {302},     # anonymous: nothing to revoke, so no csrf is demanded
     ("branding", "GET"): {404},    # missing art 404s; it must never redirect to /login
+    ("manifest", "GET"): {200},    # a constant body -- anonymous callers get the real thing
 }
 
 # A few routes only reach their localhost gate with a meaningful payload.
@@ -591,3 +601,55 @@ def test_declared_tiers_are_known_values():
         "Only PUBLIC / LOGIN / LOCALHOST exist. Inventing a fourth tier in the\n"
         "table without teaching this file to enforce it produces a declaration\n"
         "that asserts nothing.".format(bad))
+
+
+# ---------------------------------------------------------------------------
+# 6. Field-level disclosure: a LOGIN route may still withhold part of its body
+# ---------------------------------------------------------------------------
+
+_PANEL_REDACTION = "(job output is shown only on the server's own screen)"
+
+
+def test_panel_status_withholds_job_stdout_from_lan(app):
+    """`/api/panel/status` stays LOGIN-tier but must not hand its `lines` to a LAN caller.
+
+    `lines` is the maintenance subprocess's OWN stdout -- absolute paths out of the
+    owner's install, catalog internals, whatever a CLI traceback prints. Starting a
+    destructive job required loopback and cancelling one required loopback, but READING
+    the output was a bare `@app.route` with no check at all until 2026-07-21. Moonglade
+    is explicitly not single-user, so a logged-in account on the network could poll the
+    owner's job stdout.
+
+    This asserts the LAN caller gets the redaction marker instead of the real buffer.
+    """
+    cli = _login(app)
+    resp = cli.get("/api/panel/status", environ_overrides={"REMOTE_ADDR": LAN})
+    assert resp.status_code == 200, (
+        "a LAN account is still entitled to job STATE -- see the companion test below; "
+        "got {}".format(resp.status_code))
+    assert resp.get_json()["lines"] == [_PANEL_REDACTION], (
+        "LAN caller received the real `lines` buffer instead of the redaction marker.\n"
+        "FIX: keep the loopback check in api_panel_status -- do NOT widen `lines` back\n"
+        "to every logged-in caller.")
+
+
+def test_panel_status_is_not_blanket_localhost_gated(app):
+    """The companion to the test above, and the reason this one exists at all.
+
+    The obvious-looking fix for the leak is `if not _is_local_request(): return 403` on
+    the whole route. That is WRONG here: 14 of the 20 PANEL_ACTIONS are non-destructive
+    and a LAN account may run every one of them (api_panel_run only demands loopback when
+    `spec["destructive"]`). Whole-route gating would let that account start a job and then
+    watch a progress UI that never moves, in all three pollers.
+
+    So this pins the other side: job STATE must keep reaching a LAN caller. Without this
+    test, a future 'tighten the panel routes' sweep silently breaks LAN progress and every
+    remaining test still passes.
+    """
+    cli = _login(app)
+    body = cli.get("/api/panel/status",
+                   environ_overrides={"REMOTE_ADDR": LAN}).get_json()
+    for field in ("status", "action", "label", "rc", "progress"):
+        assert field in body, (
+            "`{}` vanished from the LAN payload -- the route was probably blanket "
+            "LOCALHOST-gated. Redact the `lines` field, not the whole response.".format(field))

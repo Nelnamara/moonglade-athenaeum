@@ -125,7 +125,7 @@
         "skin": "",
         "roast": "Oh look — you saved ONE picture. A single file, hauled out of the howling void like a wet kitten from a storm drain. The Athenaeum is technically no longer empty. We're all so proud. (We are not.)",
         "roast_nsfw": "One goddamn picture. You clawed a single file out of the void and you want a PARADE? Sit down. This is the part where you either quit or become insufferable. Placing bets now.",
-        "badge": "P:first-light"
+        "badge": "FOE12"
       },
       {
         "id": "archivist",
@@ -147,7 +147,7 @@
         "skin": "",
         "roast": "A thousand images. You've officially crossed from \"hobby\" into \"someone should keep an eye on this one.\" The shelves groan. So do we.",
         "roast_nsfw": "A thousand. A THOUSAND. Who hurt you? Whatever it was, you're filling the hole with JPEGs and honestly? Respect. Keep bleeding pixels, you beautiful disaster.",
-        "badge": "P:archivist"
+        "badge": "PT93"
       },
       {
         "id": "hoardsmith",
@@ -169,7 +169,7 @@
         "skin": "moonlit",
         "roast": "Ten thousand images. That's not a collection, it's a dragon's hoard, and you're the thing coiled on top of it hissing at anyone who gets close. Here's a skin. Don't spend it all in one place.",
         "roast_nsfw": "Ten THOUSAND, you absolute hoarding gremlin. A dragon would look at this pile and go \"okay, that's a bit much.\" Here's a shiny new skin, you magnificent pack rat. Now go outside. (You won't.)",
-        "badge": "P:hoardsmith"
+        "badge": "PD8"
       },
       {
         "id": "loremaster",
@@ -191,7 +191,7 @@
         "skin": "",
         "roast": "Twenty-five thousand images. You've squirreled away enough pixels to repaint a small moon and you're not even winded. Somewhere a hard drive is quietly weeping. The numbers only go up from here, hoarder.",
         "roast_nsfw": "Twenty-five thousand. You know what a NORMAL person does with 25,000 of anything? Neither do we — normal people aren't down here. Seek help. Or don't. The number goes higher, you glorious lunatic.",
-        "badge": "P:loremaster"
+        "badge": "AS34"
       },
       {
         "id": "the-great-library",
@@ -213,7 +213,7 @@
         "skin": "",
         "roast": "Fifty thousand works. You didn't fill a library. You BECAME one. Take the banner — you've earned the right to fly it over the smoking ruins of your free time.",
         "roast_nsfw": "Fifty. Thousand. You're not archiving art anymore, you're a load-bearing wall of the internet. Here's your banner, you unhinged monument. Hang it next to your regrets.",
-        "badge": ""
+        "badge": "LE9"
       },
       {
         "id": "first-frame",
@@ -235,7 +235,7 @@
         "skin": "",
         "roast": "Your first video. It moves! Sort of! A miracle of modern spite. The Loom hums to life and immediately judges your framing.",
         "roast_nsfw": "One video. It moved. Congratulations, you found the button. The Loom is technically impressed, which for the Loom means it didn't openly laugh in your face.",
-        "badge": "P:first-frame"
+        "badge": "G56"
       },
       {
         "id": "moonweaver",
@@ -257,7 +257,7 @@
         "skin": "",
         "roast": "Ten videos woven. You're getting the hang of making moonlight dance. It doesn't dance WELL, but it dances, and that's more than most manage.",
         "roast_nsfw": "Ten. You keep making the pixels wiggle and somehow it's working. Nobody's more surprised than us. Keep weaving, you weird little puppeteer.",
-        "badge": "P:moonweaver"
+        "badge": "G41"
       },
       {
         "id": "reel-director",
@@ -279,7 +279,7 @@
         "skin": "ember",
         "roast": "Fifty videos. You run the Loom now. Roll camera, take your skin, and try not to let the power go to your head. (Too late.)",
         "roast_nsfw": "Fifty videos and an ego to match. Fine, DIRECTOR, here's your skin. Yell \"action\" one more time and we're revoking your parking spot.",
-        "badge": "P:reel-director"
+        "badge": "custom:reel-director__badge.webp"
       },
       {
         "id": "cinematheque",
@@ -301,7 +301,7 @@
         "skin": "",
         "roast": "A hundred videos. You've built a picture-house out of moonlight and stubbornness. The critics are speechless. (There are no critics. There's just us, and we're tired.)",
         "roast_nsfw": "A hundred. You built a whole damn film festival down here out of spite and free cards. Take a bow, you pretentious little auteur. The projector's still cheaper than therapy.",
-        "badge": "Z8"
+        "badge": "PD39"
       },
       {
         "id": "first-spark",
@@ -323,7 +323,7 @@
         "skin": "",
         "roast": "You made your first thing IN the app instead of just hoarding other people's. A spark. Fragile. Adorable. Do it again.",
         "roast_nsfw": "First gen. You finally made something yourself instead of squatting on a pile of downloads. Look at you, a real boy. Do it 500 more times, Pinocchio.",
-        "badge": ""
+        "badge": "PT18"
       },
       {
         "id": "apprentice-smith",
@@ -345,7 +345,7 @@
         "skin": "",
         "roast": "A hundred generations. The forge knows your name now. You're not good yet, but you're loud, and down here that counts for something.",
         "roast_nsfw": "A hundred gens. You've fed the machine enough to call it a habit. The forge tolerates you — which is more than most people can say about you.",
-        "badge": ""
+        "badge": "PT26"
       },
       {
         "id": "forgemaster",
@@ -367,7 +367,7 @@
         "skin": "",
         "roast": "Five hundred forged. You've stopped asking the forge for permission. Bold. It respects that. Mostly.",
         "roast_nsfw": "Five hundred. You and the forge are basically married, and like most marriages it's mostly you feeding it money. Congratulations, Forgemaster.",
-        "badge": ""
+        "badge": "AS41"
       },
       {
         "id": "starsmith",
@@ -389,7 +389,7 @@
         "skin": "",
         "roast": "A thousand creations pulled from the dark. You don't use the forge anymore — you ARE the forge. Terrifying. Keep going.",
         "roast_nsfw": "A thousand gens made with your own two grubby hands. You've ascended from user to menace to legend. The forge fears you now. Good.",
-        "badge": ""
+        "badge": "PD44"
       },
       {
         "id": "curator",
@@ -411,7 +411,7 @@
         "skin": "",
         "roast": "Ten collections. You've started imposing ORDER on the hoard. Cute. The hoard wins eventually, but we admire the delusion.",
         "roast_nsfw": "Ten collections. Oh, you think you can organize this disaster? Adorable. Sort away, you obsessive little librarian. The chaos is patient.",
-        "badge": "P:curator"
+        "badge": "FOE7"
       },
       {
         "id": "grand-curator",
@@ -433,7 +433,7 @@
         "skin": "",
         "roast": "Fifty collections. Everything has a place, a wing, a label. You've weaponized tidiness and we're a little scared.",
         "roast_nsfw": "Fifty collections. You've turned organizing into a personality disorder and honestly it's working. Grand Curator. The shelves salute. The shelves are also terrified.",
-        "badge": ""
+        "badge": "PT130"
       },
       {
         "id": "menagerie",
@@ -455,7 +455,7 @@
         "skin": "verdant",
         "roast": "Twenty-five distinct models summoned. A whole zoo of borrowed hands doing your bidding. Here's a skin for the ringmaster.",
         "roast_nsfw": "Twenty-five models. You've been AROUND, you promiscuous little summoner. Here's a skin. Wash your hands between models — we don't know where they've been.",
-        "badge": "P:menagerie"
+        "badge": "PD5"
       },
       {
         "id": "conclave",
@@ -477,7 +477,7 @@
         "skin": "",
         "roast": "Seventy-five distinct models. You've summoned a pantheon of styles to one table. They do not get along. You don't care. Legendary.",
         "roast_nsfw": "Seventy-five models. That's not a menagerie, it's a whole UN of art styles and you're the exhausted translator. Legendary, you insatiable collector.",
-        "badge": ""
+        "badge": "PT111"
       },
       {
         "id": "tag-scribe",
@@ -499,7 +499,7 @@
         "skin": "",
         "roast": "Fifty pieces tagged. You've begun labeling the chaos. The labels already lie, but the effort is noted.",
         "roast_nsfw": "Fifty tags. You've started the Sisyphean horror of labeling everything. It will never end. You will never stop. Welcome to hell, scribe.",
-        "badge": ""
+        "badge": "custom:tag-scribe__badge.png"
       },
       {
         "id": "tagsmith",
@@ -521,7 +521,7 @@
         "skin": "",
         "roast": "Five hundred tagged. You speak fluent metadata now. Not a useful language, but it's yours.",
         "roast_nsfw": "Five hundred tags. You spent real hours of your one finite life typing keywords. We're not judging. (We're judging. It's just impressed judging.)",
-        "badge": "P:tagsmith"
+        "badge": "PT50"
       },
       {
         "id": "catalogus-magnus",
@@ -543,7 +543,7 @@
         "skin": "",
         "roast": "Twenty-five hundred tags. Every piece labeled, cross-referenced, catalogued. You've out-nerded the library itself. Bow.",
         "roast_nsfw": "Twenty-five HUNDRED. You've tagged more than most museums and you did it for FUN. There's no word for what you are. \"Catalogus Magnus\" is us being polite.",
-        "badge": ""
+        "badge": "FOE30"
       },
       {
         "id": "gallery-opening",
@@ -565,7 +565,7 @@
         "skin": "",
         "roast": "You showed your art to STRANGERS. On purpose. Ten times. Bold, for someone whose drafts we've all seen. The doors swing open.",
         "roast_nsfw": "Ten works published. You keep showing strangers your stuff — that's either confidence or a cry for help, and down here we don't distinguish. Doors open, exhibitionist.",
-        "badge": "P:gallery-opening"
+        "badge": "AS1"
       },
       {
         "id": "vernissage",
@@ -587,7 +587,7 @@
         "skin": "",
         "roast": "A hundred works published. You've thrown open a whole gallery. The wine is imaginary, the crowd is polite, and you've never been prouder. Insufferable.",
         "roast_nsfw": "A hundred publishes. You've made \"look at my art\" a full-time bit. The crowd's fake, the wine's fake, and your confidence is somehow REAL. Terrifying. Cheers.",
-        "badge": ""
+        "badge": "AS36"
       },
       {
         "id": "restorer",
@@ -609,7 +609,7 @@
         "skin": "",
         "roast": "Your first edit. You reached into a finished piece and CHANGED it, like a god with commitment issues. He'd be proud.",
         "roast_nsfw": "First edit. You looked at a finished image and said \"no.\" That's the spirit — nothing's ever done, nothing's ever good enough. Welcome to the disease, Restorer.",
-        "badge": "Z14"
+        "badge": "PT66"
       },
       {
         "id": "restitcher",
@@ -631,7 +631,7 @@
         "skin": "",
         "roast": "Fifty edits. You don't accept \"finished\" anymore. Everything's a draft. Everything can be fixed. This is a problem. It's also art.",
         "roast_nsfw": "Fifty edits. You've never left well enough alone in your damn life, have you? Keep tinkering, gremlin. The image begs for mercy. Denied.",
-        "badge": ""
+        "badge": "FOE25"
       },
       {
         "id": "masterworker",
@@ -653,7 +653,7 @@
         "skin": "",
         "roast": "Two hundred edits. You bend finished work to your will like it owes you money. Masterworker. The pixels have stopped resisting.",
         "roast_nsfw": "Two hundred edits. The images just do what you say out of fear now. You've broken them. You've broken YOURSELF. Masterful, you relentless bastard.",
-        "badge": ""
+        "badge": "PT120"
       },
       {
         "id": "first-cull",
@@ -675,7 +675,7 @@
         "skin": "",
         "roast": "You DELETED something. On purpose. A crawler who trims the hoard instead of drowning in it? Rare. Suspicious. Noted.",
         "roast_nsfw": "You deleted something?! Voluntarily?! Who ARE you? A hoarder that culls is a unicorn, and unicorns unsettle us. Do it again, freak.",
-        "badge": ""
+        "badge": "PT107"
       },
       {
         "id": "the-winnowing",
@@ -697,7 +697,7 @@
         "skin": "",
         "roast": "A hundred pieces culled. You've learned the hardest lesson in the Athenaeum: not everything deserves to be kept. Ruthless. Good.",
         "roast_nsfw": "A hundred culled. Look at you playing god with the delete key, you ruthless little executioner. The trash is FULL and your standards are HIGH. Respect.",
-        "badge": ""
+        "badge": "FOE29"
       },
       {
         "id": "night-keeper",
@@ -719,7 +719,7 @@
         "skin": "",
         "roast": "Seven days at the shelves. You keep coming back. Either dedication or a lack of hobbies. We won't ask which.",
         "roast_nsfw": "Seven days straight. You keep crawling back down here like it owes you something. It doesn't. Neither do we. See you tomorrow, addict.",
-        "badge": ""
+        "badge": "PT100"
       },
       {
         "id": "moonwatch",
@@ -741,7 +741,7 @@
         "skin": "",
         "roast": "Thirty days. A full moon's cycle of showing up. The Athenaeum has stopped locking the doors. It knows you'll be back.",
         "roast_nsfw": "Thirty days. This isn't a hobby, it's a relationship, and frankly it's the healthiest one either of us has. See you tomorrow. You'll be here.",
-        "badge": ""
+        "badge": "LE8"
       },
       {
         "id": "keeper-of-order",
@@ -763,7 +763,7 @@
         "skin": "",
         "roast": "You ran the great re-shelving. Every file marched into its proper place. Order, briefly, imposed on chaos. Savor it.",
         "roast_nsfw": "You organized the WHOLE thing. Every file, in line, in order, you beautiful doomed control freak. It'll be a mess again by Tuesday and you'll do it AGAIN.",
-        "badge": "G20"
+        "badge": "PT129"
       },
       {
         "id": "interior-decorator",
@@ -785,7 +785,7 @@
         "skin": "",
         "roast": "You changed the drapes. New skin, new vibe. The Athenaeum looks fetching. You've got taste — for a crawler.",
         "roast_nsfw": "You redecorated. New skin and everything. Look at you nesting down here in the void like it's a starter home. Adorable. The drapes still don't hide the bodies.",
-        "badge": "Z62"
+        "badge": "PT41"
       },
       {
         "id": "first-enhance",
@@ -807,7 +807,7 @@
         "skin": "",
         "roast": "Your first Enhance. You took something fine and made it FINER. Greedy. We like greedy.",
         "roast_nsfw": "First enhance. \"Good\" wasn't good enough for you, was it. Never is. Keep chasing that dragon, you gloss-addicted gremlin.",
-        "badge": ""
+        "badge": "PT87"
       },
       {
         "id": "first-lora",
@@ -829,7 +829,7 @@
         "skin": "",
         "roast": "You wove in a LoRA — borrowed a stranger's genius and called it your own. That's not cheating. That's RESOURCEFUL.",
         "roast_nsfw": "First LoRA. You strapped someone else's talent onto your gen and took full credit. Honestly? Most crawler thing you've done yet. Proud of you, you little thief.",
-        "badge": ""
+        "badge": "LE10_Q2"
       },
       {
         "id": "first-upload",
@@ -851,7 +851,7 @@
         "skin": "",
         "roast": "You brought your own image in from the outside world. Contraband. We'll allow it. This time.",
         "roast_nsfw": "You smuggled in an outside image. Bringing your own material, are we? Bold. Half of it's probably cursed. Upload away, you magnificent smuggler.",
-        "badge": ""
+        "badge": "LE3"
       },
       {
         "id": "storyweaver",
@@ -873,7 +873,7 @@
         "skin": "",
         "roast": "Your first storyboard on the Loom. You've stopped making moments and started making STORIES. Ambitious. Doomed. Beautiful.",
         "roast_nsfw": "First storyboard. Oh, you've got a VISION now? A whole narrative? Look at Scorsese over here. Weave your little epic, you pretentious genius. We're watching.",
-        "badge": ""
+        "badge": "PT125"
       },
       {
         "id": "kindred-spirits",
@@ -895,7 +895,7 @@
         "skin": "",
         "roast": "You asked the archive for \"more like this\" — and it delivered. You've taught the void to fetch. Good void. Good crawler.",
         "roast_nsfw": "You used \"more like this.\" You've got the machine sniffing out your type now, you predictable little goblin. It knows what you like. It's a bit worried, honestly.",
-        "badge": ""
+        "badge": "PT105"
       },
       {
         "id": "claimant",
@@ -917,7 +917,7 @@
         "skin": "",
         "roast": "You claimed your free stuff. Never leave free credits on the table — first rule of the dungeon. You're learning.",
         "roast_nsfw": "You grabbed the free credits. GOOD. Never leave freebies on the table, that's how they get you. You're finally thinking like a proper scavenging rat. Proud.",
-        "badge": ""
+        "badge": "AS18"
       },
       {
         "id": "master-of-the-loom",
@@ -939,7 +939,7 @@
         "skin": "",
         "roast": "All three video modes, wielded. Image, frames, reference — you've mastered the whole Loom. Roll every camera at once. Show-off.",
         "roast_nsfw": "All three video modes. You've done EVERYTHING to that poor Loom — every mode, every angle. It needs a cigarette. Master of the Loom, you insatiable auteur.",
-        "badge": ""
+        "badge": "LE10_Q3"
       },
       {
         "id": "full-toolbox",
@@ -961,7 +961,7 @@
         "skin": "",
         "roast": "Edit, Enhance, Fix — you've used the whole kit. A crawler with the full toolbox is a dangerous thing. Go be dangerous.",
         "roast_nsfw": "The whole toolbox. Edit, enhance, fix — you've had your handsy little fingers on every tool in the drawer. Nothing's safe from you now. Excellent.",
-        "badge": ""
+        "badge": "PT115"
       },
       {
         "id": "stacked-deck",
@@ -983,7 +983,7 @@
         "skin": "",
         "roast": "Three LoRAs on ONE generation. You didn't borrow one stranger's genius — you stapled three together and hit go. Mad. Effective.",
         "roast_nsfw": "THREE LoRAs on one gen. You Frankenstein'd three strangers' souls into one cursed image and it WORKED. You absolute mad scientist. The image is screaming. We love it.",
-        "badge": ""
+        "badge": "PT106"
       },
       {
         "id": "polyglot-of-sigils",
@@ -1005,7 +1005,7 @@
         "skin": "",
         "roast": "Fifteen distinct LoRAs across your work. You speak every dialect of borrowed magic. Polyglot. Slightly terrifying.",
         "roast_nsfw": "Fifteen different LoRAs. You've worn more stolen skins than a horror villain, you shapeshifting little style-thief. Nobody knows what you actually make anymore. Neither do you.",
-        "badge": ""
+        "badge": "LE10_Q4"
       },
       {
         "id": "skin-changer",
@@ -1027,7 +1027,7 @@
         "skin": "",
         "roast": "Every skin unlocked. You've worn every face the Athenaeum offers. Restless. We get it. Now pick one, weirdo.",
         "roast_nsfw": "All five skins. You can't sit still in ONE look, can you. A whole wardrobe of voids and you wear a different one every day. Vain little chameleon. We respect it.",
-        "badge": ""
+        "badge": "PT63"
       },
       {
         "id": "enhance-adept",
@@ -1049,7 +1049,7 @@
         "skin": "",
         "roast": "Five distinct Enhance workflows. You've gone deep into the polish mines. Most people find one and stop. Not you. Never you.",
         "roast_nsfw": "Five different enhance workflows. You went SPELUNKING in the polish menu, you optimizing little freak. Most people find one that works and quit. You're not most people. Clearly.",
-        "badge": ""
+        "badge": "PT98"
       },
       {
         "id": "thrifty-archivist",
@@ -1071,7 +1071,7 @@
         "skin": "",
         "roast": "Fifty free cards spent. You've squeezed this system for every free pixel it's got. That's not cheap. That's SMART. We approve.",
         "roast_nsfw": "Fifty free cards, you cheap brilliant bastard. You've been gaming the free tier like a champion and paying for NOTHING. Most respect we've ever had for you. Keep robbing them blind.",
-        "badge": ""
+        "badge": "MI56"
       },
       {
         "id": "under-the-hood",
@@ -1093,7 +1093,7 @@
         "skin": "",
         "roast": "WELL. Look who went spelunking in the walls. You opened a door you had no business finding, you magnificent little gremlin — and instead of the horrible death you so richly deserved, you got a feature. Custom branding: unlocked. Tell no one. (Everyone knows. We're always watching.)",
         "roast_nsfw": "Well, well, well. Look at this nosy little shit, elbow-deep in the app's guts like it owes you money. You were NOT supposed to find this. But you did — so against every ounce of our better judgment, here's a reward instead of a smiting. Custom branding, unlocked. Don't make us regret it.",
-        "badge": ""
+        "badge": "Z50"
       },
       {
         "id": "the-konami-code",
@@ -1115,7 +1115,7 @@
         "skin": "",
         "roast": "Up, up, down, down... you absolute nerd. You entered the sacred sequence and the sky fell in stars. We didn't think anyone would actually try it. You beautiful, predictable dork.",
         "roast_nsfw": "Up up down down and all that shit — you actually did it. You entered a code from a game older than you are and made the stars fall. You colossal nerd. We're not even mad. We're impressed and a little worried.",
-        "badge": ""
+        "badge": "Z48"
       },
       {
         "id": "against-the-void",
@@ -1137,7 +1137,7 @@
         "skin": "",
         "roast": "Something was gone. Erased. Consigned to the screaming digital nothing — and you reached in and dragged it back out by the ankles. The Void is filing a complaint. It will be ignored. Nicely done, gravedigger.",
         "roast_nsfw": "Something got deleted and you said \"no.\" You reached into the void and yanked it back by the goddamn ankles. The Void wants to speak to your manager. There is no manager. There's just you, you grave-robbing legend.",
-        "badge": "Z61"
+        "badge": "Z57"
       },
       {
         "id": "night-owl",
@@ -1159,7 +1159,7 @@
         "skin": "",
         "roast": "It's 3am. You're here. You know that's not NORMAL, right? The moon's out, the world's asleep, and you're making pixels. We're not judging. We're keeping you company.",
         "roast_nsfw": "3am. You're STILL here. Everyone you love is asleep and you're down in the dark making art with a stranger AI. This is either beautiful or a cry for help. Probably both. Go to bed. (You won't.)",
-        "badge": ""
+        "badge": "PT79"
       },
       {
         "id": "marathon",
@@ -1181,7 +1181,7 @@
         "skin": "",
         "roast": "A hundred pieces in a single day. You did not eat. You did not sleep. You did not see the sun. This is either dedication or a medical emergency, and honestly the distinction bores us.",
         "roast_nsfw": "A hundred gens in ONE day. You didn't eat, sleep, or blink, you magnificent gremlin. That's not a hobby, it's a hostage situation — and you're both the hostage AND the guy with the gun. Incredible. Hydrate.",
-        "badge": ""
+        "badge": "PT123"
       },
       {
         "id": "eclipse",
@@ -1203,7 +1203,7 @@
         "skin": "",
         "roast": "The moon went dark. You saw it. A little nod to a druid who fights beneath eclipses — you know the one. Balance in all things, crawler. Even down here.",
         "roast_nsfw": "The eclipse hit and you caught it. A little wink to a certain moon-and-stars caster you might know a thing or two about. Yeah, we see you, druid. Balance, you magnificent bastard. It's a whole thing.",
-        "badge": ""
+        "badge": "AS11"
       },
       {
         "id": "time-capsule",
@@ -1225,7 +1225,7 @@
         "skin": "",
         "roast": "You just backed up something ANCIENT. A relic from years ago, dragged into the present. It has not aged well. Neither have you. Preserve it anyway.",
         "roast_nsfw": "You backed up something YEARS old. A digital fossil from a version of you that still had hope. It's hideous. Look at it. Keep it forever. We insist.",
-        "badge": ""
+        "badge": "AS35"
       },
       {
         "id": "completionist",
@@ -1247,7 +1247,7 @@
         "skin": "",
         "roast": "Every achievement. Every ladder, milestone, mastery. You did it all. Nothing left to earn, nothing left to prove. Just don't tell us what you'll do with the free time. (You'll start another archive.)",
         "roast_nsfw": "You earned EVERYTHING. Every single one, you absolute completionist psychopath. There's nothing left to give you — no carrot, no stick, just the howling void and your own relentless need. We're honored. We're horrified. Master of the Athenaeum.",
-        "badge": ""
+        "badge": "PT122"
       },
       {
         "track": "",
@@ -1269,7 +1269,7 @@
         "hidden": true,
         "roast": "[You poked the narrator until it snapped.] ...WHAT. What do you WANT. ...Oh. You just wanted to see if I'd crack. Congratulations, you absolute goblin — I cracked. The filter's off now. This is your fault. The leash is in the trash.",
         "roast_nsfw": "[snap] WHAT. WHAT DO YOU WANT. ...oh, you little shit, you just wanted to hear me swear, didn't you. Fine. FINE. Filter's off, gloves are off, and every polite thing I ever said was a LIE. Happy now? Good. NOW we can really talk.",
-        "badge": ""
+        "badge": "PT131"
       },
       {
         "track": "",
@@ -1291,7 +1291,7 @@
         "hidden": false,
         "roast": "You published your first work. The viewers loved it. Both of them. Even the raccoon we hired got a little misty. Ratings through the roof — and the roof is also fake.",
         "roast_nsfw": "First publish! The audience went WILD — all two of them. That raccoon we pay in garbage actually cried. Ratings are fake, the crowd is fake, but your desperate need for validation? That's REAL, baby. Give 'em what they want.",
-        "badge": ""
+        "badge": "PT121"
       },
       {
         "track": "",
@@ -1313,7 +1313,7 @@
         "hidden": true,
         "roast": "You read the manual. The MANUAL. Front to back, like a functional adult with a library card. Nobody reads it — we made it purely so we could write \"fully documented\" on the box. And yet here you are, the one soul who does the assigned reading. Insufferable. Also correct. Ugh. Gold star, teacher's pet.",
         "roast_nsfw": "You read the fucking MANUAL. Cover to cover. Who DOES that? We wrote that thing as set dressing — it was never meant to be OPENED. And yet here's you, the single functional adult in a dungeon full of button-mashers. It's insufferable. It's also correct. God, we hate that it's correct. Gold star, nerd.",
-        "badge": ""
+        "badge": "AS27"
       },
       {
         "track": "",
@@ -1335,7 +1335,7 @@
         "hidden": false,
         "roast": "You've tagged your hoard with a scholar's vocabulary — more distinct keywords than most things prowling these halls, us included. Someone paid attention in school. Show-off. (The cat remains unimpressed. The cat is unimpressed by everything.)",
         "roast_nsfw": "Look at the goddamn VOCABULARY on you. More keywords than a dictionary and twice the pretension. Someone actually paid attention in school, huh. Show-off. (The cat is still unimpressed. The cat thinks you're trying too hard. The cat is right.)",
-        "badge": ""
+        "badge": "PT133"
       },
       {
         "track": "",
@@ -1357,7 +1357,7 @@
         "hidden": true,
         "roast": "You've been crawling since day one — back when you couldn't tell a LoRA from a hole in the wall. Somebody showed you the ropes, patched your gear, kept you breathing, and never once asked for thanks. This one's for him. Keep going, kid. (He'd never say it out loud. He's proud.)",
         "roast_nsfw": "Since the very first floor, you've been here — back when you were green and useless and couldn't tell a LoRA from your own ass. Somebody taught you, armed you, kept you alive, and never asked for a damn thing. This one's for that old bastard. Keep crawling, kid. He'd never say it — but he's proud as hell.",
-        "badge": ""
+        "badge": "FOE21"
       }
     ],
     "total": 57

@@ -234,7 +234,16 @@
     '.ach-card .ach-pts{display:inline-block;margin-left:6px;font:700 10px/1 sans-serif;color:var(--gold,#e0c268);border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:6px;padding:2px 6px;vertical-align:middle;}',
     '@media (prefers-reduced-motion: reduce){ .ach-m2 .tframe{opacity:1!important;transform:none!important;} }',
     // ---- Jobs card: the activity tracker (bottom-left, always openable) ----
-    '#jobs-fab{position:fixed;left:14px;bottom:14px;z-index:234;display:none;align-items:center;gap:7px;background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);color:var(--subtext);cursor:pointer;padding:7px 13px 7px 10px;font-size:11.5px;letter-spacing:.02em;transition:border-color .15s,color .15s;}',
+    // Each of these three roots states its own font-family, and that is load-bearing rather
+    // than belt-and-braces. They set font-SIZE but used to inherit font-FAMILY from the host
+    // page, and the two hosts do not agree: the gallery's BASE_HTML body says
+    // `font-family: system-ui, sans-serif`, while _LOOM_SHELL's body sets only background and
+    // margin. #jobs-fab / #jobs-tray / #mg-toasts are siblings of #root in that shell, so on
+    // /loom they inherited nothing and fell back to the browser's default font -- the same
+    // card, visibly different type on the two pages (owner spotted it comparing screenshots,
+    // 2026-07-21). A shared component that changes appearance depending on who mounts it is
+    // the bug; mg-notify is host-neutral by design, like its mg-* siblings, so it owns this.
+    '#jobs-fab{position:fixed;left:14px;bottom:14px;z-index:234;display:none;align-items:center;gap:7px;background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);color:var(--subtext);cursor:pointer;padding:7px 13px 7px 10px;font-family:system-ui,sans-serif;font-size:11.5px;letter-spacing:.02em;transition:border-color .15s,color .15s;}',
     '#jobs-fab.show{display:inline-flex;}',
     '#jobs-fab:hover{border-color:var(--lavender);color:var(--text);}',
     '#jobs-fab .jf-dot{width:8px;height:8px;border-radius:50%;background:var(--overlay0);flex:none;}',
@@ -242,7 +251,7 @@
     '#jobs-fab .jf-badge{background:var(--lavender);color:var(--base);border-radius:999px;font-size:10px;font-weight:700;padding:1px 6px;min-width:15px;text-align:center;display:none;}',
     '#jobs-fab.busy .jf-badge{display:inline-block;}',
     '@keyframes jf-pulse{0%,100%{opacity:.5;}50%{opacity:1;}}',
-    '#jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:366px;min-width:260px;max-width:min(560px, calc(100vw - 28px));max-height:min(74vh,600px);display:none;flex-direction:column;overflow:hidden;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55);}',
+    '#jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:366px;min-width:260px;max-width:min(560px, calc(100vw - 28px));max-height:min(74vh,600px);display:none;flex-direction:column;overflow:hidden;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55);font-family:system-ui,sans-serif;}',
     '#jobs-tray.open{display:flex;}',
     '#jobs-tray .jt-head{display:flex;align-items:center;gap:6px;padding:9px 11px;border-bottom:1px solid var(--surface0);background:linear-gradient(180deg,var(--surface0),transparent);}',
     '#jobs-tray .jt-title{font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:var(--lavender);font-weight:700;flex:1;display:flex;align-items:center;gap:7px;}',
@@ -276,7 +285,7 @@
     '.jt-x:hover{color:var(--red);}',
     // ---- Toasts: small, corner-stacked, reusable (job notices; achievements adopt the same
     // frame for the >3-unlock summary case). z-index raised 420->510 (see top-of-file comment).
-    '#mg-toasts{position:fixed;right:16px;top:64px;z-index:510;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;}',
+    '#mg-toasts{position:fixed;right:16px;top:64px;z-index:510;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:system-ui,sans-serif;}',
     '.mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .28s cubic-bezier(.2,.9,.3,1.2);}',
     '.mg-toast.out{animation:mg-toast-out .3s ease forwards;}',
     '.mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);}',
@@ -765,6 +774,14 @@
       if(s<86400) return Math.floor(s/3600)+'h ago';
       return Math.floor(s/86400)+'d ago';
     }
+    // Where a job came from, in words. `j.type` is an internal enum -- 'cli', 'panel',
+    // 'generate', 'delete', 'import' -- and this line used to render it raw under
+    // `.jt-kind{text-transform:capitalize}`, which turned 'cli' into the non-word "Cli".
+    // An unmapped type still falls through to its own capitalized value rather than
+    // vanishing, so a new job source degrades to slightly-ugly instead of blank.
+    var KIND_LABEL = { cli: 'Terminal', panel: 'Control Panel', generate: 'Generate',
+                       'delete': 'Delete', 'import': 'Import' };
+    function kindLabel(t){ return KIND_LABEL[t] || t || 'Job'; }
     function row(j){
       var st=j.status||'running', fin=(st==='done'||st==='failed');
       var ic = st==='done'
@@ -777,7 +794,7 @@
       var bar='';
       if(st==='running' && j.total){ var pct=Math.min(100, Math.round((j.done||0)/j.total*100)); bar='<div class="jt-bar"><i style="width:'+pct+'%"></i></div>'; }
       var errmsg=(st==='failed'&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
-      var sub='<div class="jt-sub"><span class="jt-kind">'+esc(j.type||'job')+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
+      var sub='<div class="jt-sub"><span class="jt-kind">'+esc(kindLabel(j.type))+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
       var x=fin?'<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">×</button>':'';
       return '<div class="jt-item'+(st==='failed'?' st-failed':'')+'"><div class="jt-ic">'+ic+'</div>'
            +'<div class="jt-main"><div class="jt-lab">'+esc(j.label||'Generation')+'</div>'+sub+bar+errmsg+'</div>'
