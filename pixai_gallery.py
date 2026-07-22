@@ -7381,7 +7381,9 @@ function savePrompt() {
       {% for u in web_users %}
       <div class="u-row" data-username="{{ u.username }}">
         <span class="u-name">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
+        {% if panel_is_local or u.username == current_username %}
         <button type="button" class="btn btn-danger" onclick="removeUser(this)">Remove</button>
+        {% endif %}
       </div>
       {% else %}
       <div class="p-note" id="users-empty">No accounts.</div>
@@ -7390,6 +7392,7 @@ function savePrompt() {
   </div>
   <div class="p-sec">
     <h2>Add user</h2>
+    {% if panel_is_local %}
     <form id="add-user-form" onsubmit="return addUser(event)">
       <div class="setup-row login-fields" style="max-width:380px;">
         <input type="text" id="new-username" placeholder="Username" autocomplete="off" maxlength="64" required>
@@ -7399,7 +7402,10 @@ function savePrompt() {
       </div>
     </form>
     <div id="add-user-status" style="margin-top:8px;"></div>
-    <div class="p-note">Every account here has equal access to this gallery (generate, browse, maintenance) &mdash; there's no separate admin tier.</div>
+    <div class="p-note">Once you're signed in, every account has equal access to this gallery (generate, browse, maintenance) &mdash; there's no separate admin tier. Adding a new account, or removing someone else's, is restricted to the machine running the gallery.</div>
+    {% else %}
+    <div class="p-note">Only the machine running the gallery can add new accounts. Ask the owner, or sign in from that machine. (You can still remove your own account above.)</div>
+    {% endif %}
   </div>
   </div>
 </div>
@@ -7458,14 +7464,25 @@ function addUser(evt){
 function removeUser(btn){
   // Read the username back off the row's data attribute rather than a
   // templated/interpolated JS argument -- see the comment in addUser() above.
+  // Whether this is YOUR OWN row is read the same way, off the server-rendered
+  // ".u-you" marker already on the page -- no second templated JS value needed.
   var row=btn.closest('.u-row');
   var username=row.getAttribute('data-username');
-  if(!confirm('Remove account "'+username+'"?\\n\\nThey will be signed out on every device immediately.')) return;
+  var isSelf = !!row.querySelector('.u-you');
+  var msg = isSelf
+    ? 'Remove your own account "'+username+'"?\\n\\nYou will be signed out immediately, on every device.'
+    : 'Remove account "'+username+'"?\\n\\nThey will be signed out on every device immediately.';
+  if(!confirm(msg)) return;
   var st=el('add-user-status');
   fetch('/api/users/remove',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:username, csrf:CSRF})})
     .then(function(r){return r.json();}).then(function(d){
       if(d.error){ st.innerHTML='<span class="st-failed">⚠ '+escH2(d.error)+'</span>'; return; }
+      // Self-removal kills the caller's own session server-side immediately
+      // (get_web_user_session_epoch returns None once the account is gone) --
+      // send them to /login rather than leave a dead session sitting on the
+      // Panel page looking functional until their next click fails.
+      if(isSelf){ location.href='/login'; return; }
       row.remove();
       if(!el('users-list').querySelector('.u-row')){
         var e=document.createElement('div'); e.className='p-note'; e.id='users-empty'; e.textContent='No accounts.';
@@ -8182,19 +8199,25 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         session.setdefault("csrf", secrets.token_hex(16))
         # out_dir is a HOST FILESYSTEM PATH -- withheld from a LAN caller the same way
         # /api/panel/status's job stdout is (2026-07-21 audit, S2): it's unrelated to
-        # this route's actual trust decision. Every account here already carries equal
-        # trust for ACCOUNT MANAGEMENT (api_users_add/_remove are LOGIN, deliberately --
-        # see those routes' own docstrings), so usernames on this same page are staying
-        # visible on purpose; that call was made and is not being revisited here. A
-        # server install path is a different kind of fact -- it identifies the owner's
-        # machine, not a fellow account -- and the front door never signed up to expose
-        # it past the loopback boundary. LOGIN tier itself is unchanged; the field is.
+        # this route's actual trust decision. Usernames on this same page stay visible
+        # to every signed-in session on purpose -- reading the roster isn't the same
+        # action as adding to or removing from it, and that's a different, narrower
+        # question than the one below. A server install path is a different kind of
+        # fact -- it identifies the owner's machine, not a fellow account -- and the
+        # front door never signed up to expose it past the loopback boundary.
         panel_out_dir = str(out_dir) if _is_local_request() else "(local to the server)"
+        # panel_is_local drives the Users tab's UI: as of 2026-07-22, adding an account
+        # or removing someone ELSE's is LOCALHOST-only (api_users_add/_remove) -- a LAN
+        # session can still remove its OWN row. Hiding the controls it can't use avoids
+        # a confirm-dialog-then-403 dead end; the server enforces the same boundary
+        # regardless of what this flag renders, so getting this wrong is a UX
+        # regression, not a security one.
+        panel_is_local = _is_local_request()
         return render_template_string(
             PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
             all_actions_json=json.dumps(all_actions),
             out_dir=panel_out_dir, actions_json=json.dumps(actions),
-            supervised=_supervised(),
+            supervised=_supervised(), panel_is_local=panel_is_local,
             web_users=core.list_web_users(), csrf=session["csrf"],
             current_username=session.get("user"))
 
@@ -8214,14 +8237,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/users/add", methods=["POST"])
     def api_users_add():
-        """Add a new gallery web-login account from the Panel's Users tab. Gated
-        by nothing beyond the front door (_enforce_front_door()) -- every account
-        in this app's model already carries equal trust, so any logged-in session
-        (local or LAN) may manage accounts, same as the rest of the Panel. Refuses
-        a duplicate username outright rather than silently resetting a stranger's
-        password (that's still what add_or_update_web_user itself does, and stays
-        available for the owner via --add-web-user for exactly that recovery
-        case) -- mirrors static/_mockup_login_panel.html's Add User validation.
+        """Add a new gallery web-login account from the Panel's Users tab.
+
+        LOCALHOST-ONLY as of 2026-07-22. Previously gated by nothing beyond the
+        front door, reasoned as "every account in this app's model already
+        carries equal trust, so any logged-in session may manage accounts."
+        That principle covers what an ALREADY-EXISTING account can do (generate,
+        browse, curate) -- it was never weighed against a LAN guest minting
+        itself a brand-new, persistent account. Closed alongside the matching
+        fix to /api/users/remove: a LAN session used to be able to evict the
+        owner's own account and then register a fresh one for itself, one
+        finding with two halves (see docs/STATE.md's Access & accounts section).
+        Account creation now sits in the same trust class as
+        api_setup_save_key/api_branding_shortcut/destructive Panel jobs -- a
+        logged-in LAN account can use the gallery, not decide who else gets to.
+
+        Refuses a duplicate username outright rather than silently resetting a
+        stranger's password (that's still what add_or_update_web_user itself
+        does, and stays available for the owner via --add-web-user for exactly
+        that recovery case) -- mirrors static/_mockup_login_panel.html's Add
+        User validation.
 
         The exists-check and the write happen in ONE call to
         core.add_web_user_if_new() (a single _accounts_lock acquisition), not a
@@ -8232,6 +8267,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         write would silently reset the first request's just-created password.
         Adversarial-review hardening, 2026-07-19 (same root cause as
         /api/users/remove's last-account race, see that route's docstring)."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -8256,12 +8293,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/users/remove", methods=["POST"])
     def api_users_remove():
-        """Remove a gallery web-login account from the Panel's Users tab. Refuses
-        to remove the LAST remaining account: that would leave zero accounts,
-        re-triggering the local-only bootstrap state and effectively locking out
-        every remote LAN user until someone re-bootstraps from the server
-        machine itself -- a real self-lockout risk, guarded against explicitly
-        rather than left as a footgun.
+        """Remove a gallery web-login account from the Panel's Users tab.
+
+        Removing SOMEONE ELSE'S account is LOCALHOST-only, as of 2026-07-22;
+        removing YOUR OWN account stays reachable from any logged-in session,
+        local or LAN. Self-removal can only harm the caller -- that's a
+        different, much smaller trust question than evicting another named
+        account, which is the specific gap this closes: a LAN session used to
+        be able to remove ANY account by name, including the owner's, with no
+        guard beyond "not the last account left." A guest handed a tablet could
+        boot the owner and (before the matching api_users_add fix) mint itself
+        a durable login in the same motion. See docs/STATE.md's Access &
+        accounts section for the full reasoning; api_users_add closes the
+        other half (a LAN session can no longer register a new account either).
+
+        Refuses to remove the LAST remaining account: that would leave zero
+        accounts, re-triggering the local-only bootstrap state and effectively
+        locking out every remote LAN user until someone re-bootstraps from the
+        server machine itself -- a real self-lockout risk, guarded against
+        explicitly rather than left as a footgun. This applies even to a local
+        session removing itself.
 
         The "how many accounts exist" check and the removal happen in ONE call
         to core.remove_web_user_guarded() (a single _accounts_lock acquisition),
@@ -8276,6 +8327,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         username = str(body.get("username") or "").strip()
+        if username != session.get("user") and not _is_local_request():
+            return jsonify({"error": "localhost-only to remove another account"}), 403
         import pixai_gallery_backup as core
         result = core.remove_web_user_guarded(username)
         if result == "not_found":
