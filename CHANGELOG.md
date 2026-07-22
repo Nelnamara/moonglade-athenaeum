@@ -66,6 +66,17 @@ git tags. Full prose notes for tagged versions live on
   disabled while any added LoRA is unresolved, and the submit handler itself refuses
   to fire on an unresolved LoRA as a second guard.
 
+- **`--generate`/`--edit-image` with `batch>1` catalogued only the composite grid,
+  losing every individual image.** Both built their saved-media list by reading
+  `outputs.mediaId` (the composite grid PixAI returns for any `batchSize>1` task) and
+  `outputs.batchMediaIds` (null on modern tasks) directly, instead of going through
+  `_task_image_media` — the helper that already correctly prefers `outputs.batch[]`,
+  written for `_download_image_task`/`web_generate` but never wired into the CLI's own
+  generate/edit-image runners. A 4-image batch run downloaded and catalogued exactly
+  one file: the grid thumbnail, not any of the actual generations paid for. Both now
+  use the same helper, and pick up each image's real per-batch seed in the process
+  instead of the shared submitted one.
+
 ### Known issue (not fixed — deliberately left for the design pass)
 
 - **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
