@@ -135,3 +135,35 @@ def test_cli_jobs_are_labelled_in_words_not_command_slugs():
     for label in ('"Image generation"', '"Video render"', '"Library sync"',
                   '"Incremental update"', '"Full backup"'):
         assert label in src, "expected human CLI job label %s is missing" % label
+
+
+def test_notify_components_do_not_inherit_their_font_from_the_host_page():
+    """The same Activity card rendered in two different typefaces depending on the page.
+
+    #jobs-fab / #jobs-tray / #mg-toasts set font-SIZE but used to inherit font-FAMILY, and
+    the two hosts disagree: the gallery's BASE_HTML body declares `system-ui, sans-serif`,
+    while _LOOM_SHELL's body set only background and margin. Those three are siblings of
+    #root in that shell, so on /loom they inherited nothing and fell back to the browser
+    default. mg-notify is host-neutral by design, so the component owns this.
+
+    Bite: drop font-family from any of the three roots and this fails, naming it.
+    """
+    js = _notify_js()
+    for sel in ("#jobs-fab{", "#jobs-tray{", "#mg-toasts{"):
+        i = js.index(sel)
+        rule = js[i:js.index("}", i)]
+        assert "font-family" in rule, (
+            "%s does not state its own font-family -- it will inherit the host page's, and "
+            "the gallery and the Loom shell do not agree" % sel.rstrip("{"))
+
+
+def test_loom_shell_body_declares_a_font_for_what_mounts_outside_root():
+    """The shell mounts the Activity chip/tray, the toasts and the ? FAB outside #root, so
+    they inherit from body, not from .sb-root's own font-family. Belt to mg-notify's braces:
+    the shell should not hand anything an unstyled baseline."""
+    src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
+    shell = src[src.index("_LOOM_SHELL = r"):]
+    body_rule = shell[shell.index("body {"):shell.index("}", shell.index("body {"))]
+    assert "font-family" in body_rule, (
+        "_LOOM_SHELL's body has no font-family; anything mounted outside #root falls back "
+        "to the browser default")
