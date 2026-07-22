@@ -6144,13 +6144,17 @@ var Gen = (function(){
   function updateDimNote(){ var n=el('gen-dim-note'); if(!n) return; var d=dims();
     n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px'); }
   function payload(){ var a=dims();
-    return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
+    return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'',
+      model_type:(selected&&selected.model_type)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
       steps:+el('gen-steps').value||25, cfg:+el('gen-cfg').value||7,
       count:+el('gen-count').value, seed:(el('gen-seed')?el('gen-seed').value.trim():''),
       high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
       ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
-      loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
+      // model_type/lora_base_type ride along so the server can run the SAME architecture
+      // check this drawer already gates Go on (loraIncompat/anyIncompat) -- a direct POST
+      // to /api/generate bypassing the UI had no equivalent check at all.
+      loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight, lora_base_type:l.lora_base_type||''};}) }; }
   function refreshCost(){
     updateDimNote();
     var cost=el('gen-cost');
@@ -10622,14 +10626,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # can be stale/raced). This is what stops gens landing as "Unknown model" + missing
             # the feed. Falls back to the client version_id when no model_id was sent.
             _mid = str(body.get("model_id") or "").strip()
+            model_type = str(body.get("model_type") or "").strip()
             if _mid:
-                _vid = (core.resolve_version_meta(session, _mid) or {}).get("version_id") or ""
+                _meta = core.resolve_version_meta(session, _mid) or {}
+                _vid = _meta.get("version_id") or ""
                 if _vid:
                     args.model = _vid
+                    model_type = _meta.get("model_type") or model_type   # server-resolved wins
             if not args.model:
                 return jsonify({"error": "pick a model first"}), 400
             if not args.prompt:
                 return jsonify({"error": "enter a prompt"}), 400
+            # is_lora_compatible() -- the LoRA architecture-mismatch spend gate -- previously
+            # had zero production callers; the drawer's own loraIncompat()/anyIncompat() only
+            # disabled the Go button client-side, so a direct POST here had no equivalent
+            # check at all and could burn real credits/a card on a submission PixAI's own
+            # backend rejects (audit: orphaned-surfaces, high, 2026-07-21). lora_base_type
+            # rides in the payload rather than a fresh resolve per LoRA -- proportionate here
+            # since this only guards the caller's OWN spend, not a security boundary.
+            for lo in (body.get("loras") or []):
+                vid = str((lo or {}).get("version_id") or "").strip()
+                lbt = str((lo or {}).get("lora_base_type") or "").strip()
+                if vid and not core.is_lora_compatible(model_type, lbt):
+                    return jsonify({"error": "a selected LoRA doesn't match the chosen "
+                                             "model's architecture -- remove it or switch models"}), 400
             params = core._gen_parameters(args)
             core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
             task_id = core.submit_generation(session, params)
