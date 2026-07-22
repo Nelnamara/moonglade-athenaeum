@@ -615,6 +615,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 1, 'rungs_total': 5,
      'roast': "[redacted]",
      'roast_nsfw': '[redacted]',
     },
@@ -627,6 +628,7 @@ ACHIEVEMENTS = [
      'threshold': 1000,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 2, 'rungs_total': 5,
      'roast': '[redacted]'ve officially crossed from "hobby" into "someone should keep an eye on this one." The shelves groan. So do we.',
      'roast_nsfw': "[redacted]",
     },
@@ -639,6 +641,7 @@ ACHIEVEMENTS = [
      'threshold': 10000,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 3, 'rungs_total': 5,
      'skin': 'moonlit',
      'roast': "[redacted]",
      'roast_nsfw': '[redacted]'s a bit much." Here\'s a shiny new skin, you magnificent pack rat. Now go outside. (You won\'t.)',
@@ -652,6 +655,7 @@ ACHIEVEMENTS = [
      'threshold': 25000,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 4, 'rungs_total': 5,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -664,6 +668,7 @@ ACHIEVEMENTS = [
      'threshold': 50000,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 5, 'rungs_total': 5,
      'banner_reward': True,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
@@ -677,6 +682,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 1, 'rungs_total': 4,
      'roast': '[redacted]',
      'roast_nsfw': "[redacted]",
     },
@@ -689,6 +695,7 @@ ACHIEVEMENTS = [
      'threshold': 10,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 2, 'rungs_total': 4,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -701,6 +708,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 3, 'rungs_total': 4,
      'skin': 'ember',
      'roast': '[redacted]',
      'roast_nsfw': '[redacted]'s your skin. Yell "action" one more time and we\'re revoking your parking spot.',
@@ -714,6 +722,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 4, 'rungs_total': 4,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -726,6 +735,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 1, 'rungs_total': 4,
      'roast': "[redacted]",
      'roast_nsfw': '[redacted]',
     },
@@ -738,6 +748,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 2, 'rungs_total': 4,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -750,6 +761,7 @@ ACHIEVEMENTS = [
      'threshold': 500,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 3, 'rungs_total': 4,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -762,6 +774,7 @@ ACHIEVEMENTS = [
      'threshold': 1000,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 4, 'rungs_total': 4,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -774,6 +787,7 @@ ACHIEVEMENTS = [
      'threshold': 10,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'vault', 'rung': 1, 'rungs_total': 2,
      'roast': "[redacted]",
      'roast_nsfw': '[redacted]',
     },
@@ -786,6 +800,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'vault', 'rung': 2, 'rungs_total': 2,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -798,6 +813,7 @@ ACHIEVEMENTS = [
      'threshold': 25,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'menagerie', 'rung': 1, 'rungs_total': 2,
      'skin': 'verdant',
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
@@ -811,6 +827,7 @@ ACHIEVEMENTS = [
      'threshold': 75,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'menagerie', 'rung': 2, 'rungs_total': 2,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -823,6 +840,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'index', 'rung': 1, 'rungs_total': 3,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -835,6 +853,7 @@ ACHIEVEMENTS = [
      'threshold': 500,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'index', 'rung': 2, 'rungs_total': 3,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -847,6 +866,7 @@ ACHIEVEMENTS = [
      'threshold': 2500,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'index', 'rung': 3, 'rungs_total': 3,
      'roast': "[redacted]",
      'roast_nsfw': '[redacted]'ve tagged more than most museums and you did it for FUN. There\'s no word for what you are. "Catalogus Magnus" is us being polite.',
     },
@@ -859,6 +879,7 @@ ACHIEVEMENTS = [
      'threshold': 10,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'gallery', 'rung': 1, 'rungs_total': 2,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -871,6 +892,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'gallery', 'rung': 2, 'rungs_total': 2,
      'roast': "[redacted]",
      'roast_nsfw': '[redacted]'ve made "look at my art" a full-time bit. The crowd\'s fake, the wine\'s fake, and your confidence is somehow REAL. Terrifying. Cheers.',
     },
@@ -883,6 +905,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'restoration', 'rung': 1, 'rungs_total': 3,
      'roast': "[redacted]",
      'roast_nsfw': '[redacted]'s the spirit — nothing\'s ever done, nothing\'s ever good enough. Welcome to the disease, Restorer.',
     },
@@ -895,6 +918,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'restoration', 'rung': 2, 'rungs_total': 3,
      'roast': '[redacted]'t accept "finished" anymore. Everything\'s a draft. Everything can be fixed. This is a problem. It\'s also art.',
      'roast_nsfw': "[redacted]",
     },
@@ -907,6 +931,7 @@ ACHIEVEMENTS = [
      'threshold': 200,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'restoration', 'rung': 3, 'rungs_total': 3,
      'roast': '[redacted]',
      'roast_nsfw': "[redacted]",
     },
@@ -919,6 +944,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'sweep', 'rung': 1, 'rungs_total': 2,
      'roast': '[redacted]',
      'roast_nsfw': '[redacted]',
     },
@@ -931,6 +957,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'sweep', 'rung': 2, 'rungs_total': 2,
      'roast': "[redacted]",
      'roast_nsfw': '[redacted]',
     },
@@ -943,6 +970,7 @@ ACHIEVEMENTS = [
      'threshold': 7,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'vigil', 'rung': 1, 'rungs_total': 2,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -955,6 +983,7 @@ ACHIEVEMENTS = [
      'threshold': 30,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'vigil', 'rung': 2, 'rungs_total': 2,
      'roast': "[redacted]",
      'roast_nsfw': "[redacted]",
     },
@@ -1321,6 +1350,24 @@ SKINS = [
 ]
 _SKIN_IDS = {s["id"] for s in SKINS}
 
+# The 10 Evolution Ladder tracks each ladder achievement's 'track' field points at
+# (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields, sourced from
+# docs/achievements_roster_57.json's roster.tracks). Single source of truth for
+# ladder display names -- the Trophy Hall's carousel/ladder-grid groups by this,
+# not a second hand-maintained id->name map in the frontend.
+LADDER_TRACKS = [
+    {"id": "archive",     "name": "The Archive",           "metric": "images"},
+    {"id": "loom",        "name": "The Loom",               "metric": "videos"},
+    {"id": "forge",       "name": "The Moonforge",          "metric": "local_gens"},
+    {"id": "vault",       "name": "The Stacks",             "metric": "collections"},
+    {"id": "menagerie",   "name": "The Menagerie",          "metric": "models"},
+    {"id": "index",       "name": "The Index",              "metric": "tagged"},
+    {"id": "gallery",     "name": "The Gallery",            "metric": "published"},
+    {"id": "restoration", "name": "The Restoration Wing",   "metric": "edits"},
+    {"id": "sweep",       "name": "The Great Sweep",        "metric": "culled"},
+    {"id": "vigil",       "name": "The Vigil",              "metric": "days_used"},
+]
+
 # ---------------------------------------------------------------------------
 # Branding: the banner mark (the animated icon beside the title) is one of the
 # owner's own cut marks in out_dir/branding/marks/, chosen + animated from the
@@ -1566,6 +1613,10 @@ def compute_achievements(metrics, seen=(), sets=None):
             "banner_reward": bool(a.get("banner_reward")), "points": achievement_points(a),
             "roast": a.get("roast", ""), "roast_nsfw": a.get("roast_nsfw", ""),
         }
+        if a.get("bucket") == "ladder":
+            entry["track"] = a["track"]
+            entry["rung"] = a["rung"]
+            entry["rungs_total"] = a["rungs_total"]
         if a["id"] in crit:
             entry["criteria"] = crit[a["id"]]
         achs.append(entry)
@@ -1589,7 +1640,7 @@ def compute_achievements(metrics, seen=(), sets=None):
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
     earned_points = sum(x["points"] for x in achs if x["earned"])
     possible_points = sum(x["points"] for x in achs)
-    return {"achievements": achs, "skins": skins, "newly": newly,
+    return {"achievements": achs, "skins": skins, "ladders": LADDER_TRACKS, "newly": newly,
             "earned_points": earned_points, "possible_points": possible_points}
 
 
