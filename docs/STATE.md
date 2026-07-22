@@ -33,9 +33,11 @@ CSRF, `/api/panel/status` stopped handing maintenance stdout to LAN accounts, th
 stopped caching a followed login redirect, and saved views became per-account; plus the last two
 video models, a prompt field in Deep Focus, and the cost displays consolidated onto
 `<mg-cost-badge>`). **`loom-v2` has since pulled ahead again** (post-release audit fixes S1–S3/
-B1/B2/B4, the account-eviction gate, the Folio of Honors redesign + its layout fix) — check
-`git rev-list --count origin/master..origin/loom-v2` for the live count rather than trusting a
-number here. Each release is a `--no-ff` merge of `loom-v2` → `master`, tagged and published as
+B1/B2/B4, the account-eviction gate, the Folio of Honors redesign + its layout fix, and a
+2026-07-22 sweep through the rest of the audit board's high-severity list — see
+`docs/AUDIT_2026-07-21.md` for what's still open, `CHANGELOG.md [Unreleased]` for what shipped)
+— check `git rev-list --count origin/master..origin/loom-v2` for the live count rather than
+trusting a number here. Each release is a `--no-ff` merge of `loom-v2` → `master`, tagged and published as
 a GitHub Release. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
 tree, the `v2` toggle, and the `CardView`/`CardEditor` components) was retired 2026-07-17; `/loom`
 opens straight into the V2 shell with no layout switch. The repo is public and has real external
