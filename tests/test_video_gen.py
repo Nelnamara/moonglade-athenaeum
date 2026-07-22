@@ -4,6 +4,8 @@ builder produces exactly what PixAI's generator sends. Pure functions; no networ
 no credits."""
 from types import SimpleNamespace
 
+import pytest
+
 import pixai_gallery_backup as core
 
 
@@ -131,6 +133,64 @@ def test_dump_params_prints_full_shape_when_flagged(capsys):
 def test_dump_params_silent_by_default(capsys):
     core._maybe_dump_params(SimpleNamespace(dump_params=False), {"parameters": {"x": 1}})
     assert capsys.readouterr().out == ""
+
+
+def test_dump_params_also_prints_the_task_status(capsys):
+    """Found 2026-07-21 debugging a real report of edit jobs that 'never hit PixAI':
+    --dump-params printed only what was SUBMITTED, never what happened to it -- so the
+    one moment someone recovers a task specifically because something looked wrong, this
+    told them nothing about the outcome. A real task carries status alongside parameters
+    in the same getTaskById response; this must not require a second round trip."""
+    core._maybe_dump_params(SimpleNamespace(dump_params=True),
+                            {"parameters": {"x": 1}, "status": "Failed"})
+    out = capsys.readouterr().out
+    assert "task status: Failed" in out
+
+
+def test_dump_params_omits_the_status_line_when_absent(capsys):
+    """Must not print 'task status: None' or similar -- silence is correct when the
+    response genuinely carries no status field."""
+    core._maybe_dump_params(SimpleNamespace(dump_params=True), {"parameters": {"x": 1}})
+    out = capsys.readouterr().out
+    assert "task status" not in out
+
+
+# ---- _outputs_or_raise: an accurate message when PixAI itself failed the task ----
+
+class TestOutputsOrRaise:
+    def test_does_not_raise_when_something_was_found(self):
+        core._outputs_or_raise({"status": "done"}, found=["media1"], empty_message="unused")
+
+    def test_genuinely_empty_completed_task_keeps_the_original_message(self):
+        """The case this message was always right about -- e.g. a silently
+        content-filtered task that PixAI still reports as 'done'. Must not change."""
+        with pytest.raises(core.EmptyOutputsError, match="task completed but no media"):
+            core._outputs_or_raise({"status": "done"}, found=[],
+                                   empty_message="task completed but no media ids found")
+
+    def test_missing_status_keeps_the_original_message(self):
+        """A --task-id recovery whose getTaskById response has no status field at all
+        (or the field is empty) must fall back to the original wording, not silently
+        claim a failure that was never reported."""
+        with pytest.raises(core.EmptyOutputsError, match="task completed but no media"):
+            core._outputs_or_raise({}, found=[],
+                                   empty_message="task completed but no media ids found")
+
+    @pytest.mark.parametrize("raw_status", ["failed", "Failed", "ERROR", "cancelled",
+                                            "Canceled", "rejected"])
+    def test_a_real_pixai_failure_gets_an_accurate_message_instead(self, raw_status):
+        """The actual bug: all four call sites said 'task completed' unconditionally,
+        even when PixAI's own status said the task never completed at all -- which read
+        as a Moonglade bug reporting a PixAI-side rejection. Case-insensitive, since
+        pixai_gallery_backup.py's own generation_status() lowercases before comparing
+        against this same _GEN_FAIL tuple."""
+        with pytest.raises(core.EmptyOutputsError) as exc:
+            core._outputs_or_raise({"status": raw_status}, found=[],
+                                   empty_message="task completed but no media ids found")
+        msg = str(exc.value)
+        assert "completed" not in msg, "still claims the task completed"
+        assert raw_status.lower() in msg.lower()
+        assert "pixai.art" in msg, "no pointer to where the real reason might be found"
 
 
 # ---- referenceVideo (multi-image/video/audio) -- pinned to the real submit (2026-07-02) ----

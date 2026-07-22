@@ -96,8 +96,8 @@ class PixAIError(Exception):
 
 
 class EmptyOutputsError(PixAIError):
-    """PixAI reported the task TERMINAL (phase 'done') but its outputs carry no
-    media -- the task produced nothing and never will.
+    """PixAI reported the task TERMINAL -- either 'done' with empty outputs, or a real
+    failure (failed/error/cancelled/rejected) -- so it produced nothing and never will.
 
     This exists to be distinguishable from an ordinary PixAIError at a catch
     site, NOT to carry different information. The web poller's collect step has
@@ -4102,13 +4102,50 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
 def _maybe_dump_params(args, result):
     """If --dump-params is set, print the task's full submit `parameters` (the exact
     shape PixAI received). Handy for banking a param shape off a recovered --task-id
-    without a live browser capture. Read-only; prints nothing otherwise."""
+    without a live browser capture. Read-only; prints nothing otherwise.
+
+    Also prints the task's own status. Found needed 2026-07-21: recovering a task is
+    almost always done BECAUSE something looked wrong, and the params alone can't say
+    whether PixAI ever actually ran it -- this used to print only what was submitted,
+    never what happened to it, so the one moment you most want to know the outcome was
+    exactly when this told you nothing about it."""
     if not getattr(args, "dump_params", False):
         return
     params = (result or {}).get("parameters")
     print("=== task parameters (full submit shape) ===")
     print(json.dumps(params if params is not None else result, indent=2, ensure_ascii=False))
     print("=== end parameters ===")
+    status = (result or {}).get("status")
+    if status:
+        print("task status: {}".format(status))
+
+
+def _outputs_or_raise(result, found, empty_message):
+    """Common tail for every 'download a completed task's outputs' function: raise
+    EmptyOutputsError when there is nothing to download, with a message that matches
+    what actually happened rather than always claiming the task 'completed'.
+
+    Found 2026-07-21 chasing a real report of edit jobs that looked like they'd never
+    reached PixAI. They had: a real task id was issued (the spend already happened),
+    but PixAI's own status for the task was 'failed' -- and every one of the four call
+    sites below said 'task completed but no media ids found' regardless, because none
+    of them looked at `result["status"]` before writing the message. For a task PixAI
+    itself marked failed, 'completed' is not almost-right, it's the opposite of what
+    happened, and it is exactly the kind of thing that reads as a tool bug instead of
+    a PixAI-side rejection.
+
+    `empty_message` is the ORIGINAL message, used verbatim for the case it was always
+    right about -- a task that is genuinely done with empty outputs (e.g. silently
+    content-filtered). Only the newly-distinguished failed/cancelled/rejected case gets
+    different text; nothing about the genuinely-empty case changes."""
+    if found:
+        return
+    raw = str((result or {}).get("status") or "").lower()
+    if raw in _GEN_FAIL:
+        raise EmptyOutputsError(
+            "PixAI reported this task as '{}' -- it did not complete, so there is "
+            "nothing to recover. Check pixai.art for why, or resubmit.".format(raw))
+    raise EmptyOutputsError(empty_message)
 
 
 def run_generate(args):
@@ -4186,8 +4223,7 @@ def run_generate(args):
         if v.get("mediaId"):
             mids.append(str(v["mediaId"]))
     mids = list(dict.fromkeys(mids))
-    if not mids:
-        raise EmptyOutputsError("task completed but no media ids found")
+    _outputs_or_raise(result, mids, "task completed but no media ids found")
 
     # Prefer the task's actual metadata (authoritative, and the only source when
     # recovering by --task-id); fall back to the params we submitted.
@@ -4256,8 +4292,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     and reference-video (referenceVideo) -- reads outputs.videos + the submitted block
     generically. Returns the list of saved file paths."""
     outs, shared = video_outputs(result)
-    if not outs:
-        raise EmptyOutputsError("video task completed but no video outputs found")
+    _outputs_or_raise(result, outs, "video task completed but no video outputs found")
     detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
     sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
@@ -4376,8 +4411,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     resolve_media -> download -> catalog as source='api'. Returns the saved file paths."""
     outputs = result.get("outputs") or {}
     media = _task_image_media(outputs)
-    if not media:
-        raise EmptyOutputsError("task completed but no media ids found")
+    _outputs_or_raise(result, media, "task completed but no media ids found")
     from pixai_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     img_dir = out / "images"
@@ -4841,8 +4875,7 @@ def run_edit_image(args):
     for m in outputs.get("batchMediaIds") or []:
         mids.append(str(m))
     mids = list(dict.fromkeys(mids))
-    if not mids:
-        raise EmptyOutputsError("edit task completed but no media ids found")
+    _outputs_or_raise(result, mids, "edit task completed but no media ids found")
 
     fm = extract_full_meta(result)
     chat = (params.get("chat") or {}) if isinstance(params, dict) else {}
