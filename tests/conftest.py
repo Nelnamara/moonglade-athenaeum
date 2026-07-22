@@ -67,7 +67,11 @@ def _no_live_card_network(monkeypatch):
     """The card list/match hit PixAI's live /v2 REST API. Keep unit tests offline by
     default: _rest_get/_rest_post raise (so list_kaisuukens -> [] and match_kaisuuken ->
     None) unless a test overrides them, and user-id resolution is stubbed so _make_session
-    (now reached from generation previews via the free/paid note) builds no network."""
+    (now reached from generation previews via the free/paid note) builds no network.
+    Exception: match_kaisuuken(raise_on_error=True) -- the spend-time check inside
+    _apply_kaisuuken -- deliberately does NOT fail soft here; it propagates this same
+    blocked-network error, so any test that reaches _apply_kaisuuken's auto-match path
+    must stub match_kaisuuken (or READ_ONLY-gate/--no-card/--kaisuuken-id past it)."""
     def _blocked(*a, **k):
         raise core.PixAIError("live /v2 REST blocked in tests")
     monkeypatch.setattr(core, "_rest_get", _blocked, raising=False)

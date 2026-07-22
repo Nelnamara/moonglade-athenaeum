@@ -54,6 +54,11 @@ class TestRunGenerateReadOnly:
         submit reaches the network when READ_ONLY is off, not exercising poll behaviour."""
         monkeypatch.setattr(core, "READ_ONLY", False)
         monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
+        # This test's job is the READ_ONLY gate, not free-card matching -- stub the
+        # auto-match directly (no card) rather than let it hit conftest's blocked
+        # _rest_post, which _apply_kaisuuken now correctly treats as a real failure
+        # and aborts on (see match_kaisuuken/_apply_kaisuuken, fail-open fix).
+        monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
         resp = mocker.MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"data": {"createGenerationTask": {"id": "t1"}}}

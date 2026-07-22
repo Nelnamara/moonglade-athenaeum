@@ -46,6 +46,15 @@ git tags. Full prose notes for tagged versions live on
   also removed ~30 CSS rules confirmed dead in the new render code, left behind from the old
   design and part of what caused the confusion.
 
+- **A flaky free-card check could silently spend real credits after promising "0
+  credits."** `match_kaisuuken`'s fail-soft contract (returns `None` on error) is right
+  for read-only/preview callers, but `_apply_kaisuuken` — the spend-time check — used the
+  same call, so a transient `/v2/kaisuuken/check` glitch was indistinguishable from
+  "genuinely no free card exists," and the generation proceeded to spend credits either
+  way. The spend-time check now retries once, then aborts the submission with a clear
+  error instead of guessing. Covers both the CLI and the web `/api/generate`/`/api/edit`
+  routes.
+
 ### Known issue (not fixed — deliberately left for the design pass)
 
 - **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
