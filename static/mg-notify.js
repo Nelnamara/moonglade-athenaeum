@@ -765,6 +765,14 @@
       if(s<86400) return Math.floor(s/3600)+'h ago';
       return Math.floor(s/86400)+'d ago';
     }
+    // Where a job came from, in words. `j.type` is an internal enum -- 'cli', 'panel',
+    // 'generate', 'delete', 'import' -- and this line used to render it raw under
+    // `.jt-kind{text-transform:capitalize}`, which turned 'cli' into the non-word "Cli".
+    // An unmapped type still falls through to its own capitalized value rather than
+    // vanishing, so a new job source degrades to slightly-ugly instead of blank.
+    var KIND_LABEL = { cli: 'Terminal', panel: 'Control Panel', generate: 'Generate',
+                       'delete': 'Delete', 'import': 'Import' };
+    function kindLabel(t){ return KIND_LABEL[t] || t || 'Job'; }
     function row(j){
       var st=j.status||'running', fin=(st==='done'||st==='failed');
       var ic = st==='done'
@@ -777,7 +785,7 @@
       var bar='';
       if(st==='running' && j.total){ var pct=Math.min(100, Math.round((j.done||0)/j.total*100)); bar='<div class="jt-bar"><i style="width:'+pct+'%"></i></div>'; }
       var errmsg=(st==='failed'&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
-      var sub='<div class="jt-sub"><span class="jt-kind">'+esc(j.type||'job')+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
+      var sub='<div class="jt-sub"><span class="jt-kind">'+esc(kindLabel(j.type))+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
       var x=fin?'<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">×</button>':'';
       return '<div class="jt-item'+(st==='failed'?' st-failed':'')+'"><div class="jt-ic">'+ic+'</div>'
            +'<div class="jt-main"><div class="jt-lab">'+esc(j.label||'Generation')+'</div>'+sub+bar+errmsg+'</div>'

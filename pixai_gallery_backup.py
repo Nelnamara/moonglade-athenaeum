@@ -6891,7 +6891,7 @@ def main():
             run_list_models(args)
             return
         if args.generate:
-            _job = _cli_job_start(out, "generate")
+            _job = _cli_job_start(out, "Image generation")
             try:
                 run_generate(args)
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
@@ -6900,7 +6900,7 @@ def main():
             _cli_job_finish(out, _job)
             return
         if getattr(args, "generate_video", False):
-            _job = _cli_job_start(out, "generate-video")
+            _job = _cli_job_start(out, "Video render")
             try:
                 run_generate_video(args)
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
@@ -6952,7 +6952,7 @@ def main():
             # a --sync run spawned as a subprocess. Also re-point args.progress at a
             # job-aware callback so the download/thumbnail progress ticks below feed
             # throttled heartbeats into the same job (purely additive -- see _make_progress).
-            _job = _cli_job_start(out, "sync")
+            _job = _cli_job_start(out, "Library sync")
             if _job:
                 args.progress = _make_progress(out, _job)
             try:
@@ -7016,7 +7016,7 @@ def main():
         # passes no `progress` kwarg today, so run_download's own `sys.stdout.isatty()`
         # fallback draws the \r bar directly -- wiring progress in would change that
         # existing terminal-output behavior (it would print unconditionally, tty or not).
-        _job = _cli_job_start(out, "update" if getattr(args, "update", False) else "download")
+        _job = _cli_job_start(out, "Incremental update" if getattr(args, "update", False) else "Full backup")
         try:
             run_download(args)
         except Exception as e:                           # noqa: BLE001 -- re-raised below unchanged
