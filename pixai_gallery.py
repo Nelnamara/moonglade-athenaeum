@@ -8161,10 +8161,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # must stay valid across multiple calls on the same page, not rotate
         # after each one.
         session.setdefault("csrf", secrets.token_hex(16))
+        # out_dir is a HOST FILESYSTEM PATH -- withheld from a LAN caller the same way
+        # /api/panel/status's job stdout is (2026-07-21 audit, S2): it's unrelated to
+        # this route's actual trust decision. Every account here already carries equal
+        # trust for ACCOUNT MANAGEMENT (api_users_add/_remove are LOGIN, deliberately --
+        # see those routes' own docstrings), so usernames on this same page are staying
+        # visible on purpose; that call was made and is not being revisited here. A
+        # server install path is a different kind of fact -- it identifies the owner's
+        # machine, not a fellow account -- and the front door never signed up to expose
+        # it past the loopback boundary. LOGIN tier itself is unchanged; the field is.
+        panel_out_dir = str(out_dir) if _is_local_request() else "(local to the server)"
         return render_template_string(
             PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
             all_actions_json=json.dumps(all_actions),
-            out_dir=str(out_dir), actions_json=json.dumps(actions),
+            out_dir=panel_out_dir, actions_json=json.dumps(actions),
             supervised=_supervised(),
             web_users=core.list_web_users(), csrf=session["csrf"],
             current_username=session.get("user"))

@@ -652,4 +652,41 @@ def test_panel_status_is_not_blanket_localhost_gated(app):
     for field in ("status", "action", "label", "rc", "progress"):
         assert field in body, (
             "`{}` vanished from the LAN payload -- the route was probably blanket "
-            "LOCALHOST-gated. Redact the `lines` field, not the whole response.".format(field))
+            "localhost-gated instead of having only its one leaky field fixed.".format(field))
+
+
+def test_panel_withholds_the_server_install_path_from_lan(app, tmp_path):
+    """`/panel` stays LOGIN-tier -- same reasoning as api_panel_status above -- but must
+    not hand a LAN caller the absolute host filesystem path (`out_dir`, e.g.
+    'D:\\\\Moonglade Athenaeum\\\\pixai_backup'). It renders as plain HTML ("library at
+    <code>{{ out_dir }}</code>"), unconditionally, to every LOGIN caller regardless of
+    _is_local_request() -- found by the 2026-07-21 audit as S2, the same shape as the
+    api_panel_status leak: a route whose TIER is correct but whose BODY mixes in host
+    detail that tier does not justify.
+
+    Deliberately narrower than that fix, though: usernames on this same page (S2's other
+    half) are NOT touched here. Account management is LOGIN-tier on purpose --
+    api_users_add/_remove's own docstrings say every account in this app's model already
+    carries equal trust -- so a fellow account's username is not the kind of fact this
+    route needs to hide. A host filesystem path is a different kind of fact entirely: it
+    identifies the SERVER's machine, not a peer account.
+    """
+    cli = _login(app)
+    resp = cli.get("/panel", environ_overrides={"REMOTE_ADDR": LAN})
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert str(tmp_path) not in html, (
+        "the real out_dir path reached a LAN caller's rendered /panel page")
+    assert "local to the server" in html
+
+
+def test_panel_shows_the_real_path_to_localhost(app, tmp_path):
+    """The companion to the test above: the owner sitting at the server must still see
+    the real path -- it's useful, it's their own machine, and there is nothing to
+    withhold from loopback. Without this test, a future 'just always redact it' change
+    would pass the LAN test above while quietly breaking the one caller who actually
+    needs this information."""
+    cli = _login(app)
+    html = cli.get("/panel").get_data(as_text=True)   # loopback REMOTE_ADDR by default
+    assert str(tmp_path) in html, (
+        "the owner's own /panel no longer shows the real library path")

@@ -17,6 +17,16 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Control Panel no longer shows your library's file path to other accounts on your
+  network.** `/panel` stays reachable to any signed-in account — managing accounts there is
+  intentionally shared, same as the rest of the Panel — but the server's own install path is
+  a different kind of fact, and only you see it now.
+- **A job's logged error message could be unbounded in size.** Every other place that logs an
+  error already trims it; one path — a bare terminal run hitting an unexpected failure — didn't,
+  so an unusually long message could be written and later served back in full. It's capped now,
+  the same as everywhere else.
+
+
 - **Recovering a failed task said "completed."** If PixAI itself marked a task
   failed/cancelled/rejected, every recovery path (`--dump-params`, the web gallery's
   "⬇ Import", the CLI's own `--generate`/`--generate-video`/`--edit-image` recovery)

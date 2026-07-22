@@ -609,6 +609,10 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   Re-spin as literal prefix replacement over `expanduser("~")` / `gettempdir()` / `sys.prefix`
   / `getcwd()` / `out_dir`, longest-first, with a spaced-username case. Triage rather than
   blanket-convert: some sites are legitimately useful diagnostics.
+  **A narrower, related gap was closed 2026-07-21**: `append_job_event` (the one write
+  choke point every job event funnels through) now caps every string field at 200 chars,
+  closing `_cli_job_finish`'s previously-uncapped `error=str(error)` write. That bounds
+  SIZE only, not host-path CONTENT — it is not a substitute for the re-spin above.
 - **Cache Storage outlives sign-out.** It is scoped to the ORIGIN, not the session, and the
   service worker answers `/img/` and `/full/` cache-first — a cache hit never reaches the
   server, so the front door never sees it. Every original and thumbnail the last session
@@ -629,9 +633,12 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   One command against a real tablet settles it; it has never been run.
 - **`/panel` lists every account username to any LOGIN-tier caller** (`web_users=core.list_web_users()`
   passed to the template). On an install with more than one account, any signed-in user can
-  enumerate the others. Flagged in passing by a 2026-07-21 review and left unowned; filed here
-  so it stops being a parenthetical. Same page also renders `library at {{ out_dir }}`, a host
-  path, to the same audience.
+  enumerate the others. **This is deliberate**, not a gap: `api_users_add`/`api_users_remove`
+  are LOGIN-tier on purpose — every account in this app's model carries equal trust, so seeing
+  and managing a fellow account is part of the design, the same as the rest of the Panel. (The
+  same page's `library at {{ out_dir }}` host-path disclosure — a genuinely different kind of
+  fact, and NOT part of that decision — was fixed 2026-07-21: withheld from non-local callers,
+  same pattern as `/api/panel/status`'s `lines` field.)
 - **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
   is unreachable and the variable name is a misnomer for "authorized". This is *deliberate and
   documented* at the call site — the front-door hook guarantees an authorized request reaches

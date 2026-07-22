@@ -826,15 +826,36 @@ def append_job_event(out_dir, job_id, status=None, **fields):
     """Append ONE job event to jobs.jsonl (append-only; safe from many processes).
     Each call records a job's CURRENT state; readers collapse by job_id. Known
     fields: type, label, done, total, media_ids, error, source, dismissed. `ts`
-    is stamped here. Fails soft -- logging a job must never break the job."""
+    is stamped here. Fails soft -- logging a job must never break the job.
+
+    Every STRING field is capped at 200 chars here, at the one write choke point
+    every job event from every source funnels through (web routes' own _log_job
+    wrapper, the Panel's subprocess reader, the CLI's own job logging). Found
+    2026-07-21: _cli_job_finish wrote a caught exception's str(e) here with NO cap
+    at all -- the only error-write in either module missing one -- fed by blanket
+    `except Exception` wrappers around whole download/sync runs, so an unbounded
+    message (a long traceback, an arbitrarily large error string) could land here
+    verbatim and later get served back to any LOGIN caller via /api/jobs. 200
+    matches the str(e)[:200] convention already used at every other error-serving
+    site in this app, rather than inventing a new limit.
+
+    This bounds SIZE, not CONTENT -- a short message can still contain a host path
+    (`C:\\Users\\...` easily fits in 200 chars). Redacting host detail out of error
+    text generally is a separate, larger, deliberately deferred piece of work (see
+    docs/AUDIT_2026-07-21.md, S3) -- a first attempt at that used a regex that
+    stopped redacting at the first space, silently leaving a spaced username
+    exposed, which is exactly the kind of narrow-looking fix that is easy to get
+    subtly wrong. This closes the "totally unbounded" half safely tonight without
+    reopening that harder problem."""
     if not job_id:
         return
     rec = {"ts": time.time(), "job_id": str(job_id)}
     if status is not None:
         rec["status"] = status
     for k, v in fields.items():
-        if v is not None:
-            rec[k] = v
+        if v is None:
+            continue
+        rec[k] = v[:200] if isinstance(v, str) else v
     try:
         with _jobs_path(out_dir).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
