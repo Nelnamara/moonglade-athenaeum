@@ -17,6 +17,25 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The wiki said the Generate drawer and web import were more restricted than they
+  actually are.** `wiki/Generating.md` claimed the Generate drawer was localhost-only —
+  it's actually reachable from any signed-in device, including over the LAN, by
+  deliberate design since v2.0.0. `wiki/Backing-Up.md` claimed the ↑ Import button only
+  appears for a local session — the button shows for everyone signed in; only the actual
+  import is refused from a LAN device. Both now describe the real (correct) restriction
+  instead of a stricter one nobody built. Five smaller wiki corrections landed alongside
+  these from the same fact-check pass: `Generating.md` (the web drawer doesn't
+  auto-fall-back on an unsupported Mode — only the CLI does), `Setup.md` (only the
+  password is hidden when adding a web user, not the username), `Deleting.md` (the CLI's
+  typed `delete` confirmation is case-insensitive, and now mentions `READ_ONLY`),
+  `Trophy-Hall.md` (The Moonforge counts Generated **and** Imported pieces, not just
+  Generated), `Trust-and-Safety.md` (`/logout` was missing from the list of routes
+  reachable without an account), `The-Loom.md` (Deep Focus's field list was missing its
+  new Prompt field), `How-It-Works.md` (the on-disk layout diagram was missing four
+  real files/folders), `Control-Panel.md` (a note on what a LAN session sees instead of
+  the install path), and `README.md` (the Quickstart never mentioned that first login
+  doubles as account creation).
+
 - **The Control Panel no longer shows your library's file path to other accounts on your
   network.** `/panel` stays reachable to any signed-in account — managing accounts there is
   intentionally shared, same as the rest of the Panel — but the server's own install path is

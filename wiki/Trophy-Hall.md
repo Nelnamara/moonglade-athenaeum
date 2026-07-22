@@ -30,7 +30,9 @@ legendary at the crown.
 | **The Vigil** | distinct days you opened the app | Night Keeper (7) · Moonwatch (30) |
 
 **The Archive** counts everything in your library; **The Moonforge** counts only what you
-made here (the same set as the gallery's **Source → Generated** filter).
+made here — pieces the gallery's Source filter calls **Generated or Imported**, not
+everything The Archive counts, but broader than **Source → Generated** alone (which
+excludes Imported).
 
 ### Milestones
 

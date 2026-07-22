@@ -25,9 +25,11 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
 - **Be reached by anyone who hasn't signed in.** As of **v2.0.0** the gallery is default-deny:
   every route except the login page itself requires an account, and that applies on the
   machine running the server exactly as it does over the network. Nothing is browsable
-  anonymously — the only things served without an account are the login page itself and the
-  static pieces it needs to render: your branding art and the web-app manifest, neither of
-  which carries any library content. Sessions are signed cookies over scrypt-hashed passwords,
+  anonymously — the only things served without an account are the login page itself, its own
+  sign-out endpoint (a harmless no-op if nobody's signed in — needed so a stale cookie can
+  still be cleared locally), and the static pieces the login page needs to render: your
+  branding art and the web-app manifest, none of which carries any library content. Sessions
+  are signed cookies over scrypt-hashed passwords,
   rate-limited per address. **Sign out** signs you out *everywhere* — it revokes every
   outstanding session for that account on every device, which is what makes it the right thing
   to press if you think a session was captured. (Simply visiting the sign-out URL, rather than

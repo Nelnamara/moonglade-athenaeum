@@ -70,8 +70,8 @@ there. Any signed-in session can: every account carries equal trust, there's no 
 role.
 
 **Locked out, or resetting a forgotten password.** On the server machine,
-`python pixai_gallery_backup.py --add-web-user` prompts (hidden — never echoed) for a username
-and password and writes the hash straight to `config.json`. It *adds or updates*, so it doubles
+`python pixai_gallery_backup.py --add-web-user` prompts for a username (typed normally) and a
+password (hidden — never echoed) and writes the hash straight to `config.json`. It *adds or updates*, so it doubles
 as a password reset for an existing name. Companions: `--list-web-users` shows who exists,
 `--remove-web-user <name>` deletes one. (Remove the last account and the first-run bootstrap
 re-opens on the server machine — a deliberate escape hatch, not a bug.)

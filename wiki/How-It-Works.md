@@ -52,10 +52,14 @@ pixai_backup/
 ├─ loom/              the Loom's storyboard store + exports
 ├─ _duplicates/       quarantine from --dedup (reversible)
 ├─ _deleted/          quarantine from a gallery delete (reversible)
+├─ view_presets/      per-account saved gallery views (<account>.json each)
 ├─ organize_manifest.csv   reversible move log (--undo-organize)
 ├─ achievements.json  earned achievements + earn dates
 ├─ telemetry.json     achievement counters
 ├─ jobs.jsonl         Control Panel job log
+├─ schedule.json      Control Panel scheduled jobs
+├─ prompt_snippets.json    saved prompt snippets
+├─ toolbox_presets.json    saved Toolbox presets
 ├─ catalog.db         the source of truth
 └─ raw_tasks.jsonl    raw task data
 ```
