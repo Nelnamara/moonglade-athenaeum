@@ -1166,3 +1166,54 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
     ref_params = seen["params"]
     assert edit_params != ref_params, \
         "edit-pro and reference-pro priced to identical params -- edit_model didn't thread through"
+
+
+# ---------------------------------------------------------------------------
+# Import: creating a collection on the way in
+# ---------------------------------------------------------------------------
+
+def test_import_modal_can_create_a_collection_on_import(tmp_path):
+    """The dropdown could only pick a collection that already existed, so importing into a
+    NEW one meant importing uncollected first and re-collecting afterwards. A collection is
+    just a name applied to rows (add_to_collection), so an unseen name creates one -- the
+    only thing missing was the way in.
+
+    The sentinel must never reach the server as a collection name: chosenCollection()
+    resolves it to the typed value before the request is built.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+
+    assert 'value="__new__"' in html, "no '+ New collection' option in the import dropdown"
+    assert 'id="imp-newcoll"' in html, "the option exists but there is nowhere to type the name"
+    assert 'ImportUI.onCollectionChange()' in html, "picking the option reveals nothing"
+
+    # The sentinel is resolved client-side, never appended as a collection name.
+    assert "chosenCollection" in html
+    assert "fd.append('collection', coll)" in html, (
+        "the import still appends the raw <select> value -- '__new__' would be sent as a "
+        "literal collection name")
+
+
+def test_import_modal_refuses_to_import_into_an_unnamed_new_collection(tmp_path):
+    """Picking "New collection…" and leaving it blank must not fall through to importing
+    uncollected -- that is the failure you notice later, hunting for files that went
+    somewhere else. chosenCollection() returns null for that state and doImport stops.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(coll===null)" in html, (
+        "doImport does not distinguish 'no collection chosen' from 'new collection, name "
+        "still blank' -- a blank name would silently import uncollected")
+
+
+def test_import_collection_choice_does_not_persist_between_imports(tmp_path):
+    """reset() runs on both open() and close(), so a name typed for one batch cannot ride
+    along on the next -- collection choice is per-import, not sticky."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(cs)cs.value=''" in html and "if(cn)cn.value=''" in html, (
+        "reset() leaves the collection selection or the typed new-collection name behind")

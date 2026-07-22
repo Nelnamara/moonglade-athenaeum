@@ -1562,6 +1562,34 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   <label className="sb-toggle" title="Blur this shot's frames/refs on the board">
                     <input type="checkbox" checked={c.discreet} onChange={(ev) => dfPatch((cc) => ({ ...cc, discreet: ev.target.checked }))} />blur previews</label></div>
               </div>
+              {/* Base prompt. Deep Focus is now A home for c.prompt, not the only one -- the
+                  right panel's own Prompt field still writes it too. This is option 2 of the
+                  two the owner left open when the field was held back from the web-component
+                  migration (docs/STATE.md, "The Prompt textarea is the one piece deliberately
+                  held back"): give base-prompt editing a home in Deep Focus rather than let
+                  every hand-typed prompt become a frozen override. Placement matches the
+                  approved mockup -- after Mode/Duration/Discreet, before the frames -- so the
+                  field sits in the same reading order on both surfaces. */}
+              <div className="sb-field" style={{ marginTop: 10 }}>
+                <label className="sb-lab">Prompt</label>
+                <textarea className="lv-ta" value={c.prompt || ""} placeholder="what happens in this shot"
+                  onChange={(ev) => {
+                    // Same rule as the right panel's Prompt field: typing a base prompt means
+                    // "auto-compose, using this text", so it clears an active drawer override.
+                    //
+                    // The flash matters MORE here than there. The panel's copy of the notice
+                    // renders at .lv-overrideflash inside the right panel, which sits BEHIND
+                    // .lv-df-veil (z-450) while Deep Focus is open -- so without the copy
+                    // rendered below, editing here would destroy an override with no visible
+                    // signal at all. That silent-until-you-notice failure is the exact hazard
+                    // the flash was added for, and a second surface writing c.prompt would
+                    // have quietly reintroduced it.
+                    if (c.promptOverride) { setOverrideClearedFlash(true); setTimeout(() => setOverrideClearedFlash(false), 1600); }
+                    dfPatch((cc) => ({ ...clearPromptOverride(cc), prompt: ev.target.value }));
+                  }} />
+                {overrideClearedFlash && <div className="lv-overrideflash">override cleared &mdash; back to auto-compose</div>}
+                <span className="sb-hint">the shot's base prompt &mdash; Camera, Lighting and cast are woven in on top when it generates</span>
+              </div>
               <div className="lv-df-frames">
                 <FrameSlot which="open" frame={c.openFrame} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
                   onPatch={(p) => dfPatchFrame("openFrame", p)} />

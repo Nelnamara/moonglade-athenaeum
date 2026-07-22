@@ -3762,10 +3762,19 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="imp-sum" id="imp-sum"></div>
       <div id="imp-body"></div>
       <label class="imp-orow"><span class="imp-lbl">Add to collection</span>
-        <select id="imp-collection" class="gen-sel" style="flex:1;">
+        <select id="imp-collection" class="gen-sel" style="flex:1;" onchange="ImportUI.onCollectionChange()">
           <option value="">&mdash; none &mdash;</option>
           {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          <option value="__new__">&#65291; New collection&hellip;</option>
         </select></label>
+      {# A collection is just a name applied to rows (add_to_collection), so an unseen name
+         creates one -- this row is purely the way in, which the dropdown alone never gave.
+         Reuses .gen-sel: it is a box style (background/border/radius/padding/font), not a
+         select-specific one, so it dresses the input identically with no new CSS. #}
+      <label class="imp-orow" id="imp-newcoll-row" style="display:none;">
+        <span class="imp-lbl">New collection</span>
+        <input id="imp-newcoll" class="gen-sel" style="flex:1;" maxlength="120"
+               placeholder="name it &mdash; it&rsquo;s created when the import lands"></label>
     </div>
     <div id="imp-result" class="imp-result" style="display:none;"></div>
     <div class="modal-actions" style="margin-top:16px;">
@@ -4519,6 +4528,10 @@ function doExportDownload() {
 // --- Web import: drop local files -> POST /api/import-local (localhost-only route) ------------
 var ImportUI = (function(){
   var CAP = 24;                 // preview is capped; the IMPORT itself is never capped
+  // Sentinel for the "＋ New collection…" option. Double-underscored so it cannot collide
+  // with a real collection name, and it is never sent to the server -- chosenCollection()
+  // resolves it to the typed name (or refuses) before the request is built.
+  var NEW_COLL = '__new__';
   var files = [];               // File[]
   var urls = [];                // objectURLs pending revoke
   var IMG = /[.](png|jpe?g|webp|gif|bmp|avif)$/i, VID = /[.](mp4|webm|mov|m4v)$/i, ZIP = /[.]zip$/i;
@@ -4530,7 +4543,11 @@ var ImportUI = (function(){
   function reset(){ files=[]; revoke();
     el('imp-drop').style.display=''; el('imp-preview').style.display='none';
     el('imp-result').style.display='none'; el('imp-go').style.display='none';
-    var fi=el('imp-file'), fo=el('imp-folder'); if(fi)fi.value=''; if(fo)fo.value=''; }
+    var fi=el('imp-file'), fo=el('imp-folder'); if(fi)fi.value=''; if(fo)fo.value='';
+    // The collection choice is per-import, not sticky: reset() runs on both open() and
+    // close(), so a name typed for one batch can't silently ride along on the next.
+    var cs=el('imp-collection'), cn=el('imp-newcoll'), cr=el('imp-newcoll-row');
+    if(cs)cs.value=''; if(cn)cn.value=''; if(cr)cr.style.display='none'; }
   function open(){ reset(); el('import-modal').classList.add('open'); }
   function close(){ el('import-modal').classList.remove('open'); reset(); }
   function browse(){ el('imp-file').click(); }
@@ -4572,12 +4589,29 @@ var ImportUI = (function(){
         var cell=body.querySelector('.imp-tg[data-i="'+i+'"]'); if(cell)cell.innerHTML='<img src="'+u+'">'; }
     }
   }
+  function onCollectionChange(){
+    var isNew=el('imp-collection').value===NEW_COLL;
+    el('imp-newcoll-row').style.display=isNew?'':'none';
+    if(isNew) el('imp-newcoll').focus();
+  }
+  // Resolve the dropdown to a real collection name, or '' for none. Returns null when the
+  // user picked "New collection…" and left it blank -- doImport treats that as "not ready"
+  // rather than silently importing uncollected, which is the failure you'd only notice
+  // later, looking for files that went somewhere else.
+  function chosenCollection(){
+    var sel=el('imp-collection').value;
+    if(sel!==NEW_COLL) return sel;
+    var name=(el('imp-newcoll').value||'').trim();
+    return name || null;
+  }
   function doImport(){
     if(!files.length) return;
+    var coll=chosenCollection();
+    if(coll===null){ el('imp-newcoll').focus(); el('imp-newcoll').placeholder='give the collection a name first'; return; }
     var go=el('imp-go'); go.disabled=true; go.textContent='Importing…';
     var fd=new FormData();
     files.forEach(function(f){ fd.append('files', f, f.name); });        // basename; server ignores any path
-    var coll=el('imp-collection').value; if(coll) fd.append('collection', coll);
+    if(coll) fd.append('collection', coll);
     // No CSRF token: same as the app's other fetch-based mutating APIs (/api/generate,
     // /api/loom/generate, /api/delete) -- protected by SESSION_COOKIE_SAMESITE=Lax + the
     // global front-door auth gate, and here additionally by the route's localhost-only check.
@@ -4605,7 +4639,7 @@ var ImportUI = (function(){
     dz.addEventListener('drop',function(ev){ ev.preventDefault(); dz.classList.remove('hot');
       if(ev.dataTransfer && ev.dataTransfer.files) add(ev.dataTransfer.files); });
   });
-  return {open:open, close:close, browse:browse, browseFolder:browseFolder, onPick:onPick, remove:remove, doImport:doImport};
+  return {open:open, close:close, browse:browse, browseFolder:browseFolder, onPick:onPick, remove:remove, doImport:doImport, onCollectionChange:onCollectionChange};
 })();
 function bulkReplacePrompt() {
   var sel = [...selGet()];

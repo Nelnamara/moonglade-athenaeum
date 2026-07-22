@@ -1734,7 +1734,21 @@ ${"=".repeat(48)}
           value: c.duration,
           onChange: (ev) => dfPatch((cc) => ({ ...cc, duration: Number(ev.target.value) }))
         }
-      )), /* @__PURE__ */ React.createElement("div", { className: "lv-field narrow" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Discreet"), /* @__PURE__ */ React.createElement("label", { className: "sb-toggle", title: "Blur this shot's frames/refs on the board" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: c.discreet, onChange: (ev) => dfPatch((cc) => ({ ...cc, discreet: ev.target.checked })) }), "blur previews"))), /* @__PURE__ */ React.createElement("div", { className: "lv-df-frames" }, /* @__PURE__ */ React.createElement(
+      )), /* @__PURE__ */ React.createElement("div", { className: "lv-field narrow" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Discreet"), /* @__PURE__ */ React.createElement("label", { className: "sb-toggle", title: "Blur this shot's frames/refs on the board" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: c.discreet, onChange: (ev) => dfPatch((cc) => ({ ...cc, discreet: ev.target.checked })) }), "blur previews"))), /* @__PURE__ */ React.createElement("div", { className: "sb-field", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Prompt"), /* @__PURE__ */ React.createElement(
+        "textarea",
+        {
+          className: "lv-ta",
+          value: c.prompt || "",
+          placeholder: "what happens in this shot",
+          onChange: (ev) => {
+            if (c.promptOverride) {
+              setOverrideClearedFlash(true);
+              setTimeout(() => setOverrideClearedFlash(false), 1600);
+            }
+            dfPatch((cc) => ({ ...clearPromptOverride(cc), prompt: ev.target.value }));
+          }
+        }
+      ), overrideClearedFlash && /* @__PURE__ */ React.createElement("div", { className: "lv-overrideflash" }, "override cleared \u2014 back to auto-compose"), /* @__PURE__ */ React.createElement("span", { className: "sb-hint" }, "the shot's base prompt \u2014 Camera, Lighting and cast are woven in on top when it generates")), /* @__PURE__ */ React.createElement("div", { className: "lv-df-frames" }, /* @__PURE__ */ React.createElement(
         FrameSlot,
         {
           which: "open",
