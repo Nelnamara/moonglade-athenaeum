@@ -287,6 +287,60 @@ def test_resume_skips_on_disk_without_redownload(tmp_path, mocker):
     assert not any("known" in n for n in names)
 
 
+def test_resume_does_not_skip_a_zero_byte_file(tmp_path, mocker):
+    """Invariant 3, audit 2026-07-21: the startup disk index used to count ANY file
+    with a matching extension as 'already done', including a 0-byte one left behind by
+    an interrupted download. That media_id then went into on_disk_by_mid and was
+    filtered out of every future page -- permanently, since no --update/--sync ever
+    re-attempts a media_id the index already claims to have. Mirrors the test above
+    exactly, except the on-disk file for 'known' is empty: it must now be treated the
+    SAME as if nothing were on disk at all, i.e. download() must be called for it."""
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_known.webp").write_bytes(b"")   # 0 bytes -- interrupted
+    dl = _patch_download_layer(mocker)
+    mocker.patch.object(core, "gql", side_effect=[_page("new1", True, "c1"),
+                                                  _page("known", False)])
+
+    core.run_download(_dl_args(tmp_path))
+
+    names = [str(c.args[2]) for c in dl.call_args_list]
+    assert any("new1" in n for n in names)
+    assert any("known" in n for n in names), (
+        "the zero-byte file was indexed as 'already done' and never re-downloaded")
+
+
+class TestDownloadNeverWritesAZeroByteFile:
+    """The other half of invariant 3: even if the resume index is fixed, download()
+    itself must not CREATE a zero-byte file in the first place -- a 200 response with
+    an empty/truncated body must not be promoted from the .part file to the real
+    filename, or the very next run's resume index (now correctly fixed) would just
+    find it and retry forever without the underlying cause (a bad response) ever
+    being reported as a failure."""
+
+    def test_empty_response_body_is_treated_as_a_failure(self, mock_session, mocker, tmp_path):
+        resp = mocker.MagicMock()
+        resp.status_code = 200
+        resp.headers = {"Content-Type": "image/webp"}
+        resp.raise_for_status.return_value = None
+        resp.iter_content.return_value = iter([])   # zero chunks -> nbytes stays 0
+        # requests.Response's context manager returns itself; a bare MagicMock's
+        # auto-generated __enter__ would instead hand the code a SECOND, unconfigured
+        # mock as `r`, silently detaching every attribute set above from what download()
+        # actually reads.
+        resp.__enter__ = mocker.Mock(return_value=resp)
+        resp.__exit__ = mocker.Mock(return_value=False)
+        mock_session.get.return_value = resp
+
+        status, path = core.download(mock_session, "http://x/img", tmp_path / "stem",
+                                     retries=0)
+
+        assert status == "fail"
+        assert path is None
+        assert not (tmp_path / "stem.webp").exists(), (
+            "an empty response body was promoted to a real file on disk")
+        assert not list(tmp_path.glob("*.part")), "a stray .part file was left behind"
+
+
 def test_update_mode_stops_early(tmp_path, mocker):
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
