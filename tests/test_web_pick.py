@@ -675,6 +675,49 @@ def test_export_csv_honours_the_gallery_filters(tmp_path):
     assert ids("?q=nothingmatchesthis") == set()             # empty result is a header-only CSV
 
 
+def test_grid_export_link_appears_only_when_filtered(tmp_path):
+    """The filtered-export backend (above) shipped with no way to REACH it: the only CSV link
+    lived on the Control Panel and always dumped the whole catalog. The gallery grid now grows
+    an 'Export this view' link -- but ONLY inside the {% if chips %} active-filter bar, so an
+    unfiltered grid still routes people to the Panel's full dump instead of a redundant one."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", prompt_preview="night elf", model_name="WAI",
+             created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", prompt_preview="daylight", model_name="WAI",
+             created_at="2025-02-01T00:00:00"),
+    ])
+    plain = cli.get("/").get_data(as_text=True)
+    assert "Export this view" not in plain and "/export-csv?" not in plain   # unfiltered: none
+    filtered = cli.get("/?q=night").get_data(as_text=True)
+    assert "Export this view" in filtered                                    # filtered: it shows
+    assert "/export-csv?" in filtered and "q=night" in filtered              # carries the query
+
+
+def test_grid_export_link_drives_the_filtered_export_end_to_end(tmp_path):
+    """The link must carry the LIVE query string, so following it exports exactly the filtered
+    view -- this proves the reachability wiring end to end, not just the backend (which its own
+    test above already covers)."""
+    import re
+    import html as htmlmod
+    import csv
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", prompt_preview="night elf", model_name="WAI",
+             created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", prompt_preview="daylight city", model_name="WAI",
+             created_at="2025-02-01T00:00:00"),
+        _row(media_id="3", filename="c_3.png", prompt_preview="night market", model_name="Other",
+             created_at="2026-01-01T00:00:00"),
+    ])
+    grid = cli.get("/?q=night&model=WAI").get_data(as_text=True)
+    m = re.search(r'href="(/export-csv\?[^"]+)"', grid)
+    assert m, "filtered grid did not render an /export-csv link"
+    href = htmlmod.unescape(m.group(1))          # Jinja escaped & -> &amp; in the attribute
+    r = cli.get(href)
+    assert r.status_code == 200 and r.mimetype == "text/csv"
+    ids = {row["media_id"] for row in csv.DictReader(io.StringIO(r.get_data(as_text=True)))}
+    assert ids == {"1"}                          # q=night AND model=WAI -> only row 1
+
+
 def test_branding_absent_is_404(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
