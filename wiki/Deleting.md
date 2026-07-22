@@ -41,6 +41,9 @@ python pixai_gallery_backup.py --delete-task <taskid>  # preview deleting one ta
 
 `--delete-task` is dry-run until `--apply`, and is **cloud-only** — your local files and
 `catalog.db` are untouched. Deletion uses a baked-in persisted hash; the `--apply` flag plus
-a typed lowercase `delete` (skippable with `--yes`) are the safety mechanism. Uppercase
-`DELETE` is the *gallery's* gate; `--confirm` is a different flag entirely — it gates
-credit-spending generation, not deletion.
+typing `delete` at the confirmation prompt (case-insensitive; skippable with `--yes`) are the
+safety mechanism. Uppercase `DELETE` is the *gallery's* gate (that one **is** case-sensitive);
+`--confirm` is a different flag entirely — it gates credit-spending generation, not deletion.
+
+`READ_ONLY: true` in `config.json` blocks both of these outright, regardless of `--yes` or
+the typed confirm — see [Trust & Safety](Trust-and-Safety#the-read_only-flag).

@@ -35,9 +35,11 @@ URL (`pixai.art/model/<id>`) gives the *model* id, which generation rejects
 you the correct version id — prefer those.
 
 ### Modes are model-specific
-Lite/Standard suit older SD models; Pro/Ultra are for newer types. Picking an
-unsupported mode is harmless — the tool **auto-falls-back** to the model's default (a
-rejected submit costs no credits) and generates anyway.
+Lite/Standard suit older SD models; Pro/Ultra are for newer types. The drawer's Mode
+picker doesn't filter by model, so picking an unsupported combination shows an error on
+submit rather than falling back (a rejected submit still costs no credits) — pick
+**Auto** if you're not sure. The CLI's `--mode` (below) does auto-fall-back and retry
+once on an unsupported mode.
 
 ### LoRAs are add-ons, not base models
 A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via the
@@ -201,8 +203,10 @@ forces a specific card. Cards closest to expiry are used first.
 ## The Generate drawer (web gallery, v1.9.0)
 
 Everything above also lives in the **web gallery** as a dockable drawer — click **✦ Generate**
-in the header. It is **localhost-only**: anyone browsing the gallery over the LAN can look,
-but only the owner's machine can spend credits or cards.
+in the header. It is **login-tier, not localhost-only**: any signed-in device — local or
+elsewhere on your LAN — can open the drawer and spend credits or cards. That's deliberate,
+so a tablet or second device can generate too; see [Trust & Safety](Trust-and-Safety) for
+what *is* restricted to the server's own machine.
 
 - **Generate** — pick a base model in the pop-out browser (hover any card for a full preview),
   attach up to 6 **LoRAs with weights**, aspect/mode/count, live credit cost with the free-card

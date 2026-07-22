@@ -37,6 +37,9 @@ pip install requests pillow flask truststore websockets
    python pixai_gallery_backup.py --count       # …or headless: how many images you have
    python pixai_gallery_backup.py               # back up everything
    ```
+4. First time opening the web gallery: sign in from the machine running the server — the
+   login page doubles as an account-creation form the very first time, before any account
+   exists (see the [FAQ](../../wiki/FAQ)).
 
 That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everything else has working defaults. No DevTools, no token to recapture. *([Why so simple? →](../../wiki/How-It-Works))*
 
