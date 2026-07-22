@@ -631,14 +631,28 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   registration on a cert-error origin, and plain HTTP has no `caches` at all. If it does not
   install there, three user-facing promises are wrong and the Cache Storage entry above is moot.
   One command against a real tablet settles it; it has never been run.
-- **`/panel` lists every account username to any LOGIN-tier caller** (`web_users=core.list_web_users()`
-  passed to the template). On an install with more than one account, any signed-in user can
-  enumerate the others. **This is deliberate**, not a gap: `api_users_add`/`api_users_remove`
-  are LOGIN-tier on purpose — every account in this app's model carries equal trust, so seeing
-  and managing a fellow account is part of the design, the same as the rest of the Panel. (The
-  same page's `library at {{ out_dir }}` host-path disclosure — a genuinely different kind of
-  fact, and NOT part of that decision — was fixed 2026-07-21: withheld from non-local callers,
-  same pattern as `/api/panel/status`'s `lines` field.)
+- **A signed-in LAN account can delete the OWNER's own named account, and then register a new
+  one for itself.** This was first filed as "`/panel` lists every account username" — a naming
+  choice that understated it into sounding like enumeration. It's write access:
+  `api_users_remove` (`pixai_gallery.py:8239`) is LOGIN-tier and its only guard is refusing to
+  remove the *last* account (`remove_web_user_guarded`) — nothing stops a caller from removing
+  any *other* specific account by name, including the owner's. On the borrowed-tablet LAN story
+  this app is built around, that means a guest can evict the owner and mint themselves a
+  persistent login, all from the Panel's Users tab.
+  **Not decided as of 2026-07-21.** `api_users_add`/`api_users_remove`'s own docstrings assert
+  "every account carries equal trust" as the reason both sit at LOGIN tier — real code, not
+  invented — but that principle was reasoned about for the *creative* capabilities (generate,
+  browse, curate), and whether it was ever weighed against "a guest can delete you specifically"
+  is a different question the code doesn't answer. Two live options: (a) move
+  `api_users_add`/`api_users_remove` behind `_is_local_request()`, 2 lines each, mirroring
+  `api_setup_save_key`; or (b) keep them LOGIN and say so explicitly as a considered call, the
+  way `/api/server/stop` already is. Needs the owner's answer, not a drive-by pick.
+  Username *visibility* on the same page (who's on the account) is the smaller, separate half of
+  the original finding and stays LOGIN-tier regardless of how the above is answered — reading
+  the roster isn't the same action as deleting from it.
+  The same page's `library at {{ out_dir }}` host-path disclosure — a different kind of fact
+  entirely, the server's own machine rather than a peer account — **was fixed 2026-07-21**:
+  withheld from non-local callers, same pattern as `/api/panel/status`'s `lines` field.
 - **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
   is unreachable and the variable name is a misnomer for "authorized". This is *deliberate and
   documented* at the call site — the front-door hook guarantees an authorized request reaches
