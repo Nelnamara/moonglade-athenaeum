@@ -5991,13 +5991,18 @@ var Gen = (function(){
     if(i>=0){ loras.splice(i,1); c.classList.remove('sel'); renderLoras(); refreshLoraNotes(); debouncedCost(); return; }
     if(loras.length>=6) return;
     var entry={model_id:m.model_id, title:m.title, preview_url:m.preview_url, version_id:'',
-               weight:0.7, lora_base_type:'', trigger_words:''};
-    loras.push(entry); c.classList.add('sel'); renderLoras();
+               weight:0.7, lora_base_type:'', trigger_words:'', failed:false};
+    loras.push(entry); c.classList.add('sel'); renderLoras(); updateGoState();
     fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
       .then(function(r){return r.json();})
       .then(function(d){ entry.version_id=d.version_id||''; entry.lora_base_type=d.lora_base_model_type||'';
-        entry.trigger_words=d.trigger_words||''; renderLoras(); refreshLoraNotes(); debouncedCost(); })
-      .catch(function(){ renderLoras(); });
+        entry.trigger_words=d.trigger_words||'';
+        // An empty version_id here is ALSO a failure, not a quiet no-op -- a LoRA that
+        // never resolves must not be able to vanish from the submit silently (see failed
+        // below): it used to just sit there forever wearing the "still loading" hourglass.
+        entry.failed=!entry.version_id;
+        renderLoras(); refreshLoraNotes(); debouncedCost(); })
+      .catch(function(){ entry.failed=true; renderLoras(); refreshLoraNotes(); });
   }
   // --- LoRA<->base compatibility gate + trigger-word offers ------------------
   // A LoRA runs on a base ONLY if its loraBaseModelType == the base's modelType (exact enum
@@ -6014,7 +6019,13 @@ var Gen = (function(){
     return String(b).toUpperCase()!==String(l).toUpperCase();
   }
   function anyIncompat(){ return loras.some(loraIncompat); }
-  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat(); }
+  // A LoRA still missing its version_id -- whether the lookup is still in flight or has
+  // permanently failed -- must block Generate. The old code let this fall through silently:
+  // the submit payload just filtered the unresolved LoRA out (see payload()), so a paid
+  // generation could fire missing a LoRA the user believed was included, with nothing on
+  // screen but an hourglass that never explained itself.
+  function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }
+  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat() || anyLoraUnresolved(); }
   function triggersInPrompt(tw){
     var first=(tw||'').split(',')[0].trim().toLowerCase();
     return first && (el('gen-prompt').value||'').toLowerCase().indexOf(first)>=0;
@@ -6048,9 +6059,11 @@ var Gen = (function(){
   function renderLoras(){
     var box=el('gen-loras'); if(!box) return; box.innerHTML='';
     loras.forEach(function(l,i){
-      var d=document.createElement('div'); d.className='lora-chip'+(loraIncompat(l)?' incompat':'');
+      var d=document.createElement('div'); d.className='lora-chip'+((loraIncompat(l)||l.failed)?' incompat':'');
+      var badge=l.version_id?'':(l.failed?' \\u26a0':' \\u23f3');
+      var titleAttr=l.failed?(esc(l.title)+' \\u2014 could not load; remove it (\\u00d7) and re-add to retry'):esc(l.title);
       d.innerHTML=(l.preview_url?'<img src="'+esc(l.preview_url)+'" alt="">':'')
-        +'<span class="nm" title="'+esc(l.title)+'">'+esc(l.title)+(l.version_id?'':' \\u23f3')+'</span>'
+        +'<span class="nm" title="'+titleAttr+'">'+esc(l.title)+badge+'</span>'
         +'<input type="number" step="0.05" min="0" max="2" value="'+l.weight+'" title="Weight" onchange="Gen.loraWeight('+i+', this.value)">'
         +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>';
       box.appendChild(d);
@@ -6189,6 +6202,10 @@ var Gen = (function(){
     var p=payload();
     if(!p.version_id) return;
     if(!p.prompt){ el('gen-prompt').focus(); return; }
+    // Belt-and-suspenders alongside updateGoState()'s disabled attribute: never let a
+    // paid submit fire while a LoRA the user added is still unresolved or failed --
+    // payload() would otherwise just quietly drop it and spend credits on a mismatch.
+    if(anyLoraUnresolved()){ el('gen-lora-note').scrollIntoView({block:'nearest'}); return; }
     runTask('/api/generate', p, el('gen-result'),
             {past:'Generated', btn:el('gen-go'), busy:'Generating\\u2026', idle:'Generate'});
   }

@@ -55,6 +55,17 @@ git tags. Full prose notes for tagged versions live on
   error instead of guessing. Covers both the CLI and the web `/api/generate`/`/api/edit`
   routes.
 
+- **A LoRA whose version lookup failed could silently vanish from a paid generation.**
+  Adding a LoRA in the Generate drawer kicks off a background lookup for its
+  `version_id`; the chip showed an hourglass until it resolved. If that lookup ever
+  failed, the hourglass just... stayed forever, with no distinct failure state — and
+  the submit payload quietly filtered any LoRA still missing a `version_id` out of the
+  request. The generation fired anyway, at full price, missing a LoRA the user believed
+  was included. Now a failed lookup is tracked separately from a pending one (a
+  warning icon + explanatory tooltip instead of an endless spinner), Generate is
+  disabled while any added LoRA is unresolved, and the submit handler itself refuses
+  to fire on an unresolved LoRA as a second guard.
+
 ### Known issue (not fixed — deliberately left for the design pass)
 
 - **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
