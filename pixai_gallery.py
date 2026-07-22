@@ -6382,6 +6382,25 @@ document.addEventListener('mg-pick-request', function(e){
   var d=e.detail; if(!d||typeof d.respond!=='function') return;
   Picker.open(function(mid, thumb){ d.respond(mid, thumb); }, d.kind==='video'?{type:'video'}:null);
 });
+// mg-submit / mg-result: the drawer polls and renders ITS OWN result inline (self-contained,
+// same as the Loom's mount) -- these two listeners are not for that. They are the two things
+// runTask() gives every OTHER tab (Generate/Edit/Fix, still the pre-migration inline JS) that
+// the Video tab silently lost when it moved to <mg-generate-drawer> and nothing was ever wired
+// to replace them: Jobs.register (the Activity card entry that survives closing the drawer or
+// navigating away -- the drawer's own poll dies with the page, per its `if(!self.isConnected)
+// return;` guard, so without this a video that finishes after you leave shows NOWHERE) and
+// Acct.refresh() (the header credit balance, which every other spend path already updates on
+// completion). Found 2026-07-21 by the post-v2.2.0 audit (B4): verified the drawer dispatches
+// both events (bubbles+composed) but the gallery bound neither, while the Loom's own mount
+// binds both via bindGenDrawer -- and its onVideoSubmit comment explicitly says the "Rendered"
+// label is chosen to match "the gallery's own existing label for this same endpoint", i.e. this
+// wiring was always assumed to exist here. One document-level listener each, matching
+// mg-pick-request immediately above: the drawer is the only source of either event.
+document.addEventListener('mg-submit', function(e){
+  var d=e.detail; if(!d||!d.task_id) return;
+  if(window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, 'Rendered');
+});
+document.addEventListener('mg-result', function(){ Acct.refresh(); });
 var Tags = (function(){
   var items=[], hot=0, ta=null, timer=null, seq=0;
   function box(){ return document.getElementById('tag-suggest'); }
