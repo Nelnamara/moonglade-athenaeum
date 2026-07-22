@@ -354,9 +354,17 @@ on record so far, from a read-only code check (no changes made):
   still live — two different cards' (or the same card's two renderings, since ladder tiers
   render once in the active-ladder grid AND again in "All Ladder Tiers") text visually
   overlapping could easily read as "two flavors shown for one achievement" without any
-  roast-logic bug at all. Owner's own account may also have Triggered already earned from
-  real play — worth checking whether the Unleash checkbox is actually ticked before assuming
-  the gate itself is broken.
+  roast-logic bug at all.
+- **Update, same day, after the layout fix shipped:** the owner earned Triggered live (real
+  play, screenshot in hand) — `unleash_available` genuinely flips true, the toggle appears,
+  and the celebration toast fired. Claude read the toast text back against the achievement's
+  own `roast` field and it was an exact, word-for-word match — reported that as "expected:
+  the toggle just hasn't been checked yet." **The owner said this explanation is incorrect.**
+  What's specifically wrong about it was not established — do not reuse Claude's toggle
+  theory as a starting point next time without re-deriving it. Owner wants to compare the
+  `roast` and `roast_nsfw` fields for himself (both sit side by side per-achievement in
+  `pixai_gallery.py`'s `ACHIEVEMENTS` list, easy to diff directly) on his work machine before
+  deciding anything.
 - **Do not resume work on this without the owner's go** — explicit scope boundary he set.
 
 ## Public repo / community
