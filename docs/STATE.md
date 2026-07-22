@@ -320,6 +320,44 @@ users.
   assigned on every one. Badge and mascot art serves from the D: branding tree
   (`D:\Moonglade Athenaeum\pixai_backup\branding\`); the pre-57 badge originals are preserved
   unserved in `badges\_pre57_backup\`.
+- **Real layout bug, found and fixed same day (`34f2078`):** `#ach-grid` still carried its
+  pre-redesign `class="ach-grid"`, whose CSS forced `display:grid;grid-template-columns:
+  repeat(auto-fill,minmax(216px,1fr))` — correct for the OLD layout where every direct child
+  was one ~216px tile, wrong for the new one where every direct child is a full-width section
+  (the carousel, the ladder row, each `.hall-block`). Auto-placed those sections into narrow
+  tiled columns instead of stacking them — the owner caught it on the live D: install as a
+  scrambled, overlapping render. Fixed to `display:flex;flex-direction:column`. Also removed
+  ~30 CSS rules (`.ach-card`/`.ach-sect`/`.ach-bar`/`.ach-crit`/`.ach-roast` + tier variants)
+  confirmed to have zero producers left in the new render code — dead scaffolding that encoded
+  the exact wrong mental model that caused the bug. **Lesson, already added to memory:**
+  verification that checks individual elements (text content, one element's computed style) in
+  isolation can be 100% green while cross-element GEOMETRY is broken — this needs
+  `getBoundingClientRect()` comparisons between siblings, or a real screenshot, neither of
+  which ran before this shipped the first time (screenshot capture was unavailable all
+  session).
+
+### ⚠️ OPEN — roast text (flavor commentary) may be leaking uncensored/"spicy" lines it
+shouldn't. Owner-reported 2026-07-22, immediately after the layout fix above, from the live
+D: install. **Deliberately NOT investigated further or fixed tonight — owner wants to look
+himself first, and has flagged this for the actual design pass, not a quick patch.** What's
+on record so far, from a read-only code check (no changes made):
+- The gating as written: server-side, `roast_nsfw` is blanked to `""` for every achievement
+  unless the **Triggered** feat (poke the narrator until it snaps) is earned on that account
+  (`api_achievements()`, `pixai_gallery.py` — `unleashed = any(a["id"]=="triggered" and
+  a["earned"] ...)`). Client-side, `card()` (`static/mg-notify.js`) shows exactly ONE roast
+  string per card — `roast_nsfw` only if BOTH the server sent a non-empty one AND the local
+  "Unleash the AI" checkbox (`Ach.setUnleash`, a `localStorage` preference, separate from the
+  server flag) is checked. On paper this reads as correctly gated, and neither of those two
+  checks was touched by tonight's redesign or the layout fix.
+- Two live possibilities, NOT distinguished yet: (a) a genuine gating bug somewhere in this
+  chain; (b) the owner's report describes what was on screen while the layout bug above was
+  still live — two different cards' (or the same card's two renderings, since ladder tiers
+  render once in the active-ladder grid AND again in "All Ladder Tiers") text visually
+  overlapping could easily read as "two flavors shown for one achievement" without any
+  roast-logic bug at all. Owner's own account may also have Triggered already earned from
+  real play — worth checking whether the Unleash checkbox is actually ticked before assuming
+  the gate itself is broken.
+- **Do not resume work on this without the owner's go** — explicit scope boundary he set.
 
 ## Public repo / community
 
