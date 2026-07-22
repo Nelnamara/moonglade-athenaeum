@@ -2290,9 +2290,18 @@ def find_image_file(out_dir, media_id, filename):
     deleted_dir = out_dir / DELETED_DIRNAME
     if filename:
         for candidate in out_dir.rglob(filename):
-            if (candidate.is_file() and not _is_under(candidate, gallery_dir)
-                    and not _is_under(candidate, deleted_dir)):
-                return candidate
+            # The fallback below (find_files_for_media_id) already skips zero-byte
+            # files -- this fast path found candidate rglob before that fallback ever
+            # runs, so it needs the same size check or a catalog row still pointing at
+            # its original filename gets a truncated/interrupted download served back
+            # as if it were the real image (audit 2026-07-21, invariant 3/6).
+            try:
+                if (candidate.is_file() and candidate.stat().st_size > 0
+                        and not _is_under(candidate, gallery_dir)
+                        and not _is_under(candidate, deleted_dir)):
+                    return candidate
+            except OSError:
+                continue
     matches = find_files_for_media_id(out_dir, media_id)
     return matches[0] if matches else None
 
