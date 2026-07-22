@@ -27,13 +27,16 @@
 Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owner's own AI
 generations, serves a local searchable web gallery, generates images and videos through
 PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
-the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; it and `master` are
-currently level at **v2.2.0** (2026-07-21 — four security fixes: `/logout`'s global revoke
-moved behind POST + CSRF, `/api/panel/status` stopped handing maintenance stdout to LAN
-accounts, the service worker stopped caching a followed login redirect, and saved views became
-per-account; plus the last two video models, a prompt field in Deep Focus, and the cost
-displays consolidated onto `<mg-cost-badge>`). Each release is a `--no-ff` merge of `loom-v2` →
-`master`, tagged and published as a GitHub Release. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
+the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
+is **v2.2.0** (2026-07-21 — four security fixes: `/logout`'s global revoke moved behind POST +
+CSRF, `/api/panel/status` stopped handing maintenance stdout to LAN accounts, the service worker
+stopped caching a followed login redirect, and saved views became per-account; plus the last two
+video models, a prompt field in Deep Focus, and the cost displays consolidated onto
+`<mg-cost-badge>`). **`loom-v2` has since pulled ahead again** (post-release audit fixes S1–S3/
+B1/B2/B4, the account-eviction gate, the Folio of Honors redesign + its layout fix) — check
+`git rev-list --count origin/master..origin/loom-v2` for the live count rather than trusting a
+number here. Each release is a `--no-ff` merge of `loom-v2` → `master`, tagged and published as
+a GitHub Release. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
 tree, the `v2` toggle, and the `CardView`/`CardEditor` components) was retired 2026-07-17; `/loom`
 opens straight into the V2 shell with no layout switch. The repo is public and has real external
 users.
