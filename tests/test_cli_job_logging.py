@@ -50,7 +50,7 @@ def test_sync_logs_a_cli_job_that_completes(monkeypatch, tmp_path):
     core.main()
 
     assert calls == ["download", "fix_models", "backfill", "thumbnails", "reconcile"]
-    jobs = _cli_jobs(tmp_path, "sync")
+    jobs = _cli_jobs(tmp_path, "Library sync")
     assert len(jobs) == 1
     job = jobs[0]
     assert job["job_id"].startswith("cli-")           # the CLI's own job-id convention
@@ -67,7 +67,7 @@ def test_sync_failure_logs_a_failed_cli_job_and_still_raises(monkeypatch, tmp_pa
     with pytest.raises(SystemExit):
         core.main()
 
-    jobs = _cli_jobs(tmp_path, "sync")
+    jobs = _cli_jobs(tmp_path, "Library sync")
     assert len(jobs) == 1
     assert jobs[0]["status"] == "failed"
     assert "network blip" in jobs[0]["error"]
@@ -92,7 +92,7 @@ def test_sync_progress_ticks_feed_the_same_job(monkeypatch, tmp_path):
 
     core.main()
 
-    jobs = _cli_jobs(tmp_path, "sync")
+    jobs = _cli_jobs(tmp_path, "Library sync")
     assert len(jobs) == 1                              # progress heartbeats, not new jobs
     assert jobs[0]["status"] == "done"
 
@@ -108,19 +108,19 @@ def test_update_logs_a_cli_job_labeled_update(monkeypatch, tmp_path):
     core.main()
 
     assert seen == {"update": True}
-    jobs = _cli_jobs(tmp_path, "update")
+    jobs = _cli_jobs(tmp_path, "Incremental update")
     assert len(jobs) == 1 and jobs[0]["status"] == "done"
     assert jobs[0]["job_id"].startswith("cli-")
 
 
 def test_plain_download_logs_a_cli_job_labeled_download(monkeypatch, tmp_path):
-    """No flags at all -> the same fallback branch as --update, labeled 'download'."""
+    """No flags at all -> the same fallback branch as --update, labeled 'Full backup'."""
     monkeypatch.setattr(core, "run_download", lambda args: None)
     monkeypatch.setattr(sys, "argv", ["prog", "--out", str(tmp_path)])
 
     core.main()
 
-    jobs = _cli_jobs(tmp_path, "download")
+    jobs = _cli_jobs(tmp_path, "Full backup")
     assert len(jobs) == 1 and jobs[0]["status"] == "done"
 
 
@@ -135,7 +135,7 @@ def test_generate_preview_logs_a_cli_job_that_completes(monkeypatch, tmp_path):
 
     core.main()
 
-    jobs = _cli_jobs(tmp_path, "generate")
+    jobs = _cli_jobs(tmp_path, "Image generation")
     assert len(jobs) == 1
     assert jobs[0]["job_id"].startswith("cli-")
     assert jobs[0]["status"] == "done"
@@ -159,7 +159,7 @@ def test_generate_failure_logs_a_failed_cli_job_and_still_raises(monkeypatch, tm
     with pytest.raises(SystemExit):
         core.main()
 
-    jobs = _cli_jobs(tmp_path, "generate")
+    jobs = _cli_jobs(tmp_path, "Image generation")
     assert len(jobs) == 1
     assert jobs[0]["status"] == "failed"
     assert "rejected" in jobs[0]["error"]
@@ -174,7 +174,7 @@ def test_generate_video_preview_logs_a_cli_job_that_completes(monkeypatch, tmp_p
 
     core.main()
 
-    jobs = _cli_jobs(tmp_path, "generate-video")
+    jobs = _cli_jobs(tmp_path, "Video render")
     assert len(jobs) == 1
     assert jobs[0]["job_id"].startswith("cli-")
     assert jobs[0]["status"] == "done"

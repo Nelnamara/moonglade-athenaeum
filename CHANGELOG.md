@@ -95,6 +95,14 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Activity card was showing internal identifiers instead of words.** Every job run from
+  a terminal read "Cli" underneath it — not a word — because the row printed the internal job
+  type verbatim. Terminal runs also carried raw command names as their title, so
+  "generate-video" sat in the list next to real sentences, and the completion toast popped
+  "generate-video — done". Sources now read Terminal / Control Panel / Generate, and terminal
+  jobs are titled in words: Image generation, Video render, Library sync, Incremental update,
+  Full backup.
+
 - **Saved views belong to your account, not to the whole install.** They shipped in a single
   shared file, by analogy with the skin choice — which is right for a theme and wrong for a
   saved search, since a view's name and query say what you look for in your own library. On an

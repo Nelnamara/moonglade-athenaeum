@@ -2,6 +2,7 @@
 two DOM anchors JobsCard needs to render the activity tray -- a cheap regression guard against
 this shell edit being silently reverted (the achievement-toast path needs no anchor at all,
 see mg-notify.js's own top-of-file comment; only the visible Job Tracker card does)."""
+import re
 from pathlib import Path
 
 import pixai_gallery
@@ -83,3 +84,54 @@ def test_deep_focus_prompt_edit_is_not_silent_about_destroying_an_override():
     assert "lv-overrideflash" in block, (
         "Deep Focus fires the flash but never renders it -- the panel's copy is behind the "
         "veil, so the user sees nothing")
+
+
+# ---------------------------------------------------------------------------
+# The activity card shows words, not internal identifiers
+# ---------------------------------------------------------------------------
+
+def _notify_js():
+    return (Path(__file__).resolve().parents[1] / "static" / "mg-notify.js").read_text(encoding="utf-8")
+
+
+def test_activity_rows_translate_the_job_type_instead_of_printing_the_enum():
+    """`j.type` is an internal enum ('cli', 'panel', 'generate', 'delete', 'import') and the
+    row's sub-line used to print it raw under `.jt-kind{text-transform:capitalize}` -- which
+    rendered the non-word "Cli" under every terminal-run job.
+
+    Bite: put `esc(j.type||'job')` back in the sub-line and this fails.
+    """
+    js = _notify_js()
+    assert "kindLabel(j.type)" in js, "the sub-line still prints the raw job type enum"
+    assert "cli: 'Terminal'" in js, "no display name for the 'cli' job type"
+    # Every type any writer actually emits needs a mapping, or it leaks through capitalized.
+    for kind in ("cli", "panel", "generate", "delete", "import"):
+        assert ("%s:" % kind) in js or ("'%s':" % kind) in js, (
+            "job type %r has no display name in KIND_LABEL" % kind)
+
+
+def test_cli_jobs_are_labelled_in_words_not_command_slugs():
+    """The activity row's title is `j.label`, and _cli_job_finish never relabels -- so a
+    label set at start is what the user reads forever. Passing the bare command name put
+    "generate-video" in a list beside real sentences, and mg-notify's completion toast is
+    built as `label + " — done"`, so it also popped "generate-video — done".
+
+    Noun phrases on purpose: the same string has to read correctly while running, when done,
+    and inside that toast.
+    """
+    src = (Path(__file__).resolve().parents[1] / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    # Checked as exact call forms rather than by scanning the argument text: the download
+    # site reads `"Incremental update" if getattr(args, "update", False) else "Full backup"`,
+    # and a naive search for the slug "update" matches that getattr's ATTRIBUTE NAME, which
+    # is correct code. (Cost me one red test to notice.)
+    banned = ['_cli_job_start(out, "generate")',
+              '_cli_job_start(out, "generate-video")',
+              '_cli_job_start(out, "sync")',
+              '_cli_job_start(out, "update" if']
+    for call in banned:
+        assert call not in src, (
+            "CLI job still labelled with a raw command slug: %s -- the activity card and "
+            "its completion toast both render this verbatim" % call)
+    for label in ('"Image generation"', '"Video render"', '"Library sync"',
+                  '"Incremental update"', '"Full backup"'):
+        assert label in src, "expected human CLI job label %s is missing" % label
