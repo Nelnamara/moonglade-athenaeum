@@ -31,6 +31,16 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The shot's prompt is editable in Deep Focus.** Until now the base prompt — the text that
+  keeps recomposing as you change Camera, Lighting and cast — could only be written from the
+  right-hand panel. Double-click a card and it's there, between the mode row and the frames,
+  in the same reading order as the panel. Editing it clears an active drawer override and says
+  so, the same way the panel already does.
+- **You can create a collection while importing.** The "Add to collection" dropdown gained a
+  **＋ New collection…** option: name it in the box that appears and it's created as the import
+  lands. Previously you had to import loose and re-collect afterwards. Leaving the name blank
+  won't quietly import into nothing — it asks you to name it first.
+
 - **Export the current filtered view to CSV, from the gallery grid.** The filtered-export
   backend already shipped (an earlier blitz taught `/export-csv` to honour the grid's `?q=&model=…`
   filter args) but had no way in — the only CSV link lived on the Control Panel and always dumped
