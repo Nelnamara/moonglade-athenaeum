@@ -632,12 +632,26 @@ READ_ONLY = bool(_cfg.get("READ_ONLY", False))
 
 
 def _check_read_only(action):
-    """Called at the top of every function that actually fires an account-mutating
-    network call (submit_generation, submit_fixer, delete_task_gql, claim_reward) --
-    the shared choke points both the CLI and the web app's generate/edit/enhance/fix/
-    delete/claim routes all funnel through. Raising here, unconditionally, is what
-    makes READ_ONLY override --confirm/--apply/--yes rather than just changing their
-    default."""
+    """Called at the top of every branch that actually fires an account-mutating
+    network call. Raising here, unconditionally, is what makes READ_ONLY override
+    --confirm/--apply/--yes rather than just changing their default.
+
+    Nine call sites, not four: submit_generation, submit_fixer, delete_task_gql and
+    claim_reward are the choke points the WEB app's generate/edit/enhance/fix/delete/
+    claim routes all funnel through -- but the CLI's run_generate, run_generate_video,
+    run_reference_video, run_enhance and run_edit_image each build their OWN gql_adhoc
+    call (for retry logic submit_generation doesn't have) instead of calling through a
+    choke point, and until 2026-07-21 none of them called this. Found by audit: with
+    READ_ONLY=True and --confirm, all five reached the mutation, and the free-card
+    check fired first -- a live network call before the guard even ran. Each of those
+    five now calls this as the FIRST statement of its actual-submit branch, before any
+    upload or card-check, not just before the mutation itself.
+
+    upload_media() is deliberately NOT gated here -- it costs no credits and is not one
+    of the four actions CLAUDE.md's contract lists (submit a generation, submit a fix,
+    delete a task, claim a reward). Whether READ_ONLY should also block a free upload
+    is an open question, tracked in docs/AUDIT_2026-07-21.md, not resolved by this
+    docstring."""
     if READ_ONLY:
         raise PixAIError(
             "READ_ONLY is set in config.json -- refusing to {}. "
@@ -4098,6 +4112,11 @@ def run_generate(args):
         task_id = existing_task
         print("Fetching existing task (no credits):", task_id)
     else:
+        # This CLI runner builds its own gql_adhoc call (for the inferenceProfile retry
+        # below) instead of going through submit_generation() -- so it needs its own
+        # _check_read_only, in the same place submit_generation puts it: before ANY
+        # network call this branch makes, including _apply_kaisuuken's free-card check.
+        _check_read_only("submit a generation (spends credits)")
         print("Submitting generation task...")
         _apply_kaisuuken(session, params, args)
         try:
@@ -4501,6 +4520,7 @@ def run_generate_video(args):
         task_id = existing_task
         print("Fetching existing video task (no credits):", task_id)
     else:
+        _check_read_only("submit a video generation (spends credits)")
         print("Submitting VIDEO generation task (this spends credits)...")
         _apply_kaisuuken(session, params, args)
         created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
@@ -4589,6 +4609,10 @@ def run_reference_video(args):
         task_id = existing_task
         print("Fetching existing reference-video task (no credits):", task_id)
     else:
+        # Checked before _resolve_refs, not just before the mutation: _resolve_refs
+        # uploads any local ref files (upload_media -> a real gql_adhoc mutation) before
+        # this function ever reaches the createGenerationTask call.
+        _check_read_only("submit a reference video generation (spends credits)")
         if override:
             params = json.loads(override)
         else:
@@ -4663,6 +4687,8 @@ def run_enhance(args):
         task_id = existing
         print("Fetching existing enhance task (no credits):", task_id)
     else:
+        # Checked before the upload, not just before the mutation -- see run_reference_video.
+        _check_read_only("submit an enhance task (spends credits unless a card applies)")
         if override:
             params = json.loads(override)
         else:
@@ -4749,6 +4775,9 @@ def run_edit_image(args):
         task_id = existing_task
         print("Fetching existing edit task (no credits):", task_id)
     else:
+        # Checked before the upload loop, not just before the mutation -- see
+        # run_reference_video.
+        _check_read_only("submit an edit (spends credits unless a card applies)")
         if override:
             params = json.loads(override)
         else:
