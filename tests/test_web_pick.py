@@ -782,7 +782,8 @@ def test_branding_absent_is_404(tmp_path):
 def test_enhance_shelf_promotes_official_tools(tmp_path):
     """The Enhance sub-tab leads with a grouped shelf of curated one-click official tools
     (Upscale / Cleanup / Convert / Light) above the flat 140+ community list — so real
-    tools aren't buried among junk workflows. Each card fires Gen.enhance(<workflow_id>)."""
+    tools aren't buried among junk workflows. Each card fires Gen.selectEnhance(<workflow_id>,
+    <name>) -- D-12: select-then-run now, not click-runs-immediately (see below)."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
@@ -794,8 +795,41 @@ def test_enhance_shelf_promotes_official_tools(tmp_path):
                 "1793505053210462325",   # Remove background
                 "1793713293591365899",   # Basic Outpainting
                 "1801729774701480692"):  # relight sunshine
-        assert "Gen.enhance('" + wid + "')" in html
+        assert "Gen.selectEnhance('" + wid + "'," in html
     assert 'id="enh-q"' in html          # the browse-all search still present below the shelf
+
+
+def test_enhance_is_select_then_run_with_a_persistent_badge(tmp_path):
+    """D-12: the one Enhance path that never got the <mg-cost-badge> treatment -- it used
+    to price + window.confirm() on every click, the exact pattern every other price
+    surface (Image/Edit/Video, and now this one) already replaced with a persistent
+    badge. Now: click selects (no spend), a separate Run button fires it, and the badge
+    is the only warning -- no window.confirm left anywhere in this path."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert '<mg-cost-badge id="enhance-cost"' in html
+    assert 'id="enh-go" disabled' in html                 # nothing selected yet -> Run starts disabled
+    assert "function selectEnhance(wid, name){" in html
+    assert "function runEnhance(){" in html
+    assert "window.confirm('This Enhance tool spends credits" not in html   # old inline confirm is gone
+    assert "window.confirm('Run this Enhance tool?" not in html
+    # selecting enables Run and (re)prices; switching source also reprices Enhance, not just Edit
+    assert "el('enh-go').disabled=false;" in html
+    assert "debEnhanceCost();" in html and "debEditCost();" in html         # setEditSource fires both
+
+
+def test_enhance_price_uses_the_selected_tool_and_shared_source(tmp_path, monkeypatch):
+    """/api/price's mode=enhance branch (already handled server-side, unchanged by D-12)
+    still gets exactly {mode, source, workflow_id} -- this pins the client-side payload
+    shape the new badge wiring builds, not just that the server accepts it."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    seen = {}
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 4200)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    r = cli.post("/api/price", json={"mode": "enhance", "source": "12345", "workflow_id": "999"})
+    assert r.get_json()["cost"] == 4200
+    assert seen["p"]["model"] == "pixai-panelplugin" and seen["p"]["workflowId"] == "999"
 
 
 def test_edit_model_id_and_quality_omit():
@@ -967,8 +1001,14 @@ def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
 
 
 def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch):
-    """/api/price mode=enhance builds panelplugin params (so cost can be shown), and the
-    Enhance click carries a spend guardrail since free cards don't cover these workflows."""
+    """/api/price mode=enhance builds panelplugin params so a real cost can be shown.
+
+    The spend guardrail used to be a hardcoded window.confirm() claiming "free cards do
+    not cover Enhance workflows" -- D-12 replaced it with the persistent <mg-cost-badge>
+    (test_enhance_is_select_then_run_with_a_persistent_badge), which reflects PixAI's
+    REAL per-request match_kaisuuken result instead of a fixed claim baked into a string.
+    This test now only pins the price-routing params; the badge test above owns the
+    guardrail assertion."""
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
@@ -978,8 +1018,6 @@ def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch
                                  "workflow_id": "1794855217667308480"})
     assert seen["p"]["model"] == "pixai-panelplugin"
     assert str(seen["p"].get("workflowId")) == "1794855217667308480"
-    html = cli.get("/").get_data(as_text=True)
-    assert "free cards do not cover Enhance" in html    # the confirm guardrail
 
 
 def test_import_task_by_id(tmp_path, monkeypatch):
