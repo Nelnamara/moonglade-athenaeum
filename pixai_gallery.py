@@ -2240,16 +2240,22 @@ def collection_health(out_dir, db_path):
 def duplicate_groups(out_dir, limit=300):
     """Class-A duplicates for the gallery review browser: media_ids whose file
     exists in more than one folder bucket. Cheap (no hashing). Returns a list of
-    {media_id, keeper(rel), copies:[{rel,bucket,size}]} sorted keeper-first."""
+    {media_id, keeper(rel), copies:[{rel,bucket,size}]} sorted keeper-first.
+
+    Excludes gallery/, _duplicates/, AND _deleted/ (B11, audit 2026-07-21) -- a
+    locally-purged image must not be reported back as a live duplicate of its own
+    quarantined self."""
     from collections import defaultdict
     gallery_dir = out_dir / "gallery"
     quarantine_dir = out_dir / "_duplicates"
+    deleted_dir = out_dir / DELETED_DIRNAME
     prio = {"batches": 0, "month": 1, "images": 2, "other": 3}
     locs = defaultdict(list)
     for p in out_dir.rglob("*"):
         if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
             continue
-        if p.name.endswith(".part") or _is_under(p, gallery_dir) or _is_under(p, quarantine_dir):
+        if (p.name.endswith(".part") or _is_under(p, gallery_dir)
+                or _is_under(p, quarantine_dir) or _is_under(p, deleted_dir)):
             continue
         rel = p.relative_to(out_dir)
         top = str(rel).replace("\\", "/").split("/")[0]
