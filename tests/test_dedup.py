@@ -110,6 +110,22 @@ def test_audit_detects_class_b_content_dupe(tmp_path):
     assert rep["totals"]["class_b_groups"] == 1
 
 
+def test_audit_ignores_deleted_quarantine(tmp_path):
+    """B11 (audit 2026-07-21): _scan_media_files (shared by audit_collection AND
+    verify_quarantine) excluded gallery/ and _duplicates/ but never learned about
+    _deleted/ -- so a locally-purged image is reported back as a live Class A
+    duplicate of its own quarantined self, and counted in the audit's file total."""
+    from pixai_gallery import DELETED_DIRNAME
+    (tmp_path / "images").mkdir()
+    (tmp_path / DELETED_DIRNAME).mkdir()
+    (tmp_path / "images" / "a_111.webp").write_bytes(b"AAAA")
+    (tmp_path / DELETED_DIRNAME / "111.webp").write_bytes(b"AAAA")
+    rep = core.audit_collection(tmp_path, content=False)
+    assert rep["totals"]["files"] == 1, "the _deleted/ file was counted in the audit's walk"
+    assert rep["totals"]["class_a_groups"] == 0, (
+        "a _deleted/ file was paired with the live copy as a phantom duplicate")
+
+
 # ---------------------------------------------------------------------------
 # Zero-byte files (audit 2026-07-21, S-tier: a 0-byte file could win keeper
 # selection on bucket priority alone and send the REAL image to quarantine --

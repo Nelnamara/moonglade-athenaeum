@@ -287,6 +287,26 @@ def test_resume_skips_on_disk_without_redownload(tmp_path, mocker):
     assert not any("known" in n for n in names)
 
 
+def test_resume_ignores_quarantined_deleted_file(tmp_path, mocker):
+    """B11 (audit 2026-07-21): the startup disk-index walk's skip_dirs never learned
+    about _deleted/ (only 'gallery'/'_duplicates') -- so a media_id purged locally
+    (moved to _deleted/ by purge_media_local) is still indexed as 'already done' and
+    resume/--update silently never re-downloads it, exactly as if it were a live file."""
+    from pixai_gallery import DELETED_DIRNAME
+    qdir = tmp_path / DELETED_DIRNAME
+    qdir.mkdir(parents=True)
+    (qdir / "x_known.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+    mocker.patch.object(core, "gql", side_effect=[_page("known", False)])
+
+    core.run_download(_dl_args(tmp_path))
+
+    names = [str(c.args[2]) for c in dl.call_args_list]
+    assert any("known" in n for n in names), (
+        "a file quarantined under _deleted/ was indexed as 'already done' and "
+        "never re-downloaded")
+
+
 def test_resume_does_not_skip_a_zero_byte_file(tmp_path, mocker):
     """Invariant 3, audit 2026-07-21: the startup disk index used to count ANY file
     with a matching extension as 'already done', including a 0-byte one left behind by
