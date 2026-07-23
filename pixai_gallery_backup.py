@@ -55,7 +55,7 @@ from pathlib import Path
 from pixai_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
                             save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
                             media_id_of, find_files_for_media_id, build_thumbnails,
-                            _NO_WINDOW)
+                            _NO_WINDOW, DELETED_DIRNAME)
 
 
 def _ensure_db(out):
@@ -1193,6 +1193,19 @@ def already_downloaded(root, media_id):
     return matches[0] if matches else None
 
 
+def already_downloaded_video(root, media_id):
+    """Video-aware sibling of already_downloaded() (B16, audit 2026-07-21).
+
+    already_downloaded() alone is a guaranteed-False no-op for videos: its default
+    matcher (find_files_for_media_id's _IMAGE_EXTS) never matches .mp4/.webm/etc,
+    so --sync-artworks --with-videos' resume check fired a full resolve_media
+    network round trip on every single run, even for a video already on disk. Same
+    shared matcher, same exact-match + quarantine-exclusion contract -- just
+    _VIDEO_EXTS instead of the image-only default."""
+    matches = find_files_for_media_id(root, media_id, exts=_VIDEO_EXTS)
+    return matches[0] if matches else None
+
+
 # ---------------------------------------------------------------------------
 # Content hashing (shared by --audit content dedup and organize's same-bytes check)
 # ---------------------------------------------------------------------------
@@ -2123,15 +2136,23 @@ def _bucket_of(rel_path):
 
 def _scan_media_files(out_dir):
     """One walk of the tree. Yields (path, rel, bucket, media_id) for every image
-    file outside gallery/ and _duplicates/. Single source of truth for the audit."""
+    file outside gallery/, _duplicates/, and _deleted/. Single source of truth for
+    the audit (and, via verify_quarantine, the dedup-verify pass).
+
+    _deleted/ exclusion is B11 (audit 2026-07-21): without it, a locally-purged
+    image is a valid audit hit -- reported back as a live Class A duplicate of its
+    own quarantined self, and (via verify_quarantine's survivor index) potentially
+    treated as the "surviving keeper" a _duplicates/ copy is compared against."""
     gallery_dir = out_dir / "gallery"
     quarantine_dir = out_dir / "_duplicates"
+    deleted_dir = out_dir / DELETED_DIRNAME
     for p in out_dir.rglob("*"):
         if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
             continue
         if p.name.endswith(".part"):
             continue
-        if _is_under_dir(p, gallery_dir) or _is_under_dir(p, quarantine_dir):
+        if (_is_under_dir(p, gallery_dir) or _is_under_dir(p, quarantine_dir)
+                or _is_under_dir(p, deleted_dir)):
             continue
         rel = p.relative_to(out_dir)
         yield p, rel, _bucket_of(rel), media_id_of(p)
@@ -2534,7 +2555,12 @@ def cmd_organize(args, out, img_dir, db_path):
     every move can be undone with --undo-organize. Idempotent (files already at
     their target are skipped), byte-safe (never overwrites a differing file), and
     dry-runnable. Metadata embedding (--embed-metadata) and conversion (--convert)
-    are opt-in. Imported (source='local') files and videos are left untouched."""
+    are opt-in. Imported (source='local') files, videos, and _deleted/ quarantine
+    are left untouched (B11, audit 2026-07-21: this is the only one of B11's five
+    quarantine-blind walks that actually MOVES files -- a stale _deleted/ remnant
+    sharing a media_id with the live catalogued copy collided with it in the move
+    plan, either hard-deleting one outright as a spurious "redundant" duplicate or
+    resurrecting the quarantined copy into the organized tree in its place)."""
     db_path = _ensure_db(out)
     meta_by_mid = {}
     for row in load_catalog(db_path):
@@ -2542,7 +2568,8 @@ def cmd_organize(args, out, img_dir, db_path):
         if mid:
             meta_by_mid[mid] = row
 
-    skip_dirs = (out / "gallery", out / "_duplicates", out / "videos", out / "imported")
+    skip_dirs = (out / "gallery", out / "_duplicates", out / "videos", out / "imported",
+                 out / DELETED_DIRNAME)
 
     def _target(mid, row, ext):
         month = (row.get("created_at") or "")[:7] or "unknown-date"
@@ -3084,7 +3111,7 @@ def run_sync_artworks(args):
 
         def _fetch_video(item):
             vmid, title = item
-            if already_downloaded(out, vmid):
+            if already_downloaded_video(out, vmid):
                 return "skip"
             url, info = resolve_media(session, vmid)
             if not url:
@@ -3409,6 +3436,11 @@ def run_import_local(args):
     gallery_dir = out / "gallery"
     quarantine = out / "_duplicates"
     branding_dir = out / "branding"   # app chrome (banner/logo/marks) -- never gallery content
+    # B11 (audit 2026-07-21): purge_media_local() clears a purged image's catalog
+    # row when it moves the file to _deleted/, so without this exclusion the scan
+    # below sees an orphaned file with no existing row/media_id match and
+    # resurrects it as a brand-new source='local' row.
+    deleted_dir = out / DELETED_DIRNAME
 
     print("Scanning {} for media (this can take a moment on a large backup)...".format(src),
           flush=True)
@@ -3428,7 +3460,7 @@ def run_import_local(args):
         if _prog:
             _prog(idx + 1, total, 0)
         if not external and (_under(p, gallery_dir) or _under(p, quarantine)
-                             or _under(p, branding_dir)):
+                             or _under(p, branding_dir) or _under(p, deleted_dir)):
             continue
         is_vid = p.suffix.lower() in _VIDEO_EXTS
         if external:
@@ -6128,13 +6160,15 @@ def run_download(args, progress=None):
     # the progress count AND build the on-disk media_id index. Resume is then an
     # O(1) dict lookup instead of an O(whole-tree) rglob per media_id -- the
     # latter made follow-up runs scale quadratically with collection size.
-    # Prunes gallery/ thumbnails and _duplicates/ quarantine.
+    # Prunes gallery/ thumbnails, _duplicates/ quarantine, and _deleted/ quarantine
+    # (B11, audit 2026-07-21: without this a locally-purged media_id is still
+    # indexed as "already done", so resume/--update never re-downloads it).
     already_done = 0
     disk_bytes = 0
     on_disk_by_mid = {}   # media_id -> Path of an existing full-res image
 
     def _iter_image_entries(root):
-        skip_dirs = {"gallery", "_duplicates"}
+        skip_dirs = {"gallery", "_duplicates", DELETED_DIRNAME}
         stack = [str(root)]
         while stack:
             try:
