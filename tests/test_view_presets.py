@@ -11,15 +11,19 @@ Tier enforcement (login-required) is asserted by tests/test_route_tiers.py.
 """
 import json
 
-from pixai_gallery import create_app
+from pixai_gallery import _account_key, create_app
 from tests.conftest import login_client
 
 
 def _presets_file(tmp_path, user="tester"):
     """One account's own store. Saved views are PER-ACCOUNT: a saved view is a stored
     search (names + queries that say what someone looks for in their library), not a
-    theme, so it does not get the install-wide treatment /api/skin gets."""
-    return tmp_path / "view_presets" / (user + ".json")
+    theme, so it does not get the install-wide treatment /api/skin gets.
+
+    Keyed through the same _account_key() the app itself uses (B14 residual: a bare
+    username here would silently pass on a case-insensitive filesystem even after a
+    regression, since "tester" happens to need no encoding either way)."""
+    return tmp_path / "view_presets" / (_account_key(user) + ".json")
 
 
 def _legacy_presets_file(tmp_path):
@@ -144,6 +148,34 @@ def test_one_account_cannot_see_or_clobber_anothers_saved_views(tmp_path):
     # ...and bob's delete must not reach into alice's set either
     bob.post("/api/view-presets", json={"delete": "mine"})
     assert alice.get("/api/view-presets").get_json()["presets"] == {"mine": "?q=alice-only"}
+
+
+def test_saved_views_are_independent_for_accounts_differing_only_by_case(tmp_path):
+    """B14 residual: the per-account key was quote(username, safe=""), which is
+    case-PRESERVING -- it produces two DIFFERENT strings for "Nel" and "nel" ("Nel"
+    and "nel" themselves, neither has characters quote() escapes). Those two
+    different strings name the SAME file on NTFS (case-insensitive-but-preserving),
+    even though account identity itself is case-SENSITIVE: _find_web_user compares
+    the raw username with ==, so "Nel" and "nel" are two separate AUTH_USERS rows,
+    same as "alice"/"bob" above -- just unlucky enough to collide on disk. FAILS
+    before the fix on this filesystem: nel's read/save clobbers Nel's, exactly like
+    the alice/bob test above would if _view_presets_path() were reverted to a
+    shared file."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    app = create_app(tmp_path)
+
+    upper = login_test_client(app, username="Nel", password="a-real-test-password-1")
+    upper.post("/api/view-presets", json={"name": "mine", "query": "?q=Nel-only"})
+
+    lower = login_test_client(app, username="nel", password="a-real-test-password-2")
+    assert lower.get("/api/view-presets").get_json()["presets"] == {}, (
+        "nel can see Nel's saved views -- case-differing usernames collide on disk")
+
+    lower.post("/api/view-presets", json={"name": "mine", "query": "?q=nel-only"})
+    assert lower.get("/api/view-presets").get_json()["presets"] == {"mine": "?q=nel-only"}
+    assert upper.get("/api/view-presets").get_json()["presets"] == {"mine": "?q=Nel-only"}, (
+        "nel's save overwrote Nel's identically-named view -- case-collision on disk")
 
 
 def test_an_account_without_its_own_file_still_sees_the_legacy_shared_set(tmp_path):
