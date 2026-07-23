@@ -1044,7 +1044,7 @@ ${"=".repeat(48)}
       )
     )));
   }
-  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
@@ -2910,7 +2910,6 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         scale,
         selShot,
         setSelShot,
-        generateShot,
         useExistingVideo,
         genState,
         thumbs,
