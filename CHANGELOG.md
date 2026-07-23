@@ -15,6 +15,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-07-23 — More security hardening, the Folio of Honors, and LoRA support in the Loom
+
 ### Changed
 
 - **Trophy Hall is now The Folio of Honors, with a full visual redesign.** The owner's
@@ -243,8 +245,6 @@ git tags. Full prose notes for tagged versions live on
   `--probe` and the normal download path) is untouched and very much alive; only the
   dead manual-override flag is removed.
 
-### Added
-
 - **The published wiki now syncs automatically on every release tag.**
   `.github/workflows/wiki-sync.yml` pushes `wiki/*.md` to the wiki repo whenever a `v*`
   tag lands, so it can't silently drift the way it did for 4 releases / 6 days before
@@ -267,6 +267,8 @@ git tags. Full prose notes for tagged versions live on
   bug or a visual artifact of the (now-fixed) overlap bug making two different cards' text
   read as one. Owner wants to look at it himself before any further changes — see
   `docs/STATE.md`'s Folio of Honors section for what's on record.
+
+### Fixed (continued)
 
 - **A signed-in LAN account could evict the owner's own account, and register a fresh one
   for itself.** The only guard on removing an account was "not the last one left" — nothing
