@@ -8,10 +8,10 @@ git tags. Full prose notes for tagged versions live on
 
 > **Maintenance note.** This file is the in-repo source of truth — **update the `[Unreleased]`
 > section with every change, and cut it into a dated version block when you tag a release.**
-> GitHub Releases are published through **v1.10.0** — publishing paused after **v1.6.0**, and
+> GitHub Releases are published through **v2.2.0** — publishing paused after **v1.6.0**, and
 > **v1.8.0–v1.10.0 were back-published** on 2026-07-10 from tag messages + git history. **v1.11.0 is
-> tagged but has no Release yet** — its tag sits on `loom-v2` and never reached master; it arrives
-> there as part of **v2.0.0**. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
+> tagged but has no Release of its own** — its commits reached master as part of **v2.0.0**, which
+> does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
 
@@ -102,6 +102,26 @@ git tags. Full prose notes for tagged versions live on
   the service worker's thumbnail revalidation, two Deep Focus prompt-field behaviors,
   two branding-render checks, the mobile drawer's full-width rule, and the v4.0 video
   cost warning.
+
+- **A doc-truth-up sweep across the repo.** Route docstrings, help text, and comments that
+  no longer matched what the code actually does, verified one at a time against the real
+  current behavior rather than trusting the earlier audit's own wording (which was itself
+  sometimes stale by the time this landed). Route tier docstrings corrected to match
+  `ROUTE_TIERS` (four routes wrongly claimed Localhost/Open); the first-run bootstrap
+  docstring updated to describe the real web-based flow; every remaining reference to the
+  deleted PySide6 GUI removed from user-facing strings and code comments (five sites, not
+  the two originally estimated), two of which kept their original reasoning rather than
+  just losing the GUI comparison; `docs/architecture.md`'s on-disk layout diagram brought
+  up to date (11 missing entries) and its `/api/branding` tier claim corrected;
+  `docs/STATE.md`'s self-contradictions resolved (some turned out to already be fixed by
+  earlier work tonight — checked rather than assumed); `CHANGELOG.md`'s own v2.2.0 entry
+  and release-history maintenance note corrected against `gh release list` and
+  `git merge-base`; `config.example.json` gained two real, previously-undocumented config
+  overrides; README's feature table and wiki index gained the Loom, Folio of Honors, and
+  Control Panel. Two real (not doc-only) gaps surfaced along the way were deliberately
+  **not** fixed here and are tracked instead: `--full-meta`/`--backfill-full-meta` don't
+  get the fallback resilience their own docstring claims, and a LAN-signed-in session can
+  see an Import button that always 403s.
 
 - **The model-preview tooltip "jumped" while browsing, making it hard to scan a grid.**
   Two independently-drifted copies of the hover-preview mechanism (the gallery's own
@@ -295,7 +315,7 @@ git tags. Full prose notes for tagged versions live on
   then mounted nowhere while four surfaces each hand-rolled their own "is this free or does it
   cost credits" line — the one surface whose entire job is stopping an accidental 27,500-credit
   click. They are now one component: the Generate drawer (shared by the gallery's Video tab and
-  the Loom), the gallery's Image and Edit tabs, and the picker. What you'll notice: the gallery's
+  the Loom), and the gallery's Image and Edit tabs. What you'll notice: the gallery's
   FREE line gains the card's name, how many are left, and when it expires (matching what the
   drawer already showed); and where a failed price check used to read as a neutral "cost
   unavailable", it now says plainly, in red, that the cost couldn't be verified and generating
@@ -399,7 +419,7 @@ git tags. Full prose notes for tagged versions live on
 - **Saved views now follow you between devices.** The gallery's "Saved views…" presets lived in
   each browser's own localStorage, so a view saved at the desktop simply didn't exist on the
   tablet sharing the same server. They now persist server-side (`/api/view-presets` →
-  `out_dir/view_presets.json`, atomic write, login tier) — the same follows-you-everywhere
+  `out_dir/view_presets/<account>.json`, atomic write, login tier) — the same follows-you-everywhere
   contract as the skin choice. Any legacy localStorage set is merged up automatically on first
   load (server names win ties, so two browsers migrating in sequence can't fight over whose
   stale copy sticks) and then cleared. Stored queries must be `?…` filter strings — the client
