@@ -12023,9 +12023,15 @@ def main():
                          "starts (manual convenience for a terminal launch; the double-click "
                          "'Serve Gallery' launcher does NOT pass this -- it polls the server "
                          "until it actually answers and opens the browser itself)")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="show INFO-level log lines (request activity, startup steps) on the "
+                         "console too -- the log FILE under out_dir/logs/ always captures them "
+                         "regardless of this flag")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
+    import pixai_logging
+    pixai_logging.setup_logging(out_dir, verbose=args.verbose)
     # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
     # to start here used to be the ONLY thing a brand-new user saw: a console exit, before
     # the web app's own first-run wizard (paste a key, run the first sync) ever had a

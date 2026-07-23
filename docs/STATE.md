@@ -609,14 +609,25 @@ waiting; the "together" grouping still applies to what's left below.
   the whole premise: considering REMOVING the ornate per-tile frames from Legendary/Feat
   rather than adding a matching Epic one (2026-07-23). Not the "deep-purple WoW epic /
   tier-gear" direction previously banked — that's shelved pending this bigger question.
-- **"Earned rewards" as its own display** — shape TBD. This is about the Folio of Honors
-  (achievement unlocks), not a PixAI feature: a dedicated display for rewards you've
-  actually earned (banners, skins, etc.), separate from the achievement list itself.
-- **"Toast badge grows to its home marker"** — the owner's own half-articulated idea from
-  the unlock-toast work: the badge shown in the unlock toast animates/scales as it "arrives"
-  at wherever its permanent icon lives, as a satisfying collect-moment. Never finished being
-  specified (own note at the time: "owner articulating the idea separately. AWAITING.") —
-  still awaiting that, not touched.
+- **"Earned rewards" display — CORRECTION 2026-07-23, this is already LIVE, not TBD.**
+  A previous pass (and this file, until now) wrongly carried it as an unbuilt idea. It's a
+  real section in the Folio of Honors today, currently showing only **skin** unlocks. Open
+  (not a shape question — a build-more question): extend it to also cover **banner** and
+  **icon** unlocks (assets already exist per the owner), plus a secret easter egg that
+  unlocks full custom branding. Exact current render location in `pixai_gallery.py` /
+  `static/mg-notify.js` not yet re-confirmed against the post-Folio-of-Honors code — ask the
+  owner to point at it directly rather than re-deriving from git history next time this
+  comes up.
+- **"Toast badge grows to its home marker" — CORRECTION 2026-07-23, this was a REAL
+  regression, not an unfinished idea.** Owner: "this was actually live until the achievement
+  revamp debacle... one of the lost facts." The archived note this file's prior wording was
+  sourced from ("owner articulating the idea separately, AWAITING") predates that — it must
+  have been built and shipped sometime after, then lost when the Hall got reworked. A
+  `c877919`→`0a8da3a` Trophy Hall reformat (2026-07-14/15, reverted) is confirmed real and
+  touched the adjacent "Rewards Earned" bar, but a quick pass did not turn up the specific
+  grow-to-marker animation code in that commit or the later `a47ec41` Figma-ported Folio of
+  Honors ship — needs either owner git-archaeology guidance or a fresh re-description, not
+  further guessing.
 - **Real SFX for the unlock toast — deferred to the Design Pass.** The loader ships and
   fails soft, but no `branding/sfx/` folder exists on the served tree, so the synth chime is
   the only sound that ever plays. Sources scouted: Kenney / Sonniss GDC / freesound /
