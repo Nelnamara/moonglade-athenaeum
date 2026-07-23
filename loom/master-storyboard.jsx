@@ -719,6 +719,29 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       });
     }
   }, [setImgLoras]);
+  // D-12 increments 2-4: read-only cost badges for the Image/Edit/Reference tabs -- refs to
+  // the <mg-cost-badge> custom elements (imperative setChecking/setPrice/clear API, the same
+  // component the Gallery's Enhance sub-tab uses). Kept ALONGSIDE -- not instead of --
+  // confirmSpend's window.confirm at submit time below, unlike the Gallery's Enhance tab:
+  // these three tabs' confirm dialog IS the fail-closed guardrail that got built after they
+  // used to lie about cost (see confirmSpend's own comment), so the badge is an added
+  // preview, not a replacement for the submit-time gate.
+  const imgCostRef = useRef(null);
+  const editCostRef = useRef(null);
+  const refCostRef = useRef(null);
+  // Shared read-only price fetch, imperative so a fast-changing prompt never triggers a
+  // React re-render just to show "checking...". Guards on `ref.current === badge` (captured
+  // at call time) so a response for a badge the ref has since moved off of -- tab switch,
+  // unmount -- never writes into whatever now lives at ref.current.
+  const priceInto = (ref, body) => {
+    const badge = ref.current;
+    if (!badge) return;
+    badge.setChecking();
+    fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then((r) => r.json())
+      .then((d) => { if (ref.current === badge) badge.setPrice(d); })
+      .catch(() => { if (ref.current === badge) badge.setPrice(null); });
+  };
   // Bridge <mg-generate-drawer> the same way. activeRef always holds the CURRENT active
   // shot (updated every render below) so these long-lived, bind-once listeners never read
   // a stale closure from whichever shot happened to be selected when the element first
@@ -870,6 +893,37 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   activeRef.current = active;
+  // D-12 increments 2-4: debounced read-only price checks feeding the three badges declared
+  // above. Each depends only on primitives (never the whole active.c / project.assets object),
+  // so an unrelated re-render -- a poll tick, another tab's state -- doesn't reset the
+  // debounce timer or refire a check nothing actually changed.
+  const editSrcMid = active.c.openFrame && active.c.openFrame.mediaId;
+  const refMids = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId).map((a) => a.mediaId);
+  const refMidsKey = refMids.join(",");
+  useEffect(() => {
+    const badge = imgCostRef.current;
+    if (!badge) return;
+    const prompt = (active.c.imgPrompt || "").trim();
+    if (!imgModel || !prompt || anyLoraUnresolved(imgLoras)) { badge.clear(); return; }
+    const t = setTimeout(() => priceInto(imgCostRef, { model_id: imgModel.model_id, prompt }), 250);
+    return () => clearTimeout(t);
+  }, [imgModel, imgLoras, active.c.id, active.c.imgPrompt]);
+  useEffect(() => {
+    const badge = editCostRef.current;
+    if (!badge) return;
+    const instruction = (active.c.editPrompt || "").trim();
+    if (!editSrcMid || !instruction) { badge.clear(); return; }
+    const t = setTimeout(() => priceInto(editCostRef, { mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" }), 250);
+    return () => clearTimeout(t);
+  }, [editSrcMid, active.c.id, active.c.editPrompt]);
+  useEffect(() => {
+    const badge = refCostRef.current;
+    if (!badge) return;
+    const prompt = (active.c.refPrompt || "").trim();
+    if (!refMids.length || !prompt) { badge.clear(); return; }
+    const t = setTimeout(() => priceInto(refCostRef, { mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" }), 250);
+    return () => clearTimeout(t);
+  }, [refMidsKey, active.c.id, active.c.refPrompt]);
   // Duplicate of the Video tabBody's own selIdx/prevEntry below (kept deliberately separate
   // rather than hoisted -- that one lives inside a bare block for frame-handoff, this one
   // feeds a Hook, which can't live inside a block).
@@ -1242,6 +1296,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
           {sel && <button className="lv-mini2" onClick={() => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, (c.openFrame && c.openFrame.desc) || "", c.lighting || ""].filter(Boolean).join(", ") }))}>&#8615; seed from shot description</button>}
+          <mg-cost-badge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." card-label="a card"></mg-cost-badge>
           <button className="lv-go" disabled={busyI || anyLoraUnresolved(imgLoras)} onClick={() => genImage(active)}>{busyI ? (gi.msg || "generating…") : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…" : "✦ Generate reference image"}</button>
           {gi.phase === "error" && <div className="lv-gerr">{gi.msg}</div>}
           {gi.mid && (
@@ -1269,6 +1324,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <label className="lv-lab">Edit instruction</label>
           <textarea className="lv-ta" value={active.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
             onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
+          <mg-cost-badge ref={editCostRef} hint="Add a source image and instruction to see the cost." card-label="an Edit card"></mg-cost-badge>
           <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(active)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
           {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
           {ge.mid && (
@@ -1296,6 +1352,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <label className="lv-lab">Prompt</label>
           <textarea className="lv-ta" value={active.c.refPrompt || ""} placeholder="compose a new still from the references…"
             onChange={(ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))} />
+          <mg-cost-badge ref={refCostRef} hint="Add references and a prompt to see the cost." card-label="an Edit card"></mg-cost-badge>
           <button className="lv-go" disabled={busyR || !refs.length} onClick={() => genRef(active)}>{busyR ? (gr.msg || "generating…") : "✦ Generate from references"}</button>
           {gr.phase === "error" && <div className="lv-gerr">{gr.msg}</div>}
           {gr.mid && (
