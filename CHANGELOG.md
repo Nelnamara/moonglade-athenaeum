@@ -96,27 +96,28 @@ git tags. Full prose notes for tagged versions live on
   server through the wildcard host and require it to be recognized, which only
   passes if the rewrite genuinely happened.
 
-- **`is_lora_compatible()`, the LoRA/model architecture-mismatch spend gate, was never
-  actually called anywhere.** Its own docstring says why it exists: a mismatched LoRA
-  is rejected server-side by PixAI, burning a real generation or free card. The
-  drawer's client-side `loraIncompat()`/`anyIncompat()` already resolve the same
-  model_type/lora_base_type and disable Generate on a mismatch — but that's advisory
-  only, and a direct POST to `/api/generate` bypassing the UI had no equivalent check
-  at all. The server now runs the same check for real: `model_type` (server-resolved
-  when a model_id is sent, same call already made for version resolution) and each
-  LoRA's `lora_base_type` (now sent alongside `version_id`/`weight`) get validated
-  before any card is attached or credits spent; a mismatch is a 400, not a submit.
-  CLI `--lora` has no equivalent check yet — narrower scope, left open.
+- **A failed free-card check now says so in plain, on-theme language instead of a raw
+  technical error.** "Lost to the Void — the free-card check didn't come back before
+  submitting, so nothing was spent. Wait a moment and try again." Still refuses to
+  guess and silently spend credits (unchanged); just says it in the app's own voice
+  now, per the owner's D-1 answer, mirroring how PixAI's own site reports a similar
+  random failure.
+
+- **`--variant`, a CLI flag that did nothing, is gone.** Verified directly (not taken
+  on a prior audit's word, per the owner's D-5 request): `args.variant` was parsed but
+  read nowhere in the codebase — zero occurrences. The variant *auto-detection*
+  machinery it was meant to override (`detect_variant`/`test_variant`, used by
+  `--probe` and the normal download path) is untouched and very much alive; only the
+  dead manual-override flag is removed.
 
 ### Removed
 
-- **`ENHANCE_PLUGINS` and the dead `plugin=` branch of `/api/enhance`.** Unlike
-  `is_lora_compatible` above, this one really was just dead code, not a gap to wire
-  in: the Edit tab's Enhance UI has only ever sent `workflow_id`, never `plugin`, so
-  the dict's three entries were unreachable. `hand-fix`/`face-fix` are superseded by
-  the real, working box-based `/api/fix` (`submit_fixer`); `detail-fix`'s workflow is
-  already reachable the normal way, through the same `workflow_id` path every other
-  Enhance workflow uses.
+- **`ENHANCE_PLUGINS` and the dead `plugin=` branch of `/api/enhance`.** The Edit
+  tab's Enhance UI has only ever sent `workflow_id`, never `plugin`, so the dict's
+  three entries were unreachable. `hand-fix`/`face-fix` are superseded by the real,
+  working box-based `/api/fix` (`submit_fixer`); `detail-fix`'s workflow is already
+  reachable the normal way, through the same `workflow_id` path every other Enhance
+  workflow uses.
 
 ### Known issue (not fixed — deliberately left for the design pass)
 
