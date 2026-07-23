@@ -501,18 +501,16 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
-- **The Prompt textarea is the one piece deliberately held back, owner's explicit call
-  2026-07-18:** it is still the **only write site for `c.prompt` in the entire app** (no Deep
-  Focus equivalent) — a "base" string `shotText()` keeps recomposing alongside every later
-  Camera/Lighting/cast edit. The drawer's own composed-prompt box only ever writes
+- **The Prompt textarea still has no shared web-component home** — it stayed a plain React
+  `<textarea>` rather than migrating like `<mg-generate-drawer>` did. There are now **two
+  write sites for `c.prompt`**: the right panel's own Prompt field, and Deep Focus's own
+  matching field (same placement in both — after Mode/Duration, before the frames), each
+  clearing an active `c.promptOverride` the instant the owner types there, since typing a
+  base prompt means "auto-compose from this text now." A "base" string `shotText()` keeps
+  recomposing alongside every later Camera/Lighting/cast edit. The drawer's own
+  composed-prompt box (`<mg-generate-drawer>`) is unrelated — it only ever writes
   `c.promptOverride`/`c.promptOverrideText` (a frozen, never-re-woven verbatim replacement,
-  by that feature's own explicit design) — deleting the native textarea would make every
-  hand-typed prompt an override going forward, silently retiring the compose-from-fields
-  machinery for any shot ever hand-touched. Owner chose to hold this out rather than decide
-  yet; two live options if/when revisited: ship the override-only model as a deliberate
-  simplification, or give base-prompt editing a new home in Deep Focus (mirroring exactly how
-  Deep Focus stayed the sole remaining way to set a card to V2V after Mode's own chips were
-  deleted). Not a blocker on anything else shipping.
+  by that feature's own explicit design).
 - `<mg-cost-badge>` now covers the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`,
   shared by the gallery Video tab and the Loom's Video tab), `pixai_gallery.py`'s Generate
   and Edit tabs, the Gallery's Enhance sub-tab (`enhance-cost`, reshaped select-then-run —
@@ -539,15 +537,17 @@ What's still CLI-only, tracked so the web surface stays complete:
   too, so a forgotten password doesn't require CLI access. Would need its own trust call
   (self-only, like `api_users_remove`'s self-removal carve-out? or LOCALHOST like adding a
   new account?) rather than inheriting one by default — not decided yet, not started.
-- (`--restore-orphans` and `--undo-organize` were the last CLI-only *maintenance* actions,
-  and both now render Panel buttons. `reconcile-deleted` runs via `/api/panel/run` and the
-  scheduler but renders no button by design, `panel_visible: False`. `PANEL_ACTIONS` in
-  `pixai_gallery.py`. `--faststart-videos` is deliberately CLI-only for a different reason:
-  it's a one-time remux for videos downloaded before the auto-faststart path shipped —
-  every current video-acquisition path (`run_sync_videos`, `_download_video_task`,
-  `run_import_local`) already calls `video_faststart()` at collect time, so there's nothing
-  left for a Panel button to do going forward. Deprecated-in-place by owner decision — D-6,
-  `docs/AUDIT_2026-07-21.md`.)
+- (`--restore-orphans` and `--undo-organize` now render Panel buttons. `reconcile-deleted`
+  runs via `/api/panel/run` and the scheduler but renders no button by design,
+  `panel_visible: False`. `PANEL_ACTIONS` in `pixai_gallery.py`. Still genuinely CLI-only,
+  with no web route at all: `--convert-existing` (bulk-converts already-downloaded `.webp`
+  files to the `--convert` format) and `--backfill-meta`/`--backfill-full-meta` (fill in
+  missing catalog fields for existing rows). `--faststart-videos` is deliberately CLI-only
+  for a different reason: it's a one-time remux for videos downloaded before the
+  auto-faststart path shipped — every current video-acquisition path (`run_sync_videos`,
+  `_download_video_task`, `run_import_local`) already calls `video_faststart()` at collect
+  time, so there's nothing left for a Panel button to do going forward. Deprecated-in-place
+  by owner decision — D-6, `docs/AUDIT_2026-07-21.md`.)
 
 ---
 
@@ -590,9 +590,10 @@ waiting; the "together" grouping still applies to what's left below.
 - The **gallery search-bar redesign**, blocked on owner input.
 - The **owner's layout/function note-taking pass**, which gates several deferred items.
 - Epic-tier frame art, the "earned rewards" display, the toast-badge-to-home-marker motion,
-  and toast tier colours vs shipped badge art — all previously filed individually under
-  Open owner calls. (Per-tile ornate frames shipped with the Folio of Honors redesign,
-  2026-07-22 — no longer on this list.)
+  and toast tier colours vs shipped badge art each also has its own line under Open owner
+  calls below — grouping them here is about execution order, not fewer decisions. (Per-tile
+  ornate frames shipped with the Folio of Honors redesign, 2026-07-22 — no longer on this
+  list.)
 
 ---
 
@@ -834,7 +835,7 @@ surface: no visual build from prose alone.
 | [ledger](https://claude.ai/code/artifact/d1ee39a1-db65-487b-a6ef-067ea6d1392d) | Per-achievement mascot + badge assignment | Live |
 | [Chibi Library · assign uses](https://claude.ai/code/artifact/1998636d-9043-41e8-900d-797c67fd04f2) | Chibi browser + use assignment | Live |
 | [Cohesion Map](https://claude.ai/code/artifact/4229e98c-4ac3-4e86-820a-72a57465c066) | Top-down app map | Live |
-| [Moonglade Banners — defaults & unlocks](https://claude.ai/code/artifact/7919cec3-aec7-41d0-8efc-8fb2d0f4cdb5) | Banner picks; feeds the banner-unlock reward | Live |
+| [Moonglade Banners — defaults & unlocks](https://claude.ai/code/artifact/7919cec3-aec7-41d0-8efc-8fb2d0f4cdb5) | Banner picks for the banner-unlock reward, which isn't built yet (D-8) | Live |
 | [Moonglade Model Deck](https://claude.ai/code/artifact/9f16f42d-2541-4dd9-935a-0f9d0f39c7c4) | Model research deck | Mirror — `docs/archive/MODEL_DECK_2026-07-11.md` is truth |
 
 **Parked**

@@ -1557,9 +1557,14 @@ _FULL_META_FIELDS = (
 def task_detail_gql(session, task_id):
     """GET getTaskById for one task. Returns the task dict or None on failure."""
     if not TASK_DETAIL_HASH:
+        # Defensive only: TASK_DETAIL_HASH ships with a working built-in default (see
+        # its module-level assignment above), so this fires only if that default is
+        # stripped or someone blanks it in config.json -- not a real setup gate.
         raise PixAIError(
-            "TASK_DETAIL_HASH missing from config.json. "
-            "Capture it from DevTools (see README -> Full Meta) and add it.")
+            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current getTaskById "
+            "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
+            "this file).")
     params = {
         "operation": "getTaskById",
         "u3t": U3T,
@@ -4073,9 +4078,10 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
     is also sent as `mediaId`. `scene_id` marks a Toolbox PRESET (banked 2026-07-04
     from task 2030050946353349700: a preset = this same chat block + a canned prompt
     + top-level sceneId, e.g. "character-card"; Edit cards match it either way).
-    NOTE: we deliberately DO NOT attach a `kaisuukenId` (free-card) here -- free-card
-    spending is a separate, explicit feature; without it the server charges credits,
-    so this stays behind --confirm like all spend paths.
+    NOTE: `kaisuuken_id` defaults to "" and is only attached (below) when the caller
+    passes one explicitly -- same opt-in shape as the other build_*_parameters builders.
+    Without one the server charges credits, so this still stays behind --confirm like
+    all spend paths.
     """
     ids = [str(m) for m in (media_ids or []) if str(m).strip()]
     if not ids:
@@ -5997,9 +6003,13 @@ def run_backfill_full_meta(args):
     session = _make_session(getattr(args, "token", None))
 
     if not TASK_DETAIL_HASH:
+        # Defensive only: TASK_DETAIL_HASH ships with a working built-in default, so this
+        # fires only if that default is stripped or blanked in config.json.
         raise PixAIError(
-            "--backfill-full-meta requires TASK_DETAIL_HASH in config.json. "
-            "See README -> Full Meta for capture instructions.")
+            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current getTaskById "
+            "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
+            "this file).")
 
     rows = load_catalog(db_path)
     with_loras = getattr(args, "with_loras", False)
@@ -6129,9 +6139,13 @@ def run_download(args, progress=None):
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
 
     if use_full_meta and not TASK_DETAIL_HASH:
+        # Defensive only: TASK_DETAIL_HASH ships with a working built-in default, so this
+        # fires only if that default is stripped or blanked in config.json.
         raise PixAIError(
-            "--full-meta requires TASK_DETAIL_HASH in config.json. "
-            "See README -> Full Meta for capture instructions.")
+            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current getTaskById "
+            "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
+            "this file).")
 
     if not getattr(args, "organize_adv_live", False):
         img_dir.mkdir(parents=True, exist_ok=True)
@@ -6697,7 +6711,7 @@ def main():
                     help="DELETE the given generation task id(s) from your PixAI account "
                          "(irreversible). Dry-run unless --apply is also given; then asks "
                          "for typed confirmation unless --yes. Local backups are untouched. "
-                         "Requires DELETE_TASK_HASH in config.json.")
+                         "(DELETE_TASK_HASH ships with a working default; no config.json setup needed.)")
     ap.add_argument("--yes", action="store_true",
                     help="skip the interactive confirmation for --delete-task --apply "
                          "(use with care; deletion cannot be undone)")
@@ -6766,8 +6780,9 @@ def main():
                          "plan without moving anything")
     ap.add_argument("--full-meta", action="store_true",
                     help="fetch full prompt, seed, steps, sampler, CFG, and model name for each "
-                         "task via a second API call (requires TASK_DETAIL_HASH + MODEL_DETAIL_HASH "
-                         "in config.json). One extra call per unique task; batch images share one call.")
+                         "task via a second API call (TASK_DETAIL_HASH + MODEL_DETAIL_HASH ship with "
+                         "working defaults; no config.json setup needed). One extra call per unique "
+                         "task; batch images share one call.")
     ap.add_argument("--backfill-meta", action="store_true",
                     help="fill in missing url/width/height in catalog.db via resolve_media "
                          "for rows that lack them, then exit")
