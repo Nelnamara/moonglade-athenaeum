@@ -3722,10 +3722,13 @@ __DESIGN_TOKENS__
   .card .meta .date  { font-size: 10px; color: var(--overlay0); }
   /* Privacy blur (opt-in toggle): blur every thumbnail until hover. Useful on
      LAN / mobile / over-the-shoulder. NSFW-flagged cards (data-nsfw="1") blur
-     more heavily when the flag is known. */
-  body.privacy-blur .card img { filter: blur(16px); transition: filter .12s; }
-  body.privacy-blur .card[data-nsfw="1"] img { filter: blur(28px); }
-  body.privacy-blur .card:hover img { filter: none; }
+     more heavily when the flag is known. Audit 2026-07-21 S5: .pick-cell (the gallery
+     Picker's own grid, .pick-modal below) never carried ANY of this -- picking an
+     image painted the whole catalog unblurred regardless of Privacy Blur. Same two
+     rules, same selector shape, just a second class. */
+  body.privacy-blur .card img, body.privacy-blur .pick-cell img, body.privacy-blur #gen-ref-slot img { filter: blur(16px); transition: filter .12s; }
+  body.privacy-blur .card[data-nsfw="1"] img, body.privacy-blur .pick-cell[data-nsfw="1"] img, body.privacy-blur #gen-ref-slot[data-nsfw="1"] img { filter: blur(28px); }
+  body.privacy-blur .card:hover img, body.privacy-blur .pick-cell:hover img, body.privacy-blur #gen-ref-slot:hover img { filter: none; }
   .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
   /* --accent, not --lavender: the two are the same colour in the default skin, so this
      read as correct, but a skin that retints --accent (nightfallen: #a678f0 vs a
@@ -5758,6 +5761,7 @@ var Picker = (function(){
         if(!imgs.length && !meta.append){ empty.textContent='No images found.'; empty.style.display='block'; if(moreBtn) moreBtn.style.display='none'; return; }
         empty.style.display='none';
         imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
+          if(m.is_nsfw==='1') c.setAttribute('data-nsfw','1');
           c.innerHTML='<img loading="lazy" decoding="async" src="'+m.thumb+'" alt="">';
           c.onclick=function(){ pick(m); }; grid.appendChild(c); });
         if(moreBtn) moreBtn.style.display = meta.hasMore ? '' : 'none';
@@ -5781,7 +5785,7 @@ var Picker = (function(){
   function onFilter(){ markLoading(); ensureCore().setFilters(Object.assign(readFilters(), {type:forcedType})); }
   function pick(m, thumb){
     try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
-    var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'');
+    var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'', m.is_nsfw||'');
   }
   function more_(){ ensureCore().loadMore(); }
   function onScroll(){ ensureCore().onScroll(el('pick-grid'), 320); }
@@ -6234,20 +6238,22 @@ var Gen = (function(){
     if(s.cfg_scale) el('gen-cfg').value=s.cfg_scale;
   }
   function resetModelDefaults(){ applyModelDefaults(); }
-  var genRef=null;   // {media_id, thumb} -- the img2img reference, or null
+  var genRef=null;   // {media_id, thumb, is_nsfw} -- the img2img reference, or null
   function refPick(){
     if(genRef){ genRef=null; renderGenRef(); debouncedCost(); return; }   // click filled slot = clear
-    Picker.open(function(mid, thumb){ genRef={media_id:mid, thumb:thumb}; renderGenRef(); debouncedCost(); });
+    Picker.open(function(mid, thumb, prompt, is_nsfw){ genRef={media_id:mid, thumb:thumb, is_nsfw:is_nsfw}; renderGenRef(); debouncedCost(); });
   }
   function renderGenRef(){
     var s=el('gen-ref-slot'), c=el('gen-ref-ctl'); if(!s) return;
     if(genRef){
+      if(genRef.is_nsfw==='1') s.setAttribute('data-nsfw','1'); else s.removeAttribute('data-nsfw');
       s.innerHTML='<img src="'+genRef.thumb+'" style="width:100%;height:100%;object-fit:cover;">'
         +'<span style="position:absolute;top:1px;right:1px;background:rgba(21,19,28,.85);color:var(--subtext);border-radius:50%;width:15px;height:15px;font-size:10px;line-height:15px;text-align:center;">&times;</span>';
       s.style.borderStyle='solid'; s.title='Click to remove the reference';
       c.style.display='';
       s.onmouseenter=function(){ showRefPreview(genRef.media_id, s); }; s.onmouseleave=hidePreview;
     } else {
+      s.removeAttribute('data-nsfw');
       s.innerHTML='+ ref'; s.style.borderStyle='dashed'; s.title='Pick a reference image from your gallery';
       s.onmouseenter=null; s.onmouseleave=null; c.style.display='none';
     }
@@ -6589,7 +6595,7 @@ var Gen = (function(){
 // file). One document-level listener; the drawer is the only source of this event.
 document.addEventListener('mg-pick-request', function(e){
   var d=e.detail; if(!d||typeof d.respond!=='function') return;
-  Picker.open(function(mid, thumb){ d.respond(mid, thumb); }, d.kind==='video'?{type:'video'}:null);
+  Picker.open(function(mid, thumb, prompt, is_nsfw){ d.respond(mid, thumb, is_nsfw); }, d.kind==='video'?{type:'video'}:null);
 });
 // mg-submit / mg-result: the drawer polls and renders ITS OWN result inline (self-contained,
 // same as the Loom's mount) -- these two listeners are not for that. They are the two things
@@ -9772,7 +9778,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if not mid:
                 continue
             isv = str(r.get("is_video") or "") == "1"
+            # is_nsfw rides along so every consumer of this route (the gallery Picker,
+            # <mg-gallery-picker>, and the Generate drawer's reference slots) can set
+            # data-nsfw the same way the Jinja template and /api/similar already do.
+            # Audit 2026-07-21 S5: this was the one remaining projection gap -- without
+            # it, Privacy Blur (body.privacy-blur .card[data-nsfw="1"] img) never saw an
+            # NSFW thumbnail on any of these three surfaces.
+            isnsfw = str(r.get("is_nsfw") or "") == "1"
             out.append({"media_id": str(mid), "is_video": "1" if isv else "",
+                        "is_nsfw": "1" if isnsfw else "",
                         "thumb": "/thumbs/{}.jpg".format(mid),
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000],
                         "duration": (r.get("video_duration") or "") if isv else ""})

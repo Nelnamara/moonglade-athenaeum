@@ -24,6 +24,15 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 - **The Similar modal ("more like this") no longer leaks unblurred NSFW lookalikes.**
   `/api/similar` now includes `is_nsfw` in its response, and the client sets `data-nsfw`
   on its hand-cloned cards, so Privacy Blur now covers this surface like every other one.
+- **Privacy Blur now reaches every surface that shows a catalog thumbnail, closing the
+  last open Tier-1 security item.** `/api/gallery-images` now projects `is_nsfw` alongside
+  `/api/similar`, and it's threaded through the pick-event chain on both host paths (the
+  main gallery page and the Loom) so a picked reference thumbnail knows its own NSFW state
+  too. The gallery Picker, `<mg-gallery-picker>`, the Generate drawer's reference slots, and
+  the Edit tab's single reference slot (found during this pass, not in the original
+  citation) each gained the same `data-nsfw` + blur-on-`body.privacy-blur` treatment `.card`
+  already had — previously none of the four rendered `.card`, so Privacy Blur never touched
+  any of them regardless of the flag.
 
 ### Fixed
 
