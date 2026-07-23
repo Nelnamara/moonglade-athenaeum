@@ -309,6 +309,36 @@ def test_resume_does_not_skip_a_zero_byte_file(tmp_path, mocker):
         "the zero-byte file was indexed as 'already done' and never re-downloaded")
 
 
+def test_run_download_returns_its_fail_count(tmp_path, mocker, capsys):
+    """D-4: run_download's own tally (dl['fail'] etc.) never reached any caller -- no
+    return statement meant a partial-failure run was indistinguishable from a clean one
+    to everything downstream (the CLI job log, the Panel). Also locks in the louder
+    console notice that replaces the old easy-to-miss one-liner."""
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "_quick_count", return_value=2)
+    mocker.patch.object(core, "resolve_media",
+                        return_value=("http://x/img", {"width": "1", "height": "1"}))
+
+    def fake_download(session, url, stem, **kw):
+        if "bad" in str(stem):
+            return ("fail", None)
+        dest = stem.with_suffix(".webp")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"img")
+        return ("ok", dest)
+    mocker.patch.object(core, "download", side_effect=fake_download)
+    mocker.patch.object(core, "gql", side_effect=[_page("bad", True, "c1"), _page("good", False)])
+
+    result = core.run_download(_dl_args(tmp_path))
+
+    assert result is not None, "run_download must return its counts, not None"
+    assert result["fail"] == 1
+    assert result["ok"] == 1
+    out = capsys.readouterr().out
+    assert "FINISHED WITH ERRORS" in out
+    assert "Exit code is still 0 by design" in out
+
+
 class TestDownloadNeverWritesAZeroByteFile:
     """The other half of invariant 3: even if the resume index is fixed, download()
     itself must not CREATE a zero-byte file in the first place -- a 200 response with

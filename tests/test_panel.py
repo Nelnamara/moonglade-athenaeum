@@ -154,6 +154,37 @@ def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
     assert "line two" in d["lines"]
 
 
+def test_run_reports_done_with_errors_from_the_warn_marker(tmp_path, monkeypatch):
+    """D-4: the CLI subprocess prints a ~=MGWARN=~N marker line when some files failed
+    but the run itself completed (exit 0). Before the fix, _panel_reader had no idea
+    this marker existed -- it fell into the generic log-lines branch, and status was
+    computed purely from rc==0, so this looked identical to a clean 'done'."""
+    import subprocess
+
+    class FakeProc:
+        def __init__(self):
+            import io
+            self.stdout = io.StringIO("line one\n~=MGWARN=~3\nline two\n")
+        def wait(self):
+            return 0
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: FakeProc())
+
+    cli = _authed_client(tmp_path)
+    cli.post("/api/panel/run", json={"action": "sync"})
+    import time
+    d = {}
+    for _ in range(50):
+        d = cli.get("/api/panel/status").get_json()
+        if d["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert d["status"] == "done_with_errors" and d["rc"] == 0
+    assert d["warn_count"] == 3
+    # the marker line itself must not pollute the visible log
+    assert "~=MGWARN=~3" not in d["lines"]
+    assert "line one" in d["lines"] and "line two" in d["lines"]
+
+
 def test_schedule_roundtrip_and_safe_only(tmp_path):
     cli = _authed_client(tmp_path)
     # default: disabled

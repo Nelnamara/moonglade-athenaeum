@@ -37,6 +37,32 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **A backup that partially failed reported itself identically to a clean one.** If some
+  files failed to download after retries, the run still printed a tally but nothing
+  distinguished it from success anywhere downstream — the CLI job log, the Panel's Jobs
+  tray, all said "done." Exit code is unchanged by design (still 0 — a partial failure
+  must not break a scheduled task over one transient blip); what's new is a real
+  `done_with_errors` status that's visible and dismissable everywhere a job shows up,
+  plus a much louder console notice for a bare-terminal run.
+
+- **The model-preview tooltip "jumped" while browsing, making it hard to scan a grid.**
+  Two independently-drifted copies of the hover-preview mechanism (the gallery's own
+  `#model-flyout`, and the shared `<mg-model-picker>` the Loom mounts) both fired an
+  instant, un-animated, freshly-repositioned popup on every single card the mouse
+  passed over while scanning — not just the one you paused on. Both now wait ~130ms
+  of genuine hover before opening, so a fast scan across several cards never triggers
+  it at all.
+
+- **Prompt snippets and Loom storyboards were install-wide — any signed-in account
+  could read, overwrite, or delete every other account's.** Same problem saved views
+  already got fixed for, just never applied here. Both are now per-account
+  (`out_dir/prompt_snippets/<user>.json`, `out_dir/loom/kv/<user>/`), falling back
+  read-only to the old shared file/dir for an account that hasn't saved its own copy
+  yet — nothing disappears on upgrade. One accepted, documented gap: deleting a Loom
+  board you inherited from the shared layer but never saved yourself doesn't stick
+  (a later read still falls through to the shared copy) — narrow enough not to matter
+  for how this is actually used, revisit if that changes.
+
 - **The Folio of Honors rendered as a scrambled, overlapping mess on first ship.** `#ach-grid`
   still carried its pre-redesign CSS class, whose rule forced every direct child into a
   ~216px tiled grid column — correct for the old flat card layout, wrong for the new one,

@@ -115,6 +115,17 @@ def test_terminal_state_is_sticky(tmp_path):
     assert "note" not in j and "done" not in j and "total" not in j
 
 
+def test_done_with_errors_is_sticky_too(tmp_path):
+    """D-4's new terminal status must be sticky the same way done/failed already are --
+    a late running heartbeat must not drag it back to 'running'."""
+    core.append_job_event(tmp_path, "j1", status="done_with_errors",
+                          error="3 file(s) failed to download")
+    core.append_job_event(tmp_path, "j1", status="running", done=5, total=10)
+    j = core.read_jobs(tmp_path)[0]
+    assert j["status"] == "done_with_errors"
+    assert "done" not in j and "total" not in j
+
+
 def test_dismissed_is_filtered_out(tmp_path):
     core.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"])
     core.append_job_event(tmp_path, "j2", status="failed", error="boom")
@@ -260,6 +271,18 @@ def test_dismiss_finished_clears_done_and_failed_only(tmp_path):
     cli.post("/api/jobs/dismiss", json={"finished": True})
     ids = [j["job_id"] for j in cli.get("/api/jobs").get_json()["jobs"]]
     assert ids == ["r"]                        # running survives; finished cleared
+
+
+def test_dismiss_finished_also_clears_done_with_errors(tmp_path):
+    """D-4: without wiring the new status into the same terminal set /api/jobs/dismiss
+    already uses, a done_with_errors job could never be cleared by 'clear finished' --
+    it would just sit there forever even though the run it represents is over."""
+    cli = _authed_client(tmp_path)
+    core.append_job_event(tmp_path, "w", status="done_with_errors", error="2 failed")
+    core.append_job_event(tmp_path, "r", status="running", label="live")
+    cli.post("/api/jobs/dismiss", json={"finished": True})
+    ids = [j["job_id"] for j in cli.get("/api/jobs").get_json()["jobs"]]
+    assert ids == ["r"]
 
 
 def test_resolve_orphan_jobs_resolves_stuck_running(tmp_path):

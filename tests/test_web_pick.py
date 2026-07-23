@@ -3,6 +3,7 @@ paging + full prompts for the copy-to-clipboard feature) and /api/upload (local 
 -> PixAI media_id via the free S3 handshake). All localhost-gated; upload_media is
 monkeypatched so nothing touches the network."""
 import io
+import json
 import os
 import re
 from pathlib import Path
@@ -289,7 +290,9 @@ def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch):
     saved = cli.post("/api/snippets",
                      json={"snippets": ["masterpiece, 4k", "", "  ", "night"]}).get_json()
     assert saved == {"snippets": ["masterpiece, 4k", "night"]}   # blanks dropped
-    assert (tmp_path / "prompt_snippets.json").exists()
+    # Per-account storage (D-7): the file lives under prompt_snippets/<user>.json now,
+    # not the old flat prompt_snippets.json every account used to share.
+    assert (tmp_path / "prompt_snippets" / "tester.json").exists()
     assert cli.get("/api/snippets").get_json() == {"snippets": ["masterpiece, 4k", "night"]}
 
 
@@ -297,6 +300,57 @@ def test_snippets_rejects_non_list(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.post("/api/snippets", json={"snippets": "nope"}).status_code == 400
+
+
+def test_one_account_cannot_see_or_clobber_anothers_snippets(tmp_path):
+    """Same split saved views already got (test_view_presets.py), same reason: prompt
+    snippets were install-wide (one shared prompt_snippets.json), so any signed-in
+    account could read AND wholesale-overwrite every other account's saved snippets."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    app = create_app(tmp_path)
+
+    alice = login_test_client(app, username="alice", password="a-real-test-password-1")
+    alice.post("/api/snippets", json={"snippets": ["alice-only"]})
+
+    bob = login_test_client(app, username="bob", password="a-real-test-password-2")
+    assert bob.get("/api/snippets").get_json()["snippets"] == [], (
+        "bob can see alice's snippets -- the store is not per-account")
+
+    bob.post("/api/snippets", json={"snippets": ["bob-only"]})
+    assert bob.get("/api/snippets").get_json()["snippets"] == ["bob-only"]
+    assert alice.get("/api/snippets").get_json()["snippets"] == ["alice-only"], (
+        "bob's save wiped alice's snippets -- the store is not per-account")
+
+
+def test_gallery_model_preview_hover_is_debounced_not_instant(tmp_path):
+    """Same D-11 fix as the Loom's mg-model-picker.js: a raw mouseenter re-triggered an
+    instant, freshly-repositioned popup on every card the mouse passed over while
+    scanning the grid. This is fundamentally a feel/timing bug (real verification is
+    manual, in a browser) -- this only guards against reverting to the raw wiring."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "c.onmouseenter=function(){ scheduleShowPreview(m, c); };" in html
+    assert "c.onmouseleave=cancelPreview;" in html
+    assert "function scheduleShowPreview(m, anchor){" in html
+    assert "function cancelPreview(){ clearTimeout(previewTimer); hidePreview(); }" in html
+
+
+def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path):
+    """Upgrade path: nothing disappears the moment the store goes per-account. An
+    account with no file of its own falls back to the old shared prompt_snippets.json
+    (read-only) -- exactly what it saw before the split -- and diverges on first save."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    (tmp_path / "prompt_snippets.json").write_text(
+        json.dumps(["from-before"]), encoding="utf-8")
+
+    assert cli.get("/api/snippets").get_json() == {"snippets": ["from-before"]}
+
+    cli.post("/api/snippets", json={"snippets": ["from-before", "new-one"]})
+    own = json.loads((tmp_path / "prompt_snippets" / "tester.json").read_text(encoding="utf-8"))
+    assert own == ["from-before", "new-one"]
+    assert json.loads((tmp_path / "prompt_snippets.json").read_text(encoding="utf-8")) == ["from-before"]
 
 
 def test_suggest_prompt_route(tmp_path, monkeypatch):

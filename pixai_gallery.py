@@ -2912,8 +2912,9 @@ def create_app(out_dir: Path):
     _panel_lock = threading.Lock()
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
                   "rc": None, "started_at": None, "progress": None,
-                  "proc": None, "cancelled": False}
+                  "proc": None, "cancelled": False, "warn_count": 0}
     _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in pixai_gallery_backup.py
+    _WARN_PREFIX = "~=MGWARN=~"        # matches PANEL_WARN_PREFIX in pixai_gallery_backup.py (D-4)
     # The Loom's ffmpeg export job (trim + concat finished shots -> one mp4).
     _export_lock = threading.Lock()
     _export_job = {"status": "idle", "progress": 0, "elapsed": 0.0,
@@ -3018,6 +3019,7 @@ def create_app(out_dir: Path):
         with _panel_lock:
             jid = _panel_job.get("job_id")
         last_pct = -1
+        warn_n = 0
         for line in iter(proc.stdout.readline, ""):
             line = line.rstrip("\n")
             if line.startswith(_PROG_PREFIX):
@@ -3035,6 +3037,14 @@ def create_app(out_dir: Path):
                 except (ValueError, ZeroDivisionError):
                     pass
                 continue
+            if line.startswith(_WARN_PREFIX):
+                # D-4: "<prefix>N" -- N files failed after retries, run otherwise completed.
+                # Not a log line -- keep it out of the visible transcript, same as _PROG_PREFIX.
+                try:
+                    warn_n = int(line[len(_WARN_PREFIX):])
+                except ValueError:
+                    pass
+                continue
             with _panel_lock:
                 _panel_job["lines"].append(line)
                 if len(_panel_job["lines"]) > 800:       # ring buffer
@@ -3043,14 +3053,20 @@ def create_app(out_dir: Path):
         rc = proc.wait()
         with _panel_lock:
             cancelled = _panel_job.get("cancelled")
-            status = "cancelled" if cancelled else ("done" if rc == 0 else "failed")
+            status = ("cancelled" if cancelled else
+                      "failed" if rc != 0 else
+                      "done_with_errors" if warn_n else "done")
             _panel_job["rc"] = rc
             _panel_job["status"] = status
+            _panel_job["warn_count"] = warn_n
             _panel_job["progress"] = None                # clear the bar when the job ends
             _panel_job["proc"] = None
         if jid:                                          # cancelled/done both close the card row cleanly
-            _log_job(jid, status=("failed" if status == "failed" else "done"),
-                     error=("exited {}".format(rc) if status == "failed" else None))
+            _log_job(jid, status=("failed" if status == "failed" else
+                                  "done_with_errors" if status == "done_with_errors" else "done"),
+                     error=("exited {}".format(rc) if status == "failed" else
+                           "{} file(s) failed to download".format(warn_n) if status == "done_with_errors"
+                           else None))
 
     def _panel_run(action, int_arg=None):
         import subprocess
@@ -3089,7 +3105,7 @@ def create_app(out_dir: Path):
             _panel_job.update(status="running", action=action, label=spec["label"],
                               lines=["$ " + " ".join(action_args)], rc=None,
                               started_at=None, progress=None, proc=proc, cancelled=False,
-                              job_id=job_id)
+                              job_id=job_id, warn_count=0)
         _log_job(job_id, status="running", type="panel", label=spec["label"])
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
 
@@ -5831,7 +5847,7 @@ var Snips = (function(){
   return {open:open, saveCurrent:saveCurrent, insert:insert, del:del};
 })();
 var Gen = (function(){
-  var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null;
+  var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null, previewTimer=null;
   var sortMode='popular', catFilter='';   // Model-Market: 'popular'(REST) | 'newest'(GraphQL); category chip
   var workflows=null, enhTimer=null;
   var fixTag_='face', fixBoxes=[], fixStart=null;
@@ -5924,8 +5940,12 @@ var Gen = (function(){
       var uses = m.ref_count ? '<span class="uses" title="'+fmt(m.ref_count)+' generations \\u2014 PixAI\\u2019s own most-used ranking">\\u25c8 '+fmtCompact(m.ref_count)+'</span>' : '';
       c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span>'+uses+'</div></div>';
       c.onclick=function(){ selectCard(m, c); };
-      c.onmouseenter=function(){ showPreview(m, c); };
-      c.onmouseleave=hidePreview;
+      // Debounced (D-11): a raw mouseenter re-triggered an instant, un-animated,
+      // freshly-repositioned popup on EVERY card the mouse passed over while scanning
+      // a grid -- which is what "browsing" is. A short hover-intent delay means only a
+      // genuine pause-to-look opens it; a fast scan across several cards never does.
+      c.onmouseenter=function(){ scheduleShowPreview(m, c); };
+      c.onmouseleave=cancelPreview;
       grid.appendChild(c);
     });
   }
@@ -5957,6 +5977,11 @@ var Gen = (function(){
     placePreview(p, anchor);
   }
   function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
+  function scheduleShowPreview(m, anchor){
+    clearTimeout(previewTimer);
+    previewTimer=setTimeout(function(){ showPreview(m, anchor); }, 130);
+  }
+  function cancelPreview(){ clearTimeout(previewTimer); hidePreview(); }
   function placePreview(p, anchor){
     var r=anchor.getBoundingClientRect(), w=300, gap=14, x;
     var dr=el('gen-drawer'), leftish = dr && dr.classList.contains('dock-left');
@@ -7279,7 +7304,7 @@ function savePrompt() {
   .p-check{display:inline-flex;align-items:center;gap:7px;color:var(--text);font-size:13px;cursor:pointer;}
   #joblog{background:var(--base);border:1px solid var(--surface1);border-radius:8px;padding:12px 14px;font-family:ui-monospace,monospace;font-size:12px;color:var(--subtext);white-space:pre-wrap;line-height:1.5;max-height:340px;overflow-y:auto;margin-top:12px;display:none;}
   #jobstatus{font-size:12.5px;margin-top:6px;}
-  .st-running{color:var(--lavender);} .st-done{color:var(--emerald);} .st-failed{color:var(--red);}
+  .st-running{color:var(--lavender);} .st-done{color:var(--emerald);} .st-failed{color:var(--red);} .st-warn{color:var(--peach);}
   .jobprog{margin:12px 0 4px;}
   .jp-bar{height:10px;border-radius:6px;background:var(--surface1);overflow:hidden;}
   .jp-bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-soft));transition:width .4s ease;}
@@ -7627,8 +7652,10 @@ function poll(){
     if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+escH2(d.label)+'\\u2026</span>'; stop.style.display=''; setButtons(true); setTimeout(poll,1000); }
     else { setButtons(false); polling=false; stop.style.display='none';
       if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+escH2(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
+      else if(d.status==='done_with_errors'){ st.innerHTML='<span class="st-warn">\\u26a0 '+escH2(d.label||'job')+' finished with errors \\u2014 '+(d.warn_count||0)+' file(s) failed (exit '+d.rc+')</span>'; loadAcct(); }
       else if(d.status==='cancelled'){ st.innerHTML='<span class="st-failed">\\u25a0 '+escH2(d.label||'job')+' stopped by you</span>'; loadAcct(); }
       else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
+      else { st.innerHTML='<span class="st-warn">? '+escH2(d.label||'job')+' ended in an unrecognized state ('+escH2(String(d.status))+')</span>'; loadAcct(); }
     }
   }).catch(function(){ polling=false; setButtons(false); });
 }
@@ -8557,6 +8584,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"status": _panel_job["status"], "action": _panel_job["action"],
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
                             "progress": _panel_job["progress"],
+                            "warn_count": _panel_job.get("warn_count") or 0,
                             "lines": lines})
 
     @app.route("/api/watch/status")
@@ -9884,11 +9912,50 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     _snips_lock = threading.Lock()
 
+    def _snips_dir():
+        d = out_dir / "prompt_snippets"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _snips_path(user):
+        from urllib.parse import quote
+        # Same quote(safe="") idiom as _view_presets_path/_loom_kv_path: a username can
+        # never escape the directory or collide via a path separator.
+        return _snips_dir() / (quote(str(user), safe="") + ".json")
+
+    def _legacy_snips_path():
+        return out_dir / "prompt_snippets.json"
+
+    def _read_snips_file(p):
+        try:
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    return [str(s) for s in data]
+        except (OSError, ValueError):
+            pass
+        return []
+
+    def _load_snippets(user):
+        """This account's snippets, falling back to the legacy shared file -- same
+        deliberately-read-only fallback as _load_view_presets: an account with no file
+        of its own yet sees whatever the old shared file held (nothing disappears), and
+        diverges the moment it saves its own."""
+        own = _snips_path(user)
+        if own.exists():
+            return _read_snips_file(own)
+        return _read_snips_file(_legacy_snips_path())
+
     @app.route("/api/snippets", methods=["GET", "POST"])
     def api_snippets():
-        """Prompt snippets/favorites, stored server-side (out_dir/prompt_snippets.json) so
-        they persist with the backup and sync across the owner's machines. Login required (any session, local or LAN)."""
-        path = out_dir / "prompt_snippets.json"
+        """Prompt snippets/favorites, stored PER-ACCOUNT (out_dir/prompt_snippets/<user>.json)
+        so one signed-in account can't see or wholesale-clobber another's -- same split saved
+        views already got. Falls back read-only to the legacy shared
+        out_dir/prompt_snippets.json for an account that hasn't saved its own copy yet.
+        Login required (any session, local or LAN)."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         with _snips_lock:
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
@@ -9897,15 +9964,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     return jsonify({"error": "snippets must be a list"}), 400
                 clean = [str(s)[:800] for s in snips if str(s).strip()][:200]
                 try:
-                    path.write_text(json.dumps(clean), encoding="utf-8")
+                    _snips_path(user).write_text(json.dumps(clean), encoding="utf-8")
                 except OSError as e:
                     return jsonify({"error": str(e)[:160]}), 200
                 return jsonify({"snippets": clean})
-            try:
-                snips = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-            except (OSError, ValueError):
-                snips = []
-            return jsonify({"snippets": snips})
+            return jsonify({"snippets": _load_snippets(user)})
 
     _ach_lock = threading.Lock()
 
@@ -10714,32 +10777,59 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # is migrated into per-key files on first touch and preserved as store.json.migrated.
     _loom_lock = threading.Lock()
 
-    def _loom_kv_dir():
+    def _legacy_loom_kv_dir():
+        """The pre-D-7 flat, install-wide store -- every account used to read and write
+        the same files here. Now the shared, read-only fallback layer every account's
+        _loom_kv_read falls through to until it saves its own copy of a given key."""
         d = out_dir / "loom" / "kv"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def _loom_kv_path(key):
+    def _legacy_loom_kv_path(key):
         from urllib.parse import quote
-        return _loom_kv_dir() / (quote(str(key), safe="") + ".json")
+        return _legacy_loom_kv_dir() / (quote(str(key), safe="") + ".json")
 
-    def _loom_kv_write(key, value):
-        """Atomically persist one key's value (tmp + os.replace)."""
-        p = _loom_kv_path(key)
+    def _loom_kv_dir(user):
+        from urllib.parse import quote
+        d = out_dir / "loom" / "kv" / quote(str(user), safe="")
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _loom_kv_path(user, key):
+        from urllib.parse import quote
+        return _loom_kv_dir(user) / (quote(str(key), safe="") + ".json")
+
+    def _loom_kv_write(user, key, value):
+        """Atomically persist one key's value into the ACCOUNT'S OWN dir (tmp +
+        os.replace). Never writes the legacy shared dir -- that stays exactly as
+        _loom_migrate() left it, a read-only fallback."""
+        p = _loom_kv_path(user, key)
         tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
         tmp.write_text(json.dumps(value), encoding="utf-8")
         os.replace(tmp, p)
 
-    def _loom_kv_read(key):
+    def _loom_kv_read(user, key):
+        """This account's value for `key`, falling back read-only to the legacy shared
+        store if the account has never saved its own copy of this key -- same pattern as
+        _load_view_presets/_load_snippets (D-7: storyboards were install-wide before this,
+        so any signed-in account could read AND overwrite every other account's boards)."""
+        own = _loom_kv_path(user, key)
+        if own.exists():
+            try:
+                return json.loads(own.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                return None
         try:
-            return json.loads(_loom_kv_path(key).read_text(encoding="utf-8"))
+            return json.loads(_legacy_loom_kv_path(key).read_text(encoding="utf-8"))
         except (ValueError, OSError):
             return None
 
     def _loom_migrate():
-        """One-time split of the legacy single store.json into per-key files. Idempotent
-        + crash-safe: re-runs from the intact store.json until the final rename lands (a
-        partial migration can't lose keys), then no-ops once store.json is gone."""
+        """One-time split of the legacy single store.json into per-key files, in the
+        LEGACY flat dir (unaffected by the D-7 per-account split -- it keeps writing the
+        shared fallback layer every account now reads through). Idempotent + crash-safe:
+        re-runs from the intact store.json until the final rename lands (a partial
+        migration can't lose keys), then no-ops once store.json is gone."""
         legacy = out_dir / "loom" / "store.json"
         if not legacy.exists():
             return
@@ -10750,7 +10840,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if isinstance(data, dict):
             for k, v in data.items():
                 try:
-                    _loom_kv_write(k, v)
+                    p = _legacy_loom_kv_path(k)
+                    tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+                    tmp.write_text(json.dumps(v), encoding="utf-8")
+                    os.replace(tmp, p)
                 except OSError:
                     return                      # leave store.json for the next touch to retry
         try:
@@ -10860,12 +10953,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/loom/get")
     def loom_get():
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         with _loom_lock:
             _loom_migrate()
-            return jsonify({"value": _loom_kv_read(request.args.get("key") or "")})
+            return jsonify({"value": _loom_kv_read(user, request.args.get("key") or "")})
 
     @app.route("/api/loom/set", methods=["POST"])
     def loom_set():
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         p = request.get_json(silent=True) or {}
         k = p.get("key")
         if not k:
@@ -10873,7 +10972,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         with _loom_lock:
             _loom_migrate()
             try:
-                _loom_kv_write(k, p.get("value"))
+                _loom_kv_write(user, k, p.get("value"))
             except OSError as e:
                 return jsonify({"ok": False, "error": str(e)[:120]}), 500
         return jsonify({"ok": True})
@@ -10881,20 +10980,40 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/loom/list")
     def loom_list():
         from urllib.parse import unquote
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         pre = request.args.get("prefix") or ""
         with _loom_lock:
             _loom_migrate()
-            keys = [unquote(f.stem) for f in _loom_kv_dir().glob("*.json")]
-        return jsonify({"keys": [k for k in keys if k.startswith(pre)]})
+            # Union of the account's own keys and the legacy shared keys it hasn't
+            # overridden yet -- mirrors _loom_kv_read's per-key fallback, so "list"
+            # never omits a board a bare "get" on the same key would still return.
+            own_keys = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.json")}
+            legacy_keys = {unquote(f.stem) for f in _legacy_loom_kv_dir().glob("*.json")}
+            keys = own_keys | legacy_keys
+        return jsonify({"keys": sorted(k for k in keys if k.startswith(pre))})
 
     @app.route("/api/loom/delete", methods=["POST"])
     def loom_delete():
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         k = (request.get_json(silent=True) or {}).get("key")
         with _loom_lock:
             _loom_migrate()
             if k:
+                # Unlinks only the account's OWN copy, never the legacy shared file --
+                # matches _view_presets: the legacy layer is never written back to.
+                # An account that never saved its own copy of an inherited/shared key
+                # can't make a delete "stick" this way (a later GET still falls through
+                # to the legacy value) -- accepted gap, not a bug: this only bites a
+                # second account deleting a board it never touched itself, which doesn't
+                # happen in the single-owner-plus-occasional-LAN-device use case this
+                # feature was built for. Revisit with a per-key tombstone file if that
+                # ever changes.
                 try:
-                    _loom_kv_path(k).unlink()
+                    _loom_kv_path(user, k).unlink()
                 except OSError:
                     pass
         return jsonify({"ok": True})
@@ -11386,7 +11505,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if body.get("finished"):
             try:
                 for j in core.read_jobs(out_dir):
-                    if j.get("status") in ("done", "failed"):
+                    if j.get("status") in core._JOBS_TERMINAL:
                         _log_job(j.get("job_id"), dismissed=True)
             except Exception:
                 pass

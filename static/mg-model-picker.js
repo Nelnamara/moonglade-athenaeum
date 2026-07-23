@@ -169,8 +169,13 @@
           '<div class="mg-meta"><div class="mg-nm" title="' + esc(m.title) + '">' + esc(m.title) + '</div>' +
           '<div class="mg-sub"><span>' + tyShort(m.type) + '</span><span>♥ ' + fmt(m.liked_count) + '</span>' + uses + '</div></div>';
         c.addEventListener('click', function () { self._pick(m, c); });
-        c.addEventListener('mouseenter', function () { self._showPreview(m, c); });
-        c.addEventListener('mouseleave', function () { self._hidePreview(); });
+        // Debounced (D-11): a raw mouseenter re-triggered an instant, un-animated,
+        // freshly-repositioned popup on every card the mouse passed over while
+        // scanning the grid -- what "browsing" actually is. Same fix as the Gallery's
+        // own #model-flyout (pixai_gallery.py's scheduleShowPreview/cancelPreview) --
+        // two independently-drifted copies, both needed it.
+        c.addEventListener('mouseenter', function () { self._schedulePreview(m, c); });
+        c.addEventListener('mouseleave', function () { self._cancelPreview(); });
         g.appendChild(c);
       });
     }
@@ -207,6 +212,17 @@
     _hidePreview() {
       var p = this._preview;
       if (p) { p.classList.remove('open'); p.setAttribute('aria-hidden', 'true'); }
+    }
+
+    _schedulePreview(m, anchor) {
+      var self = this;
+      clearTimeout(this._pt);
+      this._pt = setTimeout(function () { self._showPreview(m, anchor); }, 130);
+    }
+
+    _cancelPreview() {
+      clearTimeout(this._pt);
+      this._hidePreview();
     }
 
     _place(p, anchor) {
