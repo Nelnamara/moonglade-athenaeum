@@ -5,8 +5,7 @@
 
    Third shared web component of the Option-A cohesion migration, same conventions as
    mg-model-picker.js / mg-gallery-picker.js: plain global via <script src>, no build step,
-   reads the shared DESIGN_TOKENS_CSS custom properties. Built against the owner-locked
-   "Video Tab -- Full Parity Mockup v1" (docs/STATE.md artifact ledger): full PixAI Multi-ref
+   reads the shared DESIGN_TOKENS_CSS custom properties. Targets full PixAI Multi-ref
    parity (6 image + 3 video + 1 audio ref slots), negative prompt, Channel (Normal/Enhanced,
    PixAI's own wording), and the full 7-model roster with capability gating.
 

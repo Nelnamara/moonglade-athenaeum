@@ -940,7 +940,7 @@ def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
     see index()'s `is_local=True` comment for why that template flag is now a
     hardcoded constant rather than a live check). Both views below are captured
     AFTER logging in: an unauthenticated LOCAL request no longer gets the full owner
-    UI either (owner directive 2026-07-19 removed the loopback bypass), so the only
+    UI either (the loopback bypass is gone), so the only
     real distinction left to prove is authenticated-vs-not, never the request's
     address -- see test_unauthenticated_lan_request_to_index_is_redirected_to_login
     for that side of the boundary. Community + browse surfaces (Contests / My Art)

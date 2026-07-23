@@ -480,8 +480,8 @@ def test_every_registered_route_declares_a_tier(app):
 
 def test_no_route_is_reachable_without_a_session(app, armed):
     """Every LOGIN and LOCALHOST route, probed with no cookie at all, from a LAN
-    address and again from loopback -- localhost has not been a trusted tier
-    since the 2026-07-19 owner directive, so both must refuse identically."""
+    address and again from loopback -- localhost is not a trusted tier, so both
+    must refuse identically."""
     cli = app.test_client()
     failures = []
     for (endpoint, method), rule in sorted(_registered_pairs(app).items()):

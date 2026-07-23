@@ -92,9 +92,8 @@ def mock_session(mocker):
 # ---------------------------------------------------------------------------
 # Real-login test helpers
 # ---------------------------------------------------------------------------
-# pixai_gallery.py's _is_authorized_request() (owner directive 2026-07-19: "I would
-# expect to require login via any path with this new setup whether localhost
-# hostname or IP") has NO localhost bypass anymore -- true only for a request
+# pixai_gallery.py's _is_authorized_request() has NO localhost bypass -- login is
+# required via every path, localhost hostname or IP included. It is true only for a request
 # carrying a valid logged-in session. Every test that just needs to be past the
 # front door (not testing the gate itself) should log in for real through these
 # helpers rather than relying on the test client's default REMOTE_ADDR=127.0.0.1,

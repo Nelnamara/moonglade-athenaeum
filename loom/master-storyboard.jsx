@@ -297,8 +297,6 @@ function seedProject() {
 /* ============================ APP ============================ */
 // ─── Loom V2 — a fixed 4-region shell (left Cast&Assets/Footage, center board, right
 // Generate, top Timeline drawer), replacing the old free-floating dockable-panel system.
-// Locked design source: docs/ROADMAP_LOOM_ACHIEVEMENTS.md §1 + the two owner-approved
-// mockup artifacts (e41a3020 full shell, 84be1748 Timeline-only wireframe).
 const V2_STYLES = `
 .lv-overlay{position:fixed;inset:0;z-index:400;background:var(--base);display:flex;flex-direction:column;}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
@@ -871,7 +869,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
 
   // Fixed Timeline drawer: hidden(0) / slim(default, scrubber only) / full(preview above
   // scrubber, real 16:9). The handle drags freely between 0 and TL_HEIGHTS.full, snapping
-  // to the nearest named state on release -- same mechanic as the owner-approved mockup.
+  // to the nearest named state on release.
   const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 };
   const tlPointerDown = (e) => { tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] }; e.currentTarget.setPointerCapture(e.pointerId); };
   const tlPointerMove = (e) => {
@@ -1692,14 +1690,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   <label className="sb-toggle" title="Blur this shot's frames/refs on the board">
                     <input type="checkbox" checked={c.discreet} onChange={(ev) => dfPatch((cc) => ({ ...cc, discreet: ev.target.checked }))} />blur previews</label></div>
               </div>
-              {/* Base prompt. Deep Focus is now A home for c.prompt, not the only one -- the
-                  right panel's own Prompt field still writes it too. This is option 2 of the
-                  two the owner left open when the field was held back from the web-component
-                  migration (docs/STATE.md, "The Prompt textarea is the one piece deliberately
-                  held back"): give base-prompt editing a home in Deep Focus rather than let
-                  every hand-typed prompt become a frozen override. Placement matches the
-                  approved mockup -- after Mode/Duration/Discreet, before the frames -- so the
-                  field sits in the same reading order on both surfaces. */}
+              {/* Base prompt. Deep Focus is A home for c.prompt, not the only one -- the
+                  right panel's own Prompt field still writes it too. Editing the BASE prompt
+                  here (not a per-shot override) is deliberate: it keeps hand-typed prompts
+                  recomposable instead of freezing each one into an override. Placement --
+                  after Mode/Duration/Discreet, before the frames -- keeps the field in the
+                  same reading order on both surfaces. */}
               <div className="sb-field" style={{ marginTop: 10 }}>
                 <label className="sb-lab">Prompt</label>
                 <textarea className="lv-ta" value={c.prompt || ""} placeholder="what happens in this shot"
@@ -2140,7 +2136,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   // Softened 2026-07-18(pm): that fix's own give-up traded the bug for an opposite one -- at
   // 20min elapsed with neither done nor failed reported, it wrote a REAL terminal
   // status:"error" and severed pendingTaskId, indistinguishable from a genuine server failure
-  // and unrecoverable short of a fresh submit. The owner's own motivating case (a render that
+  // and unrecoverable short of a fresh submit. The motivating real case (a render that
   // LOOKED lost) turned out to be a content-moderation rejection surfacing late, not an actual
   // timeout -- so a merely-slow shot was being punished identically to one PixAI actually
   // killed. Elapsed time alone now only ever downgrades the poll cadence and escalates
