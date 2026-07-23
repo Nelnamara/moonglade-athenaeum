@@ -513,11 +513,18 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   simplification, or give base-prompt editing a new home in Deep Focus (mirroring exactly how
   Deep Focus stayed the sole remaining way to set a card to V2V after Mode's own chips were
   deleted). Not a blocker on anything else shipping.
-- `<mg-cost-badge>` now covers **four of six** hand-rolled cost displays: the drawer's
-  `.mgd-cost` (`static/mg-generate-drawer.js`, shared by the gallery Video tab and the Loom) and
-  three in `pixai_gallery.py` (Image, Edit, and the picker path) — consolidated 2026-07-21. Still
-  separate: the Loom's own `priceShot` + `confirmSpend` confirm dialog, and
-  `loom/src/loom-core.js`'s aggregate summary behind the cost-to-finish pill.
+- `<mg-cost-badge>` now covers the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`,
+  shared by the gallery Video tab and the Loom's Video tab), `pixai_gallery.py`'s Generate
+  and Edit tabs, the Gallery's Enhance sub-tab (`enhance-cost`, reshaped select-then-run —
+  its old `window.confirm()` is gone, the badge is the only warning), and the Loom's Image/
+  Edit/Reference Deep Focus tabs (D-12, 2026-07-22) — each of those three kept its existing
+  `confirmSpend`/`window.confirm()` gate alongside the new badge, deliberately: that dialog
+  is this project's original fail-closed guardrail, built after those exact tabs used to lie
+  about cost, so the badge there is an added preview, not a replacement. Still no badge:
+  `generateShot`'s own `priceShot` + `window.confirm` gate for shot-level/batch video
+  generation (the Loom board's per-shot/"Generate all" path, distinct from the Video Deep
+  Focus tab above), and `loom/src/loom-core.js`'s aggregate summary behind the cost-to-finish
+  pill.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
 

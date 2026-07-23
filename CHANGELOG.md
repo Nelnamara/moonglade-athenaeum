@@ -45,6 +45,15 @@ git tags. Full prose notes for tagged versions live on
   its price in a persistent badge; a separate Run button fires it. The badge is now the
   only warning, same as everywhere else — no confirm dialog left in this path.
 
+- **The Loom's Image, Edit, and Reference tabs now show their real cost before you
+  generate.** These were the last three price surfaces missing an `<mg-cost-badge>`.
+  Each tab gets its own badge, refreshed by a shared debounced read-only `/api/price`
+  check as the model/prompt/source/references change. Unlike the Gallery's Enhance
+  sub-tab above, each tab's existing `window.confirm()` at submit time is **kept, not
+  removed** — that confirm dialog is this project's original fail-closed guardrail,
+  built after these exact tabs used to lie about cost, so the badge is an added
+  preview, not a replacement for it.
+
 - **The Loom's Image tab can now use LoRAs.** Previously it only offered a base model —
   the Gallery's own Generate drawer has had full LoRA support (multi-select, per-item
   weight, trigger words, compatibility warnings) for a while, but the Loom's picker
