@@ -89,9 +89,9 @@ so the preview shouts the cost, and the actual charge is read back from the serv
 (`paidCredit`) after it runs. Clips download into `videos/` and catalog as `is_video`.
 
 **Web:** the Generate drawer's **Video** tab — pick a source image, set model / duration
-(5/10/15s; 15 is V4.0-only) / mode (Basic cheaper, Professional), optional audio, optional
-end frame for first/last-frame interpolation, then submit (the cost + free-card check show
-first).
+(5/6/10/15s; 15 is V4.0-only, see below) / mode (Basic cheaper, Professional), optional
+audio, optional end frame for first/last-frame interpolation, then submit (the cost +
+free-card check show first).
 
 ```bash
 # preview (free): prints the exact request + the ~credit cost
@@ -102,6 +102,38 @@ python pixai_gallery_backup.py --generate-video --image <media_id> --prompt "...
 # recover a finished clip for free:
 python pixai_gallery_backup.py --generate-video --task-id <id>
 ```
+
+### Video models and shot-mode gating
+
+Seven video engines are selectable (newest first), and they are **not interchangeable** —
+each has its own duration cap, free-card eligibility, and which of the Loom's four
+[Shot modes](The-Loom#shot-modes) (I2V / FLF / R2V / V2V) it actually supports. The web
+drawer's duration picker offers exactly four values — **5, 6, 10, and 15 seconds** — and
+enforces the current model's cap (see below); an out-of-range value (e.g. inherited from
+an older Loom project) snaps to the nearest one. The CLI's `--duration` is a plain
+integer with no enforced choices — pass any of the four to match the drawer's behavior.
+
+| Model (`--video-model`) | Max duration | Free card ever? | Shot modes available |
+|---|---|---|---|
+| V4.0 Preview (`v4.0`) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
+| V4.0 Lite Preview (`v4.0.1`, default) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
+| V3.2 (`v3.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
+| V3.0 Lite (`v3.0.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
+| V3.0 (High Consistency) (`v3.0`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
+| V3.0 Flash (`v3.0.1`) | 10s | **No — never covered** | First Frame only |
+| V2.7 (High Dynamics) (`v2.7`) | 10s | **No — never covered** | First Frame only |
+
+Notes:
+- **Multi-Reference (R2V) only works on the V4.0 pair.** First+Last (FLF) also works on
+  the three V3.0-generation models. V3.0 Flash and V2.7 only ever offer First Frame
+  (I2V) — the drawer hides the mode buttons a model can't do rather than letting you
+  submit a combination PixAI would reject.
+- **Free cards are V4.0-specific.** V3.0 Flash and V2.7 always cost real credits — the
+  drawer's cost badge correctly reads "no card" for them; that's expected, not a bug.
+- **15s is exclusive to the V4.0 pair.** Every other model caps at 10s, and the web
+  drawer disables + hides the 15s option entirely once you pick a capped model (rather
+  than letting you choose it and fail at submit); the CLI has no equivalent guard, so a
+  hand-typed `--duration 15` on a non-V4.0 model is on you to avoid.
 
 ## Edit an image with words (`--edit-image`)
 
