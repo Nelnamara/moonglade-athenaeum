@@ -44,6 +44,14 @@
     // scope or drop this independently of those other two features.
     '.ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}',
     '.ach-modal.open{display:flex;}',
+    // The 2026-07-21 host-neutral font fix (see the #jobs-fab/#jobs-tray/#mg-toasts comment
+    // below) only covered those three roots -- it missed the achievement celebration (.ach-m2,
+    // below) and this Folio of Honors subtree (#ach-modal, the achievement-specific id, NOT
+    // the shared `.ach-modal` class above -- scoping it to the id avoids also restyling
+    // #contest-modal/#art-modal, which reuse that same base chrome class but are not part of
+    // this fix). Same bug, same fix: state font-family explicitly instead of inheriting it,
+    // since the gallery's BASE_HTML body sets it but _LOOM_SHELL's body does not.
+    '#ach-modal{font-family:system-ui,sans-serif;}',
     '.ach-panel{position:relative;width:760px;max-width:96vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:16px;box-shadow:0 30px 90px rgba(0,0,0,.6);padding:24px 26px 28px;}',
     '.ach-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--subtext);font-size:26px;line-height:1;cursor:pointer;}',
     '.ach-x:hover{color:var(--text);}',
@@ -277,7 +285,10 @@
     '.ach-bannerflag{font-size:10px;color:var(--gold);margin-top:4px;}',
     // ---- toast v2 (the LOCKED design, artifact 335ef4e7) -- z-index raised 430->520 (see
     // top-of-file comment) so it always renders above the Loom's own full-screen overlays.
-    '.ach-m2{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;}',
+    // font-family stated explicitly for the same reason as #ach-modal above and
+    // #jobs-fab/#jobs-tray/#mg-toasts below -- this is the achievement celebration's own root,
+    // and without it the toast inherits nothing on /loom (_LOOM_SHELL's body sets no font).
+    '.ach-m2{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;font-family:system-ui,sans-serif;}',
     '.ach-m2.go{opacity:1;}',
     '.ach-m2.out{opacity:0;transition:opacity .5s;}',
     '.ach-m2 .tstage{width:min(680px,94vw);}',
