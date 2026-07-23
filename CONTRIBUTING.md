@@ -49,9 +49,15 @@ request — you can run them locally first with the commands above.
 There's no linter gate today — match the surrounding code's style rather than reformatting
 whole files. A few conventions that matter more than usual here:
 
-- **`media_id` is the single source of truth for locating a file.** Resolution goes through
-  `find_files_for_media_id()` (images) or a catalog row's `filename` (video) — never a new
-  ad-hoc glob. See the INVARIANTS section of [`CLAUDE.md`](CLAUDE.md) for the full list.
+- **A file is located by its `media_id`** (the last `_`-chunk of the filename stem), not by
+  a stored absolute path. This is **not actually centralized through one matcher today** —
+  `find_files_for_media_id()` is the gallery's own resolver, but resume, the audit,
+  `--organize`, `--import-local` and a few other call sites each walk the tree
+  independently with their own exclusion set (a known gap, not a pattern to copy). If you
+  add a new file-by-media_id lookup, prefer calling `find_files_for_media_id()` over
+  writing another ad-hoc glob, even though the existing code doesn't consistently do that
+  yet. See the Invariants section of [`docs/architecture.md`](docs/architecture.md) for
+  the full list and the current, verified state of each one.
 - **Catalog schema changes** touch three places together: `CATALOG_FIELDS`, the `_CREATE_TABLE`
   DDL, and the `_MIGRATIONS` list (so existing databases pick up the column automatically).
   All three live in `pixai_gallery.py`.

@@ -4080,7 +4080,16 @@ document.addEventListener('DOMContentLoaded', function() {
        _is_authorized_request() -- a logged-in session ONLY, no localhost bypass
        (see /login and that function's docstring). Hide them for anyone else and
        show a small read-only note instead of dead buttons. Browse/curate +
-       community stay available to everyone. #}
+       community stay available to everyone.
+       Import is the one documented exception inside this same gate: it renders for
+       every LOGIN-tier session right alongside Generate/The Loom, but
+       /api/import-local (below) is actually LOCALHOST-tier -- it writes files onto
+       the server's own machine, so it re-checks _is_local_request() itself. A
+       signed-in, non-local LAN session therefore sees a working-looking Import
+       button that always 403s when clicked. Not a security hole (the real gate is
+       correct and server-side) -- just a UX wart; gating the button's own
+       visibility on the real local check instead of this blanket flag is a
+       follow-up left to the owner, not done here. #}
     {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
@@ -9019,7 +9028,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # wizard; that conjunct hid it from them. That viewer can no longer reach this line.
         # `is_local` below (the header template's flag for showing the owner-only
         # Generate/Loom/Panel controls vs. the read-only note) is hardcoded True for the
-        # identical reason -- same call site, same guarantee. `can_delete_cloud` is a
+        # identical reason -- same call site, same guarantee. Import is the one
+        # documented exception: it renders under this same flag (grouped with
+        # Generate/Loom in the header) but /api/import-local re-checks the stricter
+        # _is_local_request() itself, so a signed-in, non-local LAN session sees the
+        # button but always gets a 403 -- see the head-nav comment above the Import
+        # button itself for the full explanation. `can_delete_cloud` is a
         # DIFFERENT, narrower flag: it drives whether the "Delete from PixAI" bulk-action
         # button renders at all. That button posts to /delete-tasks-bulk, which is gated
         # to the stricter _is_local_request() (irreversible cloud deletion, same trust
