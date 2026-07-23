@@ -73,6 +73,21 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Error messages could leak this machine's own file paths — including your Windows
+  username — to any signed-in LAN account, not just you.** A caught exception's text
+  (`str(e)`) routinely embeds an absolute path on a file-not-found, permission, or
+  upstream-API error, and 37 places across the web app either served that straight back
+  in a JSON error or stashed it for a later request to read. An earlier attempt at this
+  fix was reverted for a real flaw (a regex that stopped redacting at the first space,
+  so a spaced Windows username like "John Smith" still leaked in full). This re-spin
+  does literal-prefix matching instead of a regex, and both new tests are built around a
+  deliberately spaced directory name to make sure that exact regression can't recur.
+  Adversarially reviewed before shipping, which caught three more real gaps in the same
+  pass: a relative `--out .` could have turned the fix inside-out (mangling ordinary
+  punctuation in every error message instead of protecting anything); two sites built
+  their error text a way the sweep's search didn't recognize; one site was missing its
+  length cap. All three fixed in the same pass.
+
 - **The CLI's `--edit-image` could submit a resolution/quality the picked model doesn't
   support.** The web Edit tab has always clamped its request to the resolved model's real
   capabilities (`clamp_edit_config`) — the CLI's own defaults (1K/medium) never ran through
