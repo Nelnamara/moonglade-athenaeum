@@ -55,6 +55,41 @@ def test_missing_file_is_empty(tmp_path):
     assert core.read_jobs(tmp_path) == []
 
 
+def test_string_fields_are_capped_at_the_write_choke_point(tmp_path):
+    """Audit 2026-07-21, S3: _cli_job_finish wrote a caught exception's str(e) here with
+    NO cap at all -- the only error-write in either module missing one, fed by blanket
+    `except Exception` wrappers around whole download/sync runs. append_job_event is the
+    ONE place every job event from every source (web routes, the Panel's subprocess
+    reader, the CLI's own logging) funnels through, so capping here closes it for all of
+    them at once rather than requiring every current and future caller to remember its
+    own [:200]. Matches the str(e)[:200] convention already used everywhere else.
+
+    Bite: remove the cap and this fails with a 5000-char error stored verbatim.
+    """
+    core.append_job_event(tmp_path, "j1", status="failed", error="x" * 5000)
+    stored = core.read_jobs(tmp_path)[0]["error"]
+    assert len(stored) == 200, "error field was not capped to 200 chars"
+    assert stored == "x" * 200
+
+
+def test_capping_does_not_touch_non_string_fields(tmp_path):
+    """The cap must be type-aware -- media_ids is a list, done/total are ints. A cap that
+    tried to slice everything would crash on the very first non-string job event, or
+    silently corrupt done/total into something unusable."""
+    core.append_job_event(tmp_path, "j1", status="done",
+                          media_ids=["m1", "m2"], done=5, total=10)
+    j = core.read_jobs(tmp_path)[0]
+    assert j["media_ids"] == ["m1", "m2"]
+    assert j["done"] == 5 and j["total"] == 10
+
+
+def test_a_short_string_field_is_unaffected(tmp_path):
+    """The cap must not change the common case -- most labels/errors are far under 200
+    chars and must round-trip byte-for-byte."""
+    core.append_job_event(tmp_path, "j1", status="running", label="Sunset over the ruins")
+    assert core.read_jobs(tmp_path)[0]["label"] == "Sunset over the ruins"
+
+
 def test_collapse_last_event_wins_and_merges(tmp_path):
     # queued/running carries the label; the later done carries media_ids -- read_jobs
     # must MERGE them into one job that has both.
@@ -78,6 +113,17 @@ def test_terminal_state_is_sticky(tmp_path):
     assert j["media_ids"] == ["m1"]
     # the stale heartbeat's fields are ignored -- no zombie progress meter on a done job
     assert "note" not in j and "done" not in j and "total" not in j
+
+
+def test_done_with_errors_is_sticky_too(tmp_path):
+    """D-4's new terminal status must be sticky the same way done/failed already are --
+    a late running heartbeat must not drag it back to 'running'."""
+    core.append_job_event(tmp_path, "j1", status="done_with_errors",
+                          error="3 file(s) failed to download")
+    core.append_job_event(tmp_path, "j1", status="running", done=5, total=10)
+    j = core.read_jobs(tmp_path)[0]
+    assert j["status"] == "done_with_errors"
+    assert "done" not in j and "total" not in j
 
 
 def test_dismissed_is_filtered_out(tmp_path):
@@ -225,6 +271,18 @@ def test_dismiss_finished_clears_done_and_failed_only(tmp_path):
     cli.post("/api/jobs/dismiss", json={"finished": True})
     ids = [j["job_id"] for j in cli.get("/api/jobs").get_json()["jobs"]]
     assert ids == ["r"]                        # running survives; finished cleared
+
+
+def test_dismiss_finished_also_clears_done_with_errors(tmp_path):
+    """D-4: without wiring the new status into the same terminal set /api/jobs/dismiss
+    already uses, a done_with_errors job could never be cleared by 'clear finished' --
+    it would just sit there forever even though the run it represents is over."""
+    cli = _authed_client(tmp_path)
+    core.append_job_event(tmp_path, "w", status="done_with_errors", error="2 failed")
+    core.append_job_event(tmp_path, "r", status="running", label="live")
+    cli.post("/api/jobs/dismiss", json={"finished": True})
+    ids = [j["job_id"] for j in cli.get("/api/jobs").get_json()["jobs"]]
+    assert ids == ["r"]
 
 
 def test_resolve_orphan_jobs_resolves_stuck_running(tmp_path):

@@ -37,6 +37,9 @@ pip install requests pillow flask truststore websockets
    python pixai_gallery_backup.py --count       # …or headless: how many images you have
    python pixai_gallery_backup.py               # back up everything
    ```
+4. First time opening the web gallery: sign in from the machine running the server — the
+   login page doubles as an account-creation form the very first time, before any account
+   exists (see the [FAQ](../../wiki/FAQ)).
 
 That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everything else has working defaults. No DevTools, no token to recapture. *([Why so simple? →](../../wiki/How-It-Works))*
 
@@ -64,8 +67,8 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 |---|---|
 | **Back up everything** | Full-resolution downloads past the gallery limit · fast parallel workers · instant incremental `--update` · deduplicated SQLite catalog · image-to-video backup · published-artwork sync |
 | **Browse & search** | Local web gallery: wildcard prompt search, model/LoRA/tag/rating filters, date pickers, lightbox, ZIP export, saved views, privacy blur, mobile/PWA |
-| **Generate** | Full creation suite in the **web gallery** (dockable drawer: image · edit/enhance/fix · video with gallery-picked references), plus a matching CLI — model + LoRA pickers, live cost preview, and **free generation cards auto-apply** so covered gens cost 0 credits; results drop straight into your catalog |
-| **Curate** | **Collections** (group images/videos without moving files) · **Select mode** with drag-paint multi-select · star ratings · inline prompt edit · bulk find/replace |
+| **Generate** | Full creation suite in the **web gallery** (dockable drawer: image · edit/enhance/fix · video with gallery-picked references), plus a matching CLI — model + LoRA pickers, live cost preview, and **free generation cards auto-apply** so covered gens cost 0 credits; results drop straight into your catalog. **The Loom** is a full video storyboard tool built on top of it, for multi-shot sequences with continuity |
+| **Curate** | **Collections** (group images/videos without moving files) · **Select mode** with drag-paint multi-select · star ratings · inline prompt edit · bulk find/replace · the **Folio of Honors** tracks achievements as your archive grows |
 | **Stay in sync** | Instant incremental updates · live **event watch** (`--watch --watch-backup` auto-collects finishing gens) · bulk delete locally or cloud-side · `--reconcile-deleted` for cloud-deleted orphans · Collection Health dashboard |
 | **Run & control** | Web **Control Panel**: one-click maintenance jobs with a real progress bar and a Stop button, scheduled auto-backups, and **server Stop/Restart from the browser** · double-click `Serve Gallery` launcher · **make it yours**: pick your header mark + its animation, and set the Desktop launcher icon to match |
 
@@ -84,7 +87,7 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 
 Everything deep lives in the **[Wiki](../../wiki)**:
 
-[Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Troubleshooting](../../wiki/Troubleshooting) · [Trust & Safety](../../wiki/Trust-and-Safety) · [FAQ](../../wiki/FAQ) · [How It Works](../../wiki/How-It-Works)
+[Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [The Loom](../../wiki/The-Loom) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Control Panel](../../wiki/Control-Panel) · [Folio of Honors](../../wiki/Folio-of-Honors) · [Troubleshooting](../../wiki/Troubleshooting) · [Trust & Safety](../../wiki/Trust-and-Safety) · [FAQ](../../wiki/FAQ) · [How It Works](../../wiki/How-It-Works)
 
 In-repo: [`docs/architecture.md`](docs/architecture.md) (how it's built), [`docs/LOOM.md`](docs/LOOM.md) (the Loom's manual), [`docs/STATE.md`](docs/STATE.md) (current project state), [`docs/STANDARDS.md`](docs/STANDARDS.md) (house standards), [`docs/ART.md`](docs/ART.md) (art direction), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
