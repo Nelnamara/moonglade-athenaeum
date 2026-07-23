@@ -578,6 +578,91 @@ def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path,
     assert set(legacy) == {"from-before"}
 
 
+def test_redaction_does_not_over_redact_when_out_dir_is_a_relative_path(tmp_path, monkeypatch):
+    """Caught in adversarial review: --out defaults to a relative "pixai_backup" and
+    main() never resolves it before create_app(out_dir). Unresolved, str(out_dir) for
+    an out_dir given as "." (the exact scenario `--out .` produces) is a bare, generic
+    1-character string -- which then matches, and redacts, every single period in
+    every error message app-wide (a real, reproduced bug: an ordinary "retry in 0.5s"
+    style message came back full of "<host-path>" fragments instead of the real
+    diagnostic text). monkeypatch.chdir makes tmp_path itself the cwd so Path(".")
+    genuinely IS out_dir, exactly like a real `--out .` invocation -- a relative Path
+    built any other way (e.g. os.path.relpath) is normally a long, specific string and
+    would not actually reproduce this.
+
+    Bite: change _redact_host_paths back to using str(out_dir) instead of
+    str(Path(out_dir).resolve()) and this fails -- the periods in the message below
+    get eaten."""
+    monkeypatch.chdir(tmp_path)
+    out_dir = Path(".")
+    save_catalog(out_dir / "catalog.db", [_row(media_id="1", filename="a_1.png",
+                                          created_at="2025-01-01T00:00:00")])
+    cli = login_client(out_dir)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def boom(*a, **k):
+        raise RuntimeError("retry in 0.5s. version 2.1.0. see release notes.")
+    monkeypatch.setattr(core, "list_contests", boom)
+
+    r = cli.get("/api/contests")
+    body = r.get_data(as_text=True)
+    assert "<host-path>" not in body
+    assert "retry in 0.5s. version 2.1.0. see release notes." in body
+
+
+def test_error_responses_redact_host_paths_even_with_a_space_in_the_directory_name(tmp_path, monkeypatch):
+    """The re-spin of the redaction an earlier attempt got REJECTED for (2026-07-21,
+    docs/AUDIT_2026-07-21.md S3): a regex-based version stopped matching at the first
+    whitespace, so a spaced Windows username/directory (`C:\\Users\\John Smith\\...`)
+    still leaked into an error response in full -- exactly the harm this exists to
+    close. out_dir here deliberately has a space in it, not a convenient unspaced tmp
+    dir, so this actually exercises that failure mode instead of dodging it.
+
+    Also proves longest-candidate-first: pytest's own tmp_path is itself a real
+    subdirectory of tempfile.gettempdir() on this machine, so out_dir is naturally
+    NESTED under a second, shorter redaction candidate. If the shorter candidate fired
+    first, only the tempdir prefix would be replaced, leaving "...\\John Smith\\..."
+    still exposed right after the placeholder -- this test would still catch that.
+
+    Bite: replace _redact_host_paths's body with `return msg` (a no-op) and this fails."""
+    out_dir = tmp_path / "John Smith" / "pixai_backup"
+    out_dir.mkdir(parents=True)
+    save_catalog(out_dir / "catalog.db", [_row(media_id="1", filename="a_1.png",
+                                          created_at="2025-01-01T00:00:00")])
+    cli = login_client(out_dir)
+
+    def boom(*a, **k):
+        raise RuntimeError("could not read {}\\config.json: permission denied".format(out_dir))
+    monkeypatch.setattr(core, "_make_session", boom)
+
+    r = cli.post("/api/price", json={"model_id": "1", "prompt": "x"})
+    body = r.get_data(as_text=True)
+    assert str(out_dir) not in body
+    assert "John Smith" not in body
+    assert "<host-path>" in body
+
+
+def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch):
+    """The sweep touched 37 sites across the file, not one -- prove a SECOND,
+    differently-shaped site (different local variable names, different sibling JSON
+    keys) got the same treatment, not just the one this file happens to exercise most.
+    (The spaced-directory regression itself is covered above; this one just needs a
+    real redaction candidate, so it reuses out_dir rather than an unrelated path that
+    would never actually appear in a real error message.)"""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def boom(*a, **k):
+        raise RuntimeError("upstream call failed, see {}\\log.txt".format(tmp_path))
+    monkeypatch.setattr(core, "list_contests", boom)
+
+    r = cli.get("/api/contests")
+    body = r.get_data(as_text=True)
+    assert str(tmp_path) not in body
+    assert "<host-path>" in body
+
+
 def test_catalog_counts(tmp_path):
     import pixai_gallery as g
     g.save_catalog(tmp_path / "catalog.db", [

@@ -2886,6 +2886,54 @@ def create_app(out_dir: Path):
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
 
+    # Redacts THIS MACHINE's own filesystem paths out of an exception message before
+    # it's stored or served to any LOGIN-tier caller (any signed-in LAN account, not
+    # just the owner) -- str(e) on a file-not-found, permission, or upstream-API error
+    # routinely embeds an absolute path, which routinely embeds the OS username.
+    #
+    # Literal-PREFIX replacement, NOT a regex. An earlier attempt (2026-07-21, docs/
+    # AUDIT_2026-07-21.md's S3) used a regex (`[^\s'"<>\|]*`) that stopped matching at
+    # the first whitespace, so a spaced Windows username (`C:\Users\John Smith\...`)
+    # still leaked in full -- exactly the harm this exists to close -- and its own
+    # tests used space-free paths, so they'd have shipped green. This re-spin is
+    # tested against a spaced username specifically because of that history.
+    #
+    # Longest-candidate-first: home/cwd/tmp/out_dir routinely nest inside one another
+    # (out_dir is very often somewhere under the home directory), so matching the
+    # LONGEST real path first replaces the whole thing with one tag -- matching a
+    # shorter ancestor first would leave the more specific, still-identifying suffix
+    # (out_dir's own folder name) sitting right after the placeholder.
+    #
+    # Bounds CONTENT, not size -- pairs with append_job_event's existing [:200] cap
+    # (SIZE only) and every jsonify site's own [:N] slice; this must run BEFORE those
+    # slices, not after, or a redaction landing past the cutoff never happens.
+    def _redact_host_paths(msg):
+        if not msg:
+            return msg
+        import tempfile
+        # str(out_dir) resolved -- --out defaults to a relative "pixai_backup", and
+        # main() never resolves it before create_app(out_dir). Unresolved, a caller who
+        # started the server with (say) --out . would make out_dir's candidate a bare
+        # ".", which then matches -- and redacts -- every single period in every error
+        # message this function ever touches app-wide (found in adversarial review,
+        # reproduced: an ordinary "retry in 0.5s" style message came back full of
+        # "<host-path>" fragments). Resolving turns it into the same kind of real,
+        # multi-component absolute path the other 4 candidates already are.
+        candidates = [str(Path(out_dir).resolve()), os.path.expanduser("~"),
+                     tempfile.gettempdir(), sys.prefix, os.getcwd()]
+        seen, out = set(), str(msg)
+        for path in sorted(set(candidates), key=len, reverse=True):
+            # The length floor is a second, independent guard against the same class of
+            # bug for candidates this function doesn't control the construction of --
+            # no real absolute path on any real OS is this short, so it never rejects a
+            # genuine candidate, only a degenerate one.
+            if not path or len(path) < 4 or path in seen:
+                continue
+            seen.add(path)
+            if path in out:
+                out = out.replace(path, "<host-path>")
+        return out
+
     @app.context_processor
     def _inject_branding():
         # mark_url / mark_anim / mark_kind on every page render, so the chosen
@@ -3194,7 +3242,7 @@ def create_app(out_dir: Path):
                 _watch_status["mirrored"] += 1
         except Exception as e:
             with _watch_lock:
-                _watch_status["last_error"] = str(e)[:200]
+                _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
 
     def _reconcile_job(tid, ws_status):
         """Resolve OUR Activity/job log for a task straight from a live event, so a
@@ -3279,7 +3327,7 @@ def create_app(out_dir: Path):
                 backoff = 5   # a clean disconnect resets the backoff
             except Exception as e:
                 with _watch_lock:
-                    _watch_status["last_error"] = str(e)[:200]
+                    _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
             with _watch_lock:
                 _watch_status["connected"] = False
             _time.sleep(backoff)
@@ -8566,7 +8614,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _panel_run(action, int_arg=body.get("n"))
             return jsonify({"ok": True, "action": action, "label": spec["label"]})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/import-task", methods=["POST"])
     def api_import_task():
@@ -8605,8 +8653,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"ok": True, "saved": n, "media_ids": mids,
                             "is_video": bool(res.get("is_video"))})
         except Exception as e:
-            _log_job(job_id, status="failed", error=str(e)[:200])
-            return jsonify({"error": str(e)[:200]}), 200
+            _log_job(job_id, status="failed", error=_redact_host_paths(str(e))[:200])
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/panel/status")
     def api_panel_status():
@@ -8679,7 +8727,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         try:
             proc.terminate()   # reader sees stdout close -> finalizes status as 'cancelled'
         except Exception as e:
-            return jsonify({"ok": False, "error": str(e)[:140]}), 200
+            return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:140]}), 200
         return jsonify({"ok": True, "action": "cancel"})
 
     @app.route("/api/panel/schedule", methods=["GET", "POST"])
@@ -9065,7 +9113,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 _log_job(job_id, status=status, label=summary, done=total, total=total,
                          error=(summary if failed else None))
             except Exception as e:                               # noqa: BLE001
-                _log_job(job_id, status="failed", error=str(e)[:200])
+                _log_job(job_id, status="failed", error=_redact_host_paths(str(e))[:200])
             finally:
                 with _bulkdel_lock:
                     _bulkdel_running["on"] = False
@@ -9075,7 +9123,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:                               # noqa: BLE001 -- OS thread exhaustion, etc.
             with _bulkdel_lock:                              # never wedge single-flight forever
                 _bulkdel_running["on"] = False
-            _log_job(job_id, status="failed", error="could not start delete thread: " + str(e)[:160])
+            _log_job(job_id, status="failed", error="could not start delete thread: " + _redact_host_paths(str(e))[:160])
             return _back(delerr="could not start bulk delete -- try again")
         return _back(bulkdel="started", n=total)
 
@@ -9581,7 +9629,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify(core.model_search_rest(session, keyword=q, usage=usage,
                                                   size=size, offset=offset))
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "results": []}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "results": []}), 200
 
     @app.route("/api/model-version")
     def api_model_version():
@@ -9596,7 +9644,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify(core.resolve_version_meta(session, mid))
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "version_id": ""}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
 
     @app.route("/api/gallery-images")
     def api_gallery_images():
@@ -9659,7 +9707,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             hits = pixai_similar.similar(str(img_path), k=k, exclude_media_id=media_id)
         except Exception as e:
             return jsonify({"images": [], "total": 0,
-                            "error": "similarity index unavailable: " + str(e)[:180]}), 200
+                            "error": "similarity index unavailable: " + _redact_host_paths(str(e))[:180]}), 200
         telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
         out = []
         for mid, score in hits:
@@ -9872,7 +9920,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "followers": me.get("followerCount"),
                             "following": me.get("followingCount")})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/setup/save-key", methods=["POST"])
     def api_setup_save_key():
@@ -9915,7 +9963,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         try:
             me = core.account_info(test_session, raise_on_error=True)
         except Exception as e:
-            msg = str(e)
+            msg = _redact_host_paths(str(e))
             if "401" in msg or "Unauthorized" in msg:
                 return jsonify({"error": "That key was rejected by PixAI -- double-check it."}), 200
             return jsonify({"error": "Couldn't verify that key (temporary connection issue) -- try again."}), 200
@@ -9939,12 +9987,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                          "not overwriting it. Fix or restore the file, "
                                          "then save the key again."}), 200
             except OSError as e:
-                return jsonify({"error": "Could not read config.json: {}".format(e)}), 200
+                return jsonify({"error": "Could not read config.json: {}".format(
+                    _redact_host_paths(str(e)))}), 200
             cfg["PIXAI_API_KEY"] = key
             try:
                 cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
             except OSError as e:
-                return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(e)}), 200
+                return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(
+                    _redact_host_paths(str(e)))}), 200
         try:
             credits = int(me.get("quotaAmount") or 0)
         except (TypeError, ValueError):
@@ -9973,7 +10023,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 telem_bump("claims", claimed, out_dir=out_dir)   # Claimant
             return jsonify({"claimed": claimed, "credits": credits})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     _snips_lock = threading.Lock()
 
@@ -10031,7 +10081,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 try:
                     _snips_path(user).write_text(json.dumps(clean), encoding="utf-8")
                 except OSError as e:
-                    return jsonify({"error": str(e)[:160]}), 200
+                    return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
                 return jsonify({"snippets": clean})
             return jsonify({"snippets": _load_snippets(user)})
 
@@ -10050,7 +10100,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "official": sum(1 for c in contests if c["type"] == "official"),
                             "community": sum(1 for c in contests if c["type"] != "official")})
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "contests": []}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
 
     @app.route("/api/artwork-views")
     def api_artwork_views():
@@ -10063,7 +10113,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify({"views": core.artwork_views(session, aid)})
         except Exception as e:
-            return jsonify({"views": None, "error": str(e)[:120]}), 200
+            return jsonify({"views": None, "error": _redact_host_paths(str(e))[:120]}), 200
 
     @app.route("/api/your-art")
     def api_your_art():
@@ -10267,7 +10317,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         try:
             lnk = make_launcher_shortcut(out_dir, mark)
         except RuntimeError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 400
         return jsonify({"ok": True, "lnk": lnk})
 
     @app.route("/api/suggest-prompt")
@@ -10281,7 +10331,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify({"suggestions": core.suggest_prompt(session, mid)})
         except Exception as e:
-            return jsonify({"suggestions": [], "error": str(e)[:200]}), 200
+            return jsonify({"suggestions": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/tag-suggest")
     def api_tag_suggest():
@@ -10294,7 +10344,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify({"tags": core.tag_search_gql(session, q, first=8)})
         except Exception as e:
-            return jsonify({"tags": [], "error": str(e)[:200]}), 200
+            return jsonify({"tags": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/upload", methods=["POST"])
     def api_upload():
@@ -10316,7 +10366,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             telem_bump("uploads", out_dir=out_dir)        # first-upload milestone
             return jsonify({"media_id": str(mid)})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
         finally:
             try:
                 _os.unlink(tmp.name)
@@ -10397,7 +10447,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"ok": True, "imported": res["imported"], "skipped": res["skipped"],
                             "collection": collection or None})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -10570,7 +10620,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return jsonify({"imported": name,
                                 "label": presets[name]["label"]})
             except Exception as e:
-                return jsonify({"error": str(e)[:200]}), 200
+                return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     _view_presets_lock = threading.Lock()
 
@@ -10711,7 +10761,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     negative=(p.get("negative") or "").strip(),
                     is_private=bool(p.get("is_private")))
             except core.PixAIError as e:
-                return None, bool(p.get("no_card")), str(e)[:140]
+                return None, bool(p.get("no_card")), _redact_host_paths(str(e))[:140]
             return params, bool(p.get("no_card")), None
         if p.get("mode") == "enhance":
             src = str(p.get("source") or "").strip()
@@ -10763,7 +10813,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "card_name": (best or {}).get("name"),
                             "card_expires": (best or {}).get("expiresAt")})
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "cost": None}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None}), 200
 
     @app.route("/api/generate", methods=["POST"])
     def api_generate():
@@ -10804,7 +10854,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     @app.route("/api/edit", methods=["POST"])
     def api_edit():
@@ -10832,7 +10882,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     @app.route("/api/enhance", methods=["POST"])
     def api_enhance():
@@ -10858,7 +10908,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             telem_set_add("enhance_workflows", wid, out_dir=out_dir)  # Enhance Adept: distinct rituals
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
@@ -10877,7 +10927,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     # --- The Loom (Seedance storyboard) -------------------------------------
     # Storage is a small key->value store the Loom's window.storage shim reads via
@@ -11085,7 +11135,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             try:
                 _loom_kv_write(user, k, p.get("value"))
             except OSError as e:
-                return jsonify({"ok": False, "error": str(e)[:120]}), 500
+                return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:120]}), 500
         return jsonify({"ok": True})
 
     @app.route("/api/loom/list")
@@ -11176,7 +11226,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             dur = core.probe_video_duration(str(vid))
             return jsonify({"frame_media_id": str(frame_mid), "duration": dur})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/loom/generate", methods=["POST"])
     def loom_generate():
@@ -11242,7 +11292,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     def _run_export(cmd, out_path, total_sec):
         """Run the ffmpeg concat in a thread, parsing time= for progress. The output
@@ -11273,7 +11323,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     _export_job.update(status="failed", error="ffmpeg exited %d" % rc)
         except Exception as e:
             with _export_lock:
-                _export_job.update(status="failed", error=str(e)[:200], proc=None)
+                _export_job.update(status="failed", error=_redact_host_paths(str(e))[:200], proc=None)
 
     @app.route("/api/loom/export", methods=["POST"])
     def api_loom_export():
@@ -11570,8 +11620,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # 'failed' -- without it the job spins on 'running' in the Jobs card
             # forever. (Observed: an enhance submitted with an unusable input media id
             # sat at 'running' indefinitely while PixAI considered it long finished.)
-            _log_job(tid, status="failed", error=str(e)[:200])
-            return jsonify({"phase": "failed", "error": str(e)[:200]}), 200
+            _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
+            return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
         except Exception as e:
             # A transient PixAI blip (5xx/429/timeout) raises here even though the task may
             # still be running -- or already finished. Do NOT write an authoritative 'failed'
@@ -11579,7 +11629,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # for a task that likely succeeded. Leave the job at its last-known state (it ages
             # out, or the live-mirror watcher collects the real result). Only a genuine
             # st["phase"] == "failed" above logs a terminal failure.
-            return jsonify({"phase": "failed", "error": str(e)[:200]}), 200
+            return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/jobs")
     def api_jobs():
@@ -11636,7 +11686,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify({"workflows": core.workflow_catalog(session)})
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "workflows": []}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "workflows": []}), 200
 
     @app.after_request
     def _gzip_html(resp):
