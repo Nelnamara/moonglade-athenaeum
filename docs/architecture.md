@@ -142,7 +142,8 @@ pixai_backup/
 ├─ prompt_snippets.json    legacy install-wide snippets (read-only fallback)
 ├─ view_presets/           per-account saved gallery views (<account>.json)
 ├─ view_presets.json       legacy install-wide saved views (read-only fallback)
-├─ toolbox_presets.json    install-wide Toolbox presets
+├─ toolbox_presets/        per-account imported Toolbox presets (<account>.json)
+├─ toolbox_presets.json    legacy install-wide presets (read-only fallback)
 ├─ schedule.json           Control Panel's scheduled-task list
 ├─ _duplicates/            quarantine from --dedup (reversible)
 ├─ _deleted/               quarantine from gallery delete (recoverable)

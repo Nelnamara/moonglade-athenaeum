@@ -73,6 +73,20 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The CLI's `--edit-image` could submit a resolution/quality the picked model doesn't
+  support.** The web Edit tab has always clamped its request to the resolved model's real
+  capabilities (`clamp_edit_config`) — the CLI's own defaults (1K/medium) never ran through
+  that guard, so editing with a model like Reference Pro (2K/4K only, no quality knob at
+  all) could send an invalid combo straight into a credit spend. Now clamped in the same
+  place the CLI already builds its edit config, so both the preview and the real submit
+  are covered.
+
+- **The last per-account split from tonight's earlier work: Toolbox presets.** Imported
+  presets were still one shared file for every account, so anyone signed in could see —
+  and overwrite, one import at a time — everyone else's. Same fix shape as prompt
+  snippets and Loom storyboards earlier tonight: a file per account, with the old shared
+  file kept as a read-only fallback for an account that hasn't saved its own yet.
+
 - **A backup that partially failed reported itself identically to a clean one.** If some
   files failed to download after retries, the run still printed a tally but nothing
   distinguished it from success anywhere downstream — the CLI job log, the Panel's Jobs
