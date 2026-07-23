@@ -22,8 +22,10 @@ Click a button and the job starts as a background run of `pixai_gallery_backup.p
 
 - **One job runs at a time.** While one is running the other buttons are disabled, and a
   second request comes back with *"a job is already running"*.
-- The **live log** streams the command's output; a **progress bar** shows done / total
-  (and how many are new) for jobs that report progress.
+- The **live log** streams the command's output when you're signed in locally; a LAN
+  session sees a placeholder line instead — job output is shown only on the server's own
+  screen. A **progress bar** shows done / total (and how many are new) for jobs that
+  report progress, for both.
 - When it ends you get *finished (exit 0)*, *failed*, or *stopped by you*.
 - **■ Stop this job** terminates the run. Like the destructive jobs below, stopping is
   restricted to the machine hosting the gallery.
@@ -172,4 +174,6 @@ failed row.
 
 ## This build
 
-The last card shows the build you're running and the path to your library folder.
+The last card shows the build you're running and the path to your library folder — when
+you're signed in locally. A LAN session sees `(local to the server)` instead; the install
+path never crosses the network boundary.

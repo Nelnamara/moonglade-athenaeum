@@ -33,7 +33,6 @@ QUICK START
   python pixai_gallery_backup.py --probe     # detect full-res variant, sanity-check
   python pixai_gallery_backup.py             # download everything (backward)
   python pixai_gallery_backup.py --max 40    # small test first
-  python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
 __version__ = "2.2.0"
@@ -96,8 +95,8 @@ class PixAIError(Exception):
 
 
 class EmptyOutputsError(PixAIError):
-    """PixAI reported the task TERMINAL (phase 'done') but its outputs carry no
-    media -- the task produced nothing and never will.
+    """PixAI reported the task TERMINAL -- either 'done' with empty outputs, or a real
+    failure (failed/error/cancelled/rejected) -- so it produced nothing and never will.
 
     This exists to be distinguishable from an ordinary PixAIError at a catch
     site, NOT to carry different information. The web poller's collect step has
@@ -632,12 +631,26 @@ READ_ONLY = bool(_cfg.get("READ_ONLY", False))
 
 
 def _check_read_only(action):
-    """Called at the top of every function that actually fires an account-mutating
-    network call (submit_generation, submit_fixer, delete_task_gql, claim_reward) --
-    the shared choke points both the CLI and the web app's generate/edit/enhance/fix/
-    delete/claim routes all funnel through. Raising here, unconditionally, is what
-    makes READ_ONLY override --confirm/--apply/--yes rather than just changing their
-    default."""
+    """Called at the top of every branch that actually fires an account-mutating
+    network call. Raising here, unconditionally, is what makes READ_ONLY override
+    --confirm/--apply/--yes rather than just changing their default.
+
+    Nine call sites, not four: submit_generation, submit_fixer, delete_task_gql and
+    claim_reward are the choke points the WEB app's generate/edit/enhance/fix/delete/
+    claim routes all funnel through -- but the CLI's run_generate, run_generate_video,
+    run_reference_video, run_enhance and run_edit_image each build their OWN gql_adhoc
+    call (for retry logic submit_generation doesn't have) instead of calling through a
+    choke point, and until 2026-07-21 none of them called this. Found by audit: with
+    READ_ONLY=True and --confirm, all five reached the mutation, and the free-card
+    check fired first -- a live network call before the guard even ran. Each of those
+    five now calls this as the FIRST statement of its actual-submit branch, before any
+    upload or card-check, not just before the mutation itself.
+
+    upload_media() is deliberately NOT gated here -- it costs no credits and is not one
+    of the four actions CLAUDE.md's contract lists (submit a generation, submit a fix,
+    delete a task, claim a reward). Whether READ_ONLY should also block a free upload
+    is an open question, tracked in docs/AUDIT_2026-07-21.md, not resolved by this
+    docstring."""
     if READ_ONLY:
         raise PixAIError(
             "READ_ONLY is set in config.json -- refusing to {}. "
@@ -741,6 +754,12 @@ def _progress_line(done, total, new=0, width=40):
 # collide with normal log output. Fields after it are done|total|new.
 PANEL_PROGRESS_PREFIX = "~=MGPROG=~"
 
+# Same idea as PANEL_PROGRESS_PREFIX, for a different signal (D-4): a download run that
+# finished with some files failed after retries, but exit code 0 by design -- the Panel
+# subprocess has no other way to tell "done" from "done, but N files failed" apart from
+# this marker line. The field after it is the fail count.
+PANEL_WARN_PREFIX = "~=MGWARN=~"
+
 
 def _make_progress(out_dir=None, job_id=None):
     """Return a progress(done, total, new=0) callback. Under the Control Panel
@@ -800,7 +819,7 @@ def _make_progress(out_dir=None, job_id=None):
 JOBS_LOG_NAME = "jobs.jsonl"
 JOBS_KEEP = 50                 # show at most this many most-recent jobs
 JOBS_MAX_AGE = 24 * 3600       # drop FINISHED jobs older than this (seconds)
-_JOBS_TERMINAL = ("done", "failed")
+_JOBS_TERMINAL = ("done", "failed", "done_with_errors")
 _JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many lines
 
 
@@ -812,15 +831,36 @@ def append_job_event(out_dir, job_id, status=None, **fields):
     """Append ONE job event to jobs.jsonl (append-only; safe from many processes).
     Each call records a job's CURRENT state; readers collapse by job_id. Known
     fields: type, label, done, total, media_ids, error, source, dismissed. `ts`
-    is stamped here. Fails soft -- logging a job must never break the job."""
+    is stamped here. Fails soft -- logging a job must never break the job.
+
+    Every STRING field is capped at 200 chars here, at the one write choke point
+    every job event from every source funnels through (web routes' own _log_job
+    wrapper, the Panel's subprocess reader, the CLI's own job logging). Found
+    2026-07-21: _cli_job_finish wrote a caught exception's str(e) here with NO cap
+    at all -- the only error-write in either module missing one -- fed by blanket
+    `except Exception` wrappers around whole download/sync runs, so an unbounded
+    message (a long traceback, an arbitrarily large error string) could land here
+    verbatim and later get served back to any LOGIN caller via /api/jobs. 200
+    matches the str(e)[:200] convention already used at every other error-serving
+    site in this app, rather than inventing a new limit.
+
+    This bounds SIZE, not CONTENT -- a short message can still contain a host path
+    (`C:\\Users\\...` easily fits in 200 chars). Redacting host detail out of error
+    text generally is a separate, larger, deliberately deferred piece of work (see
+    docs/AUDIT_2026-07-21.md, S3) -- a first attempt at that used a regex that
+    stopped redacting at the first space, silently leaving a spaced username
+    exposed, which is exactly the kind of narrow-looking fix that is easy to get
+    subtly wrong. This closes the "totally unbounded" half safely tonight without
+    reopening that harder problem."""
     if not job_id:
         return
     rec = {"ts": time.time(), "job_id": str(job_id)}
     if status is not None:
         rec["status"] = status
     for k, v in fields.items():
-        if v is not None:
-            rec[k] = v
+        if v is None:
+            continue
+        rec[k] = v[:200] if isinstance(v, str) else v
     try:
         with _jobs_path(out_dir).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
@@ -855,13 +895,23 @@ def _cli_job_start(out_dir, label):
         return None
 
 
-def _cli_job_finish(out_dir, job_id, error=None):
-    """Terminal event for a _cli_job_start job. No-op if no job was started."""
+def _cli_job_finish(out_dir, job_id, error=None, warn=0):
+    """Terminal event for a _cli_job_start job. No-op if no job was started.
+
+    `warn` (D-4): a partial-failure count from a run that otherwise completed (some
+    files failed to download after retries, but the run itself didn't raise). Logged
+    as its own terminal status, "done_with_errors", distinct from both "done" (clean)
+    and "failed" (the run itself raised) -- so a scheduled/automated caller, or the
+    Panel's Jobs tray, can tell "ran but lost files" apart from either extreme instead
+    of everything but a hard crash collapsing into a silent "done"."""
     if not job_id:
         return
     try:
         if error is not None:
             append_job_event(out_dir, job_id, status="failed", error=str(error))
+        elif warn:
+            append_job_event(out_dir, job_id, status="done_with_errors",
+                             error="{} file(s) failed to download".format(warn))
         else:
             append_job_event(out_dir, job_id, status="done")
     except Exception:                                       # noqa: BLE001 -- fail-soft logging
@@ -1453,6 +1503,18 @@ def download(session, url, stem, retries=3, convert=None,
                     for chunk in r.iter_content(chunk_size=65536):
                         fh.write(chunk)
                         nbytes += len(chunk)
+                if nbytes == 0:
+                    # A 200 with an empty body -- a truncated connection, not a real
+                    # image. Promoting this to `dest` would create a permanent,
+                    # unrecoverable zero-byte file: the startup resume index treats any
+                    # non-.part file with the right extension as "already done" (see the
+                    # matching guard there), so it would never be retried by --update,
+                    # --sync, or a full re-walk. Fail this attempt instead, through the
+                    # same retry/backoff path as any other network failure below.
+                    tmp.unlink()
+                    vlog("download {} -> empty response body ({:.2f}s), retrying".format(
+                        stem.name, time.monotonic() - _t))
+                    raise requests.RequestException("empty response body")
                 _atomic_replace(tmp, dest)   # retry a transient Windows lock on the .part file
                 vlog("download {} -> {:,} bytes in {:.2f}s".format(
                     dest.name, nbytes, time.monotonic() - _t))
@@ -1495,9 +1557,14 @@ _FULL_META_FIELDS = (
 def task_detail_gql(session, task_id):
     """GET getTaskById for one task. Returns the task dict or None on failure."""
     if not TASK_DETAIL_HASH:
+        # Defensive only: TASK_DETAIL_HASH ships with a working built-in default (see
+        # its module-level assignment above), so this fires only if that default is
+        # stripped or someone blanks it in config.json -- not a real setup gate.
         raise PixAIError(
-            "TASK_DETAIL_HASH missing from config.json. "
-            "Capture it from DevTools (see README -> Full Meta) and add it.")
+            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current getTaskById "
+            "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
+            "this file).")
     params = {
         "operation": "getTaskById",
         "u3t": U3T,
@@ -2145,6 +2212,18 @@ def audit_collection(out_dir, content=True, progress=None):
             size = p.stat().st_size
         except OSError:
             continue
+        if size == 0:
+            # A 0-byte file (an interrupted download, same failure mode as invariant 3's
+            # resume-index bug) must never enter by_mid/by_size: with bucket priority as
+            # the ONLY keeper-selection signal, an empty file in the "batches" bucket
+            # outranks a real image in "images" and gets chosen as the survivor. Under
+            # plain --dedup that is recoverable (the auto-verify pass below flags it,
+            # "REVIEW NEEDED"); under --dedup --apply --dedup-delete there is no verify
+            # step at all, so it silently hard-deletes the only real copy. Excluding it
+            # here means it can never become a keeper OR a loser -- it simply isn't part
+            # of any duplicate group, which is also correct: an empty file isn't a
+            # duplicate of anything.
+            continue
         per_bucket[bucket] += 1
         by_mid[mid].append((p, rel, bucket, size))
         by_size[size].append((p, rel, bucket, mid))
@@ -2154,7 +2233,12 @@ def audit_collection(out_dir, content=True, progress=None):
     def _keeper(items, key_bucket):
         # items: list of tuples; key_bucket(item) -> bucket name. Prefer organized,
         # then shortest path (stable), so the canonical copy is deterministic.
-        return min(items, key=lambda it: (_BUCKET_PRIORITY.get(key_bucket(it), 9),
+        # A zero-byte item (it[3] is size on the by_mid tuple shape) can never win --
+        # False < True, so "is empty" sorts before every real bucket/path comparison.
+        # Defense in depth: the loop above already excludes zero-byte files from ever
+        # reaching `items` at all, so this branch should be unreachable in practice.
+        return min(items, key=lambda it: (it[3] == 0,
+                                          _BUCKET_PRIORITY.get(key_bucket(it), 9),
                                           len(str(it[1]))))
 
     # ---- Class A: same media_id across >1 distinct bucket -------------------
@@ -3994,9 +4078,10 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
     is also sent as `mediaId`. `scene_id` marks a Toolbox PRESET (banked 2026-07-04
     from task 2030050946353349700: a preset = this same chat block + a canned prompt
     + top-level sceneId, e.g. "character-card"; Edit cards match it either way).
-    NOTE: we deliberately DO NOT attach a `kaisuukenId` (free-card) here -- free-card
-    spending is a separate, explicit feature; without it the server charges credits,
-    so this stays behind --confirm like all spend paths.
+    NOTE: `kaisuuken_id` defaults to "" and is only attached (below) when the caller
+    passes one explicitly -- same opt-in shape as the other build_*_parameters builders.
+    Without one the server charges credits, so this still stays behind --confirm like
+    all spend paths.
     """
     ids = [str(m) for m in (media_ids or []) if str(m).strip()]
     if not ids:
@@ -4020,11 +4105,21 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
 
 def _edit_config_from_args(args):
     """Pull the modelConfig knobs (with defaults) out of CLI/GUI args."""
+    model_id = getattr(args, "edit_model", "") or EDIT_PRO_MODEL_ID
+    resolution = getattr(args, "edit_resolution", "") or "1K"
+    aspect_ratio = getattr(args, "edit_aspect", "") or "3:4"
+    quality = getattr(args, "edit_quality", "") or "medium"
+    # Same guard the web /api/edit path already runs (_edit_params_from_payload ->
+    # clamp_edit_config) -- without it the CLI can submit a resolution/quality/aspect
+    # the resolved model doesn't actually support (e.g. the 1K/medium defaults above,
+    # sent to reference-pro, which only exposes 2K/4K and no quality knob at all), an
+    # invalid combo on a credit-spend path.
+    resolution, quality, aspect_ratio = clamp_edit_config(model_id, resolution, quality, aspect_ratio)
     return dict(
-        model_id=getattr(args, "edit_model", "") or EDIT_PRO_MODEL_ID,
-        resolution=getattr(args, "edit_resolution", "") or "1K",
-        aspect_ratio=getattr(args, "edit_aspect", "") or "3:4",
-        quality=getattr(args, "edit_quality", "") or "medium",
+        model_id=model_id,
+        resolution=resolution,
+        aspect_ratio=aspect_ratio,
+        quality=quality,
         kaisuuken_id=getattr(args, "kaisuuken_id", "") or "",
     )
 
@@ -4059,13 +4154,50 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
 def _maybe_dump_params(args, result):
     """If --dump-params is set, print the task's full submit `parameters` (the exact
     shape PixAI received). Handy for banking a param shape off a recovered --task-id
-    without a live browser capture. Read-only; prints nothing otherwise."""
+    without a live browser capture. Read-only; prints nothing otherwise.
+
+    Also prints the task's own status. Found needed 2026-07-21: recovering a task is
+    almost always done BECAUSE something looked wrong, and the params alone can't say
+    whether PixAI ever actually ran it -- this used to print only what was submitted,
+    never what happened to it, so the one moment you most want to know the outcome was
+    exactly when this told you nothing about it."""
     if not getattr(args, "dump_params", False):
         return
     params = (result or {}).get("parameters")
     print("=== task parameters (full submit shape) ===")
     print(json.dumps(params if params is not None else result, indent=2, ensure_ascii=False))
     print("=== end parameters ===")
+    status = (result or {}).get("status")
+    if status:
+        print("task status: {}".format(status))
+
+
+def _outputs_or_raise(result, found, empty_message):
+    """Common tail for every 'download a completed task's outputs' function: raise
+    EmptyOutputsError when there is nothing to download, with a message that matches
+    what actually happened rather than always claiming the task 'completed'.
+
+    Found 2026-07-21 chasing a real report of edit jobs that looked like they'd never
+    reached PixAI. They had: a real task id was issued (the spend already happened),
+    but PixAI's own status for the task was 'failed' -- and every one of the four call
+    sites below said 'task completed but no media ids found' regardless, because none
+    of them looked at `result["status"]` before writing the message. For a task PixAI
+    itself marked failed, 'completed' is not almost-right, it's the opposite of what
+    happened, and it is exactly the kind of thing that reads as a tool bug instead of
+    a PixAI-side rejection.
+
+    `empty_message` is the ORIGINAL message, used verbatim for the case it was always
+    right about -- a task that is genuinely done with empty outputs (e.g. silently
+    content-filtered). Only the newly-distinguished failed/cancelled/rejected case gets
+    different text; nothing about the genuinely-empty case changes."""
+    if found:
+        return
+    raw = str((result or {}).get("status") or "").lower()
+    if raw in _GEN_FAIL:
+        raise EmptyOutputsError(
+            "PixAI reported this task as '{}' -- it did not complete, so there is "
+            "nothing to recover. Check pixai.art for why, or resubmit.".format(raw))
+    raise EmptyOutputsError(empty_message)
 
 
 def run_generate(args):
@@ -4098,6 +4230,11 @@ def run_generate(args):
         task_id = existing_task
         print("Fetching existing task (no credits):", task_id)
     else:
+        # This CLI runner builds its own gql_adhoc call (for the inferenceProfile retry
+        # below) instead of going through submit_generation() -- so it needs its own
+        # _check_read_only, in the same place submit_generation puts it: before ANY
+        # network call this branch makes, including _apply_kaisuuken's free-card check.
+        _check_read_only("submit a generation (spends credits)")
         print("Submitting generation task...")
         _apply_kaisuuken(session, params, args)
         try:
@@ -4129,17 +4266,19 @@ def run_generate(args):
     result = task_detail_gql(session, task_id) or {}
     _maybe_dump_params(args, result)
     outputs = result.get("outputs") or {}
-    mids = []
-    if outputs.get("mediaId"):
-        mids.append(str(outputs["mediaId"]))
-    for m in outputs.get("batchMediaIds") or []:
-        mids.append(str(m))
+    # _task_image_media prefers outputs.batch[] (the real individual images) over
+    # outputs.mediaId (the composite grid PixAI returns for any batchSize>1 task) --
+    # reading mediaId/batchMediaIds directly here used to save only the grid and
+    # silently drop every individual image on a multi-image generation (audit:
+    # fail-open/unfiled-workflow-findings, 2026-07-21).
+    media = _task_image_media(outputs)
+    seeds = dict(media)
+    mids = [mid for mid, _ in media]
     for v in outputs.get("videos") or []:
         if v.get("mediaId"):
             mids.append(str(v["mediaId"]))
     mids = list(dict.fromkeys(mids))
-    if not mids:
-        raise EmptyOutputsError("task completed but no media ids found")
+    _outputs_or_raise(result, mids, "task completed but no media ids found")
 
     # Prefer the task's actual metadata (authoritative, and the only source when
     # recovering by --task-id); fall back to the params we submitted.
@@ -4176,7 +4315,7 @@ def run_generate(args):
             "prompt_full": prompt,
             "prompt_preview": (prompt or "")[:100],
             "negative_prompt": _pick("negative_prompt", "negativePrompts"),
-            "seed": _pick("seed", "seed"),
+            "seed": seeds.get(mid) or _pick("seed", "seed"),   # per-image seed on a batch
             "steps": _pick("steps", "samplingSteps"),
             "cfg_scale": _pick("cfg_scale", "cfgScale"),
             "model_id": _pick("model_id", "modelId"),
@@ -4208,8 +4347,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     and reference-video (referenceVideo) -- reads outputs.videos + the submitted block
     generically. Returns the list of saved file paths."""
     outs, shared = video_outputs(result)
-    if not outs:
-        raise EmptyOutputsError("video task completed but no video outputs found")
+    _outputs_or_raise(result, outs, "video task completed but no video outputs found")
     detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
     sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
@@ -4328,8 +4466,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     resolve_media -> download -> catalog as source='api'. Returns the saved file paths."""
     outputs = result.get("outputs") or {}
     media = _task_image_media(outputs)
-    if not media:
-        raise EmptyOutputsError("task completed but no media ids found")
+    _outputs_or_raise(result, media, "task completed but no media ids found")
     from pixai_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     img_dir = out / "images"
@@ -4501,6 +4638,7 @@ def run_generate_video(args):
         task_id = existing_task
         print("Fetching existing video task (no credits):", task_id)
     else:
+        _check_read_only("submit a video generation (spends credits)")
         print("Submitting VIDEO generation task (this spends credits)...")
         _apply_kaisuuken(session, params, args)
         created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
@@ -4589,6 +4727,10 @@ def run_reference_video(args):
         task_id = existing_task
         print("Fetching existing reference-video task (no credits):", task_id)
     else:
+        # Checked before _resolve_refs, not just before the mutation: _resolve_refs
+        # uploads any local ref files (upload_media -> a real gql_adhoc mutation) before
+        # this function ever reaches the createGenerationTask call.
+        _check_read_only("submit a reference video generation (spends credits)")
         if override:
             params = json.loads(override)
         else:
@@ -4663,6 +4805,8 @@ def run_enhance(args):
         task_id = existing
         print("Fetching existing enhance task (no credits):", task_id)
     else:
+        # Checked before the upload, not just before the mutation -- see run_reference_video.
+        _check_read_only("submit an enhance task (spends credits unless a card applies)")
         if override:
             params = json.loads(override)
         else:
@@ -4749,6 +4893,9 @@ def run_edit_image(args):
         task_id = existing_task
         print("Fetching existing edit task (no credits):", task_id)
     else:
+        # Checked before the upload loop, not just before the mutation -- see
+        # run_reference_video.
+        _check_read_only("submit an edit (spends credits unless a card applies)")
         if override:
             params = json.loads(override)
         else:
@@ -4777,14 +4924,12 @@ def run_edit_image(args):
     result = task_detail_gql(session, task_id) or {}
     _maybe_dump_params(args, result)
     outputs = result.get("outputs") or {}
-    mids = []
-    if outputs.get("mediaId"):
-        mids.append(str(outputs["mediaId"]))
-    for m in outputs.get("batchMediaIds") or []:
-        mids.append(str(m))
-    mids = list(dict.fromkeys(mids))
-    if not mids:
-        raise EmptyOutputsError("edit task completed but no media ids found")
+    # Same fix as run_generate: outputs.batch[] holds the real individual images on
+    # a batchSize>1 edit; outputs.mediaId alone is the composite grid.
+    media = _task_image_media(outputs)
+    seeds = dict(media)
+    mids = [mid for mid, _ in media]
+    _outputs_or_raise(result, mids, "edit task completed but no media ids found")
 
     fm = extract_full_meta(result)
     chat = (params.get("chat") or {}) if isinstance(params, dict) else {}
@@ -4804,7 +4949,7 @@ def run_edit_image(args):
             continue
         full = {f: "" for f in CATALOG_FIELDS}
         full.update({
-            "task_id": str(task_id), "media_id": mid,
+            "task_id": str(task_id), "media_id": mid, "seed": seeds.get(mid, ""),
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
             "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -5312,11 +5457,18 @@ def _target_model_id(parameters):
                or (parameters.get("chat") or {}).get("modelId") or "").strip()
 
 
-def match_kaisuuken(session, parameters, enrich=False):
+def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
     """POST /v2/kaisuuken/check with a generation's `parameters` and return the single
     nearest-expiry matching TICKET as {id, expiresAt, templateId, total} -- or None when
     no card matches. READ-ONLY: this only *checks*; the card is consumed later, when the
-    task is submitted with the returned id attached. Fails soft (returns None).
+    task is submitted with the returned id attached. Fails soft (returns None) by default
+    -- fine for every read-only/preview/display caller, where a glitched check should not
+    block the UI.
+
+    `raise_on_error=True` re-raises instead of swallowing the failure into None. The one
+    caller that needs this is `_apply_kaisuuken`'s spend-time check: there, a transient
+    check failure and "genuinely no card matches" must NOT collapse into the same outcome,
+    because that outcome is "proceed and spend real credits."
 
     `enrich=True` cross-references /kaisuuken/summary to (a) PREFER the card locked to this
     generation's own model when more than one template is eligible -- so an Edit gen spends
@@ -5329,6 +5481,8 @@ def match_kaisuuken(session, parameters, enrich=False):
         data = _rest_post(session, "/kaisuuken/check",
                           {"type": "generation-task", "parameters": parameters}) or {}
     except (PixAIError, ValueError):
+        if raise_on_error:
+            raise
         return None
     matches = data.get("matches") or []
     if not matches:
@@ -5538,7 +5692,15 @@ def _apply_kaisuuken(session, params, args):
     """Attach a free-card ticket id (`kaisuukenId`) to `params` in place, mirroring the
     web client. Precedence: explicit --kaisuuken-id > --no-card (skip) > auto-match via
     /v2/kaisuuken/check. Returns the attached id ('' if none). The card is only consumed
-    when the task is actually submitted; this just picks the id. Logs what it did."""
+    when the task is actually submitted; this just picks the id. Logs what it did.
+
+    The auto-match check retries once on failure, then ABORTS (raises PixAIError) rather
+    than falling through to "no card -> pay credits". match_kaisuuken's normal fail-soft
+    contract is right for read-only/preview callers, but wrong here: this is the last
+    check before real money moves, and a transient glitch is not the same fact as "no
+    free card exists" -- treating them the same silently spends credits on a generation
+    that may have just been shown as free. Aborting surfaces the problem instead of
+    guessing with the user's money (audit: `fail-open`, 2026-07-21)."""
     explicit = (getattr(args, "kaisuuken_id", "") or "").strip()
     if explicit:
         params["kaisuukenId"] = explicit
@@ -5547,7 +5709,25 @@ def _apply_kaisuuken(session, params, args):
     if getattr(args, "no_card", False):
         print("  --no-card: not using a free card (this WILL spend credits).")
         return ""
-    best = match_kaisuuken(session, params, enrich=True)   # prefer the model-matching card
+    best = None
+    check_err = None
+    for attempt in range(2):
+        try:
+            best = match_kaisuuken(session, params, enrich=True, raise_on_error=True)
+            check_err = None
+            break
+        except (PixAIError, ValueError) as e:
+            check_err = e
+            if attempt == 0:
+                time.sleep(1.5)
+    if check_err is not None:
+        # On-theme, owner-requested wording (2026-07-22, D-1): mirrors the "job lost"
+        # message PixAI's own site shows on a similar random failure, rather than a raw
+        # technical error -- still refuses to guess and silently spend credits, just
+        # says so in the app's own voice instead of engineer-speak.
+        raise PixAIError(
+            "Lost to the Void -- the free-card check didn't come back before submitting, "
+            "so nothing was spent. Wait a moment and try again. ({})".format(check_err))
     if best and best.get("id"):
         params["kaisuukenId"] = best["id"]
         print("  free card matches ({}) -> attaching it; this costs 0 credits "
@@ -5833,9 +6013,13 @@ def run_backfill_full_meta(args):
     session = _make_session(getattr(args, "token", None))
 
     if not TASK_DETAIL_HASH:
+        # Defensive only: TASK_DETAIL_HASH ships with a working built-in default, so this
+        # fires only if that default is stripped or blanked in config.json.
         raise PixAIError(
-            "--backfill-full-meta requires TASK_DETAIL_HASH in config.json. "
-            "See README -> Full Meta for capture instructions.")
+            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current getTaskById "
+            "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
+            "this file).")
 
     rows = load_catalog(db_path)
     with_loras = getattr(args, "with_loras", False)
@@ -5965,9 +6149,13 @@ def run_download(args, progress=None):
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
 
     if use_full_meta and not TASK_DETAIL_HASH:
+        # Defensive only: TASK_DETAIL_HASH ships with a working built-in default, so this
+        # fires only if that default is stripped or blanked in config.json.
         raise PixAIError(
-            "--full-meta requires TASK_DETAIL_HASH in config.json. "
-            "See README -> Full Meta for capture instructions.")
+            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current getTaskById "
+            "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
+            "this file).")
 
     if not getattr(args, "organize_adv_live", False):
         img_dir.mkdir(parents=True, exist_ok=True)
@@ -6002,11 +6190,24 @@ def run_download(args, progress=None):
             name = e.name
             if name.endswith(".part") or os.path.splitext(name)[1].lower() not in _IMAGE_EXTS:
                 continue
-            already_done += 1
             try:
-                disk_bytes += e.stat().st_size
+                size = e.stat().st_size
             except OSError:
-                pass
+                size = None
+            # A zero-byte file (an interrupted download that got far enough to create
+            # the file but not to write it) must NOT count as "already done" here --
+            # indexing it means it is skipped FOREVER: no --update/--sync ever
+            # re-attempts a media_id already in this index, and
+            # reconcile_catalog_with_disk's strict matcher (pixai_gallery.py) finds
+            # nothing wrong either, so the row's filename is left pointing at a dead
+            # file with no signal to the user. A stat() race (size is None) is treated
+            # as fine, matching prior behaviour -- we can't tell either way, and this
+            # index has always erred toward "already done" on an unreadable stat.
+            if size == 0:
+                continue
+            already_done += 1
+            if size is not None:
+                disk_bytes += size
             on_disk_by_mid.setdefault(media_id_of(name), Path(e.path))
         vlog("startup disk scan: {} image files ({}) indexed in {:.2f}s".format(
             already_done, _format_size(disk_bytes), time.monotonic() - _t_scan))
@@ -6396,7 +6597,16 @@ def run_download(args, progress=None):
         dl["ok"], dl["skip"], dl["missing"], dl["fail"]))
     print("Catalog: {}\nRaw: {}\nImages: {}".format(db_path, raw_path, img_dir))
     if dl["fail"]:
-        print("Some failed -- just re-run; finished files are skipped.")
+        # D-4: exit code is UNCHANGED by design (still 0 -- a partial failure must not
+        # break a Task Scheduler wrapper over one transient blip). This is purely a
+        # louder, harder-to-miss console notice, plus (below) a machine-readable marker
+        # for anything watching stdout (the Panel subprocess reader).
+        print("\n*** FINISHED WITH ERRORS: {} file(s) failed to download after retries "
+              "-- just re-run, finished files are skipped. Exit code is still 0 by "
+              "design. ***".format(dl["fail"]))
+        if os.environ.get("MOONGLADE_PROGRESS") == "1":
+            print("{}{}".format(PANEL_WARN_PREFIX, dl["fail"]), flush=True)
+    return dl
 
 
 # ---------------------------------------------------------------------------
@@ -6511,7 +6721,7 @@ def main():
                     help="DELETE the given generation task id(s) from your PixAI account "
                          "(irreversible). Dry-run unless --apply is also given; then asks "
                          "for typed confirmation unless --yes. Local backups are untouched. "
-                         "Requires DELETE_TASK_HASH in config.json.")
+                         "(DELETE_TASK_HASH ships with a working default; no config.json setup needed.)")
     ap.add_argument("--yes", action="store_true",
                     help="skip the interactive confirmation for --delete-task --apply "
                          "(use with care; deletion cannot be undone)")
@@ -6536,8 +6746,6 @@ def main():
                          "(slow). Default uses the catalog size as a fast estimate.")
     ap.add_argument("--delay", type=float, default=0.4,
                     help="seconds to wait between API requests (default: 0.4)")
-    ap.add_argument("--variant", default=None,
-                    help="force a media variant (skip auto-detect), e.g. original")
     ap.add_argument("--probe", action="store_true",
                     help="show first page + auto-detect the full-res variant, then exit")
     ap.add_argument("--count", action="store_true",
@@ -6582,8 +6790,9 @@ def main():
                          "plan without moving anything")
     ap.add_argument("--full-meta", action="store_true",
                     help="fetch full prompt, seed, steps, sampler, CFG, and model name for each "
-                         "task via a second API call (requires TASK_DETAIL_HASH + MODEL_DETAIL_HASH "
-                         "in config.json). One extra call per unique task; batch images share one call.")
+                         "task via a second API call (TASK_DETAIL_HASH + MODEL_DETAIL_HASH ship with "
+                         "working defaults; no config.json setup needed). One extra call per unique "
+                         "task; batch images share one call.")
     ap.add_argument("--backfill-meta", action="store_true",
                     help="fill in missing url/width/height in catalog.db via resolve_media "
                          "for rows that lack them, then exit")
@@ -6959,7 +7168,7 @@ def main():
                 # run_download uses its `progress` PARAM (not args.progress), so hand it over
                 # explicitly -- otherwise the panel's progress bar is blank during the
                 # download step (fix_models/backfill already read args.progress themselves).
-                run_download(args, progress=getattr(args, "progress", None))
+                dl = run_download(args, progress=getattr(args, "progress", None))
                 print("\nSync: resolving any unlabeled model names...")
                 run_fix_models(args)
                 print("Sync: filling any rows still missing metadata...")
@@ -6987,7 +7196,7 @@ def main():
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
                 _cli_job_finish(out, _job, error=e)
                 raise
-            _cli_job_finish(out, _job)
+            _cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
             return
         if args.backfill_meta:
             run_backfill_meta(args)
@@ -7018,11 +7227,11 @@ def main():
         # existing terminal-output behavior (it would print unconditionally, tty or not).
         _job = _cli_job_start(out, "Incremental update" if getattr(args, "update", False) else "Full backup")
         try:
-            run_download(args)
+            dl = run_download(args)
         except Exception as e:                           # noqa: BLE001 -- re-raised below unchanged
             _cli_job_finish(out, _job, error=e)
             raise
-        _cli_job_finish(out, _job)
+        _cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
     except PixAIError as e:
         sys.exit(str(e))
 

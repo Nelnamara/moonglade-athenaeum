@@ -100,9 +100,27 @@ def test_a_live_gallery_is_recognised_as_ours_even_though_it_401s(tmp_path):
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", ""])
-def test_wildcard_bind_addresses_probe_loopback(host):
+def test_wildcard_bind_addresses_probe_loopback(host, tmp_path):
     """0.0.0.0/::/"" are bind addresses, not connectable ones -- socket.create_connection
     to "0.0.0.0" is not a meaningful health check, so port_owner rewrites them to
-    127.0.0.1. Without that rewrite the LAN-facing launch (--host 0.0.0.0, the one the
-    tablet uses) would skip the pre-flight entirely."""
-    assert port_owner(host, _free_port()) == ""
+    127.0.0.1 before probing. Without that rewrite the LAN-facing launch (--host
+    0.0.0.0, the one the tablet uses) would skip the pre-flight entirely.
+
+    The previous version of this test only probed a FREE port and asserted "" --
+    which a wildcard host returns whether or not the rewrite happens (a connection
+    attempt to a free port refuses either way), so it could not actually catch the
+    rewrite being deleted (audit: tests-that-dont-bite, high, 2026-07-21). This
+    proves the rewrite for real: a live server is only recognised through a wildcard
+    host if probe_host genuinely became 127.0.0.1 first."""
+    from werkzeug.serving import make_server
+
+    app = create_app(tmp_path)
+    srv = make_server("127.0.0.1", 0, app, threaded=True)
+    port = srv.server_port
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        assert port_owner(host, port) == "moonglade"
+    finally:
+        srv.shutdown()
+        srv.server_close()

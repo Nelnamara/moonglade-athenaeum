@@ -242,3 +242,32 @@ export function buildExportClips(entries) {
   const total = clips.reduce((s, c) => s + c.span, 0);
   return { clips, total };
 }
+
+// ---------- LoRA (D-11) ----------
+// Ported from pixai_gallery.py's loraIncompat() -- same rule, same "fail open on
+// unknown" contract, kept as a pure/tested function per this file's own header
+// convention instead of a third hand-copy embedded in JSX. A LoRA runs on a base
+// ONLY if its loraBaseModelType == the base's modelType (exact enum equality,
+// case-insensitive); an unknown/empty type on either side never blocks a submit --
+// this is advisory (disables Go / shows a warning), not a hard gate, per D-2: PixAI's
+// own site already rejects a real mismatch and explains why.
+export function loraIncompat(baseModelType, loraBaseType) {
+  const b = (baseModelType || "").toUpperCase();
+  const l = (loraBaseType || "").toUpperCase();
+  if (!b || !l) return false;
+  return b !== l;
+}
+
+// The Gallery drawer's payload() filter, ported: only LoRAs that actually resolved a
+// version_id are ever sent -- one still pending/failed must not silently vanish from
+// what the CALLER believes it sent, so this is filter-not-drop at the call site, paired
+// with the UI staying gated (Generate disabled) while anyLoraUnresolved() is true.
+export function resolveLoraPayload(loras) {
+  return (loras || [])
+    .filter((l) => l.version_id)
+    .map((l) => ({ version_id: l.version_id, weight: l.weight }));
+}
+
+export function anyLoraUnresolved(loras) {
+  return (loras || []).some((l) => !l.version_id);
+}

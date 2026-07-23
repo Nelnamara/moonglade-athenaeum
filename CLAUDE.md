@@ -176,7 +176,7 @@ that's how this file drifted badly enough to need `tests/test_docs_dont_hardcode
 during the advisory reconcile scan can crash a sync that already succeeded. Guarded by
 `tests/test_sync.py`; full rationale in `docs/architecture.md`.
 
-Achievement/Trophy-Hall current shape lives in `docs/STATE.md`; art direction (badge style
+Achievement/Folio-of-Honors current shape lives in `docs/STATE.md`; art direction (badge style
 anchor, tier palette, prompt bank) lives in `docs/ART.md` — don't restate hexes or sizes here.
 
 ## Test suite

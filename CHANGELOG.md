@@ -8,12 +8,335 @@ git tags. Full prose notes for tagged versions live on
 
 > **Maintenance note.** This file is the in-repo source of truth — **update the `[Unreleased]`
 > section with every change, and cut it into a dated version block when you tag a release.**
-> GitHub Releases are published through **v1.10.0** — publishing paused after **v1.6.0**, and
+> GitHub Releases are published through **v2.2.0** — publishing paused after **v1.6.0**, and
 > **v1.8.0–v1.10.0 were back-published** on 2026-07-10 from tag messages + git history. **v1.11.0 is
-> tagged but has no Release yet** — its tag sits on `loom-v2` and never reached master; it arrives
-> there as part of **v2.0.0**. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
+> tagged but has no Release of its own** — its commits reached master as part of **v2.0.0**, which
+> does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+
+## [2.3.0] - 2026-07-23 — More security hardening, the Folio of Honors, and LoRA support in the Loom
+
+### Changed
+
+- **Trophy Hall is now The Folio of Honors, with a full visual redesign.** The owner's
+  pick off the standing rename shortlist, shipped alongside a redesign built from a
+  finished Figma Make export — itself built partly from the legendary/feat frame
+  dimensions handed off earlier the same night (confirmed byte-for-byte identical
+  tier-triad colors to what the unlock celebration already shipped). The All tab now
+  leads with an auto-rotating carousel showcasing the active ladder's tiers, a badge row
+  to jump between all 10 ladders, and every ladder/Milestones/Masteries/Feats grouped
+  under a glowing divider. Legendary and feat cards carry the same ornate 9-slice frame
+  the unlock celebration always has — extended to the grid for the first time, a
+  deliberate change from "toast only." The sidebar's category list now filters in place
+  instead of just scrolling to a section, and Relics (skins) show all five with lock/
+  active state, not just the ones you've already unlocked. The Statistics tab gained
+  achieved/points/feats summary cards plus by-rarity and per-ladder-completion
+  breakdowns. Ported to this app's existing vanilla JS/CSS rather than adopted as React
+  (the Loom stays the only React surface); real badge art throughout, not the export's
+  placeholder images. Backend gained `track`/`rung`/`rungs_total` per ladder achievement
+  and a `ladders` list so the client doesn't need a second hand-maintained id→name map.
+
+### Added
+
+- **The Enhance sub-tab now shows its real cost before you run anything.** It was the
+  one price surface that never got the `<mg-cost-badge>` treatment every other screen
+  already has — click-a-tool used to price it and pop a `window.confirm()` on every
+  single click. Reshaped to select-then-run, mirroring the Edit sub-tab: clicking a
+  tool (from the curated shelf or the 140+ browse-all list) just selects it and shows
+  its price in a persistent badge; a separate Run button fires it. The badge is now the
+  only warning, same as everywhere else — no confirm dialog left in this path.
+
+- **The Loom's Image, Edit, and Reference tabs now show their real cost before you
+  generate.** These were the last three price surfaces missing an `<mg-cost-badge>`.
+  Each tab gets its own badge, refreshed by a shared debounced read-only `/api/price`
+  check as the model/prompt/source/references change. Unlike the Gallery's Enhance
+  sub-tab above, each tab's existing `window.confirm()` at submit time is **kept, not
+  removed** — that confirm dialog is this project's original fail-closed guardrail,
+  built after these exact tabs used to lie about cost, so the badge is an added
+  preview, not a replacement for it.
+
+- **The Loom's Image tab can now use LoRAs.** Previously it only offered a base model —
+  the Gallery's own Generate drawer has had full LoRA support (multi-select, per-item
+  weight, trigger words, compatibility warnings) for a while, but the Loom's picker
+  never gained it. `static/mg-model-picker.js` (the shared component both surfaces
+  mount) gained an opt-in multi-select mode; single-value mode is completely
+  unchanged. Each picked LoRA resolves its real generation metadata the same way the
+  Gallery already does, and Generate is disabled while any LoRA is still resolving or
+  failed to resolve — never silently dropped from what you asked for. Verified live
+  against the real running app: pending/resolved/failed/removed states, and the
+  Go-button gating, all confirmed working end to end.
+
+  Deliberately deferred: unlike the Gallery drawer, the Loom doesn't yet warn you
+  before submit if a LoRA doesn't match the base model's architecture (would need the
+  Loom to additionally resolve the base model's own type, which it doesn't today).
+  Functionally safe to defer — PixAI's own servers already reject a real mismatch and
+  explain why — but it means one fewer heads-up than the Gallery gives you.
+
+### Fixed
+
+- **Error messages could leak this machine's own file paths — including your Windows
+  username — to any signed-in LAN account, not just you.** A caught exception's text
+  (`str(e)`) routinely embeds an absolute path on a file-not-found, permission, or
+  upstream-API error, and 37 places across the web app either served that straight back
+  in a JSON error or stashed it for a later request to read. An earlier attempt at this
+  fix was reverted for a real flaw (a regex that stopped redacting at the first space,
+  so a spaced Windows username like "John Smith" still leaked in full). This re-spin
+  does literal-prefix matching instead of a regex, and both new tests are built around a
+  deliberately spaced directory name to make sure that exact regression can't recur.
+  Adversarially reviewed before shipping, which caught three more real gaps in the same
+  pass: a relative `--out .` could have turned the fix inside-out (mangling ordinary
+  punctuation in every error message instead of protecting anything); two sites built
+  their error text a way the sweep's search didn't recognize; one site was missing its
+  length cap. All three fixed in the same pass.
+
+- **The CLI's `--edit-image` could submit a resolution/quality the picked model doesn't
+  support.** The web Edit tab has always clamped its request to the resolved model's real
+  capabilities (`clamp_edit_config`) — the CLI's own defaults (1K/medium) never ran through
+  that guard, so editing with a model like Reference Pro (2K/4K only, no quality knob at
+  all) could send an invalid combo straight into a credit spend. Now clamped in the same
+  place the CLI already builds its edit config, so both the preview and the real submit
+  are covered.
+
+- **The last per-account split from tonight's earlier work: Toolbox presets.** Imported
+  presets were still one shared file for every account, so anyone signed in could see —
+  and overwrite, one import at a time — everyone else's. Same fix shape as prompt
+  snippets and Loom storyboards earlier tonight: a file per account, with the old shared
+  file kept as a read-only fallback for an account that hasn't saved its own yet.
+
+- **A backup that partially failed reported itself identically to a clean one.** If some
+  files failed to download after retries, the run still printed a tally but nothing
+  distinguished it from success anywhere downstream — the CLI job log, the Panel's Jobs
+  tray, all said "done." Exit code is unchanged by design (still 0 — a partial failure
+  must not break a scheduled task over one transient blip); what's new is a real
+  `done_with_errors` status that's visible and dismissable everywhere a job shows up,
+  plus a much louder console notice for a bare-terminal run.
+
+- **Signing out no longer leaves your images sitting in the browser's cache.** The
+  installed/offline view caches image responses in Cache Storage, and nothing
+  previously cleared that on sign-out — a shared or borrowed device could still show
+  a previous account's thumbnails after that account signed out. `/logout` now serves
+  a small page that deletes every cached entry client-side before continuing on to the
+  login page, the same way a redirect always did, plus a visible fallback link for a
+  browser that blocks the page's own script. Deliberately not hooked onto `/login`
+  itself — that path has no way to tell "you're signing out" from "you're already
+  signed in and just landed here by accident," which is exactly what sank an earlier
+  attempt at this fix.
+
+- **Seven tests that couldn't actually fail.** Each guarded a real, working feature with
+  a check loose enough to pass even if that feature broke — a substring that also
+  matched an unrelated comment, an `or` fallback that widened the match to something
+  structurally different (a desktop CSS rule instead of the mobile one, one branch of
+  a service worker instead of the other), or a slice that grabbed the wrong end of the
+  string. Every one now checks the exact thing it claims to, and was verified by
+  temporarily breaking the real feature and confirming the test actually catches it —
+  the service worker's thumbnail revalidation, two Deep Focus prompt-field behaviors,
+  two branding-render checks, the mobile drawer's full-width rule, and the v4.0 video
+  cost warning.
+
+- **A doc-truth-up sweep across the repo.** Route docstrings, help text, and comments that
+  no longer matched what the code actually does, verified one at a time against the real
+  current behavior rather than trusting the earlier audit's own wording (which was itself
+  sometimes stale by the time this landed). Route tier docstrings corrected to match
+  `ROUTE_TIERS` (four routes wrongly claimed Localhost/Open); the first-run bootstrap
+  docstring updated to describe the real web-based flow; every remaining reference to the
+  deleted PySide6 GUI removed from user-facing strings and code comments (five sites, not
+  the two originally estimated), two of which kept their original reasoning rather than
+  just losing the GUI comparison; `docs/architecture.md`'s on-disk layout diagram brought
+  up to date (11 missing entries) and its `/api/branding` tier claim corrected;
+  `docs/STATE.md`'s self-contradictions resolved (some turned out to already be fixed by
+  earlier work tonight — checked rather than assumed); `CHANGELOG.md`'s own v2.2.0 entry
+  and release-history maintenance note corrected against `gh release list` and
+  `git merge-base`; `config.example.json` gained two real, previously-undocumented config
+  overrides; README's feature table and wiki index gained the Loom, Folio of Honors, and
+  Control Panel. Two real (not doc-only) gaps surfaced along the way were deliberately
+  **not** fixed here and are tracked instead: `--full-meta`/`--backfill-full-meta` don't
+  get the fallback resilience their own docstring claims, and a LAN-signed-in session can
+  see an Import button that always 403s.
+
+- **The model-preview tooltip "jumped" while browsing, making it hard to scan a grid.**
+  Two independently-drifted copies of the hover-preview mechanism (the gallery's own
+  `#model-flyout`, and the shared `<mg-model-picker>` the Loom mounts) both fired an
+  instant, un-animated, freshly-repositioned popup on every single card the mouse
+  passed over while scanning — not just the one you paused on. Both now wait ~130ms
+  of genuine hover before opening, so a fast scan across several cards never triggers
+  it at all.
+
+- **Prompt snippets and Loom storyboards were install-wide — any signed-in account
+  could read, overwrite, or delete every other account's.** Same problem saved views
+  already got fixed for, just never applied here. Both are now per-account
+  (`out_dir/prompt_snippets/<user>.json`, `out_dir/loom/kv/<user>/`), falling back
+  read-only to the old shared file/dir for an account that hasn't saved its own copy
+  yet — nothing disappears on upgrade. One accepted, documented gap: deleting a Loom
+  board you inherited from the shared layer but never saved yourself doesn't stick
+  (a later read still falls through to the shared copy) — narrow enough not to matter
+  for how this is actually used, revisit if that changes.
+
+- **The Folio of Honors rendered as a scrambled, overlapping mess on first ship.** `#ach-grid`
+  still carried its pre-redesign CSS class, whose rule forced every direct child into a
+  ~216px tiled grid column — correct for the old flat card layout, wrong for the new one,
+  where every direct child is a full-width section (the carousel, the ladder row, each
+  section group). Those sections were being auto-placed into narrow tiles instead of
+  stacking, which is what actually showed up on screen. Fixed to a plain vertical stack;
+  also removed ~30 CSS rules confirmed dead in the new render code, left behind from the old
+  design and part of what caused the confusion.
+
+- **A flaky free-card check could silently spend real credits after promising "0
+  credits."** `match_kaisuuken`'s fail-soft contract (returns `None` on error) is right
+  for read-only/preview callers, but `_apply_kaisuuken` — the spend-time check — used the
+  same call, so a transient `/v2/kaisuuken/check` glitch was indistinguishable from
+  "genuinely no free card exists," and the generation proceeded to spend credits either
+  way. The spend-time check now retries once, then aborts the submission with a clear
+  error instead of guessing. Covers both the CLI and the web `/api/generate`/`/api/edit`
+  routes.
+
+- **A LoRA whose version lookup failed could silently vanish from a paid generation.**
+  Adding a LoRA in the Generate drawer kicks off a background lookup for its
+  `version_id`; the chip showed an hourglass until it resolved. If that lookup ever
+  failed, the hourglass just... stayed forever, with no distinct failure state — and
+  the submit payload quietly filtered any LoRA still missing a `version_id` out of the
+  request. The generation fired anyway, at full price, missing a LoRA the user believed
+  was included. Now a failed lookup is tracked separately from a pending one (a
+  warning icon + explanatory tooltip instead of an endless spinner), Generate is
+  disabled while any added LoRA is unresolved, and the submit handler itself refuses
+  to fire on an unresolved LoRA as a second guard.
+
+- **`--generate`/`--edit-image` with `batch>1` catalogued only the composite grid,
+  losing every individual image.** Both built their saved-media list by reading
+  `outputs.mediaId` (the composite grid PixAI returns for any `batchSize>1` task) and
+  `outputs.batchMediaIds` (null on modern tasks) directly, instead of going through
+  `_task_image_media` — the helper that already correctly prefers `outputs.batch[]`,
+  written for `_download_image_task`/`web_generate` but never wired into the CLI's own
+  generate/edit-image runners. A 4-image batch run downloaded and catalogued exactly
+  one file: the grid thumbnail, not any of the actual generations paid for. Both now
+  use the same helper, and pick up each image's real per-batch seed in the process
+  instead of the shared submitted one.
+
+- **The published GitHub wiki was 4 releases stale.** README calls it "full
+  documentation," but it was frozen at 2026-07-17: still told new users to
+  `pip install PySide6` and run the deleted GUI, said nothing about the login wall
+  v2.0.0 added to every path including localhost, and was missing three pages
+  entirely (The-Loom, Control-Panel, Folio of Honors) that only ever existed in the
+  repo's own `wiki/` folder. Pushed the current, fact-checked `wiki/` source to the
+  live wiki (10 pages updated, 3 added). Confirmed with the owner before publishing,
+  since it's a public surface outside this session's standing repo-push permission.
+  Still open: whether to automate this push (a CI job on tag) so it can't silently
+  drift a second time — decision D-10 in `docs/AUDIT_2026-07-21.md`.
+
+- **A test guarding the port pre-flight's wildcard-host handling couldn't actually
+  catch a regression.** `test_wildcard_bind_addresses_probe_loopback` probed a free
+  port and asserted `""` — but a wildcard host (`0.0.0.0`/`::`/`""`) returns `""`
+  against a free port whether or not `port_owner` rewrites it to `127.0.0.1` first,
+  since a connection to a free port refuses either way. Rewritten to probe a live
+  server through the wildcard host and require it to be recognized, which only
+  passes if the rewrite genuinely happened.
+
+- **A failed free-card check now says so in plain, on-theme language instead of a raw
+  technical error.** "Lost to the Void — the free-card check didn't come back before
+  submitting, so nothing was spent. Wait a moment and try again." Still refuses to
+  guess and silently spend credits (unchanged); just says it in the app's own voice
+  now, per the owner's D-1 answer, mirroring how PixAI's own site reports a similar
+  random failure.
+
+- **`--variant`, a CLI flag that did nothing, is gone.** Verified directly (not taken
+  on a prior audit's word, per the owner's D-5 request): `args.variant` was parsed but
+  read nowhere in the codebase — zero occurrences. The variant *auto-detection*
+  machinery it was meant to override (`detect_variant`/`test_variant`, used by
+  `--probe` and the normal download path) is untouched and very much alive; only the
+  dead manual-override flag is removed.
+
+- **The published wiki now syncs automatically on every release tag.**
+  `.github/workflows/wiki-sync.yml` pushes `wiki/*.md` to the wiki repo whenever a `v*`
+  tag lands, so it can't silently drift the way it did for 4 releases / 6 days before
+  tonight's manual fix. A `workflow_dispatch` trigger lets it be smoke-tested by hand
+  without waiting for the next real release.
+
+### Removed
+
+- **`ENHANCE_PLUGINS` and the dead `plugin=` branch of `/api/enhance`.** The Edit
+  tab's Enhance UI has only ever sent `workflow_id`, never `plugin`, so the dict's
+  three entries were unreachable. `hand-fix`/`face-fix` are superseded by the real,
+  working box-based `/api/fix` (`submit_fixer`); `detail-fix`'s workflow is already
+  reachable the normal way, through the same `workflow_id` path every other Enhance
+  workflow uses.
+
+### Known issue (not fixed — deliberately left for the design pass)
+
+- **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
+  Reported right after the layout fix above; not yet confirmed whether this is a real gating
+  bug or a visual artifact of the (now-fixed) overlap bug making two different cards' text
+  read as one. Owner wants to look at it himself before any further changes — see
+  `docs/STATE.md`'s Folio of Honors section for what's on record.
+
+### Fixed (continued)
+
+- **A signed-in LAN account could evict the owner's own account, and register a fresh one
+  for itself.** The only guard on removing an account was "not the last one left" — nothing
+  stopped a caller from removing any *other* account by name, including yours, or from
+  creating a brand-new one afterward. Adding an account, and removing anyone but yourself,
+  now require the request to come from the machine running the gallery; removing your own
+  account still works from anywhere, since that can only affect the person doing it. The
+  Panel's Users tab reflects this directly — a LAN session no longer sees an "Add user" form
+  or a "Remove" button on rows that aren't its own, rather than offering a control that
+  would just 403.
+
+- **The wiki said the Generate drawer and web import were more restricted than they
+  actually are.** `wiki/Generating.md` claimed the Generate drawer was localhost-only —
+  it's actually reachable from any signed-in device, including over the LAN, by
+  deliberate design since v2.0.0. `wiki/Backing-Up.md` claimed the ↑ Import button only
+  appears for a local session — the button shows for everyone signed in; only the actual
+  import is refused from a LAN device. Both now describe the real (correct) restriction
+  instead of a stricter one nobody built. Five smaller wiki corrections landed alongside
+  these from the same fact-check pass: `Generating.md` (the web drawer doesn't
+  auto-fall-back on an unsupported Mode — only the CLI does), `Setup.md` (only the
+  password is hidden when adding a web user, not the username), `Deleting.md` (the CLI's
+  typed `delete` confirmation is case-insensitive, and now mentions `READ_ONLY`),
+  `Trophy-Hall.md` (The Moonforge counts Generated **and** Imported pieces, not just
+  Generated), `Trust-and-Safety.md` (`/logout` was missing from the list of routes
+  reachable without an account), `The-Loom.md` (Deep Focus's field list was missing its
+  new Prompt field), `How-It-Works.md` (the on-disk layout diagram was missing four
+  real files/folders), `Control-Panel.md` (a note on what a LAN session sees instead of
+  the install path), and `README.md` (the Quickstart never mentioned that first login
+  doubles as account creation).
+
+- **The Control Panel no longer shows your library's file path to other accounts on your
+  network.** `/panel` stays reachable to any signed-in account — managing accounts there is
+  intentionally shared, same as the rest of the Panel — but the server's own install path is
+  a different kind of fact, and only you see it now.
+- **A job's logged error message could be unbounded in size.** Every other place that logs an
+  error already trims it; one path — a bare terminal run hitting an unexpected failure — didn't,
+  so an unusually long message could be written and later served back in full. It's capped now,
+  the same as everywhere else.
+
+
+- **Recovering a failed task said "completed."** If PixAI itself marked a task
+  failed/cancelled/rejected, every recovery path (`--dump-params`, the web gallery's
+  "⬇ Import", the CLI's own `--generate`/`--generate-video`/`--edit-image` recovery)
+  still said *"task completed but no media ids found"* — which reads as a Moonglade bug
+  even though the credits were already spent and PixAI genuinely rejected the task. The
+  message now says which of the two actually happened. `--dump-params` also prints the
+  task's status now, not just what was submitted — the params alone can't tell you
+  whether PixAI ever ran the task, which is usually the whole reason you're recovering it.
+- **A zero-byte file left by an interrupted download used to be permanent.** Nothing would
+  ever re-download it — `--update`, `--sync`, and a full re-walk all treated it as
+  "already have this one" — and the gallery would serve the empty file back if a filename
+  match hit it first. All three sites now check size, not just that a file exists.
+  `--dedup --apply --dedup-delete` could also pick an empty file as the "keeper" and
+  hard-delete the real image with no safety net; a zero-byte file can no longer enter that
+  comparison at all.
+- **`READ_ONLY` now actually stops every CLI path that can spend credits.** It already covered
+  the web app; on the CLI, five commands — `--generate`, `--generate-video`,
+  `--reference-video`, `--enhance`, `--edit-image` — built their own submit call instead of
+  going through the guarded choke point, so setting `READ_ONLY` in `config.json` and running
+  any of them with `--confirm` still reached PixAI. Each now refuses itself before the
+  free-card check or an upload runs, not just before the final submit.
+- **The gallery's Video tab stopped showing up in the Activity card.** When it moved onto
+  the shared `<mg-generate-drawer>` component, it lost the two listeners every other
+  create tab (Image, Edit, Fix) still has: registering the new task with the Job Tracker,
+  and refreshing your credit balance once it finishes. The drawer renders its own inline
+  result, which is why this went unnoticed — the generation itself worked fine, it just
+  never reached the Activity card or updated your balance on completion. The Loom's own
+  mount already wired this correctly; the gallery now mirrors it.
 
 ## [2.2.0] - 2026-07-21 — Security fixes, the last two video models, and a sharper Loom
 
@@ -23,7 +346,7 @@ git tags. Full prose notes for tagged versions live on
   then mounted nowhere while four surfaces each hand-rolled their own "is this free or does it
   cost credits" line — the one surface whose entire job is stopping an accidental 27,500-credit
   click. They are now one component: the Generate drawer (shared by the gallery's Video tab and
-  the Loom), the gallery's Image and Edit tabs, and the picker. What you'll notice: the gallery's
+  the Loom), and the gallery's Image and Edit tabs. What you'll notice: the gallery's
   FREE line gains the card's name, how many are left, and when it expires (matching what the
   drawer already showed); and where a failed price check used to read as a neutral "cost
   unavailable", it now says plainly, in red, that the cost couldn't be verified and generating
@@ -127,7 +450,7 @@ git tags. Full prose notes for tagged versions live on
 - **Saved views now follow you between devices.** The gallery's "Saved views…" presets lived in
   each browser's own localStorage, so a view saved at the desktop simply didn't exist on the
   tablet sharing the same server. They now persist server-side (`/api/view-presets` →
-  `out_dir/view_presets.json`, atomic write, login tier) — the same follows-you-everywhere
+  `out_dir/view_presets/<account>.json`, atomic write, login tier) — the same follows-you-everywhere
   contract as the skin choice. Any legacy localStorage set is merged up automatically on first
   load (server names win ties, so two browsers migrating in sequence can't fight over whose
   stale copy sticks) and then cleared. Stored queries must be `?…` filter strings — the client

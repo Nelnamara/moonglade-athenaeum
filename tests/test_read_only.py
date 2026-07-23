@@ -2,10 +2,14 @@
 tool spend/delete access to their PixAI account. The property that actually matters isn't
 "does it raise" -- it's that the underlying network call NEVER FIRES, and that this holds
 even when --confirm/--apply/--yes are passed, since those flags are exactly what a cautious
-first run wants to be safe to use without reading the source first. All four choke points
-(submit_generation, submit_fixer, delete_task_gql, claim_reward) are covered -- both the CLI
-and the web app's generate/edit/enhance/fix/delete/claim routes funnel through these same
-four functions, so gating here covers both surfaces from one place."""
+first run wants to be safe to use without reading the source first.
+
+This file covers the four WEB choke points -- submit_generation, submit_fixer,
+delete_task_gql, claim_reward -- that the web app's generate/edit/enhance/fix/delete/claim
+routes all funnel through. The CLI's five generation entry points (run_generate,
+run_generate_video, run_reference_video, run_enhance, run_edit_image) build their OWN
+gql_adhoc call instead of calling through these choke points and, until 2026-07-21, none of
+them checked READ_ONLY at all -- see tests/test_read_only_cli_paths.py for that half."""
 import pytest
 
 import pixai_gallery_backup as core

@@ -310,6 +310,12 @@ ${"=".repeat(48)}
     const total = clips.reduce((s, c) => s + c.span, 0);
     return { clips, total };
   }
+  function resolveLoraPayload(loras) {
+    return (loras || []).filter((l) => l.version_id).map((l) => ({ version_id: l.version_id, weight: l.weight }));
+  }
+  function anyLoraUnresolved(loras) {
+    return (loras || []).some((l) => !l.version_id);
+  }
 
   // master-storyboard.jsx
   var { useState, useEffect, useRef, useCallback, useMemo } = React;
@@ -896,6 +902,19 @@ ${"=".repeat(48)}
 .lv-df-frames{display:flex;gap:12px;align-items:flex-start;margin-top:14px;}
 .lv-df-frames .sb-frame{flex:1 1 0;min-width:0;}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
+/* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
+   (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
+.lv-loratoggle{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);
+  border-radius:5px;padding:3px 7px;cursor:pointer;margin:7px 0 5px;}
+.lv-loratoggle:hover{border-color:var(--accent);color:var(--accent);}
+.lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
+.lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
+.lv-lchip.failed{border-color:var(--coral);}
+.lv-lchip .lv-lnm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-lchip.failed .lv-lnm{color:var(--coral);}
+.lv-lchip input{width:52px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
+.lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
+.lv-lchip .lv-lrm:hover{color:var(--coral);}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
@@ -1014,12 +1033,13 @@ ${"=".repeat(48)}
       )
     )));
   }
-  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
     const [deepFocus, setDeepFocus] = useState(null);
     const [dfPalFor, setDfPalFor] = useState(null);
+    const [loraOpen, setLoraOpen] = useState(false);
     const [leftTab, setLeftTab] = useState("cast");
     const [leftCollapsed, setLeftCollapsed] = useState(false);
     const [density, setDensity] = useState("detailed");
@@ -1082,6 +1102,35 @@ ${"=".repeat(48)}
         el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
       }
     }, [setImgModel]);
+    const bindLoraPicker = useCallback((el) => {
+      if (el && !el._mgBound) {
+        el._mgBound = true;
+        el.addEventListener("mg-pick", (e) => {
+          const { model, selected } = e.detail;
+          setImgLoras((cur) => {
+            const i = cur.findIndex((l) => l.model_id === model.model_id);
+            if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+            if (i < 0) return [...cur, model];
+            const next = cur.slice();
+            next[i] = model;
+            return next;
+          });
+        });
+      }
+    }, [setImgLoras]);
+    const imgCostRef = useRef(null);
+    const editCostRef = useRef(null);
+    const refCostRef = useRef(null);
+    const priceInto = (ref, body) => {
+      const badge = ref.current;
+      if (!badge) return;
+      badge.setChecking();
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()).then((d) => {
+        if (ref.current === badge) badge.setPrice(d);
+      }).catch(() => {
+        if (ref.current === badge) badge.setPrice(null);
+      });
+    };
     const activeRef = useRef(null);
     const projectRef = useRef(project);
     projectRef.current = project;
@@ -1180,6 +1229,42 @@ ${"=".repeat(48)}
     const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
     const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
     activeRef.current = active;
+    const editSrcMid = active.c.openFrame && active.c.openFrame.mediaId;
+    const refMids = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId).map((a) => a.mediaId);
+    const refMidsKey = refMids.join(",");
+    useEffect(() => {
+      const badge = imgCostRef.current;
+      if (!badge) return;
+      const prompt = (active.c.imgPrompt || "").trim();
+      if (!imgModel || !prompt || anyLoraUnresolved(imgLoras)) {
+        badge.clear();
+        return;
+      }
+      const t = setTimeout(() => priceInto(imgCostRef, { model_id: imgModel.model_id, prompt }), 250);
+      return () => clearTimeout(t);
+    }, [imgModel, imgLoras, active.c.id, active.c.imgPrompt]);
+    useEffect(() => {
+      const badge = editCostRef.current;
+      if (!badge) return;
+      const instruction = (active.c.editPrompt || "").trim();
+      if (!editSrcMid || !instruction) {
+        badge.clear();
+        return;
+      }
+      const t = setTimeout(() => priceInto(editCostRef, { mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" }), 250);
+      return () => clearTimeout(t);
+    }, [editSrcMid, active.c.id, active.c.editPrompt]);
+    useEffect(() => {
+      const badge = refCostRef.current;
+      if (!badge) return;
+      const prompt = (active.c.refPrompt || "").trim();
+      if (!refMids.length || !prompt) {
+        badge.clear();
+        return;
+      }
+      const t = setTimeout(() => priceInto(refCostRef, { mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" }), 250);
+      return () => clearTimeout(t);
+    }, [refMidsKey, active.c.id, active.c.refPrompt]);
     const drawerModeFor = (m) => {
       const u = (m || "R2V").toUpperCase();
       return u === "FLF" ? "flf" : u === "I2V" ? "i2v" : "r2v";
@@ -1408,7 +1493,30 @@ ${"=".repeat(48)}
       } else if (tab === "Image") {
         const gi = genImgState[active.c.id] || {};
         const busyI = gi.phase === "submitting" || gi.phase === "running";
-        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Model ", imgModel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\xB7 ", imgModel.title) : null), /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindPicker, kind: "base" }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
+        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Model ", imgModel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\xB7 ", imgModel.title) : null), /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindPicker, kind: "base" }), imgLoras.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "lv-loras" }, imgLoras.map((l) => /* @__PURE__ */ React.createElement("div", { key: l.model_id, className: "lv-lchip" + (l.failed ? " failed" : "") }, /* @__PURE__ */ React.createElement("span", { className: "lv-lnm", title: l.title }, l.title, !l.version_id ? l.failed ? " \u26A0" : " \u23F3" : ""), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "number",
+            step: "0.05",
+            min: "0",
+            max: "2",
+            value: l.weight,
+            title: "Weight",
+            onChange: (ev) => {
+              const w = +ev.target.value || 0;
+              setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
+            }
+          }
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lv-lrm",
+            title: "Remove",
+            onClick: () => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))
+          },
+          "\xD7"
+        )))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-loratoggle", onClick: () => setLoraOpen((v) => !v) }, loraOpen ? "\u2212 hide LoRA picker" : "+ add LoRA"), loraOpen && /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindLoraPicker, kind: "lora", multi: true }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lv-ta",
@@ -1416,7 +1524,7 @@ ${"=".repeat(48)}
             placeholder: "describe the reference still (subject, pose, composition, light)\u2026",
             onChange: (ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))
           }
-        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyI, onClick: () => genImage(active) }, busyI ? gi.msg || "generating\u2026" : "\u2726 Generate reference image"), gi.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gi.msg), gi.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gi.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "cast" ? " on" : ""), onClick: () => routeImg(routeTarget || active, "cast", active.c.id) }, "cast")), gi.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gi.routed, sel ? " \xB7 it now feeds this shot's video gen" : "")));
+        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), /* @__PURE__ */ React.createElement("mg-cost-badge", { ref: imgCostRef, hint: "Pick a model and write a prompt to see the cost.", "card-label": "a card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyI || anyLoraUnresolved(imgLoras), onClick: () => genImage(active) }, busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : "\u2726 Generate reference image"), gi.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gi.msg), gi.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gi.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "cast" ? " on" : ""), onClick: () => routeImg(routeTarget || active, "cast", active.c.id) }, "cast")), gi.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gi.routed, sel ? " \xB7 it now feeds this shot's video gen" : "")));
       } else if (tab === "Edit") {
         const ge = genEditState[active.c.id] || {};
         const busyE = ge.phase === "submitting" || ge.phase === "running";
@@ -1429,7 +1537,7 @@ ${"=".repeat(48)}
             placeholder: "e.g. make it night, add rain, warmer key light\u2026",
             onChange: (ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed)));
+        ), /* @__PURE__ */ React.createElement("mg-cost-badge", { ref: editCostRef, hint: "Add a source image and instruction to see the cost.", "card-label": "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed)));
       } else if (tab === "Reference") {
         const gr = genRefState[active.c.id] || {};
         const busyR = gr.phase === "submitting" || gr.phase === "running";
@@ -1442,7 +1550,7 @@ ${"=".repeat(48)}
             placeholder: "compose a new still from the references\u2026",
             onChange: (ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyR || !refs.length, onClick: () => genRef(active) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
+        ), /* @__PURE__ */ React.createElement("mg-cost-badge", { ref: refCostRef, hint: "Add references and a prompt to see the cost.", "card-label": "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyR || !refs.length, onClick: () => genRef(active) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
       } else tabBody = /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "The ", /* @__PURE__ */ React.createElement("b", null, tab), " tab renders the shot on PixAI.");
       gen = /* @__PURE__ */ React.createElement("div", { className: "lv-gen" }, /* @__PURE__ */ React.createElement("div", { className: "lv-genhead" }, sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2699 ", sel.code, " \xB7 ", sel.c.title || "untitled") : /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2728 Draft generation ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2014 generate freely, then route or attach it to a shot")), sel && /* @__PURE__ */ React.createElement(
         "button",
@@ -2094,6 +2202,7 @@ Your currently-open board is left untouched.`)) return;
     const resumedRef = useRef({});
     const [genImgState, setGenImgState] = useState({});
     const [imgModel, setImgModel] = useState(null);
+    const [imgLoras, setImgLoras] = useState([]);
     const [genEditState, setGenEditState] = useState({});
     const [genRefState, setGenRefState] = useState({});
     const [batching, setBatching] = useState(false);
@@ -2302,7 +2411,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         const r = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model_id: imgModel.model_id, prompt })
+          body: JSON.stringify({ model_id: imgModel.model_id, prompt, loras: resolveLoraPayload(imgLoras) })
         });
         const d = await r.json();
         if (d.error || !d.task_id) {
@@ -2481,6 +2590,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenImgState,
       imgModel,
       setImgModel,
+      imgLoras,
+      setImgLoras,
       genEditState,
       setGenEditState,
       genRefState,
@@ -2671,6 +2782,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenImgState,
       imgModel,
       setImgModel,
+      imgLoras,
+      setImgLoras,
       genEditState,
       setGenEditState,
       genRefState,
@@ -2803,6 +2916,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         genImgState,
         imgModel,
         setImgModel,
+        imgLoras,
+        setImgLoras,
         genImage,
         routeImg,
         genEditState,

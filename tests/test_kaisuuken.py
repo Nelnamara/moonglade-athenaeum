@@ -171,17 +171,37 @@ def test_apply_no_card_pays_credits(monkeypatch):
 
 def test_apply_auto_match_attaches(monkeypatch):
     monkeypatch.setattr(core, "match_kaisuuken",
-                        lambda s, p, enrich=False: {"id": "id-soon", "expiresAt": "2026-07-06T00:00:00Z"})
+                        lambda s, p, enrich=False, **k: {"id": "id-soon", "expiresAt": "2026-07-06T00:00:00Z"})
     params = {"modelId": "1983308862240288769"}
     assert core._apply_kaisuuken(object(), params, _args()) == "id-soon"
     assert params["kaisuukenId"] == "id-soon"
 
 
 def test_apply_no_match_pays_credits(monkeypatch):
-    monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False: None)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False, **k: None)
     params = {"modelId": "m"}
     assert core._apply_kaisuuken(object(), params, _args()) == ""
     assert "kaisuukenId" not in params
+
+
+def test_apply_kaisuuken_check_failure_aborts_instead_of_silently_paying(monkeypatch):
+    """A transient failure of the free-card check must NOT be treated as 'no card
+    exists' at spend time -- match_kaisuuken's normal fail-soft contract collapses
+    'genuinely no match' and 'the check itself errored' into the same None, and until
+    now _apply_kaisuuken couldn't tell them apart, so a network hiccup silently spent
+    real credits on a generation that may have been promised as free moments earlier.
+    The fix retries once, then ABORTS the submission with a clear error instead of
+    falling through to "no matching free card -> this will spend credits."."""
+    calls = []
+    def flaky(*a, **k):
+        calls.append(1)
+        raise core.PixAIError("503 upstream hiccup")
+    monkeypatch.setattr(core, "_rest_post", flaky)
+    params = {"modelId": "m"}
+    with pytest.raises(core.PixAIError, match="Lost to the Void"):
+        core._apply_kaisuuken(object(), params, _args())
+    assert "kaisuukenId" not in params
+    assert len(calls) >= 2   # retried at least once before giving up rather than guessing
 
 
 # ---- run_cards display (list_kaisuukens stubbed) ----
