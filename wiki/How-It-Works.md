@@ -12,8 +12,10 @@ loom/                     The Loom's JS surface: esbuild bundle + its own `node 
 
 The CLI engine and the MCP server both import `pixai_gallery.py` for catalog access — so
 catalog logic lives in exactly one place. The two surfaces are the CLI and the web gallery:
-the Loom, Control Panel, achievements, collections, and contact sheet are browser-only, and
-`--watch` / `--claims` are CLI-only.
+the Loom, Control Panel, achievements, collections, and contact sheet are browser-only.
+`--watch` and `--claims` have web equivalents too, not CLI-only surfaces: the gallery runs
+its own always-on live-mirror watcher (Control Panel → **Live Mirror** status dot, backed by
+`/api/watch/status`) and a header **claim** button (`/api/claim`) for daily rewards.
 
 ## How it talks to PixAI — and why setup is just one key
 

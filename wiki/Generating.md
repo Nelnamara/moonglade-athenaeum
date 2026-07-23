@@ -163,6 +163,11 @@ python pixai_gallery_backup.py --suggest-prompt 739411069833281443    # a catalo
 python pixai_gallery_backup.py --suggest-prompt "C:\pics\ref.png"     # a local file (uploads first)
 ```
 
+> **Not every media_id works.** This calls PixAI's own suggest-prompt endpoint, and it can
+> return a server error on older catalog media rather than a suggestion — that's PixAI's
+> side failing, not a local bug. A recent generation or a freshly-uploaded local file is more
+> reliable than reaching back into old history.
+
 Copy a suggestion straight into `--generate --prompt "…"` to riff on an image's style.
 
 ## Free cards (`--cards`) — auto-applied
