@@ -153,10 +153,15 @@ def test_notify_components_do_not_inherit_their_font_from_the_host_page():
     #root in that shell, so on /loom they inherited nothing and fell back to the browser
     default. mg-notify is host-neutral by design, so the component owns this.
 
-    Bite: drop font-family from any of the three roots and this fails, naming it.
+    The original 2026-07-21 fix covered only those three roots; the achievement celebration
+    (.ach-m2) and the Folio of Honors subtree (#ach-modal -- the achievement-specific id, not
+    the `.ach-modal` class shared with #contest-modal/#art-modal) had the exact same gap and
+    got the same fix afterward.
+
+    Bite: drop font-family from any of the five roots and this fails, naming it.
     """
     js = _notify_js()
-    for sel in ("#jobs-fab{", "#jobs-tray{", "#mg-toasts{"):
+    for sel in ("#jobs-fab{", "#jobs-tray{", "#mg-toasts{", ".ach-m2{", "#ach-modal{"):
         i = js.index(sel)
         rule = js[i:js.index("}", i)]
         assert "font-family" in rule, (
