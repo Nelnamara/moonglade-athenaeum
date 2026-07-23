@@ -28,16 +28,17 @@ Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owne
 generations, serves a local searchable web gallery, generates images and videos through
 PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
 the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
-is **v2.2.0** (2026-07-21 — four security fixes: `/logout`'s global revoke moved behind POST +
-CSRF, `/api/panel/status` stopped handing maintenance stdout to LAN accounts, the service worker
-stopped caching a followed login redirect, and saved views became per-account; plus the last two
-video models, a prompt field in Deep Focus, and the cost displays consolidated onto
-`<mg-cost-badge>`). **`loom-v2` has since pulled ahead again** (post-release audit fixes S1–S3/
-B1/B2/B4, the account-eviction gate, the Folio of Honors redesign + its layout fix, and a
-2026-07-22 sweep through the rest of the audit board's high-severity list — see
-`docs/AUDIT_2026-07-21.md` for what's still open, `CHANGELOG.md [Unreleased]` for what shipped)
-— check `git rev-list --count origin/master..origin/loom-v2` for the live count rather than
-trusting a number here. Each release is a `--no-ff` merge of `loom-v2` → `master`, tagged and published as
+is **v2.3.0** (2026-07-23 — the Folio of Honors redesign, LoRA support + cost badges across
+the Loom's Image/Edit/Reference tabs, per-account splits for the last three shared-file
+stores (Toolbox presets, prompt snippets, Loom storyboards), the account-eviction gate, a
+2026-07-22 sweep through the rest of the audit board's high-severity list, and two further
+security fixes — Cache Storage purge on sign-out, and a host-path redaction re-spin covering
+37 sites — both adversarially reviewed before shipping; full detail in `CHANGELOG.md`'s
+`[2.3.0]` block). `loom-v2` and `master` are in sync as of that release — check
+`git rev-list --count origin/master..origin/loom-v2` for the live count rather than trusting
+a number here, since new work may already have landed on `loom-v2` since. See
+`docs/AUDIT_2026-07-21.md` for what's still open. Each release is a `--no-ff` merge of
+`loom-v2` → `master`, tagged and published as
 a GitHub Release. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
 tree, the `v2` toggle, and the `CardView`/`CardEditor` components) was retired 2026-07-17; `/loom`
 opens straight into the V2 shell with no layout switch. The repo is public and has real external
