@@ -78,6 +78,30 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   corner eating clicks — the grid now reserves clearance for it.
 - Added the missing delete-view control for saved views — the server route existed, no UI
   ever called it.
+- **`--generate-video`/`--reference-video` now snap their duration to an allowed length,
+  matching what the Loom already did.** `--reference-video`'s default was also inconsistent
+  across three places in the source (5, 15, and 15) — unified to 5, matching its i2v sibling.
+- **`--suggest-prompt` now refuses a video up front** instead of hitting PixAI's image-only
+  endpoint and surfacing a raw 500, matching the guard the web gallery already had.
+- **The `_deleted/` quarantine is now respected by all six bulk file-tree walks, not one.**
+  `cmd_organize` — the only one that actually moves/deletes files — could silently
+  hard-delete or resurrect a purged file that happened to share a media_id with a live
+  copy; reproduced and fixed, along with resume, the audit, `--import-local`, and
+  `duplicate_groups`.
+- **`--sync-artworks --with-videos`'s resume check now actually recognizes an
+  already-downloaded video** instead of re-resolving it from the network on every run.
+- **The Loom's frame-handoff fallback (`/api/loom/handoff`) now requires an exact media_id
+  match and excludes quarantined files**, closing a path where a purged or
+  substring-matching clip could get uploaded to seed the next shot.
+- **A backup that fails partway through `--sync-artworks` (or loses a page mid-pagination)
+  now reports it**, through the same `done_with_errors` signal `--sync`/`--download`
+  already had, instead of a complete-looking "done."
+- **Per-account storage (saved views, prompt snippets, Loom storyboards, toolbox presets)
+  no longer collides on Windows for usernames differing only by case** ("Nel" and "nel"
+  used to share one file on disk, reproduced and confirmed fixed for all four stores).
+- **The Loom's board cards now show when a shot's opening frame is already continuity-linked
+  to the previous shot's closing frame** — a small badge, restoring a pure-logic function
+  (`frameLinked`/new `continuityLinked`) that had zero callers since the V1→V2 migration.
 
 ### Removed
 
@@ -86,6 +110,22 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   (referenced nowhere). The real underlying logic is untouched.
 - Deleted two orphaned CSS rules (`.gen-ce`, `.vp-chip`) with zero producers left anywhere
   in the app.
+- Deleted the dead `--variant` CLI flag's whole self-referential support cluster
+  (`detect_variant`, `test_variant`, `media_url`, `MEDIA_TMPL`, `VARIANT_CANDIDATES`) — the
+  flag itself was already gone; this was the ~55-line machinery nothing called anymore, plus
+  the module docstring's stale claim that the script "auto-detects the full-res variant."
+- Deleted the unused `ARTWORK_DETAIL_HASH` config read (its live sibling `ARTWORK_LIST_HASH`
+  is untouched) and the dead `generateShot` prop threaded through the Loom's `LoomV2`
+  component (per-shot generation moved to `<mg-generate-drawer>` some time ago).
+- A broader dead-CSS-selector sweep (every class selector in the gallery's inline
+  `<style>` blocks, cross-checked for a real producer) found and removed two more:
+  `#gen-drawer.dock-right` (structurally unreachable) and `#model-preview .mp-tags`
+  (never populated).
+
+### Added
+
+- A "Contact sheet" button next to "Download collection" — the `?collection=` printable
+  contact-sheet route existed with no way to reach it from the UI.
 
 ### Docs
 
@@ -103,6 +143,20 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   name, not just the default `pixai_backup/` (previously only `jobs.jsonl` had this).
 - `docs/curation_reference_builder.py` (a committed template script) no longer hardcodes a
   personal path — reads `CURATION_INPUT_DIR`/`CURATION_OUT_DIR` env vars instead.
+- Corrected four false claims in `docs/architecture.md`'s Invariants section (one shared
+  media-id matcher, checked-before-any-network-call, catalog-as-source-of-truth for
+  organize, and `media_id_of()` as a single source of truth all overstated the real,
+  verified behavior) and a matching false claim in `CONTRIBUTING.md`.
+- Corrected two nearby code comments that named only some of the surfaces gated by the
+  header's `is_local` flag, omitting the Import button (which is separately, correctly
+  re-checked as LOCALHOST-tier server-side — never a real security gap, just a misleading
+  comment) — and `_task_detail_query`'s docstring, which overclaimed a fallback its two
+  real CLI callers don't actually get.
+- Documented the video-generation model roster for the first time: all 7 engines, the real
+  5/6/10/15s duration set (6s was never mentioned anywhere), per-model duration caps,
+  which two models no free card ever covers, and which Shot modes are gated per model.
+- `wiki/Collections.md` now documents the "Remove from «collection»" action and the
+  Actions ▾ menu it lives behind.
 
 ## [2.3.0] - 2026-07-23 — More security hardening, the Folio of Honors, and LoRA support in the Loom
 
