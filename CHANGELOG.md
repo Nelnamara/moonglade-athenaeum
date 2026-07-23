@@ -110,6 +110,14 @@ git tags. Full prose notes for tagged versions live on
   `--probe` and the normal download path) is untouched and very much alive; only the
   dead manual-override flag is removed.
 
+### Added
+
+- **The published wiki now syncs automatically on every release tag.**
+  `.github/workflows/wiki-sync.yml` pushes `wiki/*.md` to the wiki repo whenever a `v*`
+  tag lands, so it can't silently drift the way it did for 4 releases / 6 days before
+  tonight's manual fix. A `workflow_dispatch` trigger lets it be smoke-tested by hand
+  without waiting for the next real release.
+
 ### Removed
 
 - **`ENHANCE_PLUGINS` and the dead `plugin=` branch of `/api/enhance`.** The Edit
