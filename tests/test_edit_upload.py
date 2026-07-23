@@ -125,3 +125,31 @@ def test_edit_preview_shows_local_files_without_uploading(tmp_path, monkeypatch,
 def test_edit_requires_a_source(tmp_path):
     with pytest.raises(core.PixAIError):
         core.run_edit_image(_edit_args(tmp_path, edit_src=[], params_json="", task_id=""))
+
+
+def test_edit_config_from_args_clamps_to_model_caps(tmp_path):
+    """The CLI's own --edit-resolution/--edit-quality DEFAULTS (1K/medium) are exactly
+    what used to reach the server unclamped -- a real model like reference-pro (no
+    quality knob at all, 2K/4K only) rejects that combo. The web /api/edit path has
+    run this same guard (clamp_edit_config) since the preset-mismatch bug; the CLI
+    never did. Same expected values as test_clamp_edit_config_snaps_to_model_caps.
+
+    Bite: remove the clamp_edit_config call from _edit_config_from_args and this
+    fails -- cfg comes back with the raw, unclamped 1K/medium instead."""
+    args = _edit_args(tmp_path, edit_model="1948514378441961474",
+                      edit_resolution="1K", edit_aspect="21:9", edit_quality="medium")
+    cfg = core._edit_config_from_args(args)
+    assert cfg["resolution"] == "2K"
+    assert cfg["quality"] == ""
+    assert cfg["aspect_ratio"] == "21:9"
+
+
+def test_edit_preview_shows_the_clamped_config_not_the_raw_defaults(tmp_path, capsys):
+    """End-to-end: --edit-image's own preview output (what a real --confirm run would
+    actually submit) reflects the clamped values, not the CLI's raw defaults."""
+    args = _edit_args(tmp_path, edit_model="1948514378441961474",
+                      edit_resolution="1K", edit_aspect="21:9", edit_quality="medium")
+    core.run_edit_image(args)
+    out = capsys.readouterr().out
+    assert '"resolution": "2K"' in out
+    assert '"quality"' not in out   # reference-pro exposes no quality knob at all

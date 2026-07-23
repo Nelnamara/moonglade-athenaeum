@@ -525,6 +525,59 @@ def test_presets_import_and_use(tmp_path, monkeypatch):
     assert seen["p"]["chat"]["modelId"] == "1948514378441961474"
 
 
+def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatch):
+    """Same split saved views/snippets/Loom storyboards already got: Toolbox presets
+    were install-wide (one shared toolbox_presets.json), so any signed-in account
+    could read AND wholesale-overwrite every other account's imported presets."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "alice-scene",
+                       "chat": {"prompts": "ALICE PROMPT", "modelId": "1"}}})
+    app = create_app(tmp_path)
+
+    alice = login_test_client(app, username="alice", password="a-real-test-password-1")
+    d = alice.post("/api/presets", json={"task_id": "111"}).get_json()
+    assert d["imported"] == "alice-scene"
+
+    bob = login_test_client(app, username="bob", password="a-real-test-password-2")
+    assert bob.get("/api/presets").get_json()["presets"] == {}, (
+        "bob can see alice's presets -- the store is not per-account")
+
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "bob-scene",
+                       "chat": {"prompts": "BOB PROMPT", "modelId": "2"}}})
+    bob.post("/api/presets", json={"task_id": "222"})
+    assert set(bob.get("/api/presets").get_json()["presets"]) == {"bob-scene"}
+    assert set(alice.get("/api/presets").get_json()["presets"]) == {"alice-scene"}, (
+        "bob's save wiped alice's presets -- the store is not per-account")
+
+
+def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path, monkeypatch):
+    """Upgrade path: nothing disappears the moment the store goes per-account. An
+    account with no file of its own falls back to the old shared toolbox_presets.json
+    (read-only) -- exactly what it saw before the split -- and diverges on first save."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "new-scene",
+                       "chat": {"prompts": "NEW PROMPT", "modelId": "3"}}})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    (tmp_path / "toolbox_presets.json").write_text(
+        json.dumps({"from-before": {"label": "From Before", "scene_id": "",
+                                    "prompt": "x", "model_id": "9"}}),
+        encoding="utf-8")
+
+    assert set(cli.get("/api/presets").get_json()["presets"]) == {"from-before"}
+
+    cli.post("/api/presets", json={"task_id": "333"})
+    own = json.loads((tmp_path / "toolbox_presets" / "tester.json").read_text(encoding="utf-8"))
+    assert set(own) == {"from-before", "new-scene"}
+    legacy = json.loads((tmp_path / "toolbox_presets.json").read_text(encoding="utf-8"))
+    assert set(legacy) == {"from-before"}
+
+
 def test_catalog_counts(tmp_path):
     import pixai_gallery as g
     g.save_catalog(tmp_path / "catalog.db", [
