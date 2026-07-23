@@ -2240,16 +2240,22 @@ def collection_health(out_dir, db_path):
 def duplicate_groups(out_dir, limit=300):
     """Class-A duplicates for the gallery review browser: media_ids whose file
     exists in more than one folder bucket. Cheap (no hashing). Returns a list of
-    {media_id, keeper(rel), copies:[{rel,bucket,size}]} sorted keeper-first."""
+    {media_id, keeper(rel), copies:[{rel,bucket,size}]} sorted keeper-first.
+
+    Excludes gallery/, _duplicates/, AND _deleted/ (B11, audit 2026-07-21) -- a
+    locally-purged image must not be reported back as a live duplicate of its own
+    quarantined self."""
     from collections import defaultdict
     gallery_dir = out_dir / "gallery"
     quarantine_dir = out_dir / "_duplicates"
+    deleted_dir = out_dir / DELETED_DIRNAME
     prio = {"batches": 0, "month": 1, "images": 2, "other": 3}
     locs = defaultdict(list)
     for p in out_dir.rglob("*"):
         if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
             continue
-        if p.name.endswith(".part") or _is_under(p, gallery_dir) or _is_under(p, quarantine_dir):
+        if (p.name.endswith(".part") or _is_under(p, gallery_dir)
+                or _is_under(p, quarantine_dir) or _is_under(p, deleted_dir)):
             continue
         rel = p.relative_to(out_dir)
         top = str(rel).replace("\\", "/").split("/")[0]
@@ -2293,8 +2299,8 @@ def _is_under(path, parent):
         return False
 
 
-def find_files_for_media_id(out_dir, media_id, include_gallery=False):
-    """All on-disk image files whose media_id matches, anywhere under out_dir.
+def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None):
+    """All on-disk files whose media_id matches, anywhere under out_dir.
 
     Single source of truth for media-id -> file resolution, shared by resume
     (`already_downloaded`), the gallery (`find_image_file`), and the duplicate
@@ -2305,15 +2311,23 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False):
     The exact `media_id_of(p) == mid` check prevents substring collisions (a
     longer id ending in these digits). Skips `.part`, zero-byte files, gallery
     thumbnails (unless include_gallery=True), and quarantined files under
-    _duplicates/ (so a quarantined copy never counts as a live "survivor" and
-    resume treats it as not-present). Returns a list of Paths.
+    _duplicates/ or _deleted/ (so a quarantined copy never counts as a live
+    "survivor" and resume treats it as not-present). Returns a list of Paths.
+
+    `exts` defaults to `_IMAGE_EXTS` (this function's historical, still image-only
+    default -- e.g. tests/test_loom_export_bundle.py pins that video media resolves
+    via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
+    (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
+    in pixai_gallery_backup.py -- so the SAME exact-match + quarantine-exclusion
+    contract applies to videos, not just images.
     """
     mid = str(media_id)
+    match_exts = _IMAGE_EXTS if exts is None else exts
     gallery_dir = out_dir / "gallery"
     quarantine_dirs = (out_dir / "_duplicates", out_dir / DELETED_DIRNAME)
     matches = []
     for p in out_dir.rglob("*{}.*".format(mid)):
-        if p.suffix.lower() not in _IMAGE_EXTS:
+        if p.suffix.lower() not in match_exts:
             continue
         if p.name.endswith(".part"):
             continue
@@ -11351,8 +11365,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             vid_exts = (".mp4", ".webm", ".mov", ".mkv")
             vid = None
-            # videos aren't in find_files_for_media_id (image-only) -- resolve via the
-            # catalog's stored filename, then fall back to a video-aware disk scan.
+            # find_files_for_media_id defaults to images -- resolve via the catalog's
+            # stored filename first, then fall back to the SAME shared matcher with
+            # exts=vid_exts, so the fallback gets the same exact media_id_of(p) == mid
+            # check and _duplicates/_deleted quarantine exclusion as every other
+            # matcher in this file (B17, audit 2026-07-21: the fallback used to be a
+            # bare '*<mid>.*' glob with neither -- a file under _deleted/ or
+            # _duplicates/ was a valid hit, and a shorter media_id could match as a
+            # substring of a longer, unrelated one's filename).
             row = get_row(db_path, mid) or {}
             fn = row.get("filename") or ""
             if fn:
@@ -11360,10 +11380,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 if cand.is_file() and cand.suffix.lower() in vid_exts:
                     vid = cand
             if vid is None:
-                for p in out_dir.rglob("*{}.*".format(mid)):
-                    if p.suffix.lower() in vid_exts and p.is_file() and p.stat().st_size:
-                        vid = p
-                        break
+                fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
+                if fallback:
+                    vid = fallback[0]
             if vid is None:
                 return jsonify({"error": "clip not downloaded yet -- generate/collect it first"}), 200
             fdir = out_dir / "loom" / "_frames"

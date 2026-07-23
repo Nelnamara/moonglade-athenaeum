@@ -590,6 +590,20 @@ def test_duplicate_groups_ignores_gallery_and_quarantine(tmp_path):
     assert duplicate_groups(tmp_path) == []
 
 
+def test_duplicate_groups_ignores_deleted(tmp_path):
+    """B11 (audit 2026-07-21): duplicate_groups (the gallery review browser's Class-A
+    view) excluded gallery/ and _duplicates/ but never _deleted/ -- so a locally
+    purged image is reported as a live cross-bucket duplicate of its own quarantined
+    self."""
+    from pixai_gallery import duplicate_groups, DELETED_DIRNAME
+    (tmp_path / "images").mkdir()
+    (tmp_path / DELETED_DIRNAME).mkdir()
+    (tmp_path / "images" / "a_111.webp").write_bytes(b"d")
+    (tmp_path / DELETED_DIRNAME / "111.webp").write_bytes(b"d")
+    # only the images/ copy counts -> not a cross-bucket duplicate
+    assert duplicate_groups(tmp_path) == []
+
+
 def test_video_row_renders_and_serves(tmp_path):
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"

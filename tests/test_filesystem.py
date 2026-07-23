@@ -159,6 +159,21 @@ def test_import_local_skips_already_backed_up_pixai_files(tmp_path):
     assert len(rows) == 1 and rows[0]["source"] != "local"
 
 
+def test_import_local_skips_deleted_quarantine(tmp_path):
+    """B11 (audit 2026-07-21): purge_media_local() moves a purged image to _deleted/
+    AND clears its catalog row -- so an internal (no explicit path) --import-local
+    scan that doesn't skip _deleted/ finds the orphaned file, sees no existing row/
+    media_id for it, and resurrects it as a brand-new source='local' row. A purged
+    image must stay purged, not come back to life on the next --import-local."""
+    from pixai_gallery import DELETED_DIRNAME
+    qdir = tmp_path / DELETED_DIRNAME
+    qdir.mkdir(parents=True)
+    (qdir / "old_prompt_task1_999.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    assert res["imported"] == 0, "a file under _deleted/ was resurrected as a new local row"
+    assert _load_cat(tmp_path / "catalog.db") == []
+
+
 def test_import_local_external_copies_in(tmp_path):
     ext = tmp_path / "external"; ext.mkdir()
     (ext / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
@@ -284,6 +299,40 @@ def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
     with contextlib.redirect_stdout(buf):
         core.cmd_organize(args2, tmp_path, tmp_path / "images", db)
     assert "already organized" in buf.getvalue()
+
+
+def test_organize_never_touches_deleted_quarantine(tmp_path):
+    """B11 (audit 2026-07-21), highest-severity of the five: cmd_organize's skip_dirs
+    named gallery/, _duplicates/, videos/, imported/ -- never _deleted/. It's the
+    only one of the five B11 walks that actually MOVES files, so a file quarantined
+    there (e.g. a stale remnant from an earlier purge-then-redownload cycle, still
+    sharing its media_id with the live, currently-cataloged copy) gets treated as a
+    normal organize candidate: same media_id -> same catalog row -> same target path
+    as the REAL file, so it collides with it in the move plan. Depending on rglob
+    ordering that collision either hard-deletes the _deleted/ copy outright (the
+    _same_bytes 'redundant' branch, no confirmation, no _duplicates/ safety net) or
+    replaces it into the organized tree in place of the live file. Either way the
+    _deleted/ file must never be touched at all -- this asserts exactly that,
+    regardless of which of the two on-disk copies the walk happens to visit first."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, DELETED_DIRNAME
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m9", "task_id": "T9",
+        "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T9_m9.png"}])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "alpha_T9_m9.png").write_bytes(b"SAMEBYTES")   # the live, cataloged copy
+    qdir = tmp_path / DELETED_DIRNAME
+    qdir.mkdir()
+    (qdir / "old_m9.png").write_bytes(b"SAMEBYTES")                      # stale quarantine remnant
+
+    args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
+                           dry_run=False, embed_metadata=False, jpeg_quality=92,
+                           jpeg_bg="white", keep_webp=False, progress=None)
+    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+
+    assert (qdir / "old_m9.png").exists(), (
+        "a file under _deleted/ was moved or deleted by cmd_organize -- quarantine is not immune")
+    assert (qdir / "old_m9.png").read_bytes() == b"SAMEBYTES"
+    assert (tmp_path / "2024-03" / "alpha_T9_m9.png").exists()           # the real file organized fine
 
 
 def test_undo_organize_reverts_moves(tmp_path):

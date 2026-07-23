@@ -312,6 +312,26 @@ def test_resume_skips_on_disk_without_redownload(tmp_path, mocker):
     assert not any("known" in n for n in names)
 
 
+def test_resume_ignores_quarantined_deleted_file(tmp_path, mocker):
+    """B11 (audit 2026-07-21): the startup disk-index walk's skip_dirs never learned
+    about _deleted/ (only 'gallery'/'_duplicates') -- so a media_id purged locally
+    (moved to _deleted/ by purge_media_local) is still indexed as 'already done' and
+    resume/--update silently never re-downloads it, exactly as if it were a live file."""
+    from pixai_gallery import DELETED_DIRNAME
+    qdir = tmp_path / DELETED_DIRNAME
+    qdir.mkdir(parents=True)
+    (qdir / "x_known.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+    mocker.patch.object(core, "gql", side_effect=[_page("known", False)])
+
+    core.run_download(_dl_args(tmp_path))
+
+    names = [str(c.args[2]) for c in dl.call_args_list]
+    assert any("known" in n for n in names), (
+        "a file quarantined under _deleted/ was indexed as 'already done' and "
+        "never re-downloaded")
+
+
 def test_resume_does_not_skip_a_zero_byte_file(tmp_path, mocker):
     """Invariant 3, audit 2026-07-21: the startup disk index used to count ANY file
     with a matching extension as 'already done', including a 0-byte one left behind by
@@ -589,6 +609,39 @@ def test_artwork_detail_hash_config_key_is_gone():
     example_cfg = json.loads((repo_root / "config.example.json").read_text(encoding="utf-8"))
     assert "ARTWORK_DETAIL_HASH" not in example_cfg
     assert "ARTWORK_LIST_HASH" in example_cfg   # sibling override documentation stays
+
+
+def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker):
+    """B16 (audit 2026-07-21): already_downloaded() gates --sync-artworks --with-videos'
+    resume check on find_files_for_media_id's default _IMAGE_EXTS-only matcher -- no
+    .mp4 ever matches, so it's a guaranteed-False no-op for videos. Every video fired a
+    full resolve_media round trip on every single run, even one already on disk."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} |
+                                           {"media_id": "unrelated", "filename": "x_unrelated.png"}])
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "clip_V1.mp4").write_bytes(b"already here")
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    conn = {"edges": [{"node": {"id": "aw1", "mediaId": "", "title": "Anim",
+                                "visibility": "PUBLIC", "isNsfw": False,
+                                "likedCount": 0, "commentCount": 0, "aesScore": 0,
+                                "tacks": [], "videoMediaId": "V1"}}],
+            "pageInfo": {"hasPreviousPage": False}}
+    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    # Mocked with a well-formed return (not a bare MagicMock): if the bug fires and
+    # this DOES get called, _fetch_video must still complete cleanly so the failure
+    # shows up as the assertion below, not an incidental unpack/network crash.
+    resolve = mocker.patch.object(core, "resolve_media",
+                                  return_value=("http://example.com/v.mp4", {"width": "1"}))
+    mocker.patch.object(core, "download",
+                        return_value=("ok", tmp_path / "videos" / "clip_V1.mp4"))
+
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+                                                 with_videos=True, workers=1))
+
+    resolve.assert_not_called()
+    assert res["videos"] == 1
 
 
 def test_resolve_loras(mocker):
