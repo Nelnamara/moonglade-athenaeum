@@ -37,6 +37,14 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The Enhance sub-tab now shows its real cost before you run anything.** It was the
+  one price surface that never got the `<mg-cost-badge>` treatment every other screen
+  already has — click-a-tool used to price it and pop a `window.confirm()` on every
+  single click. Reshaped to select-then-run, mirroring the Edit sub-tab: clicking a
+  tool (from the curated shelf or the 140+ browse-all list) just selects it and shows
+  its price in a persistent badge; a separate Run button fires it. The badge is now the
+  only warning, same as everywhere else — no confirm dialog left in this path.
+
 - **The Loom's Image tab can now use LoRAs.** Previously it only offered a base model —
   the Gallery's own Generate drawer has had full LoRA support (multi-select, per-item
   weight, trigger words, compatibility warnings) for a while, but the Loom's picker

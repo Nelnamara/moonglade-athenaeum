@@ -5293,23 +5293,26 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="gen-lbl">One-click tools <span style="text-transform:none;color:var(--subtext);">&middot; official PixAI workflows &middot; runs on the source</span></div>
         <div class="enh-shelf">
           <div class="enh-sec">Upscale</div>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1794855217667308480')" title="Upscale the image">Upscale</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1804744873525448983')" title="Upscale in 2x2 tiles (higher detail)">Upscale 2&times;2</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1803967880822088690')" title="Upscale and re-detail">Upscale + Enhance</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1794855217667308480','Upscale')" title="Upscale the image">Upscale</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1804744873525448983','Upscale 2×2')" title="Upscale in 2x2 tiles (higher detail)">Upscale 2&times;2</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1803967880822088690','Upscale + Enhance')" title="Upscale and re-detail">Upscale + Enhance</button>
           <div class="enh-sec">Cleanup</div>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1793505053210462325')" title="Remove the background">Remove BG</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1793473388466817128')" title="Precise masked inpaint / edit">Precise inpaint</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1793713293591365899')" title="Extend the frame outward (outpaint)">Outpaint</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793505053210462325','Remove BG')" title="Remove the background">Remove BG</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793473388466817128','Precise inpaint')" title="Precise masked inpaint / edit">Precise inpaint</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793713293591365899','Outpaint')" title="Extend the frame outward (outpaint)">Outpaint</button>
           <div class="enh-sec">Convert</div>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1796053397111789217')" title="Convert to line art">To line art</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1793447160259872021')" title="Colorize a sketch / line art">Sketch colorizer</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1796053397111789217','To line art')" title="Convert to line art">To line art</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793447160259872021','Sketch colorizer')" title="Colorize a sketch / line art">Sketch colorizer</button>
           <div class="enh-sec">Light</div>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1801729774701480692')" title="Relight: warm sunshine">Relight: sun</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1801752508134768728')" title="Relight: backlighting">Relight: backlight</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1801729774701480692','Relight: sun')" title="Relight: warm sunshine">Relight: sun</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1801752508134768728','Relight: backlight')" title="Relight: backlighting">Relight: backlight</button>
         </div>
         <div class="gen-lbl">Browse all workflows <span style="text-transform:none;color:var(--subtext);">&middot; 140+ community ComfyUI</span></div>
         <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
         <div id="enh-list"></div>
+        <div class="gen-lbl" id="enh-selected" style="display:none;"></div>
+        <mg-cost-badge id="enhance-cost" hint="Pick a tool to see the cost." card-label="an Edit card"></mg-cost-badge>
+        <button type="button" class="gen-go" id="enh-go" disabled onclick="Gen.runEnhance()">Run</button>
         <div id="enh-result" class="gen-result" style="display:none;"></div>
       </div>
       <div id="edit-sub-fix" style="display:none;">
@@ -6247,6 +6250,7 @@ var Gen = (function(){
     else { img.style.display='none'; }
     renderEditRefs();   // primary changed -> @image1 slot + cap count update
     debEditCost();
+    debEnhanceCost();   // Enhance's price also depends on the shared edit-src (D-12)
   }
   var EDIT_CAPS={
     'edit-pro':{max_refs:4,resolutions:['1K','2K'],qualities:['low','medium','high'],
@@ -6407,24 +6411,40 @@ var Gen = (function(){
         var b=document.createElement('button'); b.type='button'; b.className='enh-item';
         var nm=w.name.split('|')[0].split('/')[0].trim();
         b.innerHTML=esc(nm)+' <span class="ty">'+esc((w.type||'').toLowerCase())+'</span>';
-        b.onclick=function(){ enhance(w.id); }; list.appendChild(b);
+        b.onclick=function(){ selectEnhance(w.id, nm); }; list.appendChild(b);
       });
   }
-  function enhance(wid){
+  // D-12: was click-runs-immediately (price -> window.confirm -> fire), the one Enhance
+  // path never converted to the persistent <mg-cost-badge> pattern every other price
+  // surface already uses. Now select-then-run, mirroring the Edit sub-tab's own shape:
+  // clicking a tool only SELECTS it (updates the badge), a separate Run button fires it,
+  // and the badge alone is the warning -- no window.confirm left, same as everywhere else.
+  var enhWid='', enhName='';
+  function selectEnhance(wid, name){
+    enhWid=wid; enhName=name||'';
+    var sel=el('enh-selected');
+    if(sel){ sel.style.display=''; sel.innerHTML='Selected: <b style="color:var(--text);">'+esc(enhName)+'</b>'; }
+    el('enh-go').disabled=false;
+    debEnhanceCost();
+  }
+  function enhanceCost(){
+    var cost=el('enhance-cost');
+    if(!enhWid || !editSrc()){ cost.clear(); return; }
+    cost.setChecking();
+    var mine=++costSeq;
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mode:'enhance', source:editSrc(), workflow_id:enhWid})})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
+      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
+  }
+  function debEnhanceCost(){ clearTimeout(costTimer); costTimer=setTimeout(enhanceCost,250); }
+  function runEnhance(){
     var src=editSrc();
     if(!src){ el('edit-src').focus(); return; }
-    function run(){ runTask('/api/enhance', {source:src, workflow_id:wid}, el('enh-result'), {past:'Enhanced'}); }
-    // Enhance tools spend credits -- free cards do NOT cover panelplugin workflows. Price it
-    // and confirm before firing, so a click never silently burns credits.
-    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({mode:'enhance', source:src, workflow_id:wid})})
-      .then(function(r){return r.json();}).then(function(d){
-        if(d && d.free){ run(); return; }
-        var c=(d && d.cost!=null)?(' (~'+Number(d.cost).toLocaleString()+' credits)'):'';
-        if(window.confirm('This Enhance tool spends credits'+c+' \\u2014 free cards do not cover Enhance workflows. Run it?')) run();
-      }).catch(function(){
-        if(window.confirm('Run this Enhance tool? It spends credits (free cards do not cover Enhance workflows).')) run();
-      });
+    if(!enhWid){ return; }
+    runTask('/api/enhance', {source:src, workflow_id:enhWid}, el('enh-result'),
+            {past:'Enhanced', btn:el('enh-go'), busy:'Running\\u2026', idle:'Run'});
   }
   function genDrawerEl(){ var w=el('gen-mode-video'); return w?w.querySelector('mg-generate-drawer'):null; }
   function addVideoRefs(refs){
@@ -6439,7 +6459,8 @@ var Gen = (function(){
   }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
-          editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
+          editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
+          selectEnhance:selectEnhance, runEnhance:runEnhance,
           renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
