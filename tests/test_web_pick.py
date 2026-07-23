@@ -1122,8 +1122,34 @@ def test_portrait_mobile_pass(tmp_path):
     # so a broken/missing mobile override could ship invisibly. The tablet media query
     # right after this one is a stable end marker for the slice.
     mobile_block = html.split("@media (max-width: 480px)")[1].split("@media (min-width: 681px)")[0]
-    assert "#gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left, #gen-drawer.dock-right { width: 100%" in mobile_block, \
+    assert "#gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left { width: 100%" in mobile_block, \
         "the mobile full-width drawer rule is missing from inside the 480px breakpoint"  # full-width sheet
+
+
+def test_dead_css_selectors_removed_in_broader_sweep():
+    """O9's broader mechanical sweep (audit 2026-07-21): after the two NAMED dead rules
+    (.vp-chip/.gen-ce) were deleted in a prior pass, this extracts every class selector out of
+    pixai_gallery.py's inline <style> blocks and checks each for a real producer (a template
+    element, or a classList.add/className site in the inline JS). Two more turned up with zero
+    producers anywhere in the repo:
+      - .dock-right on #gen-drawer -- Gen.setDock(d) only ever toggles 'dock-'+x for x in
+        ['left','top','bottom']; picking "right" (the default -- #gen-drawer starts with no
+        class attribute at all, and the "Dock right" button's onclick is setDock('right'))
+        REMOVES all three instead of ever adding a 'dock-right' class, so that compound
+        selector never matched a real element.
+      - #model-preview .mp-tags (+ its `span` rule) -- showPreview() builds mp-meta/mp-nm/
+        mp-sub/mp-badges/mp-desc into #model-preview's innerHTML but never emits an .mp-tags
+        element; nothing else in the repo references it either.
+    Removing them is a no-op for real rendering: the bare #gen-drawer / #model-flyout selectors
+    already at the front of those same comma-lists match unconditionally, so the mobile
+    full-width-drawer / centered-flyout behavior (checked by test_portrait_mobile_pass above)
+    is unaffected. Their LIVE siblings (dock-left/top/bottom, the rest of .mp-*) must survive."""
+    src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
+    assert "dock-right" not in src
+    assert "mp-tags" not in src
+    for still_alive in ("dock-left", "dock-top", "dock-bottom",
+                        "mp-nm", "mp-sub", "mp-desc", "mp-badges"):
+        assert still_alive in src, "a LIVE sibling selector was removed: " + still_alive
 
 
 def test_video_v40_full_cost_warning():
