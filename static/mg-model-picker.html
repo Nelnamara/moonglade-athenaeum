@@ -39,15 +39,37 @@
 
   <ol>
     <li>Cards should <b>browse on open</b> (popular models, no typing).</li>
-    <li>Typing filters; hovering a card shows a <b>preview</b> (cover · likes · base · Official · description).</li>
+    <li>Typing filters; hovering a card (after a short pause -- D-11) shows a <b>preview</b> (cover · likes · base · Official · description).</li>
     <li>Clicking a card marks it selected and updates <code>picked:</code> below via the <code>mg-pick</code> event.</li>
+  </ol>
+
+  <div class="card">
+    <label style="font:700 10px/1 system-ui;letter-spacing:.05em;text-transform:uppercase;color:var(--subtext);display:block;margin-bottom:7px;">LoRAs (multi, D-11)</label>
+    <mg-model-picker kind="lora" multi></mg-model-picker>
+  </div>
+
+  <div id="out-multi">selected: (none)</div>
+
+  <ol>
+    <li>Clicking a card <b>toggles</b> it (add/remove), unlike the single Model picker above.</li>
+    <li>Each pick resolves its real <code>version_id</code>/<code>lora_base_type</code>/<code>trigger_words</code> via <code>/api/model-version</code> -- <code>selected:</code> below should show a version_id shortly after picking, not immediately.</li>
+    <li>Multiple LoRAs can be selected at once; clicking a selected one again removes it.</li>
   </ol>
 
   <script src="/static/mg-model-picker.js"></script>
   <script>
-    document.querySelector('mg-model-picker').addEventListener('mg-pick', function (e) {
+    var pickers = document.querySelectorAll('mg-model-picker');
+    pickers[0].addEventListener('mg-pick', function (e) {
       document.getElementById('out').textContent =
         'picked: ' + e.detail.title + '  (model_id ' + e.detail.model_id + ')';
+    });
+    pickers[1].addEventListener('mg-pick', function () {
+      var sel = pickers[1].selected;
+      document.getElementById('out-multi').textContent = sel.length
+        ? 'selected: ' + sel.map(function (l) {
+            return l.title + (l.version_id ? ' (v' + l.version_id + ', w' + l.weight + ')' : l.failed ? ' (failed)' : ' (resolving…)');
+          }).join('; ')
+        : 'selected: (none)';
     });
   </script>
 </body>

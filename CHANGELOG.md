@@ -35,6 +35,25 @@ git tags. Full prose notes for tagged versions live on
   placeholder images. Backend gained `track`/`rung`/`rungs_total` per ladder achievement
   and a `ladders` list so the client doesn't need a second hand-maintained id→name map.
 
+### Added
+
+- **The Loom's Image tab can now use LoRAs.** Previously it only offered a base model —
+  the Gallery's own Generate drawer has had full LoRA support (multi-select, per-item
+  weight, trigger words, compatibility warnings) for a while, but the Loom's picker
+  never gained it. `static/mg-model-picker.js` (the shared component both surfaces
+  mount) gained an opt-in multi-select mode; single-value mode is completely
+  unchanged. Each picked LoRA resolves its real generation metadata the same way the
+  Gallery already does, and Generate is disabled while any LoRA is still resolving or
+  failed to resolve — never silently dropped from what you asked for. Verified live
+  against the real running app: pending/resolved/failed/removed states, and the
+  Go-button gating, all confirmed working end to end.
+
+  Deliberately deferred: unlike the Gallery drawer, the Loom doesn't yet warn you
+  before submit if a LoRA doesn't match the base model's architecture (would need the
+  Loom to additionally resolve the base model's own type, which it doesn't today).
+  Functionally safe to defer — PixAI's own servers already reject a real mismatch and
+  explain why — but it means one fewer heads-up than the Gallery gives you.
+
 ### Fixed
 
 - **A backup that partially failed reported itself identically to a clean one.** If some

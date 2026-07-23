@@ -24,6 +24,7 @@ import {
   friendlyGenErr, classifyTaskStatus,
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
+  loraIncompat, resolveLoraPayload, anyLoraUnresolved,
 } from "./src/loom-mutations.js";
 
 /* =========================================================================
@@ -514,6 +515,19 @@ const V2_STYLES = `
 .lv-df-frames{display:flex;gap:12px;align-items:flex-start;margin-top:14px;}
 .lv-df-frames .sb-frame{flex:1 1 0;min-width:0;}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
+/* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
+   (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
+.lv-loratoggle{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);
+  border-radius:5px;padding:3px 7px;cursor:pointer;margin:7px 0 5px;}
+.lv-loratoggle:hover{border-color:var(--accent);color:var(--accent);}
+.lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
+.lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
+.lv-lchip.failed{border-color:var(--coral);}
+.lv-lchip .lv-lnm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-lchip.failed .lv-lnm{color:var(--coral);}
+.lv-lchip input{width:52px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
+.lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
+.lv-lchip .lv-lrm:hover{color:var(--coral);}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
@@ -628,7 +642,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -638,6 +652,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // This state belongs to Deep Focus but has to live up here, at LoomV2's real top level, same
   // as deepFocus itself; the IIFE below only reads/writes it via closure.
   const [dfPalFor, setDfPalFor] = useState(null);     // which term-palette is open in Deep Focus, or null
+  const [loraOpen, setLoraOpen] = useState(false);    // D-11: is the Image tab's "+ Add LoRA" picker expanded
   const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage'
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
@@ -686,6 +701,24 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
     }
   }, [setImgModel]);
+  // D-11: the LoRA picker uses mg-model-picker's opt-in `multi` mode, whose mg-pick
+  // detail shape is { model, selected } (not the raw row bindPicker above expects) --
+  // upsert-by-model_id on selected=true (covers both the initial pending entry and the
+  // later resolved-version_id update, same entry re-dispatched), remove on selected=false.
+  const bindLoraPicker = useCallback((el) => {
+    if (el && !el._mgBound) {
+      el._mgBound = true;
+      el.addEventListener("mg-pick", (e) => {
+        const { model, selected } = e.detail;
+        setImgLoras((cur) => {
+          const i = cur.findIndex((l) => l.model_id === model.model_id);
+          if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+          if (i < 0) return [...cur, model];
+          const next = cur.slice(); next[i] = model; return next;
+        });
+      });
+    }
+  }, [setImgLoras]);
   // Bridge <mg-generate-drawer> the same way. activeRef always holds the CURRENT active
   // shot (updated every render below) so these long-lived, bind-once listeners never read
   // a stale closure from whichever shot happened to be selected when the element first
@@ -1186,11 +1219,30 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <div>
           <label className="lv-lab">Model {imgModel ? <span className="lv-dim">· {imgModel.title}</span> : null}</label>
           <mg-model-picker ref={bindPicker} kind="base"></mg-model-picker>
+          {imgLoras.length > 0 && (
+            <div className="lv-loras">
+              {imgLoras.map((l) => (
+                <div key={l.model_id} className={"lv-lchip" + (l.failed ? " failed" : "")}>
+                  <span className="lv-lnm" title={l.title}>{l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : ""}</span>
+                  <input type="number" step="0.05" min="0" max="2" value={l.weight}
+                    title="Weight"
+                    onChange={(ev) => { const w = +ev.target.value || 0;
+                      setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
+                  <button type="button" className="lv-lrm" title="Remove"
+                    onClick={() => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button type="button" className="lv-loratoggle" onClick={() => setLoraOpen((v) => !v)}>
+            {loraOpen ? "− hide LoRA picker" : "+ add LoRA"}
+          </button>
+          {loraOpen && <mg-model-picker ref={bindLoraPicker} kind="lora" multi></mg-model-picker>}
           <label className="lv-lab">Image prompt</label>
           <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
           {sel && <button className="lv-mini2" onClick={() => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, (c.openFrame && c.openFrame.desc) || "", c.lighting || ""].filter(Boolean).join(", ") }))}>&#8615; seed from shot description</button>}
-          <button className="lv-go" disabled={busyI} onClick={() => genImage(active)}>{busyI ? (gi.msg || "generating…") : "✦ Generate reference image"}</button>
+          <button className="lv-go" disabled={busyI || anyLoraUnresolved(imgLoras)} onClick={() => genImage(active)}>{busyI ? (gi.msg || "generating…") : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…" : "✦ Generate reference image"}</button>
           {gi.phase === "error" && <div className="lv-gerr">{gi.msg}</div>}
           {gi.mid && (
             <div className="lv-imgresult">
@@ -1873,6 +1925,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const resumedRef = useRef({});    // taskId -> true: shots whose interrupted poll we've re-attached this session
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
   const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
+  const [imgLoras, setImgLoras] = useState([]);           // D-11: [{model_id,title,version_id,weight,lora_base_type,trigger_words,failed}]
   const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
   const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
   const [batching, setBatching] = useState(false);
@@ -2151,7 +2204,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_id: imgModel.model_id, prompt }) });
+        body: JSON.stringify({ model_id: imgModel.model_id, prompt, loras: resolveLoraPayload(imgLoras) }) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating…" } }));
@@ -2318,7 +2371,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const costEstimate = { ...tallyPrices(settled), pending, notDoneCount: notDone.length };
 
   return {
-    genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel, genEditState, setGenEditState,
+    genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
+    imgLoras, setImgLoras, genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
     generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate,
@@ -2426,7 +2480,8 @@ export default function App() {
     }
   }, [pickCb]);
 
-  const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel, genEditState, setGenEditState,
+  const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
+    imgLoras, setImgLoras, genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
     generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate }
@@ -2536,7 +2591,8 @@ export default function App() {
         thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
         setAct={setAct} addCard={addCard} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
         moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
-        genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel} genImage={genImage} routeImg={routeImg}
+        genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
+        imgLoras={imgLoras} setImgLoras={setImgLoras} genImage={genImage} routeImg={routeImg}
         genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
         projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
         batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
