@@ -11,6 +11,25 @@ private/
 # ---- Gallery server generated files ----
 pixai_backup/gallery/
 
+# ---- Any --out directory's generated files, by name, not just the default `pixai_backup/`.
+# `pixai_backup/` below only matches THAT literal name; a custom `--out my_dir` doesn't
+# match it, so its catalog.db/images/gallery/etc. would otherwise show up in git status.
+# These are unanchored (no leading slash) so they catch the same well-known out_dir-
+# relative structure at any depth, regardless of the out_dir's name -- same trick
+# jobs.jsonl already used below (before this, jobs.jsonl was the ONLY thing generalized
+# this way; catalog.db and the rest still leaked under a custom --out).
+catalog.db
+catalog.csv
+gallery/
+images/
+videos/
+imported/
+_duplicates/
+organize_manifest.csv
+audit_report.csv
+verify_report.csv
+raw_tasks.jsonl
+
 # ---- Job activity log (append-only registry the Jobs card reads; runtime state) ----
 # pixai_backup/ is already ignored below; these catch any out_dir that lands in the repo.
 jobs.jsonl
@@ -49,9 +68,14 @@ loom/node_modules/
 .DS_Store
 Thumbs.db
 
-# ---- Stray artifact: a root file literally named HEAD (born from a `> HEAD` shell
-# redirect; content is just "OUTPUT"). Anchored to root so it never shadows .git/HEAD
-# or subdir HEADs. This neutralizes it no matter which machine regenerates it. ----
+# ---- Stray artifact: a root file literally named HEAD, content just "OUTPUT".
+# Real cause (found 2026-07-22): tests/test_panel.py's ffmpeg-mocking FakeProc
+# patches subprocess.Popen globally with no command guard, and create_app()
+# shells `git rev-parse --short HEAD` through that same patched Popen -- for
+# THAT call argv[-1] is the literal string "HEAD". Fixed at the source (the
+# FakeProc now only writes when argv[0] == "ffmpeg"); this stays as a backstop
+# in case it ever regenerates some other way. Anchored to root so it never
+# shadows .git/HEAD or subdir HEADs. ----
 /HEAD
 
 # ---- Claude Code: local browser-preview launch config (machine-local dev-server
