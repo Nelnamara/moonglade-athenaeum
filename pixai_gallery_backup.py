@@ -1198,6 +1198,19 @@ def already_downloaded(root, media_id):
     return matches[0] if matches else None
 
 
+def already_downloaded_video(root, media_id):
+    """Video-aware sibling of already_downloaded() (B16, audit 2026-07-21).
+
+    already_downloaded() alone is a guaranteed-False no-op for videos: its default
+    matcher (find_files_for_media_id's _IMAGE_EXTS) never matches .mp4/.webm/etc,
+    so --sync-artworks --with-videos' resume check fired a full resolve_media
+    network round trip on every single run, even for a video already on disk. Same
+    shared matcher, same exact-match + quarantine-exclusion contract -- just
+    _VIDEO_EXTS instead of the image-only default."""
+    matches = find_files_for_media_id(root, media_id, exts=_VIDEO_EXTS)
+    return matches[0] if matches else None
+
+
 # ---------------------------------------------------------------------------
 # Content hashing (shared by --audit content dedup and organize's same-bytes check)
 # ---------------------------------------------------------------------------
@@ -3141,7 +3154,7 @@ def run_sync_artworks(args):
 
         def _fetch_video(item):
             vmid, title = item
-            if already_downloaded(out, vmid):
+            if already_downloaded_video(out, vmid):
                 return "skip"
             url, info = resolve_media(session, vmid)
             if not url:
