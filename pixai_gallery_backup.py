@@ -14,10 +14,10 @@ You own the copyright to images you generate on PixAI. Keep the rate modest.
 HOW IMAGES ARE FETCHED
 --------------------------------------------------------------------------------
 Task summaries don't contain image URLs -- they contain media IDs. PixAI serves
-media at:   https://api.pixai.art/v1/media/<mediaId>/<variant>
-where <variant> is e.g. "thumbnail" (small) or the full-resolution one. This
-script auto-detects the full-res variant by testing a real media ID once, then
-reuses it. Run --probe to see the detection result before committing.
+media at:   https://api.pixai.art/v1/media/<mediaId>
+Fetching that object returns a `urls` list of variants (PUBLIC/ORIGINAL/etc);
+resolve_media() picks the best one via URL_VARIANT_PREFERENCE. Run --probe to
+see the resolution result before committing.
 
 --------------------------------------------------------------------------------
 SECURITY MODEL (unchanged)
@@ -30,7 +30,7 @@ QUICK START
 --------------------------------------------------------------------------------
   pip install requests truststore
   set PIXAI_TOKEN ...   (your OS's way)
-  python pixai_gallery_backup.py --probe     # detect full-res variant, sanity-check
+  python pixai_gallery_backup.py --probe     # resolve full-res media URL, sanity-check
   python pixai_gallery_backup.py             # download everything (backward)
   python pixai_gallery_backup.py --max 40    # small test first
 """
@@ -678,8 +678,6 @@ MODEL_DETAIL_HASH = _cfg.get("MODEL_DETAIL_HASH", "") or \
 # PixAI frontend update rotates them.
 ARTWORK_LIST_HASH = _cfg.get("ARTWORK_LIST_HASH", "") or \
     "ce6f4a6e63fe210c7f77b29c7b8bdce8b7ede4d4520c01de1d36e01b224918a5"
-ARTWORK_DETAIL_HASH = _cfg.get("ARTWORK_DETAIL_HASH", "") or \
-    "ac39a87c58451559f9dcbf2c04862c1ee3260f9645ed60fdfb574e41689a6766"
 CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 # Deletion mutation (deleteGenerationTask). Also a public persisted hash. It only
 # ever touches YOUR OWN tasks, and the destructive paths are independently gated by
@@ -691,11 +689,8 @@ DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "") or \
 DELETE_OPERATION = "deleteGenerationTask"
 # ===========================================================================
 
-# Media URL: https://api.pixai.art/v1/media/<id>/<variant>
-MEDIA_TMPL = "https://api.pixai.art/v1/media/{id}/{variant}"
+# Media URL: https://api.pixai.art/v1/media/<id>
 MEDIA_BASE = "https://api.pixai.art/v1/media/{id}"
-# Tried in order; first one returning a real image (and not the thumbnail) wins.
-VARIANT_CANDIDATES = ["original", "orig", "full", "hd", "public", "raw", "thumbnail"]
 # ===========================================================================
 
 
@@ -1280,12 +1275,6 @@ def extract_meta(node):
 URL_VARIANT_PREFERENCE = ["PUBLIC", "ORIGINAL", "ORIG", "FULL", "THUMBNAIL", "STILL_THUMBNAIL"]
 
 
-def media_url(mid, variant):
-    if variant in ("", None):
-        return MEDIA_BASE.format(id=mid)
-    return MEDIA_TMPL.format(id=mid, variant=variant)
-
-
 def resolve_media(session, mid):
     """Fetch the media object and return (best_full_res_url, info_dict).
 
@@ -1319,38 +1308,6 @@ def resolve_media(session, mid):
         mid, "url" if chosen else "NO-URL",
         info.get("width"), info.get("height"), time.monotonic() - _t))
     return chosen, info
-
-
-def test_variant(session, mid, variant):
-    """Return (status_code, content_type, size_str, is_image)."""
-    try:
-        r = session.get(media_url(mid, variant), stream=True, timeout=30)
-        ct = r.headers.get("Content-Type", "")
-        size = r.headers.get("Content-Length", "?")
-        is_img = (r.status_code == 200 and ct.lower().startswith("image"))
-        r.close()
-        return (r.status_code, ct, size, is_img)
-    except requests.RequestException as e:
-        return ("ERR", str(e)[:60], "", False)
-
-
-def detect_variant(session, mid, verbose=False):
-    """Pick the first candidate that returns a real image, preferring non-thumbnail."""
-    best = None
-    for v in VARIANT_CANDIDATES + [""]:
-        code, ct, size, is_img = test_variant(session, mid, v)
-        label = v or "(base)"
-        if verbose:
-            print("  {:<10} -> {} {} {}".format(
-                label, code, ct, ("" if size == "?" else size + " bytes")))
-        if is_img and best is None and v != "thumbnail":
-            best = v
-    if best is None:
-        # fall back to thumbnail if it's the only thing that worked
-        code, ct, size, is_img = test_variant(session, mid, "thumbnail")
-        if is_img:
-            best = "thumbnail"
-    return best
 
 
 def ext_from_ct(ct):
