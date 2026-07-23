@@ -4431,8 +4431,14 @@ def _task_image_media(outputs):
 
 def _task_detail_query(session, task_id):
     """getTaskById via the persisted hash when available, else the ad-hoc `task(id:)` query
-    (same parameters+outputs shape -- verified). The ad-hoc fallback means --full-meta /
-    --backfill-full-meta no longer HARD-FAIL when TASK_DETAIL_HASH is missing from config."""
+    (same parameters+outputs shape -- verified). Despite the name, this ad-hoc-fallback
+    resilience is NOT shared by --full-meta / --backfill-full-meta: run_backfill_full_meta
+    and run_download's --full-meta branch both call task_detail_gql directly, bypassing
+    this function entirely (run_backfill_full_meta even raises PixAIError itself when
+    TASK_DETAIL_HASH is empty -- see its own guard, unconditional). The only real caller
+    is collect_generation (the --task-id / --dump-params recovery path), which is the one
+    place that actually gets this fallback. Rewiring the two CLI callers to use it too
+    would be a real behavior change -- not done here."""
     if TASK_DETAIL_HASH:
         return task_detail_gql(session, task_id)
     q = "query($id: ID!) { task(id: $id) { id status createdAt parameters outputs } }"
