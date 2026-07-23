@@ -2870,6 +2870,33 @@ def _schedule_server_exit(code):
     threading.Thread(target=_die, daemon=True).start()
 
 
+def _account_key(username):
+    """Filesystem-safe, case-COLLISION-safe key for `username` -- the ONE shared
+    helper every per-account store (saved views, prompt snippets, Loom storyboards,
+    toolbox presets) keys its own file/directory with (B14 residual).
+
+    Account identity in this app is case-SENSITIVE: pixai_gallery_backup.py's
+    _find_web_user compares the raw username with `==`, and username_problem()
+    rejects only empty/too-long/control-char names -- nothing about case. So "Nel"
+    and "nel" are two distinct AUTH_USERS rows. But every one of these stores
+    originally keyed its per-account file with quote(username, safe=""), which is
+    itself case-PRESERVING: quote("Nel") == "Nel" and quote("nel") == "nel" are two
+    different STRINGS naming the SAME file on NTFS, which is case-insensitive but
+    case-preserving. That silently merged two distinct accounts onto one shared
+    file/directory -- reproduced end to end (a save from one account was visible
+    to, and overwritable by, the other) for saved views originally, then inherited
+    by every store that copied the same quote() keying pattern since.
+
+    A short hex digest of the exact (case-sensitive) username sidesteps NTFS's
+    case-folding entirely: "Nel" and "nel" hash to two different digests, so they
+    always land on two different files -- on every filesystem, not just Windows.
+    Deliberately not reversible from the key alone -- nothing on disk needs a
+    human-readable username back; the account already owns its display name in
+    config.json's AUTH_USERS."""
+    import hashlib
+    return hashlib.sha256(str(username).encode("utf-8")).hexdigest()[:16]
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
 
@@ -10169,10 +10196,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return d
 
     def _snips_path(user):
-        from urllib.parse import quote
-        # Same quote(safe="") idiom as _view_presets_path/_loom_kv_path: a username can
-        # never escape the directory or collide via a path separator.
-        return _snips_dir() / (quote(str(user), safe="") + ".json")
+        # _account_key (B14 residual): a case-safe key, so "Nel" and "nel" don't
+        # collapse onto one file the way a bare quote(username) did on NTFS.
+        return _snips_dir() / (_account_key(user) + ".json")
 
     def _legacy_snips_path():
         return out_dir / "prompt_snippets.json"
@@ -10653,8 +10679,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return d
 
     def _presets_path(user):
-        from urllib.parse import quote
-        return _toolbox_dir() / (quote(str(user), safe="") + ".json")
+        # _account_key (B14 residual): same case-safe key as every other per-account
+        # store -- toolbox_presets copied _view_presets_path's exact quote(username)
+        # pattern (and its collision) when it was split, most recently of the four.
+        return _toolbox_dir() / (_account_key(user) + ".json")
 
     def _legacy_presets_path():
         return out_dir / "toolbox_presets.json"
@@ -10796,14 +10824,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return d
 
     def _view_presets_path(user):
-        from urllib.parse import quote
-        # quote(safe="") so a username can never escape the directory or collide: every
-        # path separator and space becomes a percent-escape (dots, letters, digits, "-"
-        # and "~" are RFC 3986 "unreserved" and quote() always leaves them literal, safe
-        # or not -- harmless here since the result is one filename component, never a
-        # path, so a literal dot can't turn into a directory traversal). Same technique
-        # as the Loom's kv store (_loom_kv_path).
-        return _view_presets_dir() / (quote(str(user), safe="") + ".json")
+        # _account_key -- a case-safe key (B14 residual): the original quote(username,
+        # safe="") here was case-PRESERVING, so "Nel" and "nel" quoted to two different
+        # strings that named the SAME file on NTFS (case-insensitive-but-preserving),
+        # even though account identity itself is case-sensitive. See _account_key's
+        # own docstring for the full story; every per-account store shares this one
+        # helper now instead of each re-deriving its own quote()-based key.
+        return _view_presets_dir() / (_account_key(user) + ".json")
 
     def _legacy_view_presets_path():
         return out_dir / "view_presets.json"
@@ -11108,8 +11135,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return _legacy_loom_kv_dir() / (quote(str(key), safe="") + ".json")
 
     def _loom_kv_dir(user):
-        from urllib.parse import quote
-        d = out_dir / "loom" / "kv" / quote(str(user), safe="")
+        # _account_key (B14 residual): a case-safe key for the per-account SUBDIRECTORY
+        # -- same fix as _view_presets_path/_snips_path/_presets_path. The KEY portion
+        # of a board's filename (_loom_kv_path below) is a separate concern (per-board
+        # name collisions within one account's own dir, not account identity) and still
+        # uses quote() unchanged.
+        d = out_dir / "loom" / "kv" / _account_key(user)
         d.mkdir(parents=True, exist_ok=True)
         return d
 

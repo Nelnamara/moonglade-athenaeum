@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+from pixai_gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
 
 from tests.conftest import login_client, login_existing_client
 
@@ -341,9 +341,10 @@ def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch):
     saved = cli.post("/api/snippets",
                      json={"snippets": ["masterpiece, 4k", "", "  ", "night"]}).get_json()
     assert saved == {"snippets": ["masterpiece, 4k", "night"]}   # blanks dropped
-    # Per-account storage (D-7): the file lives under prompt_snippets/<user>.json now,
-    # not the old flat prompt_snippets.json every account used to share.
-    assert (tmp_path / "prompt_snippets" / "tester.json").exists()
+    # Per-account storage (D-7): the file lives under prompt_snippets/<key>.json now,
+    # not the old flat prompt_snippets.json every account used to share. Keyed via
+    # _account_key (B14 residual), not the raw username.
+    assert (tmp_path / "prompt_snippets" / (_account_key("tester") + ".json")).exists()
     assert cli.get("/api/snippets").get_json() == {"snippets": ["masterpiece, 4k", "night"]}
 
 
@@ -374,6 +375,30 @@ def test_one_account_cannot_see_or_clobber_anothers_snippets(tmp_path):
         "bob's save wiped alice's snippets -- the store is not per-account")
 
 
+def test_snippets_are_independent_for_accounts_differing_only_by_case(tmp_path):
+    """B14 residual: _snips_path() keyed its per-account file with quote(username,
+    safe=""), which is case-PRESERVING -- "Nel" and "nel" quote to two different
+    strings that name the SAME file on NTFS (case-insensitive-but-preserving), even
+    though account identity is case-SENSITIVE (same alice/bob split as above, just
+    unlucky enough to collide on disk). FAILS before the fix on this filesystem:
+    nel's snippets read/save clobbers Nel's."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    app = create_app(tmp_path)
+
+    upper = login_test_client(app, username="Nel", password="a-real-test-password-1")
+    upper.post("/api/snippets", json={"snippets": ["Nel-only"]})
+
+    lower = login_test_client(app, username="nel", password="a-real-test-password-2")
+    assert lower.get("/api/snippets").get_json()["snippets"] == [], (
+        "nel can see Nel's snippets -- case-differing usernames collide on disk")
+
+    lower.post("/api/snippets", json={"snippets": ["nel-only"]})
+    assert lower.get("/api/snippets").get_json()["snippets"] == ["nel-only"]
+    assert upper.get("/api/snippets").get_json()["snippets"] == ["Nel-only"], (
+        "nel's save overwrote Nel's snippets -- case-collision on disk")
+
+
 def test_gallery_model_preview_hover_is_debounced_not_instant(tmp_path):
     """Same D-11 fix as the Loom's mg-model-picker.js: a raw mouseenter re-triggered an
     instant, freshly-repositioned popup on every card the mouse passed over while
@@ -399,7 +424,8 @@ def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path
     assert cli.get("/api/snippets").get_json() == {"snippets": ["from-before"]}
 
     cli.post("/api/snippets", json={"snippets": ["from-before", "new-one"]})
-    own = json.loads((tmp_path / "prompt_snippets" / "tester.json").read_text(encoding="utf-8"))
+    own = json.loads((tmp_path / "prompt_snippets" / (_account_key("tester") + ".json"))
+                     .read_text(encoding="utf-8"))
     assert own == ["from-before", "new-one"]
     assert json.loads((tmp_path / "prompt_snippets.json").read_text(encoding="utf-8")) == ["from-before"]
 
@@ -646,6 +672,35 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
         "bob's save wiped alice's presets -- the store is not per-account")
 
 
+def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, monkeypatch):
+    """B14 residual: toolbox_presets was the most recently split store, and it copied
+    _view_presets_path's exact quote(username, safe="") keying -- inheriting the same
+    case-collision bug. FAILS before the fix on this filesystem: nel's presets
+    read/save clobbers Nel's."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "upper-scene",
+                       "chat": {"prompts": "UPPER PROMPT", "modelId": "1"}}})
+    app = create_app(tmp_path)
+
+    upper = login_test_client(app, username="Nel", password="a-real-test-password-1")
+    upper.post("/api/presets", json={"task_id": "111"})
+
+    lower = login_test_client(app, username="nel", password="a-real-test-password-2")
+    assert lower.get("/api/presets").get_json()["presets"] == {}, (
+        "nel can see Nel's presets -- case-differing usernames collide on disk")
+
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "lower-scene",
+                       "chat": {"prompts": "LOWER PROMPT", "modelId": "2"}}})
+    lower.post("/api/presets", json={"task_id": "222"})
+    assert set(lower.get("/api/presets").get_json()["presets"]) == {"lower-scene"}
+    assert set(upper.get("/api/presets").get_json()["presets"]) == {"upper-scene"}, (
+        "nel's save wiped Nel's presets -- case-collision on disk")
+
+
 def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path, monkeypatch):
     """Upgrade path: nothing disappears the moment the store goes per-account. An
     account with no file of its own falls back to the old shared toolbox_presets.json
@@ -664,7 +719,8 @@ def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path,
     assert set(cli.get("/api/presets").get_json()["presets"]) == {"from-before"}
 
     cli.post("/api/presets", json={"task_id": "333"})
-    own = json.loads((tmp_path / "toolbox_presets" / "tester.json").read_text(encoding="utf-8"))
+    own = json.loads((tmp_path / "toolbox_presets" / (_account_key("tester") + ".json"))
+                     .read_text(encoding="utf-8"))
     assert set(own) == {"from-before", "new-scene"}
     legacy = json.loads((tmp_path / "toolbox_presets.json").read_text(encoding="utf-8"))
     assert set(legacy) == {"from-before"}

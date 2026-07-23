@@ -890,7 +890,7 @@ def _cli_job_start(out_dir, label):
         return None
 
 
-def _cli_job_finish(out_dir, job_id, error=None, warn=0):
+def _cli_job_finish(out_dir, job_id, error=None, warn=0, warn_detail=None):
     """Terminal event for a _cli_job_start job. No-op if no job was started.
 
     `warn` (D-4): a partial-failure count from a run that otherwise completed (some
@@ -898,15 +898,22 @@ def _cli_job_finish(out_dir, job_id, error=None, warn=0):
     as its own terminal status, "done_with_errors", distinct from both "done" (clean)
     and "failed" (the run itself raised) -- so a scheduled/automated caller, or the
     Panel's Jobs tray, can tell "ran but lost files" apart from either extreme instead
-    of everything but a hard crash collapsing into a silent "done"."""
+    of everything but a hard crash collapsing into a silent "done".
+
+    `warn_detail` (B15): overrides the default "file(s) failed to download" noun
+    phrase for a caller whose `warn` count isn't about downloaded files -- e.g.
+    run_sync_artworks, where it can mean a page fetch that failed mid-pagination or
+    a failed video download. The done_with_errors status/marker mechanism itself is
+    unchanged; only the human-readable detail text differs."""
     if not job_id:
         return
     try:
         if error is not None:
             append_job_event(out_dir, job_id, status="failed", error=str(error))
         elif warn:
+            detail = warn_detail or "file(s) failed to download"
             append_job_event(out_dir, job_id, status="done_with_errors",
-                             error="{} file(s) failed to download".format(warn))
+                             error="{} {}".format(warn, detail))
         else:
             append_job_event(out_dir, job_id, status="done")
     except Exception:                                       # noqa: BLE001 -- fail-soft logging
@@ -3035,7 +3042,14 @@ def run_sync_artworks(args):
     """Page the owner's published artworks (listArtworks) and merge their
     metadata (title, published flag, NSFW flag, likes, comments, aes score, tags)
     onto matching catalog rows by media_id. Published artworks are a subset of
-    generations, so unmatched/undownloaded ones are simply skipped."""
+    generations, so unmatched/undownloaded ones are simply skipped.
+
+    Returns {"artworks", "matched", "videos", "fail"} (B15) -- "fail" counts a
+    pagination fetch that failed mid-run (artwork_list_gql has no retry of its own,
+    unlike gql()) plus any video that failed to download after retries; a non-zero
+    "fail" means this run is INCOMPLETE even though it didn't raise. Callers should
+    thread it into _cli_job_finish(warn=...) the same way run_download's own callers
+    thread dl['fail']."""
     out = Path(args.out)
     db_path = _ensure_db(out)
     # Build the session FIRST -- _make_session auto-resolves USER_ID from the API key when it
@@ -3052,6 +3066,8 @@ def run_sync_artworks(args):
     artworks = 0
     before = None
     page = 0
+    incomplete = False               # B15: True if pagination stopped on a failed
+                                      # fetch rather than legitimately running out of pages
     _prog = getattr(args, "progress", None)
     print("Syncing published artworks (listArtworks)...")
     while True:
@@ -3062,6 +3078,15 @@ def run_sync_artworks(args):
                 raise PixAIError(
                     "listArtworks returned no data. The ARTWORK_LIST_HASH may have "
                     "rotated after a PixAI update -- recapture it into config.json.")
+            # B15: unlike gql() (retries 4x, then raises), artwork_list_gql has no
+            # retry of its own -- a RequestException/non-200/bad-JSON on any page
+            # after the first is swallowed and returns None (see its own docstring).
+            # Treat that exactly like the download-retry-exhausted case: whatever was
+            # already collected is real and worth keeping, but the run is INCOMPLETE,
+            # not a clean finish -- it must not report a total that looks whole.
+            incomplete = True
+            print("\n  page {} fetch failed (no response) -- stopping pagination early. "
+                  "Results below are INCOMPLETE, not a full sync.".format(page))
             break
         edges = conn.get("edges", [])
         if not edges:
@@ -3102,6 +3127,7 @@ def run_sync_artworks(args):
 
     # Optionally download animated-artwork video files (videoMediaId) into videos/.
     vids_ok = 0
+    vids_failed = 0                  # B15: real failures after retries, not "missing"
     if with_videos and videos:
         vdir = out / "videos"
         vdir.mkdir(parents=True, exist_ok=True)
@@ -3128,12 +3154,34 @@ def run_sync_artworks(args):
                 vids_ok += 1
             elif status == "missing":
                 print("  no media url for video {} ({})".format(item[0], item[1]))
+            elif status == "fail":
+                # download() already retried internally before giving up -- same
+                # terminal "fail" status run_download's own dl['fail'] counts.
+                vids_failed += 1
+                print("  FAILED video {} ({})".format(item[0], item[1]))
         print("Videos saved/present: {} of {}.".format(vids_ok, len(videos)))
     elif videos and not with_videos:
         print("({} animated artworks have video; re-run with --with-videos to download them.)"
               .format(len(videos)))
 
-    return {"artworks": artworks, "matched": matched, "videos": vids_ok}
+    # B15: same "done_with_errors" visibility run_download's own callers already get --
+    # a loud console notice plus the same machine-readable marker for the Panel
+    # subprocess reader (this function is run as its own subprocess by the "sync-artworks"
+    # Panel action, exactly like a plain download). Exit code is unaffected by design,
+    # same rationale as run_download's own end-of-run notice.
+    fail = (1 if incomplete else 0) + vids_failed
+    if fail:
+        detail = []
+        if incomplete:
+            detail.append("artwork listing stopped early after a page fetch failed")
+        if vids_failed:
+            detail.append("{} video(s) failed to download after retries".format(vids_failed))
+        print("\n*** FINISHED WITH ERRORS: {} -- exit code is still 0 by design. ***"
+              .format("; ".join(detail)))
+        if os.environ.get("MOONGLADE_PROGRESS") == "1":
+            print("{}{}".format(PANEL_WARN_PREFIX, fail), flush=True)
+
+    return {"artworks": artworks, "matched": matched, "videos": vids_ok, "fail": fail}
 
 
 def run_sync_videos(args):
@@ -7065,7 +7113,18 @@ def main():
                 len(load_catalog(db_path)), csv_path))
             return
         if args.sync_artworks:
-            run_sync_artworks(args)
+            # B15: same job-tracking + done_with_errors wiring --sync already has (see
+            # above) -- previously this call had NO job logging at all, so a partial
+            # failure (mid-pagination break, a failed video download) was invisible
+            # everywhere: no Jobs-tray entry, no done_with_errors, nothing.
+            _job = _cli_job_start(out, "Artwork sync")
+            try:
+                res = run_sync_artworks(args)
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job, warn=(res or {}).get("fail", 0),
+                            warn_detail="issue(s) during artwork sync")
             return
         if args.sync_videos:
             run_sync_videos(args)
