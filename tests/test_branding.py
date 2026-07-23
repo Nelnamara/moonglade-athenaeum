@@ -67,8 +67,12 @@ def test_branding_save_and_render(tmp_path):
     assert r.get_json() == {"mark": "mark_12", "anim": "eclipse"}
     assert json.loads((tmp_path / "branding.json").read_text())["anim"] == "eclipse"
     html = cli.get("/").get_data(as_text=True)
-    assert "anim-eclipse" in html and "/branding/marks/mark_12.png" in html
-    assert "mk-tile" in html              # tile marks get the rounded-corner class
+    # The rendered mark span's OWN class attribute, not a bare substring -- BASE_HTML's
+    # shared stylesheet permanently contains ".mark:not(.anim-classic)..." and every
+    # anim-*/mk-tile class name as CSS selector text on every page, so a bare "anim-eclipse
+    # in html" / "mk-tile in html" check passed even on a default, unbranded page.
+    assert 'class="mark anim-eclipse mk-tile"' in html
+    assert "/branding/marks/mark_12.png" in html
 
 
 def test_branding_validation_and_lan_gate(tmp_path):
@@ -167,7 +171,10 @@ def test_subpage_headers_carry_anim_class(tmp_path):
     cli = _client(tmp_path)
     for path in ("/health", "/panel"):
         html = cli.get(path).get_data(as_text=True)
-        assert "anim-classic" in html, path
+        # The rendered mark span's own class, not a bare substring -- the shared
+        # stylesheet's ".mark:not(.anim-classic)" selector puts "anim-classic" on
+        # every page regardless of what the header's actual mark element carries.
+        assert 'class="mark anim-classic"' in html, path
 
 
 def test_banner_band_class(tmp_path):
