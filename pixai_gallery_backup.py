@@ -3716,7 +3716,7 @@ REFVIDEO_MODEL_ID = "2003969750675682808"   # numeric model id for v4.0.1 refere
 
 def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_ids=(),
                                      audio_media_ids=(), model="v4.0.1",
-                                     model_id=REFVIDEO_MODEL_ID, duration=15,
+                                     model_id=REFVIDEO_MODEL_ID, duration=5,
                                      mode="professional", generate_audio=False,
                                      audio_language="english", is_private=False,
                                      priority=1000, kaisuuken_id=""):
@@ -3907,7 +3907,11 @@ def build_filter_parameters(media_id, filter_id, *, strength=0.77, is_private=Fa
 
 def _gen_video_parameters(args):
     """Build the i2v `parameters` from CLI/GUI args (thin wrapper over
-    build_video_parameters). `--params-json` overrides everything."""
+    build_video_parameters). `--params-json` overrides everything.
+
+    Snaps --duration to PixAI's allowed lengths (5/6/10/15) before it reaches the
+    builder -- the same snap build_shot_video_params (the Loom/web adapter) already
+    applies, now made a CLI guarantee too rather than a Loom-only one (B9)."""
     if getattr(args, "params_json", ""):
         return json.loads(args.params_json)
     return build_video_parameters(
@@ -3916,7 +3920,7 @@ def _gen_video_parameters(args):
         model=(getattr(args, "video_model", "") or getattr(args, "model", "")
                or DEFAULT_VIDEO_MODEL),
         tail_media_id=getattr(args, "tail", "") or "",
-        duration=getattr(args, "duration", 5) or 5,
+        duration=_snap_video_duration(getattr(args, "duration", 5) or 5),
         mode=getattr(args, "vmode", None) or "professional",
         generate_audio=bool(getattr(args, "audio", False)),
         audio_language=getattr(args, "audio_language", None) or "english",
@@ -4673,10 +4677,13 @@ def run_reference_video(args):
     is_private = (getattr(args, "vchannel", "private") == "private")
 
     def _build(img_ids, vid_ids, aud_ids):
+        # Duration: default 5 (matches the argparse flag + the i2v sibling -- was 15 here,
+        # a real 3x cost divergence, B10), snapped to PixAI's allowed lengths before use
+        # for either preview or submit, same as the i2v CLI path (B9).
         return build_reference_video_parameters(
             prompt, image_media_ids=img_ids, video_media_ids=vid_ids, audio_media_ids=aud_ids,
             model=(getattr(args, "video_model", "") or "v4.0.1"),
-            duration=getattr(args, "duration", 15) or 15,
+            duration=_snap_video_duration(getattr(args, "duration", 5) or 5),
             mode=getattr(args, "vmode", None) or "professional",
             generate_audio=bool(getattr(args, "audio", False)),
             audio_language=getattr(args, "audio_language", None) or "english",
@@ -5558,12 +5565,33 @@ def tag_search_gql(session, prefix, first=8):
 def run_suggest_prompt(args):
     """--suggest-prompt <media_id|file>: print PixAI's suggested prompt(s) for an image
     (the site's "Image to prompt"). A local file is uploaded first (free); a catalog
-    media_id is used directly. FREE and read-only -- spends no credits, no --confirm."""
+    media_id is used directly. FREE and read-only -- spends no credits, no --confirm.
+
+    PixAI's suggest-prompt endpoint is image-only and 500s on a video; the web gallery
+    already hides the "Suggest prompt" button for a video row (`row.is_video != '1'`
+    in pixai_gallery.py). Mirror that same gate here (B18 residual) so the CLI refuses
+    early with a clear message instead of surfacing that raw 500."""
     src = (getattr(args, "suggest_prompt", "") or "").strip()
     if not src:
         raise PixAIError("--suggest-prompt needs a catalog media_id or a local image file.")
+    is_local = _is_local_source(src)
+    if is_local:
+        if Path(src).suffix.lower() in _VIDEO_EXTS:
+            raise PixAIError(
+                "--suggest-prompt only works on images, not video -- {} looks like a "
+                "video file (PixAI's image-to-prompt endpoint doesn't support "
+                "video).".format(src))
+    else:
+        out = getattr(args, "out", "") or "pixai_backup"
+        row = next((r for r in load_catalog(Path(out) / "catalog.db")
+                    if r.get("media_id") == src), None)
+        if row and row.get("is_video") == "1":
+            raise PixAIError(
+                "--suggest-prompt only works on images, not video -- media {} is a video "
+                "in your catalog (PixAI's image-to-prompt endpoint doesn't support video; "
+                "the web gallery hides this button for videos for the same reason).".format(src))
     session = _make_session(getattr(args, "token", None))
-    if _is_local_source(src):
+    if is_local:
         print("Uploading image (free):", src)
         media_id = upload_media(session, src)
     else:
