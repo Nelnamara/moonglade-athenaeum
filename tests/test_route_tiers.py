@@ -239,8 +239,11 @@ ROUTE_TIERS = {
 PUBLIC_EXPECTED_STATUS = {
     ("login", "GET"): {200},
     ("login", "POST"): {200},      # re-renders the form (no csrf) -- never a redirect
-    ("logout", "GET"): {302},      # its own redirect to /login, not the front door's
-    ("logout", "POST"): {302},     # anonymous: nothing to revoke, so no csrf is demanded
+    # a 200 page now, not a redirect -- it has to run script client-side to purge
+    # Cache Storage before navigating on to /login, which a 3xx can't do (see
+    # test_session_revocation.py's test_logout_purges_cache_storage_client_side)
+    ("logout", "GET"): {200},
+    ("logout", "POST"): {200},     # anonymous: nothing to revoke, so no csrf is demanded
     ("branding", "GET"): {404},    # missing art 404s; it must never redirect to /login
     ("manifest", "GET"): {200},    # a constant body -- anonymous callers get the real thing
 }

@@ -81,6 +81,17 @@ git tags. Full prose notes for tagged versions live on
   `done_with_errors` status that's visible and dismissable everywhere a job shows up,
   plus a much louder console notice for a bare-terminal run.
 
+- **Signing out no longer leaves your images sitting in the browser's cache.** The
+  installed/offline view caches image responses in Cache Storage, and nothing
+  previously cleared that on sign-out — a shared or borrowed device could still show
+  a previous account's thumbnails after that account signed out. `/logout` now serves
+  a small page that deletes every cached entry client-side before continuing on to the
+  login page, the same way a redirect always did, plus a visible fallback link for a
+  browser that blocks the page's own script. Deliberately not hooked onto `/login`
+  itself — that path has no way to tell "you're signing out" from "you're already
+  signed in and just landed here by accident," which is exactly what sank an earlier
+  attempt at this fix.
+
 - **The model-preview tooltip "jumped" while browsing, making it hard to scan a grid.**
   Two independently-drifted copies of the hover-preview mechanism (the gallery's own
   `#model-flyout`, and the shared `<mg-model-picker>` the Loom mounts) both fired an

@@ -231,14 +231,18 @@ def test_logout_still_revokes_every_outstanding_cookie(tmp_path):
 
 
 def test_anonymous_logout_is_still_a_noop(tmp_path):
-    """A genuinely anonymous GET /logout stays a harmless 302 that touches no
-    server state -- it must not mint, bump, or rewrite anything."""
+    """A genuinely anonymous GET /logout stays a harmless response that touches no
+    server state -- it must not mint, bump, or rewrite anything. It's a 200 page
+    now, not a redirect (see test_logout_purges_cache_storage_client_side), but the
+    purge must fire even here -- unconditional, same reasoning as the cookie clear
+    it always did: whoever hits /logout should leave with a clean local cache."""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     before_epoch = core.get_web_user_session_epoch("alice")
     before_bytes = core._config_path().read_bytes()
     r = app.test_client().get("/logout")
-    assert r.status_code in (301, 302, 303, 307, 308)
+    assert r.status_code == 200
+    assert "caches.delete" in r.get_data(as_text=True)
     assert core.get_web_user_session_epoch("alice") == before_epoch
     assert core._config_path().read_bytes() == before_bytes
 
@@ -262,11 +266,57 @@ def test_get_logout_signs_out_only_this_browser(tmp_path):
     before_epoch = core.get_web_user_session_epoch("alice")
 
     r = victim.get("/logout")
-    assert r.status_code in (301, 302, 303, 307, 308)
+    assert r.status_code == 200
     assert victim.get("/api/jobs").status_code == 401     # this browser IS signed out
     assert other.get("/api/jobs").status_code == 200, \
         "a GET /logout must not sign the user out on their other devices"
     assert core.get_web_user_session_epoch("alice") == before_epoch
+
+
+def test_logout_purges_cache_storage_client_side(tmp_path):
+    """A redirect can't run script, so a bare redirect() can never clear Cache
+    Storage -- the browser-side cache /sw.js fills under /img/ and /full/, which
+    outlives sign-out because nothing else purges it (docs/AUDIT_2026-07-21.md's
+    Cache-Storage-survives-sign-out item). /logout must instead serve a real page
+    that deletes every cache before navigating on to /login -- proven here for
+    both the GET and the real, CSRF-carrying POST path, since either one is a
+    genuine completed sign-out.
+
+    Bite: revert to redirect(url_for('login')) and both assertions fail --
+    there is no HTML body to search for the purge script in."""
+    core.add_or_update_web_user("alice", "hunter2")
+    app = _client(tmp_path)
+
+    r_get = app.test_client().get("/logout")
+    body_get = r_get.get_data(as_text=True)
+    assert "caches.keys()" in body_get and "caches.delete" in body_get
+    assert "/login" in body_get, "must still land the browser on /login, same as the old redirect did"
+    # A plain, always-visible <a href="/login"> is the escape hatch for a browser
+    # whose extension/CSP blocks the inline <script> specifically -- <noscript>
+    # alone only engages when scripting is off ENTIRELY, so it does not cover that
+    # case. Without this link, that reader is stranded with no purge and no way on.
+    assert 'href="/login"' in body_get, \
+        "no visible fallback link -- a page whose script gets blocked (but not scripting overall) strands the reader"
+
+    victim = _login(app)
+    r_post = _logout(victim)   # the real POST path, csrf token + all
+    body_post = r_post.get_data(as_text=True)
+    assert r_post.status_code == 200
+    assert "caches.delete" in body_post
+
+
+def test_refused_logout_does_not_purge_the_cache(tmp_path):
+    """A bad-CSRF POST leaves the session INTACT (see
+    test_post_logout_without_a_valid_csrf_token_revokes_nothing) -- it must not
+    purge the browser's cache either, since nothing about the sign-out actually
+    happened. Purging here would be a false "you're signed out" signal to a user
+    who is, in fact, still signed in."""
+    core.add_or_update_web_user("alice", "hunter2")
+    app = _client(tmp_path)
+    victim = _login(app)
+    r = victim.post("/logout", data={"csrf": "forged-token-not-in-session"})
+    assert r.status_code == 400
+    assert "caches.delete" not in r.get_data(as_text=True)
 
 
 def test_post_logout_without_a_valid_csrf_token_revokes_nothing(tmp_path):

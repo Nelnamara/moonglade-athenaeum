@@ -8123,6 +8123,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                       next_url=next_url, no_accounts=no_accounts,
                                       bootstrap_mode=bootstrap_mode)
 
+    # Served by logout() in place of a redirect -- see its own comment for why a
+    # real page (not a 3xx) is required to run the Cache Storage purge. Static, no
+    # Jinja/user input involved, so a plain string is safer than round-tripping it
+    # through render_template_string for nothing.
+    _LOGOUT_HTML = (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Signing out…</title>"
+        "<style>body{margin:0;height:100vh;display:flex;align-items:center;"
+        "justify-content:center;background:#0b0a12;color:#cfd0e0;"
+        "font:14px system-ui,sans-serif}</style></head>"
+        "<body>Signing you out… <a href=\"/login\">Continue</a>"
+        "<script>(function(){"
+        "function go(){location.replace('/login');}"
+        "if('caches' in window){"
+        "caches.keys().then(function(ks){"
+        "return Promise.all(ks.map(function(k){return caches.delete(k);}));"
+        "}).catch(function(){}).then(go);"
+        "}else{go();}"
+        "})();</script>"
+        "<noscript><meta http-equiv=\"refresh\" content=\"0;url=/login\"></noscript>"
+        "</body></html>"
+    )
+
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
         """Sign out. A GET clears THIS browser's cookie and nothing else; a POST
@@ -8190,9 +8214,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 core.bump_web_user_session_epoch(user)
         # Unconditional and outside the guard: whoever holds an already-invalid cookie
         # must still be able to shed it locally. Client-side only, touches no server
-        # state, and leaves the anonymous case a plain 302 no-op.
+        # state, and leaves the anonymous case a harmless no-op.
         session.clear()
-        return redirect(url_for("login"))
+        # Cache Storage (used by /sw.js for the installed/PWA view) is browser-side
+        # state a redirect can't touch -- the server can clear the SESSION but not
+        # what the browser itself cached under /img/ and /full/. A bare redirect()
+        # never runs script, so the purge has to happen from an actual page: this
+        # unconditional (same reasoning as session.clear() above -- even an
+        # already-signed-out /logout hit should leave a clean cache) 200 response
+        # deletes every Cache Storage entry client-side, then does the SAME
+        # navigation to /login a redirect would have. This must NOT be hooked onto
+        # /login instead: login() has no signed-in short-circuit, so purging there
+        # would wipe a currently-signed-in user's cache on a stray bookmark/Back
+        # hit to /login (the flaw that got an earlier draft of this fix rejected).
+        return _LOGOUT_HTML
 
     # ------------------------------------------------------------------
     # THE front door: DEFAULT-DENY for every request, enforced in one place.
