@@ -4105,11 +4105,21 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
 
 def _edit_config_from_args(args):
     """Pull the modelConfig knobs (with defaults) out of CLI/GUI args."""
+    model_id = getattr(args, "edit_model", "") or EDIT_PRO_MODEL_ID
+    resolution = getattr(args, "edit_resolution", "") or "1K"
+    aspect_ratio = getattr(args, "edit_aspect", "") or "3:4"
+    quality = getattr(args, "edit_quality", "") or "medium"
+    # Same guard the web /api/edit path already runs (_edit_params_from_payload ->
+    # clamp_edit_config) -- without it the CLI can submit a resolution/quality/aspect
+    # the resolved model doesn't actually support (e.g. the 1K/medium defaults above,
+    # sent to reference-pro, which only exposes 2K/4K and no quality knob at all), an
+    # invalid combo on a credit-spend path.
+    resolution, quality, aspect_ratio = clamp_edit_config(model_id, resolution, quality, aspect_ratio)
     return dict(
-        model_id=getattr(args, "edit_model", "") or EDIT_PRO_MODEL_ID,
-        resolution=getattr(args, "edit_resolution", "") or "1K",
-        aspect_ratio=getattr(args, "edit_aspect", "") or "3:4",
-        quality=getattr(args, "edit_quality", "") or "medium",
+        model_id=model_id,
+        resolution=resolution,
+        aspect_ratio=aspect_ratio,
+        quality=quality,
         kaisuuken_id=getattr(args, "kaisuuken_id", "") or "",
     )
 

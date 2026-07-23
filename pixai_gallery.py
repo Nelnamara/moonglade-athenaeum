@@ -10436,22 +10436,46 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     _presets_lock = threading.Lock()
 
-    def _presets_path():
+    # Toolbox presets are PER-ACCOUNT, one file each under out_dir/toolbox_presets/ --
+    # same shape as _view_presets_path/_snips_path/_loom_kv_path. They shipped
+    # install-wide; Moonglade is explicitly not single-user (the repo is public and has
+    # real external users), so on any install with more than one account, install-wide
+    # meant every account could see, and overwrite, every other account's imported
+    # presets. The legacy shared file stays a READ-ONLY fallback for an account with no
+    # file of its own yet -- same no-migration-flag contract as _load_view_presets.
+    def _toolbox_dir():
+        d = out_dir / "toolbox_presets"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _presets_path(user):
+        from urllib.parse import quote
+        return _toolbox_dir() / (quote(str(user), safe="") + ".json")
+
+    def _legacy_presets_path():
         return out_dir / "toolbox_presets.json"
 
-    def _load_presets():
+    def _read_presets_data(p):
         try:
-            if _presets_path().exists():
-                return json.loads(_presets_path().read_text(encoding="utf-8"))
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
         except (OSError, ValueError):
             pass
         return {}
 
-    def _edit_params_from_payload(core, p, session=None):
+    def _load_presets(user):
+        own = _presets_path(user)
+        if own.exists():
+            return _read_presets_data(own)
+        return _read_presets_data(_legacy_presets_path())
+
+    def _edit_params_from_payload(core, p, user, session=None):
         """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
         catalog media_id (the image being edited). A `preset` name swaps in a locally
-        banked Toolbox preset (canned prompt + sceneId + its modelId). Returns None if
-        no source.
+        banked Toolbox preset (canned prompt + sceneId + its modelId), looked up from
+        `user`'s own per-account presets. Returns None if no source.
 
         `session` is REQUIRED for a real submit and deliberately omitted for pricing.
         With it, every source id is run through _input_media_id -- a catalog id is a
@@ -10466,7 +10490,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         scene_id, model_id = "", ""
         preset_name = str(p.get("preset") or "").strip()
         if preset_name:
-            pre = _load_presets().get(preset_name)
+            pre = _load_presets(user).get(preset_name)
             if not pre:
                 return None
             instruction = pre.get("prompt") or instruction
@@ -10498,14 +10522,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/presets", methods=["GET", "POST"])
     def api_presets():
-        """Toolbox presets, stored LOCALLY (out_dir/toolbox_presets.json -- preset
+        """Toolbox presets, stored per-account under out_dir/toolbox_presets/ (preset
         prompts are PixAI-authored content, so they live as the owner's own captured
         task data, never in the repo). GET lists {name: {label, scene_id}} (no prompt
         bodies). POST {task_id, label?} imports one from a task the owner ran on the
         site: fetches the task, extracts chat.prompts + sceneId + modelId, saves it.
-        Login required; uses the owner's key on import."""
+        Login required; uses the owner's key on import.
+
+        The account comes from the SESSION, never the request body -- same contract as
+        /api/view-presets and /api/snippets: a client that could name its own key could
+        read and overwrite anyone's presets."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "authentication required"}), 401
         with _presets_lock:
-            presets = _load_presets()
+            presets = _load_presets(user)
             if request.method == "GET":
                 return jsonify({"presets": {
                     k: {"label": v.get("label") or k, "scene_id": v.get("scene_id", "")}
@@ -10515,8 +10546,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if not tid:
                 return jsonify({"error": "task_id required"}), 400
             try:
-                core, session = _gen_session()
-                task = core.task_detail_gql(session, tid) or {}
+                core, gsession = _gen_session()
+                task = core.task_detail_gql(gsession, tid) or {}
                 params = task.get("parameters") or {}
                 chat = params.get("chat") or {}
                 prompt = chat.get("prompts") or params.get("prompts") or ""
@@ -10532,8 +10563,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     "model_id": str(chat.get("modelId") or ""),
                     "from_task": tid,
                 }
-                _presets_path().write_text(json.dumps(presets, indent=1),
-                                           encoding="utf-8")
+                dest = _presets_path(user)
+                tmp = dest.with_suffix(".tmp")
+                tmp.write_text(json.dumps(presets, indent=1), encoding="utf-8")
+                os.replace(tmp, dest)   # atomic: a torn write can't eat the set
                 return jsonify({"imported": name,
                                 "label": presets[name]["label"]})
             except Exception as e:
@@ -10645,12 +10678,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 os.replace(tmp, dest)   # atomic: a torn write can't eat the set
             return jsonify({"presets": presets})
 
-    def _params_and_nocard(core, p):
+    def _params_and_nocard(core, p, user):
         """Route a drawer payload to generate, edit, or video params. Returns (params,
-        no_card, note). note is set (params None) when something's missing."""
+        no_card, note). note is set (params None) when something's missing. `user` is
+        only consulted on the edit path (a preset lookup is per-account)."""
         p = p or {}
         if p.get("mode") == "edit":
-            params = _edit_params_from_payload(core, p)
+            params = _edit_params_from_payload(core, p, user)
             return (params, bool(p.get("no_card")),
                     None if params else "pick an image to edit")
         if p.get("mode") in ("I2V", "FLF", "R2V"):
@@ -10698,7 +10732,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Live cost + free-card check for the drawer's current settings (generate OR
         edit). Read-only (no spend). Login required (any session, local or LAN)."""
         try:
-            core, session = _gen_session()
+            user = str(session.get("user") or "")
+            # NOT `core, session = _gen_session()` -- session is assigned that way further
+            # down in this same function, which (Python whole-function scoping) makes the
+            # bare name `session` local for the ENTIRE function, so the read above would
+            # raise UnboundLocalError instead of reading Flask's session. gsession names
+            # the PixAI API session distinctly, the same fix already applied in api_presets.
+            core, gsession = _gen_session()
             body = request.get_json(silent=True) or {}
             # Resolve a bare base model_id -> its current version, exactly as /api/generate
             # does, so a caller that knows only the base model still gets a real cost +
@@ -10710,14 +10750,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if (not str(body.get("version_id") or "").strip()
                     and str(body.get("model_id") or "").strip()
                     and not body.get("mode")):
-                _vid = (core.resolve_version_meta(session, str(body["model_id"]).strip()) or {}).get("version_id") or ""
+                _vid = (core.resolve_version_meta(gsession, str(body["model_id"]).strip()) or {}).get("version_id") or ""
                 if _vid:
                     body = {**body, "version_id": _vid}
-            params, no_card, note = _params_and_nocard(core, body)
+            params, no_card, note = _params_and_nocard(core, body, user)
             if params is None:
                 return jsonify({"cost": None, "free": False, "note": note})
-            cost = core.price_task(session, params)
-            best = None if no_card else core.match_kaisuuken(session, params, enrich=True)
+            cost = core.price_task(gsession, params)
+            best = None if no_card else core.match_kaisuuken(gsession, params, enrich=True)
             return jsonify({"cost": cost, "free": bool(best),
                             "cards": (best or {}).get("total"),
                             "card_name": (best or {}).get("name"),
@@ -10773,16 +10813,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}."""
         try:
             from types import SimpleNamespace
-            core, session = _gen_session()
+            user = str(session.get("user") or "")
+            # gsession, not `core, session = _gen_session()` -- see api_price's identical
+            # comment: session is Flask's, reassigning it here would make every reference
+            # to the bare name `session` in this function a local (UnboundLocalError on
+            # the read above), not a read of Flask's session.
+            core, gsession = _gen_session()
             p = request.get_json(silent=True) or {}
-            params = _edit_params_from_payload(core, p, session)
+            params = _edit_params_from_payload(core, p, user, gsession)
             if params is None:
                 return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
-            core._apply_kaisuuken(session, params,
+            core._apply_kaisuuken(gsession, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            task_id = core.submit_generation(session, params)
+            task_id = core.submit_generation(gsession, params)
             telem_bump("edits", out_dir=out_dir)          # The Restoration Wing
             telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
