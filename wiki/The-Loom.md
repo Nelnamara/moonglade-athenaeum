@@ -70,6 +70,11 @@ planned one.
 There is no text-only mode: these video models need an input frame or reference, so every
 shot needs one.
 
+**Not every model offers all four.** Multi-Reference (R2V) only works on the V4.0 pair;
+V3.0 Flash and V2.7 only ever offer First Frame (I2V) — the Generate drawer hides the
+modes a selected model doesn't support. See [Generating](Generating#video-models-and-shot-mode-gating)
+for the full per-model breakdown (durations, free-card eligibility, mode support).
+
 ## Connecting shots
 
 The Video tab's **Continuity** chips say how a shot joins the one before it:

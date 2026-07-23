@@ -34,6 +34,12 @@ never break — keep your month folders tidy for Explorer browsing *and* organiz
 images into cross-cutting sets (Favorites, a character, a project) at the same time.
 
 ## Other bulk actions
+Selecting anything reveals an **Actions ▾** button in the bulk bar — it opens a menu
+holding everything below, rather than a row of separate buttons:
+- **+ Add to collection**.
+- **− Remove from «collection»** — only appears while a Collection filter is active
+  (removing from "which collection?" has no answer otherwise); takes the selection out
+  of that one collection. A `catalog.db` label change only — no files are touched.
 - **Send to Video** loads the selection into the Generate drawer's Video tab as
   reference images (images only, up to 9) — see [Generating](Generating).
 - **Send to The Loom (cast)** sends the selected images to the Loom's cast.
