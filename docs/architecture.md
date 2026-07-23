@@ -65,7 +65,7 @@ gallery.
 | `query_catalog()` | SQL-backed filter/sort/paginate for gallery index |
 | `list_media_ids()` | Returns ordered media IDs for prev/next navigation |
 | `backfill_batches()` | Scans `batches/` on disk and fills empty `batch` column; called on gallery startup |
-| `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). Invariant 1, single source |
+| `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). Invariant 1 — but NOT actually a single source: `backfill_batches()` (above, this same module) and `pixai_similar.py`'s `scan_dir` both re-implement the identical `stem.split("_")[-1]` inline instead of calling it |
 | `find_files_for_media_id()` | All on-disk files for a media_id, BOTH layouts (prefixed `*_<mid>.*` AND bare `<mid>.*`), exact-id checked, gallery excluded. Used by the gallery's `find_image_file` — **not** by resume or the audit, which each still walk the tree independently (see Invariant 7) |
 | `create_app()` | Flask app factory; calls `init_db` + `backfill_batches` before serving |
 
@@ -171,10 +171,22 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 
 1. **`media_id` is always the last `_`-chunk of the filename stem.** Resume,
    organize, and lookup all parse `stem.split("_")[-1]`.
-2. **Resume is keyed on media id, checked before any network call.**
+2. **Resume is keyed on media id.** True in the base case: `run_download`'s O(1)
+   on-disk index is checked before any network call. **Not true under `--full-meta` /
+   `--sync`**, though (`--sync` runs `--update --full-meta` under the hood): for every
+   task on the page, `task_detail_gql` + `model_name_gql` + LoRA resolution all fire
+   BEFORE the per-media resume check, in both the parallel and serial code paths — so
+   re-running `--full-meta` over an already-complete backup still pays the full
+   metadata network cost per task, not just per missing media.
 3. **Incomplete files don't count as done** — `.part` temp files and zero-byte
    files are treated as not-downloaded; downloads are atomic (`*.part` → replace).
-4. **`catalog.db` is the source of truth** for organize and friends.
+4. **`catalog.db` is the source of truth for `--organize`, resume, and gallery
+   lookups.** **Not** for `--audit`/`--dedup`: `audit_collection()` (see its
+   module-table entry above) is a deliberately filesystem-truth pass — it walks the
+   actual on-disk bytes to find duplicates the catalog wouldn't know about, and
+   keeper selection never consults `catalog.db`. That's why the (fixed) zero-byte-
+   keeper defect needed its own filesystem-side size guard: catalog correctness
+   alone couldn't have caught it.
 5. **`--organize` re-normalizes the WHOLE backup via `rglob`** into one collapsed
    scheme — `out/YYYY-MM/<prompt_taskid_mediaid>` month folders. It stays idempotent
    (files already at target = "already in place"), byte-safe (identical dupes
@@ -184,12 +196,13 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 6. **`find_image_file` excludes `out_dir/gallery/`** to prevent thumbnails from
    being returned as full-res images.
 7. **`find_files_for_media_id` recognizes both naming layouts** — prefixed
-   `*_<mid>.*` and bare `<mid>.*` — but it is not the single shared matcher this
-   invariant used to claim. The gallery (`find_image_file`) uses it; resume
-   (`run_download`) does not — it builds its own on-disk `media_id` index at
-   startup instead — and the audit (`audit_collection`) does not either. Tracked
-   as `docs/AUDIT_2026-07-21.md` P7: consolidating onto one real shared matcher is
-   still open work, not yet done.
+   `*_<mid>.*` and bare `<mid>.*` — but it is **not a single shared matcher**; that
+   framing is aspirational, not current fact. Only the gallery's `find_image_file`
+   calls it. Resume (`run_download`), the audit (`audit_collection`), `cmd_organize`,
+   `run_import_local`, `duplicate_groups`, and the Loom's `/api/loom/last-frame`
+   resolver each walk the tree independently instead, and each one's exclusion set
+   (which quarantine/thumbnail directories it skips) is its own, not shared.
+   Consolidating onto one real shared matcher is still open work, not yet done.
 
 ## The web suite
 
