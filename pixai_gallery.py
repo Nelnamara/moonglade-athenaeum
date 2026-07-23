@@ -11357,8 +11357,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             vid_exts = (".mp4", ".webm", ".mov", ".mkv")
             vid = None
-            # videos aren't in find_files_for_media_id (image-only) -- resolve via the
-            # catalog's stored filename, then fall back to a video-aware disk scan.
+            # find_files_for_media_id defaults to images -- resolve via the catalog's
+            # stored filename first, then fall back to the SAME shared matcher with
+            # exts=vid_exts, so the fallback gets the same exact media_id_of(p) == mid
+            # check and _duplicates/_deleted quarantine exclusion as every other
+            # matcher in this file (B17, audit 2026-07-21: the fallback used to be a
+            # bare '*<mid>.*' glob with neither -- a file under _deleted/ or
+            # _duplicates/ was a valid hit, and a shorter media_id could match as a
+            # substring of a longer, unrelated one's filename).
             row = get_row(db_path, mid) or {}
             fn = row.get("filename") or ""
             if fn:
@@ -11366,10 +11372,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 if cand.is_file() and cand.suffix.lower() in vid_exts:
                     vid = cand
             if vid is None:
-                for p in out_dir.rglob("*{}.*".format(mid)):
-                    if p.suffix.lower() in vid_exts and p.is_file() and p.stat().st_size:
-                        vid = p
-                        break
+                fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
+                if fallback:
+                    vid = fallback[0]
             if vid is None:
                 return jsonify({"error": "clip not downloaded yet -- generate/collect it first"}), 200
             fdir = out_dir / "loom" / "_frames"

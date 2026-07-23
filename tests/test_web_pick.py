@@ -526,6 +526,47 @@ def test_loom_handoff_needs_local_clip(tmp_path, monkeypatch):
     assert "not downloaded" in d["error"]
 
 
+def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch):
+    """B17 (audit 2026-07-21): the fallback resolver's bare '*<mid>.*' glob had no
+    quarantine exclusion -- a file under _deleted/ (a local purge) was a valid hit,
+    so a purged clip could be extracted and uploaded to seed the next (paid) shot.
+    No catalog row for this media_id, so the fast path can't shortcut past the
+    fallback -- this exercises exactly the buggy branch."""
+    import pixai_gallery as g
+    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir.mkdir()
+    (qdir / "shot_V9.mp4").write_bytes(b"fake")
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    calls = []
+    monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
+
+    cli = _authed_client(tmp_path, [])
+    d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
+
+    assert calls == [], "extracted a frame from a file quarantined under _deleted/"
+    assert "not downloaded" in d["error"]
+
+
+def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch):
+    """B17 (audit 2026-07-21): the fallback glob had no media_id_of(p) == mid check,
+    so a SHORTER media_id could match as a substring of a longer, UNRELATED one's
+    filename -- e.g. a request for 'V9' resolving to a clip whose real id is '9V9'."""
+    import pixai_gallery as g
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "other_9V9.mp4").write_bytes(b"fake")   # real media_id is "9V9"
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    calls = []
+    monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
+
+    cli = _authed_client(tmp_path, [])
+    d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
+
+    assert calls == [], "matched a DIFFERENT media_id's file via a substring collision"
+    assert "not downloaded" in d["error"]
+
+
 def test_gen_reference_image_passthrough():
     """Capture #14 (task 2030052367400863154): 'use as reference' = plain img2img,
     a top-level mediaId + strength on a standard submit."""
