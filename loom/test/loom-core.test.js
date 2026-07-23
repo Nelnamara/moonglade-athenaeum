@@ -4,7 +4,7 @@ import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta,
   flat, shotText, shotPayload, durOf, reelStats, effectivePrompt,
-  priceFingerprint, tallyPrices, formatCostEstimate,
+  priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
 } from "../src/loom-core.js";
 
 /* ---------- fixtures ---------- */
@@ -271,6 +271,43 @@ describe("priceFingerprint / tallyPrices / formatCostEstimate", () => {
   test("formatCostEstimate distinguishes a settled zero-cost paid shot from 'nothing settled'", () => {
     assert.equal(formatCostEstimate({ paid: 1, credits: 0 }), "0 cr");
     assert.equal(formatCostEstimate({}), "…");
+  });
+});
+
+describe("costTooltip", () => {
+  // Same hard rule as formatCostEstimate (see the shared comment above it in
+  // loom-core.js): a "0 cr"/"free" reading must only ever mean a genuinely settled,
+  // zero-cost result -- never merely unpriced or still-pricing. costTooltip's long
+  // form spells out every bucket by name, so the failure mode isn't a bare wrong
+  // word -- it's the `pending` count going missing from the sentence, which would
+  // leave "0 free-card, 0 paid (≈0 credits), 0 unpriced." standing on its own and
+  // reading exactly like a fully-settled, nothing-to-pay result.
+  test("genuinely free/settled result", () => {
+    const text = costTooltip({ free: 2, paid: 0, credits: 0, unknown: 0, pending: 0 });
+    assert.equal(text, "Cost to finish: 2 free-card, 0 paid (≈0 credits), 0 unpriced.");
+  });
+
+  test("paid/settled result shows the real credit total", () => {
+    const text = costTooltip({ free: 0, paid: 3, credits: 1500, unknown: 0, pending: 0 });
+    assert.equal(text, "Cost to finish: 0 free-card, 3 paid (≈1,500 credits), 0 unpriced.");
+  });
+
+  test("unpriced/pending state names the pending count instead of reading as settled-free", () => {
+    const text = costTooltip({ free: 0, paid: 0, credits: 0, unknown: 0, pending: 4 });
+    assert.equal(text, "Cost to finish: 0 free-card, 0 paid (≈0 credits), 0 unpriced, 4 still estimating.");
+    // The specific conflation this guards against: with pending dropped from the
+    // sentence, an all-zeros tooltip would be indistinguishable from a real free result.
+    assert.notEqual(text, "Cost to finish: 0 free-card, 0 paid (≈0 credits), 0 unpriced.");
+  });
+
+  test("pending is additive alongside real settled figures, not a replacement for them", () => {
+    const text = costTooltip({ free: 1, paid: 2, credits: 900, unknown: 1, pending: 3 });
+    assert.equal(text, "Cost to finish: 1 free-card, 2 paid (≈900 credits), 1 unpriced, 3 still estimating.");
+  });
+
+  test("no pending omits 'still estimating' entirely (only settled figures shown)", () => {
+    const text = costTooltip({ free: 0, paid: 1, credits: 250, unknown: 0, pending: 0 });
+    assert.doesNotMatch(text, /estimating/);
   });
 });
 
