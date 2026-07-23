@@ -9,6 +9,7 @@ import {
   friendlyGenErr, classifyTaskStatus,
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
+  loraIncompat, resolveLoraPayload, anyLoraUnresolved,
 } from "../src/loom-mutations.js";
 import { flat, shotText, actLetter } from "../src/loom-core.js";
 
@@ -427,5 +428,43 @@ describe("buildExportClips", () => {
     assert.equal(clips[1].crop, undefined);
     assert.equal(clips[2].crop, undefined);
     assert.equal(clips[3].crop, undefined);
+  });
+});
+
+describe("loraIncompat (D-11, ported from pixai_gallery.py's identical function)", () => {
+  test("exact match is compatible", () => {
+    assert.equal(loraIncompat("SDXL_MODEL", "SDXL_MODEL"), false);
+  });
+  test("case-insensitive", () => {
+    assert.equal(loraIncompat("sdxl_model", "SDXL_MODEL"), false);
+  });
+  test("architecture mismatch is incompatible", () => {
+    assert.equal(loraIncompat("DIT7B_MODEL", "SDXL_MODEL"), true);
+  });
+  test("fails OPEN on unknown/empty -- never blocks a submit on missing data", () => {
+    assert.equal(loraIncompat("", "SDXL_MODEL"), false);
+    assert.equal(loraIncompat("SDXL_MODEL", ""), false);
+    assert.equal(loraIncompat(null, null), false);
+  });
+});
+
+describe("resolveLoraPayload / anyLoraUnresolved (D-11)", () => {
+  test("only resolved LoRAs (a real version_id) are ever sent", () => {
+    const loras = [
+      { model_id: "1", version_id: "v1", weight: 0.7 },
+      { model_id: "2", version_id: "", weight: 0.5 },       // still pending
+      { model_id: "3", version_id: "", weight: 0.9, failed: true },  // failed lookup
+    ];
+    assert.deepEqual(resolveLoraPayload(loras), [{ version_id: "v1", weight: 0.7 }]);
+  });
+  test("empty/absent list is safe", () => {
+    assert.deepEqual(resolveLoraPayload([]), []);
+    assert.deepEqual(resolveLoraPayload(undefined), []);
+  });
+  test("anyLoraUnresolved is true while ANY entry lacks a version_id (pending or failed)", () => {
+    assert.equal(anyLoraUnresolved([{ version_id: "v1" }]), false);
+    assert.equal(anyLoraUnresolved([{ version_id: "v1" }, { version_id: "" }]), true);
+    assert.equal(anyLoraUnresolved([{ version_id: "", failed: true }]), true);
+    assert.equal(anyLoraUnresolved([]), false);
   });
 });
