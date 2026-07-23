@@ -71,7 +71,15 @@
     'mg-gallery-picker .mg-pk-cell img{width:100%;height:100%;object-fit:cover;display:block;}',
     'mg-gallery-picker .mg-pk-vid{position:absolute;top:5px;right:5px;background:rgba(6,4,16,.72);color:var(--text,#d6d2e2);',
     ' font-size:9px;border-radius:4px;padding:1px 6px;}',
-    'mg-gallery-picker .mg-pk-empty{grid-column:1/-1;color:var(--subtext,#9a93ab);text-align:center;padding:34px;font-size:13px;}'
+    'mg-gallery-picker .mg-pk-empty{grid-column:1/-1;color:var(--subtext,#9a93ab);text-align:center;padding:34px;font-size:13px;}',
+    /* Privacy blur (audit 2026-07-21 S5): this component never carried the host page's
+       body.privacy-blur rule at all -- picking through <mg-gallery-picker> (the Loom's own
+       gallery picker) painted the whole catalog unblurred regardless of the toggle. body is
+       real light DOM (no shadow root here), so the host page's class reaches straight in,
+       same shape as .card/.pick-cell in pixai_gallery.py. */
+    'body.privacy-blur mg-gallery-picker .mg-pk-cell img{filter:blur(16px);transition:filter .12s;}',
+    'body.privacy-blur mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img{filter:blur(28px);}',
+    'body.privacy-blur mg-gallery-picker .mg-pk-cell:hover img{filter:none;}'
   ].join('');
 
   function injectStyle() {
@@ -240,6 +248,7 @@
         var c = document.createElement('div');
         c.className = 'mg-pk-cell';
         c.title = m.prompt || m.media_id;
+        if (m.is_nsfw === '1') c.setAttribute('data-nsfw', '1');
         c.innerHTML = '<img loading="lazy" decoding="async" src="' + esc(m.thumb) + '" alt="">' +
           (m.is_video === '1' ? '<span class="mg-pk-vid">▶</span>' : '');
         c.addEventListener('click', function () { self._pick(m); });
@@ -256,7 +265,7 @@
       }
       this.dispatchEvent(new CustomEvent('mg-pick', { bubbles: true, composed: true,
         detail: { media_id: m.media_id, thumb: m.thumb, prompt: m.prompt || '',
-                  is_video: m.is_video === '1', duration: m.duration || '' } }));
+                  is_video: m.is_video === '1', duration: m.duration || '', is_nsfw: m.is_nsfw === '1' } }));
     }
 
     _upload() {

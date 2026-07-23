@@ -94,6 +94,57 @@ def test_gallery_images_type_filter_and_paging(tmp_path):
     assert da["total"] == 6 and "9" in [m["media_id"] for m in da["images"]]
 
 
+def test_gallery_images_includes_is_nsfw_for_privacy_blur(tmp_path):
+    """Audit 2026-07-21, S5 (the remaining half): /api/similar already projects is_nsfw
+    (fixed 2026-07-23) but /api/gallery-images -- the route the gallery Picker,
+    <mg-gallery-picker>, and the Generate drawer's reference slots all actually call --
+    did not, so Privacy Blur's stronger NSFW rule (.card[data-nsfw="1"] img) never saw
+    an NSFW thumbnail on any of those three surfaces."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", is_nsfw="1", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", is_nsfw="", created_at="2025-01-02T00:00:00"),
+    ])
+    d = cli.get("/api/gallery-images").get_json()
+    by_id = {m["media_id"]: m for m in d["images"]}
+    assert by_id["1"]["is_nsfw"] == "1"
+    assert by_id["2"]["is_nsfw"] == ""
+
+
+def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces(tmp_path):
+    """Audit 2026-07-21, S5 (the client half): with is_nsfw now on the wire (test above),
+    every surface rendering /api/gallery-images results needs to set data-nsfw on the card
+    it builds, and body.privacy-blur needs a rule that actually blurs it -- neither existed
+    for the gallery Picker (.pick-cell), the Edit tab's single reference slot
+    (#gen-ref-slot), <mg-gallery-picker> (.mg-pk-cell), or the Generate drawer's reference
+    slots (.mgd-slot, all three renderers) before this pass. Source-checks since none of
+    these are build-step components with an in-repo DOM test harness."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(m.is_nsfw==='1') c.setAttribute('data-nsfw','1');" in html          # .pick-cell
+    assert "f(m.media_id, thumb||m.thumb, m.prompt||'', m.is_nsfw||'')" in html    # pick() -> respond chain
+    assert "Picker.open(function(mid, thumb, prompt, is_nsfw){ d.respond(mid, thumb, is_nsfw); }" in html
+    assert 'genRef={media_id:mid, thumb:thumb, is_nsfw:is_nsfw}' in html          # #gen-ref-slot
+    assert 'body.privacy-blur .pick-cell[data-nsfw="1"] img' in html
+    assert 'body.privacy-blur #gen-ref-slot[data-nsfw="1"] img' in html
+
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-gallery-picker.js").read_text(encoding="utf-8")
+    assert "if (m.is_nsfw === '1') c.setAttribute('data-nsfw', '1');" in picker_js
+    assert "is_nsfw: m.is_nsfw === '1'" in picker_js
+    assert 'body.privacy-blur mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img' in picker_js
+
+    drawer_js = (Path(__file__).resolve().parents[1] / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
+    assert drawer_js.count("box.setAttribute('data-nsfw', '1');") == 3   # _renderSlots, _renderEndSlot, _renderVidSlots
+    assert "respond: function (media_id, thumb, is_nsfw)" in drawer_js
+    assert 'body.privacy-blur mg-generate-drawer .mgd-slot[data-nsfw="1"] img' in drawer_js
+
+    loom_jsx = (Path(__file__).resolve().parents[1] / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
+    assert "cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration, e.detail.is_nsfw);" in loom_jsx
+    assert 'openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw)' in loom_jsx
+
+    loom_bundle = (Path(__file__).resolve().parents[1] / "loom" / "dist" / "master-storyboard.bundle.js").read_text(encoding="utf-8")
+    assert "is_nsfw" in loom_bundle or "isNsfw" in loom_bundle   # esbuild output stays in sync with the .jsx source
+
+
 def test_collections_endpoint(tmp_path):
     rows = [_row(media_id="1", filename="a_1.png", collections="Banners,Faves",
                  created_at="2025-01-01T00:00:00"),

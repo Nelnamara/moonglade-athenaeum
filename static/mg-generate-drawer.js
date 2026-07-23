@@ -163,7 +163,15 @@
     /* the floating ref preview -- fixed so a host transform:scale() can't distort it */
     'mg-generate-drawer .mgd-preview{position:fixed;z-index:600;width:300px;background:var(--mantle,#131024);border:1px solid var(--surface1,#3a3460);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);overflow:hidden;display:none;pointer-events:none;}',
     'mg-generate-drawer .mgd-preview.open{display:block;}',
-    'mg-generate-drawer .mgd-preview img{width:100%;max-height:300px;object-fit:cover;display:block;}'
+    'mg-generate-drawer .mgd-preview img{width:100%;max-height:300px;object-fit:cover;display:block;}',
+    /* Privacy blur (audit 2026-07-21 S5): the reference-slot thumbnails (mgd-slot, set via
+       slotBox()) never carried the host page's body.privacy-blur rule -- once picked, an
+       NSFW reference image sat here in full, regardless of the toggle. Same shape as
+       .card/.pick-cell in pixai_gallery.py; body is real light DOM, so it reaches straight
+       through this element's own plain (non-shadow) markup. */
+    'body.privacy-blur mg-generate-drawer .mgd-slot img{filter:blur(16px);transition:filter .12s;}',
+    'body.privacy-blur mg-generate-drawer .mgd-slot[data-nsfw="1"] img{filter:blur(28px);}',
+    'body.privacy-blur mg-generate-drawer .mgd-slot:hover img{filter:none;}'
   ].join('');
 
   function injectStyle() {
@@ -318,6 +326,7 @@
 
   function slotBox(cssText) {
     var box = document.createElement('div');
+    box.className = 'mgd-slot';
     box.style.cssText = 'position:relative;width:72px;height:72px;border-radius:8px;border:1px solid var(--surface1,#3a3460);background:var(--surface0,#211f3a);cursor:pointer;overflow:hidden;display:grid;place-items:center;color:var(--subtext,#9a93ab);font-size:10.5px;text-align:center;' + (cssText || '');
     return box;
   }
@@ -516,6 +525,7 @@
         var box = slotBox();
         if (s) {
           refN++;
+          if (s.is_nsfw) box.setAttribute('data-nsfw', '1');
           var tag = (self._mode === 'flf' ? 'start' : '@image' + refN);
           box.innerHTML = '<img src="' + esc(s.thumb) + '" style="width:100%;height:100%;object-fit:cover;">' +
             '<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.88);color:var(--lavender,#b692e6);font-size:9px;padding:1px 5px;border-radius:4px;">' + tag + '</span>' +
@@ -559,6 +569,7 @@
       this._endWrap.innerHTML = '';
       var box = slotBox(), s = this._slots[1];
       if (s) {
+        if (s.is_nsfw) box.setAttribute('data-nsfw', '1');
         box.innerHTML = '<img src="' + esc(s.thumb) + '" style="width:100%;height:100%;object-fit:cover;">' +
           '<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.88);color:var(--lavender,#b692e6);font-size:9px;padding:1px 5px;border-radius:4px;">end</span>' +
           '<button type="button" class="mgd-vs-x" style="position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;border:none;background:rgba(21,19,28,.88);color:var(--subtext,#9a93ab);font-size:10px;line-height:1;cursor:pointer;padding:0;">&times;</button>';
@@ -585,6 +596,7 @@
         if (s) {
           refN++;
           box.style.borderStyle = 'solid';
+          if (s.is_nsfw) box.setAttribute('data-nsfw', '1');
           box.innerHTML = '<img src="' + esc(s.thumb) + '" style="width:100%;height:100%;object-fit:cover;">' +
             '<span class="mgd-vidbadge">▶</span>' +
             '<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.88);color:var(--lavender,#b692e6);font-size:9px;padding:1px 5px;border-radius:4px;">@video' + refN + '</span>' +
@@ -659,9 +671,9 @@
         bubbles: true, composed: true,
         detail: {
           slot: i, bank: bank, mode: this._mode, kind: (bank === 'vid' ? 'video' : 'image'),
-          respond: function (media_id, thumb) {
+          respond: function (media_id, thumb, is_nsfw) {
             if (!media_id) return;
-            var item = { media_id: String(media_id), thumb: thumb || ('/thumbs/' + media_id + '.jpg') };
+            var item = { media_id: String(media_id), thumb: thumb || ('/thumbs/' + media_id + '.jpg'), is_nsfw: !!is_nsfw };
             if (bank === 'vid') { self._vidSlots[i] = item; self._renderVidSlots(); }
             else { var arr = self._primary(); arr[i] = item; self._setPrimary(arr); self._renderSlots(); }
           }

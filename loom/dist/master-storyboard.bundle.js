@@ -1167,7 +1167,7 @@ ${"=".repeat(48)}
           a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
         });
         el.addEventListener("mg-pick-request", (e) => {
-          openPick((mid, thumb) => e.detail.respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
+          openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
         });
         el.addEventListener("mg-submit", (e) => {
           const a = activeRef.current;
@@ -2770,7 +2770,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         el.addEventListener("mg-pick", (e) => {
           const cb = pickCb;
           setPickCb(null);
-          if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration);
+          if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration, e.detail.is_nsfw);
         });
         el.addEventListener("mg-close", () => setPickCb(null));
       }
