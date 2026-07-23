@@ -132,6 +132,31 @@ class TestResolveMedia:
         assert url is None
 
 
+def test_variant_detection_cluster_is_gone():
+    """The --variant CLI flag was deleted in D-5, but its whole self-referential support
+    cluster survived as dead code: detect_variant() looped test_variant() over
+    VARIANT_CANDIDATES, test_variant() called media_url() (MEDIA_TMPL-based), and nothing
+    outside that chain ever called any of the three -- run_probe (the one plausible caller)
+    actually calls resolve_media() above, a separate urls-list/URL_VARIANT_PREFERENCE
+    mechanism (audit 2026-07-21, O7; a prior pass's claim that run_probe still needed this
+    cluster via detect_variant() was wrong, re-verified here). Zero callers anywhere,
+    confirmed by a repo-wide grep -- not even a test exercised it."""
+    import re
+    from pathlib import Path
+    dead_names = ("detect_variant", "test_variant", "media_url", "MEDIA_TMPL", "VARIANT_CANDIDATES")
+    for name in dead_names:
+        assert not hasattr(core, name), name
+    src = (Path(__file__).resolve().parents[1] / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    for name in dead_names:
+        # word-boundary, not substring -- "_media_url" (a live dict key elsewhere) must not
+        # false-fail this on "media_url".
+        assert not re.search(r'\b' + re.escape(name) + r'\b', src), name
+    # The LIVE mechanism (resolve_media's own resolution path) must be untouched.
+    assert hasattr(core, "MEDIA_BASE")
+    assert hasattr(core, "resolve_media")
+    assert hasattr(core, "URL_VARIANT_PREFERENCE")
+
+
 # ---------------------------------------------------------------------------
 # _quick_count() — verify it returns 0 on PixAIError without raising
 # ---------------------------------------------------------------------------
@@ -545,6 +570,25 @@ def test_sync_artworks_resolves_userid_via_session(tmp_path, mocker):
                         return_value={"edges": [], "pageInfo": {"hasPreviousPage": False}})
     res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     assert res["artworks"] == 0 and core.USER_ID == "resolved-99"   # ran instead of raising
+
+
+def test_artwork_detail_hash_config_key_is_gone():
+    """ARTWORK_DETAIL_HASH was read from config.json with a baked-in default, same shape as
+    its sibling ARTWORK_LIST_HASH just above -- but unlike that sibling (used by
+    artwork_list_gql/run_sync_artworks right here in this file), nothing anywhere ever reads
+    ARTWORK_DETAIL_HASH (audit 2026-07-21, schema-config-drift appendix row: "read from config
+    and given a baked default, then never used anywhere"). config.example.json documented it
+    as a settable override, so that mention goes too -- its live sibling stays."""
+    import json
+    from pathlib import Path
+    assert not hasattr(core, "ARTWORK_DETAIL_HASH")
+    assert hasattr(core, "ARTWORK_LIST_HASH")   # the live sibling must be untouched
+    repo_root = Path(__file__).resolve().parents[1]
+    src = (repo_root / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    assert "ARTWORK_DETAIL_HASH" not in src
+    example_cfg = json.loads((repo_root / "config.example.json").read_text(encoding="utf-8"))
+    assert "ARTWORK_DETAIL_HASH" not in example_cfg
+    assert "ARTWORK_LIST_HASH" in example_cfg   # sibling override documentation stays
 
 
 def test_resolve_loras(mocker):
