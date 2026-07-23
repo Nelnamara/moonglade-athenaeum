@@ -121,23 +121,38 @@ full meta (`prompt_full`, `seed`, `steps`, `sampler`, `cfg_scale`, `model_id/nam
 
 ```
 pixai_backup/
-├─ images/            flat downloads (pre-organize)
-├─ 2024-03/           organize: month folders, descriptive names
+├─ images/                flat downloads (pre-organize)
+├─ 2024-03/                organize: month folders, descriptive names
 │   └─ <prompt>_<taskid>_<mediaid>.<ext>
-├─ unknown-date/      organize: fallback month folder for rows with no created_at
-├─ videos/            backed-up + imported videos (mp4)
-├─ imported/          external media copied in via --import-local
-├─ gallery/thumbs/    768px JPEG thumbnails, one per media_id (immutable cache)
-├─ branding/          machine-local marks, frames, badges, reward art
-├─ loom/              The Loom's project store + exports
-├─ _duplicates/       quarantine from --dedup (reversible)
-├─ _deleted/          quarantine from gallery delete (recoverable)
+├─ unknown-date/           organize: fallback month folder for rows with no created_at
+├─ videos/                 backed-up + imported videos (mp4)
+├─ imported/               external media copied in via --import-local
+├─ gallery/thumbs/         768px JPEG thumbnails, one per media_id (immutable cache)
+├─ branding/               machine-local marks, frames, badges, reward art
+├─ branding.json           chosen mark + animation (POST /api/branding; separate from
+│                          the branding/ art dir above)
+├─ loom/                   The Loom's project store + exports
+│   ├─ exports/             finished storyboard renders (ffmpeg trim+concat -> loom_cut.mp4)
+│   ├─ kv/                  per-account key/value store: kv/<account>/<key>.json, with
+│   │                      legacy flat kv/<key>.json files kept as a read-only fallback
+│   ├─ _frames/             extracted last-frame PNGs (shot-to-shot chaining)
+│   ├─ _uploads/            staged data-URL uploads before submit
+│   └─ store.json           legacy pre-split store, migrated into kv/ on first touch
+├─ prompt_snippets/        per-account saved prompt snippets (<account>.json)
+├─ prompt_snippets.json    legacy install-wide snippets (read-only fallback)
+├─ view_presets/           per-account saved gallery views (<account>.json)
+├─ view_presets.json       legacy install-wide saved views (read-only fallback)
+├─ toolbox_presets.json    install-wide Toolbox presets
+├─ schedule.json           Control Panel's scheduled-task list
+├─ _duplicates/            quarantine from --dedup (reversible)
+├─ _deleted/               quarantine from gallery delete (recoverable)
 ├─ organize_manifest.csv   reversible move log (--undo-organize)
-├─ catalog.db         the source of truth
-├─ raw_tasks.jsonl    raw task data (for re-processing)
-├─ achievements.json  earned achievements + earn dates
-├─ telemetry.json     counters the achievement system reads
-└─ jobs.jsonl         append-only activity/job log
+├─ catalog.db              the source of truth
+├─ catalog.csv             legacy catalog format (auto-migrated in) / --export-csv output
+├─ raw_tasks.jsonl         raw task data (for re-processing)
+├─ achievements.json       earned achievements + earn dates
+├─ telemetry.json          counters the achievement system reads
+└─ jobs.jsonl              append-only activity/job log
 ```
 
 Thumbnails are keyed by `media_id`, **not** content-addressed — the filename is an
@@ -208,8 +223,10 @@ asserts it against a live request, so it is the authority when prose and code di
   Homebridge-style (`/api/server/stop|restart`; restart = exit 42, relaunched by the
   supervisor). CSV export (`/export-csv`) is a plain in-memory browser download, not a
   Panel subprocess.
-- **Branding**: machine-local marks in `out_dir/branding/marks/`, `/api/branding`
-  GET/POST (POST localhost-only), animated banner marks, a Desktop `.lnk` shortcut writer.
+- **Branding**: machine-local marks in `out_dir/branding/marks/`, `/api/branding` GET
+  (open)/POST (LOGIN-tier, like the rest of the writes above — not localhost), animated
+  banner marks. `/api/branding/shortcut` (the Desktop `.lnk` writer, LOCALHOST-only because
+  it shells out to the host machine) is the actual localhost-gated route in this group.
 
 ## Testing
 

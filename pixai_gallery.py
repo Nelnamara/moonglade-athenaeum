@@ -2897,8 +2897,9 @@ def create_app(out_dir: Path):
     # logs. Each action is a WHITELISTED argv against pixai_gallery_backup.py
     # (never an arbitrary command); destructive ones require confirm=True.
     # One job at a time. Localhost-gated at the routes. Runs the CLI as a
-    # subprocess (isolation + natural stdout capture -- same shape the GUI
-    # uses) with cwd = the checkout dir (where config.json lives).
+    # subprocess (isolation from the Flask process + natural stdout capture, so
+    # the unmodified CLI script's own print output streams straight to the
+    # Jobs card) with cwd = the checkout dir (where config.json lives).
     # ------------------------------------------------------------------
     _cli_path = str(Path(__file__).resolve().parent / "pixai_gallery_backup.py")
     _cli_dir = str(Path(__file__).resolve().parent)
@@ -3111,7 +3112,7 @@ def create_app(out_dir: Path):
 
     # ---- Automated tasks: run a SAFE job on an interval while the app is open ----
     # Persisted to out_dir/schedule.json. Only non-destructive actions are schedulable.
-    # An in-process daemon: fires while the gallery/GUI is running (it is NOT an OS-level
+    # An in-process daemon: fires while the gallery is running (it is NOT an OS-level
     # cron -- for always-on, point Windows Task Scheduler at `--update` instead).
     _sched_lock = threading.Lock()
 
@@ -6817,7 +6818,7 @@ document.addEventListener('DOMContentLoaded', function() {
       data-prompt="{{ _prompt|e }}" onclick="copyPrompt(this)">Copy Prompt</button>
     {% endif %}
     <button class="btn" data-cmd="{{ row.media_id }}" onclick="copyCmd(this)"
-      title="Copy this image's media_id (paste into the GUI Video/Edit tab)">Copy media id</button>
+      title="Copy this image's media_id (paste into the Edit tab or the Loom)">Copy media id</button>
     <button class="btn" onclick="window.print()" title="Print this image with its details (Letter)">&#128424; Print</button>
     {% if row.is_video != '1' %}
     <a class="btn" href="/contact-sheet?ids={{ row.media_id }}&format=photo" target="_blank" title="Print as a 4x6 photo">4&times;6 photo</a>
@@ -7273,7 +7274,8 @@ function savePrompt() {
   <p style="color:var(--subtext);font-size:13px;">
     {{ groups|length }} media id(s) exist in more than one folder. The
     <span style="color:var(--green);">keeper</span> is the most-organized copy;
-    <code>--dedup</code> would quarantine the rest. Review below, then run Dedup from the GUI Utilities tab.
+    <code>--dedup</code> would quarantine the rest. Review below, then run Dedup from the
+    <a href="{{ url_for('panel') }}">Control Panel</a>.
   </p>
   {% for g in groups %}
   <div style="display:flex;gap:14px;align-items:flex-start;background:var(--mantle);border-radius:8px;padding:12px;margin-bottom:10px;">
@@ -8481,7 +8483,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/ping")
     def api_ping():
-        """Cheap liveness probe — the Stop/Restart reconnect overlay polls this. Open."""
+        """Cheap liveness probe — the Stop/Restart reconnect overlay polls this. Login required
+        (any session, local or LAN)."""
         return jsonify({"ok": True})
 
     @app.route("/api/server/stop", methods=["POST"])
@@ -9369,15 +9372,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         true ONLY for a request carrying a valid logged-in session (see /login
         below). Deliberately has NO localhost/loopback bypass -- owner directive
         2026-07-19: "I would expect to require login via any path with this new
-        setup whether localhost hostname or IP." A fresh install therefore MUST
-        run `python pixai_gallery_backup.py --add-web-user` once (account creation
-        is deliberately CLI-only, kept off the web surface) before the web app is
-        reachable at all, from any address including 127.0.0.1 -- there is no
-        bootstrap/first-run bypass. `_is_local_request()` still exists and is still
-        used, but ONLY as an independent, stricter, ADDITIONAL requirement on the
-        couple of routes that must never run for a remote session even when
-        logged in (/api/branding/shortcut, destructive Panel actions) -- it is no
-        longer consulted here.
+        setup whether localhost hostname or IP." A fresh install creates its
+        first account either via `python pixai_gallery_backup.py --add-web-user`
+        or, while no accounts exist yet, through /login's own local-only
+        bootstrap_mode form -- see login()'s docstring below for the real,
+        shipped web-based bootstrap flow; account creation is NOT CLI-only.
+        That bootstrap lives entirely inside login()'s own narrower gate, not
+        here: `_is_authorized_request()` itself still has no bypass of any kind,
+        so the web app remains unreachable, from any address including
+        127.0.0.1, to anything but /login until an account exists and signs in.
+        `_is_local_request()` still exists and is still used, but ONLY as an
+        independent, stricter, ADDITIONAL requirement on the couple of routes
+        that must never run for a remote session even when logged in
+        (/api/branding/shortcut, destructive Panel actions) -- it is no longer
+        consulted here.
 
         Every genuine access-control gate that used to read `_is_local_request()`
         was converted to this during the LAN-auth pass; a few purely-informational
@@ -9546,7 +9554,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/model-search")
     def api_model_search():
-        """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key -> localhost only.
+        """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key. Login required
+        (any session, local or LAN).
         ?q=&kind=base|lora&size=N&offset=N&category=&sort=popular|newest.
 
         Two data sources by design: the REST /search (default) has RICH rows (description /
@@ -10202,8 +10211,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/branding", methods=["GET", "POST"])
     def api_branding():
-        """The banner mark (the icon beside the title) + its animation. GET is
-        open (cosmetic; the LAN view renders the same header); POST is owner-only.
+        """The banner mark (the icon beside the title) + its animation. GET and POST both
+        require login (any session, local or LAN) -- cosmetic, so any authorized device may
+        read or change it, same as the rest of the LOGIN-tier settings surface.
         Persists to out_dir/branding.json."""
         if request.method == "GET":
             cfg = load_branding(out_dir)
@@ -11127,7 +11137,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def loom_generate():
         """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
         Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
-        video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Localhost."""
+        video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Login required
+        (any session, local or LAN)."""
         try:
             import base64
             import hashlib
@@ -11765,7 +11776,8 @@ def main():
         print("(self-signed HTTPS: your browser/phone will show a one-time 'proceed anyway' warning)")
     print("Press Ctrl+C to stop.\n")
     if getattr(args, "open_browser", False):
-        # fire just after app.run() starts blocking (the GUI proves this pattern)
+        # fire just after app.run() starts blocking (a timer thread is the only way to
+        # run code after a blocking call starts)
         import threading, webbrowser
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)
