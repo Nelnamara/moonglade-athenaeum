@@ -199,8 +199,8 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
    `*_<mid>.*` and bare `<mid>.*` — but it is **not a single shared matcher**; that
    framing is aspirational, not current fact. Only the gallery's `find_image_file`
    calls it. Resume (`run_download`), the audit (`audit_collection`), `cmd_organize`,
-   `run_import_local`, `duplicate_groups`, and the Loom's `/api/loom/last-frame`
-   resolver each walk the tree independently instead, and each one's exclusion set
+   `run_import_local`, `duplicate_groups`, and `/api/loom/handoff`'s frame-extraction
+   fallback (`loom_handoff`) each walk the tree independently instead, and each one's exclusion set
    (which quarantine/thumbnail directories it skips) is its own, not shared.
    Consolidating onto one real shared matcher is still open work, not yet done.
 
