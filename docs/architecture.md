@@ -69,6 +69,26 @@ gallery.
 | `find_files_for_media_id()` | All on-disk files for a media_id, BOTH layouts (prefixed `*_<mid>.*` AND bare `<mid>.*`), exact-id checked, gallery excluded. Used by the gallery's `find_image_file` — **not** by resume or the audit, which each still walk the tree independently (see Invariant 7) |
 | `create_app()` | Flask app factory; calls `init_db` + `backfill_batches` before serving |
 
+## CLI flags
+
+`python pixai_gallery_backup.py --help` is the authoritative per-flag text (every flag has
+help text; keep it that way when adding one). This map exists because the tuning knobs are
+easy to miss next to the headline commands — the user-facing walkthroughs live in `wiki/`
+(Backing-Up, Generating).
+
+| Group | Flags | Notes |
+|---|---|---|
+| Edit tuning (`--edit-image`) | `--edit-model` `--edit-resolution` `--edit-aspect` `--edit-quality` | all four pass through `clamp_edit_config()`, which corrects them to what the chosen model really supports (e.g. Reference Pro: 2K/4K only, no quality knob) |
+| Video tuning (`--generate-video`) | `--tail` `--camera-movement` `--audio-language` `--video-prompt-helper` `--video-channel` | `--tail` = FLF last frame; `--video-channel private` = the site's "Enhanced" channel and lands as `isPrivate` (dest is `args.vchannel`, not `video_channel`); video's prompt helper is OFF by default — the opposite of image gen |
+| All create paths | `--params-json` `--poll-timeout` `--kaisuuken-id` `--no-card` | `--params-json` returns early from the param builders — it overrides every other generation flag; `--poll-timeout` is seconds (default 300) |
+| Download shaping | `--delay` `--count-page-size` `--collect-only` `--name-length` `--name-sep` | `--delay` is a seconds float throttling most API loops, not just downloads; `--collect-only` forces the serial path; `--count-page-size` errors server-side above ~10k |
+| Format conversion | `--convert` `--convert-existing` `--jpeg-quality` `--jpeg-bg` `--keep-webp` | need Pillow; `--convert-existing` is a standalone no-token pass and defaults to png; the `.webp` is replaced unless `--keep-webp` |
+| Metadata backfill | `--backfill-meta` `--backfill-full-meta` `--with-loras` | `--backfill-meta` fills url/width/height only; `--with-loras` widens `--backfill-full-meta` to rows missing LoRA data (long run) |
+| Catalog repair | `--fix-model-names` `--relabel-removed` `--faststart-videos` `--restore-orphans` | `--relabel-removed` only acts with `--fix-model-names`; `--restore-orphans` is the one thing that makes `--verify-dupes` write; `--faststart-videos` needs ffmpeg on PATH and is idempotent |
+| Watch / niche | `--watch-seconds` `--all-contests` | modifiers for `--watch` (seconds; 0 = until Ctrl-C) and `--contests` (include ended) |
+
+Pure modifiers do nothing alone — each acts only alongside its partner command named above.
+
 ## The one-shot sync (`--sync`)
 
 One command runs the whole refresh chain; every step is idempotent (re-running on a

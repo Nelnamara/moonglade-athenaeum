@@ -67,21 +67,19 @@
     // minmax(216px,1fr)) for the pre-redesign flat card layout, where every direct child
     // really was one ~216px tile -- left unchanged by mistake when the redesign landed,
     // which auto-placed every new full-width section into narrow tiled columns instead of
-    // stacking them, the actual cause of the overlapping/scrambled render the owner hit.)
+    // stacking them -- the actual cause of the overlapping/scrambled render this fixes.)
     '.ach-grid{display:flex;flex-direction:column;margin-top:18px;}',
     '.ach-nar{width:34px;height:34px;border-radius:50%;object-fit:cover;object-position:60% 30%;cursor:pointer;border:1px solid var(--surface1);vertical-align:middle;margin-left:9px;transition:transform .12s,border-color .12s;}',
     '.ach-nar:hover{transform:scale(1.12);border-color:var(--lavender);}',
     '.ach-unleash{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--ruby);margin-left:12px;cursor:pointer;user-select:none;border:1px solid var(--ruby-deep);border-radius:999px;padding:3px 10px;background:rgba(224,53,94,.08);}',
     '.ach-unleash input{accent-color:var(--ruby);}',
-    // ---- The Folio of Honors (Trophy Hall redesign, 2026-07-22) -- design source: the
-    // owner's Figma Make export, built from the legendary/feat frame slice values handed
-    // off earlier the same night. Tier-triad colors (--tc/--tcl/--tcd) below are the SAME
-    // hex values as .ach-m2's toast triads (see above) confirmed byte-for-byte identical --
-    // one set defined here too rather than sharing across scopes, since .ach-m2's are
-    // deliberately scoped and this keeps that scoping intact. Everything else uses the
-    // app's real design tokens (var(--lavender) etc.), NOT the mockup's fixed hex, so the
-    // Hall keeps retinting per active skin like the rest of the app -- the mockup itself
-    // had no skin system to be aware of.
+    // ---- The Folio of Honors (Trophy Hall redesign, 2026-07-22). Tier-triad colors
+    // (--tc/--tcl/--tcd) below are the SAME hex values as .ach-m2's toast triads (see
+    // above), confirmed byte-for-byte identical -- one set defined here too rather than
+    // sharing across scopes, since .ach-m2's are deliberately scoped and this keeps that
+    // scoping intact. Everything else uses the app's real design tokens (var(--lavender)
+    // etc.), never fixed hex, so the Hall keeps retinting per active skin like the rest
+    // of the app.
     '.ach-hall.open{align-items:center;padding:3vh 3vw;}',
     '.ach-hall .ach-panel{width:96vw;max-width:1320px;height:94vh;max-height:860px;padding:0;display:flex;flex-direction:column;overflow:hidden;background:linear-gradient(160deg,var(--mantle) 0%,var(--base) 100%);transform-origin:top right;animation:hall-in .28s cubic-bezier(.16,.84,.34,1.06);}',
     '@keyframes hall-in{from{opacity:0;transform:scale(.93) translateY(-12px);}to{opacity:1;transform:none;}}',
@@ -91,8 +89,8 @@
     '.hall-title{font-size:19px;font-weight:700;color:var(--text);display:flex;align-items:center;white-space:nowrap;}',
     // the narrator avatar doubles as the Folio's header mascot -- restyled with a glow ring
     // to match the new look, but still the SAME clickable poke-the-narrator Easter egg
-    // (Ach.poke() -> the Triggered feat); the mockup has no way to know about that, so this
-    // keeps the real feature rather than swapping in an inert decorative image.
+    // (Ach.poke() -> the Triggered feat), deliberately kept live rather than swapped for
+    // an inert decorative image.
     '.ach-hall .ach-nar{width:36px;height:36px;border:2px solid rgba(182,146,230,.85);box-shadow:0 0 0 2px rgba(120,60,200,.45),0 0 9px rgba(182,146,230,.7),0 0 20px rgba(120,60,200,.3);}',
     '.hall-score{font-size:12.5px;color:var(--subtext);white-space:nowrap;}',
     '.hall-score b{color:var(--lavender);font-variant-numeric:tabular-nums;}',

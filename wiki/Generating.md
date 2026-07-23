@@ -75,6 +75,8 @@ python pixai_gallery_backup.py --generate --task-id <id>
 | `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | |
 | `--confirm` | off | **required** to spend credits |
 | `--task-id` | — | fetch/catalog an existing task instead of creating one |
+| `--poll-timeout` | `300` | seconds to wait for a submitted task to finish before giving up (every create path) |
+| `--params-json` | — | raw parameters object, submitted as-is — **overrides every other generation flag** (every create path) |
 
 Generated images are tagged `source='api'` — filter to them in the gallery via
 **Source → Generated**.
@@ -135,6 +137,16 @@ Notes:
   than letting you choose it and fail at submit); the CLI has no equivalent guard, so a
   hand-typed `--duration 15` on a non-V4.0 model is on you to avoid.
 
+### Video tuning flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--tail <media_id>` | — | last-frame image → first/last-frame (FLF) interpolation between `--image` and this |
+| `--camera-movement` | unset | `horizontal`/`pan`/`roll`/`tilt`/`vertical-pan`/`zoom`; unset omits it (camera direction can also just go in the prompt) |
+| `--audio` / `--audio-language` | off / `english` | generate audio with the clip; the language only matters with `--audio` |
+| `--video-prompt-helper` | off | let PixAI expand your video prompt (off by default — the **opposite** of image gen, where the helper is on unless `--no-prompt-helper`) |
+| `--video-channel` | `private` | `private` = the site's "Enhanced" channel (Plus/Premium); `normal` otherwise |
+
 ## Edit an image with words (`--edit-image`)
 
 Describe a change and let PixAI's Edit model apply it — "make it nighttime", "add a hat".
@@ -150,6 +162,17 @@ python pixai_gallery_backup.py --edit-image --edit-src <media_id> --prompt "make
 # edit a LOCAL image (uploads it, then edits) — spends credits:
 python pixai_gallery_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt "..." --confirm
 ```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--edit-model` | Edit Pro | edit model id (e.g. Reference Pro's id for reference-style edits) |
+| `--edit-resolution` | `1K` | output resolution (`1K`/`2K`/…) |
+| `--edit-aspect` | `3:4` | output aspect ratio |
+| `--edit-quality` | `medium` | quality tier |
+
+The four are clamped to what the chosen model really supports before submit — e.g.
+Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values are
+corrected (and shown in the preview) rather than rejected.
 
 ## Enhance an image (`--enhance`) — one-click PixAI workflows
 
@@ -264,6 +287,15 @@ Just generate on a model you have a card for — the match is automatic:
 Overrides: **`--no-card`** forces paying credits even when a card matches; **`--kaisuuken-id <id>`**
 forces a specific card. Cards closest to expiry are used first.
 
+## Contests (`--contests`)
+
+```bash
+python pixai_gallery_backup.py --contests                 # live contests (read-only)
+python pixai_gallery_backup.py --contests --all-contests  # include ended ones too
+```
+
+Lists PixAI's contests — name, dates, entry tag — so you can aim a generation at one.
+The web gallery has the same list under **Contests** in the header. Read-only either way.
 
 ---
 

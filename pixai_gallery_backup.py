@@ -5208,7 +5208,7 @@ _WS_SUBSCRIPTION = (
     "subscription Watch { personalEvents { "
     "taskUpdated { id status updatedAt mediaId media { id urls { url } } priority userId } "
     "newNotification { id title createdAt userId } } }")
-# Confirmed lifecycle (owner-captured 2026-07-04): waiting -> running -> completed. The
+# Confirmed lifecycle: waiting -> running -> completed. The
 # 'completed' frame is the one carrying a populated mediaId, so that's when we mirror.
 _WS_DONE_STATUS = "completed"
 
@@ -5778,7 +5778,7 @@ def _apply_kaisuuken(session, params, args):
             if attempt == 0:
                 time.sleep(1.5)
     if check_err is not None:
-        # On-theme, owner-requested wording (2026-07-22, D-1): mirrors the "job lost"
+        # On-theme wording: mirrors the "job lost"
         # message PixAI's own site shows on a similar random failure, rather than a raw
         # technical error -- still refuses to guess and silently spend credits, just
         # says so in the app's own voice instead of engineer-speak.
@@ -6947,7 +6947,8 @@ def main():
                           "(no new credits). Recovers a stranded generation that --update "
                           "can't see, since generated tasks don't enter the listing feed")
     gen.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
-    gen.add_argument("--poll-timeout", type=int, default=300)
+    gen.add_argument("--poll-timeout", type=int, default=300,
+                     help="seconds to wait for a submitted task to finish before giving up (default 300)")
     gen.add_argument("--confirm", action="store_true",
                      help="REQUIRED for --generate/--generate-video to actually submit (spends credits)")
     # --- image-to-video generation (shares --prompt/--negative/--model/--confirm/--task-id) ---
@@ -6964,7 +6965,8 @@ def main():
     gen.add_argument("--video-mode", dest="vmode", default="professional",
                      choices=["basic", "professional"], help="video quality tier")
     gen.add_argument("--audio", action="store_true", help="generate audio with the video")
-    gen.add_argument("--audio-language", dest="audio_language", default="english")
+    gen.add_argument("--audio-language", dest="audio_language", default="english",
+                     help="spoken language for --audio video sound (default english; no effect without --audio)")
     gen.add_argument("--video-prompt-helper", dest="video_prompt_helper", action="store_true",
                      help="enable PixAI's prompt-helper for video (off by default)")
     gen.add_argument("--camera-movement", dest="camera_movement", default="",

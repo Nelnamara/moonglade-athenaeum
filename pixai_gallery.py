@@ -3620,9 +3620,9 @@ __DESIGN_TOKENS__
     #lb-caption { max-width: 100%; order: 3; flex-basis: 100%; font-size: 11px; }
     .lb-actions .btn { min-height: 40px; padding: 8px 12px; }
 
-    /* FILTERS as a bottom sheet (owner: "fills a ton of the screen" / "bottom slider is
-       the way on an iphone"). Reuses the existing toggleFilters() + .open class unchanged --
-       only what .open MEANS visually changes, from an inline expand to a slide-up sheet. */
+    /* FILTERS as a bottom sheet: on a phone the inline expand swallows most of the
+       viewport, so small screens get a slide-up sheet instead. Reuses the existing
+       toggleFilters() + .open class unchanged -- only what .open MEANS visually changes. */
     .filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 220;
       max-height: 78vh; overflow-y: auto; background: var(--mantle); border-top: 1px solid var(--surface1);
       border-radius: 16px 16px 0 0; box-shadow: 0 -14px 40px rgba(0,0,0,.5);
@@ -7139,8 +7139,7 @@ function savePrompt() {
 
     LOGIN_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 {# Splash background: three tinted radial washes, a procedurally-generated star
-   field, and a vignette. Ported from static/_mockup_login_panel.html's
-   SplashBackground(). The stars are an SVG feTurbulence filter, not an image
+   field, and a vignette. The stars are an SVG feTurbulence filter, not an image
    asset -- so this renders identically on a fresh clone with no branding art
    dropped in, and costs no request. #}
 <div class="login-splash" aria-hidden="true">
@@ -7241,13 +7240,11 @@ function savePrompt() {
 </script>
 <style>
   /* ---- Login screen -------------------------------------------------------
-     Ported value-for-value from static/_mockup_login_panel.html (the locked
-     design source). An earlier pass reproduced the mock's COMPONENTS -- card,
-     inputs, button -- but not its LAYOUT, and the result read as a different
-     page: no banner, no splash, a left-aligned inline logo instead of a
-     centered stack, and placeholder-only inputs where the mock has real
-     uppercase field labels. Owner: "It looks nothing like the design... but
-     has the basics." Every value below is the mock's own. */
+     The composition is the design, not just the components: banner + splash
+     behind a centered stack, with real uppercase field labels rather than
+     placeholder-only inputs. Treat the values below as one tuned set --
+     changing them piecemeal is how this page once drifted into reading as a
+     different page entirely. */
   .login-splash { position: fixed; inset: 0; background: var(--base); overflow: hidden; z-index: 0; }
   .splash-wash { position: absolute; inset: 0;
     background:
@@ -8141,7 +8138,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         redirect -- confirmed against the installed Flask/Werkzeug via a throwaway
         reproduction. The CR/LF variants don't even get that far: redirect() raises an
         unhandled ValueError ("Header values must not contain newline characters") instead,
-        turning a real login into a 500. Adversarial-review regression -- see
+        turning a real login into a 500. Regression -- see
         tests/test_web_auth.py's safe-next tests."""
         _UNSAFE_NEXT_CHARS = ("\\", "\t", "\r", "\n")
         if (url and url.startswith("/") and not url.startswith("//")
@@ -8153,9 +8150,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Populate a freshly-authenticated session for `username` -- the ONE place
         that decides what "you are now logged in" means, shared by BOTH a normal
         /login credential POST and the local-only first-account bootstrap POST
-        below (factored out per owner directive 2026-07-19's web-based bootstrap
-        flow, so the two paths can never drift apart on what a session looks
-        like)."""
+        below (factored out so the two paths can never drift apart on what a
+        session looks like)."""
         import pixai_gallery_backup as core
         session.clear()
         session["user"] = username
@@ -8172,9 +8168,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         "invalid username or password" message -- never which field was wrong --
         and a freshly rotated CSRF token.
 
-        Local-only first-account bootstrap (owner directive 2026-07-19: "NO CLI
-        first login bullshit... its why I built a fucking login screen in
-        figma" -- the design is static/_mockup_login_panel.html): while NO
+        Local-only first-account bootstrap (first-run setup happens in the
+        browser, never the CLI): while NO
         accounts exist yet, a request from the machine the server itself runs on
         (_is_local_request()) gets this SAME form doubling as an account-creation
         form (a hidden mode=create field) instead of a banner pointing at
@@ -8189,7 +8184,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         The lockout check and the CSRF check run FIRST, ahead of that
         wants_create/bootstrap_mode gate, exactly like an ordinary credential
         POST -- a mode=create POST is not a different, lesser-checked request
-        shape (adversarial-review fix, 2026-07-19: the gate used to sit ahead of
+        shape (regression fix: the gate used to sit ahead of
         both, so a mode=create POST from an already-lockout-triggering IP sailed
         through with neither the lockout message nor any CSRF requirement,
         confirmed reproducible). Reordering does NOT weaken the bootstrap
@@ -8583,8 +8578,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         Refuses a duplicate username outright rather than silently resetting a
         stranger's password (that's still what add_or_update_web_user itself
         does, and stays available for the owner via --add-web-user for exactly
-        that recovery case) -- mirrors static/_mockup_login_panel.html's Add
-        User validation.
+        that recovery case).
 
         The exists-check and the write happen in ONE call to
         core.add_web_user_if_new() (a single _accounts_lock acquisition), not a
@@ -8593,8 +8587,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         concurrent requests claiming the same brand-new username could both pass
         the "doesn't exist yet" check before either write landed, and the second
         write would silently reset the first request's just-created password.
-        Adversarial-review hardening, 2026-07-19 (same root cause as
-        /api/users/remove's last-account race, see that route's docstring)."""
+        (Same root-cause family as /api/users/remove's last-account race -- see
+        that route's docstring.)"""
         if not _is_local_request():
             return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
@@ -9565,13 +9559,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # the keyboard (see CHANGELOG.md's "Real session-based web login" entry).
     # _is_local_request() itself now backs only the one deliberately-narrower
     # exception (/api/branding/shortcut, which shells out to the SERVER machine's
-    # own PowerShell/COM) -- see that route's docstring. This comment previously
-    # claimed every generation endpoint was local-only, which stopped being true
-    # once the LAN-auth pass landed; fixed per an adversarial-review finding that
-    # it would otherwise mislead the next reader (2026-07-19).
+    # own PowerShell/COM) -- see that route's docstring.
     #
-    # FAILS CLOSED on a missing/empty remote_addr (adversarial-review fix,
-    # 2026-07-19): a prior version treated "" as local, which is safe under
+    # FAILS CLOSED on a missing/empty remote_addr: a prior version treated
+    # "" as local, which is safe under
     # THIS app's actual deployment (app.run() -> Werkzeug's dev server always
     # populates remote_addr from the real TCP peer, never blank/None -- a plain
     # HTTP client cannot spoof it), but is a fail-OPEN default in a function
@@ -9586,9 +9577,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def _is_authorized_request():
         """THE canonical authorization gate for every network-originated request:
         true ONLY for a request carrying a valid logged-in session (see /login
-        below). Deliberately has NO localhost/loopback bypass -- owner directive
-        2026-07-19: "I would expect to require login via any path with this new
-        setup whether localhost hostname or IP." A fresh install creates its
+        below). Deliberately has NO localhost/loopback bypass -- login is
+        required on every path, localhost hostname or IP included; no request
+        address is a trusted tier. A fresh install creates its
         first account either via `python pixai_gallery_backup.py --add-web-user`
         or, while no accounts exist yet, through /login's own local-only
         bootstrap_mode form -- see login()'s docstring below for the real,
