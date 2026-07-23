@@ -480,6 +480,48 @@ def test_export_zip_by_collection_resolves_full_membership(tmp_path):
     assert names == {"a_1.png", "b_2.png"}     # both Trip members; the Other one excluded
 
 
+def test_contact_sheet_collection_button_appears_with_active_filter(tmp_path):
+    """O5 (audit 2026-07-21): /contact-sheet?collection=<name> is fully implemented
+    server-side (see contact_sheet() in pixai_gallery.py) but had NO ui entry point anywhere
+    -- every emitter that builds a contact-sheet link passed ids= only. Its ZIP-export twin
+    ('Download collection', downloadCollection()) IS wired into the filter bar, right next to
+    the Collection dropdown, gated on the exact same "a collection filter is active"
+    condition (same reasoning: there's no collection to act on otherwise). This adds a
+    sibling contact-sheet control in that same spot, under that same condition."""
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a.png", collections="Moonlit")])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a.png").write_bytes(b"x")
+    client = login_client(tmp_path)
+
+    # No collection filter -> no contact-sheet-for-collection entry (nothing to sheet FROM,
+    # same absence-reasoning as downloadCollection's own button just above it).
+    assert b"contactSheetCollection(this.dataset.coll)" not in client.get("/").data
+
+    # Collection filter active -> the entry is rendered, carrying that collection.
+    page = client.get("/?collection=Moonlit").data
+    assert b"contactSheetCollection(this.dataset.coll)" in page
+    assert b'data-coll="Moonlit"' in page
+    # sits beside the ZIP twin, not instead of it
+    assert b"downloadCollection(this.dataset.coll)" in page
+
+
+def test_contact_sheet_collection_js_builds_the_collection_query():
+    """The JS side of O5: contactSheetCollection(name) must open /contact-sheet with
+    collection=, mirroring bulkContactSheet()'s existing ids= pattern (both encodeURIComponent
+    the value and open in a new tab -- the print view is meant to sit alongside the gallery,
+    not navigate away from it)."""
+    from pathlib import Path
+    import re
+    src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
+    m = re.search(r"function contactSheetCollection\(name\)\s*\{([\s\S]*?)\n\}", src)
+    assert m, "contactSheetCollection(name) JS function not found"
+    body = m.group(1)
+    assert "/contact-sheet?collection=" in body
+    assert "encodeURIComponent(name)" in body
+    assert "_blank" in body, "should open in a new tab, like bulkContactSheet's ids= version"
+
+
 def test_detail_page_has_plain_download(tmp_path):
     """The detail page offers a plain one-click Download of the original (no convert here --
     that lives in the bulk/collection flow)."""
