@@ -3615,14 +3615,19 @@ __DESIGN_TOKENS__
   .btn-danger:hover { opacity: 0.9; background: var(--red); box-shadow: 0 3px 10px -3px rgba(243,139,168,.5); }
   .btn-primary { background: linear-gradient(180deg, #c4a6f0 0%, var(--lavender) 100%); color: var(--base); border-color: var(--lavender); font-weight: 600; }
   .btn-primary:hover { background: linear-gradient(180deg, #c4a6f0 0%, var(--lavender) 100%); box-shadow: 0 0 0 1px rgba(182,146,230,.5), 0 4px 14px -4px rgba(182,146,230,.7); }
-  /* All dropdowns share the button look: dark, rounded, custom lavender-grey caret. */
-  .filters select, #preset-select, select.p-sel { -webkit-appearance: none; appearance: none;
+  /* All dropdowns share the button look: dark, rounded, custom lavender-grey caret.
+     .pick-filters select (the gallery-picker modal's collection/source/rating/sort
+     dropdowns) had NO styling at all until it joined this list -- the other half of the
+     same native-select-styling-split audit row that gave .gen-sel's <select>s their arrow
+     back, just above; there was never a comment anywhere suggesting either gap was
+     deliberate. */
+  .filters select, #preset-select, select.p-sel, .pick-filters select { -webkit-appearance: none; appearance: none;
     background-color: var(--surface0);
     background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="10" height="6"%3E%3Cpath d="M0 0l5 6 5-6z" fill="%239a93ab"/%3E%3C/svg%3E');
     background-repeat: no-repeat; background-position: right 10px center;
     border: 1px solid var(--surface1); border-radius: 7px; color: var(--text);
     padding: 6px 28px 6px 12px; font-size: 13px; cursor: pointer; font-family: inherit; }
-  .filters select:hover, #preset-select:hover, select.p-sel:hover { border-color: var(--lavender); }
+  .filters select:hover, #preset-select:hover, select.p-sel:hover, .pick-filters select:hover { border-color: var(--lavender); }
 
   /* Active-filter chips */
   .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px 0; align-items: center; }
@@ -3670,6 +3675,20 @@ __DESIGN_TOKENS__
 
   /* Grid */
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 200px), 1fr)); gap: 12px; padding: 16px 20px; }
+  /* Clearance for the persistent Activity chip (#jobs-fab, static/mg-notify.js): it's
+     position:fixed at left:14px;bottom:14px, and JobsCard.applyState() shows it via .show
+     whenever the tray is CLOSED -- which is the default (mg_jobs_open unset), so on every
+     ordinary page load it sits on top of the grid's bottom-left corner with no clearance at
+     all, permanently eating clicks for whatever card scrolls under it -- not just while a
+     job is actually running (audit row: "the dead zone is permanent, not intermittent").
+     No page-side rule ever gave the grid room for it (unlike the Loom shell just above,
+     which budgets the same 56px-ish FAB footprint + breathing room for its OWN #eb-help-btn
+     via #root .lv-gen{padding-bottom:64px}). This is the last `.grid` rule in the sheet
+     (deliberately -- see the mobile/portrait overrides above it), so it applies at every
+     breakpoint without touching their own padding/gap values. The FAB keeps showing (that
+     part is an intentional persistent entry point, not the bug); the grid just stops
+     rendering content underneath it. */
+  .grid { padding-bottom: 64px; }
   .card { background: var(--mantle); border-radius: 8px; overflow: hidden; border: 2px solid transparent; transition: border-color .15s; position: relative; cursor: pointer; }
   .card:hover { border-color: var(--surface1); }
   .card.selected { border-color: var(--purple-bright); box-shadow: 0 0 0 1px var(--purple-bright); }
@@ -4314,6 +4333,8 @@ document.addEventListener('DOMContentLoaded', function() {
     <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
     <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
             title="Saved views"><option value="">Saved views…</option></select>
+    <button class="btn" onclick="deletePreset()" title="Delete the selected saved view"
+            style="padding:6px 10px;">&#10005;</button>
     <button class="btn" onclick="savePreset()" title="Save current filters as a named view">Save view</button>
   </div>
 </div>
@@ -4460,8 +4481,27 @@ function savePreset() {
   fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name: n, query: location.search || '?'}) })
     .then(function(r){ return r.json(); }).then(function(d) {
+      // Used to silently no-op on a server rejection (e.g. a >4096-char query string) --
+      // the prompt() just closed and nothing else ever happened. Same fix shape as Snips.persist().
       if (d && d.presets) { viewPresets = d.presets; renderPresets(); }
-    }).catch(function(){});
+      else if (window.Toast) Toast.show({kind:'err', title:'View not saved', msg:(d&&d.error)||'The server rejected the save.'});
+    }).catch(function(){ if (window.Toast) Toast.show({kind:'err', title:'View not saved', msg:'Network error.'}); });
+}
+function deletePreset() {
+  // The server has always supported POST {delete: name} (/api/view-presets), but no UI ever
+  // called it -- a saved view could be created but never removed. This is the missing
+  // control, wired to the select's own current value (the "select's reserved delete
+  // affordance" the server route's docstring already anticipated).
+  var s = document.getElementById('preset-select');
+  var n = s && s.value;
+  if (!n) return;
+  if (!confirm('Delete the saved view "' + n + '"?')) return;
+  fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({delete: n}) })
+    .then(function(r){ return r.json(); }).then(function(d) {
+      if (d && d.presets) { viewPresets = d.presets; renderPresets(); }
+      else if (window.Toast) Toast.show({kind:'err', title:'Delete failed', msg:(d&&d.error)||'The server rejected the delete.'});
+    }).catch(function(){ if (window.Toast) Toast.show({kind:'err', title:'Delete failed', msg:'Network error.'}); });
 }
 function loadPreset(n) {
   if (!n) return;
@@ -5078,7 +5118,18 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-aspects button{padding:4px 9px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
   .gen-aspects button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
   .gen-row{display:flex;gap:8px;}
-  .gen-sel{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12.5px;}
+  .gen-sel{width:100%;background-color:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12.5px;}
+  .gen-sel:hover{border-color:var(--lavender);}
+  /* Same custom-arrow treatment as .filters select/#preset-select/select.p-sel (native
+     select styling split, audit row: three selectors got appearance:none + the lavender
+     caret, .gen-sel's <select>s and the Picker's own selects never did -- no rationale
+     anywhere for the split, just an oversight, so made consistent here instead of documented
+     as intentional. `select.gen-sel`, not bare `.gen-sel`: the class is shared with several
+     plain text/number <input>s in the same drawer (gen-seed, gen-cw/ch, imp-newcoll) that
+     must NOT grow a dropdown arrow or the wider right padding a caret needs. */
+  select.gen-sel{-webkit-appearance:none;appearance:none;cursor:pointer;
+    background-image:url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="10" height="6"%3E%3Cpath d="M0 0l5 6 5-6z" fill="%239a93ab"/%3E%3C/svg%3E');
+    background-repeat:no-repeat;background-position:right 8px center;padding-right:24px;}
   .gen-check{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:12px;margin-top:8px;cursor:pointer;}
   /* The two lines that used .gen-cost (Generate + Edit) are <mg-cost-badge> now, which brings
      its own box -- padding/radius/border/font were lifted from this rule verbatim when the
@@ -5088,11 +5139,6 @@ document.addEventListener('DOMContentLoaded', function(){
      stale copies of the cost styling are the exact drift the consolidation exists to end. */
   .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
   .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
-  .gen-ce{min-height:66px;white-space:pre-wrap;overflow-y:auto;max-height:180px;}
-  .gen-ce:empty::before{content:attr(data-placeholder);color:var(--overlay0);pointer-events:none;}
-  .gen-ce:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
-  .vp-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:5px;padding:1px 6px 1px 2px;font-size:11.5px;color:var(--lavender);margin:0 2px;vertical-align:-3px;cursor:default;user-select:none;}
-  .vp-chip img{width:16px;height:16px;border-radius:3px;object-fit:cover;}
   .gen-moon{display:inline-block;width:15px;height:15px;border-radius:50%;background:var(--lavender);position:relative;overflow:hidden;vertical-align:-3px;margin-right:7px;box-shadow:0 0 9px rgba(182,146,230,.75);}
   .gen-moon::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--mantle);animation:gen-eclipse 2.6s ease-in-out infinite;}
   @keyframes gen-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}
@@ -5683,7 +5729,7 @@ var YourArt = (function(){
       g.appendChild(c);
     });
     el('art-foot').innerHTML = d.views_synced ? 'Live view counts, fetched fresh. Likes/comments from your last <code>--sync-artworks</code>.'
-      : 'Ranked by likes (live views load on the localhost server). Run <code>--sync-artworks</code> to refresh stats.';
+      : 'Ranked by likes (live views load lazily, from any signed-in device). Run <code>--sync-artworks</code> to refresh stats.';
   }
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
   return { open:open, close:close };
@@ -5870,7 +5916,18 @@ var Snips = (function(){
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function load(){ return (list!==null?Promise.resolve():fetch('/api/snippets').then(function(r){return r.json();})
       .then(function(d){ list=d.snippets||[]; }).catch(function(){ list=[]; })); }
-  function persist(){ fetch('/api/snippets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snippets:list})}); }
+  function persist(){
+    // Was fully fire-and-forget: the server answers 200 with an {error:...} body on a write
+    // failure (see /api/snippets' except OSError branch), and nothing here ever looked at
+    // the response -- a save/delete could silently not stick and the UI would still show it
+    // as saved until the next reload wiped it back out. Surface a failure the same way
+    // Acct.claim() already does (window.Toast), and only there -- a clean save stays silent
+    // exactly as before.
+    fetch('/api/snippets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snippets:list})})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(!d || d.error){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:(d&&d.error)||'The server rejected the save.'}); } })
+      .catch(function(){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:'Network error.'}); });
+  }
   function open(anchor, tgt){ target=tgt; load().then(function(){ render(); place(anchor); }); }
   function hide(){ var m=menu(); if(m) m.style.display='none'; }
   function place(a){ var m=menu(), r=a.getBoundingClientRect();
@@ -6655,6 +6712,9 @@ var Similar = (function(){
         c.className='card'; c.setAttribute('data-mid', it.media_id);
         c.setAttribute('data-prompt', it.prompt||'');
         if(it.is_video==='1') c.setAttribute('data-video','1');
+        // Mirrors the server template's own is_nsfw-gated data-nsfw attribute (see the main
+        // grid's card markup) -- without it, Privacy Blur never touches an NSFW lookalike here.
+        if(it.is_nsfw==='1') c.setAttribute('data-nsfw','1');
         c.innerHTML='<a class="cover" href="/image/'+encodeURIComponent(it.media_id)+'"></a>'
           +'<img class="loaded" src="'+it.thumb+'" loading="lazy" decoding="async" alt="">'
           +(it.is_video==='1'?'<div class="vbadge" title="Video">\\u25b6</div>':'')
@@ -6675,7 +6735,14 @@ function bulkSendVideo(){
     refs.push({mid:mid, thumb:'/thumbs/'+mid+'.jpg'});
   });
   if(!refs.length) return;
-  Gen.addVideoRefs(refs.slice(0,9));
+  // Gen.addVideoRefs() itself caps at 6 (the multi-ref drawer's real limit, see its own
+  // comment) -- this used to slice(0,9), a stale number left over from before that cap
+  // dropped 9->6 in the full-parity split. addVideoRefs's cap was always the authoritative
+  // one, so nothing over-sent either way, but nobody was ever TOLD their extra picks got
+  // dropped -- fixed here, not by raising the cap.
+  if(refs.length>6 && window.Toast) Toast.show({kind:'err', title:'Only 6 images used',
+    msg:'The video drawer takes up to 6 reference images — '+(refs.length-6)+' of your '+refs.length+' were left out.'});
+  Gen.addVideoRefs(refs);
   clearAll();   // sent to the video drawer -- clear the gallery selection (we stay on the page)
 }
 document.addEventListener('DOMContentLoaded', function(){
@@ -9344,6 +9411,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         tmp = tempfile.mkdtemp(prefix="mg_export_") if transforming else None
         mem = io.BytesIO()
         n = 0
+        # convert_image()/embed_metadata() never raise -- they report failure via a
+        # returned/discarded status NOTE and quietly hand back the untouched original. That
+        # note used to be thrown away (convert's into `_note`, embed's not even captured),
+        # so "export as JPEG + embed prompt" could silently ship untouched originals with
+        # zero signal anywhere. This is a plain form POST -> file-download response (see
+        # doExportDownload() in the page's own JS): there's no fetch/JSON leg for a status
+        # message to ride, so the only channel that survives the download is a small report
+        # INSIDE the zip itself, added only when something actually needed reporting.
+        warnings = []
         try:
             with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
                 seen_names = set()
@@ -9361,27 +9437,43 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         try:
                             shutil.copy2(p, work)
                             if fmt != "original":
-                                work, _note = core.convert_image(work, fmt, keep_original=False)
+                                work, note = core.convert_image(work, fmt, keep_original=False)
+                                if note not in ("ok", "already"):
+                                    warnings.append("{}: convert to {} -> {} (shipped as-is)"
+                                                     .format(p.name, fmt, note))
                             if embed:
-                                core.embed_metadata(work, {
+                                enote = core.embed_metadata(work, {
                                     "prompt": row.get("prompt_full") or row.get("prompt") or "",
                                     "media_id": mid, "task_id": row.get("task_id") or "",
                                     "model": row.get("model") or "", "seed": row.get("seed") or "",
                                     "date": row.get("created_at") or ""})
+                                if enote != "ok":
+                                    warnings.append("{}: embed prompt -> {} (not embedded)"
+                                                     .format(p.name, enote))
                             src = work
-                        except Exception:
+                        except Exception as e:
                             src = p        # any transform failure -> ship the original untouched
+                            warnings.append("{}: transform failed ({}) -- shipped the original"
+                                             .format(p.name, _redact_host_paths(str(e))[:120]))
                     name = src.name
                     if name in seen_names:
                         name = "{}_{}".format(mid, src.name)
                     seen_names.add(name)
                     z.write(src, arcname=name)
                     n += 1
+                if warnings:
+                    report = ("Some files in this export did not convert and/or embed the prompt "
+                               "as requested -- they were shipped as their original file instead:\n\n"
+                               + "\n".join(warnings) + "\n")
+                    z.writestr("_export_warnings.txt", report)
             if not n:
                 return "No matching images found.", 404
             mem.seek(0)
-            return send_file(mem, mimetype="application/zip", as_attachment=True,
+            resp = send_file(mem, mimetype="application/zip", as_attachment=True,
                              download_name="pixai_selection_{}.zip".format(n))
+            if warnings:
+                resp.headers["X-Export-Warnings"] = str(len(warnings))
+            return resp
         finally:
             if tmp:
                 shutil.rmtree(tmp, ignore_errors=True)   # bytes are already in `mem`
@@ -9715,7 +9807,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if not r:
                 continue        # the sidecar index can drift from later catalog deletes
             isv = str(r.get("is_video") or "") == "1"
+            # is_nsfw rides along so the client's hand-cloned .card (Similar.open() below --
+            # this modal builds its own DOM instead of reusing the server-rendered template at
+            # the top of the page, unlike every other card-producing surface) can set
+            # data-nsfw the same way the Jinja template does. Without it, Privacy Blur
+            # (body.privacy-blur .card[data-nsfw="1"] img) never sees an NSFW lookalike here
+            # at all, and it never gets blurred -- fixed alongside the client half below.
+            isnsfw = str(r.get("is_nsfw") or "") == "1"
             out.append({"media_id": str(mid), "is_video": "1" if isv else "",
+                        "is_nsfw": "1" if isnsfw else "",
                         "thumb": "/thumbs/{}.jpg".format(mid), "score": round(float(score), 3),
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
         return jsonify({"images": out, "total": len(out), "query": str(media_id)})
@@ -10171,6 +10271,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             pass
         metrics = achievement_metrics(db_path)
         metrics.update(telemetry_metrics(out_dir))
+        persist_error = None
         with _ach_lock:
             state = load_ach_state(out_dir)
             result = compute_achievements(metrics, state.get("seen"),
@@ -10187,7 +10288,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 state["earned_at"] = ea
                 if newly:
                     state["seen"] = sorted(set(state.get("seen") or []) | set(newly))
-                save_ach_state(out_dir, state)
+                # save_ach_state()'s bool return used to be discarded here, so a disk-write
+                # failure still answered 200 with no hint that "seen"/earned_at never made it
+                # to disk -- the newly-earned toast would then re-fire on the next load since
+                # the server forgot it already showed it. The achievements DATA below is still
+                # correct either way (computed fresh from the catalog every call, not from the
+                # state file), so this stays a soft error alongside a normal response rather
+                # than failing the whole request.
+                if not save_ach_state(out_dir, state):
+                    persist_error = "could not save achievement progress (disk write failed)"
             earned_at = state.get("earned_at") or {}
         feats_revealed = any(
             a["earned"] for a in result["achievements"] if a["tier"] == "feat")
@@ -10216,6 +10325,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         result["skin"] = state.get("skin", "moonglade")
         result["earned_at"] = earned_at   # {id: iso-date}; only earned ids -> no hidden-feat leak
         result["metrics"] = metrics
+        if persist_error:
+            result["error"] = persist_error
         return jsonify(result)
 
     @app.route("/api/skin", methods=["POST"])
@@ -10235,7 +10346,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             state = load_ach_state(out_dir)
             changed = state.get("skin") != skin
             state["skin"] = skin
-            save_ach_state(out_dir, state)
+            saved = save_ach_state(out_dir, state)
+        if not saved:
+            # save_ach_state() is "best-effort; swallows write errors" by design (its own
+            # docstring) -- but that return value used to be dropped on the floor here, so a
+            # disk-write failure still answered 200 {"skin": skin} as if it had stuck. Report
+            # what's ACTUALLY active (a fresh read, not the requested value) instead of lying.
+            return jsonify({"error": "could not save skin (disk write failed)",
+                            "skin": load_ach_state(out_dir)["skin"]}), 200
         if changed:                       # Interior Decorator: an explicit re-dress
             telem_bump("skin_changed_runs", out_dir=out_dir)
         return jsonify({"skin": skin})
@@ -10644,8 +10762,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def _view_presets_path(user):
         from urllib.parse import quote
         # quote(safe="") so a username can never escape the directory or collide: every
-        # path separator, dot and space becomes a percent-escape. Same technique as the
-        # Loom's kv store (_loom_kv_path).
+        # path separator and space becomes a percent-escape (dots, letters, digits, "-"
+        # and "~" are RFC 3986 "unreserved" and quote() always leaves them literal, safe
+        # or not -- harmless here since the result is one filename component, never a
+        # path, so a literal dot can't turn into a directory traversal). Same technique
+        # as the Loom's kv store (_loom_kv_path).
         return _view_presets_dir() / (quote(str(user), safe="") + ".json")
 
     def _legacy_view_presets_path():
@@ -11175,8 +11296,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 # ever changes.
                 try:
                     _loom_kv_path(user, k).unlink()
-                except OSError:
-                    pass
+                except FileNotFoundError:
+                    pass    # already gone -- deleting a nonexistent key is still a success
+                except OSError as e:
+                    # A real failure (locked file, read-only mount, permissions) used to fall
+                    # into the same bare `except OSError: pass` as "already gone" above, so
+                    # {"ok": true} came back even though the file is still sitting there --
+                    # matches loom_set's own OSError handling just above in this file.
+                    return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:120]}), 500
         return jsonify({"ok": True})
 
     @app.route("/api/loom/handoff", methods=["POST"])
@@ -11629,7 +11756,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # for a task that likely succeeded. Leave the job at its last-known state (it ages
             # out, or the live-mirror watcher collects the real result). Only a genuine
             # st["phase"] == "failed" above logs a terminal failure.
-            return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
+            #
+            # The RESPONSE used to say phase:'failed' too, which defeated the whole point of
+            # the paragraph above: static/mg-notify.js's Jobs.poll() treats phase==='failed'
+            # as terminal and stops polling right there (it only reschedules on anything
+            # else), so even with the job log correctly left alone, THIS live poll would
+            # still brick the card with a false failure. Report it as non-terminal instead --
+            # poll() falls into its 'running' branch on anything but 'done'/'failed' and just
+            # tries again in 3s, up to its own 6h ceiling either way (audit fail-open fix).
+            return jsonify({"phase": "running",
+                            "status": "checking… ({})".format(_redact_host_paths(str(e))[:160])}), 200
 
     @app.route("/api/jobs")
     def api_jobs():
@@ -11797,8 +11933,10 @@ def main():
                     help="don't build catalog thumbnails on startup (fast boot; missing "
                          "ones show 'no preview'). Per-generation thumbs are still made.")
     ap.add_argument("--open-browser", action="store_true",
-                    help="open the gallery in your default browser once the server is up "
-                         "(used by the double-click 'Serve Gallery' launcher)")
+                    help="open the gallery in your default browser ~1.5s after the server "
+                         "starts (manual convenience for a terminal launch; the double-click "
+                         "'Serve Gallery' launcher does NOT pass this -- it polls the server "
+                         "until it actually answers and opens the browser itself)")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
