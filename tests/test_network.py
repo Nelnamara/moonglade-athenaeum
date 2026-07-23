@@ -547,6 +547,62 @@ def test_sync_artworks_resolves_userid_via_session(tmp_path, mocker):
     assert res["artworks"] == 0 and core.USER_ID == "resolved-99"   # ran instead of raising
 
 
+def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker):
+    """B15: unlike gql() (retries 4x, then RAISES), artwork_list_gql swallows a
+    RequestException/non-200/bad-JSON with NO retry and just returns None (see its
+    own docstring: 'Returns the Relay connection dict ... or None on failure'). On
+    page 1 that correctly raises; on page 2+ the pagination loop treats it EXACTLY
+    like a legitimate 'no more pages' and breaks silently -- the run then reports a
+    complete-looking total for what is actually a partial sync. FAILS before the
+    fix: run_sync_artworks's return dict has no 'fail' key at all, so res['fail']
+    raises KeyError."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    page1 = {"edges": [{"node": {"id": "aw1", "mediaId": "m1", "title": "Page1 Art",
+                                 "visibility": "PUBLIC", "isNsfw": False,
+                                 "likedCount": 1, "commentCount": 0}}],
+             "pageInfo": {"hasPreviousPage": True, "startCursor": "cursor2"}}
+    # Page 1 succeeds; page 2's fetch "fails" (artwork_list_gql's own failure mode: None).
+    mocker.patch.object(core, "artwork_list_gql", side_effect=[page1, None])
+
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+
+    assert res["artworks"] == 1                 # page 1's artwork still landed -- not discarded
+    assert res["fail"] == 1                      # but the early stop is now visible, not silent
+
+
+def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mocker):
+    """B15: a video that fails to download after retries (download() returns
+    ('fail', None), the same status run_download's own dl['fail'] counts) must be
+    just as visible here -- currently it's silently absorbed into a lower
+    'Videos saved/present: N of M' console tally with no return-value or job-status
+    signal at all. FAILS before the fix for the same reason as the pagination
+    test: no 'fail' key in the return dict."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    conn = {"edges": [{"node": {"id": "aw1", "mediaId": "m1", "title": "Animated",
+                                "visibility": "PUBLIC", "isNsfw": False,
+                                "likedCount": 0, "commentCount": 0,
+                                "videoMediaId": "vid1"}}],
+            "pageInfo": {"hasPreviousPage": False}}
+    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    mocker.patch.object(core, "already_downloaded", return_value=None)
+    mocker.patch.object(core, "resolve_media", return_value=("https://x/vid1.mp4", {}))
+    mocker.patch.object(core, "download", return_value=("fail", None))
+
+    res = core.run_sync_artworks(SimpleNamespace(
+        out=str(tmp_path), token=None, delay=0, with_videos=True, workers=1))
+
+    assert res["videos"] == 0                    # the failed video was not counted as saved
+    assert res["fail"] == 1                       # and the failure is now visible
+
+
 def test_resolve_loras(mocker):
     mocker.patch.object(core, "model_name_gql",
                         side_effect=lambda s, vid: {"111": "DetailLora", "222": "222"}.get(str(vid), str(vid)))
