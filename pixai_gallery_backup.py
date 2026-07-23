@@ -33,7 +33,6 @@ QUICK START
   python pixai_gallery_backup.py --probe     # detect full-res variant, sanity-check
   python pixai_gallery_backup.py             # download everything (backward)
   python pixai_gallery_backup.py --max 40    # small test first
-  python pixai_gallery_backup.py --variant original   # force a variant if you know it
 """
 
 __version__ = "2.2.0"
@@ -5690,10 +5689,13 @@ def _apply_kaisuuken(session, params, args):
             if attempt == 0:
                 time.sleep(1.5)
     if check_err is not None:
+        # On-theme, owner-requested wording (2026-07-22, D-1): mirrors the "job lost"
+        # message PixAI's own site shows on a similar random failure, rather than a raw
+        # technical error -- still refuses to guess and silently spend credits, just
+        # says so in the app's own voice instead of engineer-speak.
         raise PixAIError(
-            "free-card check failed twice ({}); refusing to guess and silently spend "
-            "credits. Retry, or pass --no-card to proceed and pay credits "
-            "deliberately.".format(check_err))
+            "Lost to the Void -- the free-card check didn't come back before submitting, "
+            "so nothing was spent. Wait a moment and try again. ({})".format(check_err))
     if best and best.get("id"):
         params["kaisuukenId"] = best["id"]
         print("  free card matches ({}) -> attaching it; this costs 0 credits "
@@ -6695,8 +6697,6 @@ def main():
                          "(slow). Default uses the catalog size as a fast estimate.")
     ap.add_argument("--delay", type=float, default=0.4,
                     help="seconds to wait between API requests (default: 0.4)")
-    ap.add_argument("--variant", default=None,
-                    help="force a media variant (skip auto-detect), e.g. original")
     ap.add_argument("--probe", action="store_true",
                     help="show first page + auto-detect the full-res variant, then exit")
     ap.add_argument("--count", action="store_true",

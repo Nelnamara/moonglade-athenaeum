@@ -198,7 +198,7 @@ def test_apply_kaisuuken_check_failure_aborts_instead_of_silently_paying(monkeyp
         raise core.PixAIError("503 upstream hiccup")
     monkeypatch.setattr(core, "_rest_post", flaky)
     params = {"modelId": "m"}
-    with pytest.raises(core.PixAIError, match="free-card check failed"):
+    with pytest.raises(core.PixAIError, match="Lost to the Void"):
         core._apply_kaisuuken(object(), params, _args())
     assert "kaisuukenId" not in params
     assert len(calls) >= 2   # retried at least once before giving up rather than guessing
