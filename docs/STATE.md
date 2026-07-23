@@ -535,7 +535,12 @@ What's still CLI-only, tracked so the web surface stays complete:
 - (`--restore-orphans` and `--undo-organize` were the last CLI-only *maintenance* actions,
   and both now render Panel buttons. `reconcile-deleted` runs via `/api/panel/run` and the
   scheduler but renders no button by design, `panel_visible: False`. `PANEL_ACTIONS` in
-  `pixai_gallery.py`.)
+  `pixai_gallery.py`. `--faststart-videos` is deliberately CLI-only for a different reason:
+  it's a one-time remux for videos downloaded before the auto-faststart path shipped —
+  every current video-acquisition path (`run_sync_videos`, `_download_video_task`,
+  `run_import_local`) already calls `video_faststart()` at collect time, so there's nothing
+  left for a Panel button to do going forward. Deprecated-in-place by owner decision — D-6,
+  `docs/AUDIT_2026-07-21.md`.)
 
 ---
 
