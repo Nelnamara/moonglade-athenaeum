@@ -14,7 +14,21 @@
    On selection it emits a bubbling CustomEvent('mg-pick', { detail: <model row> }); the
    detail is the raw /api/model-search row (model_id, title, type, base_model, preview_url,
    liked_count, ref_count, official, description, ...). React hosts bind via a ref +
-   addEventListener('mg-pick', ...) since React doesn't wire custom events through JSX props. */
+   addEventListener('mg-pick', ...) since React doesn't wire custom events through JSX props.
+
+   D-11: opt-in MULTI-SELECT mode (`<mg-model-picker kind="lora" multi>`), added for the
+   Loom's LoRA picker. Single-value mode (the default, `multi` absent) is UNCHANGED --
+   byte-for-byte the same behavior as before, zero regression risk to the Gallery's mount,
+   which doesn't use this component at all yet. In multi mode:
+     - clicking a card TOGGLES membership (add/remove) instead of replacing a single value.
+     - each picked LoRA is resolved via /api/model-version (same as the Gallery's own
+       toggleLora()) to fill version_id/lora_base_type/trigger_words; the failure/pending
+       cases are handled the same way too (an unresolved LoRA is marked `failed`, never
+       silently dropped -- see the Gallery's fail-open fix, audit 2026-07-21).
+     - mg-pick's detail becomes { model, selected } (selected=true on add/resolve-update,
+       false on remove) instead of the raw row -- a deliberate shape difference gated on
+       the new opt-in attribute, not a change to the existing single-value contract.
+     - `.selected` (getter) returns the current multi-select array. */
 (function () {
   'use strict';
   if (window.customElements && customElements.get('mg-model-picker')) return;
@@ -109,6 +123,8 @@
       this._q = '';
       this._seq = 0;
       this._value = null;
+      this._multi = this.hasAttribute('multi');
+      this._selected = [];
       this.innerHTML =
         '<input class="mg-q" type="text" placeholder="search models…" aria-label="Search models">' +
         '<div class="mg-empty"></div>' +
@@ -160,7 +176,7 @@
       e.style.display = 'none';
       rows.forEach(function (m) {
         var c = document.createElement('div');
-        c.className = 'mg-card' + (self._value && self._value.model_id === m.model_id ? ' sel' : '');
+        c.className = 'mg-card' + (self._isSelected(m) ? ' sel' : '');
         var cov = m.preview_url
           ? '<img class="mg-cov' + (m.should_blur ? ' blur' : '') + '" loading="lazy" src="' + esc(m.preview_url) + '" alt="">'
           : '<div class="mg-cov"></div>';
@@ -180,13 +196,62 @@
       });
     }
 
+    _isSelected(m) {
+      if (this._multi) return this._selected.some(function (e) { return e.model_id === m.model_id; });
+      return this._value && this._value.model_id === m.model_id;
+    }
+
     _pick(m, card) {
+      if (this._multi) { this._toggleMulti(m, card); return; }
       this._value = m;
       var g = this._grid;
       if (g) { var sel = g.querySelector('.mg-card.sel'); if (sel) sel.classList.remove('sel'); }
       if (card) card.classList.add('sel');
       this._hidePreview();
       this.dispatchEvent(new CustomEvent('mg-pick', { bubbles: true, composed: true, detail: m }));
+    }
+
+    _toggleMulti(m, card) {
+      var self = this, i = -1;
+      this._selected.forEach(function (e, j) { if (e.model_id === m.model_id) i = j; });
+      this._hidePreview();
+      if (i >= 0) {
+        var removed = this._selected.splice(i, 1)[0];
+        if (card) card.classList.remove('sel');
+        this.dispatchEvent(new CustomEvent('mg-pick', {
+          bubbles: true, composed: true, detail: { model: removed, selected: false }
+        }));
+        return;
+      }
+      // Same shape as the Gallery's toggleLora(): push an incomplete entry immediately
+      // (host can render a pending/hourglass chip), resolve in the background, then
+      // dispatch again with the filled-in entry. An empty/failed resolve is marked
+      // `failed`, never silently dropped -- mirrors the fail-open fix (audit 2026-07-21):
+      // a LoRA that never resolves must not be able to vanish from a submit unnoticed.
+      var entry = { model_id: m.model_id, title: m.title, preview_url: m.preview_url,
+                    version_id: '', weight: 0.7, lora_base_type: '', trigger_words: '', failed: false };
+      this._selected.push(entry);
+      if (card) card.classList.add('sel');
+      this.dispatchEvent(new CustomEvent('mg-pick', {
+        bubbles: true, composed: true, detail: { model: entry, selected: true }
+      }));
+      fetch('/api/model-version?model_id=' + encodeURIComponent(m.model_id))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          entry.version_id = d.version_id || '';
+          entry.lora_base_type = d.lora_base_model_type || '';
+          entry.trigger_words = d.trigger_words || '';
+          entry.failed = !entry.version_id;
+          self.dispatchEvent(new CustomEvent('mg-pick', {
+            bubbles: true, composed: true, detail: { model: entry, selected: true }
+          }));
+        })
+        .catch(function () {
+          entry.failed = true;
+          self.dispatchEvent(new CustomEvent('mg-pick', {
+            bubbles: true, composed: true, detail: { model: entry, selected: true }
+          }));
+        });
     }
 
     _showPreview(m, anchor) {
@@ -237,6 +302,7 @@
 
     get value() { return this._value || null; }
     set value(v) { this._value = v || null; }
+    get selected() { return this._selected.slice(); }
   }
 
   window.customElements.define('mg-model-picker', MgModelPickerEl);
