@@ -216,8 +216,27 @@ def test_committed_loom_bundle_matches_a_fresh_build(tmp_path):
 
 def test_no_real_newline_inside_confirm_string(client):
     """Even without Node: the cloud-delete confirm must keep its escaped newline as
-    the two chars backslash-n, not an actual line break that splits the literal."""
+    the two chars backslash-n, not an actual line break that splits the literal.
+
+    confirmBulkDeleteCloud's confirm() argument is several single-quoted JS literals
+    joined with `+` across multiple source lines -- a real newline BETWEEN those
+    literals (where the template wraps the `+`-concatenation) is harmless source
+    formatting, but a real newline INSIDE one of the quoted literals is a JS syntax
+    error. The old version checked the newline-freedom of the WHOLE matched span
+    (picking up that harmless formatting newline) and then papered over the resulting
+    false positive with `"\\n\\n" in html`, which is true on every render regardless
+    of what is inside the confirm() call -- it only checks the escape sequence exists
+    SOMEWHERE on the whole page, which it always does. That made the assertion pass
+    unconditionally, even with the real bug reintroduced (audit: tests-that-dont-bite,
+    2026-07-21). Tightened: pull out each quoted literal from the matched span and
+    check each ONE for a real newline, not the span they're formatted across."""
     html = client.get("/").get_data(as_text=True)
     m = re.search(r"confirm\('Delete '.*?\)\)", html, flags=re.S)
     assert m, "confirmBulkDeleteCloud string not found"
-    assert "\n" not in m.group(0).split("typed")[0][:200] or "\\n\\n" in html
+    literals = re.findall(r"'((?:[^'\\]|\\.)*)'", m.group(0), flags=re.S)
+    assert literals, "no quoted string literals found inside the confirm() call"
+    bad = [s for s in literals if "\n" in s]
+    assert not bad, (
+        "confirmBulkDeleteCloud has a real newline inside a JS string literal -- "
+        "it should be the escaped two chars backslash-n, not an actual line break "
+        "(which is a JS syntax error): {!r}".format(bad))
