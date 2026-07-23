@@ -6560,6 +6560,13 @@ var Gen = (function(){
   function fix(){
     var src=editSrc(); if(!src){ el('edit-src').focus(); return; }
     if(!fixBoxes.length){ el('fix-result').style.display='block'; el('fix-result').innerHTML='<span style="color:var(--subtext);font-size:12px;">Drag a box over a hand or face first.</span>'; return; }
+    // No price check exists for this action (audit 2026-07-21, unfiled-workflow-findings):
+    // /v2/task/fixer is a separate endpoint from the createGenerationTask family /v2/task-price
+    // mirrors, so it cannot be priced the way every other spend surface in this app is -- a
+    // client-side badge would just always show nothing. Until PixAI's own API can price a fixer
+    // task, a plain confirm is this app's established fail-closed guardrail for exactly that
+    // situation (the same shape the Loom's Deep Focus tabs already use for their own confirmSpend).
+    if(!window.confirm('Fix hand/face regions? This spends PixAI credits -- no cost preview is available for this action yet.')) return;
     var img=el('fix-img'); var scale = (img.naturalWidth && img.clientWidth) ? (img.naturalWidth/img.clientWidth) : 1;
     var boxes=fixBoxes.map(function(b){ return {x:Math.round(b.x*scale),y:Math.round(b.y*scale),width:Math.round(b.w*scale),height:Math.round(b.h*scale),tag:b.tag}; });
     runTask('/api/fix', {source:src, boxes:boxes}, el('fix-result'),
