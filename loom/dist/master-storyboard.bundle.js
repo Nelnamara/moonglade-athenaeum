@@ -40,6 +40,12 @@ var LoomBundle = (() => {
     }, 0);
   };
   var nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1);
+  var frameLinked = (a, b) => !!a && !!b && (!!a.mediaId && !!b.mediaId && a.mediaId === b.mediaId || !!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId);
+  var continuityLinked = (entries, entryId) => {
+    const idx = (entries || []).findIndex((x) => x.c.id === entryId);
+    if (idx <= 0) return false;
+    return frameLinked(entries[idx - 1].c.closeFrame, entries[idx].c.openFrame);
+  };
   var connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
   var flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}` })));
   var effectivePrompt = (c) => c.promptOverride ? c.promptOverrideText || "" : c.prompt || "";
@@ -773,6 +779,11 @@ ${"=".repeat(48)}
 .lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
 .lv-st.paused{color:var(--subtext);background:var(--base);border:1px dashed var(--subtext);}
+/* Continuity indicator (frameLinked/continuityLinked) -- reuses the .lv-st badge's own
+   font/padding/border-radius, just a distinct color (--cyan, not --green) so it never reads
+   as "shot generation status" and margin-left:0 so it sits with mode/duration on the left
+   instead of racing .lv-st's own margin-left:auto for the row's one right-aligned slot. */
+.lv-st.linked{margin-left:0;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 16%,transparent);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
@@ -1356,6 +1367,7 @@ ${"=".repeat(48)}
         const gs = genState[e.c.id];
         const paused = gs && gs.phase === "paused";
         const st = paused ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
+        const linked = continuityLinked(entries, e.c.id);
         return /* @__PURE__ */ React.createElement(
           "div",
           {
@@ -1371,7 +1383,7 @@ ${"=".repeat(48)}
           })()),
           /* @__PURE__ */ React.createElement("div", { className: "lv-code" }, e.code),
           /* @__PURE__ */ React.createElement("div", { className: "lv-ctitle" }, e.c.title || "untitled"),
-          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), /* @__PURE__ */ React.createElement(
+          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), linked && /* @__PURE__ */ React.createElement("span", { className: "lv-st linked", title: "Opening frame matches the previous shot's closing frame \u2014 continuous across the cut" }, "linked"), /* @__PURE__ */ React.createElement(
             "span",
             {
               className: "lv-st " + st,

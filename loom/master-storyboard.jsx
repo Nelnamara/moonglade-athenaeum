@@ -6,7 +6,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 // (which closes over `thumbs` state) under the ORIGINAL single-arg call shape.
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
-  maxTagNum, nextTag, frameLinked, connectMeta,
+  maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
   flat, shotText, durOf, reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
   shotPayload as buildShotPayload,
@@ -214,7 +214,8 @@ const elapsedLabel = (ms) => ms < 3600000 ? Math.round(ms / 60000) + "m" : (Math
 const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
 // CONNECT, CONTINUITY_PHRASE, actLetter, maxTagNum/nextTag, frameLinked, and
 // connectMeta now live in ./src/loom-core.js (imported above) -- Phase 1
-// tooling pass, 2026-07-16.
+// tooling pass, 2026-07-16. continuityLinked (same module) added 2026-07-23 to
+// give frameLinked a real caller -- see its use in the board card below.
 
 /* ---------- storage ---------- */
 const hasStore = typeof window !== "undefined" && window.storage;
@@ -386,6 +387,11 @@ const V2_STYLES = `
 .lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
 .lv-st.paused{color:var(--subtext);background:var(--base);border:1px dashed var(--subtext);}
+/* Continuity indicator (frameLinked/continuityLinked) -- reuses the .lv-st badge's own
+   font/padding/border-radius, just a distinct color (--cyan, not --green) so it never reads
+   as "shot generation status" and margin-left:0 so it sits with mode/duration on the left
+   instead of racing .lv-st's own margin-left:auto for the row's one right-aligned slot. */
+.lv-st.linked{margin-left:0;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 16%,transparent);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
@@ -1061,6 +1067,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 // the reload-time resume effect.
                 const paused = gs && gs.phase === "paused";
                 const st = paused ? "paused" : (gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status);
+                // Continuity indicator (frameLinked, via continuityLinked in loom-core.js):
+                // does this shot's OPENING frame already match the immediately-preceding
+                // shot's CLOSING frame (checked across the GLOBAL `entries` list, same
+                // cross-act "previous shot" convention the frame-handoff button already uses
+                // below -- see prevEntry/weavePrevEntry). Rendered only when true: a quiet
+                // affirmation, not a "you forgot this" warning -- most shots are deliberately
+                // connect:"new" (an intentional fresh look/place, per CONNECT.new's own hint),
+                // so a non-matching frame is usually the shot's INTENT, not a mistake to flag.
+                const linked = continuityLinked(entries, e.c.id);
                 return (
                   <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}
                     onDoubleClick={() => setDeepFocus(e)} title="Double-click to open in Deep Focus">
@@ -1068,6 +1083,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     <div className="lv-code">{e.code}</div>
                     <div className="lv-ctitle">{e.c.title || "untitled"}</div>
                     <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
+                      {linked && <span className="lv-st linked" title="Opening frame matches the previous shot's closing frame — continuous across the cut">linked</span>}
                       <span className={"lv-st " + st}
                         onClick={paused ? (ev) => { ev.stopPropagation(); pollShot(e.c.id, e.c.pendingTaskId); } : undefined}
                         style={paused ? { cursor: "pointer" } : undefined}
