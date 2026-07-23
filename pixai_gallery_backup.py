@@ -135,7 +135,14 @@ def set_verbose(on):
 
 def vlog(msg):
     """Print a diagnostic line prefixed with seconds-since-enabled, but only in
-    verbose mode. Writes to stdout so the GUI log pane captures it too."""
+    verbose mode. Writes to stdout so the GUI log pane captures it too. Also
+    always forwarded to the persistent file logger (pixai_logging), regardless
+    of verbose state, so a run's diagnostics are on record even if -v wasn't
+    passed -- this is the one call site touched to give every existing vlog()
+    caller file-logging for free, rather than threading a logger through ~100
+    of them individually."""
+    import pixai_logging
+    pixai_logging.get_logger().debug(msg)
     if not _VERBOSE:
         return
     t0 = _VERBOSE_T0 if _VERBOSE_T0 is not None else time.monotonic()
@@ -7069,6 +7076,8 @@ def main():
                     help="list gallery web-login usernames (never password hashes), then exit")
     args = ap.parse_args()
     set_verbose(getattr(args, "verbose", False))
+    import pixai_logging
+    pixai_logging.setup_logging(args.out, verbose=getattr(args, "verbose", False))
     # Give every command a progress callback (terminal bar, or Control Panel markers under
     # MOONGLADE_PROGRESS=1). Commands that report progress (audit/dedup/sync/...) pick it up;
     # the rest ignore it.
