@@ -162,6 +162,56 @@ def test_sync_with_failures_logs_done_with_errors(monkeypatch, tmp_path):
     assert "2" in jobs[0]["error"]
 
 
+# --------------------------------------------------------------------------- --sync-artworks
+# B15: run_sync_artworks had ZERO job-tracking wiring at all (not even a plain "done" --
+# contrast the --sync branch above, and --update/plain-download below, all of which wrap
+# their runner in _cli_job_start/_cli_job_finish). A silent mid-pagination break or a
+# failed video download was invisible everywhere: no job in the Jobs tray, no
+# done_with_errors, nothing.
+
+def test_sync_artworks_logs_a_cli_job_that_completes(monkeypatch, tmp_path):
+    monkeypatch.setattr(core, "run_sync_artworks",
+                        lambda args: {"artworks": 5, "matched": 5, "videos": 0, "fail": 0})
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync-artworks", "--out", str(tmp_path)])
+
+    core.main()
+
+    jobs = _cli_jobs(tmp_path, "Artwork sync")
+    assert len(jobs) == 1
+    assert jobs[0]["job_id"].startswith("cli-")
+    assert jobs[0]["status"] == "done"
+
+
+def test_sync_artworks_with_failures_logs_done_with_errors(monkeypatch, tmp_path):
+    """FAILS before the fix: --sync-artworks has no _cli_job_start/_cli_job_finish at
+    all, so read_jobs(tmp_path) is empty regardless of run_sync_artworks's result --
+    a partial failure here looked exactly like success everywhere downstream."""
+    monkeypatch.setattr(core, "run_sync_artworks",
+                        lambda args: {"artworks": 5, "matched": 5, "videos": 1, "fail": 2})
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync-artworks", "--out", str(tmp_path)])
+
+    core.main()
+
+    jobs = _cli_jobs(tmp_path, "Artwork sync")
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "done_with_errors"
+    assert "2" in jobs[0]["error"]
+
+
+def test_sync_artworks_failure_logs_a_failed_cli_job_and_still_raises(monkeypatch, tmp_path):
+    monkeypatch.setattr(core, "run_sync_artworks",
+                        lambda args: (_ for _ in ()).throw(core.PixAIError("network blip")))
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync-artworks", "--out", str(tmp_path)])
+
+    with pytest.raises(SystemExit):
+        core.main()
+
+    jobs = _cli_jobs(tmp_path, "Artwork sync")
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "failed"
+    assert "network blip" in jobs[0]["error"]
+
+
 # --------------------------------------------------------------------------- --generate
 
 def test_generate_preview_logs_a_cli_job_that_completes(monkeypatch, tmp_path):
