@@ -61,7 +61,11 @@ def test_deep_focus_has_a_prompt_field_writing_the_base_prompt():
     field was held back to avoid.
     """
     block = _deep_focus_block(_jsx())
-    assert "c.prompt" in block, "Deep Focus renders no base-prompt field"
+    # The exact value-binding, not a bare "c.prompt" substring -- that also matches
+    # inside the identifier c.promptOverride (a different field entirely) and inside
+    # a nearby comment's prose ("a second surface writing c.prompt"), so the old check
+    # passed even with the real textarea's value binding deleted.
+    assert "value={c.prompt " in block, "Deep Focus renders no base-prompt field bound to value={c.prompt ...}"
     assert "clearPromptOverride" in block, (
         "the Deep Focus prompt field does not clear an active override -- typing a base "
         "prompt while an override is live would leave the override silently winning")
@@ -81,7 +85,10 @@ def test_deep_focus_prompt_edit_is_not_silent_about_destroying_an_override():
     block = _deep_focus_block(_jsx())
     assert "setOverrideClearedFlash" in block, (
         "Deep Focus clears overrides without flashing the notice")
-    assert "lv-overrideflash" in block, (
+    # The real rendered element, not a bare "lv-overrideflash" substring -- a nearby
+    # comment ("renders at .lv-overrideflash inside the right panel...") contains that
+    # same substring, so deleting only the real render line used to leave this passing.
+    assert '<div className="lv-overrideflash">' in block, (
         "Deep Focus fires the flash but never renders it -- the panel's copy is behind the "
         "veil, so the user sees nothing")
 

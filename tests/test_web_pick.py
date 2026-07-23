@@ -928,7 +928,13 @@ def test_portrait_mobile_pass(tmp_path):
     assert "@media (max-width: 480px)" in html
     assert "repeat(2, minmax(0, 1fr)) !important" in html           # 2-up grid, ignores saved --thumb
     assert "#model-flyout" in html and "translate(-50%, -50%)" in html  # flyout centered (was clipped)
-    assert "#gen-drawer.wide { width: 100%" in html or "#gen-drawer.wide" in html  # full-width sheet
+    # Isolate the mobile breakpoint itself -- a bare substring check let this pass off
+    # the DESKTOP #gen-drawer.wide{width:600px;} rule (a different breakpoint entirely),
+    # so a broken/missing mobile override could ship invisibly. The tablet media query
+    # right after this one is a stable end marker for the slice.
+    mobile_block = html.split("@media (max-width: 480px)")[1].split("@media (min-width: 681px)")[0]
+    assert "#gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left, #gen-drawer.dock-right { width: 100%" in mobile_block, \
+        "the mobile full-width drawer rule is missing from inside the 480px breakpoint"  # full-width sheet
 
 
 def test_video_v40_full_cost_warning():
@@ -941,7 +947,10 @@ def test_video_v40_full_cost_warning():
            / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
     assert ('mg-generate-drawer mg-cost-badge[data-state="paid"][data-warn]'
             '{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}') in src   # still RED
-    assert "V4.0 full" in src and "2.5" in src        # the ~2.5x-Lite warning text
+    # The specific warning text, not a bare "2.5" -- that also matches two unrelated
+    # font-size:12.5px CSS rules elsewhere in this same file, so the old check passed
+    # even with the real warning deleted.
+    assert "V4.0 full — ~2.5× Lite" in src        # the ~2.5x-Lite warning text
 
 
 def test_cost_badge_ships_with_every_price_surface(tmp_path):
@@ -1247,10 +1256,15 @@ def test_service_worker_revalidates_thumbnails(tmp_path):
     sw = cli.get("/sw.js").get_data(as_text=True)
     # /thumbs/ is handled on its own branch, separate from the originals' cache-first one
     assert "isThumb" in sw and "isOrig" in sw
-    # the thumb branch always fires a fetch -- it does not short-circuit on a cache hit
-    thumb_branch = sw.split("if(isOrig){")[1].split("}")[-1]
-    assert "r||n" in sw, "thumbs must fall back to the network, not stop at a cache hit"
-    assert "c.put" in thumb_branch or "c.put" in sw
+    # the thumb branch always fires a fetch -- it does not short-circuit on a cache hit.
+    # Sliced from a marker unique to the thumb branch (not a brace-count split, which
+    # used to grab the trailing "});\n" off the LAST "}" in the whole rest of the
+    # string -- a no-op slice that made every assertion below it unconditionally true).
+    assert "const n=fetch(e.request,{cache:'no-cache'})" in sw, \
+        "thumb branch's revalidate fetch not found where expected -- if it moved, update the slice marker below"
+    thumb_branch = sw[sw.index("const n=fetch(e.request,{cache:'no-cache'})"):]
+    assert "r||n" in thumb_branch, "thumbs must fall back to the network, not stop at a cache hit"
+    assert "c.put" in thumb_branch, "the thumb branch itself must revalidate-write, not just some other branch"
     # and the server must stop claiming thumbnails are immutable
     hdr = cli.get("/thumbs/1.jpg").headers.get("Cache-Control", "")
     assert "immutable" not in hdr, (

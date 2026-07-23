@@ -92,6 +92,17 @@ git tags. Full prose notes for tagged versions live on
   signed in and just landed here by accident," which is exactly what sank an earlier
   attempt at this fix.
 
+- **Seven tests that couldn't actually fail.** Each guarded a real, working feature with
+  a check loose enough to pass even if that feature broke — a substring that also
+  matched an unrelated comment, an `or` fallback that widened the match to something
+  structurally different (a desktop CSS rule instead of the mobile one, one branch of
+  a service worker instead of the other), or a slice that grabbed the wrong end of the
+  string. Every one now checks the exact thing it claims to, and was verified by
+  temporarily breaking the real feature and confirming the test actually catches it —
+  the service worker's thumbnail revalidation, two Deep Focus prompt-field behaviors,
+  two branding-render checks, the mobile drawer's full-width rule, and the v4.0 video
+  cost warning.
+
 - **The model-preview tooltip "jumped" while browsing, making it hard to scan a grid.**
   Two independently-drifted copies of the hover-preview mechanism (the gallery's own
   `#model-flyout`, and the shared `<mg-model-picker>` the Loom mounts) both fired an
