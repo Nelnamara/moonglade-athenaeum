@@ -375,10 +375,11 @@
     '.jt-item + .jt-item{margin-top:1px;}',
     '.jt-item:hover{background:var(--surface0);}',
     '.jt-item.st-failed{background:rgba(243,139,168,.09);}',
+    '.jt-item.st-warn{background:rgba(250,179,135,.09);}',
     '.jt-ic{flex:none;width:34px;height:34px;display:flex;align-items:center;justify-content:center;margin-top:1px;position:relative;}',
     '.jt-ic .gen-moon{margin:0;}',
     '.jt-glyph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}',
-    '.jt-ok{color:var(--emerald);font-size:15px;} .jt-err{color:var(--red);font-size:15px;}',
+    '.jt-ok{color:var(--emerald);font-size:15px;} .jt-err{color:var(--red);font-size:15px;} .jt-warn{color:var(--peach);font-size:15px;}',
     '.jt-nel{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}',
     '.jt-spin{position:relative;width:48px;height:48px;}',
     '.jt-spin .jt-nel{inset:6px;width:36px;height:36px;border-radius:50%;object-fit:cover;object-position:60% 32%;animation:gen-spin 1.6s linear infinite;}',
@@ -1077,9 +1078,15 @@
                        'delete': 'Delete', 'import': 'Import' };
     function kindLabel(t){ return KIND_LABEL[t] || t || 'Job'; }
     function row(j){
-      var st=j.status||'running', fin=(st==='done'||st==='failed');
+      // done_with_errors (D-4): the job itself completed (exit 0 by design), but some
+      // files failed after retries -- distinct from both a clean 'done' and a hard
+      // 'failed'. Must be terminal/dismissable like the other two, or it's stuck
+      // looking permanently in-progress with no way to clear it.
+      var st=j.status||'running', fin=(st==='done'||st==='failed'||st==='done_with_errors');
       var ic = st==='done'
              ? '<span class="jt-ok jt-glyph">✓</span><img class="jt-nel" src="/branding/mascots/trk_done.png" onerror="this.remove()">'
+             : st==='done_with_errors'
+             ? '<span class="jt-warn jt-glyph">⚠</span><img class="jt-nel" src="/branding/mascots/trk_done.png" onerror="this.remove()">'
              : st==='failed'
              ? '<span class="jt-err jt-glyph">⚠</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
              : '<span class="jt-spin"><img class="jt-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span>';
@@ -1087,10 +1094,11 @@
       var thumb=(st==='done'&&mid)?'<a class="jt-thumb" href="/image/'+encodeURIComponent(mid)+'"><img src="/thumbs/'+encodeURIComponent(mid)+'.jpg" alt=""></a>':'';
       var bar='';
       if(st==='running' && j.total){ var pct=Math.min(100, Math.round((j.done||0)/j.total*100)); bar='<div class="jt-bar"><i style="width:'+pct+'%"></i></div>'; }
-      var errmsg=(st==='failed'&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
+      var errmsg=((st==='failed'||st==='done_with_errors')&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
       var sub='<div class="jt-sub"><span class="jt-kind">'+esc(kindLabel(j.type))+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
       var x=fin?'<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">×</button>':'';
-      return '<div class="jt-item'+(st==='failed'?' st-failed':'')+'"><div class="jt-ic">'+ic+'</div>'
+      var cls=st==='failed'?' st-failed':(st==='done_with_errors'?' st-warn':'');
+      return '<div class="jt-item'+cls+'"><div class="jt-ic">'+ic+'</div>'
            +'<div class="jt-main"><div class="jt-lab">'+esc(j.label||'Generation')+'</div>'+sub+bar+errmsg+'</div>'
            +thumb+x+'</div>';
     }
@@ -1118,13 +1126,17 @@
       }
     }
     function toastTransitions(jobs){
+      var TERMINAL = {done:1, failed:1, done_with_errors:1};
       jobs.forEach(function(j){
         var st=j.status||'running', prev=last[j.job_id];
-        if(seeded && prev!=='done' && prev!=='failed' && (st==='done'||st==='failed')){
+        if(seeded && !TERMINAL[prev] && TERMINAL[st]){
           if(st==='done'){
             var mid=(j.media_ids||[])[0]||'';
             Toast.show({kind:'ok', title:(j.label||'Generation')+' — done', msg:'Added to your gallery.',
                         thumb: mid?('/thumbs/'+encodeURIComponent(mid)+'.jpg'):null});
+          } else if(st==='done_with_errors'){
+            Toast.show({kind:'err', sticky:true, title:(j.label||'Job')+' finished with errors',
+                        msg:j.error||'Some files failed — see the activity card.'});
           } else {
             Toast.show({kind:'err', sticky:true, title:(j.label||'Job')+' failed', msg:j.error||'See the activity card.'});
           }

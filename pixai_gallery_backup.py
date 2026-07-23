@@ -754,6 +754,12 @@ def _progress_line(done, total, new=0, width=40):
 # collide with normal log output. Fields after it are done|total|new.
 PANEL_PROGRESS_PREFIX = "~=MGPROG=~"
 
+# Same idea as PANEL_PROGRESS_PREFIX, for a different signal (D-4): a download run that
+# finished with some files failed after retries, but exit code 0 by design -- the Panel
+# subprocess has no other way to tell "done" from "done, but N files failed" apart from
+# this marker line. The field after it is the fail count.
+PANEL_WARN_PREFIX = "~=MGWARN=~"
+
 
 def _make_progress(out_dir=None, job_id=None):
     """Return a progress(done, total, new=0) callback. Under the Control Panel
@@ -813,7 +819,7 @@ def _make_progress(out_dir=None, job_id=None):
 JOBS_LOG_NAME = "jobs.jsonl"
 JOBS_KEEP = 50                 # show at most this many most-recent jobs
 JOBS_MAX_AGE = 24 * 3600       # drop FINISHED jobs older than this (seconds)
-_JOBS_TERMINAL = ("done", "failed")
+_JOBS_TERMINAL = ("done", "failed", "done_with_errors")
 _JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many lines
 
 
@@ -889,13 +895,23 @@ def _cli_job_start(out_dir, label):
         return None
 
 
-def _cli_job_finish(out_dir, job_id, error=None):
-    """Terminal event for a _cli_job_start job. No-op if no job was started."""
+def _cli_job_finish(out_dir, job_id, error=None, warn=0):
+    """Terminal event for a _cli_job_start job. No-op if no job was started.
+
+    `warn` (D-4): a partial-failure count from a run that otherwise completed (some
+    files failed to download after retries, but the run itself didn't raise). Logged
+    as its own terminal status, "done_with_errors", distinct from both "done" (clean)
+    and "failed" (the run itself raised) -- so a scheduled/automated caller, or the
+    Panel's Jobs tray, can tell "ran but lost files" apart from either extreme instead
+    of everything but a hard crash collapsing into a silent "done"."""
     if not job_id:
         return
     try:
         if error is not None:
             append_job_event(out_dir, job_id, status="failed", error=str(error))
+        elif warn:
+            append_job_event(out_dir, job_id, status="done_with_errors",
+                             error="{} file(s) failed to download".format(warn))
         else:
             append_job_event(out_dir, job_id, status="done")
     except Exception:                                       # noqa: BLE001 -- fail-soft logging
@@ -6557,7 +6573,16 @@ def run_download(args, progress=None):
         dl["ok"], dl["skip"], dl["missing"], dl["fail"]))
     print("Catalog: {}\nRaw: {}\nImages: {}".format(db_path, raw_path, img_dir))
     if dl["fail"]:
-        print("Some failed -- just re-run; finished files are skipped.")
+        # D-4: exit code is UNCHANGED by design (still 0 -- a partial failure must not
+        # break a Task Scheduler wrapper over one transient blip). This is purely a
+        # louder, harder-to-miss console notice, plus (below) a machine-readable marker
+        # for anything watching stdout (the Panel subprocess reader).
+        print("\n*** FINISHED WITH ERRORS: {} file(s) failed to download after retries "
+              "-- just re-run, finished files are skipped. Exit code is still 0 by "
+              "design. ***".format(dl["fail"]))
+        if os.environ.get("MOONGLADE_PROGRESS") == "1":
+            print("{}{}".format(PANEL_WARN_PREFIX, dl["fail"]), flush=True)
+    return dl
 
 
 # ---------------------------------------------------------------------------
@@ -7118,7 +7143,7 @@ def main():
                 # run_download uses its `progress` PARAM (not args.progress), so hand it over
                 # explicitly -- otherwise the panel's progress bar is blank during the
                 # download step (fix_models/backfill already read args.progress themselves).
-                run_download(args, progress=getattr(args, "progress", None))
+                dl = run_download(args, progress=getattr(args, "progress", None))
                 print("\nSync: resolving any unlabeled model names...")
                 run_fix_models(args)
                 print("Sync: filling any rows still missing metadata...")
@@ -7146,7 +7171,7 @@ def main():
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
                 _cli_job_finish(out, _job, error=e)
                 raise
-            _cli_job_finish(out, _job)
+            _cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
             return
         if args.backfill_meta:
             run_backfill_meta(args)
@@ -7177,11 +7202,11 @@ def main():
         # existing terminal-output behavior (it would print unconditionally, tty or not).
         _job = _cli_job_start(out, "Incremental update" if getattr(args, "update", False) else "Full backup")
         try:
-            run_download(args)
+            dl = run_download(args)
         except Exception as e:                           # noqa: BLE001 -- re-raised below unchanged
             _cli_job_finish(out, _job, error=e)
             raise
-        _cli_job_finish(out, _job)
+        _cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
     except PixAIError as e:
         sys.exit(str(e))
 
