@@ -225,6 +225,11 @@ users.
   load, so a mid-render tab close no longer strands the shot or orphans its clip.
 - Frame handoff is trim-aware — it extracts the previous shot's frame at its `trimOut`, not the
   untrimmed clip's real last frame.
+- A board card shows a small "linked" badge when its opening frame already matches the previous
+  shot's closing frame (`continuityLinked`, wired to the pure `frameLinked` check), next to the
+  mode/duration tags. Silent/positive-only — there is no "not linked" warning state, since most
+  shots are deliberately disconnected from their neighbor. **Owner has not yet visually confirmed
+  this — built 2026-07-23, treat the exact placement/behavior as a first cut pending a look.**
 - Multiple named storyboards persist at `storyboard:v2:proj:<id>` with an active pointer, via the
   `ProjectSwitcher` in the top strip.
 - The state layer is four composed hooks — `useProjectStore`, `useShotMutations`,
