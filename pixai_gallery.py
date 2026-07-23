@@ -615,6 +615,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 1, 'rungs_total': 5,
      'roast': "Oh look — you saved ONE picture. A single file, hauled out of the howling void like a wet kitten from a storm drain. The Athenaeum is technically no longer empty. We're all so proud. (We are not.)",
      'roast_nsfw': 'One goddamn picture. You clawed a single file out of the void and you want a PARADE? Sit down. This is the part where you either quit or become insufferable. Placing bets now.',
     },
@@ -627,6 +628,7 @@ ACHIEVEMENTS = [
      'threshold': 1000,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 2, 'rungs_total': 5,
      'roast': 'A thousand images. You\'ve officially crossed from "hobby" into "someone should keep an eye on this one." The shelves groan. So do we.',
      'roast_nsfw': "A thousand. A THOUSAND. Who hurt you? Whatever it was, you're filling the hole with JPEGs and honestly? Respect. Keep bleeding pixels, you beautiful disaster.",
     },
@@ -639,6 +641,7 @@ ACHIEVEMENTS = [
      'threshold': 10000,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 3, 'rungs_total': 5,
      'skin': 'moonlit',
      'roast': "Ten thousand images. That's not a collection, it's a dragon's hoard, and you're the thing coiled on top of it hissing at anyone who gets close. Here's a skin. Don't spend it all in one place.",
      'roast_nsfw': 'Ten THOUSAND, you absolute hoarding gremlin. A dragon would look at this pile and go "okay, that\'s a bit much." Here\'s a shiny new skin, you magnificent pack rat. Now go outside. (You won\'t.)',
@@ -652,6 +655,7 @@ ACHIEVEMENTS = [
      'threshold': 25000,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 4, 'rungs_total': 5,
      'roast': "Twenty-five thousand images. You've squirreled away enough pixels to repaint a small moon and you're not even winded. Somewhere a hard drive is quietly weeping. The numbers only go up from here, hoarder.",
      'roast_nsfw': "Twenty-five thousand. You know what a NORMAL person does with 25,000 of anything? Neither do we — normal people aren't down here. Seek help. Or don't. The number goes higher, you glorious lunatic.",
     },
@@ -664,6 +668,7 @@ ACHIEVEMENTS = [
      'threshold': 50000,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'archive', 'rung': 5, 'rungs_total': 5,
      'banner_reward': True,
      'roast': "Fifty thousand works. You didn't fill a library. You BECAME one. Take the banner — you've earned the right to fly it over the smoking ruins of your free time.",
      'roast_nsfw': "Fifty. Thousand. You're not archiving art anymore, you're a load-bearing wall of the internet. Here's your banner, you unhinged monument. Hang it next to your regrets.",
@@ -677,6 +682,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 1, 'rungs_total': 4,
      'roast': 'Your first video. It moves! Sort of! A miracle of modern spite. The Loom hums to life and immediately judges your framing.',
      'roast_nsfw': "One video. It moved. Congratulations, you found the button. The Loom is technically impressed, which for the Loom means it didn't openly laugh in your face.",
     },
@@ -689,6 +695,7 @@ ACHIEVEMENTS = [
      'threshold': 10,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 2, 'rungs_total': 4,
      'roast': "Ten videos woven. You're getting the hang of making moonlight dance. It doesn't dance WELL, but it dances, and that's more than most manage.",
      'roast_nsfw': "Ten. You keep making the pixels wiggle and somehow it's working. Nobody's more surprised than us. Keep weaving, you weird little puppeteer.",
     },
@@ -701,6 +708,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 3, 'rungs_total': 4,
      'skin': 'ember',
      'roast': 'Fifty videos. You run the Loom now. Roll camera, take your skin, and try not to let the power go to your head. (Too late.)',
      'roast_nsfw': 'Fifty videos and an ego to match. Fine, DIRECTOR, here\'s your skin. Yell "action" one more time and we\'re revoking your parking spot.',
@@ -714,6 +722,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'loom', 'rung': 4, 'rungs_total': 4,
      'roast': "A hundred videos. You've built a picture-house out of moonlight and stubbornness. The critics are speechless. (There are no critics. There's just us, and we're tired.)",
      'roast_nsfw': "A hundred. You built a whole damn film festival down here out of spite and free cards. Take a bow, you pretentious little auteur. The projector's still cheaper than therapy.",
     },
@@ -726,6 +735,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 1, 'rungs_total': 4,
      'roast': "You made your first thing IN the app instead of just hoarding other people's. A spark. Fragile. Adorable. Do it again.",
      'roast_nsfw': 'First gen. You finally made something yourself instead of squatting on a pile of downloads. Look at you, a real boy. Do it 500 more times, Pinocchio.',
     },
@@ -738,6 +748,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 2, 'rungs_total': 4,
      'roast': "A hundred generations. The forge knows your name now. You're not good yet, but you're loud, and down here that counts for something.",
      'roast_nsfw': "A hundred gens. You've fed the machine enough to call it a habit. The forge tolerates you — which is more than most people can say about you.",
     },
@@ -750,6 +761,7 @@ ACHIEVEMENTS = [
      'threshold': 500,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 3, 'rungs_total': 4,
      'roast': "Five hundred forged. You've stopped asking the forge for permission. Bold. It respects that. Mostly.",
      'roast_nsfw': "Five hundred. You and the forge are basically married, and like most marriages it's mostly you feeding it money. Congratulations, Forgemaster.",
     },
@@ -762,6 +774,7 @@ ACHIEVEMENTS = [
      'threshold': 1000,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'forge', 'rung': 4, 'rungs_total': 4,
      'roast': "A thousand creations pulled from the dark. You don't use the forge anymore — you ARE the forge. Terrifying. Keep going.",
      'roast_nsfw': "A thousand gens made with your own two grubby hands. You've ascended from user to menace to legend. The forge fears you now. Good.",
     },
@@ -774,6 +787,7 @@ ACHIEVEMENTS = [
      'threshold': 10,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'vault', 'rung': 1, 'rungs_total': 2,
      'roast': "Ten collections. You've started imposing ORDER on the hoard. Cute. The hoard wins eventually, but we admire the delusion.",
      'roast_nsfw': 'Ten collections. Oh, you think you can organize this disaster? Adorable. Sort away, you obsessive little librarian. The chaos is patient.',
     },
@@ -786,6 +800,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'vault', 'rung': 2, 'rungs_total': 2,
      'roast': "Fifty collections. Everything has a place, a wing, a label. You've weaponized tidiness and we're a little scared.",
      'roast_nsfw': "Fifty collections. You've turned organizing into a personality disorder and honestly it's working. Grand Curator. The shelves salute. The shelves are also terrified.",
     },
@@ -798,6 +813,7 @@ ACHIEVEMENTS = [
      'threshold': 25,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'menagerie', 'rung': 1, 'rungs_total': 2,
      'skin': 'verdant',
      'roast': "Twenty-five distinct models summoned. A whole zoo of borrowed hands doing your bidding. Here's a skin for the ringmaster.",
      'roast_nsfw': "Twenty-five models. You've been AROUND, you promiscuous little summoner. Here's a skin. Wash your hands between models — we don't know where they've been.",
@@ -811,6 +827,7 @@ ACHIEVEMENTS = [
      'threshold': 75,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'menagerie', 'rung': 2, 'rungs_total': 2,
      'roast': "Seventy-five distinct models. You've summoned a pantheon of styles to one table. They do not get along. You don't care. Legendary.",
      'roast_nsfw': "Seventy-five models. That's not a menagerie, it's a whole UN of art styles and you're the exhausted translator. Legendary, you insatiable collector.",
     },
@@ -823,6 +840,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'index', 'rung': 1, 'rungs_total': 3,
      'roast': "Fifty pieces tagged. You've begun labeling the chaos. The labels already lie, but the effort is noted.",
      'roast_nsfw': "Fifty tags. You've started the Sisyphean horror of labeling everything. It will never end. You will never stop. Welcome to hell, scribe.",
     },
@@ -835,6 +853,7 @@ ACHIEVEMENTS = [
      'threshold': 500,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'index', 'rung': 2, 'rungs_total': 3,
      'roast': "Five hundred tagged. You speak fluent metadata now. Not a useful language, but it's yours.",
      'roast_nsfw': "Five hundred tags. You spent real hours of your one finite life typing keywords. We're not judging. (We're judging. It's just impressed judging.)",
     },
@@ -847,6 +866,7 @@ ACHIEVEMENTS = [
      'threshold': 2500,
      'tier': 'legendary',
      'bucket': 'ladder',
+     'track': 'index', 'rung': 3, 'rungs_total': 3,
      'roast': "Twenty-five hundred tags. Every piece labeled, cross-referenced, catalogued. You've out-nerded the library itself. Bow.",
      'roast_nsfw': 'Twenty-five HUNDRED. You\'ve tagged more than most museums and you did it for FUN. There\'s no word for what you are. "Catalogus Magnus" is us being polite.',
     },
@@ -859,6 +879,7 @@ ACHIEVEMENTS = [
      'threshold': 10,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'gallery', 'rung': 1, 'rungs_total': 2,
      'roast': "You showed your art to STRANGERS. On purpose. Ten times. Bold, for someone whose drafts we've all seen. The doors swing open.",
      'roast_nsfw': "Ten works published. You keep showing strangers your stuff — that's either confidence or a cry for help, and down here we don't distinguish. Doors open, exhibitionist.",
     },
@@ -871,6 +892,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'gallery', 'rung': 2, 'rungs_total': 2,
      'roast': "A hundred works published. You've thrown open a whole gallery. The wine is imaginary, the crowd is polite, and you've never been prouder. Insufferable.",
      'roast_nsfw': 'A hundred publishes. You\'ve made "look at my art" a full-time bit. The crowd\'s fake, the wine\'s fake, and your confidence is somehow REAL. Terrifying. Cheers.',
     },
@@ -883,6 +905,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'restoration', 'rung': 1, 'rungs_total': 3,
      'roast': "Your first edit. You reached into a finished piece and CHANGED it, like a god with commitment issues. He'd be proud.",
      'roast_nsfw': 'First edit. You looked at a finished image and said "no." That\'s the spirit — nothing\'s ever done, nothing\'s ever good enough. Welcome to the disease, Restorer.',
     },
@@ -895,6 +918,7 @@ ACHIEVEMENTS = [
      'threshold': 50,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'restoration', 'rung': 2, 'rungs_total': 3,
      'roast': 'Fifty edits. You don\'t accept "finished" anymore. Everything\'s a draft. Everything can be fixed. This is a problem. It\'s also art.',
      'roast_nsfw': "Fifty edits. You've never left well enough alone in your damn life, have you? Keep tinkering, gremlin. The image begs for mercy. Denied.",
     },
@@ -907,6 +931,7 @@ ACHIEVEMENTS = [
      'threshold': 200,
      'tier': 'epic',
      'bucket': 'ladder',
+     'track': 'restoration', 'rung': 3, 'rungs_total': 3,
      'roast': 'Two hundred edits. You bend finished work to your will like it owes you money. Masterworker. The pixels have stopped resisting.',
      'roast_nsfw': "Two hundred edits. The images just do what you say out of fear now. You've broken them. You've broken YOURSELF. Masterful, you relentless bastard.",
     },
@@ -919,6 +944,7 @@ ACHIEVEMENTS = [
      'threshold': 1,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'sweep', 'rung': 1, 'rungs_total': 2,
      'roast': 'You DELETED something. On purpose. A crawler who trims the hoard instead of drowning in it? Rare. Suspicious. Noted.',
      'roast_nsfw': 'You deleted something?! Voluntarily?! Who ARE you? A hoarder that culls is a unicorn, and unicorns unsettle us. Do it again, freak.',
     },
@@ -931,6 +957,7 @@ ACHIEVEMENTS = [
      'threshold': 100,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'sweep', 'rung': 2, 'rungs_total': 2,
      'roast': "A hundred pieces culled. You've learned the hardest lesson in the Athenaeum: not everything deserves to be kept. Ruthless. Good.",
      'roast_nsfw': 'A hundred culled. Look at you playing god with the delete key, you ruthless little executioner. The trash is FULL and your standards are HIGH. Respect.',
     },
@@ -943,6 +970,7 @@ ACHIEVEMENTS = [
      'threshold': 7,
      'tier': 'common',
      'bucket': 'ladder',
+     'track': 'vigil', 'rung': 1, 'rungs_total': 2,
      'roast': "Seven days at the shelves. You keep coming back. Either dedication or a lack of hobbies. We won't ask which.",
      'roast_nsfw': "Seven days straight. You keep crawling back down here like it owes you something. It doesn't. Neither do we. See you tomorrow, addict.",
     },
@@ -955,6 +983,7 @@ ACHIEVEMENTS = [
      'threshold': 30,
      'tier': 'rare',
      'bucket': 'ladder',
+     'track': 'vigil', 'rung': 2, 'rungs_total': 2,
      'roast': "Thirty days. A full moon's cycle of showing up. The Athenaeum has stopped locking the doors. It knows you'll be back.",
      'roast_nsfw': "Thirty days. This isn't a hobby, it's a relationship, and frankly it's the healthiest one either of us has. See you tomorrow. You'll be here.",
     },
@@ -1321,6 +1350,24 @@ SKINS = [
 ]
 _SKIN_IDS = {s["id"] for s in SKINS}
 
+# The 10 Evolution Ladder tracks each ladder achievement's 'track' field points at
+# (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields, sourced from
+# docs/achievements_roster_57.json's roster.tracks). Single source of truth for
+# ladder display names -- the Folio of Honors' carousel/ladder-grid groups by this,
+# not a second hand-maintained id->name map in the frontend.
+LADDER_TRACKS = [
+    {"id": "archive",     "name": "The Archive",           "metric": "images"},
+    {"id": "loom",        "name": "The Loom",               "metric": "videos"},
+    {"id": "forge",       "name": "The Moonforge",          "metric": "local_gens"},
+    {"id": "vault",       "name": "The Stacks",             "metric": "collections"},
+    {"id": "menagerie",   "name": "The Menagerie",          "metric": "models"},
+    {"id": "index",       "name": "The Index",              "metric": "tagged"},
+    {"id": "gallery",     "name": "The Gallery",            "metric": "published"},
+    {"id": "restoration", "name": "The Restoration Wing",   "metric": "edits"},
+    {"id": "sweep",       "name": "The Great Sweep",        "metric": "culled"},
+    {"id": "vigil",       "name": "The Vigil",              "metric": "days_used"},
+]
+
 # ---------------------------------------------------------------------------
 # Branding: the banner mark (the animated icon beside the title) is one of the
 # owner's own cut marks in out_dir/branding/marks/, chosen + animated from the
@@ -1566,6 +1613,10 @@ def compute_achievements(metrics, seen=(), sets=None):
             "banner_reward": bool(a.get("banner_reward")), "points": achievement_points(a),
             "roast": a.get("roast", ""), "roast_nsfw": a.get("roast_nsfw", ""),
         }
+        if a.get("bucket") == "ladder":
+            entry["track"] = a["track"]
+            entry["rung"] = a["rung"]
+            entry["rungs_total"] = a["rungs_total"]
         if a["id"] in crit:
             entry["criteria"] = crit[a["id"]]
         achs.append(entry)
@@ -1589,7 +1640,7 @@ def compute_achievements(metrics, seen=(), sets=None):
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
     earned_points = sum(x["points"] for x in achs if x["earned"])
     possible_points = sum(x["points"] for x in achs)
-    return {"achievements": achs, "skins": skins, "newly": newly,
+    return {"achievements": achs, "skins": skins, "ladders": LADDER_TRACKS, "newly": newly,
             "earned_points": earned_points, "possible_points": possible_points}
 
 
@@ -1627,7 +1678,7 @@ def save_ach_state(out_dir, state):
 
 def _badge_thumb(out_dir, aid, size=256):
     """Lazily cache a ~size px copy of a badge master and return its Path. The 57
-    badge masters are 2000px (~300 MB total); the Trophy Hall renders these thumbs so
+    badge masters are 2000px (~300 MB total); the Folio of Honors renders these thumbs so
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
     trouble, so a tile always resolves to *something*."""
@@ -2290,9 +2341,18 @@ def find_image_file(out_dir, media_id, filename):
     deleted_dir = out_dir / DELETED_DIRNAME
     if filename:
         for candidate in out_dir.rglob(filename):
-            if (candidate.is_file() and not _is_under(candidate, gallery_dir)
-                    and not _is_under(candidate, deleted_dir)):
-                return candidate
+            # The fallback below (find_files_for_media_id) already skips zero-byte
+            # files -- this fast path found candidate rglob before that fallback ever
+            # runs, so it needs the same size check or a catalog row still pointing at
+            # its original filename gets a truncated/interrupted download served back
+            # as if it were the real image (audit 2026-07-21, invariant 3/6).
+            try:
+                if (candidate.is_file() and candidate.stat().st_size > 0
+                        and not _is_under(candidate, gallery_dir)
+                        and not _is_under(candidate, deleted_dir)):
+                    return candidate
+            except OSError:
+                continue
     matches = find_files_for_media_id(out_dir, media_id)
     return matches[0] if matches else None
 
@@ -2557,17 +2617,6 @@ DESIGN_TOKENS_CSS = r"""
     --emerald:#4fc99a; --accent-soft:#4bd68f; --gold:#c8e6a8;
   }
 """
-
-# One-click enhance plugins for the Edit tab. `detail-fix` is the VERIFIED workflowId
-# (fired for real 2026-07-02). `hand-fix` / `face-fix` use workflowNames mined from the
-# app bundle -- unverified until fired, but a rejected panelplugin submit costs no credits,
-# so they're safe to offer and confirm live. More arrive once we have the full catalog.
-ENHANCE_PLUGINS = {
-    "detail-fix": {"label": "Detail fix", "workflow_id": "1797414829336369706"},
-    "hand-fix":   {"label": "Fix hands",  "workflow_name": "mymusise/hand-fix"},
-    "face-fix":   {"label": "Fix face",   "workflow_name": "kyo/face-detailer"},
-}
-
 
 # ---------------------------------------------------------------------------
 # Global 401 guard, injected into EVERY page head (BASE_HTML and _LOOM_SHELL).
@@ -2837,6 +2886,54 @@ def create_app(out_dir: Path):
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
 
+    # Redacts THIS MACHINE's own filesystem paths out of an exception message before
+    # it's stored or served to any LOGIN-tier caller (any signed-in LAN account, not
+    # just the owner) -- str(e) on a file-not-found, permission, or upstream-API error
+    # routinely embeds an absolute path, which routinely embeds the OS username.
+    #
+    # Literal-PREFIX replacement, NOT a regex. An earlier attempt (2026-07-21, docs/
+    # AUDIT_2026-07-21.md's S3) used a regex (`[^\s'"<>\|]*`) that stopped matching at
+    # the first whitespace, so a spaced Windows username (`C:\Users\John Smith\...`)
+    # still leaked in full -- exactly the harm this exists to close -- and its own
+    # tests used space-free paths, so they'd have shipped green. This re-spin is
+    # tested against a spaced username specifically because of that history.
+    #
+    # Longest-candidate-first: home/cwd/tmp/out_dir routinely nest inside one another
+    # (out_dir is very often somewhere under the home directory), so matching the
+    # LONGEST real path first replaces the whole thing with one tag -- matching a
+    # shorter ancestor first would leave the more specific, still-identifying suffix
+    # (out_dir's own folder name) sitting right after the placeholder.
+    #
+    # Bounds CONTENT, not size -- pairs with append_job_event's existing [:200] cap
+    # (SIZE only) and every jsonify site's own [:N] slice; this must run BEFORE those
+    # slices, not after, or a redaction landing past the cutoff never happens.
+    def _redact_host_paths(msg):
+        if not msg:
+            return msg
+        import tempfile
+        # str(out_dir) resolved -- --out defaults to a relative "pixai_backup", and
+        # main() never resolves it before create_app(out_dir). Unresolved, a caller who
+        # started the server with (say) --out . would make out_dir's candidate a bare
+        # ".", which then matches -- and redacts -- every single period in every error
+        # message this function ever touches app-wide (found in adversarial review,
+        # reproduced: an ordinary "retry in 0.5s" style message came back full of
+        # "<host-path>" fragments). Resolving turns it into the same kind of real,
+        # multi-component absolute path the other 4 candidates already are.
+        candidates = [str(Path(out_dir).resolve()), os.path.expanduser("~"),
+                     tempfile.gettempdir(), sys.prefix, os.getcwd()]
+        seen, out = set(), str(msg)
+        for path in sorted(set(candidates), key=len, reverse=True):
+            # The length floor is a second, independent guard against the same class of
+            # bug for candidates this function doesn't control the construction of --
+            # no real absolute path on any real OS is this short, so it never rejects a
+            # genuine candidate, only a degenerate one.
+            if not path or len(path) < 4 or path in seen:
+                continue
+            seen.add(path)
+            if path in out:
+                out = out.replace(path, "<host-path>")
+        return out
+
     @app.context_processor
     def _inject_branding():
         # mark_url / mark_anim / mark_kind on every page render, so the chosen
@@ -2848,8 +2945,9 @@ def create_app(out_dir: Path):
     # logs. Each action is a WHITELISTED argv against pixai_gallery_backup.py
     # (never an arbitrary command); destructive ones require confirm=True.
     # One job at a time. Localhost-gated at the routes. Runs the CLI as a
-    # subprocess (isolation + natural stdout capture -- same shape the GUI
-    # uses) with cwd = the checkout dir (where config.json lives).
+    # subprocess (isolation from the Flask process + natural stdout capture, so
+    # the unmodified CLI script's own print output streams straight to the
+    # Jobs card) with cwd = the checkout dir (where config.json lives).
     # ------------------------------------------------------------------
     _cli_path = str(Path(__file__).resolve().parent / "pixai_gallery_backup.py")
     _cli_dir = str(Path(__file__).resolve().parent)
@@ -2863,8 +2961,9 @@ def create_app(out_dir: Path):
     _panel_lock = threading.Lock()
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
                   "rc": None, "started_at": None, "progress": None,
-                  "proc": None, "cancelled": False}
+                  "proc": None, "cancelled": False, "warn_count": 0}
     _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in pixai_gallery_backup.py
+    _WARN_PREFIX = "~=MGWARN=~"        # matches PANEL_WARN_PREFIX in pixai_gallery_backup.py (D-4)
     # The Loom's ffmpeg export job (trim + concat finished shots -> one mp4).
     _export_lock = threading.Lock()
     _export_job = {"status": "idle", "progress": 0, "elapsed": 0.0,
@@ -2969,6 +3068,7 @@ def create_app(out_dir: Path):
         with _panel_lock:
             jid = _panel_job.get("job_id")
         last_pct = -1
+        warn_n = 0
         for line in iter(proc.stdout.readline, ""):
             line = line.rstrip("\n")
             if line.startswith(_PROG_PREFIX):
@@ -2986,6 +3086,14 @@ def create_app(out_dir: Path):
                 except (ValueError, ZeroDivisionError):
                     pass
                 continue
+            if line.startswith(_WARN_PREFIX):
+                # D-4: "<prefix>N" -- N files failed after retries, run otherwise completed.
+                # Not a log line -- keep it out of the visible transcript, same as _PROG_PREFIX.
+                try:
+                    warn_n = int(line[len(_WARN_PREFIX):])
+                except ValueError:
+                    pass
+                continue
             with _panel_lock:
                 _panel_job["lines"].append(line)
                 if len(_panel_job["lines"]) > 800:       # ring buffer
@@ -2994,14 +3102,20 @@ def create_app(out_dir: Path):
         rc = proc.wait()
         with _panel_lock:
             cancelled = _panel_job.get("cancelled")
-            status = "cancelled" if cancelled else ("done" if rc == 0 else "failed")
+            status = ("cancelled" if cancelled else
+                      "failed" if rc != 0 else
+                      "done_with_errors" if warn_n else "done")
             _panel_job["rc"] = rc
             _panel_job["status"] = status
+            _panel_job["warn_count"] = warn_n
             _panel_job["progress"] = None                # clear the bar when the job ends
             _panel_job["proc"] = None
         if jid:                                          # cancelled/done both close the card row cleanly
-            _log_job(jid, status=("failed" if status == "failed" else "done"),
-                     error=("exited {}".format(rc) if status == "failed" else None))
+            _log_job(jid, status=("failed" if status == "failed" else
+                                  "done_with_errors" if status == "done_with_errors" else "done"),
+                     error=("exited {}".format(rc) if status == "failed" else
+                           "{} file(s) failed to download".format(warn_n) if status == "done_with_errors"
+                           else None))
 
     def _panel_run(action, int_arg=None):
         import subprocess
@@ -3040,13 +3154,13 @@ def create_app(out_dir: Path):
             _panel_job.update(status="running", action=action, label=spec["label"],
                               lines=["$ " + " ".join(action_args)], rc=None,
                               started_at=None, progress=None, proc=proc, cancelled=False,
-                              job_id=job_id)
+                              job_id=job_id, warn_count=0)
         _log_job(job_id, status="running", type="panel", label=spec["label"])
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
 
     # ---- Automated tasks: run a SAFE job on an interval while the app is open ----
     # Persisted to out_dir/schedule.json. Only non-destructive actions are schedulable.
-    # An in-process daemon: fires while the gallery/GUI is running (it is NOT an OS-level
+    # An in-process daemon: fires while the gallery is running (it is NOT an OS-level
     # cron -- for always-on, point Windows Task Scheduler at `--update` instead).
     _sched_lock = threading.Lock()
 
@@ -3128,7 +3242,7 @@ def create_app(out_dir: Path):
                 _watch_status["mirrored"] += 1
         except Exception as e:
             with _watch_lock:
-                _watch_status["last_error"] = str(e)[:200]
+                _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
 
     def _reconcile_job(tid, ws_status):
         """Resolve OUR Activity/job log for a task straight from a live event, so a
@@ -3213,7 +3327,7 @@ def create_app(out_dir: Path):
                 backoff = 5   # a clean disconnect resets the backoff
             except Exception as e:
                 with _watch_lock:
-                    _watch_status["last_error"] = str(e)[:200]
+                    _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
             with _watch_lock:
                 _watch_status["connected"] = False
             _time.sleep(backoff)
@@ -5228,23 +5342,26 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="gen-lbl">One-click tools <span style="text-transform:none;color:var(--subtext);">&middot; official PixAI workflows &middot; runs on the source</span></div>
         <div class="enh-shelf">
           <div class="enh-sec">Upscale</div>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1794855217667308480')" title="Upscale the image">Upscale</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1804744873525448983')" title="Upscale in 2x2 tiles (higher detail)">Upscale 2&times;2</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1803967880822088690')" title="Upscale and re-detail">Upscale + Enhance</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1794855217667308480','Upscale')" title="Upscale the image">Upscale</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1804744873525448983','Upscale 2×2')" title="Upscale in 2x2 tiles (higher detail)">Upscale 2&times;2</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1803967880822088690','Upscale + Enhance')" title="Upscale and re-detail">Upscale + Enhance</button>
           <div class="enh-sec">Cleanup</div>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1793505053210462325')" title="Remove the background">Remove BG</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1793473388466817128')" title="Precise masked inpaint / edit">Precise inpaint</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1793713293591365899')" title="Extend the frame outward (outpaint)">Outpaint</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793505053210462325','Remove BG')" title="Remove the background">Remove BG</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793473388466817128','Precise inpaint')" title="Precise masked inpaint / edit">Precise inpaint</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793713293591365899','Outpaint')" title="Extend the frame outward (outpaint)">Outpaint</button>
           <div class="enh-sec">Convert</div>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1796053397111789217')" title="Convert to line art">To line art</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1793447160259872021')" title="Colorize a sketch / line art">Sketch colorizer</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1796053397111789217','To line art')" title="Convert to line art">To line art</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793447160259872021','Sketch colorizer')" title="Colorize a sketch / line art">Sketch colorizer</button>
           <div class="enh-sec">Light</div>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1801729774701480692')" title="Relight: warm sunshine">Relight: sun</button>
-          <button type="button" class="enh-card" onclick="Gen.enhance('1801752508134768728')" title="Relight: backlighting">Relight: backlight</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1801729774701480692','Relight: sun')" title="Relight: warm sunshine">Relight: sun</button>
+          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1801752508134768728','Relight: backlight')" title="Relight: backlighting">Relight: backlight</button>
         </div>
         <div class="gen-lbl">Browse all workflows <span style="text-transform:none;color:var(--subtext);">&middot; 140+ community ComfyUI</span></div>
         <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
         <div id="enh-list"></div>
+        <div class="gen-lbl" id="enh-selected" style="display:none;"></div>
+        <mg-cost-badge id="enhance-cost" hint="Pick a tool to see the cost." card-label="an Edit card"></mg-cost-badge>
+        <button type="button" class="gen-go" id="enh-go" disabled onclick="Gen.runEnhance()">Run</button>
         <div id="enh-result" class="gen-result" style="display:none;"></div>
       </div>
       <div id="edit-sub-fix" style="display:none;">
@@ -5349,9 +5466,9 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="mg-toasts" aria-live="polite"></div>
 <div id="snip-menu"></div>
 <div id="ach-modal" class="ach-modal ach-hall" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
-  <div class="ach-panel" role="dialog" aria-label="Trophy Hall">
+  <div class="ach-panel" role="dialog" aria-label="The Folio of Honors">
     <div class="hall-head">
-      <div class="hall-title">&#127942; <b>Trophy Hall</b>
+      <div class="hall-title">&#127942; <b>The Folio of Honors</b>
         <img class="ach-nar" id="ach-nar" src="/branding/mascots/gen_nel.png" title="the narrator"
           alt="the narrator" onclick="Ach.poke()" onerror="this.remove()"><span id="ach-unleash-slot"></span></div>
       <div class="hall-score" id="ach-progress">&hellip;</div>
@@ -5782,7 +5899,7 @@ var Snips = (function(){
   return {open:open, saveCurrent:saveCurrent, insert:insert, del:del};
 })();
 var Gen = (function(){
-  var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null;
+  var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null, previewTimer=null;
   var sortMode='popular', catFilter='';   // Model-Market: 'popular'(REST) | 'newest'(GraphQL); category chip
   var workflows=null, enhTimer=null;
   var fixTag_='face', fixBoxes=[], fixStart=null;
@@ -5875,8 +5992,12 @@ var Gen = (function(){
       var uses = m.ref_count ? '<span class="uses" title="'+fmt(m.ref_count)+' generations \\u2014 PixAI\\u2019s own most-used ranking">\\u25c8 '+fmtCompact(m.ref_count)+'</span>' : '';
       c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span>'+uses+'</div></div>';
       c.onclick=function(){ selectCard(m, c); };
-      c.onmouseenter=function(){ showPreview(m, c); };
-      c.onmouseleave=hidePreview;
+      // Debounced (D-11): a raw mouseenter re-triggered an instant, un-animated,
+      // freshly-repositioned popup on EVERY card the mouse passed over while scanning
+      // a grid -- which is what "browsing" is. A short hover-intent delay means only a
+      // genuine pause-to-look opens it; a fast scan across several cards never does.
+      c.onmouseenter=function(){ scheduleShowPreview(m, c); };
+      c.onmouseleave=cancelPreview;
       grid.appendChild(c);
     });
   }
@@ -5908,6 +6029,11 @@ var Gen = (function(){
     placePreview(p, anchor);
   }
   function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
+  function scheduleShowPreview(m, anchor){
+    clearTimeout(previewTimer);
+    previewTimer=setTimeout(function(){ showPreview(m, anchor); }, 130);
+  }
+  function cancelPreview(){ clearTimeout(previewTimer); hidePreview(); }
   function placePreview(p, anchor){
     var r=anchor.getBoundingClientRect(), w=300, gap=14, x;
     var dr=el('gen-drawer'), leftish = dr && dr.classList.contains('dock-left');
@@ -5931,13 +6057,18 @@ var Gen = (function(){
     if(i>=0){ loras.splice(i,1); c.classList.remove('sel'); renderLoras(); refreshLoraNotes(); debouncedCost(); return; }
     if(loras.length>=6) return;
     var entry={model_id:m.model_id, title:m.title, preview_url:m.preview_url, version_id:'',
-               weight:0.7, lora_base_type:'', trigger_words:''};
-    loras.push(entry); c.classList.add('sel'); renderLoras();
+               weight:0.7, lora_base_type:'', trigger_words:'', failed:false};
+    loras.push(entry); c.classList.add('sel'); renderLoras(); updateGoState();
     fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
       .then(function(r){return r.json();})
       .then(function(d){ entry.version_id=d.version_id||''; entry.lora_base_type=d.lora_base_model_type||'';
-        entry.trigger_words=d.trigger_words||''; renderLoras(); refreshLoraNotes(); debouncedCost(); })
-      .catch(function(){ renderLoras(); });
+        entry.trigger_words=d.trigger_words||'';
+        // An empty version_id here is ALSO a failure, not a quiet no-op -- a LoRA that
+        // never resolves must not be able to vanish from the submit silently (see failed
+        // below): it used to just sit there forever wearing the "still loading" hourglass.
+        entry.failed=!entry.version_id;
+        renderLoras(); refreshLoraNotes(); debouncedCost(); })
+      .catch(function(){ entry.failed=true; renderLoras(); refreshLoraNotes(); });
   }
   // --- LoRA<->base compatibility gate + trigger-word offers ------------------
   // A LoRA runs on a base ONLY if its loraBaseModelType == the base's modelType (exact enum
@@ -5954,7 +6085,13 @@ var Gen = (function(){
     return String(b).toUpperCase()!==String(l).toUpperCase();
   }
   function anyIncompat(){ return loras.some(loraIncompat); }
-  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat(); }
+  // A LoRA still missing its version_id -- whether the lookup is still in flight or has
+  // permanently failed -- must block Generate. The old code let this fall through silently:
+  // the submit payload just filtered the unresolved LoRA out (see payload()), so a paid
+  // generation could fire missing a LoRA the user believed was included, with nothing on
+  // screen but an hourglass that never explained itself.
+  function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }
+  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat() || anyLoraUnresolved(); }
   function triggersInPrompt(tw){
     var first=(tw||'').split(',')[0].trim().toLowerCase();
     return first && (el('gen-prompt').value||'').toLowerCase().indexOf(first)>=0;
@@ -5988,9 +6125,11 @@ var Gen = (function(){
   function renderLoras(){
     var box=el('gen-loras'); if(!box) return; box.innerHTML='';
     loras.forEach(function(l,i){
-      var d=document.createElement('div'); d.className='lora-chip'+(loraIncompat(l)?' incompat':'');
+      var d=document.createElement('div'); d.className='lora-chip'+((loraIncompat(l)||l.failed)?' incompat':'');
+      var badge=l.version_id?'':(l.failed?' \\u26a0':' \\u23f3');
+      var titleAttr=l.failed?(esc(l.title)+' \\u2014 could not load; remove it (\\u00d7) and re-add to retry'):esc(l.title);
       d.innerHTML=(l.preview_url?'<img src="'+esc(l.preview_url)+'" alt="">':'')
-        +'<span class="nm" title="'+esc(l.title)+'">'+esc(l.title)+(l.version_id?'':' \\u23f3')+'</span>'
+        +'<span class="nm" title="'+titleAttr+'">'+esc(l.title)+badge+'</span>'
         +'<input type="number" step="0.05" min="0" max="2" value="'+l.weight+'" title="Weight" onchange="Gen.loraWeight('+i+', this.value)">'
         +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>';
       box.appendChild(d);
@@ -6129,6 +6268,10 @@ var Gen = (function(){
     var p=payload();
     if(!p.version_id) return;
     if(!p.prompt){ el('gen-prompt').focus(); return; }
+    // Belt-and-suspenders alongside updateGoState()'s disabled attribute: never let a
+    // paid submit fire while a LoRA the user added is still unresolved or failed --
+    // payload() would otherwise just quietly drop it and spend credits on a mismatch.
+    if(anyLoraUnresolved()){ el('gen-lora-note').scrollIntoView({block:'nearest'}); return; }
     runTask('/api/generate', p, el('gen-result'),
             {past:'Generated', btn:el('gen-go'), busy:'Generating\\u2026', idle:'Generate'});
   }
@@ -6156,6 +6299,7 @@ var Gen = (function(){
     else { img.style.display='none'; }
     renderEditRefs();   // primary changed -> @image1 slot + cap count update
     debEditCost();
+    debEnhanceCost();   // Enhance's price also depends on the shared edit-src (D-12)
   }
   var EDIT_CAPS={
     'edit-pro':{max_refs:4,resolutions:['1K','2K'],qualities:['low','medium','high'],
@@ -6316,24 +6460,40 @@ var Gen = (function(){
         var b=document.createElement('button'); b.type='button'; b.className='enh-item';
         var nm=w.name.split('|')[0].split('/')[0].trim();
         b.innerHTML=esc(nm)+' <span class="ty">'+esc((w.type||'').toLowerCase())+'</span>';
-        b.onclick=function(){ enhance(w.id); }; list.appendChild(b);
+        b.onclick=function(){ selectEnhance(w.id, nm); }; list.appendChild(b);
       });
   }
-  function enhance(wid){
+  // D-12: was click-runs-immediately (price -> window.confirm -> fire), the one Enhance
+  // path never converted to the persistent <mg-cost-badge> pattern every other price
+  // surface already uses. Now select-then-run, mirroring the Edit sub-tab's own shape:
+  // clicking a tool only SELECTS it (updates the badge), a separate Run button fires it,
+  // and the badge alone is the warning -- no window.confirm left, same as everywhere else.
+  var enhWid='', enhName='';
+  function selectEnhance(wid, name){
+    enhWid=wid; enhName=name||'';
+    var sel=el('enh-selected');
+    if(sel){ sel.style.display=''; sel.innerHTML='Selected: <b style="color:var(--text);">'+esc(enhName)+'</b>'; }
+    el('enh-go').disabled=false;
+    debEnhanceCost();
+  }
+  function enhanceCost(){
+    var cost=el('enhance-cost');
+    if(!enhWid || !editSrc()){ cost.clear(); return; }
+    cost.setChecking();
+    var mine=++costSeq;
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mode:'enhance', source:editSrc(), workflow_id:enhWid})})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
+      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
+  }
+  function debEnhanceCost(){ clearTimeout(costTimer); costTimer=setTimeout(enhanceCost,250); }
+  function runEnhance(){
     var src=editSrc();
     if(!src){ el('edit-src').focus(); return; }
-    function run(){ runTask('/api/enhance', {source:src, workflow_id:wid}, el('enh-result'), {past:'Enhanced'}); }
-    // Enhance tools spend credits -- free cards do NOT cover panelplugin workflows. Price it
-    // and confirm before firing, so a click never silently burns credits.
-    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({mode:'enhance', source:src, workflow_id:wid})})
-      .then(function(r){return r.json();}).then(function(d){
-        if(d && d.free){ run(); return; }
-        var c=(d && d.cost!=null)?(' (~'+Number(d.cost).toLocaleString()+' credits)'):'';
-        if(window.confirm('This Enhance tool spends credits'+c+' \\u2014 free cards do not cover Enhance workflows. Run it?')) run();
-      }).catch(function(){
-        if(window.confirm('Run this Enhance tool? It spends credits (free cards do not cover Enhance workflows).')) run();
-      });
+    if(!enhWid){ return; }
+    runTask('/api/enhance', {source:src, workflow_id:enhWid}, el('enh-result'),
+            {past:'Enhanced', btn:el('enh-go'), busy:'Running\\u2026', idle:'Run'});
   }
   function genDrawerEl(){ var w=el('gen-mode-video'); return w?w.querySelector('mg-generate-drawer'):null; }
   function addVideoRefs(refs){
@@ -6348,7 +6508,8 @@ var Gen = (function(){
   }
   return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
-          editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit, enhance:enhance,
+          editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
+          selectEnhance:selectEnhance, runEnhance:runEnhance,
           renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
@@ -6373,6 +6534,25 @@ document.addEventListener('mg-pick-request', function(e){
   var d=e.detail; if(!d||typeof d.respond!=='function') return;
   Picker.open(function(mid, thumb){ d.respond(mid, thumb); }, d.kind==='video'?{type:'video'}:null);
 });
+// mg-submit / mg-result: the drawer polls and renders ITS OWN result inline (self-contained,
+// same as the Loom's mount) -- these two listeners are not for that. They are the two things
+// runTask() gives every OTHER tab (Generate/Edit/Fix, still the pre-migration inline JS) that
+// the Video tab silently lost when it moved to <mg-generate-drawer> and nothing was ever wired
+// to replace them: Jobs.register (the Activity card entry that survives closing the drawer or
+// navigating away -- the drawer's own poll dies with the page, per its `if(!self.isConnected)
+// return;` guard, so without this a video that finishes after you leave shows NOWHERE) and
+// Acct.refresh() (the header credit balance, which every other spend path already updates on
+// completion). Found 2026-07-21 by the post-v2.2.0 audit (B4): verified the drawer dispatches
+// both events (bubbles+composed) but the gallery bound neither, while the Loom's own mount
+// binds both via bindGenDrawer -- and its onVideoSubmit comment explicitly says the "Rendered"
+// label is chosen to match "the gallery's own existing label for this same endpoint", i.e. this
+// wiring was always assumed to exist here. One document-level listener each, matching
+// mg-pick-request immediately above: the drawer is the only source of either event.
+document.addEventListener('mg-submit', function(e){
+  var d=e.detail; if(!d||!d.task_id) return;
+  if(window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, 'Rendered');
+});
+document.addEventListener('mg-result', function(){ Acct.refresh(); });
 var Tags = (function(){
   var items=[], hot=0, ta=null, timer=null, seq=0;
   function box(){ return document.getElementById('tag-suggest'); }
@@ -6686,7 +6866,7 @@ document.addEventListener('DOMContentLoaded', function() {
       data-prompt="{{ _prompt|e }}" onclick="copyPrompt(this)">Copy Prompt</button>
     {% endif %}
     <button class="btn" data-cmd="{{ row.media_id }}" onclick="copyCmd(this)"
-      title="Copy this image's media_id (paste into the GUI Video/Edit tab)">Copy media id</button>
+      title="Copy this image's media_id (paste into the Edit tab or the Loom)">Copy media id</button>
     <button class="btn" onclick="window.print()" title="Print this image with its details (Letter)">&#128424; Print</button>
     {% if row.is_video != '1' %}
     <a class="btn" href="/contact-sheet?ids={{ row.media_id }}&format=photo" target="_blank" title="Print as a 4x6 photo">4&times;6 photo</a>
@@ -7142,7 +7322,8 @@ function savePrompt() {
   <p style="color:var(--subtext);font-size:13px;">
     {{ groups|length }} media id(s) exist in more than one folder. The
     <span style="color:var(--green);">keeper</span> is the most-organized copy;
-    <code>--dedup</code> would quarantine the rest. Review below, then run Dedup from the GUI Utilities tab.
+    <code>--dedup</code> would quarantine the rest. Review below, then run Dedup from the
+    <a href="{{ url_for('panel') }}">Control Panel</a>.
   </p>
   {% for g in groups %}
   <div style="display:flex;gap:14px;align-items:flex-start;background:var(--mantle);border-radius:8px;padding:12px;margin-bottom:10px;">
@@ -7194,12 +7375,12 @@ function savePrompt() {
   .p-check{display:inline-flex;align-items:center;gap:7px;color:var(--text);font-size:13px;cursor:pointer;}
   #joblog{background:var(--base);border:1px solid var(--surface1);border-radius:8px;padding:12px 14px;font-family:ui-monospace,monospace;font-size:12px;color:var(--subtext);white-space:pre-wrap;line-height:1.5;max-height:340px;overflow-y:auto;margin-top:12px;display:none;}
   #jobstatus{font-size:12.5px;margin-top:6px;}
-  .st-running{color:var(--lavender);} .st-done{color:var(--emerald);} .st-failed{color:var(--red);}
+  .st-running{color:var(--lavender);} .st-done{color:var(--emerald);} .st-failed{color:var(--red);} .st-warn{color:var(--peach);}
   .jobprog{margin:12px 0 4px;}
   .jp-bar{height:10px;border-radius:6px;background:var(--surface1);overflow:hidden;}
   .jp-bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-soft));transition:width .4s ease;}
   .jp-txt{font-size:11.5px;color:var(--subtext);margin-top:5px;font-variant-numeric:tabular-nums;}
-  /* Panel tab bar -- same .htab/.htab.on visual language as the Trophy Hall's
+  /* Panel tab bar -- same .htab/.htab.on visual language as the Folio of Honors'
      Summary/All/Statistics tabs (static/mg-notify.js's injected styles), copied
      rather than shared via a <script src> because mg-notify.js also wires up the
      Jobs tray/Achievement modals that this page doesn't otherwise use; see
@@ -7353,7 +7534,9 @@ function savePrompt() {
       {% for u in web_users %}
       <div class="u-row" data-username="{{ u.username }}">
         <span class="u-name">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
+        {% if panel_is_local or u.username == current_username %}
         <button type="button" class="btn btn-danger" onclick="removeUser(this)">Remove</button>
+        {% endif %}
       </div>
       {% else %}
       <div class="p-note" id="users-empty">No accounts.</div>
@@ -7362,6 +7545,7 @@ function savePrompt() {
   </div>
   <div class="p-sec">
     <h2>Add user</h2>
+    {% if panel_is_local %}
     <form id="add-user-form" onsubmit="return addUser(event)">
       <div class="setup-row login-fields" style="max-width:380px;">
         <input type="text" id="new-username" placeholder="Username" autocomplete="off" maxlength="64" required>
@@ -7371,7 +7555,10 @@ function savePrompt() {
       </div>
     </form>
     <div id="add-user-status" style="margin-top:8px;"></div>
-    <div class="p-note">Every account here has equal access to this gallery (generate, browse, maintenance) &mdash; there's no separate admin tier.</div>
+    <div class="p-note">Once you're signed in, every account has equal access to this gallery (generate, browse, maintenance) &mdash; there's no separate admin tier. Adding a new account, or removing someone else's, is restricted to the machine running the gallery.</div>
+    {% else %}
+    <div class="p-note">Only the machine running the gallery can add new accounts. Ask the owner, or sign in from that machine. (You can still remove your own account above.)</div>
+    {% endif %}
   </div>
   </div>
 </div>
@@ -7430,14 +7617,25 @@ function addUser(evt){
 function removeUser(btn){
   // Read the username back off the row's data attribute rather than a
   // templated/interpolated JS argument -- see the comment in addUser() above.
+  // Whether this is YOUR OWN row is read the same way, off the server-rendered
+  // ".u-you" marker already on the page -- no second templated JS value needed.
   var row=btn.closest('.u-row');
   var username=row.getAttribute('data-username');
-  if(!confirm('Remove account "'+username+'"?\\n\\nThey will be signed out on every device immediately.')) return;
+  var isSelf = !!row.querySelector('.u-you');
+  var msg = isSelf
+    ? 'Remove your own account "'+username+'"?\\n\\nYou will be signed out immediately, on every device.'
+    : 'Remove account "'+username+'"?\\n\\nThey will be signed out on every device immediately.';
+  if(!confirm(msg)) return;
   var st=el('add-user-status');
   fetch('/api/users/remove',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:username, csrf:CSRF})})
     .then(function(r){return r.json();}).then(function(d){
       if(d.error){ st.innerHTML='<span class="st-failed">⚠ '+escH2(d.error)+'</span>'; return; }
+      // Self-removal kills the caller's own session server-side immediately
+      // (get_web_user_session_epoch returns None once the account is gone) --
+      // send them to /login rather than leave a dead session sitting on the
+      // Panel page looking functional until their next click fails.
+      if(isSelf){ location.href='/login'; return; }
       row.remove();
       if(!el('users-list').querySelector('.u-row')){
         var e=document.createElement('div'); e.className='p-note'; e.id='users-empty'; e.textContent='No accounts.';
@@ -7525,8 +7723,10 @@ function poll(){
     if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+escH2(d.label)+'\\u2026</span>'; stop.style.display=''; setButtons(true); setTimeout(poll,1000); }
     else { setButtons(false); polling=false; stop.style.display='none';
       if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+escH2(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
+      else if(d.status==='done_with_errors'){ st.innerHTML='<span class="st-warn">\\u26a0 '+escH2(d.label||'job')+' finished with errors \\u2014 '+(d.warn_count||0)+' file(s) failed (exit '+d.rc+')</span>'; loadAcct(); }
       else if(d.status==='cancelled'){ st.innerHTML='<span class="st-failed">\\u25a0 '+escH2(d.label||'job')+' stopped by you</span>'; loadAcct(); }
       else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
+      else { st.innerHTML='<span class="st-warn">? '+escH2(d.label||'job')+' ended in an unrecognized state ('+escH2(String(d.status))+')</span>'; loadAcct(); }
     }
   }).catch(function(){ polling=false; setButtons(false); });
 }
@@ -7973,6 +8173,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                       next_url=next_url, no_accounts=no_accounts,
                                       bootstrap_mode=bootstrap_mode)
 
+    # Served by logout() in place of a redirect -- see its own comment for why a
+    # real page (not a 3xx) is required to run the Cache Storage purge. Static, no
+    # Jinja/user input involved, so a plain string is safer than round-tripping it
+    # through render_template_string for nothing.
+    _LOGOUT_HTML = (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Signing out…</title>"
+        "<style>body{margin:0;height:100vh;display:flex;align-items:center;"
+        "justify-content:center;background:#0b0a12;color:#cfd0e0;"
+        "font:14px system-ui,sans-serif}</style></head>"
+        "<body>Signing you out… <a href=\"/login\">Continue</a>"
+        "<script>(function(){"
+        "function go(){location.replace('/login');}"
+        "if('caches' in window){"
+        "caches.keys().then(function(ks){"
+        "return Promise.all(ks.map(function(k){return caches.delete(k);}));"
+        "}).catch(function(){}).then(go);"
+        "}else{go();}"
+        "})();</script>"
+        "<noscript><meta http-equiv=\"refresh\" content=\"0;url=/login\"></noscript>"
+        "</body></html>"
+    )
+
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
         """Sign out. A GET clears THIS browser's cookie and nothing else; a POST
@@ -8040,9 +8264,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 core.bump_web_user_session_epoch(user)
         # Unconditional and outside the guard: whoever holds an already-invalid cookie
         # must still be able to shed it locally. Client-side only, touches no server
-        # state, and leaves the anonymous case a plain 302 no-op.
+        # state, and leaves the anonymous case a harmless no-op.
         session.clear()
-        return redirect(url_for("login"))
+        # Cache Storage (used by /sw.js for the installed/PWA view) is browser-side
+        # state a redirect can't touch -- the server can clear the SESSION but not
+        # what the browser itself cached under /img/ and /full/. A bare redirect()
+        # never runs script, so the purge has to happen from an actual page: this
+        # unconditional (same reasoning as session.clear() above -- even an
+        # already-signed-out /logout hit should leave a clean cache) 200 response
+        # deletes every Cache Storage entry client-side, then does the SAME
+        # navigation to /login a redirect would have. This must NOT be hooked onto
+        # /login instead: login() has no signed-in short-circuit, so purging there
+        # would wipe a currently-signed-in user's cache on a stray bookmark/Back
+        # hit to /login (the flaw that got an earlier draft of this fix rejected).
+        return _LOGOUT_HTML
 
     # ------------------------------------------------------------------
     # THE front door: DEFAULT-DENY for every request, enforced in one place.
@@ -8152,11 +8387,27 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # must stay valid across multiple calls on the same page, not rotate
         # after each one.
         session.setdefault("csrf", secrets.token_hex(16))
+        # out_dir is a HOST FILESYSTEM PATH -- withheld from a LAN caller the same way
+        # /api/panel/status's job stdout is (2026-07-21 audit, S2): it's unrelated to
+        # this route's actual trust decision. Usernames on this same page stay visible
+        # to every signed-in session on purpose -- reading the roster isn't the same
+        # action as adding to or removing from it, and that's a different, narrower
+        # question than the one below. A server install path is a different kind of
+        # fact -- it identifies the owner's machine, not a fellow account -- and the
+        # front door never signed up to expose it past the loopback boundary.
+        panel_out_dir = str(out_dir) if _is_local_request() else "(local to the server)"
+        # panel_is_local drives the Users tab's UI: as of 2026-07-22, adding an account
+        # or removing someone ELSE's is LOCALHOST-only (api_users_add/_remove) -- a LAN
+        # session can still remove its OWN row. Hiding the controls it can't use avoids
+        # a confirm-dialog-then-403 dead end; the server enforces the same boundary
+        # regardless of what this flag renders, so getting this wrong is a UX
+        # regression, not a security one.
+        panel_is_local = _is_local_request()
         return render_template_string(
             PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
             all_actions_json=json.dumps(all_actions),
-            out_dir=str(out_dir), actions_json=json.dumps(actions),
-            supervised=_supervised(),
+            out_dir=panel_out_dir, actions_json=json.dumps(actions),
+            supervised=_supervised(), panel_is_local=panel_is_local,
             web_users=core.list_web_users(), csrf=session["csrf"],
             current_username=session.get("user"))
 
@@ -8176,14 +8427,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/users/add", methods=["POST"])
     def api_users_add():
-        """Add a new gallery web-login account from the Panel's Users tab. Gated
-        by nothing beyond the front door (_enforce_front_door()) -- every account
-        in this app's model already carries equal trust, so any logged-in session
-        (local or LAN) may manage accounts, same as the rest of the Panel. Refuses
-        a duplicate username outright rather than silently resetting a stranger's
-        password (that's still what add_or_update_web_user itself does, and stays
-        available for the owner via --add-web-user for exactly that recovery
-        case) -- mirrors static/_mockup_login_panel.html's Add User validation.
+        """Add a new gallery web-login account from the Panel's Users tab.
+
+        LOCALHOST-ONLY as of 2026-07-22. Previously gated by nothing beyond the
+        front door, reasoned as "every account in this app's model already
+        carries equal trust, so any logged-in session may manage accounts."
+        That principle covers what an ALREADY-EXISTING account can do (generate,
+        browse, curate) -- it was never weighed against a LAN guest minting
+        itself a brand-new, persistent account. Closed alongside the matching
+        fix to /api/users/remove: a LAN session used to be able to evict the
+        owner's own account and then register a fresh one for itself, one
+        finding with two halves (see docs/STATE.md's Access & accounts section).
+        Account creation now sits in the same trust class as
+        api_setup_save_key/api_branding_shortcut/destructive Panel jobs -- a
+        logged-in LAN account can use the gallery, not decide who else gets to.
+
+        Refuses a duplicate username outright rather than silently resetting a
+        stranger's password (that's still what add_or_update_web_user itself
+        does, and stays available for the owner via --add-web-user for exactly
+        that recovery case) -- mirrors static/_mockup_login_panel.html's Add
+        User validation.
 
         The exists-check and the write happen in ONE call to
         core.add_web_user_if_new() (a single _accounts_lock acquisition), not a
@@ -8194,6 +8457,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         write would silently reset the first request's just-created password.
         Adversarial-review hardening, 2026-07-19 (same root cause as
         /api/users/remove's last-account race, see that route's docstring)."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -8218,12 +8483,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/users/remove", methods=["POST"])
     def api_users_remove():
-        """Remove a gallery web-login account from the Panel's Users tab. Refuses
-        to remove the LAST remaining account: that would leave zero accounts,
-        re-triggering the local-only bootstrap state and effectively locking out
-        every remote LAN user until someone re-bootstraps from the server
-        machine itself -- a real self-lockout risk, guarded against explicitly
-        rather than left as a footgun.
+        """Remove a gallery web-login account from the Panel's Users tab.
+
+        Removing SOMEONE ELSE'S account is LOCALHOST-only, as of 2026-07-22;
+        removing YOUR OWN account stays reachable from any logged-in session,
+        local or LAN. Self-removal can only harm the caller -- that's a
+        different, much smaller trust question than evicting another named
+        account, which is the specific gap this closes: a LAN session used to
+        be able to remove ANY account by name, including the owner's, with no
+        guard beyond "not the last account left." A guest handed a tablet could
+        boot the owner and (before the matching api_users_add fix) mint itself
+        a durable login in the same motion. See docs/STATE.md's Access &
+        accounts section for the full reasoning; api_users_add closes the
+        other half (a LAN session can no longer register a new account either).
+
+        Refuses to remove the LAST remaining account: that would leave zero
+        accounts, re-triggering the local-only bootstrap state and effectively
+        locking out every remote LAN user until someone re-bootstraps from the
+        server machine itself -- a real self-lockout risk, guarded against
+        explicitly rather than left as a footgun. This applies even to a local
+        session removing itself.
 
         The "how many accounts exist" check and the removal happen in ONE call
         to core.remove_web_user_guarded() (a single _accounts_lock acquisition),
@@ -8238,6 +8517,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         username = str(body.get("username") or "").strip()
+        if username != session.get("user") and not _is_local_request():
+            return jsonify({"error": "localhost-only to remove another account"}), 403
         import pixai_gallery_backup as core
         result = core.remove_web_user_guarded(username)
         if result == "not_found":
@@ -8250,7 +8531,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/ping")
     def api_ping():
-        """Cheap liveness probe — the Stop/Restart reconnect overlay polls this. Open."""
+        """Cheap liveness probe — the Stop/Restart reconnect overlay polls this. Login required
+        (any session, local or LAN)."""
         return jsonify({"ok": True})
 
     @app.route("/api/server/stop", methods=["POST"])
@@ -8332,7 +8614,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _panel_run(action, int_arg=body.get("n"))
             return jsonify({"ok": True, "action": action, "label": spec["label"]})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/import-task", methods=["POST"])
     def api_import_task():
@@ -8371,8 +8653,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"ok": True, "saved": n, "media_ids": mids,
                             "is_video": bool(res.get("is_video"))})
         except Exception as e:
-            _log_job(job_id, status="failed", error=str(e)[:200])
-            return jsonify({"error": str(e)[:200]}), 200
+            _log_job(job_id, status="failed", error=_redact_host_paths(str(e))[:200])
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/panel/status")
     def api_panel_status():
@@ -8409,6 +8691,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"status": _panel_job["status"], "action": _panel_job["action"],
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
                             "progress": _panel_job["progress"],
+                            "warn_count": _panel_job.get("warn_count") or 0,
                             "lines": lines})
 
     @app.route("/api/watch/status")
@@ -8444,7 +8727,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         try:
             proc.terminate()   # reader sees stdout close -> finalizes status as 'cancelled'
         except Exception as e:
-            return jsonify({"ok": False, "error": str(e)[:140]}), 200
+            return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:140]}), 200
         return jsonify({"ok": True, "action": "cancel"})
 
     @app.route("/api/panel/schedule", methods=["GET", "POST"])
@@ -8830,7 +9113,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 _log_job(job_id, status=status, label=summary, done=total, total=total,
                          error=(summary if failed else None))
             except Exception as e:                               # noqa: BLE001
-                _log_job(job_id, status="failed", error=str(e)[:200])
+                _log_job(job_id, status="failed", error=_redact_host_paths(str(e))[:200])
             finally:
                 with _bulkdel_lock:
                     _bulkdel_running["on"] = False
@@ -8840,7 +9123,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:                               # noqa: BLE001 -- OS thread exhaustion, etc.
             with _bulkdel_lock:                              # never wedge single-flight forever
                 _bulkdel_running["on"] = False
-            _log_job(job_id, status="failed", error="could not start delete thread: " + str(e)[:160])
+            _log_job(job_id, status="failed", error="could not start delete thread: " + _redact_host_paths(str(e))[:160])
             return _back(delerr="could not start bulk delete -- try again")
         return _back(bulkdel="started", n=total)
 
@@ -9137,15 +9420,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         true ONLY for a request carrying a valid logged-in session (see /login
         below). Deliberately has NO localhost/loopback bypass -- owner directive
         2026-07-19: "I would expect to require login via any path with this new
-        setup whether localhost hostname or IP." A fresh install therefore MUST
-        run `python pixai_gallery_backup.py --add-web-user` once (account creation
-        is deliberately CLI-only, kept off the web surface) before the web app is
-        reachable at all, from any address including 127.0.0.1 -- there is no
-        bootstrap/first-run bypass. `_is_local_request()` still exists and is still
-        used, but ONLY as an independent, stricter, ADDITIONAL requirement on the
-        couple of routes that must never run for a remote session even when
-        logged in (/api/branding/shortcut, destructive Panel actions) -- it is no
-        longer consulted here.
+        setup whether localhost hostname or IP." A fresh install creates its
+        first account either via `python pixai_gallery_backup.py --add-web-user`
+        or, while no accounts exist yet, through /login's own local-only
+        bootstrap_mode form -- see login()'s docstring below for the real,
+        shipped web-based bootstrap flow; account creation is NOT CLI-only.
+        That bootstrap lives entirely inside login()'s own narrower gate, not
+        here: `_is_authorized_request()` itself still has no bypass of any kind,
+        so the web app remains unreachable, from any address including
+        127.0.0.1, to anything but /login until an account exists and signs in.
+        `_is_local_request()` still exists and is still used, but ONLY as an
+        independent, stricter, ADDITIONAL requirement on the couple of routes
+        that must never run for a remote session even when logged in
+        (/api/branding/shortcut, destructive Panel actions) -- it is no longer
+        consulted here.
 
         Every genuine access-control gate that used to read `_is_local_request()`
         was converted to this during the LAN-auth pass; a few purely-informational
@@ -9314,7 +9602,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/model-search")
     def api_model_search():
-        """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key -> localhost only.
+        """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key. Login required
+        (any session, local or LAN).
         ?q=&kind=base|lora&size=N&offset=N&category=&sort=popular|newest.
 
         Two data sources by design: the REST /search (default) has RICH rows (description /
@@ -9340,7 +9629,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify(core.model_search_rest(session, keyword=q, usage=usage,
                                                   size=size, offset=offset))
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "results": []}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "results": []}), 200
 
     @app.route("/api/model-version")
     def api_model_version():
@@ -9355,7 +9644,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify(core.resolve_version_meta(session, mid))
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "version_id": ""}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
 
     @app.route("/api/gallery-images")
     def api_gallery_images():
@@ -9418,7 +9707,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             hits = pixai_similar.similar(str(img_path), k=k, exclude_media_id=media_id)
         except Exception as e:
             return jsonify({"images": [], "total": 0,
-                            "error": "similarity index unavailable: " + str(e)[:180]}), 200
+                            "error": "similarity index unavailable: " + _redact_host_paths(str(e))[:180]}), 200
         telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
         out = []
         for mid, score in hits:
@@ -9455,7 +9744,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/badge-thumb/<aid>.png")
     def badge_thumb(aid):
-        """Cached ~256px badge for the Trophy Hall tiles (masters stay the source of
+        """Cached ~256px badge for the Folio of Honors tiles (masters stay the source of
         truth). Lazily generated on first hit; path-safe (no slashes via <aid>)."""
         from flask import send_from_directory, abort
         if not aid or "/" in aid or "\\" in aid or ".." in aid:
@@ -9631,7 +9920,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "followers": me.get("followerCount"),
                             "following": me.get("followingCount")})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/setup/save-key", methods=["POST"])
     def api_setup_save_key():
@@ -9674,7 +9963,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         try:
             me = core.account_info(test_session, raise_on_error=True)
         except Exception as e:
-            msg = str(e)
+            msg = _redact_host_paths(str(e))
             if "401" in msg or "Unauthorized" in msg:
                 return jsonify({"error": "That key was rejected by PixAI -- double-check it."}), 200
             return jsonify({"error": "Couldn't verify that key (temporary connection issue) -- try again."}), 200
@@ -9698,12 +9987,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                          "not overwriting it. Fix or restore the file, "
                                          "then save the key again."}), 200
             except OSError as e:
-                return jsonify({"error": "Could not read config.json: {}".format(e)}), 200
+                return jsonify({"error": "Could not read config.json: {}".format(
+                    _redact_host_paths(str(e)))}), 200
             cfg["PIXAI_API_KEY"] = key
             try:
                 cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
             except OSError as e:
-                return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(e)}), 200
+                return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(
+                    _redact_host_paths(str(e)))}), 200
         try:
             credits = int(me.get("quotaAmount") or 0)
         except (TypeError, ValueError):
@@ -9732,15 +10023,54 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 telem_bump("claims", claimed, out_dir=out_dir)   # Claimant
             return jsonify({"claimed": claimed, "credits": credits})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     _snips_lock = threading.Lock()
 
+    def _snips_dir():
+        d = out_dir / "prompt_snippets"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _snips_path(user):
+        from urllib.parse import quote
+        # Same quote(safe="") idiom as _view_presets_path/_loom_kv_path: a username can
+        # never escape the directory or collide via a path separator.
+        return _snips_dir() / (quote(str(user), safe="") + ".json")
+
+    def _legacy_snips_path():
+        return out_dir / "prompt_snippets.json"
+
+    def _read_snips_file(p):
+        try:
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    return [str(s) for s in data]
+        except (OSError, ValueError):
+            pass
+        return []
+
+    def _load_snippets(user):
+        """This account's snippets, falling back to the legacy shared file -- same
+        deliberately-read-only fallback as _load_view_presets: an account with no file
+        of its own yet sees whatever the old shared file held (nothing disappears), and
+        diverges the moment it saves its own."""
+        own = _snips_path(user)
+        if own.exists():
+            return _read_snips_file(own)
+        return _read_snips_file(_legacy_snips_path())
+
     @app.route("/api/snippets", methods=["GET", "POST"])
     def api_snippets():
-        """Prompt snippets/favorites, stored server-side (out_dir/prompt_snippets.json) so
-        they persist with the backup and sync across the owner's machines. Login required (any session, local or LAN)."""
-        path = out_dir / "prompt_snippets.json"
+        """Prompt snippets/favorites, stored PER-ACCOUNT (out_dir/prompt_snippets/<user>.json)
+        so one signed-in account can't see or wholesale-clobber another's -- same split saved
+        views already got. Falls back read-only to the legacy shared
+        out_dir/prompt_snippets.json for an account that hasn't saved its own copy yet.
+        Login required (any session, local or LAN)."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         with _snips_lock:
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
@@ -9749,15 +10079,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     return jsonify({"error": "snippets must be a list"}), 400
                 clean = [str(s)[:800] for s in snips if str(s).strip()][:200]
                 try:
-                    path.write_text(json.dumps(clean), encoding="utf-8")
+                    _snips_path(user).write_text(json.dumps(clean), encoding="utf-8")
                 except OSError as e:
-                    return jsonify({"error": str(e)[:160]}), 200
+                    return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
                 return jsonify({"snippets": clean})
-            try:
-                snips = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-            except (OSError, ValueError):
-                snips = []
-            return jsonify({"snippets": snips})
+            return jsonify({"snippets": _load_snippets(user)})
 
     _ach_lock = threading.Lock()
 
@@ -9774,7 +10100,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "official": sum(1 for c in contests if c["type"] == "official"),
                             "community": sum(1 for c in contests if c["type"] != "official")})
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "contests": []}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
 
     @app.route("/api/artwork-views")
     def api_artwork_views():
@@ -9787,7 +10113,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify({"views": core.artwork_views(session, aid)})
         except Exception as e:
-            return jsonify({"views": None, "error": str(e)[:120]}), 200
+            return jsonify({"views": None, "error": _redact_host_paths(str(e))[:120]}), 200
 
     @app.route("/api/your-art")
     def api_your_art():
@@ -9935,8 +10261,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/branding", methods=["GET", "POST"])
     def api_branding():
-        """The banner mark (the icon beside the title) + its animation. GET is
-        open (cosmetic; the LAN view renders the same header); POST is owner-only.
+        """The banner mark (the icon beside the title) + its animation. GET and POST both
+        require login (any session, local or LAN) -- cosmetic, so any authorized device may
+        read or change it, same as the rest of the LOGIN-tier settings surface.
         Persists to out_dir/branding.json."""
         if request.method == "GET":
             cfg = load_branding(out_dir)
@@ -9990,7 +10317,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         try:
             lnk = make_launcher_shortcut(out_dir, mark)
         except RuntimeError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 400
         return jsonify({"ok": True, "lnk": lnk})
 
     @app.route("/api/suggest-prompt")
@@ -10004,7 +10331,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify({"suggestions": core.suggest_prompt(session, mid)})
         except Exception as e:
-            return jsonify({"suggestions": [], "error": str(e)[:200]}), 200
+            return jsonify({"suggestions": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/tag-suggest")
     def api_tag_suggest():
@@ -10017,7 +10344,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify({"tags": core.tag_search_gql(session, q, first=8)})
         except Exception as e:
-            return jsonify({"tags": [], "error": str(e)[:200]}), 200
+            return jsonify({"tags": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/upload", methods=["POST"])
     def api_upload():
@@ -10039,7 +10366,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             telem_bump("uploads", out_dir=out_dir)        # first-upload milestone
             return jsonify({"media_id": str(mid)})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
         finally:
             try:
                 _os.unlink(tmp.name)
@@ -10120,7 +10447,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"ok": True, "imported": res["imported"], "skipped": res["skipped"],
                             "collection": collection or None})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -10159,22 +10486,46 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     _presets_lock = threading.Lock()
 
-    def _presets_path():
+    # Toolbox presets are PER-ACCOUNT, one file each under out_dir/toolbox_presets/ --
+    # same shape as _view_presets_path/_snips_path/_loom_kv_path. They shipped
+    # install-wide; Moonglade is explicitly not single-user (the repo is public and has
+    # real external users), so on any install with more than one account, install-wide
+    # meant every account could see, and overwrite, every other account's imported
+    # presets. The legacy shared file stays a READ-ONLY fallback for an account with no
+    # file of its own yet -- same no-migration-flag contract as _load_view_presets.
+    def _toolbox_dir():
+        d = out_dir / "toolbox_presets"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _presets_path(user):
+        from urllib.parse import quote
+        return _toolbox_dir() / (quote(str(user), safe="") + ".json")
+
+    def _legacy_presets_path():
         return out_dir / "toolbox_presets.json"
 
-    def _load_presets():
+    def _read_presets_data(p):
         try:
-            if _presets_path().exists():
-                return json.loads(_presets_path().read_text(encoding="utf-8"))
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
         except (OSError, ValueError):
             pass
         return {}
 
-    def _edit_params_from_payload(core, p, session=None):
+    def _load_presets(user):
+        own = _presets_path(user)
+        if own.exists():
+            return _read_presets_data(own)
+        return _read_presets_data(_legacy_presets_path())
+
+    def _edit_params_from_payload(core, p, user, session=None):
         """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
         catalog media_id (the image being edited). A `preset` name swaps in a locally
-        banked Toolbox preset (canned prompt + sceneId + its modelId). Returns None if
-        no source.
+        banked Toolbox preset (canned prompt + sceneId + its modelId), looked up from
+        `user`'s own per-account presets. Returns None if no source.
 
         `session` is REQUIRED for a real submit and deliberately omitted for pricing.
         With it, every source id is run through _input_media_id -- a catalog id is a
@@ -10189,7 +10540,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         scene_id, model_id = "", ""
         preset_name = str(p.get("preset") or "").strip()
         if preset_name:
-            pre = _load_presets().get(preset_name)
+            pre = _load_presets(user).get(preset_name)
             if not pre:
                 return None
             instruction = pre.get("prompt") or instruction
@@ -10221,14 +10572,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/presets", methods=["GET", "POST"])
     def api_presets():
-        """Toolbox presets, stored LOCALLY (out_dir/toolbox_presets.json -- preset
+        """Toolbox presets, stored per-account under out_dir/toolbox_presets/ (preset
         prompts are PixAI-authored content, so they live as the owner's own captured
         task data, never in the repo). GET lists {name: {label, scene_id}} (no prompt
         bodies). POST {task_id, label?} imports one from a task the owner ran on the
         site: fetches the task, extracts chat.prompts + sceneId + modelId, saves it.
-        Login required; uses the owner's key on import."""
+        Login required; uses the owner's key on import.
+
+        The account comes from the SESSION, never the request body -- same contract as
+        /api/view-presets and /api/snippets: a client that could name its own key could
+        read and overwrite anyone's presets."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "authentication required"}), 401
         with _presets_lock:
-            presets = _load_presets()
+            presets = _load_presets(user)
             if request.method == "GET":
                 return jsonify({"presets": {
                     k: {"label": v.get("label") or k, "scene_id": v.get("scene_id", "")}
@@ -10238,8 +10596,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if not tid:
                 return jsonify({"error": "task_id required"}), 400
             try:
-                core, session = _gen_session()
-                task = core.task_detail_gql(session, tid) or {}
+                core, gsession = _gen_session()
+                task = core.task_detail_gql(gsession, tid) or {}
                 params = task.get("parameters") or {}
                 chat = params.get("chat") or {}
                 prompt = chat.get("prompts") or params.get("prompts") or ""
@@ -10255,12 +10613,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     "model_id": str(chat.get("modelId") or ""),
                     "from_task": tid,
                 }
-                _presets_path().write_text(json.dumps(presets, indent=1),
-                                           encoding="utf-8")
+                dest = _presets_path(user)
+                tmp = dest.with_suffix(".tmp")
+                tmp.write_text(json.dumps(presets, indent=1), encoding="utf-8")
+                os.replace(tmp, dest)   # atomic: a torn write can't eat the set
                 return jsonify({"imported": name,
                                 "label": presets[name]["label"]})
             except Exception as e:
-                return jsonify({"error": str(e)[:200]}), 200
+                return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     _view_presets_lock = threading.Lock()
 
@@ -10368,12 +10728,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 os.replace(tmp, dest)   # atomic: a torn write can't eat the set
             return jsonify({"presets": presets})
 
-    def _params_and_nocard(core, p):
+    def _params_and_nocard(core, p, user):
         """Route a drawer payload to generate, edit, or video params. Returns (params,
-        no_card, note). note is set (params None) when something's missing."""
+        no_card, note). note is set (params None) when something's missing. `user` is
+        only consulted on the edit path (a preset lookup is per-account)."""
         p = p or {}
         if p.get("mode") == "edit":
-            params = _edit_params_from_payload(core, p)
+            params = _edit_params_from_payload(core, p, user)
             return (params, bool(p.get("no_card")),
                     None if params else "pick an image to edit")
         if p.get("mode") in ("I2V", "FLF", "R2V"):
@@ -10400,7 +10761,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     negative=(p.get("negative") or "").strip(),
                     is_private=bool(p.get("is_private")))
             except core.PixAIError as e:
-                return None, bool(p.get("no_card")), str(e)[:140]
+                return None, bool(p.get("no_card")), _redact_host_paths(str(e))[:140]
             return params, bool(p.get("no_card")), None
         if p.get("mode") == "enhance":
             src = str(p.get("source") or "").strip()
@@ -10421,7 +10782,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Live cost + free-card check for the drawer's current settings (generate OR
         edit). Read-only (no spend). Login required (any session, local or LAN)."""
         try:
-            core, session = _gen_session()
+            user = str(session.get("user") or "")
+            # NOT `core, session = _gen_session()` -- session is assigned that way further
+            # down in this same function, which (Python whole-function scoping) makes the
+            # bare name `session` local for the ENTIRE function, so the read above would
+            # raise UnboundLocalError instead of reading Flask's session. gsession names
+            # the PixAI API session distinctly, the same fix already applied in api_presets.
+            core, gsession = _gen_session()
             body = request.get_json(silent=True) or {}
             # Resolve a bare base model_id -> its current version, exactly as /api/generate
             # does, so a caller that knows only the base model still gets a real cost +
@@ -10433,20 +10800,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if (not str(body.get("version_id") or "").strip()
                     and str(body.get("model_id") or "").strip()
                     and not body.get("mode")):
-                _vid = (core.resolve_version_meta(session, str(body["model_id"]).strip()) or {}).get("version_id") or ""
+                _vid = (core.resolve_version_meta(gsession, str(body["model_id"]).strip()) or {}).get("version_id") or ""
                 if _vid:
                     body = {**body, "version_id": _vid}
-            params, no_card, note = _params_and_nocard(core, body)
+            params, no_card, note = _params_and_nocard(core, body, user)
             if params is None:
                 return jsonify({"cost": None, "free": False, "note": note})
-            cost = core.price_task(session, params)
-            best = None if no_card else core.match_kaisuuken(session, params, enrich=True)
+            cost = core.price_task(gsession, params)
+            best = None if no_card else core.match_kaisuuken(gsession, params, enrich=True)
             return jsonify({"cost": cost, "free": bool(best),
                             "cards": (best or {}).get("total"),
                             "card_name": (best or {}).get("name"),
                             "card_expires": (best or {}).get("expiresAt")})
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "cost": None}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None}), 200
 
     @app.route("/api/generate", methods=["POST"])
     def api_generate():
@@ -10487,7 +10854,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     @app.route("/api/edit", methods=["POST"])
     def api_edit():
@@ -10496,21 +10863,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}."""
         try:
             from types import SimpleNamespace
-            core, session = _gen_session()
+            user = str(session.get("user") or "")
+            # gsession, not `core, session = _gen_session()` -- see api_price's identical
+            # comment: session is Flask's, reassigning it here would make every reference
+            # to the bare name `session` in this function a local (UnboundLocalError on
+            # the read above), not a read of Flask's session.
+            core, gsession = _gen_session()
             p = request.get_json(silent=True) or {}
-            params = _edit_params_from_payload(core, p, session)
+            params = _edit_params_from_payload(core, p, user, gsession)
             if params is None:
                 return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
-            core._apply_kaisuuken(session, params,
+            core._apply_kaisuuken(gsession, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            task_id = core.submit_generation(session, params)
+            task_id = core.submit_generation(gsession, params)
             telem_bump("edits", out_dir=out_dir)          # The Restoration Wing
             telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     @app.route("/api/enhance", methods=["POST"])
     def api_enhance():
@@ -10523,28 +10895,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             p = request.get_json(silent=True) or {}
             src = _input_media_id(core, session, str(p.get("source") or "").strip())
             wid = str(p.get("workflow_id") or "").strip()
-            plug = ENHANCE_PLUGINS.get(str(p.get("plugin") or "").strip())
             if not src:
                 return jsonify({"error": "pick an image first"}), 400
-            if wid:
-                params = core.build_panelplugin_parameters(src, wid)
-            elif plug:
-                params = core.build_panelplugin_parameters(
-                    src, plug.get("workflow_id", ""), workflow_name=plug.get("workflow_name", ""))
-            else:
+            if not wid:
                 return jsonify({"error": "pick an enhance workflow"}), 400
+            params = core.build_panelplugin_parameters(src, wid)
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
             telem_bump("enhances", out_dir=out_dir)       # first-enhance milestone
             telem_set_add("tools", "enhance", out_dir=out_dir)
-            telem_set_add("enhance_workflows",           # Enhance Adept: distinct rituals
-                          wid or (plug or {}).get("workflow_id")     # card + catalog runs of the
-                          or (plug or {}).get("workflow_name")       # same workflow share one key
-                          or str(p.get("plugin") or ""), out_dir=out_dir)
+            telem_set_add("enhance_workflows", wid, out_dir=out_dir)  # Enhance Adept: distinct rituals
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
@@ -10563,7 +10927,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     # --- The Loom (Seedance storyboard) -------------------------------------
     # Storage is a small key->value store the Loom's window.storage shim reads via
@@ -10574,32 +10938,59 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # is migrated into per-key files on first touch and preserved as store.json.migrated.
     _loom_lock = threading.Lock()
 
-    def _loom_kv_dir():
+    def _legacy_loom_kv_dir():
+        """The pre-D-7 flat, install-wide store -- every account used to read and write
+        the same files here. Now the shared, read-only fallback layer every account's
+        _loom_kv_read falls through to until it saves its own copy of a given key."""
         d = out_dir / "loom" / "kv"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def _loom_kv_path(key):
+    def _legacy_loom_kv_path(key):
         from urllib.parse import quote
-        return _loom_kv_dir() / (quote(str(key), safe="") + ".json")
+        return _legacy_loom_kv_dir() / (quote(str(key), safe="") + ".json")
 
-    def _loom_kv_write(key, value):
-        """Atomically persist one key's value (tmp + os.replace)."""
-        p = _loom_kv_path(key)
+    def _loom_kv_dir(user):
+        from urllib.parse import quote
+        d = out_dir / "loom" / "kv" / quote(str(user), safe="")
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _loom_kv_path(user, key):
+        from urllib.parse import quote
+        return _loom_kv_dir(user) / (quote(str(key), safe="") + ".json")
+
+    def _loom_kv_write(user, key, value):
+        """Atomically persist one key's value into the ACCOUNT'S OWN dir (tmp +
+        os.replace). Never writes the legacy shared dir -- that stays exactly as
+        _loom_migrate() left it, a read-only fallback."""
+        p = _loom_kv_path(user, key)
         tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
         tmp.write_text(json.dumps(value), encoding="utf-8")
         os.replace(tmp, p)
 
-    def _loom_kv_read(key):
+    def _loom_kv_read(user, key):
+        """This account's value for `key`, falling back read-only to the legacy shared
+        store if the account has never saved its own copy of this key -- same pattern as
+        _load_view_presets/_load_snippets (D-7: storyboards were install-wide before this,
+        so any signed-in account could read AND overwrite every other account's boards)."""
+        own = _loom_kv_path(user, key)
+        if own.exists():
+            try:
+                return json.loads(own.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                return None
         try:
-            return json.loads(_loom_kv_path(key).read_text(encoding="utf-8"))
+            return json.loads(_legacy_loom_kv_path(key).read_text(encoding="utf-8"))
         except (ValueError, OSError):
             return None
 
     def _loom_migrate():
-        """One-time split of the legacy single store.json into per-key files. Idempotent
-        + crash-safe: re-runs from the intact store.json until the final rename lands (a
-        partial migration can't lose keys), then no-ops once store.json is gone."""
+        """One-time split of the legacy single store.json into per-key files, in the
+        LEGACY flat dir (unaffected by the D-7 per-account split -- it keeps writing the
+        shared fallback layer every account now reads through). Idempotent + crash-safe:
+        re-runs from the intact store.json until the final rename lands (a partial
+        migration can't lose keys), then no-ops once store.json is gone."""
         legacy = out_dir / "loom" / "store.json"
         if not legacy.exists():
             return
@@ -10610,7 +11001,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if isinstance(data, dict):
             for k, v in data.items():
                 try:
-                    _loom_kv_write(k, v)
+                    p = _legacy_loom_kv_path(k)
+                    tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+                    tmp.write_text(json.dumps(v), encoding="utf-8")
+                    os.replace(tmp, p)
                 except OSError:
                     return                      # leave store.json for the next touch to retry
         try:
@@ -10720,12 +11114,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/loom/get")
     def loom_get():
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         with _loom_lock:
             _loom_migrate()
-            return jsonify({"value": _loom_kv_read(request.args.get("key") or "")})
+            return jsonify({"value": _loom_kv_read(user, request.args.get("key") or "")})
 
     @app.route("/api/loom/set", methods=["POST"])
     def loom_set():
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         p = request.get_json(silent=True) or {}
         k = p.get("key")
         if not k:
@@ -10733,28 +11133,48 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         with _loom_lock:
             _loom_migrate()
             try:
-                _loom_kv_write(k, p.get("value"))
+                _loom_kv_write(user, k, p.get("value"))
             except OSError as e:
-                return jsonify({"ok": False, "error": str(e)[:120]}), 500
+                return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:120]}), 500
         return jsonify({"ok": True})
 
     @app.route("/api/loom/list")
     def loom_list():
         from urllib.parse import unquote
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         pre = request.args.get("prefix") or ""
         with _loom_lock:
             _loom_migrate()
-            keys = [unquote(f.stem) for f in _loom_kv_dir().glob("*.json")]
-        return jsonify({"keys": [k for k in keys if k.startswith(pre)]})
+            # Union of the account's own keys and the legacy shared keys it hasn't
+            # overridden yet -- mirrors _loom_kv_read's per-key fallback, so "list"
+            # never omits a board a bare "get" on the same key would still return.
+            own_keys = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.json")}
+            legacy_keys = {unquote(f.stem) for f in _legacy_loom_kv_dir().glob("*.json")}
+            keys = own_keys | legacy_keys
+        return jsonify({"keys": sorted(k for k in keys if k.startswith(pre))})
 
     @app.route("/api/loom/delete", methods=["POST"])
     def loom_delete():
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
         k = (request.get_json(silent=True) or {}).get("key")
         with _loom_lock:
             _loom_migrate()
             if k:
+                # Unlinks only the account's OWN copy, never the legacy shared file --
+                # matches _view_presets: the legacy layer is never written back to.
+                # An account that never saved its own copy of an inherited/shared key
+                # can't make a delete "stick" this way (a later GET still falls through
+                # to the legacy value) -- accepted gap, not a bug: this only bites a
+                # second account deleting a board it never touched itself, which doesn't
+                # happen in the single-owner-plus-occasional-LAN-device use case this
+                # feature was built for. Revisit with a per-key tombstone file if that
+                # ever changes.
                 try:
-                    _loom_kv_path(k).unlink()
+                    _loom_kv_path(user, k).unlink()
                 except OSError:
                     pass
         return jsonify({"ok": True})
@@ -10806,13 +11226,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             dur = core.probe_video_duration(str(vid))
             return jsonify({"frame_media_id": str(frame_mid), "duration": dur})
         except Exception as e:
-            return jsonify({"error": str(e)[:200]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/loom/generate", methods=["POST"])
     def loom_generate():
         """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
         Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
-        video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Localhost."""
+        video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Login required
+        (any session, local or LAN)."""
         try:
             import base64
             import hashlib
@@ -10871,7 +11292,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
-            return jsonify({"error": str(e)[:300]}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
     def _run_export(cmd, out_path, total_sec):
         """Run the ffmpeg concat in a thread, parsing time= for progress. The output
@@ -10902,7 +11323,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     _export_job.update(status="failed", error="ffmpeg exited %d" % rc)
         except Exception as e:
             with _export_lock:
-                _export_job.update(status="failed", error=str(e)[:200], proc=None)
+                _export_job.update(status="failed", error=_redact_host_paths(str(e))[:200], proc=None)
 
     @app.route("/api/loom/export", methods=["POST"])
     def api_loom_export():
@@ -11199,8 +11620,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # 'failed' -- without it the job spins on 'running' in the Jobs card
             # forever. (Observed: an enhance submitted with an unusable input media id
             # sat at 'running' indefinitely while PixAI considered it long finished.)
-            _log_job(tid, status="failed", error=str(e)[:200])
-            return jsonify({"phase": "failed", "error": str(e)[:200]}), 200
+            _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
+            return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
         except Exception as e:
             # A transient PixAI blip (5xx/429/timeout) raises here even though the task may
             # still be running -- or already finished. Do NOT write an authoritative 'failed'
@@ -11208,7 +11629,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # for a task that likely succeeded. Leave the job at its last-known state (it ages
             # out, or the live-mirror watcher collects the real result). Only a genuine
             # st["phase"] == "failed" above logs a terminal failure.
-            return jsonify({"phase": "failed", "error": str(e)[:200]}), 200
+            return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/jobs")
     def api_jobs():
@@ -11246,7 +11667,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if body.get("finished"):
             try:
                 for j in core.read_jobs(out_dir):
-                    if j.get("status") in ("done", "failed"):
+                    if j.get("status") in core._JOBS_TERMINAL:
                         _log_job(j.get("job_id"), dismissed=True)
             except Exception:
                 pass
@@ -11265,7 +11686,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             return jsonify({"workflows": core.workflow_catalog(session)})
         except Exception as e:
-            return jsonify({"error": str(e)[:200], "workflows": []}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "workflows": []}), 200
 
     @app.after_request
     def _gzip_html(resp):
@@ -11450,7 +11871,8 @@ def main():
         print("(self-signed HTTPS: your browser/phone will show a one-time 'proceed anyway' warning)")
     print("Press Ctrl+C to stop.\n")
     if getattr(args, "open_browser", False):
-        # fire just after app.run() starts blocking (the GUI proves this pattern)
+        # fire just after app.run() starts blocking (a timer thread is the only way to
+        # run code after a blocking call starts)
         import threading, webbrowser
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)

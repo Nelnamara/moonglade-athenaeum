@@ -27,13 +27,18 @@
 Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owner's own AI
 generations, serves a local searchable web gallery, generates images and videos through
 PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
-the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; it and `master` are
-currently level at **v2.2.0** (2026-07-21 — four security fixes: `/logout`'s global revoke
-moved behind POST + CSRF, `/api/panel/status` stopped handing maintenance stdout to LAN
-accounts, the service worker stopped caching a followed login redirect, and saved views became
-per-account; plus the last two video models, a prompt field in Deep Focus, and the cost
-displays consolidated onto `<mg-cost-badge>`). Each release is a `--no-ff` merge of `loom-v2` →
-`master`, tagged and published as a GitHub Release. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
+the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
+is **v2.2.0** (2026-07-21 — four security fixes: `/logout`'s global revoke moved behind POST +
+CSRF, `/api/panel/status` stopped handing maintenance stdout to LAN accounts, the service worker
+stopped caching a followed login redirect, and saved views became per-account; plus the last two
+video models, a prompt field in Deep Focus, and the cost displays consolidated onto
+`<mg-cost-badge>`). **`loom-v2` has since pulled ahead again** (post-release audit fixes S1–S3/
+B1/B2/B4, the account-eviction gate, the Folio of Honors redesign + its layout fix, and a
+2026-07-22 sweep through the rest of the audit board's high-severity list — see
+`docs/AUDIT_2026-07-21.md` for what's still open, `CHANGELOG.md [Unreleased]` for what shipped)
+— check `git rev-list --count origin/master..origin/loom-v2` for the live count rather than
+trusting a number here. Each release is a `--no-ff` merge of `loom-v2` → `master`, tagged and published as
+a GitHub Release. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
 tree, the `v2` toggle, and the `CardView`/`CardEditor` components) was retired 2026-07-17; `/loom`
 opens straight into the V2 shell with no layout switch. The repo is public and has real external
 users.
@@ -282,29 +287,90 @@ users.
   of PixAI's ComfyUI catalog into `#enh-list`. The Fix sub-tab is a separate box-coordinate
   hand/face fixer (`/api/fix` → `submit_fixer`).
 
-## Achievements / Trophy Hall
+## Achievements / The Folio of Honors
 
-- The Trophy Hall is a **maximized overlay** grown from `#ach-modal` — Summary / All /
-  Statistics tabs, main grid, right rail (category nav, Within Reach, Rewards Earned, mascot
-  alcove), collapsible sections, search, mobile stacking. All Hall CSS is scoped to
-  `.ach-hall` so the contest/art modals sharing `.ach-panel` are untouched (8836086, 911b2ef).
-  The rail carries the rewards; the grid tiles are plain.
+- **Renamed from "Trophy Hall" 2026-07-22** (owner's pick off the shortlist). Same
+  **maximized overlay** grown from `#ach-modal` — Summary / All / Statistics tabs, main
+  grid, right rail (category nav — now click-to-filter, not just scroll-to — Within Reach,
+  Relics, mascot alcove), collapsible sections, search, mobile stacking. All Hall CSS is
+  scoped to `.ach-hall` so the contest/art modals sharing `.ach-panel` are untouched.
+- **Redesigned the same day**, from the owner's own Figma Make export (built partly from
+  the legendary/feat frame slice values handed off earlier that night — confirmed
+  byte-for-byte identical tier-triad colors to what the toast already shipped). The All tab
+  now leads with an auto-rotating carousel showcasing the active ladder's tiers, a
+  ladder-badge selector row (all 10 tracks), the selected ladder's tiers as cards, then
+  every ladder grouped under a glowing pill divider, then Milestones/Masteries/Feats the
+  same way. Real badge art (`/badge-thumb/<id>.png`) throughout, not placeholder images —
+  each ladder's badge is its first rung's art, chosen deliberately over the top (spoiler)
+  tier's. `pixai_gallery.py`'s `ACHIEVEMENTS`/`compute_achievements()` gained `track`/
+  `rung`/`rungs_total` per ladder achievement plus a top-level `ladders` list (`LADDER_TRACKS`)
+  so the client can group without a second hand-maintained id→name map.
 - Points are tier base + 5×(rung−1), driven by `_TIER_POINTS` (common 5 / rare 10 / epic 25 /
   legendary 50 / feat 0) and a derived `_ACH_RUNG`; feats score 0 so the total never hints at
   a hidden feat. Points render on the toast, tiles, and a Warband-style header total.
-- 9-slice tier frames wrap the unlock toast for **legendary and feat only**; grid tiles carry
-  no frame. Adding epic is a one-key change to the framed map in `_mkMoment`.
+- **9-slice tier frames now wrap legendary/feat grid tiles too, not just the unlock toast**
+  — the 2026-07-22 redesign's explicit answer to the open "frame the current modal cards, or
+  defer" question. Same served frame assets (`/branding/frames/legendary.png` / `feat.png`)
+  and slice values as the toast, applied via a `.hall-frame` overlay div rather than
+  `border-image` on the card itself (the card needs its own border for the non-framed
+  tiers). Adding epic is still a one-key change to the framed-tier set.
 - Per-criteria checklists render on the two closed-universe set masteries (Full Toolbox =
   edit/enhance/fix; Master of the Loom = i2v/flf/r2v) via `_ACH_CRITERIA` /
   `achievement_criteria`. Open-ended sets stay count-only.
 - `achievements.json` carries `earned_at:{id:iso}` for earned ids only (no hidden-feat leak),
   fail-soft; `/badge-thumb/<id>.png` serves lazy ~256px copies into `branding/_thumbs`.
 - Masked feats show the cloaked-Nel art in full color (not grayscaled); name and description
-  stay masked server-side (43014ef).
+  stay masked server-side.
 - The canonical roster is `docs/achievements_roster_57.json`: 57 achievements, `art_candidate`
   assigned on every one. Badge and mascot art serves from the D: branding tree
   (`D:\Moonglade Athenaeum\pixai_backup\branding\`); the pre-57 badge originals are preserved
   unserved in `badges\_pre57_backup\`.
+- **Real layout bug, found and fixed same day (`34f2078`):** `#ach-grid` still carried its
+  pre-redesign `class="ach-grid"`, whose CSS forced `display:grid;grid-template-columns:
+  repeat(auto-fill,minmax(216px,1fr))` — correct for the OLD layout where every direct child
+  was one ~216px tile, wrong for the new one where every direct child is a full-width section
+  (the carousel, the ladder row, each `.hall-block`). Auto-placed those sections into narrow
+  tiled columns instead of stacking them — the owner caught it on the live D: install as a
+  scrambled, overlapping render. Fixed to `display:flex;flex-direction:column`. Also removed
+  ~30 CSS rules (`.ach-card`/`.ach-sect`/`.ach-bar`/`.ach-crit`/`.ach-roast` + tier variants)
+  confirmed to have zero producers left in the new render code — dead scaffolding that encoded
+  the exact wrong mental model that caused the bug. **Lesson, already added to memory:**
+  verification that checks individual elements (text content, one element's computed style) in
+  isolation can be 100% green while cross-element GEOMETRY is broken — this needs
+  `getBoundingClientRect()` comparisons between siblings, or a real screenshot, neither of
+  which ran before this shipped the first time (screenshot capture was unavailable all
+  session).
+
+### ⚠️ OPEN — roast text (flavor commentary) may be leaking uncensored/"spicy" lines it
+shouldn't. Owner-reported 2026-07-22, immediately after the layout fix above, from the live
+D: install. **Deliberately NOT investigated further or fixed tonight — owner wants to look
+himself first, and has flagged this for the actual design pass, not a quick patch.** What's
+on record so far, from a read-only code check (no changes made):
+- The gating as written: server-side, `roast_nsfw` is blanked to `""` for every achievement
+  unless the **Triggered** feat (poke the narrator until it snaps) is earned on that account
+  (`api_achievements()`, `pixai_gallery.py` — `unleashed = any(a["id"]=="triggered" and
+  a["earned"] ...)`). Client-side, `card()` (`static/mg-notify.js`) shows exactly ONE roast
+  string per card — `roast_nsfw` only if BOTH the server sent a non-empty one AND the local
+  "Unleash the AI" checkbox (`Ach.setUnleash`, a `localStorage` preference, separate from the
+  server flag) is checked. On paper this reads as correctly gated, and neither of those two
+  checks was touched by tonight's redesign or the layout fix.
+- Two live possibilities, NOT distinguished yet: (a) a genuine gating bug somewhere in this
+  chain; (b) the owner's report describes what was on screen while the layout bug above was
+  still live — two different cards' (or the same card's two renderings, since ladder tiers
+  render once in the active-ladder grid AND again in "All Ladder Tiers") text visually
+  overlapping could easily read as "two flavors shown for one achievement" without any
+  roast-logic bug at all.
+- **Update, same day, after the layout fix shipped:** the owner earned Triggered live (real
+  play, screenshot in hand) — `unleash_available` genuinely flips true, the toggle appears,
+  and the celebration toast fired. Claude read the toast text back against the achievement's
+  own `roast` field and it was an exact, word-for-word match — reported that as "expected:
+  the toggle just hasn't been checked yet." **The owner said this explanation is incorrect.**
+  What's specifically wrong about it was not established — do not reuse Claude's toggle
+  theory as a starting point next time without re-deriving it. Owner wants to compare the
+  `roast` and `roast_nsfw` fields for himself (both sit side by side per-achievement in
+  `pixai_gallery.py`'s `ACHIEVEMENTS` list, easy to diff directly) on his work machine before
+  deciding anything.
+- **Do not resume work on this without the owner's go** — explicit scope boundary he set.
 
 ## Public repo / community
 
@@ -358,12 +424,25 @@ session, which is deliberate (the tablet generates). LOCALHOST is reserved for w
 server's own disk, credential writes, and irreversible cloud deletion. `tests/test_route_tiers.py`
 is the authority.
 
-**Three tiers.** PUBLIC (the three above) · LOGIN (everything else — any signed-in session,
+**Three tiers.** PUBLIC (the four above) · LOGIN (everything else — any signed-in session,
 local or LAN; this is what makes tablet generation work) · LOCALHOST (a signed-in session
-*and* a loopback address). Only five routes are LOCALHOST, and each acts on the server's own
-files or deletes irreversibly from PixAI: `api_panel_run` (destructive actions only),
-`api_panel_cancel`, `api_panel_schedule` POST, `api_setup_save_key`, `api_branding_shortcut`.
+*and* a loopback address). Eight routes are LOCALHOST — `tests/test_route_tiers.py`'s
+`ROUTE_TIERS` is the authority, not this count; re-derive it from there rather than trust
+this prose if the two ever disagree. Each acts on the server's own files, mints a new
+account, or deletes irreversibly from PixAI: `api_panel_run` (destructive actions only),
+`api_panel_cancel`, `api_panel_schedule` POST, `api_setup_save_key`,
+`api_branding_shortcut`, `delete_tasks_bulk`, `api_import_local`, `api_users_add`.
 `/api/server/stop` and `/restart` are deliberately LOGIN, by owner decision.
+
+`api_users_remove` doesn't fit either bucket cleanly and is declared LOGIN with a nuance
+the tier table can't express structurally: removing your OWN account is allowed from any
+signed-in session (it can only harm the caller), removing anyone ELSE's is refused unless
+the request is local — enforced inside the handler against `session["user"]`, not by tier.
+Fixed 2026-07-22 after being flagged and deliberately left for the owner the day before:
+previously any LAN session could remove *any* account by name (guard was only "not the
+last one left"), so a borrowed-tablet guest could evict the owner and — before the
+matching `api_users_add` fix — register itself a fresh, persistent login in the same
+motion. Owner's explicit choice on scope: self-removal stays LAN-reachable.
 
 The tier table is **enforced, not documented**: `tests/test_route_tiers.py` enumerates
 `app.url_map`, fails any route that declares no tier, and — critically — asserts a LOCALHOST
@@ -372,7 +451,10 @@ three gate regressions ship in one week. Verified to fail when the gate is broke
 
 **First run** creates the first account through the login page itself, offered only to a
 loopback request while zero accounts exist, so a LAN device can never claim it. Ongoing
-management is **Panel → Users**. `--add-web-user` remains a recovery path only.
+management is **Panel → Users** — adding an account, or removing one that isn't yours, from
+the server's own machine; removing your own account works from anywhere. `--add-web-user`
+remains a recovery path only (it's also currently the *only* way to reset a forgotten
+password — see Next).
 
 **Passwords:** 8-character minimum with a weak-password blocklist (repeated characters,
 sequential runs, common list), NIST-shaped — length is the control, no composition rules.
@@ -419,23 +501,28 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
-- **The Prompt textarea is the one piece deliberately held back, owner's explicit call
-  2026-07-18:** it is still the **only write site for `c.prompt` in the entire app** (no Deep
-  Focus equivalent) — a "base" string `shotText()` keeps recomposing alongside every later
-  Camera/Lighting/cast edit. The drawer's own composed-prompt box only ever writes
+- **The Prompt textarea still has no shared web-component home** — it stayed a plain React
+  `<textarea>` rather than migrating like `<mg-generate-drawer>` did. There are now **two
+  write sites for `c.prompt`**: the right panel's own Prompt field, and Deep Focus's own
+  matching field (same placement in both — after Mode/Duration, before the frames), each
+  clearing an active `c.promptOverride` the instant the owner types there, since typing a
+  base prompt means "auto-compose from this text now." A "base" string `shotText()` keeps
+  recomposing alongside every later Camera/Lighting/cast edit. The drawer's own
+  composed-prompt box (`<mg-generate-drawer>`) is unrelated — it only ever writes
   `c.promptOverride`/`c.promptOverrideText` (a frozen, never-re-woven verbatim replacement,
-  by that feature's own explicit design) — deleting the native textarea would make every
-  hand-typed prompt an override going forward, silently retiring the compose-from-fields
-  machinery for any shot ever hand-touched. Owner chose to hold this out rather than decide
-  yet; two live options if/when revisited: ship the override-only model as a deliberate
-  simplification, or give base-prompt editing a new home in Deep Focus (mirroring exactly how
-  Deep Focus stayed the sole remaining way to set a card to V2V after Mode's own chips were
-  deleted). Not a blocker on anything else shipping.
-- `<mg-cost-badge>` now covers **four of six** hand-rolled cost displays: the drawer's
-  `.mgd-cost` (`static/mg-generate-drawer.js`, shared by the gallery Video tab and the Loom) and
-  three in `pixai_gallery.py` (Image, Edit, and the picker path) — consolidated 2026-07-21. Still
-  separate: the Loom's own `priceShot` + `confirmSpend` confirm dialog, and
-  `loom/src/loom-core.js`'s aggregate summary behind the cost-to-finish pill.
+  by that feature's own explicit design).
+- `<mg-cost-badge>` now covers the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`,
+  shared by the gallery Video tab and the Loom's Video tab), `pixai_gallery.py`'s Generate
+  and Edit tabs, the Gallery's Enhance sub-tab (`enhance-cost`, reshaped select-then-run —
+  its old `window.confirm()` is gone, the badge is the only warning), and the Loom's Image/
+  Edit/Reference Deep Focus tabs (D-12, 2026-07-22) — each of those three kept its existing
+  `confirmSpend`/`window.confirm()` gate alongside the new badge, deliberately: that dialog
+  is this project's original fail-closed guardrail, built after those exact tabs used to lie
+  about cost, so the badge there is an added preview, not a replacement. Still no badge:
+  `generateShot`'s own `priceShot` + `window.confirm` gate for shot-level/batch video
+  generation (the Loom board's per-shot/"Generate all" path, distinct from the Video Deep
+  Focus tab above), and `loom/src/loom-core.js`'s aggregate summary behind the cost-to-finish
+  pill.
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
 
@@ -443,9 +530,24 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
 What's still CLI-only, tracked so the web surface stays complete:
 
-- Nothing. `--restore-orphans` and `--undo-organize` were the last two, and both now render
-  Panel buttons. (`reconcile-deleted` runs via `/api/panel/run` and the scheduler but renders
-  no button by design, `panel_visible: False`.) (`PANEL_ACTIONS` in `pixai_gallery.py`.)
+- **Password reset.** The only way to reset a forgotten password today is
+  `python pixai_gallery_backup.py --add-web-user` on the server machine (it *adds or
+  updates*, so re-running it for an existing username doubles as a reset — `wiki/Setup.md`
+  documents this). Owner request, 2026-07-22: give this a home in the Panel's Users tab
+  too, so a forgotten password doesn't require CLI access. Would need its own trust call
+  (self-only, like `api_users_remove`'s self-removal carve-out? or LOCALHOST like adding a
+  new account?) rather than inheriting one by default — not decided yet, not started.
+- (`--restore-orphans` and `--undo-organize` now render Panel buttons. `reconcile-deleted`
+  runs via `/api/panel/run` and the scheduler but renders no button by design,
+  `panel_visible: False`. `PANEL_ACTIONS` in `pixai_gallery.py`. Still genuinely CLI-only,
+  with no web route at all: `--convert-existing` (bulk-converts already-downloaded `.webp`
+  files to the `--convert` format) and `--backfill-meta`/`--backfill-full-meta` (fill in
+  missing catalog fields for existing rows). `--faststart-videos` is deliberately CLI-only
+  for a different reason: it's a one-time remux for videos downloaded before the
+  auto-faststart path shipped — every current video-acquisition path (`run_sync_videos`,
+  `_download_video_task`, `run_import_local`) already calls `video_faststart()` at collect
+  time, so there's nothing left for a Panel button to do going forward. Deprecated-in-place
+  by owner decision — D-6, `docs/AUDIT_2026-07-21.md`.)
 
 ---
 
@@ -470,8 +572,10 @@ Ranked, with the reason each sits where it does.
 
 Grouped by owner decision 2026-07-19: these were tracked as separate items but are one
 coherent visual effort and should be scoped and executed together rather than piecemeal.
+**The Folio of Honors redesign (formerly listed here) shipped 2026-07-22 on its own** —
+it had a finished design in hand while the other two didn't, so it went ahead rather than
+waiting; the "together" grouping still applies to what's left below.
 
-- The **Trophy Hall redesign**, blocked on the owner's own Figma frame.
 - The **Loom visual-refinement pass** — the skin system already reaches the Loom, so what
   remains is refinement rather than plumbing. Its whole palette funnels through a six-line
   alias block at the top of `master-storyboard.jsx`'s `STYLES` (`--bg`/`--panel`/`--ink`/
@@ -485,26 +589,20 @@ coherent visual effort and should be scoped and executed together rather than pi
     that width", not as a one-number bump.
 - The **gallery search-bar redesign**, blocked on owner input.
 - The **owner's layout/function note-taking pass**, which gates several deferred items.
-- Epic-tier frame art, per-tile ornate frames, the "earned rewards" display, the
-  toast-badge-to-home-marker motion, and toast tier colours vs shipped badge art — all
-  previously filed individually under Open owner calls.
+- Epic-tier frame art, the "earned rewards" display, the toast-badge-to-home-marker motion,
+  and toast tier colours vs shipped badge art each also has its own line under Open owner
+  calls below — grouping them here is about execution order, not fewer decisions. (Per-tile
+  ornate frames shipped with the Folio of Honors redesign, 2026-07-22 — no longer on this
+  list.)
 
 ---
 
 ## Open owner calls
 
-- **Trophy Hall redesign** is blocked on the owner's own Figma frame. Ask for the frame URL; do
-  not re-suggest the screenshot-decomposition checklist. The Figma plugin is live and
-  authenticated. (`docs/STANDARDS.md` Part 2.)
-- **Trophy Hall rename** undecided. Shortlist: *The Vault Against the Void* / *The Folio of
-  Honors* / *The Ledger of the World Tree* (banner subtext: "The Pillar of the Vault").
 - **Epic-tier frame art** undecided. The owner wants epic to read "deep-purple WoW epic /
   tier-gear," leaning Nelnamara's Dreamwalker feathers + Balance-Druid Moonfire flair, without
   out-shouting legendary-gold or feat-ruby. Enabling it is a one-key change: the framed map in
   `_mkMoment` takes `epic:1` once art exists.
-- **Per-tile ornate frames** are unbuilt — the unlock toast has them, grid tiles do not
-  (`border-image` is scoped to `.ach-m2`; there's no rule on `.ach-card`). Open question: frame
-  the current modal cards, or defer until Hall tiles become mini-toasts?
 - **"Earned rewards" as its own display** — shape TBD.
 - **"Toast badge grows to its home marker"** needs the owner to finish articulating it before
   it is buildable.
@@ -540,53 +638,20 @@ coherent visual effort and should be scoped and executed together rather than pi
 
 ---
 
-## Known defects
+## The audit board
 
-*Found 2026-07-19 by a Playwright browser crawl (185 controls, 60 screenshots reviewed by eye).
-None of these produce a console error or a wrong HTTP response, which is why the suite was fully
-green throughout. Ranked.*
+**`docs/AUDIT_2026-07-21.md` is the live backlog.** A 16-lens, 33-agent audit of the code and
+every scattered document, run against v2.2.0 with an adversarial reviewer per lens: 227 findings,
+51 killed on refutation, ~82 surviving work items with a `file:line` each. It supersedes the
+per-defect bullets below for anything it covers, and it carries what four other documents had
+each been holding separately.
 
-*Every entry re-verified against the code 2026-07-20; fixed ones are deleted, per this file's
-rule. Two claims did not survive: the Loom's **cost pill is not dead** (`refreshEstimate` has
-been wired since the pill's introducing commit — the crawler most likely clicked it while
-prices were already settled), and **`#del-modal` is not dead markup** (`confirmDelete()` drives
-both the per-row and bulk delete paths; it being what a crawl agent's XPath matched is a
-crawler-targeting note, not a defect). Two more were crawl-environment artifacts rather than
-bugs: **"Set launcher icon" 400s only where no `branding/marks/` exists**, so there is no `.ico`
-to point at and the 400 carries a correct explanatory message — the real install has cuts for
-marks 4/12/62/63/74; and **`mg-notify.js`'s mascot paths are consistent** — all use
-`/branding/mascots/`. The genuine gap there is that no `login_nel.png` art exists, so the login
-page's `onerror` chain degrades to `gen_nel.png` as designed.*
+It is **not** archived and must not be moved to `docs/archive/` until it is empty. That is the
+precise mechanism by which `SWEEP_2026-07-16.md` lost three sections of live content: archived
+with work still in it, and `CLAUDE.md` makes `docs/archive/` "historical record, never current
+fact", so roughly twenty items became contractually invisible until this audit went looking.
 
-- **Service-worker registration fails on the login page.** `/sw.js` is gated, so a signed-out
-  page gets a redirect and Chrome refuses a redirected worker script. It registers on the next
-  navigation after signing in; the thumbnail cache simply arms late.
-- **Native `<select>`s are styled two inconsistent ways.** `.filters select` / `#preset-select` /
-  `select.p-sel` get `appearance:none` + a custom caret; `.pick-filters select`
-  (`pixai_gallery.py`), `.lv-sel` and `.sb-pick-filters select` (the Loom) keep the native OS
-  arrow. `accent-color` has no effect on `<select>`, so this needs a real styling pass rather
-  than a token. *(The checkbox half of this finding is fixed: `color-scheme: dark` +
-  `accent-color` on `:root` — see CHANGELOG.)*
-- **The Activity chip is a 79×31 click dead zone over a grid card's link** — on the *gallery*
-  page, which has its own `#jobs-fab` and no `.lv-overlay`. (On the Loom the widgets are now
-  lifted above `.lv-overlay` — see CHANGELOG — so this is a gallery-only placement nit.)
-- **Cosmetic residual from that Loom widget lift:** the raised corner FABs (`#jobs-fab`/
-  `#eb-help-btn` at 401/402) render *inside* the root stacking context, while Deep Focus's
-  `.lv-df-veil` (450) and the nested `mgd`/model preview flyouts (600) render *inside*
-  `.lv-overlay`'s 400 atom — so the corner widgets paint over those backdrops instead of under
-  them. A z-index-only fix can't resolve it; the real fix hoists `.lv-df-veil` (and the nested
-  preview flyouts) up to `.sb-root` level as root-level siblings. Owner-visible refactor, deferred.
-- **Smaller:** upstream exceptions still print verbatim into the UI as a minor UX nit (34
-  `str(e)` sites) — but they are no longer an injection seam: the `innerHTML` sinks now escape
-  (`escH2`) or build text nodes, verified in a browser (see CHANGELOG).
-- **`index()` passes `is_local=True` as a literal**, so the header's "read-only LAN view" branch
-  is unreachable and the variable name is a misnomer for "authorized". This is *deliberate and
-  documented* at the call site — the front-door hook guarantees an authorized request reaches
-  that line — so it is a naming/clarity wart, not a bug. Renaming it touches auth-adjacent
-  template logic and wants an owner nod rather than a drive-by.
-
-
-### Machine-local layout (a standing drift hazard, not a bug)
+## Machine-local layout (a standing drift hazard, not a bug)
 
 - The **live gallery server runs from the D: run-copy** (`D:\Moonglade Athenaeum\`), a separate
   `loom-v2` checkout from the C: repo, and branding art serves from
@@ -646,7 +711,38 @@ page's `onerror` chain degrades to `gen_nel.png` as designed.*
   explicit-confirm gated like delete. The gate is deliberateness, not cost: publishing is free.
   Never a background or automatic action, never default-on for a batch. Like/follow only if a
   concrete use appears. Distinct from `--sync-artworks`, which is read-only published-history
-  sync.
+  sync. The rest of the reachable read-only community surface, scouted 2026-07-04 and never
+  folded in here: per-artwork view counts (dwarf likes — 345 views vs. 4 likes on one probed
+  post), lifetime task/credit/follower stats off `me{}`, the full contest catalog (now partly
+  surfaced — see the recovered bullet below), a notifications/engagement feed (LIKE/FOLLOW only,
+  no actor identity), and server bookmarks-to-local-collections. Two ops relevant to the
+  picker-favorites item below — `listMyBookmarkedGenerationModels` / `listUserLikedGenerationModel`
+  — are named as real operations in `private/API_OPERATIONS.md`, but a dated 2026-07-04 recon in
+  `private/APP_OPERATIONS_FULL.md` found the equivalent surface **absent on the Query root**;
+  neither doc has an actual captured response for them. This is a live contradiction, not a
+  known-good op — it needs a probe before it's scoped, not an assumption in either direction.
+- **Recovered from the 2026-07-16 persona sweep.** `docs/archive/SWEEP_2026-07-16.md`'s "PixAI
+  power user + community member" persona bucket held live, unactioned feature requests that went
+  invisible when the file was archived — the same failure the audit-board reconciliation already
+  fixed once (see "The audit board" above), recurring in a section that reconciliation never
+  reached. Checked against the current code 2026-07-22; still genuinely open: **credit ledger**
+  (`paidCredit` is fetched per-task but never written to the catalog — no spend charts, no
+  cost-per-model); **remix from the lightbox** (load an image's full recipe — prompt/negative/
+  model/LoRAs/size/seed — back into the Generate drawer; no matching code found under any name);
+  **model/LoRA favorites + recents in the picker**, originally scoped local-only ("server-stored
+  like Snippets") — the owner's 2026-07-22 ask wants these sourced from the user's real PixAI
+  bookmarks instead, which folds this into the Epic C contradiction noted above rather than
+  making it a free-standing small item; **prompt-matrix queue runs** (same prompt across models/
+  LoRA-weight sweeps); **a real card-utilization digest** ("what's free today, on which model" +
+  expired-unused tracking — `--cards`/`--claims` expose the raw balances this would sit on top
+  of, but the digest view itself doesn't exist); **contest deadline tracking + shortlist-to-
+  collection staging** (the contest catalog browser shipped since — official/community tabs,
+  `/api/contests` — but staging for the future publish pipeline didn't); **metadata recovery for
+  hand-made folders** (matching browser-saved PixAI files back to tasks by filename/hash).
+  Already shipped and correctly dropped from this list: the first-run wizard, `CONTRIBUTING.md`,
+  CI, and the `READ_ONLY` config flag. **The sweep's other two persona buckets (Loom video
+  creator, gallery curator — 18 more bullets) have not had this same check yet** and carry the
+  identical risk until someone does.
 - **BlurHash grid placeholders** — deferred at low ROI; a small banked item, not an epic. The
   `blurhash` column exists and is populated from `extra.imageBlurHash`, but stays empty until
   `--sync-artworks` runs, covers published rows only, and needs a JS decoder that does not
@@ -696,7 +792,7 @@ surface: no visual build from prose alone.
   gallery and the React Loom mount. "No framework" means *no build step / framework-neutral
   shared widgets* — **not** "no framework": the Loom is React by design. Migration order in
   `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
-- **The Trophy Hall's form factor is a maximized overlay**, not a page or route: grow the
+- **The Folio of Honors' form factor is a maximized overlay**, not a page or route: grow the
   existing `#ach-modal` to full-screen — instant open, gallery stays mounted behind, ESC out,
   animates from the trophy button. Owner screenshots tune the INTERIOR only; the form factor is
   settled.
@@ -739,7 +835,7 @@ surface: no visual build from prose alone.
 | [ledger](https://claude.ai/code/artifact/d1ee39a1-db65-487b-a6ef-067ea6d1392d) | Per-achievement mascot + badge assignment | Live |
 | [Chibi Library · assign uses](https://claude.ai/code/artifact/1998636d-9043-41e8-900d-797c67fd04f2) | Chibi browser + use assignment | Live |
 | [Cohesion Map](https://claude.ai/code/artifact/4229e98c-4ac3-4e86-820a-72a57465c066) | Top-down app map | Live |
-| [Moonglade Banners — defaults & unlocks](https://claude.ai/code/artifact/7919cec3-aec7-41d0-8efc-8fb2d0f4cdb5) | Banner picks; feeds the banner-unlock reward | Live |
+| [Moonglade Banners — defaults & unlocks](https://claude.ai/code/artifact/7919cec3-aec7-41d0-8efc-8fb2d0f4cdb5) | Banner picks for the banner-unlock reward, which isn't built yet (D-8) | Live |
 | [Moonglade Model Deck](https://claude.ai/code/artifact/9f16f42d-2541-4dd9-935a-0f9d0f39c7c4) | Model research deck | Mirror — `docs/archive/MODEL_DECK_2026-07-11.md` is truth |
 
 **Parked**

@@ -3,6 +3,7 @@ paging + full prompts for the copy-to-clipboard feature) and /api/upload (local 
 -> PixAI media_id via the free S3 handshake). All localhost-gated; upload_media is
 monkeypatched so nothing touches the network."""
 import io
+import json
 import os
 import re
 from pathlib import Path
@@ -289,7 +290,9 @@ def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch):
     saved = cli.post("/api/snippets",
                      json={"snippets": ["masterpiece, 4k", "", "  ", "night"]}).get_json()
     assert saved == {"snippets": ["masterpiece, 4k", "night"]}   # blanks dropped
-    assert (tmp_path / "prompt_snippets.json").exists()
+    # Per-account storage (D-7): the file lives under prompt_snippets/<user>.json now,
+    # not the old flat prompt_snippets.json every account used to share.
+    assert (tmp_path / "prompt_snippets" / "tester.json").exists()
     assert cli.get("/api/snippets").get_json() == {"snippets": ["masterpiece, 4k", "night"]}
 
 
@@ -297,6 +300,57 @@ def test_snippets_rejects_non_list(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.post("/api/snippets", json={"snippets": "nope"}).status_code == 400
+
+
+def test_one_account_cannot_see_or_clobber_anothers_snippets(tmp_path):
+    """Same split saved views already got (test_view_presets.py), same reason: prompt
+    snippets were install-wide (one shared prompt_snippets.json), so any signed-in
+    account could read AND wholesale-overwrite every other account's saved snippets."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    app = create_app(tmp_path)
+
+    alice = login_test_client(app, username="alice", password="a-real-test-password-1")
+    alice.post("/api/snippets", json={"snippets": ["alice-only"]})
+
+    bob = login_test_client(app, username="bob", password="a-real-test-password-2")
+    assert bob.get("/api/snippets").get_json()["snippets"] == [], (
+        "bob can see alice's snippets -- the store is not per-account")
+
+    bob.post("/api/snippets", json={"snippets": ["bob-only"]})
+    assert bob.get("/api/snippets").get_json()["snippets"] == ["bob-only"]
+    assert alice.get("/api/snippets").get_json()["snippets"] == ["alice-only"], (
+        "bob's save wiped alice's snippets -- the store is not per-account")
+
+
+def test_gallery_model_preview_hover_is_debounced_not_instant(tmp_path):
+    """Same D-11 fix as the Loom's mg-model-picker.js: a raw mouseenter re-triggered an
+    instant, freshly-repositioned popup on every card the mouse passed over while
+    scanning the grid. This is fundamentally a feel/timing bug (real verification is
+    manual, in a browser) -- this only guards against reverting to the raw wiring."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "c.onmouseenter=function(){ scheduleShowPreview(m, c); };" in html
+    assert "c.onmouseleave=cancelPreview;" in html
+    assert "function scheduleShowPreview(m, anchor){" in html
+    assert "function cancelPreview(){ clearTimeout(previewTimer); hidePreview(); }" in html
+
+
+def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path):
+    """Upgrade path: nothing disappears the moment the store goes per-account. An
+    account with no file of its own falls back to the old shared prompt_snippets.json
+    (read-only) -- exactly what it saw before the split -- and diverges on first save."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    (tmp_path / "prompt_snippets.json").write_text(
+        json.dumps(["from-before"]), encoding="utf-8")
+
+    assert cli.get("/api/snippets").get_json() == {"snippets": ["from-before"]}
+
+    cli.post("/api/snippets", json={"snippets": ["from-before", "new-one"]})
+    own = json.loads((tmp_path / "prompt_snippets" / "tester.json").read_text(encoding="utf-8"))
+    assert own == ["from-before", "new-one"]
+    assert json.loads((tmp_path / "prompt_snippets.json").read_text(encoding="utf-8")) == ["from-before"]
 
 
 def test_suggest_prompt_route(tmp_path, monkeypatch):
@@ -469,6 +523,144 @@ def test_presets_import_and_use(tmp_path, monkeypatch):
     assert seen["p"]["sceneId"] == "character-card"
     assert seen["p"]["chat"]["prompts"] == "BIG CANNED PROMPT"
     assert seen["p"]["chat"]["modelId"] == "1948514378441961474"
+
+
+def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatch):
+    """Same split saved views/snippets/Loom storyboards already got: Toolbox presets
+    were install-wide (one shared toolbox_presets.json), so any signed-in account
+    could read AND wholesale-overwrite every other account's imported presets."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "alice-scene",
+                       "chat": {"prompts": "ALICE PROMPT", "modelId": "1"}}})
+    app = create_app(tmp_path)
+
+    alice = login_test_client(app, username="alice", password="a-real-test-password-1")
+    d = alice.post("/api/presets", json={"task_id": "111"}).get_json()
+    assert d["imported"] == "alice-scene"
+
+    bob = login_test_client(app, username="bob", password="a-real-test-password-2")
+    assert bob.get("/api/presets").get_json()["presets"] == {}, (
+        "bob can see alice's presets -- the store is not per-account")
+
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "bob-scene",
+                       "chat": {"prompts": "BOB PROMPT", "modelId": "2"}}})
+    bob.post("/api/presets", json={"task_id": "222"})
+    assert set(bob.get("/api/presets").get_json()["presets"]) == {"bob-scene"}
+    assert set(alice.get("/api/presets").get_json()["presets"]) == {"alice-scene"}, (
+        "bob's save wiped alice's presets -- the store is not per-account")
+
+
+def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path, monkeypatch):
+    """Upgrade path: nothing disappears the moment the store goes per-account. An
+    account with no file of its own falls back to the old shared toolbox_presets.json
+    (read-only) -- exactly what it saw before the split -- and diverges on first save."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "new-scene",
+                       "chat": {"prompts": "NEW PROMPT", "modelId": "3"}}})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    (tmp_path / "toolbox_presets.json").write_text(
+        json.dumps({"from-before": {"label": "From Before", "scene_id": "",
+                                    "prompt": "x", "model_id": "9"}}),
+        encoding="utf-8")
+
+    assert set(cli.get("/api/presets").get_json()["presets"]) == {"from-before"}
+
+    cli.post("/api/presets", json={"task_id": "333"})
+    own = json.loads((tmp_path / "toolbox_presets" / "tester.json").read_text(encoding="utf-8"))
+    assert set(own) == {"from-before", "new-scene"}
+    legacy = json.loads((tmp_path / "toolbox_presets.json").read_text(encoding="utf-8"))
+    assert set(legacy) == {"from-before"}
+
+
+def test_redaction_does_not_over_redact_when_out_dir_is_a_relative_path(tmp_path, monkeypatch):
+    """Caught in adversarial review: --out defaults to a relative "pixai_backup" and
+    main() never resolves it before create_app(out_dir). Unresolved, str(out_dir) for
+    an out_dir given as "." (the exact scenario `--out .` produces) is a bare, generic
+    1-character string -- which then matches, and redacts, every single period in
+    every error message app-wide (a real, reproduced bug: an ordinary "retry in 0.5s"
+    style message came back full of "<host-path>" fragments instead of the real
+    diagnostic text). monkeypatch.chdir makes tmp_path itself the cwd so Path(".")
+    genuinely IS out_dir, exactly like a real `--out .` invocation -- a relative Path
+    built any other way (e.g. os.path.relpath) is normally a long, specific string and
+    would not actually reproduce this.
+
+    Bite: change _redact_host_paths back to using str(out_dir) instead of
+    str(Path(out_dir).resolve()) and this fails -- the periods in the message below
+    get eaten."""
+    monkeypatch.chdir(tmp_path)
+    out_dir = Path(".")
+    save_catalog(out_dir / "catalog.db", [_row(media_id="1", filename="a_1.png",
+                                          created_at="2025-01-01T00:00:00")])
+    cli = login_client(out_dir)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def boom(*a, **k):
+        raise RuntimeError("retry in 0.5s. version 2.1.0. see release notes.")
+    monkeypatch.setattr(core, "list_contests", boom)
+
+    r = cli.get("/api/contests")
+    body = r.get_data(as_text=True)
+    assert "<host-path>" not in body
+    assert "retry in 0.5s. version 2.1.0. see release notes." in body
+
+
+def test_error_responses_redact_host_paths_even_with_a_space_in_the_directory_name(tmp_path, monkeypatch):
+    """The re-spin of the redaction an earlier attempt got REJECTED for (2026-07-21,
+    docs/AUDIT_2026-07-21.md S3): a regex-based version stopped matching at the first
+    whitespace, so a spaced Windows username/directory (`C:\\Users\\John Smith\\...`)
+    still leaked into an error response in full -- exactly the harm this exists to
+    close. out_dir here deliberately has a space in it, not a convenient unspaced tmp
+    dir, so this actually exercises that failure mode instead of dodging it.
+
+    Also proves longest-candidate-first: pytest's own tmp_path is itself a real
+    subdirectory of tempfile.gettempdir() on this machine, so out_dir is naturally
+    NESTED under a second, shorter redaction candidate. If the shorter candidate fired
+    first, only the tempdir prefix would be replaced, leaving "...\\John Smith\\..."
+    still exposed right after the placeholder -- this test would still catch that.
+
+    Bite: replace _redact_host_paths's body with `return msg` (a no-op) and this fails."""
+    out_dir = tmp_path / "John Smith" / "pixai_backup"
+    out_dir.mkdir(parents=True)
+    save_catalog(out_dir / "catalog.db", [_row(media_id="1", filename="a_1.png",
+                                          created_at="2025-01-01T00:00:00")])
+    cli = login_client(out_dir)
+
+    def boom(*a, **k):
+        raise RuntimeError("could not read {}\\config.json: permission denied".format(out_dir))
+    monkeypatch.setattr(core, "_make_session", boom)
+
+    r = cli.post("/api/price", json={"model_id": "1", "prompt": "x"})
+    body = r.get_data(as_text=True)
+    assert str(out_dir) not in body
+    assert "John Smith" not in body
+    assert "<host-path>" in body
+
+
+def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch):
+    """The sweep touched 37 sites across the file, not one -- prove a SECOND,
+    differently-shaped site (different local variable names, different sibling JSON
+    keys) got the same treatment, not just the one this file happens to exercise most.
+    (The spaced-directory regression itself is covered above; this one just needs a
+    real redaction candidate, so it reuses out_dir rather than an unrelated path that
+    would never actually appear in a real error message.)"""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def boom(*a, **k):
+        raise RuntimeError("upstream call failed, see {}\\log.txt".format(tmp_path))
+    monkeypatch.setattr(core, "list_contests", boom)
+
+    r = cli.get("/api/contests")
+    body = r.get_data(as_text=True)
+    assert str(tmp_path) not in body
+    assert "<host-path>" in body
 
 
 def test_catalog_counts(tmp_path):
@@ -728,7 +920,8 @@ def test_branding_absent_is_404(tmp_path):
 def test_enhance_shelf_promotes_official_tools(tmp_path):
     """The Enhance sub-tab leads with a grouped shelf of curated one-click official tools
     (Upscale / Cleanup / Convert / Light) above the flat 140+ community list — so real
-    tools aren't buried among junk workflows. Each card fires Gen.enhance(<workflow_id>)."""
+    tools aren't buried among junk workflows. Each card fires Gen.selectEnhance(<workflow_id>,
+    <name>) -- D-12: select-then-run now, not click-runs-immediately (see below)."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
@@ -740,8 +933,41 @@ def test_enhance_shelf_promotes_official_tools(tmp_path):
                 "1793505053210462325",   # Remove background
                 "1793713293591365899",   # Basic Outpainting
                 "1801729774701480692"):  # relight sunshine
-        assert "Gen.enhance('" + wid + "')" in html
+        assert "Gen.selectEnhance('" + wid + "'," in html
     assert 'id="enh-q"' in html          # the browse-all search still present below the shelf
+
+
+def test_enhance_is_select_then_run_with_a_persistent_badge(tmp_path):
+    """D-12: the one Enhance path that never got the <mg-cost-badge> treatment -- it used
+    to price + window.confirm() on every click, the exact pattern every other price
+    surface (Image/Edit/Video, and now this one) already replaced with a persistent
+    badge. Now: click selects (no spend), a separate Run button fires it, and the badge
+    is the only warning -- no window.confirm left anywhere in this path."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert '<mg-cost-badge id="enhance-cost"' in html
+    assert 'id="enh-go" disabled' in html                 # nothing selected yet -> Run starts disabled
+    assert "function selectEnhance(wid, name){" in html
+    assert "function runEnhance(){" in html
+    assert "window.confirm('This Enhance tool spends credits" not in html   # old inline confirm is gone
+    assert "window.confirm('Run this Enhance tool?" not in html
+    # selecting enables Run and (re)prices; switching source also reprices Enhance, not just Edit
+    assert "el('enh-go').disabled=false;" in html
+    assert "debEnhanceCost();" in html and "debEditCost();" in html         # setEditSource fires both
+
+
+def test_enhance_price_uses_the_selected_tool_and_shared_source(tmp_path, monkeypatch):
+    """/api/price's mode=enhance branch (already handled server-side, unchanged by D-12)
+    still gets exactly {mode, source, workflow_id} -- this pins the client-side payload
+    shape the new badge wiring builds, not just that the server accepts it."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    seen = {}
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 4200)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    r = cli.post("/api/price", json={"mode": "enhance", "source": "12345", "workflow_id": "999"})
+    assert r.get_json()["cost"] == 4200
+    assert seen["p"]["model"] == "pixai-panelplugin" and seen["p"]["workflowId"] == "999"
 
 
 def test_edit_model_id_and_quality_omit():
@@ -840,7 +1066,13 @@ def test_portrait_mobile_pass(tmp_path):
     assert "@media (max-width: 480px)" in html
     assert "repeat(2, minmax(0, 1fr)) !important" in html           # 2-up grid, ignores saved --thumb
     assert "#model-flyout" in html and "translate(-50%, -50%)" in html  # flyout centered (was clipped)
-    assert "#gen-drawer.wide { width: 100%" in html or "#gen-drawer.wide" in html  # full-width sheet
+    # Isolate the mobile breakpoint itself -- a bare substring check let this pass off
+    # the DESKTOP #gen-drawer.wide{width:600px;} rule (a different breakpoint entirely),
+    # so a broken/missing mobile override could ship invisibly. The tablet media query
+    # right after this one is a stable end marker for the slice.
+    mobile_block = html.split("@media (max-width: 480px)")[1].split("@media (min-width: 681px)")[0]
+    assert "#gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left, #gen-drawer.dock-right { width: 100%" in mobile_block, \
+        "the mobile full-width drawer rule is missing from inside the 480px breakpoint"  # full-width sheet
 
 
 def test_video_v40_full_cost_warning():
@@ -853,7 +1085,10 @@ def test_video_v40_full_cost_warning():
            / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
     assert ('mg-generate-drawer mg-cost-badge[data-state="paid"][data-warn]'
             '{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}') in src   # still RED
-    assert "V4.0 full" in src and "2.5" in src        # the ~2.5x-Lite warning text
+    # The specific warning text, not a bare "2.5" -- that also matches two unrelated
+    # font-size:12.5px CSS rules elsewhere in this same file, so the old check passed
+    # even with the real warning deleted.
+    assert "V4.0 full — ~2.5× Lite" in src        # the ~2.5x-Lite warning text
 
 
 def test_cost_badge_ships_with_every_price_surface(tmp_path):
@@ -891,9 +1126,36 @@ def test_generate_card_has_seed_field(tmp_path):
     assert 'id="gen-seed"' in html and "seed:(el('gen-seed')" in html   # UI + payload wire the seed
 
 
+def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
+    """A LoRA whose /api/model-version lookup never resolves (still pending, or
+    permanently failed) used to just vanish from payload()'s loras filter -- the
+    generation submitted anyway, spending full credits on a result silently missing
+    a LoRA the user believed was included, with nothing on screen but an hourglass
+    that never explained itself (audit: fail-open, 2026-07-21). Fixed: the lookup's
+    failure path is distinguished from success (entry.failed), Go is gated on every
+    added LoRA having actually resolved, and generate() refuses to submit even if
+    something got the disabled button clicked anyway."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    # The silent-drop shape must be gone: a bare `.catch(function(){ renderLoras(); });`
+    # right after the model-version fetch, with no failed-state tracking at all.
+    assert ".catch(function(){ renderLoras(); });" not in html
+    assert "entry.failed=true" in html
+    assert "entry.failed=!entry.version_id" in html
+    assert "function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }" in html
+    assert "anyIncompat() || anyLoraUnresolved()" in html          # Go button gate
+    assert "if(anyLoraUnresolved()){ el('gen-lora-note').scrollIntoView" in html   # submit-time guard
+
+
 def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch):
-    """/api/price mode=enhance builds panelplugin params (so cost can be shown), and the
-    Enhance click carries a spend guardrail since free cards don't cover these workflows."""
+    """/api/price mode=enhance builds panelplugin params so a real cost can be shown.
+
+    The spend guardrail used to be a hardcoded window.confirm() claiming "free cards do
+    not cover Enhance workflows" -- D-12 replaced it with the persistent <mg-cost-badge>
+    (test_enhance_is_select_then_run_with_a_persistent_badge), which reflects PixAI's
+    REAL per-request match_kaisuuken result instead of a fixed claim baked into a string.
+    This test now only pins the price-routing params; the badge test above owns the
+    guardrail assertion."""
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
@@ -903,8 +1165,6 @@ def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch
                                  "workflow_id": "1794855217667308480"})
     assert seen["p"]["model"] == "pixai-panelplugin"
     assert str(seen["p"].get("workflowId")) == "1794855217667308480"
-    html = cli.get("/").get_data(as_text=True)
-    assert "free cards do not cover Enhance" in html    # the confirm guardrail
 
 
 def test_import_task_by_id(tmp_path, monkeypatch):
@@ -1000,6 +1260,30 @@ def test_gallery_video_tab_is_the_shared_drawer_component(tmp_path):
     assert 'id="video-slots"' not in html
     assert 'id="video-model"' not in html
     assert "Gen.videoGenerate()" not in html
+
+
+def test_gallery_video_tab_registers_with_the_job_tracker(tmp_path):
+    """Audit 2026-07-21, B4: the drawer swap above wired mg-pick-request but not mg-submit
+    or mg-result, so a Video tab generation never showed up in the Activity card and never
+    refreshed the header's credit balance -- both things every OTHER tab (Generate/Edit/Fix,
+    still the pre-migration runTask()) already gets for free. The drawer polls and renders
+    its OWN result inline regardless (self-contained, same as the Loom's mount), which is
+    exactly why this was invisible: the generation itself always looked like it worked.
+
+    Bite: remove either listener and this fails, naming which one.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    # Checked as the exact listener registrations, not bare substrings -- Acct.refresh() in
+    # particular already appears twice elsewhere on this page (runTask's own callback), so
+    # "Acct.refresh() in html" alone would pass even with this entire fix reverted.
+    assert "document.addEventListener('mg-submit', function(e){" in html, (
+        "no mg-submit listener -- a Video tab generation never reaches the Activity card")
+    assert "window.Jobs.register(d.task_id, 'Rendered')" in html, (
+        "mg-submit fires but nothing registers the job with the Activity tracker")
+    assert "document.addEventListener('mg-result', function(){ Acct.refresh(); });" in html, (
+        "no mg-result listener calling Acct.refresh() -- the header credit balance never "
+        "refreshes after a Video tab generation completes")
 
 
 def test_edit_card_has_reference_slots(tmp_path):
@@ -1110,10 +1394,15 @@ def test_service_worker_revalidates_thumbnails(tmp_path):
     sw = cli.get("/sw.js").get_data(as_text=True)
     # /thumbs/ is handled on its own branch, separate from the originals' cache-first one
     assert "isThumb" in sw and "isOrig" in sw
-    # the thumb branch always fires a fetch -- it does not short-circuit on a cache hit
-    thumb_branch = sw.split("if(isOrig){")[1].split("}")[-1]
-    assert "r||n" in sw, "thumbs must fall back to the network, not stop at a cache hit"
-    assert "c.put" in thumb_branch or "c.put" in sw
+    # the thumb branch always fires a fetch -- it does not short-circuit on a cache hit.
+    # Sliced from a marker unique to the thumb branch (not a brace-count split, which
+    # used to grab the trailing "});\n" off the LAST "}" in the whole rest of the
+    # string -- a no-op slice that made every assertion below it unconditionally true).
+    assert "const n=fetch(e.request,{cache:'no-cache'})" in sw, \
+        "thumb branch's revalidate fetch not found where expected -- if it moved, update the slice marker below"
+    thumb_branch = sw[sw.index("const n=fetch(e.request,{cache:'no-cache'})"):]
+    assert "r||n" in thumb_branch, "thumbs must fall back to the network, not stop at a cache hit"
+    assert "c.put" in thumb_branch, "the thumb branch itself must revalidate-write, not just some other branch"
     # and the server must stop claiming thumbnails are immutable
     hdr = cli.get("/thumbs/1.jpg").headers.get("Cache-Control", "")
     assert "immutable" not in hdr, (

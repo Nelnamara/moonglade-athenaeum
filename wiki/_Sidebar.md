@@ -12,7 +12,7 @@
 - [Deleting & Sync](Deleting)
 - [Collection Health](Health)
 - [Control Panel](Control-Panel)
-- [Trophy Hall](Trophy-Hall)
+- [The Folio of Honors](Folio-of-Honors)
 
 **Reference**
 - [How It Works](How-It-Works)

@@ -163,9 +163,11 @@ cut with nothing rendered.
 ## Deep Focus
 
 Double-click any card for a maximized single-shot editor: status (click to cycle), title,
-mode, duration, a **blur previews** toggle for discreet shots, both frame slots, **Other
-references & @tags** (add image/video/audio refs with roles), the audio cue, notes, **Copy
-shot**, and **Select in Generate →** to jump the shot into the drawer. `Esc` closes it.
+mode, duration, a **blur previews** toggle for discreet shots, a **Prompt** field for the
+shot's base prompt (Camera/Lighting/cast are still woven in on top when it generates), both
+frame slots, **Other references & @tags** (add image/video/audio refs with roles), the audio
+cue, notes, **Copy shot**, and **Select in Generate →** to jump the shot into the drawer.
+`Esc` closes it.
 
 Frame handoff isn't available inside Deep Focus — chain frames from the board plus the
 Generate drawer.

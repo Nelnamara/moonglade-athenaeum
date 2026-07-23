@@ -14,7 +14,7 @@ New here? Start with **[Setup](Setup)** — it takes one API key and about a min
 - **[Deleting & Cloud Sync](Deleting)** — local vs cloud delete, reconcile orphans.
 - **[Collection Health](Health)** — the analytics dashboard.
 - **[Control Panel](Control-Panel)** — maintenance jobs, the scheduler, sync options, accounts.
-- **[Trophy Hall](Trophy-Hall)** — achievements, ladders, points, and skins.
+- **[The Folio of Honors](Folio-of-Honors)** — achievements, ladders, points, and skins.
 
 ## Reference
 - **[How It Works](How-It-Works)** — architecture, the API, why setup is one key.

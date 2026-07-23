@@ -71,7 +71,9 @@ _REDIRECT_CODES = (301, 302, 303, 307, 308)
 # Adding a route to pixai_gallery.py? Add it here too, or
 # test_every_registered_route_declares_a_tier fails and names it. Pick the tier
 # by what the handler can DO, not by what feels convenient:
-#   LOGIN     -- browse the library, spend the owner's credits, manage accounts.
+#   LOGIN     -- browse the library, spend the owner's credits, manage your OWN
+#                account. Managing OTHER accounts (adding one, removing one that
+#                isn't yours) is LOCALHOST -- see api_users_add/_remove.
 #   LOCALHOST -- irreversible cloud deletion, writes to config.json (which holds
 #                PIXAI_API_KEY / AUTH_SECRET_KEY / AUTH_USERS), file-moving
 #                maintenance, or shelling out on the SERVER machine. A logged-in
@@ -102,6 +104,7 @@ ROUTE_TIERS = {
     ("api_setup_save_key", "POST"): LOCALHOST,      # rewrites config.json
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
     ("api_import_local", "POST"): LOCALHOST,         # writes files into the backup + shells thumbnails
+    ("api_users_add", "POST"): LOCALHOST,           # mints a new persistent login (2026-07-22)
 
     # -- LOGIN: any authorized session ---------------------------------------
     ("index", "GET"): LOGIN,
@@ -205,7 +208,13 @@ ROUTE_TIERS = {
     ("api_branding", "POST"): LOGIN,
     ("api_skin", "POST"): LOGIN,
     ("api_ach_event", "POST"): LOGIN,
-    ("api_users_add", "POST"): LOGIN,
+    # api_users_remove is LOGIN, not LOCALHOST, because it is genuinely reachable
+    # for a LAN session -- but ONLY to remove its OWN account; removing anyone
+    # else is refused with the same 403 a LOCALHOST route would give, enforced
+    # inside the handler on the submitted username vs session["user"], not by
+    # tier. The two generic tier tests below can't express "reachable, but only
+    # for this one argument value" -- see tests/test_panel_users.py for the
+    # LAN-self-succeeds / LAN-other-refused pair that actually covers it.
     ("api_users_remove", "POST"): LOGIN,
 
     # FINDING (2026-07-19, unresolved at the time this file was written):
@@ -230,8 +239,11 @@ ROUTE_TIERS = {
 PUBLIC_EXPECTED_STATUS = {
     ("login", "GET"): {200},
     ("login", "POST"): {200},      # re-renders the form (no csrf) -- never a redirect
-    ("logout", "GET"): {302},      # its own redirect to /login, not the front door's
-    ("logout", "POST"): {302},     # anonymous: nothing to revoke, so no csrf is demanded
+    # a 200 page now, not a redirect -- it has to run script client-side to purge
+    # Cache Storage before navigating on to /login, which a 3xx can't do (see
+    # test_session_revocation.py's test_logout_purges_cache_storage_client_side)
+    ("logout", "GET"): {200},
+    ("logout", "POST"): {200},     # anonymous: nothing to revoke, so no csrf is demanded
     ("branding", "GET"): {404},    # missing art 404s; it must never redirect to /login
     ("manifest", "GET"): {200},    # a constant body -- anonymous callers get the real thing
 }
@@ -652,4 +664,42 @@ def test_panel_status_is_not_blanket_localhost_gated(app):
     for field in ("status", "action", "label", "rc", "progress"):
         assert field in body, (
             "`{}` vanished from the LAN payload -- the route was probably blanket "
-            "LOCALHOST-gated. Redact the `lines` field, not the whole response.".format(field))
+            "localhost-gated instead of having only its one leaky field fixed.".format(field))
+
+
+def test_panel_withholds_the_server_install_path_from_lan(app, tmp_path):
+    """`/panel` stays LOGIN-tier -- same reasoning as api_panel_status above -- but must
+    not hand a LAN caller the absolute host filesystem path (`out_dir`, e.g.
+    'D:\\\\Moonglade Athenaeum\\\\pixai_backup'). It renders as plain HTML ("library at
+    <code>{{ out_dir }}</code>"), unconditionally, to every LOGIN caller regardless of
+    _is_local_request() -- found by the 2026-07-21 audit as S2, the same shape as the
+    api_panel_status leak: a route whose TIER is correct but whose BODY mixes in host
+    detail that tier does not justify.
+
+    Deliberately narrower than that fix, though: usernames on this same page (S2's other
+    half) are NOT touched here. Reading the roster stays LOGIN-tier on purpose, even
+    though WRITING to it no longer is (api_users_add/_remove were tightened 2026-07-22 --
+    see their own docstrings): seeing a fellow account's username is a different, much
+    smaller question than adding or removing one, and it is not the kind of fact this
+    route needs to hide. A host filesystem path is a different kind of fact entirely: it
+    identifies the SERVER's machine, not a peer account.
+    """
+    cli = _login(app)
+    resp = cli.get("/panel", environ_overrides={"REMOTE_ADDR": LAN})
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert str(tmp_path) not in html, (
+        "the real out_dir path reached a LAN caller's rendered /panel page")
+    assert "local to the server" in html
+
+
+def test_panel_shows_the_real_path_to_localhost(app, tmp_path):
+    """The companion to the test above: the owner sitting at the server must still see
+    the real path -- it's useful, it's their own machine, and there is nothing to
+    withhold from loopback. Without this test, a future 'just always redact it' change
+    would pass the LAN test above while quietly breaking the one caller who actually
+    needs this information."""
+    cli = _login(app)
+    html = cli.get("/panel").get_data(as_text=True)   # loopback REMOTE_ADDR by default
+    assert str(tmp_path) in html, (
+        "the owner's own /panel no longer shows the real library path")

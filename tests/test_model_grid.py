@@ -1,5 +1,8 @@
 """Model/LoRA grid backend: /v2 search (MODEL vs LORA) + version resolution. Mocked --
 conftest blocks live /v2; no network, no spend."""
+from types import SimpleNamespace
+
+import pixai_gallery
 import pixai_gallery_backup as core
 
 _SEARCH = {"data": [
@@ -191,6 +194,54 @@ def test_task_image_media_single_and_legacy():
     m = core._task_image_media({"mediaId": "X", "seed": "9", "batchMediaIds": ["X", "Y"]})
     assert [mid for mid, _ in m] == ["X", "Y"]
     assert core._task_image_media({}) == []
+
+
+def _stub_generate_network(monkeypatch, outputs):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: "")
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {"id": "T1"}})
+    monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: None)
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda s, t: {"createdAt": "2026-07-22T00:00:00Z", "outputs": outputs})
+    seen_mids = []
+    def fake_resolve(s, mid):
+        seen_mids.append(mid)
+        return "https://cdn/" + mid, {"width": 512, "height": 512}
+    monkeypatch.setattr(core, "resolve_media", fake_resolve)
+    monkeypatch.setattr(core, "download", lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
+    monkeypatch.setattr(pixai_gallery, "make_thumbnail", lambda *a, **k: None)
+    return seen_mids
+
+
+_BATCH_OUTPUTS = {"mediaId": "GRID", "seed": "1",
+                  "batch": [{"mediaId": "A", "seed": "11"}, {"mediaId": "B", "seed": "22"}]}
+
+
+def test_run_generate_saves_batch_individuals_not_the_grid(monkeypatch, tmp_path):
+    """A batchSize>1 --generate run used to build its saved-media list straight off
+    outputs.mediaId/batchMediaIds -- the composite GRID id, plus a batchMediaIds field
+    that's null on modern tasks -- so only the grid got downloaded and catalogued and
+    the individual images were silently lost (audit: unfiled-workflow-findings,
+    2026-07-21). Fixed: run_generate now goes through _task_image_media, the same
+    helper _download_image_task already used, which prefers outputs.batch[] over the
+    grid and carries each image's own seed."""
+    seen_mids = _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
+    args = SimpleNamespace(out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
+                           confirm=True, task_id="", token=None)
+    res = core.run_generate(args)
+    assert seen_mids == ["A", "B"]        # the real individuals downloaded, never "GRID"
+    assert res["images"] == 2
+
+
+def test_run_edit_image_saves_batch_individuals_not_the_grid(monkeypatch, tmp_path):
+    """Same fix, same bug, for --edit-image: a batchSize>1 edit used to save only the
+    composite grid too."""
+    seen_mids = _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
+    args = SimpleNamespace(out=str(tmp_path), params_json='{"chat": {"modelId": "v"}}',
+                           confirm=True, task_id="", edit_src=[], prompt="x", token=None)
+    res = core.run_edit_image(args)
+    assert seen_mids == ["A", "B"]
+    assert res["images"] == 2
 
 
 def test_task_detail_query_adhoc_fallback(monkeypatch):

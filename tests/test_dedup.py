@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 import pixai_gallery_backup as core
-from pixai_gallery import (media_id_of, find_files_for_media_id, init_db,
-                           save_catalog, load_catalog)
+from pixai_gallery import (media_id_of, find_files_for_media_id, find_image_file,
+                           init_db, save_catalog, load_catalog)
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +108,86 @@ def test_audit_detects_class_b_content_dupe(tmp_path):
     (tmp_path / "images" / "p_t2_444.webp").write_bytes(b"IDENTICAL-BYTES")
     rep = core.audit_collection(tmp_path, content=True)
     assert rep["totals"]["class_b_groups"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Zero-byte files (audit 2026-07-21, S-tier: a 0-byte file could win keeper
+# selection on bucket priority alone and send the REAL image to quarantine --
+# or, under --dedup-delete, straight to unlink() with no verify step at all)
+# ---------------------------------------------------------------------------
+
+def test_zero_byte_file_is_invisible_to_the_audit(tmp_path):
+    """The primary fix: a 0-byte file must not enter by_mid/by_size at all, so it can
+    never become a keeper OR a loser -- an empty file isn't a duplicate of anything."""
+    (tmp_path / "images").mkdir()
+    (tmp_path / "2023-10").mkdir()
+    (tmp_path / "images" / "a_prompt_t1_111.webp").write_bytes(b"REAL-IMAGE-BYTES")
+    (tmp_path / "2023-10" / "111.webp").write_bytes(b"")   # interrupted download
+    rep = core.audit_collection(tmp_path, content=False)
+    assert rep["totals"]["class_a_groups"] == 0, (
+        "the zero-byte file paired with the real one as a Class A duplicate group")
+
+
+def test_zero_byte_file_would_lose_to_a_real_copy_even_by_bucket_priority_alone(tmp_path):
+    """The scenario that made this an S-tier finding rather than a curiosity: place the
+    EMPTY file in the higher-priority bucket ('batches' outranks 'images' in
+    _BUCKET_PRIORITY) and the real image in the lower-priority one -- exactly the layout
+    where bucket-priority-only selection would have picked the empty file as keeper and
+    sent the real image to quarantine. Same assertion as the test above, but the tree is
+    built specifically to defeat a fix that only reordered priority instead of excluding
+    zero-byte files from the pool."""
+    (tmp_path / "images").mkdir()
+    (tmp_path / "batches" / "b1").mkdir(parents=True)
+    (tmp_path / "images" / "p_t1_111.webp").write_bytes(b"REAL-IMAGE-BYTES")
+    (tmp_path / "batches" / "b1" / "111.webp").write_bytes(b"")
+    rep = core.audit_collection(tmp_path, content=False)
+    assert rep["totals"]["class_a_groups"] == 0, (
+        "the empty batches/ file paired with the real images/ file as a duplicate group "
+        "-- bucket priority alone would have made it the keeper")
+
+
+def test_find_image_file_does_not_serve_a_zero_byte_file(tmp_path):
+    """The third site the audit found for the same invariant: find_image_file()'s FAST
+    path (try the catalog's exact filename first) checked is_file() but not size, so a
+    catalog row still pointing at its original filename would have the gallery serve a
+    truncated/interrupted download back as if it were the real image -- while the
+    fallback path (find_files_for_media_id, exercised by the tests below) already
+    correctly skipped zero-byte files. Both paths must agree."""
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "p_t1_111.webp").write_bytes(b"")   # interrupted download
+    assert find_image_file(tmp_path, "111", "p_t1_111.webp") is None
+
+
+def test_find_image_file_still_finds_a_real_file_by_exact_filename(tmp_path):
+    """The fast path must keep working for the normal case -- this guards against a
+    fix that over-corrects into refusing every file, not just empty ones."""
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "p_t1_111.webp").write_bytes(b"REAL-IMAGE-BYTES")
+    found = find_image_file(tmp_path, "111", "p_t1_111.webp")
+    assert found is not None
+    assert found.name == "p_t1_111.webp"
+
+
+def test_dedup_delete_never_unlinks_the_only_real_copy(tmp_path):
+    """The sharpest version of the bug: --dedup --apply --dedup-delete skips the
+    auto-verify safety net entirely (unlike plain --apply, which flags a mismatch as
+    'REVIEW NEEDED'), so if a zero-byte file ever won keeper selection, the real image
+    would be gone with no recovery path. Drives the real CLI action, not audit_collection
+    directly."""
+    (tmp_path / "images").mkdir()
+    (tmp_path / "batches" / "b1").mkdir(parents=True)
+    (tmp_path / "images" / "p_t1_111.webp").write_bytes(b"THE-ONLY-REAL-COPY")
+    (tmp_path / "batches" / "b1" / "111.webp").write_bytes(b"")   # interrupted, 0 bytes
+    db = tmp_path / "catalog.db"
+    init_db(db)
+    core.cmd_dedup(_args(apply=True, dedup_delete=True), tmp_path, db)
+    assert (tmp_path / "images" / "p_t1_111.webp").exists(), (
+        "the real image was deleted or quarantined -- the zero-byte file was treated "
+        "as a duplicate of it")
+    assert (tmp_path / "images" / "p_t1_111.webp").read_bytes() == b"THE-ONLY-REAL-COPY"
+    # The empty file is simply left alone -- it was never part of a duplicate group,
+    # so dedup correctly has nothing to say about it either way.
+    assert not (tmp_path / "_duplicates").exists()
 
 
 # ---------------------------------------------------------------------------

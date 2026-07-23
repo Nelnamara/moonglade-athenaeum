@@ -1,8 +1,8 @@
-# The Trophy Hall
+# The Folio of Honors
 
-Click **🏆** in the gallery header and the **Trophy Hall** opens as a maximized overlay
-over the grid — not a separate page. `Esc` or ✕ closes it and you're back exactly where
-you were.
+Click **🏆** in the gallery header and **The Folio of Honors** opens as a maximized
+overlay over the grid — not a separate page. `Esc` or ✕ closes it and you're back exactly
+where you were. (Renamed from "Trophy Hall" 2026-07-22, alongside a full visual redesign.)
 
 It's a scoreboard for the work you've already done. Nothing in it spends credits or
 talks to PixAI: progress is counted from your local `catalog.db` plus a small counter
@@ -30,7 +30,9 @@ legendary at the crown.
 | **The Vigil** | distinct days you opened the app | Night Keeper (7) · Moonwatch (30) |
 
 **The Archive** counts everything in your library; **The Moonforge** counts only what you
-made here (the same set as the gallery's **Source → Generated** filter).
+made here — pieces the gallery's Source filter calls **Generated or Imported**, not
+everything The Archive counts, but broader than **Source → Generated** alone (which
+excludes Imported).
 
 ### Milestones
 
@@ -79,24 +81,31 @@ score 0.
 The header keeps a running total: how many of the visible achievements you've earned,
 and your points out of the possible total.
 
-## Getting around the Hall
+## Getting around the Folio
 
 Three tabs across the top:
 
 - **Summary** — your six most recent unlocks with the date you earned them, plus a
   progress bar for the overall roster and for each category.
-- **All** — every achievement, grouped under collapsible category headers (click a
-  header to fold it). Earned cards light up and carry a one-line commentary from the
-  narrator; locked ones show a progress bar and `current / threshold`.
-- **Statistics** — the raw numbers behind the thresholds: images archived, videos,
-  collections, models used, published works, tagged pieces, local generations, best day,
-  distinct keywords, edits, enhances, uploads, culled, days visited, LoRA uses, distinct
-  LoRAs, Loom shots, more-like-this uses, rewards claimed, free cards used.
+- **All** — an auto-rotating showcase of your active ladder's tiers up top, a badge row
+  to switch between all 10 ladders, that ladder's tiers as cards, then every ladder in
+  turn under its own divider, then Milestones/Masteries/Feats the same way. Legendary and
+  feat cards carry the same ornate 9-slice frame the unlock celebration uses. Earned
+  cards light up and carry a one-line commentary from the narrator; locked ones show a
+  progress bar and `current / threshold`.
+- **Statistics** — achieved/points/feats at a glance, plus breakdowns by category, by
+  rarity, and by ladder completion, and underneath all the raw numbers behind the
+  thresholds: images archived, videos, collections, models used, published works, tagged
+  pieces, local generations, best day, distinct keywords, edits, enhances, uploads,
+  culled, days visited, LoRA uses, distinct LoRAs, Loom shots, more-like-this uses,
+  rewards claimed, free cards used.
 
 The **search box** in the header filters by name, description or tier and jumps you to
-the **All** tab as you type. The right-hand rail has a **Categories** jump list and
-**Within Reach** — the three locked achievements you're closest to finishing — plus a
-**Rewards Earned** row once you've unlocked something.
+the **All** tab as you type. The right-hand rail's **Categories** list now filters
+in place — click one to show only that category, click again to clear it — alongside
+**Within Reach** (the three locked achievements you're closest to finishing) and
+**Relics**, a read-only look at all five skins (locked ones dimmed with a lock icon,
+your active one checked). Picking a skin still only happens from the Control Panel.
 
 Unlocks announce themselves with a mid-screen moment — badge, chime, and flair that
 scales with rarity. If a whole stack lands at once (a first run over an existing
@@ -150,4 +159,4 @@ from zero.
 
 ---
 
-*Read-only, local, and entirely cosmetic. The Trophy Hall never spends a credit.*
+*Read-only, local, and entirely cosmetic. The Folio of Honors never spends a credit.*
