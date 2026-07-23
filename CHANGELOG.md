@@ -19,6 +19,30 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 8 parallel agents plus 7 cross-file gap-fills, ~40 real fixes total. 872 Python tests pass,
 128 Loom tests pass, CI green.
 
+### Removed
+
+- **Internal dev/creative-process narration is out of the shipped code.** Code comments and
+  test docstrings across `pixai_gallery.py`, `pixai_gallery_backup.py`, `static/mg-notify.js`,
+  `static/mg-generate-drawer.js`, `loom/master-storyboard.jsx`, and seven test files no longer
+  cite the git-ignored login mockup file, quote design-conversation directives, or carry
+  "owner directive <date>" / Figma-provenance attributions — one such comment was even being
+  served to every browser inside /login's `<style>` block. Each site now states its technical
+  rationale on its own terms; product copy (achievement roasts, narrator voice) is untouched.
+
+### Added
+
+- **Every CLI flag is now documented, and `--help` is complete.** The 30 tuning/maintenance
+  flags that existed with no documentation anywhere (edit tuning, video tuning,
+  `--params-json`/`--poll-timeout`, format conversion, download shaping, catalog repair,
+  `--watch-seconds`, `--all-contests`, `--restore-orphans`, …) are covered three ways:
+  a grouped "CLI flags" map in `docs/architecture.md` (with the non-obvious gotchas —
+  `--params-json` overrides everything, edit params clamp to the model, seconds-vs-count
+  units, which modifiers need a partner flag), user-facing sections in `wiki/Backing-Up.md`
+  (download tuning / converting formats / live watch / catalog repair) and
+  `wiki/Generating.md` (edit tuning / video tuning / shared create flags / `--contests`),
+  and real `help=` text added to the two flags that had none (`--audio-language`,
+  `--poll-timeout`).
+
 ### Security
 
 - **The Similar modal ("more like this") no longer leaks unblurred NSFW lookalikes.**

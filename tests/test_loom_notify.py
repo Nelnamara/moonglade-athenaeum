@@ -52,9 +52,8 @@ def _deep_focus_block(src):
 
 
 def test_deep_focus_has_a_prompt_field_writing_the_base_prompt():
-    """Option 2 of the decision the owner left open (docs/STATE.md, "The Prompt textarea is
-    the one piece deliberately held back"): give base-prompt editing a home in Deep Focus,
-    rather than let every hand-typed prompt become a frozen override.
+    """Deep Focus gives base-prompt editing a real home, rather than letting every
+    hand-typed prompt become a frozen override.
 
     It must write `prompt` (the base string shotText() keeps recomposing from), NOT
     promptOverrideText -- writing the override from here would be the very outcome the
