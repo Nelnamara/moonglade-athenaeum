@@ -1691,3 +1691,22 @@ def test_import_collection_choice_does_not_persist_between_imports(tmp_path):
     html = cli.get("/").get_data(as_text=True)
     assert "if(cs)cs.value=''" in html and "if(cn)cn.value=''" in html, (
         "reset() leaves the collection selection or the typed new-collection name behind")
+
+
+def test_fix_tab_has_a_spend_confirm_since_it_cannot_be_priced(tmp_path):
+    """Audit 2026-07-21, unfiled-workflow-findings: the Fix sub-tab (hand/face box-fixer)
+    fires /api/fix with zero warning of any kind -- no price badge (POST /v2/task/fixer
+    is a different endpoint from the createGenerationTask family /v2/task-price mirrors,
+    confirmed in private/GENERATOR_SURFACE.md's parameter schema, so it genuinely cannot
+    be priced the way every other spend surface here is) and, before this fix, no
+    window.confirm() either -- the only credit-spending action in the app with neither."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    start = html.index("function fix(){")
+    end = html.index("function openEdit(mid){", start)   # the next function, whole fix() in between
+    fix_fn = html[start:end]
+    assert "window.confirm(" in fix_fn, "fix() submits with no spend confirmation at all"
+    # the confirm must gate the actual submit, not just exist somewhere nearby
+    assert fix_fn.index("window.confirm(") < fix_fn.index("runTask('/api/fix'"), (
+        "the confirm exists but doesn't actually gate the runTask('/api/fix') call")

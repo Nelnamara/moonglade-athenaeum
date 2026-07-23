@@ -151,6 +151,30 @@ python pixai_gallery_backup.py --edit-image --edit-src <media_id> --prompt "make
 python pixai_gallery_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt "..." --confirm
 ```
 
+## Enhance an image (`--enhance`) — one-click PixAI workflows
+
+Run one of PixAI's own preset enhance tools on an image: a **panelplugin workflow**
+(`--workflow-id` — face fix, upscale, background removal, and similar one-click tools) or an
+**art filter** (`--filter-id`). Source is a catalog `media_id` or a local file (auto-uploaded on
+`--confirm`). Preview-only until `--confirm`, same as every other spend-capable command here.
+
+**Web:** the Generate drawer's **Edit ▸ Enhance** sub-tab lists PixAI's own curated workflow
+shelf and a search box over the rest of its ComfyUI catalog — that's the easiest way to find a
+real `--workflow-id`/`--filter-id` without guessing. `--dump-params` off a real enhance task
+(recovered via `--task-id`) also prints the exact ids and shape it used.
+
+```bash
+# preview a panelplugin workflow (e.g. an upscale) on a catalog image:
+python pixai_gallery_backup.py --enhance --src <media_id> --workflow-id <id>
+# apply an art filter, with strength, spending credits:
+python pixai_gallery_backup.py --enhance --src <media_id> --filter-id filter-v1-m2 --strength 0.77 --confirm
+```
+
+> **No cost preview.** Unlike every other spend-capable command in this file, `--enhance` has
+> no `--price`-style estimate before `--confirm` — PixAI's own cost-preview endpoint doesn't
+> cover this task family. Preview mode (no `--confirm`) still shows you exactly what would be
+> submitted, so you can sanity-check the workflow/filter id and source image first.
+
 ## Multi-reference video (`--reference-video`)
 
 A different video mode (V4.0): drive a clip from **multiple reference images / videos / audio**
@@ -196,9 +220,15 @@ python pixai_gallery_backup.py --suggest-prompt "C:\pics\ref.png"     # a local 
 ```
 
 > **Images only.** This calls PixAI's own image-to-prompt endpoint, which reads back tags
-> from a still image — it has no video support, and a video `media_id` returns a server
-> error rather than a suggestion. (The web gallery's own Suggest Prompt button only ever
-> appears on image detail pages for exactly this reason.) Point it at an image, not a clip.
+> from a still image — it has no video support, and a video `media_id` returns a clear refusal
+> rather than a suggestion (`--suggest-prompt` checks locally before ever reaching the
+> network). (The web gallery's own Suggest Prompt button only ever appears on image detail
+> pages for exactly this reason.) Point it at an image, not a clip.
+>
+> The exact catalog `media_id` above is just an example from this repo's own history — PixAI's
+> endpoint can fail on sufficiently old media even when it's a real image, so don't be
+> surprised if that specific number doesn't reproduce; swap in any recent image `media_id`
+> from your own catalog.
 
 Copy a suggestion straight into `--generate --prompt "…"` to riff on an image's style.
 
