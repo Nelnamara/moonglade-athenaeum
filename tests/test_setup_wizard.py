@@ -144,6 +144,35 @@ class TestSaveKeyEndpoint:
         assert cfg["READ_ONLY"] is True
         assert cfg["USER_ID"] == "123"
 
+    def test_config_write_failure_redacts_the_host_path(self, tmp_path, monkeypatch):
+        """This route's two config.json read/write failure messages build their error
+        text with .format(e) rather than a bare str(e) -- caught by adversarial review
+        as a real gap in the mechanical str(e)-wrapping sweep (docs/AUDIT_2026-07-21.md's
+        S3 re-spin): a text-matching sweep for the literal substring "str(e)" is blind to
+        a caught exception referenced any other way. tmp_path (used as both out_dir and,
+        via _redirect_config_to, the directory config.json lives in) stands in for the
+        host path that must not reach the response.
+
+        Bite: revert either .format(e) call back to a bare str(e) (no
+        _redact_host_paths wrapper) and this fails."""
+        _redirect_config_to(monkeypatch, tmp_path)
+        monkeypatch.setattr(core, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 500})
+        from pathlib import Path as RealPath
+        orig_write_text = RealPath.write_text
+
+        def boom_write(self, *a, **k):
+            if self.name == "config.json":
+                raise OSError("[Errno 13] Permission denied: '{}'".format(self))
+            return orig_write_text(self, *a, **k)
+        monkeypatch.setattr(RealPath, "write_text", boom_write)
+
+        cli = _authed_client(tmp_path)
+        r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "sk-real-key"}),
+                     content_type="application/json")
+        body = r.get_data(as_text=True)
+        assert str(tmp_path) not in body
+        assert "<host-path>" in body
+
 
 class TestWizardBannerGating:
     def test_needs_key_banner_when_no_key_configured(self, tmp_path):
