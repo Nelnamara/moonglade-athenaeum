@@ -304,6 +304,63 @@ def test_undo_organize_reverts_moves(tmp_path):
     assert not (tmp_path / "organize_manifest.csv").exists()              # manifest cleared
 
 
+def _organize_args(out):
+    return SimpleNamespace(out=str(out), name_length=60, name_sep="_", convert=None,
+                           dry_run=False, embed_metadata=False, jpeg_quality=92,
+                           jpeg_bg="white", keep_webp=False, progress=None)
+
+
+def test_organize_drops_byte_identical_duplicate(tmp_path):
+    """INVARIANT 5's byte-safe half: two on-disk copies of the SAME media_id (a stray
+    re-download, an old batches/ copy alongside a flat one, etc.) collapse onto the
+    same YYYY-MM destination. When they are byte-identical, cmd_organize must unlink
+    the redundant one and keep exactly one file -- this is the one line in the whole
+    command that unlink()s a real file on a path that runs live by default (no
+    --dry-run gate), so it must never fire on the wrong side of a comparison."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup1", "task_id": "T9",
+        "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
+    (tmp_path / "images").mkdir()
+    loc_a = tmp_path / "images" / "dup1.png"
+    loc_b = tmp_path / "images" / "extra_dup1.png"
+    loc_a.write_bytes(b"identical-bytes")
+    loc_b.write_bytes(b"identical-bytes")
+
+    core.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
+
+    dst = tmp_path / "2024-07" / "dup_T9_dup1.png"
+    assert dst.exists() and dst.read_bytes() == b"identical-bytes"
+    assert not loc_a.exists()          # both original locations consumed: one moved...
+    assert not loc_b.exists()          # ...the other recognized as a redundant dupe and unlinked
+    by = {r["media_id"]: r for r in load_catalog(db)}
+    assert by["dup1"]["filename"] == "dup_T9_dup1.png"
+
+
+def test_organize_keeps_differing_content_side_by_side(tmp_path):
+    """INVARIANT 5's other half: two on-disk copies of the SAME media_id that are NOT
+    byte-identical (a genuine conflict, not a redundant dupe) must both survive --
+    cmd_organize must never silently pick one and discard the other's real content."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup2", "task_id": "T8",
+        "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
+    (tmp_path / "images").mkdir()
+    loc_a = tmp_path / "images" / "dup2.png"
+    loc_b = tmp_path / "images" / "extra_dup2.png"
+    loc_a.write_bytes(b"content-A")
+    loc_b.write_bytes(b"totally-different-content-B")
+
+    core.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
+
+    dst = tmp_path / "2024-07" / "dup_T8_dup2.png"
+    assert dst.exists()
+    survivors = [p for p in (loc_a, loc_b) if p.exists()]
+    assert len(survivors) == 1, "exactly one of the two original locations should remain untouched"
+    surviving_bytes = {dst.read_bytes(), survivors[0].read_bytes()}
+    assert surviving_bytes == {b"content-A", b"totally-different-content-B"}   # neither lost
+
+
 def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch):
     from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
@@ -373,6 +430,56 @@ def test_init_db_creates_table(tmp_path):
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     con.close()
     assert "catalog" in tables
+
+
+def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_path):
+    """Schema changes are a three-place contract (docs/architecture.md): CATALOG_FIELDS,
+    _CREATE_TABLE, and _MIGRATIONS must all agree. A fresh checkout's CREATE TABLE
+    already has every CATALOG_FIELDS column -- that half is exercised by every test in
+    this suite that pushes `{f: "" for f in CATALOG_FIELDS}` through save_catalog
+    (INSERT fails immediately if _CREATE_TABLE is missing one). Nothing exercises the
+    OTHER half: _MIGRATIONS is what actually reaches an EXISTING install's catalog.db
+    (run on every _connect()), so forgetting an ALTER TABLE entry for a newly added
+    field breaks upgraders silently while a fresh checkout's suite stays green.
+
+    This simulates exactly that existing install: a catalog.db holding ONLY the columns
+    present since the SQLite schema's very first commit (cc2aeb1, 2026-06-13, "replace
+    catalog.csv with SQLite (catalog.db)") -- the one moment a column could enter
+    _CREATE_TABLE with zero pre-existing databases around to migrate. Every
+    CATALOG_FIELDS entry added since then must arrive via _MIGRATIONS, or this
+    "existing" database never gains it, forever. (Checked against git log: every field
+    added after that commit -- batch, artwork_id/title/..., loras, negative_prompt/
+    clip_skip, is_video/poster_media_id/video_duration, source, deleted_remote,
+    collections, blurhash/nsfw_scores -- landed in CATALOG_FIELDS and _MIGRATIONS in the
+    SAME commit each time; no historical instance of the drift this test guards against
+    was found. The test is not vacuous regardless -- see the report for the mutation
+    check that proves it fails when a migration entry is missing.)"""
+    import sqlite3
+    from pixai_gallery import CATALOG_FIELDS, _connect
+
+    original_fields = [   # cc2aeb1's _CREATE_TABLE, verbatim -- none of these have ever
+        "task_id", "media_id", "filename", "url", "width", "height",   # needed a migration
+        "prompt_preview", "status", "created_at", "prompt_full", "natural_prompt",
+        "seed", "steps", "sampler", "cfg_scale", "model_id", "model_name", "rating",
+    ]
+    db = tmp_path / "ancient_catalog.db"
+    con = sqlite3.connect(str(db))
+    con.execute("CREATE TABLE catalog ({})".format(
+        ", ".join(("media_id TEXT PRIMARY KEY" if f == "media_id" else "{} TEXT".format(f))
+                  for f in original_fields)))
+    con.commit()
+    con.close()
+
+    _connect(db).close()   # the real upgrade path load_catalog/save_catalog always take
+
+    con = sqlite3.connect(str(db))
+    cols = {r[1] for r in con.execute("PRAGMA table_info(catalog)").fetchall()}
+    con.close()
+    missing = [f for f in CATALOG_FIELDS if f not in cols]
+    assert not missing, (
+        "field(s) {} are in CATALOG_FIELDS with no _MIGRATIONS entry that adds them -- "
+        "an existing install's catalog.db (predating that field) would never gain this "
+        "column".format(missing))
 
 
 def test_save_and_load_roundtrip(tmp_path):
