@@ -15,6 +15,86 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small items —
+8 parallel agents plus 7 cross-file gap-fills, ~40 real fixes total. 872 Python tests pass,
+128 Loom tests pass, CI green.
+
+### Security
+
+- **The Similar modal ("more like this") no longer leaks unblurred NSFW lookalikes.**
+  `/api/similar` now includes `is_nsfw` in its response, and the client sets `data-nsfw`
+  on its hand-cloned cards, so Privacy Blur now covers this surface like every other one.
+
+### Fixed
+
+- **Four silent-failure paths now surface real errors instead of lying about success.**
+  `/api/skin` and `/api/achievements?mark=1` used to answer 200 even when the disk write
+  failed; they now report the failure and the actually-active value. `/api/loom/delete`
+  used to answer `{"ok": true}` on a real `OSError`, indistinguishable from "already
+  gone"; it now distinguishes the two. Prompt-snippet saves and saved-view saves were both
+  fire-and-forget against endpoints that can answer 200 with an error body — both now show
+  a Toast on failure.
+- **A transient PixAI blip on `/api/task-status` no longer bricks the poller.** It used to
+  answer `phase: "failed"`, which the client treats as terminal and stops polling — even
+  though the code's own comment said this exact branch should be a soft, non-terminal
+  retry. Now answers `phase: "running"` so polling continues as intended.
+- **`bulkSendVideo()` no longer silently drops picks past a stale cap.** It pre-sliced to
+  9 images before handing off to a drawer that only holds 6; the extra 3 vanished with no
+  signal. Now passes the full selection and warns how many were left out.
+- **`/export-zip` no longer ships silently-untouched files with no signal.** A failed
+  convert-to-format or embed-prompt step used to fail silently and ship the original
+  unchanged; now collects every such case into a `_export_warnings.txt` inside the zip
+  plus an `X-Export-Warnings` response header.
+- **The stray root `HEAD` file, finally root-caused.** Two of `tests/test_panel.py`'s ten
+  `FakeProc` ffmpeg mocks patched `subprocess.Popen` globally with no command guard;
+  `create_app()`'s own `git rev-parse --short HEAD` call rode the same patched `Popen` and
+  got its output written to a file literally named `HEAD` in the repo root. Both classes
+  now guard on the command being `ffmpeg`. Fail-first verified: reverting the guard
+  reproduces a freshly-written `HEAD` file; restoring it does not.
+- Fixed a timing-flaky live-server test in `tests/test_port_preflight.py` (a fixed 0.4s
+  probe timeout could occasionally lose a scheduling race under full-suite thread
+  contention) and tightened three weak assertions in `tests/test_js_syntax.py`,
+  `tests/test_read_only.py`, and `tests/test_web_pick.py` that couldn't actually catch
+  the regressions their own docstrings described.
+- Fixed a Loom bug where the shared `<mg-generate-drawer>`'s own Camera and quality
+  controls rendered alongside the Loom's equivalent controls (missing `data-loom-ctx`
+  attribute on the mount) — added, with a new regression test.
+- Extended a font-inheritance fix (host-neutral `font-family` on toast/tray roots, shipped
+  2026-07-21) to two roots it missed: the achievement celebration and the Folio of Honors
+  panel, both of which fell back to the browser default on `/loom`.
+- Native `<select>` styling made consistent across the Generate drawer and the
+  gallery-picker's filter dropdowns (some had the custom lavender-caret treatment,
+  some didn't, with no reason for the split).
+- The persistent Activity FAB no longer permanently sits on top of the grid's bottom-left
+  corner eating clicks — the grid now reserves clearance for it.
+- Added the missing delete-view control for saved views — the server route existed, no UI
+  ever called it.
+
+### Removed
+
+- Deleted three zero-caller GUI-era wrapper functions (`run_audit`, `run_dedup`,
+  `run_verify_dupes` — the removed PySide6 GUI was their only caller) and `is_lora_type()`
+  (referenced nowhere). The real underlying logic is untouched.
+- Deleted two orphaned CSS rules (`.gen-ce`, `.vp-chip`) with zero producers left anywhere
+  in the app.
+
+### Docs
+
+- `docs/architecture.md`: documented the 5 shared `mg-*.js` web components as a group for
+  the first time; corrected the thumbnail-cache description (short-lived + ETag, not
+  immutable) and `already_downloaded()`'s real behavior.
+- Fixed stale claims across `wiki/How-It-Works.md` (`--watch`/`--claims` have web
+  surfaces, not CLI-only), `wiki/Generating.md` (`--suggest-prompt` caveat), and
+  `wiki/Setup.md` (`cryptography` isn't in `requirements.txt`).
+  `README.md`/`CONTRIBUTING.md` got several small corrections (Python 3.9+ floor, orphaned
+  screenshot captions, module count).
+- Added `SECURITY.md` (private vulnerability reporting is off for this repo; falls back to
+  the existing email convention).
+- `.gitignore` now generalizes ignored generated-file patterns to any `--out` directory
+  name, not just the default `pixai_backup/` (previously only `jobs.jsonl` had this).
+- `docs/curation_reference_builder.py` (a committed template script) no longer hardcodes a
+  personal path — reads `CURATION_INPUT_DIR`/`CURATION_OUT_DIR` env vars instead.
+
 ## [2.3.0] - 2026-07-23 — More security hardening, the Folio of Honors, and LoRA support in the Loom
 
 ### Changed

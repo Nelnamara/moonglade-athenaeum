@@ -163,10 +163,10 @@ python pixai_gallery_backup.py --suggest-prompt 739411069833281443    # a catalo
 python pixai_gallery_backup.py --suggest-prompt "C:\pics\ref.png"     # a local file (uploads first)
 ```
 
-> **Not every media_id works.** This calls PixAI's own suggest-prompt endpoint, and it can
-> return a server error on older catalog media rather than a suggestion — that's PixAI's
-> side failing, not a local bug. A recent generation or a freshly-uploaded local file is more
-> reliable than reaching back into old history.
+> **Images only.** This calls PixAI's own image-to-prompt endpoint, which reads back tags
+> from a still image — it has no video support, and a video `media_id` returns a server
+> error rather than a suggestion. (The web gallery's own Suggest Prompt button only ever
+> appears on image detail pages for exactly this reason.) Point it at an image, not a clip.
 
 Copy a suggestion straight into `--generate --prompt "…"` to riff on an image's style.
 

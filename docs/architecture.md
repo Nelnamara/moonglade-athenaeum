@@ -66,7 +66,7 @@ gallery.
 | `list_media_ids()` | Returns ordered media IDs for prev/next navigation |
 | `backfill_batches()` | Scans `batches/` on disk and fills empty `batch` column; called on gallery startup |
 | `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). Invariant 1, single source |
-| `find_files_for_media_id()` | SHARED matcher: all on-disk files for a media_id, BOTH layouts (prefixed `*_<mid>.*` AND bare `<mid>.*`), exact-id checked, gallery excluded. Resume, gallery, and audit all use it so they never drift apart |
+| `find_files_for_media_id()` | All on-disk files for a media_id, BOTH layouts (prefixed `*_<mid>.*` AND bare `<mid>.*`), exact-id checked, gallery excluded. Used by the gallery's `find_image_file` — **not** by resume or the audit, which each still walk the tree independently (see Invariant 7) |
 | `create_app()` | Flask app factory; calls `init_db` + `backfill_batches` before serving |
 
 ## The one-shot sync (`--sync`)
@@ -183,11 +183,13 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
    leaves `source='local'` + videos untouched.
 6. **`find_image_file` excludes `out_dir/gallery/`** to prevent thumbnails from
    being returned as full-res images.
-7. **Media-id → file resolution goes through one shared matcher**
-   (`find_files_for_media_id`) that recognizes both naming layouts — prefixed
-   `*_<mid>.*` and bare `<mid>.*`. Resume, the gallery, and the audit all share it
-   so they never drift (the historical `images/`+month duplication came from a
-   matcher that only knew one layout).
+7. **`find_files_for_media_id` recognizes both naming layouts** — prefixed
+   `*_<mid>.*` and bare `<mid>.*` — but it is not the single shared matcher this
+   invariant used to claim. The gallery (`find_image_file`) uses it; resume
+   (`run_download`) does not — it builds its own on-disk `media_id` index at
+   startup instead — and the audit (`audit_collection`) does not either. Tracked
+   as `docs/AUDIT_2026-07-21.md` P7: consolidating onto one real shared matcher is
+   still open work, not yet done.
 
 ## The web suite
 
