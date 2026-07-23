@@ -2299,8 +2299,8 @@ def _is_under(path, parent):
         return False
 
 
-def find_files_for_media_id(out_dir, media_id, include_gallery=False):
-    """All on-disk image files whose media_id matches, anywhere under out_dir.
+def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None):
+    """All on-disk files whose media_id matches, anywhere under out_dir.
 
     Single source of truth for media-id -> file resolution, shared by resume
     (`already_downloaded`), the gallery (`find_image_file`), and the duplicate
@@ -2311,15 +2311,23 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False):
     The exact `media_id_of(p) == mid` check prevents substring collisions (a
     longer id ending in these digits). Skips `.part`, zero-byte files, gallery
     thumbnails (unless include_gallery=True), and quarantined files under
-    _duplicates/ (so a quarantined copy never counts as a live "survivor" and
-    resume treats it as not-present). Returns a list of Paths.
+    _duplicates/ or _deleted/ (so a quarantined copy never counts as a live
+    "survivor" and resume treats it as not-present). Returns a list of Paths.
+
+    `exts` defaults to `_IMAGE_EXTS` (this function's historical, still image-only
+    default -- e.g. tests/test_loom_export_bundle.py pins that video media resolves
+    via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
+    (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
+    in pixai_gallery_backup.py -- so the SAME exact-match + quarantine-exclusion
+    contract applies to videos, not just images.
     """
     mid = str(media_id)
+    match_exts = _IMAGE_EXTS if exts is None else exts
     gallery_dir = out_dir / "gallery"
     quarantine_dirs = (out_dir / "_duplicates", out_dir / DELETED_DIRNAME)
     matches = []
     for p in out_dir.rglob("*{}.*".format(mid)):
-        if p.suffix.lower() not in _IMAGE_EXTS:
+        if p.suffix.lower() not in match_exts:
             continue
         if p.name.endswith(".part"):
             continue
