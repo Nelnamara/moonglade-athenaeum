@@ -1411,7 +1411,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             render can't unmount the element and kill its in-flight poll -- CSS-hidden
             instead, exactly like every other tab's content stays out of the DOM flow
             without losing its live state. See the videoTrailer comment above. */}
-        <mg-generate-drawer ref={bindGenDrawer} style={{ display: tab === "Video" ? "" : "none" }}></mg-generate-drawer>
+        {/* data-loom-ctx tells the shared drawer's own CSS (static/mg-generate-drawer.js) to
+            hide its Camera + Basic/Professional controls -- this host already owns both (the
+            shot Camera field above, the top-strip Draft toggle) via its own state. Without
+            this attribute the drawer renders its own copies alongside the Loom's, showing two
+            Camera controls and two quality controls for the same setting. */}
+        <mg-generate-drawer ref={bindGenDrawer} data-loom-ctx="" style={{ display: tab === "Video" ? "" : "none" }}></mg-generate-drawer>
         {videoTrailer}
       </div>
     );

@@ -11,7 +11,13 @@
    PixAI's own wording), and the full 7-model roster with capability gating.
 
    Usage:
-     <mg-generate-drawer tab="video"></mg-generate-drawer>
+     <mg-generate-drawer></mg-generate-drawer>
+   No attributes configure it at mount -- connectedCallback() never reads one off the host
+   element (form state instead comes from prefill(), the Loom's shot-context entry, or the
+   drawer's own internal defaults). The one attribute this file DOES read is data-loom-ctx,
+   consumed by CSS alone (see the mgd-cam-wrap/mgd-quality-wrap rule below) to hide the
+   drawer's own Camera/quality controls when a host -- currently only the Loom -- already
+   owns equivalents.
    The element owns the full lifecycle -- form state, live cost (/api/price), submit
    (/api/loom/generate), poll (/api/task-status), result strip -- and stays picker-agnostic
    for gallery picks: it never opens a gallery picker itself. Audio refs are the one
