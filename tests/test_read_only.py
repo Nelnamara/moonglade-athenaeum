@@ -91,7 +91,12 @@ class TestReadOnlyDoesNotTouchLocalOperations:
 
     def test_organize_and_dedup_unaffected(self, monkeypatch):
         # No function under test here -- this documents the boundary so a future change
-        # that widens _check_read_only's call sites has to consciously cross it.
+        # that widens _check_read_only's call sites has to consciously cross it. Both
+        # halves of the class's own name are asserted -- the test used to only look at
+        # cmd_dedup, so cmd_organize (equally named in the docstring and the test's own
+        # name) could grow a _check_read_only call with nothing here to notice.
         import inspect
         src = inspect.getsource(core.cmd_dedup)
         assert "_check_read_only" not in src
+        organize_src = inspect.getsource(core.cmd_organize)
+        assert "_check_read_only" not in organize_src

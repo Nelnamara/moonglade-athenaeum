@@ -1092,12 +1092,23 @@ def test_video_v40_full_cost_warning():
 
 
 def test_cost_badge_ships_with_every_price_surface(tmp_path):
-    """Every surface that renders a live cost is a <mg-cost-badge> now, and every page carrying
-    one MUST also load static/mg-cost-badge.js. A custom element whose definition never loads is
-    an inert <div>: setChecking()/setPrice() throw, the cost line freezes on its idle hint, and
-    the Go button beside it still spends. That failure is silent and it is on the spend path, so
-    the pairing gets a test rather than a convention -- the same reasoning that put the drawer's
-    own script tag under test above."""
+    """Every <mg-cost-badge> element MUST ship on a page that also loads
+    static/mg-cost-badge.js. A custom element whose definition never loads is an inert
+    <div>: setChecking()/setPrice() throw, the cost line freezes on its idle hint, and
+    the Go button beside it still spends. That failure is silent and it is on the spend
+    path, so the pairing gets a test rather than a convention -- the same reasoning that
+    put the drawer's own script tag under test above.
+
+    Scope: this checks the <mg-cost-badge>/script pairing, not "every surface that
+    renders a live cost" -- the Loom has two OTHER live-cost surfaces that are
+    genuinely not badges, so this test's mechanism (a custom-element/script pairing
+    check) has nothing to pair for them: the "Generate all" aggregate estimate
+    (the .lv-cost-pill button, master-storyboard.jsx) and the per-shot spend-gate
+    confirm() dialogs (the fail-closed cost gate ahead of a submit). Both print cost as
+    plain text/JS strings with no custom element to upgrade, so a missing script tag
+    can't silently break them the way it breaks a badge (audit: tests-that-dont-bite,
+    doc-lie, 2026-07-21 -- the docstring used to claim "every surface", which this
+    test's own assertions never covered)."""
     import pixai_gallery as pg
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
