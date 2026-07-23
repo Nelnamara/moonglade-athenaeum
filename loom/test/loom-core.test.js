@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
-  maxTagNum, nextTag, frameLinked, connectMeta,
+  maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
   flat, shotText, shotPayload, durOf, reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
 } from "../src/loom-core.js";
@@ -123,6 +123,74 @@ describe("connectMeta", () => {
 
   test("empty string falls back to 'new'", () => {
     assert.equal(connectMeta(""), CONNECT.new);
+  });
+});
+
+/* ---------- continuityLinked ---------- */
+// The board's continuity indicator: is a given shot's OPENING frame already frameLinked
+// to the immediately-preceding shot's CLOSING frame? `entries` is always the project's full,
+// flattened, cross-act list (flat(project)) -- continuity is a timeline concept, not an
+// act-scoped one, same convention the frame-handoff button's own "previous shot" lookup
+// already follows (entries.findIndex + idx-1, see master-storyboard.jsx's prevEntry/
+// weavePrevEntry) -- so a test below deliberately puts the two shots in DIFFERENT acts to
+// prove the act boundary is irrelevant.
+
+describe("continuityLinked", () => {
+  test("the first shot in the project has no predecessor, so it is never linked", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "med-1", thumbId: "", desc: "", tag: "" } }) },
+    ];
+    assert.equal(continuityLinked(entries, "c1"), false);
+  });
+
+  test("an id not present in entries has no predecessor either", () => {
+    const entries = [{ c: makeCard({ id: "c1" }) }];
+    assert.equal(continuityLinked(entries, "does-not-exist"), false);
+  });
+
+  test("an empty/absent entries list is safe and never linked", () => {
+    assert.equal(continuityLinked([], "c1"), false);
+    assert.equal(continuityLinked(undefined, "c1"), false);
+  });
+
+  test("true when this shot's openFrame shares mediaId with the previous shot's closeFrame", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "med-9", thumbId: "", desc: "", tag: "" } }) },
+      { c: makeCard({ id: "c2", openFrame: { mediaId: "med-9", thumbId: "", desc: "", tag: "" } }) },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), true);
+  });
+
+  test("true when this shot's openFrame shares thumbId with the previous shot's closeFrame (locally uploaded frames)", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "", thumbId: "thumb-4", desc: "", tag: "" } }) },
+      { c: makeCard({ id: "c2", openFrame: { mediaId: "", thumbId: "thumb-4", desc: "", tag: "" } }) },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), true);
+  });
+
+  test("false when the previous shot's closeFrame and this shot's openFrame are different frames", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "med-1", thumbId: "", desc: "", tag: "" } }) },
+      { c: makeCard({ id: "c2", openFrame: { mediaId: "med-2", thumbId: "", desc: "", tag: "" } }) },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), false);
+  });
+
+  test("false when neither shot's relevant frame has any identity set yet (both blank)", () => {
+    const entries = [
+      { c: makeCard({ id: "c1" }) },
+      { c: makeCard({ id: "c2" }) },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), false);
+  });
+
+  test("act boundaries are irrelevant -- continuity is checked against the previous entry in the FLATTENED list regardless of which act either shot is in", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "med-7", thumbId: "", desc: "", tag: "" } }), ai: 0 },
+      { c: makeCard({ id: "c2", openFrame: { mediaId: "med-7", thumbId: "", desc: "", tag: "" } }), ai: 1 },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), true);
   });
 });
 

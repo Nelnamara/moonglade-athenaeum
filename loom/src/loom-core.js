@@ -61,6 +61,25 @@ export const frameLinked = (a, b) => !!a && !!b && (
   (!!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId)
 );
 
+// Board-level continuity indicator built on frameLinked (2026-07-23 rebuild -- frameLinked
+// itself had zero callers anywhere in V2; this is the first one). Is `entryId`'s OPENING
+// frame already linked to the immediately-preceding shot's CLOSING frame? `entries` must be
+// the project's full, flattened, cross-act shot list (flat(project)) -- continuity is a
+// timeline concept, not an act-scoped one, the same convention the frame-handoff button's
+// own "previous shot" lookup already follows (see prevEntry/weavePrevEntry in
+// master-storyboard.jsx). The first shot in the project -- or an id entries doesn't contain
+// at all -- has no predecessor to compare against, so it is never "linked".
+//
+// NOT the same concept as CONNECT/connectMeta's "Continuity" chip (setShotMode/setShotConnect
+// in loom-mutations.js): that couples a single shot's own Mode to its connect field (how
+// THIS shot's own video generation should behave). This checks actual frame images across
+// a cut; that never does.
+export const continuityLinked = (entries, entryId) => {
+  const idx = (entries || []).findIndex((x) => x.c.id === entryId);
+  if (idx <= 0) return false;
+  return frameLinked(entries[idx - 1].c.closeFrame, entries[idx].c.openFrame);
+};
+
 // CONNECT[x] where x is a falsy/stale/legacy value throws. Every direct index
 // now goes through this instead, falling back to "new scene" (the safest,
 // most neutral default) rather than crashing shotText/export/render.
