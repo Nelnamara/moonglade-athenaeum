@@ -3562,8 +3562,8 @@ __DESIGN_TOKENS__
 
     /* DRAWER + LIGHTBOX: full-width sheet, reachable centered model flyout, stacked selects,
        lightbox arrows off the image, touch-sized controls. */
-    #gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left, #gen-drawer.dock-right { width: 100%; max-width: 100vw; }
-    #model-flyout, #gen-drawer.dock-left #model-flyout, #gen-drawer.dock-right #model-flyout,
+    #gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left { width: 100%; max-width: 100vw; }
+    #model-flyout, #gen-drawer.dock-left #model-flyout,
     #gen-drawer.dock-top #model-flyout, #gen-drawer.dock-bottom #model-flyout {
       position: fixed; top: 50%; left: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%);
       width: 94vw; max-width: 94vw; max-height: 82vh;
@@ -4135,6 +4135,9 @@ document.addEventListener('DOMContentLoaded', function() {
     <button type="button" class="btn" style="margin-top:6px;font-size:12px;padding:5px 10px;"
       data-coll="{{ collection }}" onclick="downloadCollection(this.dataset.coll)"
       title="Download every item in this collection as a ZIP (optional convert/embed)">&#8681; Download collection</button>
+    <button type="button" class="btn" style="margin-top:6px;font-size:12px;padding:5px 10px;"
+      data-coll="{{ collection }}" onclick="contactSheetCollection(this.dataset.coll)"
+      title="Open a printable contact sheet for every item in this collection">&#128424; Contact sheet</button>
     {% endif %}
   </div>
   <div>
@@ -4667,6 +4670,13 @@ function downloadCollection(name) {
   _exportColl = name;
   document.getElementById('export-n').textContent = 'collection “' + name + '”';
   document.getElementById('export-modal').classList.add('open');
+}
+function contactSheetCollection(name) {
+  // Whole COLLECTION's ZIP-download twin (downloadCollection above): open the print-ready
+  // contact sheet for every item in the collection, same as bulkContactSheet() does for a
+  // curated selection (ids=) but with collection= -- the server resolves full membership.
+  if (!name) return;
+  window.open('/contact-sheet?collection=' + encodeURIComponent(name), '_blank');
 }
 function doExportDownload() {
   var fmt = document.getElementById('export-fmt').value;
@@ -5235,8 +5245,6 @@ document.addEventListener('DOMContentLoaded', function(){
   #model-preview .mp-sub{display:flex;gap:8px;font-size:11px;margin-top:3px;color:var(--subtext);}
   #model-preview .mp-sub .ty{color:var(--emerald);}
   #model-preview .mp-desc{font-size:11px;color:var(--subtext);margin-top:5px;line-height:1.45;max-height:88px;overflow:hidden;}
-  #model-preview .mp-tags{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px;}
-  #model-preview .mp-tags span{font-size:10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;padding:1px 6px;color:var(--subtext);}
   #model-preview .mp-badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
   #model-preview .mp-badges .bdg{font-size:10px;font-weight:600;letter-spacing:.02em;border-radius:5px;padding:1px 7px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);text-transform:uppercase;}
   #model-preview .mp-badges .bdg.base{color:#c9b8ff;border-color:#4a3f78;}
