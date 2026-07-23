@@ -3,7 +3,8 @@
    your catalog" modal (search, collection/type/rating/sort filters, infinite scroll).
 
    Second shared web component of the Option-A cohesion migration (see
-   docs/SUITE_ARCHITECTURE_AUDIT.md), same conventions as mg-model-picker.js: plain global
+   docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md, archived), same conventions as
+   mg-model-picker.js: plain global
    via <script src>, no build step, reads the shared DESIGN_TOKENS_CSS. PickerCore already
    unified the browse/filter/paginate LOGIC between the gallery's vanilla Picker and the
    Loom's React GalleryPick; this element unifies the missing piece -- the RENDERING -- so

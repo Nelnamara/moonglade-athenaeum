@@ -30,7 +30,7 @@ gallery.
 | `convert_image()` | WebP→PNG/JPEG via Pillow; flattens alpha for JPEG |
 | `embed_metadata()` | Write prompt/IDs/date into PNG text chunks or JPEG EXIF |
 | `build_stem_name()` | Filesystem-safe names from prompt |
-| `already_downloaded()` | Resume check: rglob the whole tree for `*_<mediaId>.*` |
+| `already_downloaded()` | Existing-file check via the shared `find_files_for_media_id` matcher (both naming layouts, not just `*_<mediaId>.*`). Used by `run_sync_artworks`'s video resume — `run_download` does NOT call it; it builds its own on-disk `media_id` index at startup instead |
 | `cmd_organize()` | Re-normalize the WHOLE backup (`rglob`) into ONE scheme — `YYYY-MM/` month folders, descriptive names, no `batches/`. Reversible via `organize_manifest.csv` / `--undo-organize` |
 | `_ensure_db()` | Auto-migrates catalog.csv → catalog.db if needed; used by all commands |
 | `audit_collection()` | Filesystem-truth duplicate audit: Class A (same media_id in >1 folder) + Class B (byte-identical, different id via size-bucketed hashing) |
@@ -127,7 +127,7 @@ pixai_backup/
 ├─ unknown-date/           organize: fallback month folder for rows with no created_at
 ├─ videos/                 backed-up + imported videos (mp4)
 ├─ imported/               external media copied in via --import-local
-├─ gallery/thumbs/         768px JPEG thumbnails, one per media_id (immutable cache)
+├─ gallery/thumbs/         768px JPEG thumbnails, one per media_id (short-lived cache)
 ├─ branding/               machine-local marks, frames, badges, reward art
 ├─ branding.json           chosen mark + animation (POST /api/branding; separate from
 │                          the branding/ art dir above)
@@ -157,8 +157,10 @@ pixai_backup/
 ```
 
 Thumbnails are keyed by `media_id`, **not** content-addressed — the filename is an
-identity, not a digest of the bytes. They're served `max-age=31536000, immutable`, so a
-`--rebuild-thumbs` rewrites the same URL a client may already have cached.
+identity, not a digest of the bytes. Because `--rebuild-thumbs` regenerates them IN PLACE
+at that same key, they're served `public, max-age=300` (short, not immutable) so a repair
+doesn't get pinned behind a year-long cache; the route's ETag still gives a 304 on the
+common repeat-visit path.
 
 **Organize** normalizes everything into `YYYY-MM/` month folders with readable
 `<prompt>_<taskid>_<mediaid>` names (no batch subfolders), writing a reversible
@@ -228,6 +230,28 @@ asserts it against a live request, so it is the authority when prose and code di
   (open)/POST (LOGIN-tier, like the rest of the writes above — not localhost), animated
   banner marks. `/api/branding/shortcut` (the Desktop `.lnk` writer, LOCALHOST-only because
   it shells out to the host machine) is the actual localhost-gated route in this group.
+
+## Shared web components (`static/`)
+
+Five framework-neutral custom elements (the "Option-A cohesion migration") live in
+`static/` as plain `mg-*.js` globals — no build step, no shadow DOM, loaded via a plain
+`<script src>` tag, each self-injecting its own `<style>` that reads the shared
+`DESIGN_TOKENS_CSS` custom properties so it re-skins with the rest of the app. Both the
+vanilla gallery (`pixai_gallery.py`) and the React Loom (`loom/master-storyboard.jsx`)
+mount the same files instead of each hand-duplicating the UI:
+
+| File | Element / global | Role |
+|---|---|---|
+| `mg-model-picker.js` | `<mg-model-picker>` | Model/LoRA picker: search box + cover cards + hover preview card |
+| `mg-gallery-picker.js` | `<mg-gallery-picker>` | Whole-catalog image picker modal (search, Collection/Source/Rating/Sort filters, infinite scroll); wraps `picker-core.js` |
+| `mg-generate-drawer.js` | `<mg-generate-drawer>` | The full Generate/Edit/Video form (Multi-ref slots, cost line, submit+poll) |
+| `mg-cost-badge.js` | `<mg-cost-badge>` | The one renderer for "this costs N credits" / "a free card covers it" |
+| `mg-notify.js` | `Ach` / `Toast` / `Jobs` / `JobsCard` (plain globals, not a custom element) | Achievement-toast celebrations, the corner Toast utility, and the Job activity tracker |
+
+`static/picker-core.js` is a sixth file worth knowing about but is not one of the five: it's
+the framework-agnostic browse/filter/paginate/infinite-scroll logic that `mg-gallery-picker`
+wraps (and that the Loom's own `GalleryPick` also shares) — no DOM, no custom element, just
+the shared engine underneath.
 
 ## Testing
 

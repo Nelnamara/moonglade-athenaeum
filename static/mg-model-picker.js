@@ -3,7 +3,8 @@
    gallery and the React Loom can mount, so the widget lives in ONE place instead of two.
 
    The first shared web component of the Option-A cohesion migration (see
-   docs/SUITE_ARCHITECTURE_AUDIT.md). Loaded as a plain global via <script src>, exactly
+   docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md, archived). Loaded as a plain global
+   via <script src>, exactly
    like picker-core.js and the vendored React -- NO build step, runs untranspiled (a native
    ES class is fine in every modern browser). It reads the shared DESIGN_TOKENS_CSS custom
    properties, so it re-skins with the app, and it owns its OWN floating preview element,
