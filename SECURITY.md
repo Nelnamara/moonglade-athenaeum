@@ -1,7 +1,7 @@
 # Security Policy
 
-Moonglade Athenaeum is a personal-scale project (see [CONTRIBUTING.md](CONTRIBUTING.md)),
-but it's a real web app with real gated actions behind it — spending your PixAI credits,
+Moonglade Athenaeum has one maintainer (see [CONTRIBUTING.md](CONTRIBUTING.md)), but it's a
+public, multi-user web app with real gated actions behind it — spending your PixAI credits,
 deleting from your PixAI account, importing files onto the host machine, managing sign-in
 accounts. A bug that lets one of those trigger from a request that shouldn't be allowed to
 is a genuine security issue, not just a UI glitch. See

@@ -175,9 +175,9 @@ users.
   (`_renderError`) now recognizes a content-moderation rejection the same way the Loom's own
   poll path already did — a local, verbatim port of `friendlyGenErr` (the drawer can't import
   `loom-mutations.js`, an ES module, and must stay a build-free `<script>`), wired into the two
-  call sites that carry a genuine raw server string (submit failure, poll task failure). Fixes
-  the Loom's own Video-tab mount for free (shared component) and will cover the gallery's own
-  Video tab once it adopts `<mg-generate-drawer>` (still pending).
+  call sites that carry a genuine raw server string (submit failure, poll task failure). Covers
+  both mounts of the shared component — the Loom's own Video tab and, since the gallery's
+  Option-A migration (`2b20806`), the gallery's Video tab too.
 - **Timeline drawer's video preview was too small and left-justified** instead of centered —
   `.sb-shotprev`/`.sb-shotprev-wrap` max-width 340px→460px with `margin:auto` centering, the
   preview zone/drawer's "full" height grown proportionally (280px→362px / 360px→442px) so the
