@@ -1,8 +1,9 @@
 # FAQ
 
 **Is this official / affiliated with PixAI?**
-No. It's an unofficial personal-use tool that uses your own API key plus PixAI's
-private frontend queries. PixAI's terms grant you copyright of your own generations.
+No. It's an unofficial, independently-run client that uses your own API key plus PixAI's
+private frontend queries. Anyone can self-host it against their own account. PixAI's
+terms grant you copyright of your own generations.
 
 **Will this get my account banned / does it steal credits?**
 It's built to do the opposite of abuse: it only reads/manages *your own* account,
