@@ -605,22 +605,26 @@ waiting; the "together" grouping still applies to what's left below.
 
 ## Open owner calls
 
-- **Epic-tier frame art** undecided. The owner wants epic to read "deep-purple WoW epic /
-  tier-gear," leaning Nelnamara's Dreamwalker feathers + Balance-Druid Moonfire flair, without
-  out-shouting legendary-gold or feat-ruby. Enabling it is a one-key change: the framed map in
-  `_mkMoment` takes `epic:1` once art exists.
-- **"Earned rewards" as its own display** — shape TBD.
-- **"Toast badge grows to its home marker"** needs the owner to finish articulating it before
-  it is buildable.
-- **Real SFX for the unlock toast** need owner-supplied sound. The loader ships and fails soft,
-  but no `branding/sfx/` folder exists on the served tree, so the synth chime is the only sound
-  that ever plays. Sources scouted: Kenney / Sonniss GDC / freesound / OpenGameArt (CC0), or
-  Stable Audio Open via Pinokio; the owner has 1–2 WoW sounds.
-- **Toast tier colors vs. shipped badge art.** Whether to realign the code's toast tier-glow
-  colors and rarity pill to the shipped badges' tier scheme. The recommended scheme (rarity
-  carried on gem + glow, ring reinforces; legendary warmed toward amber) was never
-  owner-confirmed; the code still runs the original (common = steel-blue `#9fbad6`, with
-  `--gunmetal #8a93a2` / `--ruby #e0355e`).
+- **Epic-tier frame art — deferred to the Design Pass.** The owner is now on the fence about
+  the whole premise: considering REMOVING the ornate per-tile frames from Legendary/Feat
+  rather than adding a matching Epic one (2026-07-23). Not the "deep-purple WoW epic /
+  tier-gear" direction previously banked — that's shelved pending this bigger question.
+- **"Earned rewards" as its own display** — shape TBD. This is about the Folio of Honors
+  (achievement unlocks), not a PixAI feature: a dedicated display for rewards you've
+  actually earned (banners, skins, etc.), separate from the achievement list itself.
+- **"Toast badge grows to its home marker"** — the owner's own half-articulated idea from
+  the unlock-toast work: the badge shown in the unlock toast animates/scales as it "arrives"
+  at wherever its permanent icon lives, as a satisfying collect-moment. Never finished being
+  specified (own note at the time: "owner articulating the idea separately. AWAITING.") —
+  still awaiting that, not touched.
+- **Real SFX for the unlock toast — deferred to the Design Pass.** The loader ships and
+  fails soft, but no `branding/sfx/` folder exists on the served tree, so the synth chime is
+  the only sound that ever plays. Sources scouted: Kenney / Sonniss GDC / freesound /
+  OpenGameArt (CC0), or Stable Audio Open via Pinokio; the owner has 1–2 WoW sounds.
+- **Toast tier colors vs. shipped badge art — owner says resolved 2026-07-23, specifics to
+  land in the Design Pass.** Which direction (realign the code's toast/rarity-pill colors to
+  the shipped badges' tier scheme, or keep the code's original common/gunmetal/ruby scheme)
+  wasn't restated when he called it resolved — confirm before touching the CSS.
 - **Gallery search-bar redesign** is unstarted and deliberately blocked on the owner's
   layout-notes pass. Banked design: a LEFT Filters drawer mirroring the right Generate drawer.
   Sketch only after that pass.
