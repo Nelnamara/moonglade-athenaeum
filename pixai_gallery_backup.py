@@ -1770,11 +1770,6 @@ def _model_preview_url(media):
     return next((u for u in urls if "/thumb/" in u), urls[0] if urls else "")
 
 
-def is_lora_type(model_type):
-    """True if a model type is a LoRA (can't be used as a base model)."""
-    return "LORA" in (model_type or "").upper()
-
-
 def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
     """Search models/LoRAs via the oRPC GET /v2/generation-model/search endpoint. Unlike
     the GraphQL `generationModels` connection (which conflates base models + LoRAs), this
@@ -2541,11 +2536,6 @@ def cmd_verify_dupes(args, out):
     return res
 
 
-def run_verify_dupes(args):
-    """GUI/CLI wrapper for quarantine verification."""
-    cmd_verify_dupes(args, Path(args.out))
-
-
 def reconcile_catalog_with_disk(out_dir, db_path):
     """After files move/disappear, point each catalog row's filename+batch at the
     surviving on-disk file for that media_id. Rows whose file is gone keep their
@@ -2994,17 +2984,6 @@ def run_count(args):
     if images > tasks:
         print("\nNote: image count exceeds task count because some older tasks\n"
               "produced batches of several images -- all of them get downloaded.")
-
-
-def run_audit(args):
-    """GUI/CLI wrapper: read-only duplicate audit."""
-    cmd_audit(args, Path(args.out))
-
-
-def run_dedup(args):
-    """GUI/CLI wrapper: dedup (quarantine/delete + catalog reconcile)."""
-    out = Path(args.out)
-    cmd_dedup(args, out, out / "catalog.db")
 
 
 def artwork_list_gql(session, before=None, last=50):
@@ -3790,8 +3769,8 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     lengths. (Card auto-apply happens at the route: a V4.0 card makes it free.)
 
     `negative` only reaches i2vPro (I2V/FLF) -- the referenceVideo submit shape captured
-    2026-07-02 has no negativePrompts field, a genuine PixAI API gap (see docs/STATE.md's
-    Control Panel / web parity section), not an oversight here."""
+    2026-07-02 has no negativePrompts field at all. A genuine PixAI API gap, not an
+    oversight here -- R2V/V2V shots silently ignore a negative prompt if one is set."""
     m = (mode or "R2V").upper()
     imgs = [str(i) for i in (image_ids or []) if str(i).strip()]
     vids = [str(v) for v in (video_ids or []) if str(v).strip()]
@@ -5163,10 +5142,10 @@ def run_account_info(args):
 # far gentler on PixAI than periodic polling. Confirmed reachable with the same Bearer
 # token the tool already holds (see private/APP_OPERATIONS_FULL.md).
 #
-# STATUS: this `--watch` command is the live monitor + the capture tool for the ONE
-# unknown -- the exact `status` string a completed task emits. Run it, start a
-# generation in the PixAI web UI, and it prints the frames; that pins the completion
-# enum so a future event-driven backup can trigger on it (instead of polling).
+# STATUS: this `--watch` command is the shipped live monitor. With --watch-backup it
+# is also the event-driven backup mode -- each task's 'completed' frame (confirmed
+# lifecycle below) triggers an immediate download + catalog, instead of waiting on
+# the next polling pass.
 _WS_URI = "wss://gw.pixai.art/graphql"
 _WS_SUBSCRIPTION = (
     "subscription Watch { personalEvents { "
