@@ -814,7 +814,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           .then((d) => {
             if (mySeq !== imgModelSeqRef.current) return;   // a newer pick superseded this fetch
             const versions = (d && d.versions) || [], v = versions[0] || {};
-            setImgModel((cur) => (cur && cur.model_id === m.model_id) ? {
+            // Owner report 2026-07-24: the version dropdown never appeared on the Loom for a
+            // model confirmed (same model, same account) to show one on the Gallery. Root
+            // cause: this updater ALSO required cur.model_id===m.model_id on top of the
+            // mySeq check above -- redundant for the "newer pick superseded this one" case
+            // mySeq already covers, but a real liability for anything else that can touch
+            // imgModel while this fetch is in flight (a shot switch, a project reload) --
+            // any of those silently drops the whole versions/compatibility/restrictions
+            // payload with no error, no retry, nothing visibly wrong. The Gallery's own
+            // onBasePick has never done a model_id re-check here, only the sequence guard --
+            // matching it exactly rather than carrying an extra condition that was never
+            // proven necessary and demonstrably breaks the one thing it must never break.
+            setImgModel((cur) => cur ? {
               ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
               sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
               compatibility: v.compatibility || {}, restrictions: v.restrictions || {},

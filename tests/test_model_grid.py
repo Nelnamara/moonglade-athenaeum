@@ -308,6 +308,43 @@ def test_model_search_market_gql(monkeypatch):
     assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
 
 
+def test_model_search_market_gql_supports_cursor_pagination(monkeypatch):
+    """Owner report 2026-07-24: the picker 'scrolls a few rows and stops -- no continuous
+    scroll'. Root cause: `generationModels` already returned pageInfo.hasNextPage (has_more
+    was computed and returned all along), but the query never requested endCursor and never
+    accepted an `after` variable, so there was no way to actually ask for a next page even
+    though the server would have one. Standard Relay Connection shape (edges+pageInfo) --
+    the same spec this app already relies on elsewhere (page_variables' before/last cursor
+    pagination for task history) -- so `after`/`endCursor` is the expected forward-paging
+    pair, not a guess. First call (no `after`) must NOT send the $a variable or after: arg
+    at all -- an empty/null cursor is not the same as a real one, and PixAI's own resolver
+    may reject a present-but-empty $a differently than an absent one."""
+    captured = {}
+    def fake_gql(session, query, vars=None):
+        captured["query"] = query
+        captured["vars"] = vars
+        return {"generationModels": {"pageInfo": {"hasNextPage": True, "endCursor": "CURSOR_ABC"},
+                                       "edges": [{"node": {"id": "1", "title": "X", "type": "SDXL_MODEL",
+                                       "latestVersion": {"id": "v1"}, "media": {"urls": []},
+                                       "tags": [], "author": {}}}]}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+
+    r = core.model_search_market_gql(object(), usage="MODEL", limit=24)
+    assert "after:" not in captured["query"] and "$a" not in captured["query"]
+    assert r["has_more"] is True and r["next_cursor"] == "CURSOR_ABC"
+
+    r2 = core.model_search_market_gql(object(), usage="MODEL", limit=24, after="CURSOR_ABC")
+    assert "after:$a" in captured["query"] and "$a:String" in captured["query"]
+    assert captured["vars"]["a"] == "CURSOR_ABC"
+
+    # no next page -> next_cursor must be empty, never a stale/previous cursor a client
+    # could accidentally keep paging on forever
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, vars=None: {
+        "generationModels": {"pageInfo": {"hasNextPage": False, "endCursor": "IGNORED"}, "edges": []}})
+    r3 = core.model_search_market_gql(object(), usage="MODEL")
+    assert r3["has_more"] is False and r3["next_cursor"] == ""
+
+
 def test_model_search_market_gql_requests_and_surfaces_architecture_fields(monkeypatch):
     """picker-parity-round2 (problem 3): the query gained latestVersion{modelType
     loraBaseModelType} -- confirmed live against the owner's real account (real rows come

@@ -49,8 +49,30 @@ git tags. Full prose notes for tagged versions live on
   model's restrictions had them, so switching from a restricted model to an unrestricted one
   left the bounds stuck at the previous model's numbers — fixed so the gate always resolves
   min/max to either the model's real bounds or the field's own default.
+- **The picker's grid now supports continuous scroll, on both the gallery and the Loom.**
+  `has_more` had been computed correctly server-side since picker-parity-round2; nothing
+  client-side had ever read it or asked for a next page, and the GraphQL path (every LoRA
+  search, and any base-model search using a category filter or "Newest" sort) had no way
+  to even ask — the query requested `hasNextPage` but not `endCursor`, and took no `after`
+  argument. Added forward Relay-cursor paging, the same spec this app already relies on
+  elsewhere (`page_variables`'s cursor pagination for task history). `/api/model-search`
+  now accepts one opaque `cursor=` a client just echoes back — the route decides what it
+  means per-request (a real GraphQL cursor on the market path, a plain offset on REST) so
+  the client never needs to know which path is serving it. The picker's grid now fetches
+  and appends a next page near the bottom of the scroll, with its own staleness guard and a
+  visible "loading more…" indicator; a transient error leaves pagination state untouched so
+  the next scroll simply retries instead of wedging closed. Live-verified end to end with
+  two mocked pages: the grid held both, in order, not replaced.
 
 ### Fixed
+
+- **A real Loom-only bug in the base-model version-resolve guard**, found by the owner
+  testing the identical model on both surfaces: the gallery showed a version dropdown, the
+  Loom didn't. The Loom's resolve-fetch updater carried a redundant `model_id` re-check on
+  top of the sequence-counter guard the gallery's own `onBasePick` has always used alone —
+  could silently drop the whole versions/compatibility/restrictions payload for any reason
+  `imgModel` changed mid-fetch that wasn't a newer pick, which the counter already handled
+  correctly by itself. Simplified to match the gallery's proven guard exactly.
 
 - **The model picker's squished thumbnails and dead scrolling, and picking a model no longer
   leaving the panel stuck open.** Owner live-tested the same-day picker-parity-round2 work and

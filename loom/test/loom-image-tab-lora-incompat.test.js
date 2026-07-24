@@ -28,9 +28,23 @@ describe("Image tab LoRA↔base compatibility warning (L536 closes the D-11 defe
     // capabilities can be shown too -- model_type capture itself is unchanged in spirit,
     // just reading from the new shape.
     assert.match(src,
-      /setImgModel\(\(cur\) => \(cur && cur\.model_id === m\.model_id\) \? \{\s*\n\s*\.\.\.cur, version_id: v\.version_id \|\| "", model_type: v\.model_type \|\| "",/,
+      /setImgModel\(\(cur\) => cur \? \{\s*\n\s*\.\.\.cur, version_id: v\.version_id \|\| "", model_type: v\.model_type \|\| "",/,
       "bindPicker must capture the base model's model_type from /api/model-version?all=1, " +
       "or loraIncompat has nothing real to compare a picked LoRA against");
+  });
+
+  test("the version-resolve updater guards ONLY on the sequence counter, not a redundant model_id re-check", () => {
+    // Owner report 2026-07-24: the version dropdown never appeared on the Loom for a model
+    // confirmed (same model, same account) to show one on the Gallery. The extra
+    // cur.model_id===m.model_id condition this updater used to carry, on top of the mySeq
+    // guard, could silently drop a legitimate versions/compatibility/restrictions payload
+    // for any reason imgModel changed mid-fetch that wasn't "a newer pick" -- the ONE thing
+    // mySeq already exists to prevent, correctly. The Gallery's own onBasePick has never
+    // had this second condition. Pin the simpler, matching shape so it can't regress back.
+    assert.doesNotMatch(src, /cur && cur\.model_id === m\.model_id/,
+      "no code path should re-check model_id equality here -- mySeq is the only guard needed");
+    assert.match(src, /if \(mySeq !== imgModelSeqRef\.current\) return;/,
+      "the sequence guard itself must stay -- it's what correctly rejects a stale response");
   });
 
   test("each LoRA chip computes incompat via the (previously dead) imported loraIncompat()", () => {

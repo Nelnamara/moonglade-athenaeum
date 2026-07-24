@@ -307,6 +307,48 @@ def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatc
     assert "compat" not in d3["results"][0]
 
 
+def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monkeypatch):
+    """Owner report 2026-07-24: the picker never loads more than its first page. The
+    unused `offset=` param is replaced by a unified `cursor=` the client just echoes back
+    without needing to know which search path is serving it -- the route decides what an
+    opaque cursor MEANS based on which path is active for THIS request. GraphQL: the
+    literal cursor string, passed through as `after=`. REST: a plain base-10 offset,
+    computed here (not inside model_search_rest, which only knows a raw int offset)."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    gql_calls = []
+    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+        gql_calls.append(k) or {"results": [], "has_more": True, "next_cursor": "GQL_NEXT"}))
+    rest_calls = []
+    monkeypatch.setattr(core, "model_search_rest", lambda *a, **k: (
+        rest_calls.append(k) or {"results": [], "has_more": True}))
+    cli = _authed_client(tmp_path, [])
+
+    # GraphQL path (kind=lora always uses it): cursor passed straight through as `after`,
+    # and the server's own next_cursor rides back to the client unchanged.
+    d = cli.get("/api/model-search?kind=lora&cursor=GQL_PREV").get_json()
+    assert gql_calls[-1]["after"] == "GQL_PREV"
+    assert d["next_cursor"] == "GQL_NEXT"
+
+    # REST path (plain base-model keyword search): cursor is a base-10 offset string;
+    # next_cursor is computed as offset+size since model_search_rest has no cursor concept.
+    d2 = cli.get("/api/model-search?kind=base&cursor=24&size=24").get_json()
+    assert rest_calls[-1]["offset"] == 24
+    assert d2["next_cursor"] == "48"
+
+    # first page (no cursor at all) -> REST offset 0, GraphQL after=None (not sent)
+    cli.get("/api/model-search?kind=base")
+    assert rest_calls[-1]["offset"] == 0
+    cli.get("/api/model-search?kind=lora")
+    assert gql_calls[-1]["after"] is None
+
+    # has_more False -> next_cursor must be empty, on EITHER path, regardless of what the
+    # underlying offset math would otherwise compute -- never hand back a cursor that
+    # would page a client past the real end of the list.
+    monkeypatch.setattr(core, "model_search_rest", lambda *a, **k: {"results": [], "has_more": False})
+    d3 = cli.get("/api/model-search?kind=base&cursor=24").get_json()
+    assert d3["next_cursor"] == ""
+
+
 def test_collections_endpoint(tmp_path):
     rows = [_row(media_id="1", filename="a_1.png", collections="Banners,Faves",
                  created_at="2025-01-01T00:00:00"),

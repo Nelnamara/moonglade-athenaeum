@@ -1926,7 +1926,7 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
 MARKET_CATEGORIES = ("character", "style", "pose", "clothing", "background", "detail", "other")
 
 
-def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24):
+def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24, after=None):
     """Market-style model browse via the GraphQL `generationModels` connection, which -- unlike
     the REST /search -- actually HONORS `category` and a date `orderBy`. Use this for category
     chips + a Newest sort; the REST path (model_search_rest) stays the default for keyword/Popular
@@ -1945,7 +1945,19 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     sort/badging (see annotate_lora_compat) through this GraphQL connection, which -- unlike
     REST's oRPC search -- actually carries this per-row. Surfaced as `model_type` /
     `lora_base_model_type`, the SAME key names model_search_rest's sibling
-    resolve_version_meta() already uses, so callers don't care which path produced a row."""
+    resolve_version_meta() already uses, so callers don't care which path produced a row.
+
+    after=<cursor> (owner report 2026-07-24: the picker "scrolls a few rows and stops"):
+    forward Relay-cursor paging -- standard `edges`/`pageInfo` connection shape, the same
+    spec this app already relies on elsewhere (page_variables' before/last cursor pagination
+    for task history, just the other direction). has_more was ALREADY computed correctly
+    from pageInfo.hasNextPage; the real gap was that the query never requested endCursor and
+    never accepted an after: argument, so a client had no way to actually ask for the next
+    page even knowing one existed. Omitted entirely (not sent as an empty string) when
+    absent -- a present-but-empty $a may not mean the same thing to PixAI's resolver as no
+    $a at all, and this is the first page of a fresh search either way. next_cursor in the
+    return is '' whenever has_more is false, even if the server's own endCursor is
+    non-empty -- never hand a caller a cursor that would page forever on an exhausted list."""
     cat = (category or "").strip().lower()
     # category/orderBy come from a fixed whitelist -> safe to interpolate; keyword stays a
     # bound $variable (never interpolate user text into a query).
@@ -1954,11 +1966,18 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         args.append('category:"%s"' % cat)
     if (sort or "").strip().lower() == "newest":
         args.append('orderBy:"-createdAt"')
-    q = ("query($k:String,$n:Int){ generationModels(" + ", ".join(args) + "){ "
-         "pageInfo{ hasNextPage } edges { node { id title type isNsfw likedCount "
+    after = (after or "").strip()
+    var_decl = "$k:String,$n:Int"
+    variables = {"k": keyword or "", "n": int(limit)}
+    if after:
+        args.append("after:$a")
+        var_decl += ",$a:String"
+        variables["a"] = after
+    q = ("query(" + var_decl + "){ generationModels(" + ", ".join(args) + "){ "
+         "pageInfo{ hasNextPage endCursor } edges { node { id title type isNsfw likedCount "
          "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
          "tags { name } author { displayName } createdAt } } } }")
-    data = (gql_adhoc(session, q, {"k": keyword or "", "n": int(limit)}) or {}).get("generationModels") or {}
+    data = (gql_adhoc(session, q, variables) or {}).get("generationModels") or {}
     want_lora = (usage or "MODEL").upper() == "LORA"
     out = []
     for e in data.get("edges") or []:
@@ -1992,7 +2011,10 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             "model_type": lv.get("modelType") or "",
             "lora_base_model_type": lv.get("loraBaseModelType") or "",
         })
-    return {"results": out, "has_more": bool((data.get("pageInfo") or {}).get("hasNextPage"))}
+    page_info = data.get("pageInfo") or {}
+    has_more = bool(page_info.get("hasNextPage"))
+    return {"results": out, "has_more": has_more,
+            "next_cursor": (page_info.get("endCursor") or "") if has_more else ""}
 
 
 def workflow_catalog(session, first=80):
