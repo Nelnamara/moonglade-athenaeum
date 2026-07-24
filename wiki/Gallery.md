@@ -60,6 +60,34 @@ The filter bar:
   link that downloads exactly the rows you're looking at. (The Control Panel's **Download
   catalog (CSV)** is the whole-library dump.)
 
+### Search operators
+
+The search box also understands `key:value` tokens, so every useful catalog column is
+reachable without a dedicated dropdown. Mix them freely with plain words — everything
+is ANDed:
+
+```
+model:tsubaki night elf          images from a Tsubaki model whose prompt has both words
+model:"Ether Real"               quote values that contain spaces
+negative:blurry                  search the negative prompt
+seed:123456789                   exact seed (paste it straight from a detail page)
+rating:>=3 aes:>6                three-plus stars AND aesthetic score above 6
+width:>1000 height:>1000         big renders only (likes: steps: cfg: duration: work too)
+created:2026-07                  July 2026; created:2026 for the year, created:2026-07-04 for a day
+created:<2026                    strictly before 2026 (>, >=, <= also work)
+video:1 nsfw:0                   videos, SFW only (published: too; 1/0, true/false, yes/no)
+collection:"Elf Portraits"       exact collection name, same as the dropdown
+source:api                       online / api / local / deleted, same as the dropdown
+tag:elf lora:detail sampler:euler title:grove batch:B1 filename:mp4
+task:900000001  media:100000003  exact ids (a bare long number still works as before)
+```
+
+Text operators match substrings, case-insensitively, and take the same `*` / `?`
+wildcards as free text (`model:eth*mix`). An unrecognized key (or a malformed value
+like `width:tall`) isn't an error — the whole token is simply searched as prompt text,
+the way search engines behave. Operator searches work everywhere the search box does:
+the grid, the pickers, saved views, and the filtered CSV export.
+
 Cards show a ▶ badge on videos and **AI** / **local** badges by source. **Videos play
 right in the lightbox** (and on the detail page), so you can browse a mixed grid of
 images and videos with the arrow keys without leaving the overlay.

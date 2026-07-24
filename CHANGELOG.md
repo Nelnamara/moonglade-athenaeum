@@ -45,6 +45,21 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   rows cataloged before cost tracking existed. Read-only surfacing: the MCP `get_image`
   detail JSON gains the field, and `--catalog-stats` prints a spend total (counted once
   per task, never per batch image).
+- **The search box speaks field operators** (audit Tier 6, Curator #3). `key:value` tokens
+  reach every sanely filterable catalog column from the one search string: text fields
+  (`model:` `lora:` `tag:` `title:` `sampler:` `negative:` `natural:` `batch:` `status:`
+  `filename:`) as case-insensitive substrings with the usual `*`/`?` wildcards; numbers
+  (`rating:>=3`, `width:>1000`, `aes:>6`, `likes:`, `steps:`, `cfg:`, `clip_skip:`,
+  `comments:`, `duration:`) with `>` `<` `>=` `<=` or exact; exact ids (`seed:` `task:`
+  `media:` `artwork:` `model_id:`); `video:`/`published:`/`nsfw:` booleans;
+  `created:2026-07` date prefixes (with `<`/`>` compares); and `collection:`/`source:`
+  mirroring their dropdowns. Quoted values carry spaces (`model:"Ether Real"`); unknown
+  keys and malformed values degrade to plain prompt text, search-engine style. Plain
+  free text compiles to byte-identical SQL as before (regression-pinned), everything is
+  parameter-bound (hostile-value tested), and because `_build_where` is shared the grid,
+  prev/next navigation, the filtered CSV export, all the pickers, saved views and the MCP
+  server's `search_catalog` gained the syntax together. Grammar with copy-paste examples
+  in `wiki/Gallery.md` § Search operators.
 - **Every CLI flag is now documented, and `--help` is complete.** The 30 tuning/maintenance
   flags that existed with no documentation anywhere (edit tuning, video tuning,
   `--params-json`/`--poll-timeout`, format conversion, download shaping, catalog repair,
