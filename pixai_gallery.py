@@ -5444,6 +5444,12 @@ document.addEventListener('DOMContentLoaded', function(){
   @keyframes gen-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}
   .gen-result{margin-top:12px;} .gen-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
   .gen-result a{color:var(--accent-soft);font-size:12px;text-decoration:none;}
+  /* Concurrent generations (2026-07-23): each submission gets its OWN line inside the
+     result strip instead of one shared div that a later submission's status update would
+     overwrite. A hairline separator between entries is the only visual change from before
+     when only one submission is ever in flight. */
+  .gen-result-line{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
+  .gen-result-line:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none;}
   #enh-list{max-height:230px;overflow-y:auto;margin-top:2px;}
   .enh-item{display:block;width:100%;text-align:left;padding:6px 9px;margin-bottom:4px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.3;}
   .enh-item:hover{border-color:var(--overlay0);}
@@ -6594,33 +6600,46 @@ var Gen = (function(){
       .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
   }
   function debouncedCost(){ clearTimeout(costTimer); costTimer=setTimeout(refreshCost,250); }
-  function renderResult(res, d, past){
-    res.style.display='block';
-    if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
+  function renderResultInto(target, d, past){
+    if(d.error){ target.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
     var ids=d.media_ids||[];
     var cost = d.paid_credit===0 ? 'free (card used)' : ((d.paid_credit||0).toLocaleString()+' credits');
     var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 '+past+' \\u2014 '+cost+'. Added to your gallery.</div>';
     ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
     if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');Gen.setMode(\\'edit\\');return false;">Edit this result \\u2192</a>'; }
-    res.innerHTML=html;
+    target.innerHTML=html;
   }
+  // Concurrent generations (owner-approved 2026-07-23): PixAI itself runs tasks in
+  // parallel, so the Go button used to lock for no real reason -- every OTHER tab reused
+  // this one runTask(), so fixing it here fixes Generate/Edit/Enhance/Fix together. Each
+  // call now gets its OWN line appended into the result strip (never overwriting a sibling
+  // submission's still-live status/result), and the button frees up the moment the SERVER
+  // ANSWERS the submit -- accepted or rejected -- not when the task finishes rendering.
+  // Jobs already polls each task_id independently (its own de-dupe map is keyed by id), so
+  // nothing about the polling itself needed to change -- only who owns the button and
+  // where a submission's own status gets rendered.
   function runTask(url, p, res, opts){
     opts=opts||{};
-    res.style.display='block'; res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
+    res.style.display='block';
+    var line=document.createElement('div'); line.className='gen-result-line';
+    line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
+    res.appendChild(line);
     if(opts.btn){ opts.btn.disabled=true; opts.btn.textContent=opts.busy; }
-    function done(){ if(opts.btn){ opts.btn.disabled=false; opts.btn.textContent=opts.idle; } }
+    function unlock(){ if(opts.btn){ opts.btn.disabled=false; opts.btn.textContent=opts.idle; } }
     fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
       .then(function(r){return r.json();})
       .then(function(d){
-        if(d.error || !d.task_id){ done(); renderResult(res, {error:d.error||'submit failed'}); return; }
-        res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
+        unlock();   // the server answered -- free the button for the NEXT submission
+        if(d.error || !d.task_id){ renderResultInto(line, {error:d.error||'submit failed'}); return; }
+        line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
         // Jobs owns the polling, so the task (and its result) survive closing the drawer.
+        // The callback below only ever touches THIS submission's own `line`.
         Jobs.track(d.task_id, opts.past||'Task', function(phase, data){
-          if(phase==='done'){ done(); renderResult(res, data, opts.past); Acct.refresh(); }
-          else if(phase==='failed'){ done(); renderResult(res, {error:data.error||('task '+(data.status||'failed'))}); }
-          else { res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Rendering under the eclipse\\u2026 (task '+String(d.task_id).slice(-6)+')</span>'; }
+          if(phase==='done'){ renderResultInto(line, data, opts.past); Acct.refresh(); }
+          else if(phase==='failed'){ renderResultInto(line, {error:data.error||('task '+(data.status||'failed'))}); }
+          else { line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Rendering under the eclipse\\u2026 (task '+String(d.task_id).slice(-6)+')</span>'; }
         });
-      }).catch(function(){ done(); renderResult(res, {error:'network error'}); });
+      }).catch(function(){ unlock(); renderResultInto(line, {error:'network error'}); });
   }
   function generate(){
     var p=payload();
@@ -6796,7 +6815,13 @@ var Gen = (function(){
   }
   function fix(){
     var src=editSrc(); if(!src){ el('edit-src').focus(); return; }
-    if(!fixBoxes.length){ el('fix-result').style.display='block'; el('fix-result').innerHTML='<span style="color:var(--subtext);font-size:12px;">Drag a box over a hand or face first.</span>'; return; }
+    if(!fixBoxes.length){
+      var fr=el('fix-result'); fr.style.display='block';
+      var w=document.createElement('div'); w.className='gen-result-line';
+      w.innerHTML='<span style="color:var(--subtext);font-size:12px;">Drag a box over a hand or face first.</span>';
+      fr.appendChild(w);   // append, not overwrite -- a fix task already in flight keeps its own line
+      return;
+    }
     // No price check exists for this action (audit 2026-07-21, unfiled-workflow-findings):
     // /v2/task/fixer is a separate endpoint from the createGenerationTask family /v2/task-price
     // mirrors, so it cannot be priced the way every other spend surface in this app is -- a
