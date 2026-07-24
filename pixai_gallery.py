@@ -384,6 +384,157 @@ def _like_pattern(term):
     return re.sub(r"(?<!\\)%{2,}", "%", "%" + t + "%")
 
 
+# ---------------------------------------------------------------------------
+# Search field operators: key:value tokens inside the search box
+# ---------------------------------------------------------------------------
+# alias -> (kind, column). Kinds:
+#   text       substring, case-insensitive, * / ? wildcards via _like_pattern
+#   prompt     like a free-text term (prompt_full OR prompt_preview) but explicit,
+#              which matters for quoted phrases: prompt:"night elf"
+#   num        key:N exact, or key:>N / key:<N / key:>=N / key:<=N; a blank column
+#              value never matches a comparison (except rating -- see below)
+#   exact      whole-value equality (ids and seeds; substring matching ids is the
+#              exact chance-collision failure the long-digit gate below exists for)
+#   bool       1/true/yes/on -> col='1'; 0/false/no/off -> anything else
+#   date       created_at prefix (2026 / 2026-07 / 2026-07-04) or a </>/<=/>=
+#              prefix-compare (created:<2026-07 = strictly before July)
+#   collection exact-token match in the comma-joined list, same as the dropdown
+#   source     the dropdown's semantics (online = blank-or-online, deleted =
+#              deleted_remote flag), else substring on the source column
+#
+# Deliberately NOT operators (one line each):
+#   url             expiring PixAI CDN link -- nothing sane to filter on
+#   prompt_preview/ covered by free text and prompt:
+#     prompt_full
+#   poster_media_id internal video->poster linkage; media: finds either row
+#   blurhash        opaque placeholder hash, not human-meaningful
+#   nsfw_scores     JSON blob; nsfw: covers the sane ask
+#   deleted_remote  already surfaced as source:deleted (mirrors the dropdown)
+#
+# Injection safety: every user value is a bound SQL parameter. The only strings
+# interpolated into SQL are column names and comparison operators, and both come
+# exclusively from these hardcoded maps -- never from user input. Pinned by
+# tests/test_search_operators.py's hostile-value test.
+_SEARCH_OPS = {
+    "prompt":   ("prompt", None),
+    "negative": ("text", "negative_prompt"), "negative_prompt": ("text", "negative_prompt"),
+    "model":    ("text", "model_name"),      "model_name": ("text", "model_name"),
+    "lora":     ("text", "loras"),           "loras": ("text", "loras"),
+    "tag":      ("text", "art_tags"),        "tags": ("text", "art_tags"),
+    "art_tags": ("text", "art_tags"),
+    "title":    ("text", "title"),
+    "sampler":  ("text", "sampler"),
+    "filename": ("text", "filename"),
+    "batch":    ("text", "batch"),
+    "status":   ("text", "status"),
+    "natural":  ("text", "natural_prompt"),  "natural_prompt": ("text", "natural_prompt"),
+    "width":    ("num", "width"),
+    "height":   ("num", "height"),
+    "rating":   ("num", "rating"),
+    "steps":    ("num", "steps"),
+    "cfg":      ("num", "cfg_scale"),        "cfg_scale": ("num", "cfg_scale"),
+    "clip_skip": ("num", "clip_skip"),
+    "aes":      ("num", "aes_score"),        "aes_score": ("num", "aes_score"),
+    "likes":    ("num", "liked_count"),      "liked_count": ("num", "liked_count"),
+    "comments": ("num", "comment_count"),    "comment_count": ("num", "comment_count"),
+    "duration": ("num", "video_duration"),   "video_duration": ("num", "video_duration"),
+    "seed":     ("exact", "seed"),
+    "task":     ("exact", "task_id"),        "task_id": ("exact", "task_id"),
+    "media":    ("exact", "media_id"),       "media_id": ("exact", "media_id"),
+    "artwork":  ("exact", "artwork_id"),     "artwork_id": ("exact", "artwork_id"),
+    "model_id": ("exact", "model_id"),
+    "video":    ("bool", "is_video"),        "is_video": ("bool", "is_video"),
+    "published": ("bool", "is_published"),   "is_published": ("bool", "is_published"),
+    "nsfw":     ("bool", "is_nsfw"),         "is_nsfw": ("bool", "is_nsfw"),
+    "created":  ("date", "created_at"),      "created_at": ("date", "created_at"),
+    "date":     ("date", "created_at"),
+    "collection": ("collection", "collections"),
+    "collections": ("collection", "collections"),
+    "source":   ("source", "source"),
+}
+
+# Tokens: quoted runs group (model:"Ether Real" / "night elf" are ONE token each);
+# everything else splits on whitespace exactly like q.split() always did.
+_SEARCH_TOKEN_RE = re.compile(r'[^\s"]*"[^"]*"[^\s"]*|\S+')
+_SEARCH_KEY_RE   = re.compile(r"[A-Za-z_]+")
+_SEARCH_NUM_RE   = re.compile(r"^(>=|<=|>|<)?(-?\d+(?:\.\d+)?)$")
+_SEARCH_DATE_RE  = re.compile(r"^(>=|<=|>|<)?(\d{4}(?:-\d{2}(?:-\d{2})?)?)$")
+_SEARCH_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_SEARCH_FALSY  = frozenset({"0", "false", "no", "off"})
+
+
+def _unquote(s):
+    """Strip one pair of surrounding double quotes, if present."""
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        return s[1:-1]
+    return s
+
+
+def _operator_clause(key, value):
+    """Compile one key:value search token into (sql_clause, params), or None when
+    the token isn't a valid operator and should be searched as plain prompt text
+    instead (unknown key, empty value, malformed number/date, unrecognized bool)
+    -- the way search engines degrade, so a stray colon never errors or surprises."""
+    spec = _SEARCH_OPS.get(key.lower())
+    if not spec or value == "":
+        return None
+    kind, col = spec
+    if kind == "text":
+        return ("LOWER(COALESCE({},'')) LIKE ? ESCAPE '\\'".format(col),
+                [_like_pattern(value)])
+    if kind == "prompt":
+        like = _like_pattern(value)
+        return ("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
+                "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')",
+                [like, like])
+    if kind == "exact":
+        return ("{} = ?".format(col), [value])
+    if kind == "num":
+        m = _SEARCH_NUM_RE.match(value)
+        if not m:
+            return None
+        op = m.group(1) or "="
+        num = float(m.group(2))
+        if col == "rating":
+            # unrated ('') counts as 0 -- identical to the Min-rating dropdown
+            return ("CAST(COALESCE(NULLIF(rating,''),'0') AS REAL) {} ?".format(op),
+                    [num])
+        return ("(COALESCE({0},'') != '' AND CAST({0} AS REAL) {1} ?)".format(col, op),
+                [num])
+    if kind == "bool":
+        v = value.lower()
+        if v in _SEARCH_TRUTHY:
+            return ("{} = '1'".format(col), [])
+        if v in _SEARCH_FALSY:
+            return ("COALESCE({},'') != '1'".format(col), [])
+        return None
+    if kind == "date":
+        m = _SEARCH_DATE_RE.match(value)
+        if not m:
+            return None
+        op = m.group(1) or "="
+        prefix = m.group(2)
+        # prefix-compare: created:>2026-07 excludes July itself, created:>=2026-07
+        # includes it -- comparing the row's SAME-LENGTH prefix keeps that intuitive
+        # (a raw string compare against full timestamps would drag July into '>')
+        return ("SUBSTR(created_at,1,?) {} ?".format(op), [len(prefix), prefix])
+    if kind == "collection":
+        # exact-token in the comma-joined list, mirroring the Collection dropdown
+        return ("(',' || COALESCE(collections,'') || ',') LIKE ?",
+                ["%," + value + ",%"])
+    if kind == "source":
+        v = value.lower()
+        if v == "online":
+            return ("COALESCE(source,'') IN ('', 'online')", [])
+        if v in ("api", "local"):
+            return ("source = ?", [v])
+        if v == "deleted":
+            return ("deleted_remote = '1'", [])
+        return ("LOWER(COALESCE(source,'')) LIKE ? ESCAPE '\\'",
+                [_like_pattern(value)])
+    return None
+
+
 def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
                  published_only=False, art_tag="", lora="", media_type="", source="",
                  collection=""):
@@ -417,14 +568,29 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         clauses.append("LOWER(COALESCE(loras,'')) LIKE ?")
         params.append("%" + lora.strip().lower() + "%")
     if q:
-        # Whitespace-separated terms are ANDed; each may use * / ? wildcards over prompt
-        # text. A term that looks like a WHOLE task/media id (all digits, long enough
-        # that a short numeric prompt word can't collide -- PixAI ids run ~18-19 digits)
-        # also matches that id EXACTLY, so pasting an id from PixAI's site (or
-        # --dump-params output) finds the row. Short numeric terms stay prompt-only:
-        # a substring match on ids made a term like "88" match ~14% of the whole
-        # catalog by id chance alone, swamping any real prompt hits (found 2026-07-16).
-        for term in q.split():
+        # Whitespace-separated tokens are ANDed. A token can be a FIELD OPERATOR
+        # (key:value -- see _SEARCH_OPS/_operator_clause above; quoted values group,
+        # so model:"Ether Real" is one token); anything else is free text, whose
+        # behavior is UNCHANGED from before operators existed (pinned at the SQL
+        # level by tests/test_search_operators.py): each term may use * / ?
+        # wildcards over prompt text, and a term that looks like a WHOLE task/media
+        # id (all digits, long enough that a short numeric prompt word can't
+        # collide -- PixAI ids run ~18-19 digits) also matches that id EXACTLY, so
+        # pasting an id from PixAI's site (or --dump-params output) finds the row.
+        # Short numeric terms stay prompt-only: a substring match on ids made a
+        # term like "88" match ~14% of the whole catalog by id chance alone,
+        # swamping any real prompt hits (found 2026-07-16).
+        for tok in _SEARCH_TOKEN_RE.findall(q):
+            op_clause = None
+            if ":" in tok and not tok.startswith(":"):
+                key, _, raw = tok.partition(":")
+                if _SEARCH_KEY_RE.fullmatch(key):
+                    op_clause = _operator_clause(key, _unquote(raw))
+            if op_clause:
+                clauses.append(op_clause[0])
+                params += op_clause[1]
+                continue
+            term = _unquote(tok)
             if term.isdigit() and len(term) >= 8:
                 clauses.append("(task_id = ? OR media_id = ?)")
                 params += [term, term]
@@ -4230,8 +4396,8 @@ document.addEventListener('DOMContentLoaded', function() {
 <div class="filters">
   <div class="f-grow">
     <label>Search prompt / task or media id</label><br>
-    <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard, or an id…"
-           title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf. Also matches task id / media id.">
+    <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard, an id, or model:tsubaki…"
+           title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf. Also matches task id / media id. Field operators: model: lora: tag: title: sampler: negative: batch: status: filename: collection: source: seed: task: media: — plus numbers (rating:>=3, width:>1000, aes:>6, likes:>0, steps: cfg: duration:), created:2026-07 dates, and video:/published:/nsfw: 1 or 0. Quote spaces: model:&quot;Ether Real&quot;.">
   </div>
   <div>
     <label>Media</label><br>

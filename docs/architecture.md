@@ -63,7 +63,7 @@ gallery.
 | `_MIGRATIONS` | List of ALTER TABLE statements run on every `_connect()` call — add new columns here |
 | `init_db()` | Creates table + runs migrations; called at gallery startup and by `save_catalog` |
 | `save_catalog()` | Upsert list of dicts; calls `init_db` first |
-| `query_catalog()` | SQL-backed filter/sort/paginate for gallery index |
+| `query_catalog()` | SQL-backed filter/sort/paginate for gallery index. Its `q` string supports `key:value` field operators (`model:`, `rating:>=3`, `created:2026-07`, …) parsed by `_build_where`/`_operator_clause`; grammar + examples in `wiki/Gallery.md` § Search operators |
 | `list_media_ids()` | Returns ordered media IDs for prev/next navigation |
 | `backfill_batches()` | Scans `batches/` on disk and fills empty `batch` column; called on gallery startup |
 | `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). Invariant 1 — but NOT actually a single source: `backfill_batches()` (above, this same module) and `pixai_similar.py`'s `scan_dir` both re-implement the identical `stem.split("_")[-1]` inline instead of calling it |
