@@ -129,6 +129,26 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   learns the truth, instead of drifting until its own cycle happens to catch up. The per-shot
   badge itself is unchanged. Fail-first tested:
   `loom/test/loom-activity-tracker-live-update.test.js`.
+- **The Multi-Reference picker no longer corrupts a shot's composed prompt just by being
+  opened** (owner-filed, pinned from a frame-by-frame video review: `docs/AUDIT_2026-07-21.md`
+  `owner-2026-07-23` row "Loom shot-card reference sending bugs out past 2 images"). Two
+  un-synced numbering systems were both writing "@imageN" syntax: each cast asset's own
+  project-global tag (assigned once, in cast-add order — a cast member added 4th is "@image4"
+  forever, project-wide) vs. the shared `<mg-generate-drawer>`'s own Multi-Reference bank,
+  which has no concept of that global namespace and always numbers whatever it holds
+  "@image1", "@image2", ... purely by array position. The two only agreed when a shot used
+  every cast member from @image1 up with no gaps; the moment it didn't, `shotText()`'s
+  "Keep consistent" line could cite a real, valid-looking tag the drawer's own bank had
+  never assigned to that picture at all — and opening the "Pick from your gallery" picker
+  (which steals DOM focus off the drawer's prompt box, forcing a synchronous re-chipify on
+  blur) was enough to let that mismatch reassign a citation onto the wrong picture, drop it
+  entirely, or freeze the mangled result as a hand-edited `promptOverride` ("override
+  active"). Fix: `loom-core.js`'s new `shotImageRefs()`/`positionTag()` give `shotText()`
+  and `shotPayload()` one shared, per-shot positional numbering, so the composed prompt can
+  never disagree with the drawer's own bank about what a given `@imageN` means. Also fixed:
+  picking a 3rd/4th reference now actually persists (`pickTarget()` + a durable
+  `mg-pick-request` handler) instead of vanishing the moment any other field re-triggered
+  the drawer's prefill. Fail-first tested: `loom/test/loom-reference-picker-corruption.test.js`.
 - **Generate no longer locks until the task finishes — PixAI itself runs generations in
   parallel, so every gen panel now does too** (owner field-test 2026-07-23). The lock was
   two separate mechanisms, both fixed the same way: the gallery's `runTask()` (shared by
