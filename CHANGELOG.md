@@ -15,6 +15,29 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+
+- **The model picker's squished thumbnails and dead scrolling, and picking a model no longer
+  leaving the panel stuck open.** Owner live-tested the same-day picker-parity-round2 work and
+  found it worse, not better. Root cause for the squish + no-scroll (one bug, not two):
+  `.mg-grid` gaining a real, definite height exposed that `.mg-card`'s `overflow:hidden` zeroes
+  its automatic minimum size per spec, so with `grid-auto-rows` at its default `auto`, every
+  implicit row track stretched/compressed to divide the container's fixed height evenly instead
+  of sizing to content — 24 real cards measured live collapsed into 12 rows of ~41px each (a
+  166px thumbnail cropped to a sliver), and the always-exactly-full rows meant `scrollHeight`
+  never exceeded `clientHeight` either. One-line fix: `grid-auto-rows:min-content`
+  (`static/mg-model-picker.js`) — same shared component, so this fixes the Gallery and the Loom
+  together. Separately: neither `onBasePick()` (`pixai_gallery.py`) nor its Loom mirror
+  (`master-storyboard.jsx`'s `bindPicker`) ever closed the picker on a successful pick — both
+  now do, for a base-model pick only (LoRA picking stays open, it's multi-select). Root-caused
+  this time by rendering real cards through the actual component and measuring
+  `scrollHeight`/`clientHeight`/`getBoundingClientRect()` live rather than only checking for
+  console errors on the DOM-event path — the verification gap that let this ship broken twice.
+  Full detail, plus an honest accounting of what the owner also reported that turned out to be
+  either already-working-as-designed (LoRA tab search chips) or genuinely never built or
+  documented anywhere (per-LoRA version selection, subscription-tier LoRA caps,
+  capability-gating on the Image/Edit tabs), in `docs/AUDIT_2026-07-21.md`'s O12 entry.
+
 ## [2.4.0] - 2026-07-24 — Concurrent generations, real trash recovery, and a nasty video-corruption bug fixed
 
 A trash/quarantine restore panel, field-operator search (`model:`, `rating:>=3`, …),

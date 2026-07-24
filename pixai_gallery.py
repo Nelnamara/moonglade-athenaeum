@@ -6792,6 +6792,12 @@ var Gen = (function(){
   // what selectCard did AFTER that: resolve the real version + metadata and refresh
   // every downstream surface (LoRA compat notes, model-defaults prefill, cost).
   function onBasePick(m){
+    // Owner report 2026-07-24: picking a model left the flyout open, forcing a manual
+    // close to get back to the form -- close it the instant a base model is picked
+    // (single-select: one choice ends the browsing task). LoRA picking is deliberately
+    // left open (multi-select -- see onLoraPick/toggleLora), matching the existing
+    // separate "+ Add LoRA" button as the explicit way to continue into LoRA selection.
+    if(el('model-flyout').classList.contains('open')) toggleFlyout();
     selected=Object.assign({}, m); var mySeq=++selSeq;
     var th=el('gen-selthumb');
     if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
