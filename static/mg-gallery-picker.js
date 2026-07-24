@@ -15,13 +15,19 @@
    default-type is image (the default) | video | all -- "all" browses both kinds and is
    sent to the server as type=all (NOT '': the server maps an empty type to "image" for
    the gallery Picker's back-compat, which is exactly how videos used to go missing).
-   Optional boolean attribute (OFF by default, so the first adopter's behavior is a
+   Optional boolean attributes (all OFF by default, so the first adopter's behavior is a
    byte-for-byte match of what it already had -- no surface added silently):
      show-type          -- render the Image/Video/All type dropdown (the Loom's own mount
-                            uses this; it's the only one of the original four parity flags
-                            with a real caller -- show-source/show-upload/show-copy-prompt
-                            were removed 2026-07-24, dead-code audit: zero callers outside
-                            this file's own standalone dev harness, mg-gallery-picker.html)
+                            uses this)
+     show-source        -- render the Source (AI-generated / imported local) dropdown
+     show-upload        -- render an "Upload" button (POSTs to /api/upload, then picks it)
+     show-copy-prompt   -- render a "copy prompt on pick" checkbox (persisted to localStorage)
+   show-source/show-upload/show-copy-prompt were removed 2026-07-24 as a dead-code sweep
+   (zero callers outside this file's own dev harness at the time) and RESTORED 2026-07-24,
+   same night, once the gallery's own #pick-modal migration (O13) became their first real
+   caller -- all three exist because the gallery's own picker had them and losing them on
+   migration would have been a regression, not a consolidation. Lesson: "zero callers
+   right now" is not the same claim as "will never have one" -- see docs/AUDIT_2026-07-21.md.
    Events (both bubble + compose, so a React host's DOM listener sees them):
      mg-pick  -- detail: {media_id, thumb, prompt, is_video}
      mg-close -- fired on Escape / backdrop click / the X button; the host is expected to
@@ -59,6 +65,10 @@
     'mg-gallery-picker .mg-pk-filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}',
     'mg-gallery-picker .mg-pk-filters select{background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
     ' border-radius:6px;color:var(--text,#d6d2e2);padding:5px 9px;font-size:12px;cursor:pointer;max-width:210px;}',
+    'mg-gallery-picker .mg-pk-copy{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--subtext,#9a93ab);}',
+    'mg-gallery-picker .mg-pk-upload{background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
+    ' color:var(--text,#d6d2e2);border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;}',
+    'mg-gallery-picker .mg-pk-upload:hover{border-color:var(--accent,#b692e6);}',
     'mg-gallery-picker .mg-pk-count{margin-left:auto;font-size:11px;color:var(--subtext,#9a93ab);font-family:ui-monospace,monospace;}',
     'mg-gallery-picker .mg-pk-sizer{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--subtext,#9a93ab);}',
     'mg-gallery-picker .mg-pk-sizer input{width:70px;}',
@@ -90,6 +100,7 @@
     (document.head || document.documentElement).appendChild(s);
   }
 
+  var COPY_KEY = 'pick-copyprompt';   // same localStorage key the gallery's own Picker uses
   var TILE_KEY = 'mg-pk-tile';        // persisted thumbnail-size preference, shared by every picker instance
 
   class MgGalleryPickerEl extends HTMLElement {
@@ -108,6 +119,9 @@
       this._type = dt === 'video' ? 'video' : dt === 'all' ? 'all' : 'image';
       this._q = ''; this._collection = ''; this._rating = 0; this._sort = 'newest';
       this._showType = this.hasAttribute('show-type');
+      this._showSource = this.hasAttribute('show-source');
+      this._showUpload = this.hasAttribute('show-upload');
+      this._showCopy = this.hasAttribute('show-copy-prompt');
       this._source = '';
 
       this.innerHTML = this._skeleton();
@@ -136,6 +150,14 @@
           try { localStorage.setItem(TILE_KEY, self._sizeEl.value); } catch (e) { /* private mode */ }
         });
       }
+      this._copyEl = this.querySelector('.mg-pk-copyck');
+      if (this._copyEl) {
+        try { this._copyEl.checked = localStorage.getItem(COPY_KEY) === '1'; } catch (e) { /* private mode */ }
+        this._copyEl.addEventListener('change', function () {
+          try { localStorage.setItem(COPY_KEY, this.checked ? '1' : '0'); } catch (e) { /* private mode */ }
+        });
+      }
+
       var self = this;
       this._core = window.PickerCore.create({
         defaultFilters: { type: this._type, collection: this._collection, source: this._source,
@@ -162,6 +184,11 @@
       this._grid.addEventListener('scroll', function () { self._core.onScroll(self._grid, 280); });
       this._onKey = function (e) { if (e.key === 'Escape') self._close(); };
       window.addEventListener('keydown', this._onKey);
+      if (this._showUpload) {
+        this._fileEl = this.querySelector('.mg-pk-file');
+        this.querySelector('.mg-pk-upload').addEventListener('click', function () { self._fileEl.click(); });
+        this._fileEl.addEventListener('change', function () { self._upload(); });
+      }
       setTimeout(function () { self._q_el.focus(); }, 60);
     }
 
@@ -175,6 +202,14 @@
       var typeSel = this._showType
         ? '<select data-f="type"><option value="all">Image + video</option>' +
           '<option value="image">Images</option><option value="video">Videos</option></select>' : '';
+      var sourceSel = this._showSource
+        ? '<select data-f="source">' + opt('', 'Any source') + opt('api', 'Generated (AI)') +
+          opt('local', 'Imported local') + '</select>' : '';
+      var uploadBtn = this._showUpload
+        ? '<button type="button" class="mg-pk-upload">＋ Upload</button>' +
+          '<input type="file" class="mg-pk-file" accept="image/*" style="display:none">' : '';
+      var copyCk = this._showCopy
+        ? '<label class="mg-pk-copy"><input type="checkbox" class="mg-pk-copyck"> Copy prompt on pick</label>' : '';
       return (
         '<div class="mg-pk-box" role="dialog" aria-label="Pick from your gallery">' +
         '<div class="mg-pk-head"><span class="mg-pk-t">Pick from your gallery</span>' +
@@ -182,12 +217,14 @@
         '<button type="button" class="mg-pk-x" title="Close (Esc)">&#215;</button></div>' +
         '<div class="mg-pk-filters">' +
         '<select data-f="collection"><option value="">All collections</option></select>' +
-        typeSel +
+        typeSel + sourceSel +
         '<select data-f="rating"><option value="0">Any rating</option>' +
         opt(1, '★+') + opt(2, '★★+') + opt(3, '★★★+') + opt(4, '★★★★+') + opt(5, '★★★★★') + '</select>' +
         '<select data-f="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>' +
+        uploadBtn +
         '<label class="mg-pk-sizer">Size <input type="range" min="90" max="240" step="8" title="Thumbnail size"></label>' +
         '<span class="mg-pk-count"></span></div>' +
+        copyCk +
         '<div class="mg-pk-grid"></div>' +
         '<div class="mg-pk-empty" style="display:none;">No matches for these filters.</div>' +
         '</div>'
@@ -244,9 +281,30 @@
     }
 
     _pick(m) {
+      if (this._copyEl && this._copyEl.checked && m.prompt) {
+        try { navigator.clipboard && navigator.clipboard.writeText(m.prompt); } catch (e) { /* clipboard denied */ }
+      }
       this.dispatchEvent(new CustomEvent('mg-pick', { bubbles: true, composed: true,
         detail: { media_id: m.media_id, thumb: m.thumb, prompt: m.prompt || '',
                   is_video: m.is_video === '1', duration: m.duration || '', is_nsfw: m.is_nsfw === '1' } }));
+    }
+
+    _upload() {
+      var f = this._fileEl.files[0]; if (!f) return;
+      var self = this;
+      this._empty.textContent = 'Uploading ' + f.name + '…';
+      this._empty.style.display = 'block';
+      var fd = new FormData(); fd.append('file', f);
+      fetch('/api/upload', { method: 'POST', body: fd }).then(function (r) { return r.json(); })
+        .then(function (d) {
+          self._fileEl.value = '';
+          if (d.error || !d.media_id) { self._empty.textContent = '⚠ Upload failed: ' + (d.error || 'no media id'); return; }
+          self._empty.style.display = 'none';
+          self._pick({ media_id: d.media_id, prompt: '', thumb: URL.createObjectURL(f) });
+        }).catch(function () {
+          self._fileEl.value = '';
+          self._empty.textContent = '⚠ Upload failed (network).';
+        });
     }
 
     _close() {

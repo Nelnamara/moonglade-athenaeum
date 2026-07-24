@@ -643,6 +643,87 @@ convenience, not dead code — left alone in both cases, documented in the audit
   declared public API of a deliberately host-agnostic component, banked for the
   not-yet-wired cost-to-finish pill and the D-12 web-component consolidation.
 
+### Changed (2026-07-24, picker/field unification — O12, O13, L536, reclassified HIGH severity)
+
+The three items above were separately-tracked symptoms of ONE root cause: the gallery and
+the Loom each hand-rolled their own model picker, gallery/reference picker, and generate
+field set, so any given fix (LoRA support, a Size slider, a field) only ever landed on
+whichever surface someone happened to be touching. This pass finishes the migration that
+makes that class of drift structurally impossible: both surfaces now run on the SAME
+`<mg-model-picker>`/`<mg-gallery-picker>` components, and the gallery's old duplicate
+implementations are deleted, not just patched around.
+
+**L536 — the Loom's Image tab reaches full PixAI field parity.** Advanced (negative/steps/
+CFG scale, plus a "using this model's tuned preset" note + reset, mirroring the gallery's
+`applyModelDefaults()` exactly), all 8 aspect-ratio buttons, Size + custom W×H, Mode, Count,
+Seed, High-priority (Turbo), and Prompt helper — same field names/defaults/order as the
+gallery's own Generate tab. One new `buildImgGenBody()` helper (`loom/src/loom-mutations.js`)
+assembles the exact `/api/generate` body from model + LoRAs + the new field state, shared by
+both the debounced cost-preview badge and the real submit, so the price a user agrees to can
+never drift from what's actually sent. Base-model picks now also resolve `model_type` (the
+Loom never fetched this before), which incidentally closes a real dangling loose end found in
+review: the LoRA↔base incompatibility warning (`loraIncompat()`) was imported into
+`master-storyboard.jsx` with zero call sites since D-11 explicitly deferred it for exactly
+this missing piece — it's wired now, matching the gallery's own warning chip + Go-button gate.
+
+**O12 — the gallery's Generate tab now runs on `<mg-model-picker>`, not `#model-flyout`.**
+Two lazily-mounted instances (`kind="base"`, and `kind="lora" multi market` for LoRAs) replace
+the flyout's own hand-rolled search/grid/hover-preview/market UI entirely — `search()`,
+`render()`, `selectCard()`, `toggleLora()`, and the card-hover debounce are deleted from
+`pixai_gallery.py`, not left alongside a second, newly-unreachable copy. `<mg-model-picker>`
+gained a new opt-in `market` attribute (Popular/Newest sort + the same 6 category chips the
+old flyout had for LoRAs — `/api/model-search` already accepted `sort=`/`category=`, only the
+client UI was missing) so the gallery's LoRA browsing loses nothing in the swap; OFF by
+default, so the Loom's existing LoRA mount is untouched. Page size (`size=12` → `24`, matching
+the old flyout) shipped as an earlier, safe, additive step in this same pass.
+
+**O13 — the gallery's own picker is `<mg-gallery-picker>`, not `#pick-modal`.** The `Picker`
+module is a thin mount/unmount bridge now (mirroring the Loom's existing `openPick`/
+`bindGalleryPicker` pattern) instead of a second, independent PickerCore-rendering
+implementation; its public contract (`open(callback, opts)` / `close()`) is unchanged, so its
+four call sites (the img2img reference picker, the Edit tab's source picker, the additional-
+reference slot, and `<mg-generate-drawer>`'s `mg-pick-request` bridge) needed no changes.
+`show-source`/`show-upload`/`show-copy-prompt` — all three real, gallery-only features — were
+restored to `<mg-gallery-picker>` (see Removed, 2026-07-24 doc/dead-code cleanup, above: a
+same-night dead-code sweep had just deleted them as having "zero callers outside the dev
+harness," which stopped being true the moment this migration needed them) so the swap loses
+nothing; the Size slider O13 originally flagged as gallery-missing arrives for free as part of
+adopting the same component the Loom already had it on.
+
+Both migrations were live-verified against a real running server (synthetic local catalog,
+real thumbnail files, no PixAI network touched): logged in through the real `/login` page,
+drove the gallery's reference-image pick, the Edit-tab source pick, the video-drawer's
+`mg-pick-request` bridge, a base-model pick (including its version/metadata resolve and
+error-handling path), and a LoRA multi-select add/remove — all through the real DOM event
+path a click would take, not just source assertions. Zero console errors throughout. Full
+suites green at every step: 993 Python, 261 Loom.
+
+Two small, deliberate, documented behavior changes from the consolidation, neither treated as
+a silent regression: (1) the LoRA picker's old hard cap of 6 (`if(loras.length>=6) return;`)
+is not reproduced — `<mg-model-picker>`'s own multi-select already optimistically highlights
+a picked card before the host's listener ever runs, so silently refusing the add here would
+leave the picker showing a card as selected that never made it into the submitted LoRA list,
+which is worse than no cap; the Loom's identical mount has run uncapped since D-11 with no
+issue. (2) Removing a LoRA via its chip's own × no longer force-refreshes the picker grid (the
+old `search()` this relied on no longer exists) — the removed entry's card can stay visually
+highlighted in the picker until the user clicks that same card again, which self-heals it
+immediately; `loras` (and therefore what actually submits) is correct the instant the × is
+clicked, regardless of the grid's own highlight state.
+
+**Not done in this pass** — precise, scoped, NOT started: exposing a model/LoRA's other
+version rows (`resolve_version_meta()` in `pixai_gallery_backup.py` still always takes
+`rows[0]`; PixAI's own site lists releases/iterations beyond the first, confirmed live by
+the owner, all on one fixed architecture — no cross-architecture switching, an earlier draft
+of this session assumed otherwise and was reverted before shipping); LoRA search results
+filtered or sorted by the selected base model's architecture (`model_search_rest()` already
+returns each row's loose `base_model` category string, but mapping it reliably onto the
+strict `modelType` enum `loraIncompat()` uses needs a live data point this offline pass
+couldn't get); a `sampling_method` field (fetched by `/api/model-version`, delivered to the
+client, read by neither surface — and no UI slot exists for it on either side); and any
+`capabilities`-driven per-model gating (fetched, never read; what the real capability
+strings mean needs a live PixAI capture, not something derivable from this checkout). See
+`docs/AUDIT_2026-07-21.md`'s O12/O13/L536 rows for exact next steps on each.
+
 ## [2.3.0] - 2026-07-23 — More security hardening, the Folio of Honors, and LoRA support in the Loom
 
 ### Changed
