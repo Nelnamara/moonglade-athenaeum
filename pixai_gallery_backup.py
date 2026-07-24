@@ -824,6 +824,23 @@ JOBS_MAX_AGE = 24 * 3600       # drop FINISHED jobs older than this (seconds)
 _JOBS_TERMINAL = ("done", "failed", "done_with_errors")
 _JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many lines
 
+# How stale a 'running' job has to be before the ongoing /api/jobs reconciliation
+# sweep (resolve_orphan_jobs, called with min_age=this from pixai_gallery.py's
+# api_jobs()) will re-ask PixAI for its real status. This is a *different* clock
+# from --poll-timeout: --poll-timeout (300s generate / 600s video, see argparse
+# defaults) bounds how long the CLI waits on ONE task it's actively watching --
+# it's "the task itself timed out". This bounds something else: "the client
+# stopped watching" (a closed tab, a dead Generate card, a crashed browser) while
+# the task itself may still be legitimately in flight. Picking --poll-timeout's
+# own 300s here would false-flag any real generation slower than 5 minutes --
+# ordinary for video -- as an orphan on every single /api/jobs poll (the web
+# generate path never re-stamps a running job's `ts` past its initial submit
+# event, so nothing else naturally resets that clock). 1800s (30 minutes) is
+# comfortably past every known real generation time (routine within minutes;
+# --poll-timeout only waits up to 600s even for video) while still surfacing a
+# genuine orphan same-day, far short of JOBS_MAX_AGE's 24h silent drop-from-view.
+JOBS_ORPHAN_SWEEP_AGE = 30 * 60
+
 
 def _jobs_path(out_dir):
     return Path(out_dir) / JOBS_LOG_NAME
@@ -1001,23 +1018,58 @@ def read_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE, now=None):
     return _select_jobs(jobs, order, time.time() if now is None else now, keep, max_age)
 
 
-def resolve_orphan_jobs(out_dir, status_fn):
+def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
     """Resolve jobs stuck at 'running' by asking `status_fn(task_id)` for their true state
     and appending a terminal event when it has finished. Only PixAI-task-keyed generate
     jobs (job_id is the numeric task id) are checked -- panel/delete jobs are local and
     self-report. `status_fn` returns 'running' | 'done' | 'failed' (a raised exception on
     one job is skipped, not fatal). Fixes jobs orphaned when a Generate card was closed
-    before its poll resolved. Returns the number of jobs resolved to a terminal state."""
+    before its poll resolved. Returns the number of jobs resolved to a terminal state.
+
+    `min_age` (seconds, default 0): skip jobs whose last event is younger than this --
+    don't even call `status_fn`. 0 means "ask about every non-terminal generate job right
+    now", which is what the ONE-SHOT call at live-mirror watcher startup wants (catch
+    anything left stuck from a prior server session, immediately). A real `min_age`
+    (JOBS_ORPHAN_SWEEP_AGE) is for the ONGOING reconciliation sweep api_jobs() runs on
+    every poll -- see that constant's comment for why 300s/--poll-timeout is the wrong
+    number to reuse here.
+
+    Two behaviors below are gated on `min_age` being truthy, so the min_age=0 (startup)
+    call keeps its exact original behavior -- unchanged from before this parameter
+    existed, still exactly what every pre-existing test pins:
+
+    - A `status_fn` call that comes back genuinely still 'running' for an aged-in job
+      writes a lightweight 'running' heartbeat, refreshing that job's `ts`. Nothing else
+      does this for a web-submitted generate job (api_task_status()'s own 'running' branch
+      never writes to the log at all), so without it, once a job crosses min_age it would
+      get re-asked on literally every subsequent /api/jobs poll for as long as it keeps
+      genuinely running -- a real video generation easily outlives 30 minutes. The
+      heartbeat resets the min_age clock, so a still-genuinely-running job is only
+      re-checked once per min_age, not once per poll.
+    - A `status_fn` call that RAISES for an aged-in job is recorded as 'stale' -- a
+      distinct, visible, non-terminal status meaning "still stuck, and we couldn't reach
+      PixAI to find out why" -- instead of silently left untouched. Un-gated (min_age=0),
+      a single transient blip on a job that's merely SECONDS old would immediately get
+      branded 'stale', which is wrong -- that's exactly the "transient blip" case
+      api_task_status()'s own except-clause deliberately declines to treat as terminal.
+      Gating on min_age means only a job that has ALREADY been stuck a while, and is now
+      ALSO unreachable, gets the marker."""
     resolved = 0
+    now = time.time() if now is None else now
     for j in read_jobs(out_dir):
         if j.get("status") in _JOBS_TERMINAL:
             continue
         jid = str(j.get("job_id") or "")
         if j.get("type") != "generate" or not jid.isdigit():
             continue
+        if min_age and (now - float(j.get("ts") or 0)) < min_age:
+            continue
         try:
             phase = status_fn(jid)
         except Exception:                          # noqa: BLE001 -- one bad lookup must not stop the rest
+            if min_age:
+                append_job_event(out_dir, jid, status="stale",
+                                 error="couldn't reach PixAI to verify this job's real status")
             continue
         if isinstance(phase, dict):
             # Tolerate a caller handing us generation_status()'s whole
@@ -1032,6 +1084,8 @@ def resolve_orphan_jobs(out_dir, status_fn):
             append_job_event(out_dir, jid, status=phase,
                              error=("task " + phase if phase == "failed" else None))
             resolved += 1
+        elif min_age:
+            append_job_event(out_dir, jid, status="running")   # refresh ts; see docstring
     return resolved
 
 
