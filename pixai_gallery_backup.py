@@ -1482,6 +1482,11 @@ def download(session, url, stem, retries=3, convert=None,
                 dest = stem.with_name(stem.name + ext)
                 tmp = dest.with_suffix(dest.suffix + ".part")
                 dest.parent.mkdir(parents=True, exist_ok=True)   # fresh backup dir may lack images/
+                # Content-Length is only comparable to bytes-written when the body is NOT
+                # content-encoded: requests decompresses gzip/br inside iter_content, so a
+                # compressed response's header counts different bytes than we write.
+                expect = int(r.headers.get("Content-Length") or 0)
+                enc = (r.headers.get("Content-Encoding") or "identity").strip().lower()
                 nbytes = 0
                 with open(tmp, "wb") as fh:
                     for chunk in r.iter_content(chunk_size=65536):
@@ -1499,6 +1504,18 @@ def download(session, url, stem, retries=3, convert=None,
                     vlog("download {} -> empty response body ({:.2f}s), retrying".format(
                         stem.name, time.monotonic() - _t))
                     raise requests.RequestException("empty response body")
+                if expect and enc == "identity" and nbytes != expect:
+                    # The connection was cut MID-body but the chunk stream ended
+                    # "cleanly", so no exception fired -- promoting this .part would
+                    # create a permanent truncated file (a video that stops playing
+                    # mid-way), invisible to resume forever after, exactly like the
+                    # zero-byte case above. Fail the attempt through the same
+                    # retry/backoff path instead.
+                    tmp.unlink()
+                    vlog("download {} -> short body ({:,} of {:,} bytes, {:.2f}s), retrying".format(
+                        stem.name, nbytes, expect, time.monotonic() - _t))
+                    raise requests.RequestException(
+                        "short body: got {} of {} bytes".format(nbytes, expect))
                 _atomic_replace(tmp, dest)   # retry a transient Windows lock on the .part file
                 vlog("download {} -> {:,} bytes in {:.2f}s".format(
                     dest.name, nbytes, time.monotonic() - _t))
@@ -3397,7 +3414,18 @@ def video_faststart(path):
     +faststart) so iOS/Safari will play it over HTTP -- PixAI serves videos with moov at
     the END, which desktop tolerates but iOS refuses (MediaError 4). No re-encode, no
     quality loss. Returns True only when it rewrote the file; no-op (False) if ffmpeg is
-    absent, the file is already faststart, or the remux fails (original left untouched)."""
+    absent, the file is already faststart, or the remux fails (original left untouched).
+
+    The temp name is UNIQUE per invocation (uuid suffix), never derived from the
+    filename alone. Two collectors can legitimately remux the same clip seconds apart
+    (the gallery's live-mirror watcher and a /api/task-status done-poll both collect a
+    finished task, and the CLI's --watch-backup is a whole separate process), and with
+    a deterministic temp name their two concurrent ffmpeg runs interleaved writes into
+    the SAME temp file: the survivor was a full-length mp4 carrying the other run's
+    stale pre-shift bytes exactly one moov-size offset out of place -- it played fine
+    and then stopped mid-way. With unique temps any overlap is safe: each remux is
+    complete and self-contained, and whichever os.replace lands last wins with a
+    COMPLETE file either way."""
     p = Path(path)
     if p.suffix.lower() not in (".mp4", ".mov", ".m4v"):
         return False
@@ -3405,7 +3433,9 @@ def video_faststart(path):
     if not ff or not p.exists() or _mp4_is_faststart(p):
         return False
     import subprocess
-    tmp = p.with_name(p.stem + ".__fstmp__" + p.suffix)   # keep the real ext so ffmpeg picks the muxer
+    from uuid import uuid4
+    # unique per call; the real ext stays LAST so ffmpeg still picks the muxer by extension
+    tmp = p.with_name(p.stem + ".__fstmp__" + uuid4().hex[:8] + p.suffix)
     try:
         r = subprocess.run([ff, "-y", "-v", "error", "-i", str(p),
                             "-c", "copy", "-movflags", "+faststart", str(tmp)],
@@ -3414,11 +3444,13 @@ def video_faststart(path):
         if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
             os.replace(str(tmp), str(p))            # atomic swap
             return True
-    except Exception:                               # noqa: BLE001 -- remux must never crash a collect
-        pass
+    except Exception as e:                          # noqa: BLE001 -- remux must never crash a collect
+        # swallowed by design (a failed remux leaves the original playable), but never
+        # silently: a lost race or an odd ffmpeg failure must at least show under -v.
+        vlog("faststart remux failed for {}: {}".format(p.name, e))
     try:
         if tmp.exists():
-            tmp.unlink()
+            tmp.unlink()   # the temp is unique to THIS call, so this only ever cleans our own leftover
     except OSError:
         pass
     return False
