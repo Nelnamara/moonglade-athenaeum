@@ -32,8 +32,8 @@
   <code>PickerCore</code>.</p>
 
   <div class="row">
-    <button id="btnPlain">Open (Loom parity — image only, no extras)</button>
-    <button id="btnFull">Open (all optional features on)</button>
+    <button id="btnPlain">Open (Loom parity — image only)</button>
+    <button id="btnFull">Open (with the Type dropdown)</button>
   </div>
   <div id="out">picked: (none)</div>
 
@@ -42,17 +42,18 @@
     <li>Collection/rating/sort filters should work; typing should filter after a short pause.</li>
     <li>Escape, the ✕, or clicking the dark backdrop should close it (fires <code>mg-close</code>).</li>
     <li>Clicking an image tile fires <code>mg-pick</code> and closes it — check the line below updates.</li>
-    <li>"all optional features" adds Type + Source dropdowns, an Upload button, and a copy-prompt checkbox.</li>
+    <li>The second button also adds the Image/Video/All type dropdown (<code>show-type</code>) —
+      the one optional attribute this component still has (dead-code pass, 2026-07-24, removed the
+      other three: show-source/show-upload/show-copy-prompt had zero callers outside this page).</li>
   </ol>
 
   <script src="/static/picker-core.js"></script>
   <script src="/static/mg-gallery-picker.js"></script>
   <script>
-    function openPicker(extra) {
+    function openPicker(withType) {
       var el = document.createElement('mg-gallery-picker');
       el.setAttribute('default-type', 'image');
-      if (extra) { el.setAttribute('show-type', ''); el.setAttribute('show-source', '');
-        el.setAttribute('show-upload', ''); el.setAttribute('show-copy-prompt', ''); }
+      if (withType) { el.setAttribute('show-type', ''); }
       el.addEventListener('mg-pick', function (e) {
         document.getElementById('out').textContent = 'picked: ' + JSON.stringify(e.detail, null, 1);
         el.remove();

@@ -41,7 +41,7 @@ holding everything below, rather than a row of separate buttons:
   (removing from "which collection?" has no answer otherwise); takes the selection out
   of that one collection. A `catalog.db` label change only — no files are touched.
 - **Send to Video** loads the selection into the Generate drawer's Video tab as
-  reference images (images only, up to 9) — see [Generating](Generating).
+  reference images (images only, up to 6) — see [Generating](Generating).
 - **Send to The Loom (cast)** sends the selected images to the Loom's cast.
 - **Print sheet** opens a print-ready contact sheet of the selection.
 - **Find/replace in prompts** across the selection.

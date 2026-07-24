@@ -217,16 +217,12 @@ ROUTE_TIERS = {
     # LAN-self-succeeds / LAN-other-refused pair that actually covers it.
     ("api_users_remove", "POST"): LOGIN,
 
-    # FINDING (2026-07-19, unresolved at the time this file was written):
-    # api_server_stop / api_server_restart both say "Localhost-only." in their
-    # docstrings and neither one calls _is_local_request(). They are declared
-    # LOGIN here because LOGIN is what the code actually enforces today, and a
-    # test that ships red is a test that gets deleted. This is the same
-    # docstring-says-localhost / code-says-nothing shape the route-gating audit
-    # already found three times (api_panel_cancel, api_panel_schedule POST,
-    # api_setup_save_key). If the owner decides these should be loopback-only,
-    # add the check to the handlers and move these two lines up to the
-    # LOCALHOST block -- this file will then prove it.
+    # RESOLVED (owner decision 2026-07-19, see CHANGELOG): api_server_stop /
+    # api_server_restart stay in the broader "any logged-in LAN session" tier
+    # on purpose, not LOCALHOST. Their docstrings were updated to say "Login
+    # required" to match, closing the docstring-says-localhost /
+    # code-says-nothing gap the route-gating audit had flagged. LOGIN here is
+    # the intended, current design, not a stand-in for an unresolved decision.
     ("api_server_stop", "POST"): LOGIN,
     ("api_server_restart", "POST"): LOGIN,
 }
