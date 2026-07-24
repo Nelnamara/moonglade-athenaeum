@@ -98,10 +98,39 @@ def test_resolve_version_meta_full_shape(monkeypatch):
     assert b["trigger_words"] == "" and b["negative_prompt"] == "nsfw, worst quality"
     assert b["sampling_method"] == "Euler a" and b["sampling_steps"] == 28 and b["cfg_scale"] == 5
     assert b["capabilities"] == ["better-hands"]
+    assert b["compatibility"] == {} and b["restrictions"] == {}   # none given -> empty, not missing
 
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])   # no versions -> empty shape
     e = core.resolve_version_meta(object(), "x")
     assert e["version_id"] == "" and e["model_type"] == "" and e["capabilities"] == []
+    assert e["compatibility"] == {} and e["restrictions"] == {}
+
+
+def test_resolve_version_meta_extracts_compatibility_and_restrictions(monkeypatch):
+    """extra.compatibility says which Advanced-panel params a model actually HONORS (a
+    control the model ignores should be hidden/disabled in the drawer, not just always
+    shown); extra.restrictions gives real min/max bounds for the ones it does. Both were
+    probed live 2026-07-06 (memory: pixai-model-capability-schema) but never extracted --
+    resolve_version_meta/list_model_versions kept only sampling_steps/cfg_scale's DEFAULT
+    values, discarding whether the model honors them at all or what range is valid."""
+    row = [{"id": "V9", "modelType": "SDXL_MODEL", "loraBaseModelType": None,
+            "extra": {"samplingSteps": 16, "cfgScale": None,
+                      "compatibility": {"cfgScale": False, "samplingSteps": False,
+                                         "controlnet": False, "vae": False, "upscale": False,
+                                         "negativePrompt": True, "styleKey": True, "watermark": True},
+                      "restrictions": {"samplingSteps": {"min": 16, "max": 50}}}}]
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: row)
+    m = core.resolve_version_meta(object(), "B9")
+    assert m["compatibility"] == {"cfgScale": False, "samplingSteps": False, "controlnet": False,
+                                   "vae": False, "upscale": False, "negativePrompt": True,
+                                   "styleKey": True, "watermark": True}
+    assert m["restrictions"] == {"samplingSteps": {"min": 16, "max": 50}}
+
+    # non-dict/garbage values must fail open to {} (never crash, never mis-shape the picker)
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [
+        {"id": "V10", "extra": {"compatibility": "not-a-dict", "restrictions": None}}])
+    g = core.resolve_version_meta(object(), "B10")
+    assert g["compatibility"] == {} and g["restrictions"] == {}
 
 
 def test_is_lora_compatible_exact_equality_fails_open():

@@ -82,3 +82,30 @@ describe("Per-LoRA version selection (mirrors the base model's #gen-version/.lv-
       "version's own fields -- the full version list already rode the entry from pick time");
   });
 });
+
+describe("Image tab Advanced-panel capability gating (extra.compatibility, mirrors the Gallery's gateField())", () => {
+  test("compatibility/restrictions ride imgModel from both resolve paths (initial pick + version switch)", () => {
+    const matches = src.match(/compatibility: v\.compatibility \|\| \{\}, restrictions: v\.restrictions \|\| \{\},/g) || [];
+    assert.equal(matches.length, 2,
+      "both bindPicker's initial resolve AND pickVersion's switch must capture compatibility/restrictions -- " +
+      "missing either one leaves the drawer showing stale gating after a version switch or the first pick");
+  });
+
+  test("a field is disabled ONLY on an explicit false -- unknown/absent compatibility fails open", () => {
+    assert.match(src, /const negOff = compat\.negativePrompt === false;/);
+    assert.match(src, /const stepsOff = compat\.samplingSteps === false;/);
+    assert.match(src, /const cfgOff = compat\.cfgScale === false;/);
+  });
+
+  test("disabled fields carry the cap-off dimming class and an explanatory title, not silent removal", () => {
+    assert.match(src, /disabled=\{negOff\} title=\{negOff \? offTitle : ""\}/);
+    assert.match(src, /disabled=\{stepsOff\} title=\{stepsOff \? offTitle : ""\}/);
+    assert.match(src, /disabled=\{cfgOff\} title=\{cfgOff \? offTitle : ""\}/);
+    assert.match(src, /\.cap-off\{opacity:\.4;cursor:not-allowed;\}/);
+  });
+
+  test("restrictions clamp the field's own hardcoded min/max when the model publishes tighter bounds", () => {
+    assert.match(src, /min=\{stepsB\.min != null \? stepsB\.min : 1\} max=\{stepsB\.max != null \? stepsB\.max : 150\}/);
+    assert.match(src, /min=\{cfgB\.min != null \? cfgB\.min : 1\} max=\{cfgB\.max != null \? cfgB\.max : 30\}/);
+  });
+});

@@ -2015,7 +2015,8 @@ def workflow_catalog(session, first=80):
 def _empty_version_meta():
     return {"version_id": "", "model_type": "", "lora_base_model_type": "",
             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
-            "sampling_steps": None, "cfg_scale": None, "capabilities": []}
+            "sampling_steps": None, "cfg_scale": None, "capabilities": [],
+            "compatibility": {}, "restrictions": {}}
 
 
 def _version_row_to_meta(r):
@@ -2029,9 +2030,20 @@ def _version_row_to_meta(r):
     - lora_base_model_type: for a LoRA, the base-model family it REQUIRES (null for base models).
       A LoRA runs on a base iff lora_base_model_type == the base's model_type (see is_lora_compatible).
     - trigger_words: the LoRA's activation tokens (extra.triggerWords|trainedWords); '' if none.
-    - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer."""
+    - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer.
+    - compatibility: which Advanced-panel params this model actually HONORS (e.g.
+      {cfgScale:false, samplingSteps:false, negativePrompt:true, ...}, probed live
+      2026-07-06 -- memory pixai-model-capability-schema). A control the model ignores
+      should be hidden/disabled in the drawer, not just always shown as if it did
+      something. Empty dict (not missing) when absent -- callers treat "no entry for this
+      key" as "unknown, don't restrict" (fail open), same convention as capabilities above.
+    - restrictions: real min/max bounds for the params above (e.g.
+      {samplingSteps:{min:16,max:50}}) -- clamp the drawer's own hardcoded bounds to these
+      when present instead of a one-size-fits-all guess."""
     extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
     caps = extra.get("capabilities")
+    compat = extra.get("compatibility")
+    restrictions = extra.get("restrictions")
     return {
         "version_id": str(r.get("id") or ""),
         "model_type": (r.get("modelType") or "").strip(),
@@ -2042,6 +2054,8 @@ def _version_row_to_meta(r):
         "sampling_steps": extra.get("samplingSteps"),
         "cfg_scale": extra.get("cfgScale"),
         "capabilities": [c for c in caps if isinstance(c, str)] if isinstance(caps, list) else [],
+        "compatibility": compat if isinstance(compat, dict) else {},
+        "restrictions": restrictions if isinstance(restrictions, dict) else {},
     }
 
 
@@ -2051,8 +2065,9 @@ def resolve_version_meta(session, model_id):
     resolve_latest_version() kept only the id. Read-only.
 
     Returns {version_id, model_type, lora_base_model_type, trigger_words, negative_prompt,
-    sampling_method, sampling_steps, cfg_scale, capabilities}. All keys always present
-    (empty/None when the model has no version or the field is absent).
+    sampling_method, sampling_steps, cfg_scale, capabilities, compatibility, restrictions}.
+    All keys always present (empty/None when the model has no version or the field is
+    absent).
 
     NOTE: `/generation-model/{id}/versions` returns MULTIPLE rows per model -- confirmed on
     PixAI's own site, which lists them as separate releases/iterations, all on the SAME
