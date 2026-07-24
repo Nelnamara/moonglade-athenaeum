@@ -1640,7 +1640,7 @@ ${"=".repeat(48)}
             setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" }));
           }
         }
-      )) : /* @__PURE__ */ React.createElement("div", { className: "lv-assetprev" }, as.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement(
+      )) : /* @__PURE__ */ React.createElement("div", { className: "lv-assetprev", title: as.kind === "video" ? "Video asset \u2014 poster from your gallery" : void 0 }, as.kind === "video" && src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : as.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement(
         "input",
         {
           className: "lv-in",
@@ -1685,7 +1685,7 @@ ${"=".repeat(48)}
     })), !(project.assets || []).length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No cast yet \u2014 add one below."), /* @__PURE__ */ React.createElement("button", { className: "lv-addcast", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
       const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
       return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-    }), "image", true) }, "+ add from gallery"), /* @__PURE__ */ React.createElement(
+    }), "all", true) }, "+ add from gallery"), /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "lv-addcast",
