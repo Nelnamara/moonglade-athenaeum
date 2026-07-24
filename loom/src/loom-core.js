@@ -95,7 +95,96 @@ export const flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c
 // composed-prompt box (Camera/Lighting/cast/etc already folded in by hand, not re-composed).
 export const effectivePrompt = (c) => (c.promptOverride ? (c.promptOverrideText || "") : (c.prompt || ""));
 
-export const shotText = (entry, p) => {
+// ---------- shot-level "what image is this" list (single source of truth for BOTH the
+// composed prompt's @imageN citations AND the Multi-Reference drawer's own image bank) ----
+//
+// AUDIT_2026-07-21.md's owner-filed "Loom shot-card reference sending bugs out past 2
+// images" row traced the corruption to two DIFFERENT, un-synced numbering systems that both
+// happen to use the same "@imageN" syntax:
+//   1. A project-GLOBAL tag on each cast asset (assigned once, in cast-add order -- see
+//      nextTag/maxTagNum above -- e.g. a cast member added 4th is "@image4" forever, project-
+//      wide, regardless of which shots actually use them).
+//   2. The Multi-Reference drawer's OWN per-shot numbering (static/mg-generate-drawer.js's
+//      _refMap()/_renderSlots()), which has zero concept of a global tag namespace -- it always
+//      labels whatever lands in its image bank "@image1", "@image2", ... purely by ARRAY
+//      POSITION, in the exact order shotPayload()/buildShotPayload() hands it (see that
+//      function's own prefill-effect comment in master-storyboard.jsx).
+// These only agree when a shot happens to use every cast member from @image1 up with no gaps.
+// The moment a shot uses a LATER-numbered cast member (e.g. a 4th-added "Greg" = @image4)
+// without also using every earlier one, shotText() used to cite Greg's real, stable @image4 --
+// but the drawer's image bank, fed the SAME image tag-less and re-numbered by position, calls
+// that same picture something else entirely (e.g. @image1 or @image2). Once anything forces
+// the drawer to round-trip the composed prompt through its own chip/reference system (opening
+// the "Pick from your gallery" picker steals DOM focus off the drawer's prompt box, and its
+// blur handler synchronously re-chipifies), a real "@imageN" citation can get silently
+// reinterpreted against the WRONG picture, or a mismatched round-trip freezes the (now wrong)
+// text as a hand-edited override. shotImageRefs()/positionTag() are the single place that
+// numbers a shot's own images -- shotText() and shotPayload() both go through them now, so
+// whatever @imageN the composed prompt names for a picture is, by construction, the exact same
+// @imageN the drawer's own Image References panel shows for that same picture.
+//
+// `imgSrc(thumbId, source)` is injected rather than closed-over so this stays pure: in
+// master-storyboard.jsx it resolves against the component's `thumbs` state; here (and in
+// tests) callers pass whatever lookup they like.
+export const shotImageRefs = (entry, project, imgSrc) => {
+  const c = entry.c;
+  const tagNum = (t) => { const m = /(\d+)/.exec(t || ""); return m ? +m[1] : 99; };
+  const items = [];
+  (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
+    .forEach((as) => { const d = as.mediaId || imgSrc(as.thumbId, as.source); if (d) items.push({ tag: as.tag, d, kind: "cast", id: as.id }); });
+  // Untagged open/close frames need DISTINCT fallback tags -- both defaulting to the
+  // same literal meant an FLF shot with two untagged frames silently sent duplicate
+  // @image9 tags, and the model only ever saw one of the two images.
+  [["@image8", "openFrame", c.openFrame], ["@image9", "closeFrame", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, key, f]) => {
+    if (!f) return; const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) items.push({ tag: f.tag || fallbackTag, d, kind: "frame", id: key }); });
+  (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
+    const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) items.push({ tag: r.tag, d, kind: "ref", id: r.id }); });
+  items.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
+  return items;
+};
+
+// No-op resolver for shotText() callers that have no live `thumbs` state to close over (the
+// shot-list export, copyShot, the several "did the hand-edit actually change anything"
+// comparisons) -- trusts only mediaId, the same thing shotPayload's own imgSrc contract
+// already means for an asset/ref with no gallery media_id yet. Keeps shotText() callable as
+// shotText(entry, project) everywhere it already is today (every master-storyboard.jsx call
+// site but the live drawer-prefill one, and every test in loom-core.test.js).
+const noImgSrc = () => null;
+
+// This shot's OWN "@imageN" for one cast asset or c.refs entry, numbered purely by POSITION
+// within shotImageRefs()'s sorted list -- see that function's own comment for why this must
+// replace a raw, project-global .tag anywhere the text is going to reach the Multi-Reference
+// drawer. Returns null when `id` has no resolvable image in THIS shot (nothing for the drawer
+// to number at all); callers fall back to the entity's own stored .tag in that case, exactly
+// matching prior behavior for a not-yet-resolvable reference.
+export const positionTag = (entry, project, imgSrc, id) => {
+  const items = shotImageRefs(entry, project, imgSrc);
+  const idx = items.findIndex((it) => it.id === id);
+  return idx < 0 ? null : "@image" + (idx + 1);
+};
+
+// Multi-Reference drawer pick-persistence plan (AUDIT_2026-07-21.md "reference picker
+// corruption" row, requirement 2: adding a 3rd/4th reference via the picker must actually
+// work). A pick used to ONLY ever update the drawer's own private, in-memory bank -- nothing
+// host-side ever recorded it, so it was silently discarded the next time ANY host-tracked
+// field changed and the prefill effect rebuilt the drawer's bank fresh from shotPayload()
+// (that is why "the Image References panel never advances past its original entries").
+// Given the drawer reports a completed pick at its own bank SLOT INDEX, this decides what the
+// host must durably do with it: replace whichever entity (cast asset / shot ref / open-close
+// frame) ALREADY supplies that slot's current picture (never assume slot index == that
+// entity's array index -- see shotImageRefs()'s own comment), or append a brand-new
+// shot-level reference, tagged past every tag this shot already uses so it reliably sorts to
+// the final slot, when the slot is past everything the shot currently supplies. Pure/
+// testable -- master-storyboard.jsx's mg-pick-request listener is the only caller, and just
+// carries out whichever plan this returns.
+export const pickTarget = (entry, project, imgSrc, slot) => {
+  const items = shotImageRefs(entry, project, imgSrc);
+  const existing = items[slot];
+  if (existing) return { type: "replace", kind: existing.kind, id: existing.id };
+  return { type: "append", tag: nextTag(items, "@image") };
+};
+
+export const shotText = (entry, p, imgSrc) => {
   const { c, code, ai } = entry;
   // Hard early-return, never merged with the composition below -- a promptOverride is the
   // owner's own final word on this shot's text. Composing Camera/Lighting/cast INTO an
@@ -103,6 +192,7 @@ export const shotText = (entry, p) => {
   // into the text on each cycle (the override IS usually that same composed text with one
   // clause nudged, so it already contains its own Camera/Lighting/etc lines).
   if (c.promptOverride) return effectivePrompt(c);
+  const resolve = imgSrc || noImgSrc;
   const idx = flat(p).findIndex((x) => x.c.id === c.id);
   const prev = idx > 0 ? flat(p)[idx - 1] : null;
   const L = [`[${code} — "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
@@ -118,9 +208,17 @@ export const shotText = (entry, p) => {
   // is the same string) -- the project-level analogue of the per-shot cast block.
   if (p.look) L.push("", `Look (consistent across the film): ${p.look}`);
   const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id));
-  if (usedCast.length) { L.push("", "Keep consistent:"); usedCast.forEach((as) =>
-    L.push(`  ${as.name} — ${as.lock ? "maintain exact appearance from " : "reference "}${as.tag}`)); }
-  if (c.refs.length) { L.push("", "Other references:"); c.refs.forEach((r) => L.push(`  ${r.tag} — ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`)); }
+  if (usedCast.length) { L.push("", "Keep consistent:"); usedCast.forEach((as) => {
+    // positionTag(), not as.tag -- see shotImageRefs()'s comment. Falls back to the asset's
+    // own global tag only when it has no resolvable image in THIS shot (matches prior
+    // behavior: nothing for the drawer to number, so there's no live reference to protect).
+    const tag = positionTag(entry, p, resolve, as.id) || as.tag;
+    L.push(`  ${as.name} — ${as.lock ? "maintain exact appearance from " : "reference "}${tag}`);
+  }); }
+  if (c.refs.length) { L.push("", "Other references:"); c.refs.forEach((r) => {
+    const tag = positionTag(entry, p, resolve, r.id) || r.tag;
+    L.push(`  ${tag} — ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`);
+  }); }
   if (c.camera) L.push("", `Camera: ${c.camera}`);
   if (c.lighting) L.push(`Lighting/Mood: ${c.lighting}`);
   if (c.audioCue) L.push(`Audio: ${c.audioCue}`);
@@ -135,23 +233,12 @@ export const shotText = (entry, p) => {
 // (and in tests) callers pass whatever lookup they like.
 export const shotPayload = (entry, project, imgSrc) => {
   const c = entry.c;
-  const tagNum = (t) => { const m = /(\d+)/.exec(t || ""); return m ? +m[1] : 99; };
-  const imgs = [];
-  (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
-    .forEach((as) => { const d = as.mediaId || imgSrc(as.thumbId, as.source); if (d) imgs.push({ tag: as.tag, d }); });
-  // Untagged open/close frames need DISTINCT fallback tags -- both defaulting to the
-  // same literal meant an FLF shot with two untagged frames silently sent duplicate
-  // @image9 tags, and the model only ever saw one of the two images.
-  [["@image8", c.openFrame], ["@image9", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, f]) => {
-    if (!f) return; const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) imgs.push({ tag: f.tag || fallbackTag, d }); });
-  (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
-    const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) imgs.push({ tag: r.tag, d }); });
+  const imgs = shotImageRefs(entry, project, imgSrc);
   const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
-  imgs.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
   // Draft mode renders every shot at the cheaper "basic" quality for blocking out an
   // animatic; approve the cut, turn Draft off, and re-generate the keepers at pro. Carried
   // on the payload so BOTH the price preview and the actual submit see the same quality.
-  return { mode: c.mode, prompt: shotText(entry, project), images: imgs.map((x) => x.d),
+  return { mode: c.mode, prompt: shotText(entry, project, imgSrc), images: imgs.map((x) => x.d),
            video_refs: vids, duration: c.duration, quality: project.draft ? "basic" : "professional",
            generate_audio: !!c.audioGen, audio_language: c.audioLanguage || "english",
            hasInput: (imgs.length + vids.length) > 0 };
