@@ -153,8 +153,24 @@
        item that fills whatever room the (flex-column) host element above has, with its own
        internal scroll for overflow -- see the file header comment for the unconstrained-
        parent fallback behavior. min-height keeps it from ever looking collapsed to nothing
-       while a search is in flight in a very short host. */
-    'mg-model-picker .mg-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px;',
+       while a search is in flight in a very short host.
+       grid-auto-rows:min-content -- found live 2026-07-24 (owner report: thumbnails
+       "squished", grid "no longer scrollable"): giving .mg-grid a REAL, definite height
+       (the flex:1 1 auto above) exposed a second bug riding along with the first fix.
+       .mg-card has overflow:hidden, which per spec makes its OWN automatic minimum size
+       (what grid track sizing falls back to) resolve to 0 instead of its content's real
+       min-content height -- so with a definite container height and no card contributing
+       a height floor, every implicit `auto` row track was stretching/compressing to
+       divide the container's fixed height evenly across however many rows existed (empty-
+       looking 320px cap hid this before: fewer visible rows, less pressure). 24 cards
+       measured live: rows collapsed to ~41px each (image forced to a sliver, cropped by
+       the card's own overflow:hidden -- "squished"), and since the compressed rows always
+       exactly filled the container, scrollHeight never exceeded clientHeight either --
+       "no longer scrollable" was the SAME bug, not a second one. min-content forces each
+       auto row to size off its content's own minimum instead, restoring both real card
+       height and real overflow. Verified live: rows back to ~200px, images a real 1:1
+       square, scrollHeight now correctly exceeds clientHeight with 24+ cards. */
+    'mg-model-picker .mg-grid{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:min-content;gap:7px;margin-top:8px;',
     ' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity .12s;}',
     'mg-model-picker .mg-card{position:relative;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
     ' border-radius:8px;overflow:hidden;cursor:pointer;}',

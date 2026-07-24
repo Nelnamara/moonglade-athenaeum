@@ -784,6 +784,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     if (el && !el._mgBound) {
       el._mgBound = true;
       el.addEventListener("mg-pick", (e) => {
+        // Owner report 2026-07-24: picking a model left the overlay open, forcing a
+        // manual close -- close it the instant a base model is picked (single-select:
+        // one choice ends the browsing task), mirroring pixai_gallery.py's onBasePick.
+        // LoRA picking (the other <mg-model-picker> mount, kind="lora" multi) is
+        // deliberately left open -- see the "+ add LoRA" toggle below.
+        setPickerOpen(false);
         const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
         setImgModel(m);
         setModelDefaults(null);

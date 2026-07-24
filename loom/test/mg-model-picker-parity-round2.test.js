@@ -49,9 +49,19 @@ describe("Problem 1: .mg-grid fills its host's real height instead of a fixed 32
   });
 
   test(".mg-grid is a flex item that grows to fill available space and keeps its own scroll", () => {
-    assert.match(src, /'mg-model-picker \.mg-grid\{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px;',\s*\n\s*' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity \.12s;\}',/,
+    assert.match(src, /'mg-model-picker \.mg-grid\{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:min-content;gap:7px;margin-top:8px;',\s*\n\s*' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity \.12s;\}',/,
       "the grid must flex-grow to fill the host's real height and remain the one scrolling " +
       "region -- not a second independent scroll container fighting the host's own overflow");
+  });
+
+  test(".mg-grid forces auto rows to size off content, not stretch to fill a definite container height", () => {
+    assert.match(src, /grid-auto-rows:min-content/,
+      "found live 2026-07-24: .mg-card has overflow:hidden, which per spec makes its " +
+      "automatic minimum size 0 -- with a definite grid height (from the flex:1 1 auto " +
+      "fix above) and default grid-auto-rows:auto, every implicit row track stretched to " +
+      "divide the container's fixed height evenly instead of sizing to content, squishing " +
+      "every card to a sliver and making scrollHeight never exceed clientHeight either " +
+      "(the reported 'no longer scrollable' was the SAME bug, not a second one)");
   });
 
   test("the search input / market UI / empty message stay their natural size (flex:none), only the grid grows", () => {

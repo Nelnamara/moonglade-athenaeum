@@ -1280,6 +1280,7 @@ ${"=".repeat(48)}
       if (el && !el._mgBound) {
         el._mgBound = true;
         el.addEventListener("mg-pick", (e) => {
+          setPickerOpen(false);
           const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
           setImgModel(m);
           setModelDefaults(null);
