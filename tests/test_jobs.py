@@ -103,6 +103,48 @@ def test_collapse_last_event_wins_and_merges(tmp_path):
     assert j["media_ids"] == ["m9"]          # added by the later event
 
 
+def test_started_at_survives_the_collapse(tmp_path):
+    """Owner field-report 2026-07-23: two generations sat spinning with no way to recover
+    their task id manually. The Activity tray's row(j) never surfaces the task id at all --
+    fixing that is separate -- but a detail card also wants "time spent", which needs the
+    job's ORIGINAL registration ts, not just its latest event's ts. Before this fix,
+    _reconstruct_jobs's `cur.update(rec)` on every later event blindly overwrote `ts`, so by
+    the time a job went 'done' the true start time was gone -- unreconstructable. The first
+    event's ts must survive under a distinct `started_at` key, even once later events move
+    `ts` on to the terminal event's own time."""
+    core.append_job_event(tmp_path, "j1", status="running", type="generate", label="Elf",
+                          ts=1000.0)
+    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"], ts=1042.5)
+    j = core.read_jobs(tmp_path, now=1042.5)[0]
+    assert j["ts"] == 1042.5                  # latest event's ts -- unchanged behavior
+    assert j["started_at"] == 1000.0, "registration ts was discarded by the collapse"
+
+
+def test_started_at_is_the_first_event_not_the_latest_running_heartbeat(tmp_path):
+    """A job that gets several 'running' heartbeats before finishing must keep the FIRST
+    one's ts as started_at, not the most recent heartbeat's -- otherwise "time spent" would
+    shrink every time the card polls a long-running job instead of growing."""
+    core.append_job_event(tmp_path, "j1", status="running", type="generate", ts=1000.0)
+    core.append_job_event(tmp_path, "j1", status="running", done=1, total=10, ts=1010.0)
+    core.append_job_event(tmp_path, "j1", status="running", done=5, total=10, ts=1020.0)
+    j = core.read_jobs(tmp_path, now=1020.0)[0]
+    assert j["started_at"] == 1000.0
+    assert j["ts"] == 1020.0
+
+
+def test_started_at_survives_compaction(tmp_path):
+    """The compacted log's single surviving line per job must itself carry the real
+    started_at (not the compaction-time ts) so a job's elapsed-time reconstruction doesn't
+    silently reset the moment the raw log crosses the line cap."""
+    core.append_job_event(tmp_path, "j1", status="running", type="generate", ts=1000.0)
+    for i in range(core._JOBS_COMPACT_AT + 5):
+        core.append_job_event(tmp_path, "j1", status="running", done=i, total=99999)
+    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m"])
+    core.maybe_compact_jobs(tmp_path)
+    j = core.read_jobs(tmp_path)[0]
+    assert j["started_at"] == 1000.0
+
+
 def test_terminal_state_is_sticky(tmp_path):
     """A late/interleaved running heartbeat must not drag a finished job back to running,
     nor inject its progress/heartbeat fields onto the finished record."""
