@@ -3441,9 +3441,25 @@ def create_app(out_dir: Path):
     # drop. Each generation is downloaded + cataloged the INSTANT it completes -- this
     # is what makes --update a fallback instead of the only way gens land locally.
     # Read-only listening + free downloads (no credits spent). Always-on by design.
+    #
+    # Staleness watchdog (2026-07-23): a real incident showed `connected` reading
+    # True with no error for ~21 minutes while the socket had actually gone silent
+    # -- no exception, no close frame, nothing to trip the reconnect logic below on
+    # its own. core._watch_events_async now times out waiting on each individual
+    # frame (core._WS_STALE_TIMEOUT, currently 4 minutes -- see that constant's own
+    # comment for how the number was chosen) and raises core.WatchStaleError, which
+    # lands in this loop's `except` below exactly like any other dropped connection
+    # and gets reconnected the same way -- no separate thread, no polling, no new
+    # control flow, just a bound on how long `await ws.recv()` is allowed to block.
     _watch_lock = threading.Lock()
     _watch_status = {"connected": False, "last_event_at": None, "mirrored": 0,
-                      "events_seen": 0, "last_error": None, "started_at": None}
+                      "events_seen": 0, "last_error": None, "started_at": None,
+                      # New fields (additive -- see api_watch_status()): how many times
+                      # the staleness watchdog below has had to force a reconnect, and
+                      # when the most recent one happened. Existing readers of this dict
+                      # (the Panel's watch-status UI, tests) only read the fields they
+                      # already know about, so this is safe to add without touching them.
+                      "stale_reconnects": 0, "last_stale_reconnect_at": None}
 
     # ---- Single-flight collect (per task id, in-process) -------------------------
     # THREE uncoordinated collectors live in this process: the always-on live-mirror
@@ -3612,6 +3628,20 @@ def create_app(out_dir: Path):
 
                 asyncio.run(core._watch_events_async(auth, on_event, None))
                 backoff = 5   # a clean disconnect resets the backoff
+            except core.WatchStaleError as e:
+                # core._watch_events_async's own recv() timeout fired: the socket
+                # reported no error and `connected` was already True, but nothing --
+                # not even a keepalive ping -- arrived for core._WS_STALE_TIMEOUT
+                # seconds. This is the exact failure this watchdog exists for (see
+                # the module docstring above): a connection that LOOKS healthy on
+                # every existing signal while silently seeing nothing. Recorded in
+                # its own counter/timestamp, distinct from `last_error`'s generic
+                # reconnect noise, so this specific failure mode stays visible in
+                # /api/watch/status instead of looking like an ordinary drop.
+                with _watch_lock:
+                    _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+                    _watch_status["stale_reconnects"] += 1
+                    _watch_status["last_stale_reconnect_at"] = _time.time()
             except Exception as e:
                 with _watch_lock:
                     _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
@@ -8228,6 +8258,11 @@ function loadWatchStatus(){
       var bits=['\\u25c9 connected'];
       if(d.last_event_at) bits.push('last event '+_timeAgo(d.last_event_at));
       bits.push((d.mirrored||0)+' mirrored this session');
+      // Only shown once it has actually happened -- most sessions never trip the
+      // staleness watchdog, and an always-visible "0 stale reconnects" would just
+      // be noise on the one status line the Panel gives this feature.
+      if(d.stale_reconnects) bits.push(d.stale_reconnects+' stale reconnect'+(d.stale_reconnects===1?'':'s')+
+        (d.last_stale_reconnect_at ? ' (last '+_timeAgo(d.last_stale_reconnect_at)+')' : ''));
       st.textContent=bits.join(' \\u00b7 ');
     } else {
       dot.style.background = d.last_error ? 'var(--red)' : 'var(--overlay0)';
