@@ -2,9 +2,9 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
-  maxTagNum, nextTag, frameLinked, connectMeta,
+  maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
   flat, shotText, shotPayload, durOf, reelStats, effectivePrompt,
-  priceFingerprint, tallyPrices, formatCostEstimate,
+  priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
 } from "../src/loom-core.js";
 
 /* ---------- fixtures ---------- */
@@ -123,6 +123,74 @@ describe("connectMeta", () => {
 
   test("empty string falls back to 'new'", () => {
     assert.equal(connectMeta(""), CONNECT.new);
+  });
+});
+
+/* ---------- continuityLinked ---------- */
+// The board's continuity indicator: is a given shot's OPENING frame already frameLinked
+// to the immediately-preceding shot's CLOSING frame? `entries` is always the project's full,
+// flattened, cross-act list (flat(project)) -- continuity is a timeline concept, not an
+// act-scoped one, same convention the frame-handoff button's own "previous shot" lookup
+// already follows (entries.findIndex + idx-1, see master-storyboard.jsx's prevEntry/
+// weavePrevEntry) -- so a test below deliberately puts the two shots in DIFFERENT acts to
+// prove the act boundary is irrelevant.
+
+describe("continuityLinked", () => {
+  test("the first shot in the project has no predecessor, so it is never linked", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "med-1", thumbId: "", desc: "", tag: "" } }) },
+    ];
+    assert.equal(continuityLinked(entries, "c1"), false);
+  });
+
+  test("an id not present in entries has no predecessor either", () => {
+    const entries = [{ c: makeCard({ id: "c1" }) }];
+    assert.equal(continuityLinked(entries, "does-not-exist"), false);
+  });
+
+  test("an empty/absent entries list is safe and never linked", () => {
+    assert.equal(continuityLinked([], "c1"), false);
+    assert.equal(continuityLinked(undefined, "c1"), false);
+  });
+
+  test("true when this shot's openFrame shares mediaId with the previous shot's closeFrame", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "med-9", thumbId: "", desc: "", tag: "" } }) },
+      { c: makeCard({ id: "c2", openFrame: { mediaId: "med-9", thumbId: "", desc: "", tag: "" } }) },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), true);
+  });
+
+  test("true when this shot's openFrame shares thumbId with the previous shot's closeFrame (locally uploaded frames)", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "", thumbId: "thumb-4", desc: "", tag: "" } }) },
+      { c: makeCard({ id: "c2", openFrame: { mediaId: "", thumbId: "thumb-4", desc: "", tag: "" } }) },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), true);
+  });
+
+  test("false when the previous shot's closeFrame and this shot's openFrame are different frames", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "med-1", thumbId: "", desc: "", tag: "" } }) },
+      { c: makeCard({ id: "c2", openFrame: { mediaId: "med-2", thumbId: "", desc: "", tag: "" } }) },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), false);
+  });
+
+  test("false when neither shot's relevant frame has any identity set yet (both blank)", () => {
+    const entries = [
+      { c: makeCard({ id: "c1" }) },
+      { c: makeCard({ id: "c2" }) },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), false);
+  });
+
+  test("act boundaries are irrelevant -- continuity is checked against the previous entry in the FLATTENED list regardless of which act either shot is in", () => {
+    const entries = [
+      { c: makeCard({ id: "c1", closeFrame: { mediaId: "med-7", thumbId: "", desc: "", tag: "" } }), ai: 0 },
+      { c: makeCard({ id: "c2", openFrame: { mediaId: "med-7", thumbId: "", desc: "", tag: "" } }), ai: 1 },
+    ];
+    assert.equal(continuityLinked(entries, "c2"), true);
   });
 });
 
@@ -271,6 +339,43 @@ describe("priceFingerprint / tallyPrices / formatCostEstimate", () => {
   test("formatCostEstimate distinguishes a settled zero-cost paid shot from 'nothing settled'", () => {
     assert.equal(formatCostEstimate({ paid: 1, credits: 0 }), "0 cr");
     assert.equal(formatCostEstimate({}), "…");
+  });
+});
+
+describe("costTooltip", () => {
+  // Same hard rule as formatCostEstimate (see the shared comment above it in
+  // loom-core.js): a "0 cr"/"free" reading must only ever mean a genuinely settled,
+  // zero-cost result -- never merely unpriced or still-pricing. costTooltip's long
+  // form spells out every bucket by name, so the failure mode isn't a bare wrong
+  // word -- it's the `pending` count going missing from the sentence, which would
+  // leave "0 free-card, 0 paid (≈0 credits), 0 unpriced." standing on its own and
+  // reading exactly like a fully-settled, nothing-to-pay result.
+  test("genuinely free/settled result", () => {
+    const text = costTooltip({ free: 2, paid: 0, credits: 0, unknown: 0, pending: 0 });
+    assert.equal(text, "Cost to finish: 2 free-card, 0 paid (≈0 credits), 0 unpriced.");
+  });
+
+  test("paid/settled result shows the real credit total", () => {
+    const text = costTooltip({ free: 0, paid: 3, credits: 1500, unknown: 0, pending: 0 });
+    assert.equal(text, "Cost to finish: 0 free-card, 3 paid (≈1,500 credits), 0 unpriced.");
+  });
+
+  test("unpriced/pending state names the pending count instead of reading as settled-free", () => {
+    const text = costTooltip({ free: 0, paid: 0, credits: 0, unknown: 0, pending: 4 });
+    assert.equal(text, "Cost to finish: 0 free-card, 0 paid (≈0 credits), 0 unpriced, 4 still estimating.");
+    // The specific conflation this guards against: with pending dropped from the
+    // sentence, an all-zeros tooltip would be indistinguishable from a real free result.
+    assert.notEqual(text, "Cost to finish: 0 free-card, 0 paid (≈0 credits), 0 unpriced.");
+  });
+
+  test("pending is additive alongside real settled figures, not a replacement for them", () => {
+    const text = costTooltip({ free: 1, paid: 2, credits: 900, unknown: 1, pending: 3 });
+    assert.equal(text, "Cost to finish: 1 free-card, 2 paid (≈900 credits), 1 unpriced, 3 still estimating.");
+  });
+
+  test("no pending omits 'still estimating' entirely (only settled figures shown)", () => {
+    const text = costTooltip({ free: 0, paid: 1, credits: 250, unknown: 0, pending: 0 });
+    assert.doesNotMatch(text, /estimating/);
   });
 });
 

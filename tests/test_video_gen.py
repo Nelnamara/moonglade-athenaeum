@@ -65,6 +65,19 @@ def test_params_json_override():
     assert core._gen_video_parameters(a) == {"type": "x"}
 
 
+def test_gen_video_parameters_snaps_duration():
+    """B9: --generate-video's CLI builder must snap an out-of-range --duration to the
+    nearest allowed PixAI length (5/6/10/15), exactly like the Loom's
+    build_shot_video_params already does -- not submit it verbatim. 7 has no matching
+    allowed length; nearest is 6."""
+    a = SimpleNamespace(prompt="p", image="55", tail="", duration=7,
+                        model="", video_model="", vmode="basic", audio=False,
+                        audio_language="english", negative="",
+                        video_prompt_helper=False, params_json="")
+    p = core._gen_video_parameters(a)
+    assert p["i2vPro"]["duration"] == "6"
+
+
 def _video_args(tmp_path, **kw):
     base = dict(out=str(tmp_path), image="55", tail="", prompt="p", negative="",
                 model="", video_model="", duration=5, vmode="professional",
@@ -240,6 +253,50 @@ def test_reference_video_requires_a_ref(tmp_path):
     import pytest
     with pytest.raises(core.PixAIError):
         core.run_reference_video(_refvid_args(tmp_path, ref_image=None))
+
+
+def test_reference_video_preview_snaps_duration(tmp_path, capsys):
+    """B9's twin on the reference-video CLI path: --duration 7 has no matching allowed
+    PixAI length (5/6/10/15) and must snap to the nearest (6), not submit verbatim --
+    the exact bug already fixed for the Loom's build_shot_video_params, now missing here."""
+    core.run_reference_video(_refvid_args(tmp_path, duration=7))
+    out = capsys.readouterr().out
+    assert '"duration": 6,' in out
+
+
+def test_reference_video_builder_default_matches_i2v_sibling():
+    """B10: build_reference_video_parameters()'s own `duration` keyword default must
+    agree with its i2v sibling (build_video_parameters, default 5) -- it used to be 15,
+    a real 3x cost divergence (1 V4.0 card at 5s vs 3 at 15s) baked into the source."""
+    import inspect
+    assert inspect.signature(core.build_video_parameters).parameters["duration"].default == 5
+    assert inspect.signature(core.build_reference_video_parameters).parameters["duration"].default == 5
+
+
+def test_reference_video_argparse_default_is_5(monkeypatch, tmp_path):
+    """B10: the real --duration argparse default -- what an actual user gets when they
+    omit --duration on --reference-video -- must be 5. Driven through the real parser
+    via core.main() rather than re-derived, so a future edit to the add_argument() call
+    itself is what this test is pinned against."""
+    captured = {}
+    monkeypatch.setattr(core, "run_reference_video", lambda a: captured.setdefault("args", a))
+    monkeypatch.setattr("sys.argv", ["prog", "--reference-video", "--ref-image", "1",
+                                     "--out", str(tmp_path)])
+    core.main()
+    assert captured["args"].duration == 5
+
+
+def test_reference_video_falls_back_to_5_not_15(tmp_path, capsys):
+    """B10: run_reference_video's own call-site fallback (`getattr(args, "duration", ...)
+    or ...`) must land on 5 for a falsy or wholly-missing --duration -- not the old,
+    inconsistent 15 -- so no other duration-default drift exists for r2v."""
+    core.run_reference_video(_refvid_args(tmp_path, duration=0))
+    assert '"duration": 5,' in capsys.readouterr().out
+
+    args = _refvid_args(tmp_path)
+    del args.duration
+    core.run_reference_video(args)
+    assert '"duration": 5,' in capsys.readouterr().out
 
 
 # ---- shot -> video params (the PixAI provider adapter for the Loom) ----

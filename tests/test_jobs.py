@@ -12,7 +12,7 @@ import time
 import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import login_client, login_test_client
 
 
 def _row(**kw):
@@ -101,6 +101,48 @@ def test_collapse_last_event_wins_and_merges(tmp_path):
     assert j["status"] == "done"
     assert j["label"] == "Moon elf"          # kept from the earlier event
     assert j["media_ids"] == ["m9"]          # added by the later event
+
+
+def test_started_at_survives_the_collapse(tmp_path):
+    """Owner field-report 2026-07-23: two generations sat spinning with no way to recover
+    their task id manually. The Activity tray's row(j) never surfaces the task id at all --
+    fixing that is separate -- but a detail card also wants "time spent", which needs the
+    job's ORIGINAL registration ts, not just its latest event's ts. Before this fix,
+    _reconstruct_jobs's `cur.update(rec)` on every later event blindly overwrote `ts`, so by
+    the time a job went 'done' the true start time was gone -- unreconstructable. The first
+    event's ts must survive under a distinct `started_at` key, even once later events move
+    `ts` on to the terminal event's own time."""
+    core.append_job_event(tmp_path, "j1", status="running", type="generate", label="Elf",
+                          ts=1000.0)
+    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m1"], ts=1042.5)
+    j = core.read_jobs(tmp_path, now=1042.5)[0]
+    assert j["ts"] == 1042.5                  # latest event's ts -- unchanged behavior
+    assert j["started_at"] == 1000.0, "registration ts was discarded by the collapse"
+
+
+def test_started_at_is_the_first_event_not_the_latest_running_heartbeat(tmp_path):
+    """A job that gets several 'running' heartbeats before finishing must keep the FIRST
+    one's ts as started_at, not the most recent heartbeat's -- otherwise "time spent" would
+    shrink every time the card polls a long-running job instead of growing."""
+    core.append_job_event(tmp_path, "j1", status="running", type="generate", ts=1000.0)
+    core.append_job_event(tmp_path, "j1", status="running", done=1, total=10, ts=1010.0)
+    core.append_job_event(tmp_path, "j1", status="running", done=5, total=10, ts=1020.0)
+    j = core.read_jobs(tmp_path, now=1020.0)[0]
+    assert j["started_at"] == 1000.0
+    assert j["ts"] == 1020.0
+
+
+def test_started_at_survives_compaction(tmp_path):
+    """The compacted log's single surviving line per job must itself carry the real
+    started_at (not the compaction-time ts) so a job's elapsed-time reconstruction doesn't
+    silently reset the moment the raw log crosses the line cap."""
+    core.append_job_event(tmp_path, "j1", status="running", type="generate", ts=1000.0)
+    for i in range(core._JOBS_COMPACT_AT + 5):
+        core.append_job_event(tmp_path, "j1", status="running", done=i, total=99999)
+    core.append_job_event(tmp_path, "j1", status="done", media_ids=["m"])
+    core.maybe_compact_jobs(tmp_path)
+    j = core.read_jobs(tmp_path)[0]
+    assert j["started_at"] == 1000.0
 
 
 def test_terminal_state_is_sticky(tmp_path):
@@ -370,6 +412,91 @@ def test_reaper_still_leaves_running_jobs_alone_in_dict_form(tmp_path):
     assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["777"]["status"] == "running"
 
 
+# ------------------------------------------------------- fix 2: age-gated reconciliation
+
+def test_resolve_orphan_jobs_min_age_skips_jobs_that_are_not_old_enough_yet(tmp_path):
+    """The ongoing /api/jobs sweep passes a real min_age so a job that's only just been
+    submitted (its own Generate card is very likely still actively polling it) is never
+    even asked about -- asking would be pointless PixAI traffic on every poll for every
+    normal, healthy generation."""
+    core.append_job_event(tmp_path, "1", status="running", type="generate")   # ts ~ now
+    asked = []
+    n = core.resolve_orphan_jobs(tmp_path, lambda tid: asked.append(tid) or "done", min_age=1800)
+    assert n == 0 and asked == []
+    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["1"]["status"] == "running"
+
+
+def test_stale_job_reconciliation_marks_stale_when_pixai_cannot_be_reached(tmp_path):
+    """THE FIX (docs/AUDIT_2026-07-21.md, owner-2026-07-23, fix 2): a job stuck at
+    'running' well past a reasonable age gets re-checked against PixAI's real status.
+    When that check itself fails (network error -- PixAI's own state genuinely can't be
+    determined), the job must NOT be silently left exactly as it was forever, and must
+    NOT be guessed into 'done' or 'failed' -- either guess could be wrong and would hide
+    real evidence from the owner. It gets a distinct, visible 'stale' marker instead,
+    with the failure reason recorded, so the owner can see a job got stuck AND that we
+    tried and couldn't confirm why -- never a silent, untraceable disappearance."""
+    old_ts = time.time() - 3700           # well past the 1800s threshold used below
+    core.append_job_event(tmp_path, "2037215124834251576", status="running",
+                          type="generate", label="Generated", ts=old_ts)
+
+    def _network_error(tid):
+        raise RuntimeError("connection reset")
+
+    n = core.resolve_orphan_jobs(tmp_path, _network_error, min_age=1800)
+
+    assert n == 0                                    # NOT resolved to done/failed
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["2037215124834251576"]
+    assert job["status"] == "stale", "a failed status check silently vanished instead of being marked"
+    assert job["status"] not in core._JOBS_TERMINAL   # never guessed into a false done/failed
+    assert job.get("error")                           # the owner can see WHY it's stuck
+
+
+def test_stale_job_reconciliation_resolves_a_real_orphan_when_pixai_confirms_it(tmp_path):
+    """The other half: when PixAI CAN be reached and reports the aged job actually
+    finished (or failed), the sweep resolves it for real -- 'stale' is only for when the
+    check itself is impossible, not a substitute for actually asking."""
+    old_ts = time.time() - 3700
+    core.append_job_event(tmp_path, "5551", status="running", type="generate", ts=old_ts)
+    n = core.resolve_orphan_jobs(tmp_path, lambda tid: "done", min_age=1800)
+    assert n == 1
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["5551"]
+    assert job["status"] == "done"
+
+
+def test_stale_job_reconciliation_refreshes_ts_for_a_confirmed_still_running_aged_job(tmp_path):
+    """A job that crosses min_age but IS genuinely still running (PixAI confirms
+    'running', no error) must not get re-asked on literally every subsequent poll for as
+    long as it stays running -- a real video generation can easily run past 30 minutes.
+    The sweep refreshes its ts on a confirmed-alive check, resetting the min_age clock,
+    so the next ask waits another full min_age instead of firing again immediately."""
+    old_ts = time.time() - 3700
+    core.append_job_event(tmp_path, "9001", status="running", type="generate", ts=old_ts)
+    core.resolve_orphan_jobs(tmp_path, lambda tid: "running", min_age=1800)
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["9001"]
+    assert job["status"] == "running"
+    assert job["ts"] > old_ts + 3000, "ts was not refreshed -- the job will be re-asked every poll"
+
+
+def test_api_jobs_endpoint_reconciles_a_stale_orphan_on_poll(tmp_path, monkeypatch):
+    """End-to-end: /api/jobs itself (not just the library function) runs the sweep --
+    same 'runs opportunistically off an existing poll' shape as maybe_compact_jobs right
+    beside it. A generate job old enough to cross JOBS_ORPHAN_SWEEP_AGE, whose PixAI
+    status check fails, comes back from a plain GET /api/jobs already marked 'stale'."""
+    cli = _authed_client(tmp_path)
+    old_ts = time.time() - core.JOBS_ORPHAN_SWEEP_AGE - 100
+    core.append_job_event(tmp_path, "2037215124834251576", status="running",
+                          type="generate", label="Generated", ts=old_ts)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def _boom(session, tid):
+        raise RuntimeError("network blip")
+    monkeypatch.setattr(core, "generation_status", _boom)
+
+    jobs = cli.get("/api/jobs").get_json()["jobs"]
+    by_id = {j["job_id"]: j for j in jobs}
+    assert by_id["2037215124834251576"]["status"] == "stale"
+
+
 def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypatch):
     """A task PixAI calls 'done' whose outputs carry no media is TERMINAL -- it produced
     nothing and never will. /api/task-status used to let that fall into the catch-all
@@ -417,3 +544,58 @@ def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeyp
     cli.get("/api/task-status?task_id=556")
     job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["556"]
     assert job["status"] == "running", "a transient blip wrote a sticky false failure"
+
+
+def test_collect_is_single_flight_across_watcher_and_poll(tmp_path, monkeypatch):
+    """The in-process half of the video-corruption fix (owner field-test 2026-07-23):
+    the always-on live-mirror watcher and a /api/task-status done-poll both collect the
+    same task seconds apart. They must coalesce into ONE collect_generation -- the
+    second entrant waits, then answers from the catalog instead of re-downloading
+    (the double collect is what lined up two concurrent video_faststart remuxes on the
+    same clip in the first place). The watcher-mirror closure is driven through the
+    app.extensions seam create_app exposes for exactly this."""
+    import threading
+    from pixai_gallery import create_app
+
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    app = create_app(tmp_path)
+    cli = login_test_client(app)
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "completed", "phase": "done",
+                                        "paid_credit": 0})
+
+    mu = threading.Lock()
+    stats = {"cur": 0, "max": 0, "calls": 0}
+    entered = threading.Event()
+
+    def slow_collect(session, tid, out, **kw):
+        with mu:
+            stats["cur"] += 1
+            stats["calls"] += 1
+            stats["max"] = max(stats["max"], stats["cur"])
+        entered.set()
+        time.sleep(0.4)                    # hold the collect open so the poll overlaps it
+        save_catalog(tmp_path / "catalog.db", [
+            _row(task_id="909", media_id="M9", is_video="1",
+                 filename="videos/x_909_M9.mp4", created_at="2025-01-02T00:00:00")])
+        with mu:
+            stats["cur"] -= 1
+        return {"media_ids": ["M9"], "saved": 1, "is_video": True, "duration": 2.0}
+
+    monkeypatch.setattr(core, "collect_generation", slow_collect)
+
+    t = threading.Thread(target=app.extensions["mg_watch_mirror"], args=("909",))
+    t.start()
+    assert entered.wait(5), "the watcher-mirror path never reached collect_generation"
+    r = cli.get("/api/task-status?task_id=909")     # arrives while the collect is in flight
+    t.join(10)
+    assert not t.is_alive()
+
+    body = r.get_json()
+    assert body["phase"] == "done" and body["media_ids"] == ["M9"]
+    assert body.get("is_video") is True             # catalog re-read keeps the video flag
+    assert stats["calls"] == 1, "the same task was collected twice"
+    assert stats["max"] == 1, "two collects for one task ran concurrently"

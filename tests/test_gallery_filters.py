@@ -209,6 +209,36 @@ def test_collection_health_excludes_deleted_and_branding(tmp_path):
     assert h["total_files"] == 1   # only the real, non-deleted, non-branding image counts
 
 
+def test_collection_health_uncataloged_is_disk_minus_catalog(tmp_path):
+    """Integrity job (audit 2026-07-21, Curator #9): uncataloged =
+    on_disk_ids - catalog_ids, exactly. Fixture is built so the four candidate
+    computations -- correct difference, the reverse difference, the union, and
+    the intersection -- all land on DIFFERENT counts, so a directional bug
+    (reporting catalog-not-on-disk, or a union/intersection instead of the
+    disk-not-in-catalog difference) can't accidentally still pass:
+      shared (on disk AND cataloged):      111            (1 id)
+      disk-only (should BE 'uncataloged'): 999, 888       (2 ids)
+      catalog-only (the OTHER direction,
+        already covered by 'missing'):     222, 333, 444  (3 ids)
+    correct answer (disk - catalog) = 2; reverse (catalog - disk) = 3;
+    union = 6; intersection = 1 -- all distinct from each other."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="111", filename="111.webp", created_at="2024-03-01", model_name="ModelA"),
+        _row(media_id="222", filename="222.webp", created_at="2024-03-01", model_name="ModelA"),
+        _row(media_id="333", filename="333.webp", created_at="2024-03-01", model_name="ModelA"),
+        _row(media_id="444", filename="444.webp", created_at="2024-03-01", model_name="ModelA"),
+    ])
+    (tmp_path / "2024-03").mkdir()
+    (tmp_path / "2024-03" / "111.webp").write_bytes(b"data")   # shared: cataloged + on disk
+    (tmp_path / "2024-03" / "999.webp").write_bytes(b"data")   # disk-only: on disk, no catalog row
+    (tmp_path / "2024-03" / "888.webp").write_bytes(b"data")   # disk-only: on disk, no catalog row
+    # 222/333/444 stay catalog-only: a row + filename, but no file ever placed on disk.
+    h = collection_health(tmp_path, db)
+    assert h["uncataloged"] == 2          # {999, 888} -- disk files with no catalog row
+    assert h["missing"] == 3              # {222, 333, 444} -- the reverse direction, unaffected
+
+
 def test_published_and_tag_filters(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [
@@ -480,6 +510,48 @@ def test_export_zip_by_collection_resolves_full_membership(tmp_path):
     assert names == {"a_1.png", "b_2.png"}     # both Trip members; the Other one excluded
 
 
+def test_contact_sheet_collection_button_appears_with_active_filter(tmp_path):
+    """O5 (audit 2026-07-21): /contact-sheet?collection=<name> is fully implemented
+    server-side (see contact_sheet() in pixai_gallery.py) but had NO ui entry point anywhere
+    -- every emitter that builds a contact-sheet link passed ids= only. Its ZIP-export twin
+    ('Download collection', downloadCollection()) IS wired into the filter bar, right next to
+    the Collection dropdown, gated on the exact same "a collection filter is active"
+    condition (same reasoning: there's no collection to act on otherwise). This adds a
+    sibling contact-sheet control in that same spot, under that same condition."""
+    from tests.conftest import login_client
+    save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a.png", collections="Moonlit")])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a.png").write_bytes(b"x")
+    client = login_client(tmp_path)
+
+    # No collection filter -> no contact-sheet-for-collection entry (nothing to sheet FROM,
+    # same absence-reasoning as downloadCollection's own button just above it).
+    assert b"contactSheetCollection(this.dataset.coll)" not in client.get("/").data
+
+    # Collection filter active -> the entry is rendered, carrying that collection.
+    page = client.get("/?collection=Moonlit").data
+    assert b"contactSheetCollection(this.dataset.coll)" in page
+    assert b'data-coll="Moonlit"' in page
+    # sits beside the ZIP twin, not instead of it
+    assert b"downloadCollection(this.dataset.coll)" in page
+
+
+def test_contact_sheet_collection_js_builds_the_collection_query():
+    """The JS side of O5: contactSheetCollection(name) must open /contact-sheet with
+    collection=, mirroring bulkContactSheet()'s existing ids= pattern (both encodeURIComponent
+    the value and open in a new tab -- the print view is meant to sit alongside the gallery,
+    not navigate away from it)."""
+    from pathlib import Path
+    import re
+    src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
+    m = re.search(r"function contactSheetCollection\(name\)\s*\{([\s\S]*?)\n\}", src)
+    assert m, "contactSheetCollection(name) JS function not found"
+    body = m.group(1)
+    assert "/contact-sheet?collection=" in body
+    assert "encodeURIComponent(name)" in body
+    assert "_blank" in body, "should open in a new tab, like bulkContactSheet's ids= version"
+
+
 def test_detail_page_has_plain_download(tmp_path):
     """The detail page offers a plain one-click Download of the original (no convert here --
     that lives in the bulk/collection flow)."""
@@ -544,6 +616,20 @@ def test_duplicate_groups_ignores_gallery_and_quarantine(tmp_path):
     (tmp_path / "images" / "a_111.webp").write_bytes(b"d")
     (tmp_path / "gallery" / "thumbs" / "111.jpg").write_bytes(b"d")
     (tmp_path / "_duplicates" / "111.webp").write_bytes(b"d")
+    # only the images/ copy counts -> not a cross-bucket duplicate
+    assert duplicate_groups(tmp_path) == []
+
+
+def test_duplicate_groups_ignores_deleted(tmp_path):
+    """B11 (audit 2026-07-21): duplicate_groups (the gallery review browser's Class-A
+    view) excluded gallery/ and _duplicates/ but never _deleted/ -- so a locally
+    purged image is reported as a live cross-bucket duplicate of its own quarantined
+    self."""
+    from pixai_gallery import duplicate_groups, DELETED_DIRNAME
+    (tmp_path / "images").mkdir()
+    (tmp_path / DELETED_DIRNAME).mkdir()
+    (tmp_path / "images" / "a_111.webp").write_bytes(b"d")
+    (tmp_path / DELETED_DIRNAME / "111.webp").write_bytes(b"d")
     # only the images/ copy counts -> not a cross-bucket duplicate
     assert duplicate_groups(tmp_path) == []
 

@@ -61,6 +61,25 @@ export const frameLinked = (a, b) => !!a && !!b && (
   (!!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId)
 );
 
+// Board-level continuity indicator built on frameLinked (2026-07-23 rebuild -- frameLinked
+// itself had zero callers anywhere in V2; this is the first one). Is `entryId`'s OPENING
+// frame already linked to the immediately-preceding shot's CLOSING frame? `entries` must be
+// the project's full, flattened, cross-act shot list (flat(project)) -- continuity is a
+// timeline concept, not an act-scoped one, the same convention the frame-handoff button's
+// own "previous shot" lookup already follows (see prevEntry/weavePrevEntry in
+// master-storyboard.jsx). The first shot in the project -- or an id entries doesn't contain
+// at all -- has no predecessor to compare against, so it is never "linked".
+//
+// NOT the same concept as CONNECT/connectMeta's "Continuity" chip (setShotMode/setShotConnect
+// in loom-mutations.js): that couples a single shot's own Mode to its connect field (how
+// THIS shot's own video generation should behave). This checks actual frame images across
+// a cut; that never does.
+export const continuityLinked = (entries, entryId) => {
+  const idx = (entries || []).findIndex((x) => x.c.id === entryId);
+  if (idx <= 0) return false;
+  return frameLinked(entries[idx - 1].c.closeFrame, entries[idx].c.openFrame);
+};
+
 // CONNECT[x] where x is a falsy/stale/legacy value throws. Every direct index
 // now goes through this instead, falling back to "new scene" (the safest,
 // most neutral default) rather than crashing shotText/export/render.
@@ -76,7 +95,150 @@ export const flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c
 // composed-prompt box (Camera/Lighting/cast/etc already folded in by hand, not re-composed).
 export const effectivePrompt = (c) => (c.promptOverride ? (c.promptOverrideText || "") : (c.prompt || ""));
 
-export const shotText = (entry, p) => {
+// ---------- shot-level "what image is this" list (single source of truth for BOTH the
+// composed prompt's @imageN citations AND the Multi-Reference drawer's own image bank) ----
+//
+// AUDIT_2026-07-21.md's owner-filed "Loom shot-card reference sending bugs out past 2
+// images" row traced the corruption to two DIFFERENT, un-synced numbering systems that both
+// happen to use the same "@imageN" syntax:
+//   1. A project-GLOBAL tag on each cast asset (assigned once, in cast-add order -- see
+//      nextTag/maxTagNum above -- e.g. a cast member added 4th is "@image4" forever, project-
+//      wide, regardless of which shots actually use them).
+//   2. The Multi-Reference drawer's OWN per-shot numbering (static/mg-generate-drawer.js's
+//      _refMap()/_renderSlots()), which has zero concept of a global tag namespace -- it always
+//      labels whatever lands in its image bank "@image1", "@image2", ... purely by ARRAY
+//      POSITION, in the exact order shotPayload()/buildShotPayload() hands it (see that
+//      function's own prefill-effect comment in master-storyboard.jsx).
+// These only agree when a shot happens to use every cast member from @image1 up with no gaps.
+// The moment a shot uses a LATER-numbered cast member (e.g. a 4th-added "Greg" = @image4)
+// without also using every earlier one, shotText() used to cite Greg's real, stable @image4 --
+// but the drawer's image bank, fed the SAME image tag-less and re-numbered by position, calls
+// that same picture something else entirely (e.g. @image1 or @image2). Once anything forces
+// the drawer to round-trip the composed prompt through its own chip/reference system (opening
+// the "Pick from your gallery" picker steals DOM focus off the drawer's prompt box, and its
+// blur handler synchronously re-chipifies), a real "@imageN" citation can get silently
+// reinterpreted against the WRONG picture, or a mismatched round-trip freezes the (now wrong)
+// text as a hand-edited override. shotImageRefs()/positionTag() are the single place that
+// numbers a shot's own images -- shotText() and shotPayload() both go through them now, so
+// whatever @imageN the composed prompt names for a picture is, by construction, the exact same
+// @imageN the drawer's own Image References panel shows for that same picture.
+//
+// `imgSrc(thumbId, source)` is injected rather than closed-over so this stays pure: in
+// master-storyboard.jsx it resolves against the component's `thumbs` state; here (and in
+// tests) callers pass whatever lookup they like.
+export const shotImageRefs = (entry, project, imgSrc) => {
+  const c = entry.c;
+  const tagNum = (t) => { const m = /(\d+)/.exec(t || ""); return m ? +m[1] : 99; };
+  const items = [];
+  (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
+    .forEach((as) => { const d = as.mediaId || imgSrc(as.thumbId, as.source); if (d) items.push({ tag: as.tag, d, kind: "cast", id: as.id }); });
+  // Untagged open/close frames need DISTINCT fallback tags -- both defaulting to the
+  // same literal meant an FLF shot with two untagged frames silently sent duplicate
+  // @image9 tags, and the model only ever saw one of the two images.
+  [["@image8", "openFrame", c.openFrame], ["@image9", "closeFrame", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, key, f]) => {
+    if (!f) return; const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) items.push({ tag: f.tag || fallbackTag, d, kind: "frame", id: key }); });
+  (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
+    const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) items.push({ tag: r.tag, d, kind: "ref", id: r.id }); });
+  // FRAME RESERVATION (2026-07-23, "frame/cast @imageN slot collision" -- the THIRD
+  // manifestation of this file's un-synced-numbering bug class; follow-up to commit 2e714fd
+  // and commit c7aaff2). Opening/Closing Frame now ALWAYS sort ahead of cast/refs, by KIND,
+  // regardless of whatever their own raw .tag field says. A frame's .tag is independently
+  // owner-editable (master-storyboard.jsx's FrameSlot tag input) and can carry any text,
+  // including one that happens to collide with a cast member's real, stable project-global
+  // tag (e.g. both claiming "@image1"). Sorting by raw tag text let whichever entry got
+  // pushed into `items` first -- always a cast asset, by construction above -- silently win
+  // the disputed slot, bumping the frame to a DIFFERENT number than the one its own UI
+  // statically displayed (the owner's report: a cast member "usurped" the frame's slot).
+  // Frame identity now wins the first slot(s) by construction instead: Opening Frame is
+  // always @image1 and Closing Frame (FLF only) is always @image2, whenever each resolves to
+  // an actual image, because they are structurally load-bearing for FLF/i2v generation itself
+  // (not flavor, like a cast portrait or an extra reference) and the UI already presents them
+  // first, above "Other references & @tags". Cast/refs fill in from @image3 on. Two frame
+  // items never compete with each other on tag text either (both get sortNum 0) -- their
+  // relative order is Open-before-Close by construction (the push order above), never by
+  // whatever stale text either one's .tag holds. See positionTag()'s callers (shotText's
+  // frame-description lines, FrameSlot's own live-tag display) -- none of them may trust a
+  // frame's raw .tag as anything but a fallback for when it has no resolvable image at all.
+  const kindRank = (it) => (it.kind === "frame" ? 0 : 1);
+  const sortNum = (it) => (it.kind === "frame" ? 0 : tagNum(it.tag));
+  items.sort((a, b) => kindRank(a) - kindRank(b) || sortNum(a) - sortNum(b));
+  // PixAI's real cap: a generation takes at most 6 image refs. Reserving frames first means
+  // a shot that has to drop something under this cap always drops a lower-priority cast/ref,
+  // never a structurally load-bearing frame -- the same "keep the highest-priority N, leave
+  // the rest out" truncation pixai_gallery.py's bulkSendVideo()/Gen.addVideoRefs() already
+  // apply to the gallery's own bulk-send-to-video path (same real 6-image limit, trimmed
+  // before ever reaching submit). shotPayload() is what actually builds the /api/loom/
+  // generate body (both batchGenerate's direct call and the drawer's own prefill route
+  // through it), so capping here guarantees the real submit never exceeds it either way.
+  return items.slice(0, 6);
+};
+
+// No-op resolver for shotText() callers that have no live `thumbs` state to close over (the
+// shot-list export, copyShot, the several "did the hand-edit actually change anything"
+// comparisons) -- trusts only mediaId, the same thing shotPayload's own imgSrc contract
+// already means for an asset/ref with no gallery media_id yet. Keeps shotText() callable as
+// shotText(entry, project) everywhere it already is today (every master-storyboard.jsx call
+// site but the live drawer-prefill one, and every test in loom-core.test.js).
+const noImgSrc = () => null;
+
+// This shot's OWN "@imageN" for one cast asset or c.refs entry, numbered purely by POSITION
+// within shotImageRefs()'s sorted list -- see that function's own comment for why this must
+// replace a raw, project-global .tag anywhere the text is going to reach the Multi-Reference
+// drawer. Returns null when `id` has no resolvable image in THIS shot (nothing for the drawer
+// to number at all); callers fall back to the entity's own stored .tag in that case, exactly
+// matching prior behavior for a not-yet-resolvable reference.
+export const positionTag = (entry, project, imgSrc, id) => {
+  const items = shotImageRefs(entry, project, imgSrc);
+  const idx = items.findIndex((it) => it.id === id);
+  return idx < 0 ? null : "@image" + (idx + 1);
+};
+
+// Multi-Reference drawer pick-persistence plan (AUDIT_2026-07-21.md "reference picker
+// corruption" row, requirement 2: adding a 3rd/4th reference via the picker must actually
+// work). A pick used to ONLY ever update the drawer's own private, in-memory bank -- nothing
+// host-side ever recorded it, so it was silently discarded the next time ANY host-tracked
+// field changed and the prefill effect rebuilt the drawer's bank fresh from shotPayload()
+// (that is why "the Image References panel never advances past its original entries").
+// Given the drawer reports a completed pick at its own bank SLOT INDEX, this decides what the
+// host must durably do with it: replace whichever entity (cast asset / shot ref / open-close
+// frame) ALREADY supplies that slot's current picture (never assume slot index == that
+// entity's array index -- see shotImageRefs()'s own comment), or append a brand-new
+// shot-level reference, tagged past every tag this shot already uses so it reliably sorts to
+// the final slot, when the slot is past everything the shot currently supplies. Pure/
+// testable -- master-storyboard.jsx's mg-pick-request listener is the only caller, and just
+// carries out whichever plan this returns.
+export const pickTarget = (entry, project, imgSrc, slot) => {
+  const items = shotImageRefs(entry, project, imgSrc);
+  const existing = items[slot];
+  if (existing) return { type: "replace", kind: existing.kind, id: existing.id };
+  return { type: "append", tag: nextTag(items, "@image") };
+};
+
+// ---------- r2v video-reference bank pick persistence (parallel to pickTarget() above) ---
+// The Multi-Reference drawer's SEPARATE video-reference bank (static/mg-generate-drawer.js's
+// _vidSlots, requested with bank:"vid") has the exact same "a pick only ever lands in the
+// drawer's own private slots" gap pickTarget() closes for the image bank -- but it can't
+// reuse shotImageRefs()/pickTarget() as-is: video refs carry their media id in c.refs' own
+// .source field as a numeric STRING (see shotPayload()'s `vids` computation below), never
+// .mediaId the way cast/frames/image-refs do, and there's no cast/frame equivalent to fold
+// in -- a video ref only ever comes from c.refs itself. Small enough to stay its own pair of
+// functions rather than bending shotImageRefs()'s shape to fit.
+export const shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || ""));
+
+export const pickVideoTarget = (entry, slot) => {
+  const items = shotVideoRefs(entry);
+  const existing = items[slot];
+  if (existing) return { type: "replace", id: existing.id };
+  // Tag uniqueness is scoped to EVERY video-kind ref on the card (matching addRef()'s own
+  // nextTag(card.refs.filter(kind), pre) convention in master-storyboard.jsx), not just the
+  // resolvable ones shotVideoRefs() above returns for slot alignment -- an owner-typed video
+  // ref with no source yet (Deep Focus's "file name or URL" field starts empty) still holds
+  // its tag, and a newly-appended ref must never collide with it.
+  const allVideoRefs = (entry.c.refs || []).filter((r) => r.kind === "video");
+  return { type: "append", tag: nextTag(allVideoRefs, "@video") };
+};
+
+export const shotText = (entry, p, imgSrc) => {
   const { c, code, ai } = entry;
   // Hard early-return, never merged with the composition below -- a promptOverride is the
   // owner's own final word on this shot's text. Composing Camera/Lighting/cast INTO an
@@ -84,13 +246,23 @@ export const shotText = (entry, p) => {
   // into the text on each cycle (the override IS usually that same composed text with one
   // clause nudged, so it already contains its own Camera/Lighting/etc lines).
   if (c.promptOverride) return effectivePrompt(c);
+  const resolve = imgSrc || noImgSrc;
   const idx = flat(p).findIndex((x) => x.c.id === c.id);
   const prev = idx > 0 ? flat(p)[idx - 1] : null;
   const L = [`[${code} — "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
   if (c.connect === "extend" && prev) L.push(`Continue seamlessly from the previous clip ${prev.code} (upload it as @video1).`);
   if (c.connect === "flf") {
-    if (c.openFrame.desc || c.openFrame.tag) L.push(`Opening frame ${c.openFrame.tag || "(first image)"}: ${c.openFrame.desc || "—"}`);
-    if (c.closeFrame.desc || c.closeFrame.tag) L.push(`Closing frame ${c.closeFrame.tag || "(last image)"}: ${c.closeFrame.desc || "—"}`);
+    // positionTag(), not the frame's own raw .tag -- see shotImageRefs()'s frame-reservation
+    // comment. A frame's raw .tag is free text the owner can edit in FrameSlot's UI and can
+    // drift from its actual, guaranteed slot (e.g. it still reads "@image2" from before the
+    // shot's cast composition changed, while the frame is now really reserved @image1).
+    // positionTag() is always the live, structurally-guaranteed number -- falls back to the
+    // raw tag only when the frame has no resolvable image in THIS shot at all (nothing live
+    // to number, matching every other fallback in this function).
+    const openTag = positionTag(entry, p, resolve, "openFrame") || c.openFrame.tag;
+    const closeTag = positionTag(entry, p, resolve, "closeFrame") || c.closeFrame.tag;
+    if (c.openFrame.desc || openTag) L.push(`Opening frame ${openTag || "(first image)"}: ${c.openFrame.desc || "—"}`);
+    if (c.closeFrame.desc || closeTag) L.push(`Closing frame ${closeTag || "(last image)"}: ${c.closeFrame.desc || "—"}`);
   }
   L.push("", c.prompt || "(prompt tbd)");
   if (c.connect === "extend" || c.connect === "flf") L.push(CONTINUITY_PHRASE);
@@ -99,9 +271,17 @@ export const shotText = (entry, p) => {
   // is the same string) -- the project-level analogue of the per-shot cast block.
   if (p.look) L.push("", `Look (consistent across the film): ${p.look}`);
   const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id));
-  if (usedCast.length) { L.push("", "Keep consistent:"); usedCast.forEach((as) =>
-    L.push(`  ${as.name} — ${as.lock ? "maintain exact appearance from " : "reference "}${as.tag}`)); }
-  if (c.refs.length) { L.push("", "Other references:"); c.refs.forEach((r) => L.push(`  ${r.tag} — ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`)); }
+  if (usedCast.length) { L.push("", "Keep consistent:"); usedCast.forEach((as) => {
+    // positionTag(), not as.tag -- see shotImageRefs()'s comment. Falls back to the asset's
+    // own global tag only when it has no resolvable image in THIS shot (matches prior
+    // behavior: nothing for the drawer to number, so there's no live reference to protect).
+    const tag = positionTag(entry, p, resolve, as.id) || as.tag;
+    L.push(`  ${as.name} — ${as.lock ? "maintain exact appearance from " : "reference "}${tag}`);
+  }); }
+  if (c.refs.length) { L.push("", "Other references:"); c.refs.forEach((r) => {
+    const tag = positionTag(entry, p, resolve, r.id) || r.tag;
+    L.push(`  ${tag} — ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`);
+  }); }
   if (c.camera) L.push("", `Camera: ${c.camera}`);
   if (c.lighting) L.push(`Lighting/Mood: ${c.lighting}`);
   if (c.audioCue) L.push(`Audio: ${c.audioCue}`);
@@ -116,23 +296,18 @@ export const shotText = (entry, p) => {
 // (and in tests) callers pass whatever lookup they like.
 export const shotPayload = (entry, project, imgSrc) => {
   const c = entry.c;
-  const tagNum = (t) => { const m = /(\d+)/.exec(t || ""); return m ? +m[1] : 99; };
-  const imgs = [];
-  (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
-    .forEach((as) => { const d = as.mediaId || imgSrc(as.thumbId, as.source); if (d) imgs.push({ tag: as.tag, d }); });
-  // Untagged open/close frames need DISTINCT fallback tags -- both defaulting to the
-  // same literal meant an FLF shot with two untagged frames silently sent duplicate
-  // @image9 tags, and the model only ever saw one of the two images.
-  [["@image8", c.openFrame], ["@image9", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, f]) => {
-    if (!f) return; const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) imgs.push({ tag: f.tag || fallbackTag, d }); });
-  (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
-    const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) imgs.push({ tag: r.tag, d }); });
-  const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
-  imgs.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
+  const imgs = shotImageRefs(entry, project, imgSrc);   // already capped at 6 -- see its own comment
+  // PixAI's real cap: at most 3 @video refs on a reference-video generation -- the video-side
+  // twin of shotImageRefs()'s own 6-image cap (see that function's comment for the precedent
+  // this mirrors). Nothing currently stops a shot from accumulating more than 3 video-kind
+  // c.refs entries over its editing history; capping here, at the one place that builds the
+  // actual /api/loom/generate body, guarantees the real submit never exceeds it regardless of
+  // which surface (batchGenerate's direct call or the drawer's own prefill) triggered it.
+  const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source).slice(0, 3);
   // Draft mode renders every shot at the cheaper "basic" quality for blocking out an
   // animatic; approve the cut, turn Draft off, and re-generate the keepers at pro. Carried
   // on the payload so BOTH the price preview and the actual submit see the same quality.
-  return { mode: c.mode, prompt: shotText(entry, project), images: imgs.map((x) => x.d),
+  return { mode: c.mode, prompt: shotText(entry, project, imgSrc), images: imgs.map((x) => x.d),
            video_refs: vids, duration: c.duration, quality: project.draft ? "basic" : "professional",
            generate_audio: !!c.audioGen, audio_language: c.audioLanguage || "english",
            hasInput: (imgs.length + vids.length) > 0 };

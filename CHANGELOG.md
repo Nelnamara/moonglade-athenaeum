@@ -15,6 +15,892 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-07-24 — Concurrent generations, real trash recovery, and a nasty video-corruption bug fixed
+
+A trash/quarantine restore panel, field-operator search (`model:`, `rating:>=3`, …),
+concurrent generations (no more waiting for one render to finish before starting the next),
+real credit-cost tracking in the catalog, and a full unification of the model/image pickers
+across the Loom and the gallery — plus a data-loss video-corruption bug found and fixed, the
+last open Privacy Blur security gap closed, and the audit board's entire Tier 1-5 defect list
+(security, breakage, orphaned code, doc lies, test gaps) driven to zero open items. 1,057
+Python tests pass, 301 Loom tests pass, CI green.
+
+### Removed
+
+- **Dead live-organize-into-batches code path removed from `run_download`.** The
+  `organize_adv_live` runtime flag it was gated on has had no CLI argument setting it true
+  since before this changelog's history (`--organize-adv` is only a back-compat alias for
+  `--organize`, unrelated); confirmed via a full-repo grep (source + tests) that nothing
+  ever sets it truthy. Simplified all five branches to their always-taken path: `img_dir`
+  is now created unconditionally, the parallel-download gate dropped its always-true
+  `organize_adv_live` clause, `task_folder` is always `img_dir`, filenames always go
+  through `build_stem_name`, and the orphaned `_prompt.txt`/`_index.csv` batch-writing
+  block (plus the `is_batch`/`batch_results` bookkeeping that only fed it) is gone.
+  `--organize`'s month-folder normalization and its own legacy-`batches/`-tidying are
+  untouched — this was only the unreachable *creation* path. 985 tests pass.
+- **Internal dev/creative-process narration is out of the shipped code.** Code comments and
+  test docstrings across `pixai_gallery.py`, `pixai_gallery_backup.py`, `static/mg-notify.js`,
+  `static/mg-generate-drawer.js`, `loom/master-storyboard.jsx`, and seven test files no longer
+  cite the git-ignored login mockup file, quote design-conversation directives, or carry
+  "owner directive <date>" / Figma-provenance attributions — one such comment was even being
+  served to every browser inside /login's `<style>` block. Each site now states its technical
+  rationale on its own terms; product copy (achievement roasts, narrator voice) is untouched.
+
+### Added
+
+- **Trash / quarantine restore panel** (2026-07-24; docs/AUDIT_2026-07-21.md's restore-panel
+  row, scoped 2026-07-23, now shipped). `_deleted/` had ~12k quarantined files with no restore
+  UI even though the delete confirm promises files are "recoverable" — a false promise in
+  practice until now. Ships as a **floating overlay panel** opened from a new "Open trash…"
+  button in the Control Panel (`Trash.open()`/`Trash.close()` in `PANEL_HTML`'s own script,
+  reusing the Folio of Honors/Contests/YourArt `.ach-modal`/`.ach-panel` chrome — copied into
+  `PANEL_HTML`'s `<style>` the same way `.p-tabs`/`.htab` already are, since this page
+  deliberately doesn't load `static/mg-notify.js`) — **not** a page embedded in the Panel's own
+  layout, matching the owner's earlier correction on this exact point ("Achievements come up
+  in a floating panel as well"). Server side: `list_quarantined()` is a directory scan (not a
+  catalog query — the whole point of `purge_media_local` is that the row is already gone),
+  paginated newest-first so a ~12k-file trash costs one cheap `os.scandir()`/`stat()` pass per
+  request, never O(everything) worth of thumbnail work — thumbnails are generated on demand for
+  only the current page (`_ensure_trash_thumbs()`, threaded like `build_thumbnails()`) by
+  reusing the existing `make_thumbnail()`/`make_video_thumbnail()` functions, writing into the
+  SAME `thumb_dir` slot `purge_media_local` already frees, so the unmodified existing
+  `/thumbs/<media_id>.jpg` route serves them — no new thumbnail logic or serving route.
+  `purge_media_local` now also snapshots the row to a `<media_id>.json` sidecar in `_deleted/`
+  before deleting it from the catalog, so `restore_quarantined_media()` can reinsert a FULL row
+  (rating/collections/prompt/task_id/…) on restore, not just a bare filename; files quarantined
+  before this feature (or any sidecar write that failed) fall back to the file's own mtime for
+  a "deleted" date and a minimal restored row. Four new routes: `GET /api/trash/list`
+  (paginated listing) and `POST /api/trash/restore` are **LOGIN** tier (recovering something is
+  not the same trust question as destroying it); `POST /api/trash/delete-forever` (selected
+  items) and `POST /api/trash/empty` (the whole trash) are **LOCALHOST**-only + a server-side
+  `confirm: true` body flag (matching `api_panel_run`'s existing destructive-action contract),
+  with the client additionally demanding a typed "DELETE" via `prompt()` before either call
+  fires (mirroring `confirmBulkDeleteCloud()`'s existing pattern byte-for-byte) — the
+  LOCALHOST-only actions are hidden from a LAN session's view of the panel's own affordances,
+  not just rejected server-side. All four routes registered + verified in
+  `tests/test_route_tiers.py`'s catch-all tier sweep. 32 new fail-first tests in
+  `tests/test_trash.py` (directory-scan pagination/sidecar-vs-mtime fallback, restore/
+  delete-forever/empty-trash, the sidecar-vs-real-file disambiguation, and the LAN-refusal +
+  confirm-required shape of both destructive routes).
+- **`paid_credit` is persisted — what every generation actually cost is now catalog data**
+  (2026-07-23; data layer only, no UI/charts yet). New catalog column `paid_credit` (the
+  server-reported actual credit cost of the row's task; `'0'` = free via card/daily,
+  `''` = never captured; task-level, repeated on each of the task's media rows), added via
+  the three-place schema contract so existing databases auto-upgrade losslessly. Stored at
+  every site that sees the value: `--generate` / `--edit-image` / video runs, the web
+  suite's collect path (`/api/task-status` → `collect_generation`, which also covers the
+  `--watch-backup` live mirror and `--task-id` recovery), `--sync-videos`, and the
+  `--full-meta` / `--backfill-full-meta` task-detail mapping. **Historical recovery works:**
+  the task-detail record returns the cost for old tasks too, so new
+  `--backfill-full-meta --with-credit` (the `--with-loras` pattern) fills the column for
+  rows cataloged before cost tracking existed. Read-only surfacing: the MCP `get_image`
+  detail JSON gains the field, and `--catalog-stats` prints a spend total (counted once
+  per task, never per batch image).
+- **The search box speaks field operators** (audit Tier 6, Curator #3). `key:value` tokens
+  reach every sanely filterable catalog column from the one search string: text fields
+  (`model:` `lora:` `tag:` `title:` `sampler:` `negative:` `natural:` `batch:` `status:`
+  `filename:`) as case-insensitive substrings with the usual `*`/`?` wildcards; numbers
+  (`rating:>=3`, `width:>1000`, `aes:>6`, `likes:`, `steps:`, `cfg:`, `clip_skip:`,
+  `comments:`, `duration:`) with `>` `<` `>=` `<=` or exact; exact ids (`seed:` `task:`
+  `media:` `artwork:` `model_id:`); `video:`/`published:`/`nsfw:` booleans;
+  `created:2026-07` date prefixes (with `<`/`>` compares); and `collection:`/`source:`
+  mirroring their dropdowns. Quoted values carry spaces (`model:"Ether Real"`); unknown
+  keys and malformed values degrade to plain prompt text, search-engine style. Plain
+  free text compiles to byte-identical SQL as before (regression-pinned), everything is
+  parameter-bound (hostile-value tested), and because `_build_where` is shared the grid,
+  prev/next navigation, the filtered CSV export, all the pickers, saved views and the MCP
+  server's `search_catalog` gained the syntax together. Grammar with copy-paste examples
+  in `wiki/Gallery.md` § Search operators.
+- **Every CLI flag is now documented, and `--help` is complete.** The 30 tuning/maintenance
+  flags that existed with no documentation anywhere (edit tuning, video tuning,
+  `--params-json`/`--poll-timeout`, format conversion, download shaping, catalog repair,
+  `--watch-seconds`, `--all-contests`, `--restore-orphans`, …) are covered three ways:
+  a grouped "CLI flags" map in `docs/architecture.md` (with the non-obvious gotchas —
+  `--params-json` overrides everything, edit params clamp to the model, seconds-vs-count
+  units, which modifiers need a partner flag), user-facing sections in `wiki/Backing-Up.md`
+  (download tuning / converting formats / live watch / catalog repair) and
+  `wiki/Generating.md` (edit tuning / video tuning / shared create flags / `--contests`),
+  and real `help=` text added to the two flags that had none (`--audio-language`,
+  `--poll-timeout`).
+- **Activity tray job detail popover (owner field-report 2026-07-23): two stuck
+  generations, no way to recover their task id without server access.** Clicking any row
+  in the Activity tray now opens a small popover (`static/mg-notify.js`'s `JobsCard`) with
+  the job's **Task ID** (one-click copy via `navigator.clipboard`, fully guarded — a
+  missing clipboard API or a rejected write degrades to a silent no-op, never a thrown
+  error), a real clock **Time Sent**, and an elapsed **Time Spent** (live-ticking while the
+  job is still running). Backend fix underneath: `pixai_gallery_backup.py`'s
+  `_reconstruct_jobs` used to let every later event's merge overwrite `ts` with its own
+  timestamp, so a finished job's true registration time was unrecoverable by the time it
+  reached `read_jobs()` — it now stamps a `started_at` off the FIRST event for a job_id and
+  never lets a later merge clobber it (survives compaction too), sourced entirely from
+  timestamps already being logged, no new capture needed. Escape and click-outside close
+  the popover, matching the tray's existing dismiss patterns. Investigated the owner's
+  model/LoRA-icon stretch idea and skipped it: no submit path threads model/LoRA info into
+  `Jobs.register()`/`Jobs.track()` today (four independent call sites across the gallery
+  and the Loom, in both `.jsx` and the compiled bundle), and there's no existing
+  by-id icon lookup to resolve an already-submitted model/LoRA against — real new plumbing
+  across multiple surfaces, not a cheap addition.
+- **The Loom's Footage tab can now import an already-rendered gallery video straight onto
+  the board as real, placeable footage** — the actual gap behind GitHub issue #3, found
+  after live-testing that issue's earlier "picker selection" fix
+  (`docs/AUDIT_2026-07-21.md`, `owner-2026-07-23` row): that fix correctly made a rendered
+  video reachable and visible through the picker, but routed every pick into Cast & Assets
+  (a reusable `@tag` prompt reference), with no way to actually place an already-rendered
+  clip into an Act. Footage's own "Browse library" button now imports the picked video as
+  a REAL shot entry — `status:"done"`, `resultMid` set to the picked media — landing in the
+  project's first act (creating one if the project has none yet) and appearing in Finished
+  Shots immediately; the owner repositions it from there via each shot card's existing
+  "move to…" dropdown, the same mechanism a rendered shot already uses, not new UI. The
+  button is now locked to video only (Cast & Assets keeps its own separate "+ add from
+  gallery," reference use case, video included) since an imported "shot" can only be a
+  video. Duration comes from the catalog's own `video_duration` where present, falling back
+  to a new local `ffprobe` route (`/api/loom/video-duration`, sharing `_find_local_video_file`
+  and `probe_video_duration` with the existing frame-handoff route) for older rows that
+  predate that column. Imported entries carry `imported:true` for provenance — no PixAI
+  task backs the clip — surfaced as a small badge on the board card and the Finished-Shots
+  filmstrip. Clicking the per-shot "Generate video" button on one is a safe, already-live
+  no-op: live-verified against a real running server that it's `<mg-generate-drawer>`'s own
+  pre-existing `_hasAnyRef` guard (static/mg-generate-drawer.js) that catches it today —
+  "Pick a source image first.", no request fired, footage untouched — not the
+  `generateShot`/`shotPayload().hasInput` path (that one is batch-only and unreachable for
+  an imported card regardless, since `batchGenerate` already excludes `status:"done"`
+  shots before ever calling it; it still carries an imported-aware message as a defensive
+  fallback). Both `batchGenerate` and the standing cost estimate already exclude
+  `status:"done"` shots, so an imported clip is never accidentally resubmitted or priced.
+  Fail-first tested: two new pure helpers in
+  `loom/src/loom-mutations.js` (`importedFootagePatch`, `landInFirstAct`,
+  `loom/test/loom-mutations.test.js`), rewritten/extended source-presence coverage in
+  `loom/test/loom-picker-video-import.test.js`, and `tests/test_web_pick.py` for the new
+  server route.
+- **`/health` now surfaces an "Uncataloged" count — on-disk media with no catalog row at
+  all** (audit Tier 6, Curator #9 — the integrity job, confirmed the cheapest backlog item:
+  `collection_health` already walked the disk into `on_disk_ids`; the only gap was a
+  matching unconditional `catalog_ids` set, since the existing catalog query filtered to
+  `filename != ''`). `uncataloged = on_disk_ids - catalog_ids`, mirroring the existing
+  `missing` stat's opposite direction, and deliberately reuses `on_disk_ids`'s existing scope
+  (images only; `gallery/`, `_duplicates/`, `_deleted/`, `branding/` already excluded) rather
+  than widening it. Renders as a new stat tile next to "Missing files", plus — only when
+  nonzero — a note pointing at the library's existing local-file importer (the gallery's
+  "↑ Import" button / `--import-local`) instead of a bare, actionable-less number; no new
+  reconciliation machinery was built. `catalog_ids` is intentionally the *unconditional*
+  media-id set (every row, regardless of filename) so the count matches what `--import-local`
+  itself would actually do — it already treats a blank-filename row's media_id as "already
+  cataloged" via the same `existing_mids` check. Fail-first tested:
+  `tests/test_gallery_filters.py::test_collection_health_uncataloged_is_disk_minus_catalog`,
+  whose fixture is sized so the correct answer, the reverse direction, the union, and the
+  intersection all land on different counts (verified against a reversed-direction mutant and
+  a union mutant, both caught).
+
+### Security
+
+- **`moonglade_mcp.py`'s setup-instructions docstring no longer hardcodes the owner's real
+  Windows username path.** `claude mcp add`'s copy-pasteable example (`C:\Users\gwilkins\...`)
+  and the matching `MOONGLADE_OUT` example (`D:\Moonglade Athenaeum\...`) are now generic
+  placeholders (`C:\Users\<you>\...`, `D:\path\to\...`), matching CLAUDE.md's "no real
+  credentials or user-specific values in any committed file" rule.
+- **The Similar modal ("more like this") no longer leaks unblurred NSFW lookalikes.**
+  `/api/similar` now includes `is_nsfw` in its response, and the client sets `data-nsfw`
+  on its hand-cloned cards, so Privacy Blur now covers this surface like every other one.
+- **Privacy Blur now reaches every surface that shows a catalog thumbnail, closing the
+  last open Tier-1 security item.** `/api/gallery-images` now projects `is_nsfw` alongside
+  `/api/similar`, and it's threaded through the pick-event chain on both host paths (the
+  main gallery page and the Loom) so a picked reference thumbnail knows its own NSFW state
+  too. The gallery Picker, `<mg-gallery-picker>`, the Generate drawer's reference slots, and
+  the Edit tab's single reference slot (found during this pass, not in the original
+  citation) each gained the same `data-nsfw` + blur-on-`body.privacy-blur` treatment `.card`
+  already had — previously none of the four rendered `.card`, so Privacy Blur never touched
+  any of them regardless of the flag.
+
+### Fixed
+
+- **Orphaned jobs no longer spin in the Activity card forever** (`docs/AUDIT_2026-07-21.md`,
+  `owner-2026-07-23`, reproduced against the owner's own `jobs.jsonl`: task
+  `2037215124834251576` logged one `"running"` event and never got a second one, though
+  the generation had actually finished on PixAI's side). Two fixes:
+  - **A task-id recovery (`/api/import-task`) now closes the ORIGINAL orphaned job entry
+    too**, not just the new `import-<suffix>` job it logs for the recovery action itself —
+    on either success path (a fresh collect, or the "already cataloged" short-circuit).
+    Previously, recovering a stuck task correctly imported the media but left the Activity
+    card spinning on the orphan forever, permanently disconnected from reality.
+  - **`/api/jobs` now runs an ongoing reconciliation sweep** (`resolve_orphan_jobs(...,
+    min_age=JOBS_ORPHAN_SWEEP_AGE)`, same "runs opportunistically off an existing poll"
+    shape as `maybe_compact_jobs` beside it) that re-checks any `generate` job stuck
+    `"running"` for more than `JOBS_ORPHAN_SWEEP_AGE` (30 minutes — comfortably past any
+    real single generation, including video's own 600s `--poll-timeout`, while still
+    surfacing an orphan same-day rather than waiting on `JOBS_MAX_AGE`'s 24h silent
+    drop-from-view) against PixAI's real task status. A job that resolves for real gets its
+    true terminal event; a job whose status check itself fails (PixAI unreachable) is
+    marked a new, distinct, dismissable `"stale"` state instead of being silently left
+    exactly as-is or guessed into a false `done`/`failed` — the owner can always see that a
+    job got stuck. The live-mirror watcher's own startup sweep is unchanged (`min_age=0`,
+    checks everything once immediately). Fail-first tested:
+    `tests/test_web_pick.py::test_import_task_closes_the_original_orphaned_job_entry` (+ the
+    already-cataloged and dismissed-orphan variants beside it) and
+    `tests/test_jobs.py::test_stale_job_reconciliation_marks_stale_when_pixai_cannot_be_reached`
+    (+ the min-age-gate, real-resolve, and ts-refresh-throttle variants beside it, plus an
+    end-to-end `/api/jobs` test).
+- **The Loom's own Activity tracker widget no longer goes stale mid-render, and no longer
+  visibly disagrees with the per-shot "RENDERING… (task …)" badge** (owner field-test
+  2026-07-23, `docs/AUDIT_2026-07-21.md` owner-2026-07-23 lens — "functionally dead" tracker
+  and "status mismatch" were the same root cause). `generateShot` deliberately registers each
+  submission with the shared job log via `Jobs.register()` only (no second poll loop — the
+  Loom's own `pollShot` already owns real completion handling), but that left the shared
+  Activity tray (`static/mg-notify.js`'s `JobsCard`) with no way to learn a shot finished
+  except its own independent, unsynchronized ~2.5–7s poll cycle — a second hop the gallery's
+  equivalent path never has, since `Jobs.poll()` there calls `JobsCard.refresh()` the instant
+  it sees a terminal phase. `pollShot`'s `tick()` now makes that same call on its own `done`
+  and `failed` branches, so the tray catches up the moment the shot's own (live, working) poll
+  learns the truth, instead of drifting until its own cycle happens to catch up. The per-shot
+  badge itself is unchanged. Fail-first tested:
+  `loom/test/loom-activity-tracker-live-update.test.js`.
+- **The Multi-Reference picker no longer corrupts a shot's composed prompt just by being
+  opened** (owner-filed, pinned from a frame-by-frame video review: `docs/AUDIT_2026-07-21.md`
+  `owner-2026-07-23` row "Loom shot-card reference sending bugs out past 2 images"). Two
+  un-synced numbering systems were both writing "@imageN" syntax: each cast asset's own
+  project-global tag (assigned once, in cast-add order — a cast member added 4th is "@image4"
+  forever, project-wide) vs. the shared `<mg-generate-drawer>`'s own Multi-Reference bank,
+  which has no concept of that global namespace and always numbers whatever it holds
+  "@image1", "@image2", ... purely by array position. The two only agreed when a shot used
+  every cast member from @image1 up with no gaps; the moment it didn't, `shotText()`'s
+  "Keep consistent" line could cite a real, valid-looking tag the drawer's own bank had
+  never assigned to that picture at all — and opening the "Pick from your gallery" picker
+  (which steals DOM focus off the drawer's prompt box, forcing a synchronous re-chipify on
+  blur) was enough to let that mismatch reassign a citation onto the wrong picture, drop it
+  entirely, or freeze the mangled result as a hand-edited `promptOverride` ("override
+  active"). Fix: `loom-core.js`'s new `shotImageRefs()`/`positionTag()` give `shotText()`
+  and `shotPayload()` one shared, per-shot positional numbering, so the composed prompt can
+  never disagree with the drawer's own bank about what a given `@imageN` means. Also fixed:
+  picking a 3rd/4th reference now actually persists (`pickTarget()` + a durable
+  `mg-pick-request` handler) instead of vanishing the moment any other field re-triggered
+  the drawer's prefill — and that same durability now covers the drawer's other two pick
+  paths, which had the identical gap: i2v/flf's Start/End Frame slots (write directly into
+  `c.openFrame`/`c.closeFrame`) and r2v's separate video-reference bank (new
+  `pickVideoTarget()` — video refs store their media id in `c.refs`' `.source`, not
+  `.mediaId`). Both were already correct at generation time (the drawer's own submit payload
+  reads its live in-memory slots directly) but invisible everywhere else — Deep Focus's own
+  frame/ref UI, the composed prompt — and silently wiped by the next prefill. Fail-first
+  tested: `loom/test/loom-reference-picker-corruption.test.js`,
+  `loom/test/loom-picker-frame-video-persistence.test.js`.
+- **Opening/Closing Frame could lose their own `@imageN` slot to a cast member — the THIRD
+  manifestation of the un-synced-numbering bug class the previous two entries fixed**
+  (owner live-test 2026-07-23: a shot with 2 cast members and both Opening Frame + Closing
+  Frame set (FLF mode) showed "OPENING FRAME @image1" / "CLOSING FRAME @image2" in both the
+  shot detail popover and the Generate drawer, while the composed prompt cited @image1/
+  @image3/@image4 for cast and the drawer's live Image References bank told yet a third
+  story — "Greg in the cast has usurped the image ref in the generator," in the owner's own
+  words). Root cause: `c.openFrame.tag`/`c.closeFrame.tag` are a SEPARATE, freely
+  owner-editable piece of state (a plain text `<input>` in `FrameSlot`, `master-storyboard.
+  jsx`) from a cast asset's own project-global tag — `shotImageRefs()`'s old sort ordered
+  everything by raw tag TEXT, so a cast tag that happened to tie with a frame's own stored
+  tag (both claiming e.g. "@image1") always won the disputed slot, because cast entries were
+  pushed into the sort array before frame entries by construction. The frame's own UI kept
+  statically showing the number it thought it had, while the real, live-computed number
+  (what the composed prompt and the drawer's bank actually used) silently disagreed. Fix:
+  Opening/Closing Frame now ALWAYS reserve the first slot(s) — `@image1`, and `@image2` when
+  Closing Frame applies (FLF only) — regardless of any raw `.tag` stored on the frame or any
+  cast/ref tag that collides with it; cast/refs fill in from `@image3` on. They're
+  structurally load-bearing for FLF/i2v generation (not flavor, like a cast portrait), and
+  the UI already presents them first, above "Other references & @tags." `shotText()`'s own
+  frame-description lines ("Opening frame @imageN: ...") now read the live `positionTag()`
+  too, instead of the frame's raw, independently-driftable `.tag` — and `FrameSlot`'s tag
+  field in both surfaces is now a read-only display of that same live number, not a second
+  independently-settable "@imageN" next to the shot's real numbering. Also closed a gap the
+  reservation scheme would otherwise have made easier to hit: PixAI's real caps (6 image
+  refs, 3 video refs on a reference-video generation) were never enforced anywhere in the
+  submit path — `shotImageRefs()` now truncates to 6 (frames always survive the cut, since
+  they sort first) and `shotPayload()` truncates `video_refs` to 3, mirroring the existing
+  6-image truncation `pixai_gallery.py`'s `bulkSendVideo()`/`Gen.addVideoRefs()` already
+  apply to the gallery's own bulk-send-to-video path. Follow-up to commits `2e714fd` and
+  `c7aaff2` above. Fail-first tested: `loom/test/loom-reference-picker-corruption.test.js`
+  (new `describe` blocks "frame/cast @imageN slot collision" and "PixAI's real caps"),
+  confirmed to fail pre-fix for the diagnosed reason (a cast tag tie beats the frame's own
+  claimed slot by push order; no cap truncation existed at all).
+- **Generate no longer locks until the task finishes — PixAI itself runs generations in
+  parallel, so every gen panel now does too** (owner field-test 2026-07-23). The lock was
+  two separate mechanisms, both fixed the same way: the gallery's `runTask()` (shared by
+  Generate/Edit/Enhance/Fix) and the shared `<mg-generate-drawer>` (the gallery's Video tab
+  and the Loom's Deep Focus) each disabled their Go button from submit until the task's poll
+  reached a terminal phase. Both now free the button the moment the **server answers the
+  submit** — accepted or rejected — not when the render finishes, and each concurrent
+  submission gets its own line appended into the result strip instead of one shared
+  `innerHTML` a second submission would overwrite (the drawer's poll loop also moved off a
+  single shared timer that a second submission used to clobber via `clearTimeout`, onto a
+  per-submission timer set). The Loom's per-shot pipeline (`generateShot`/`pollShot`/
+  `batchGenerate`) needed no change — it already keys generation state per shot id and fires
+  polling without awaiting it, so different shots already rendered concurrently;
+  `batchGenerate`'s own `todo` filter already refuses to resubmit a shot still `"wip"`. Spend
+  gates (the Fix tab's `window.confirm`, the live `/api/price` check) are unchanged and still
+  gate every submission. Fail-first tested: `tests/test_concurrent_generations.py`,
+  `loom/test/mg-generate-drawer-concurrent.test.js`,
+  `loom/test/loom-batch-generate-concurrency.test.js`.
+- **Videos no longer corrupt on collect** (owner field-test 2026-07-23: two clips fine on
+  PixAI's side truncated mid-play locally — byte forensics traced it to two concurrent
+  `ffmpeg +faststart` remuxes interleaving writes into the SAME deterministic temp file,
+  because the live-mirror watcher and a `/api/task-status` done-poll both collected the
+  same finished task seconds apart). Three layers, each fail-first tested:
+  - `video_faststart()` uses a **unique temp name per invocation** (uuid suffix, real
+    extension kept last so ffmpeg still picks the muxer) — the load-bearing fix, and the
+    only one that also covers the separate `--watch-backup` process; the swallowed
+    remux-failure path now `vlog()`s instead of hiding a lost race.
+  - **Single-flight collect per task id** inside the gallery process: the live-mirror
+    watcher, `/api/task-status`, and `/api/import-task` share a per-task lock — the first
+    entrant runs the real `collect_generation`, a concurrent entrant waits and then
+    answers from the catalog without re-downloading.
+  - `download()` now **verifies bytes written against `Content-Length`** (when the body
+    is not content-encoded) and fails a short body through the existing retry/backoff
+    path instead of promoting a truncated `.part` — closes the adjacent mid-stream-cut
+    hole next to the B1 zero-byte guard (not the cause of this incident, but real).
+- **Four silent-failure paths now surface real errors instead of lying about success.**
+  `/api/skin` and `/api/achievements?mark=1` used to answer 200 even when the disk write
+  failed; they now report the failure and the actually-active value. `/api/loom/delete`
+  used to answer `{"ok": true}` on a real `OSError`, indistinguishable from "already
+  gone"; it now distinguishes the two. Prompt-snippet saves and saved-view saves were both
+  fire-and-forget against endpoints that can answer 200 with an error body — both now show
+  a Toast on failure.
+- **A transient PixAI blip on `/api/task-status` no longer bricks the poller.** It used to
+  answer `phase: "failed"`, which the client treats as terminal and stops polling — even
+  though the code's own comment said this exact branch should be a soft, non-terminal
+  retry. Now answers `phase: "running"` so polling continues as intended.
+- **`bulkSendVideo()` no longer silently drops picks past a stale cap.** It pre-sliced to
+  9 images before handing off to a drawer that only holds 6; the extra 3 vanished with no
+  signal. Now passes the full selection and warns how many were left out.
+- **`/export-zip` no longer ships silently-untouched files with no signal.** A failed
+  convert-to-format or embed-prompt step used to fail silently and ship the original
+  unchanged; now collects every such case into a `_export_warnings.txt` inside the zip
+  plus an `X-Export-Warnings` response header.
+- **The stray root `HEAD` file, finally root-caused.** Two of `tests/test_panel.py`'s ten
+  `FakeProc` ffmpeg mocks patched `subprocess.Popen` globally with no command guard;
+  `create_app()`'s own `git rev-parse --short HEAD` call rode the same patched `Popen` and
+  got its output written to a file literally named `HEAD` in the repo root. Both classes
+  now guard on the command being `ffmpeg`. Fail-first verified: reverting the guard
+  reproduces a freshly-written `HEAD` file; restoring it does not.
+- Fixed a timing-flaky live-server test in `tests/test_port_preflight.py` (a fixed 0.4s
+  probe timeout could occasionally lose a scheduling race under full-suite thread
+  contention) and tightened three weak assertions in `tests/test_js_syntax.py`,
+  `tests/test_read_only.py`, and `tests/test_web_pick.py` that couldn't actually catch
+  the regressions their own docstrings described.
+- Fixed a Loom bug where the shared `<mg-generate-drawer>`'s own Camera and quality
+  controls rendered alongside the Loom's equivalent controls (missing `data-loom-ctx`
+  attribute on the mount) — added, with a new regression test.
+- Extended a font-inheritance fix (host-neutral `font-family` on toast/tray roots, shipped
+  2026-07-21) to two roots it missed: the achievement celebration and the Folio of Honors
+  panel, both of which fell back to the browser default on `/loom`.
+- Native `<select>` styling made consistent across the Generate drawer and the
+  gallery-picker's filter dropdowns (some had the custom lavender-caret treatment,
+  some didn't, with no reason for the split).
+- The persistent Activity FAB no longer permanently sits on top of the grid's bottom-left
+  corner eating clicks — the grid now reserves clearance for it.
+- Added the missing delete-view control for saved views — the server route existed, no UI
+  ever called it.
+- **`--generate-video`/`--reference-video` now snap their duration to an allowed length,
+  matching what the Loom already did.** `--reference-video`'s default was also inconsistent
+  across three places in the source (5, 15, and 15) — unified to 5, matching its i2v sibling.
+- **`--suggest-prompt` now refuses a video up front** instead of hitting PixAI's image-only
+  endpoint and surfacing a raw 500, matching the guard the web gallery already had.
+- **The `_deleted/` quarantine is now respected by all six bulk file-tree walks, not one.**
+  `cmd_organize` — the only one that actually moves/deletes files — could silently
+  hard-delete or resurrect a purged file that happened to share a media_id with a live
+  copy; reproduced and fixed, along with resume, the audit, `--import-local`, and
+  `duplicate_groups`.
+- **`--sync-artworks --with-videos`'s resume check now actually recognizes an
+  already-downloaded video** instead of re-resolving it from the network on every run.
+- **The Loom's frame-handoff fallback (`/api/loom/handoff`) now requires an exact media_id
+  match and excludes quarantined files**, closing a path where a purged or
+  substring-matching clip could get uploaded to seed the next shot.
+- **A backup that fails partway through `--sync-artworks` (or loses a page mid-pagination)
+  now reports it**, through the same `done_with_errors` signal `--sync`/`--download`
+  already had, instead of a complete-looking "done."
+- **Per-account storage (saved views, prompt snippets, Loom storyboards, toolbox presets)
+  no longer collides on Windows for usernames differing only by case** ("Nel" and "nel"
+  used to share one file on disk, reproduced and confirmed fixed for all four stores).
+- **The Loom's board cards now show when a shot's opening frame is already continuity-linked
+  to the previous shot's closing frame** — a small badge, restoring a pure-logic function
+  (`frameLinked`/new `continuityLinked`) that had zero callers since the V1→V2 migration.
+- **The live-mirror watcher no longer goes silently dead while still reporting itself
+  healthy** (2026-07-23, `docs/AUDIT_2026-07-21.md` owner-2026-07-23 — same "Job Tracker"
+  reliability thread as the orphaned-jobs fix above, a distinct root cause). Live-checked
+  via the app's own `/api/watch/status` on a real running server: `connected: true,
+  last_error: null`, but `last_event_at` was ~21 minutes stale despite active generations
+  finishing in that window — two of three generations that night sat spinning in the
+  Activity tray for 13+ minutes even though PixAI had actually finished them in under a
+  minute. The WebSocket had gone silent (no error, no close frame, not even a keepalive
+  ping) but nothing was watching for that shape of failure — `_watch_loop`'s reconnect/
+  backoff logic only runs when `core._watch_events_async` raises, and a socket that just
+  stops producing frames never raises anything on its own. Fix: `_watch_events_async`'s
+  receive loop now awaits each frame with `asyncio.wait_for(ws.recv(),
+  timeout=_WS_STALE_TIMEOUT)`; a lapse raises the new `WatchStaleError` (a `PixAIError`
+  subclass), which lands in `_watch_loop`'s existing `except`/backoff/reconnect exactly
+  like any other dropped connection — no new thread, no polling, one bound on how long a
+  single `recv()` may block. `_WS_STALE_TIMEOUT` = 240s (4 minutes): comfortably past any
+  real per-frame cadence (the incident's own generations finished in under a minute, and
+  ordinary keepalive pings are far more frequent than that) so a healthy connection is
+  never cycled just for a quiet stretch, while still decisively shorter than the ~20-minute
+  gap this was built to catch — see the constant's own comment in
+  `pixai_gallery_backup.py` for the full reasoning. Deliberately NOT gated on whether jobs
+  are "actively running": a watcher that's been silently dead for a while can't be trusted
+  to know what's actually running either, so an unconditional idle-timeout is the simpler,
+  safer check. `/api/watch/status` gains two additive fields for visibility —
+  `stale_reconnects` (count) and `last_stale_reconnect_at` (timestamp) — surfaced in the
+  Panel's watch-status line only once nonzero; every existing reader of that endpoint is
+  unaffected. Fail-first tested: `tests/test_watch.py::
+  test_watch_raises_when_connection_goes_stale_despite_looking_healthy` (confirmed failing
+  against pre-fix code — `AttributeError: module has no attribute '_WS_STALE_TIMEOUT'` —
+  then green) plus a companion `test_watch_pings_reset_the_staleness_clock` proving a
+  steady trickle of bare keepalive pings, with no real events at all, does NOT trip the
+  watchdog. Out of scope, deliberately: the separate, still-unresolved bug in the
+  browser's own `/api/task-status` poll that also failed to catch those two stuck jobs —
+  a different mechanism, not touched here.
+
+### Removed
+
+- Deleted three zero-caller GUI-era wrapper functions (`run_audit`, `run_dedup`,
+  `run_verify_dupes` — the removed PySide6 GUI was their only caller) and `is_lora_type()`
+  (referenced nowhere). The real underlying logic is untouched.
+- Deleted two orphaned CSS rules (`.gen-ce`, `.vp-chip`) with zero producers left anywhere
+  in the app.
+- Deleted the dead `--variant` CLI flag's whole self-referential support cluster
+  (`detect_variant`, `test_variant`, `media_url`, `MEDIA_TMPL`, `VARIANT_CANDIDATES`) — the
+  flag itself was already gone; this was the ~55-line machinery nothing called anymore, plus
+  the module docstring's stale claim that the script "auto-detects the full-res variant."
+- Deleted the unused `ARTWORK_DETAIL_HASH` config read (its live sibling `ARTWORK_LIST_HASH`
+  is untouched) and the dead `generateShot` prop threaded through the Loom's `LoomV2`
+  component (per-shot generation moved to `<mg-generate-drawer>` some time ago).
+- A broader dead-CSS-selector sweep (every class selector in the gallery's inline
+  `<style>` blocks, cross-checked for a real producer) found and removed two more:
+  `#gen-drawer.dock-right` (structurally unreachable) and `#model-preview .mp-tags`
+  (never populated).
+
+### Added
+
+- A "Contact sheet" button next to "Download collection" — the `?collection=` printable
+  contact-sheet route existed with no way to reach it from the UI.
+
+### Docs
+
+- `docs/architecture.md`: documented the 5 shared `mg-*.js` web components as a group for
+  the first time; corrected the thumbnail-cache description (short-lived + ETag, not
+  immutable) and `already_downloaded()`'s real behavior.
+- Fixed stale claims across `wiki/How-It-Works.md` (`--watch`/`--claims` have web
+  surfaces, not CLI-only), `wiki/Generating.md` (`--suggest-prompt` caveat), and
+  `wiki/Setup.md` (`cryptography` isn't in `requirements.txt`).
+  `README.md`/`CONTRIBUTING.md` got several small corrections (Python 3.9+ floor, orphaned
+  screenshot captions, module count).
+- Added `SECURITY.md` (private vulnerability reporting is off for this repo; falls back to
+  the existing email convention).
+- `.gitignore` now generalizes ignored generated-file patterns to any `--out` directory
+  name, not just the default `pixai_backup/` (previously only `jobs.jsonl` had this).
+- `docs/curation_reference_builder.py` (a committed template script) no longer hardcodes a
+  personal path — reads `CURATION_INPUT_DIR`/`CURATION_OUT_DIR` env vars instead.
+- Corrected four false claims in `docs/architecture.md`'s Invariants section (one shared
+  media-id matcher, checked-before-any-network-call, catalog-as-source-of-truth for
+  organize, and `media_id_of()` as a single source of truth all overstated the real,
+  verified behavior) and a matching false claim in `CONTRIBUTING.md`.
+- Corrected two nearby code comments that named only some of the surfaces gated by the
+  header's `is_local` flag, omitting the Import button (which is separately, correctly
+  re-checked as LOCALHOST-tier server-side — never a real security gap, just a misleading
+  comment) — and `_task_detail_query`'s docstring, which overclaimed a fallback its two
+  real CLI callers don't actually get.
+- Documented the video-generation model roster for the first time: all 7 engines, the real
+  5/6/10/15s duration set (6s was never mentioned anywhere), per-model duration caps,
+  which two models no free card ever covers, and which Shot modes are gated per model.
+- `wiki/Collections.md` now documents the "Remove from «collection»" action and the
+  Actions ▾ menu it lives behind.
+
+### Fixed
+
+- **`--rebuild-similar` no longer re-embeds quarantined or purged images.** `pixai_similar.py`'s
+  `scan_dir` excluded only `gallery/` (thumbnails); it now also skips `_duplicates/` (--dedup)
+  and `_deleted/` (gallery delete), matching `find_image_file`/`find_files_for_media_id`'s
+  existing exclusion set (INVARIANT 6). A purged or quarantined image can no longer surface as
+  a "similar" match. Fail-first tested:
+  `tests/test_similar.py::test_scan_dir_excludes_quarantine_dirs`.
+- **`numpy` is now a declared dependency.** `pixai_similar.py` imports it unconditionally at
+  module scope, but it was missing from `requirements.txt` — a clean install could break on a
+  machine where nothing else happens to pull it in transitively. Fail-first tested:
+  `tests/test_requirements.py::test_numpy_is_a_declared_dependency`.
+- **The Loom's corner FABs (Activity chip, help button) no longer paint over the Deep Focus
+  veil.** `.lv-df-veil` renders as a DOM descendant of `.lv-overlay`, so its `z-index:450` only
+  ever competed inside `.lv-overlay`'s own stacking context — at the root, the whole overlay
+  was just `z-index:400`, which lost to the body-level `#jobs-fab`/`#jobs-tray` (401/402).
+  `.lv-overlay` now picks up a `.lv-overlay-df` modifier class while Deep Focus is open, raising
+  its own root-context z-index to 450 (Deep Focus's own intended value) — no DOM move needed.
+  `loom/dist/master-storyboard.bundle.js` rebuilt to match. Regression-tested:
+  `loom/test/loom-df-veil-stacking.test.js`.
+- **A rejected Mode (`inferenceProfile`) on the web Generate tab no longer surfaces PixAI's raw
+  GraphQL error.** Found live 2026-07-24. `inferenceProfile` is model-type-specific on PixAI's
+  side (e.g. an SDXL-family model rejects `pro`/`ultra` outright, `unknown inferenceProfile
+  "ultra" for model type "SDXL_MODEL"`) — the CLI's `--generate` had quietly self-healed this
+  since Mode shipped (drop the param, retry once on the model's default), but the shared
+  `submit_generation()` choke point every web route goes through (`/api/generate`, `/api/edit`,
+  `/api/loom/generate`) had no such protection, so a web user hitting an unsupported Mode just
+  got the raw rejection text. **Primary fix:** the retry now lives in `submit_generation()`
+  itself (`pixai_gallery_backup.py`), so every current and future caller gets it for free;
+  `run_generate` was simplified to call through it instead of duplicating the try/except (it
+  still keeps its own upfront `_check_read_only()` call ahead of `_apply_kaisuuken`'s free-card
+  network call — see that function's updated docstring for why). **Backstop:** `friendlyGenErr`
+  (`static/mg-generate-drawer.js` + `loom/src/loom-mutations.js`, kept in parity by their
+  existing test) now recognizes an `inferenceProfile` rejection and shows "That quality setting
+  isn't available for this model — try Auto instead." instead of raw GraphQL text, for whatever
+  the retry doesn't catch. **Separate gap closed in the same pass:** the Gallery Image tab's own
+  `renderResultInto` never called `friendlyGenErr` at all (unlike the Video tab's
+  `<mg-generate-drawer>`, which already did) — it now has its own local copy (a third
+  hand-maintained port, same reasoning as the drawer's) and calls it, so every error on that tab
+  reads as a message instead of raw JSON/GraphQL text. **Deliberately not built:** client-side
+  gating of the Mode `<select>` by the selected model's supported profiles — no response
+  anywhere (model-search, model-version) currently exposes that set, and building it would mean
+  inventing a new capability matrix to prevent an error the retry already recovers from
+  gracefully; the retry-and-succeed behavior is arguably better UX than a block (nothing to
+  configure, always current). Fail-first tested: `tests/test_model_grid.py::test_submit_generation_retries_on_inferenceprofile_rejection`
+  (plus two scope-guard siblings and an end-to-end `run_generate` regression test);
+  `loom/test/loom-mutations.test.js` and the extended
+  `loom/test/mg-generate-drawer-parity.test.js` (now checks all three `friendlyGenErr` copies,
+  not just two). `wiki/Generating.md` and `wiki/Troubleshooting.md` corrected — both had just
+  been updated hours earlier the same night to accurately describe the *pre-fix* gap, which
+  this fix immediately made stale again.
+- **Owner-only controls no longer walk a LAN session through a confirm dialog just to
+  403 it.** The "↑ Import" button, "Set launcher icon" (Panel → Branding), and every
+  destructive Panel Maintenance action (Organize, Dedup — apply/delete, Rebuild
+  thumbnails, Restore orphans, Undo organize) all used to render for ANY logged-in
+  session, local or LAN, because their visibility only checked the blanket `is_local`/
+  `panel_is_local` "is this session authorized at all" flag — never the same real
+  `_is_local_request()` gate their target routes (`/api/import-local`,
+  `/api/branding/shortcut`, `/api/panel/run`'s destructive branch) already enforced
+  server-side (`docs/AUDIT_2026-07-21.md` P3 and the reachability-lens finding under
+  §5, both explicitly left as "an owner UX call, not made" — the owner made the call
+  2026-07-24: gate visibility on the real check). Not a security hole (every
+  underlying route was already correctly gated) — a UX fix. Import now renders behind
+  a new `is_true_local` template flag (the same un-hardcoded `_is_local_request()`
+  value `can_delete_cloud` already used for "Delete from PixAI"); "Set launcher icon"
+  and the Maintenance tab's destructive buttons now key off the Panel's existing
+  `panel_is_local` (computed since 2026-07-22, previously wired only to the Users
+  tab) — destructive actions are filtered out of the `ACTIONS` payload server-side
+  before it ever reaches the client, with one explanatory note replacing the
+  now-empty "Changes files · asks first" row instead of silently going blank. All
+  three now match the Panel Users tab's own established precedent (hide a control the
+  caller can't use, backed by the real server-side gate) instead of a dead-end
+  confirm-then-403. Fail-first tested:
+  `tests/test_route_tiers.py::test_index_withholds_the_import_button_from_a_lan_session`
+  and `::test_panel_withholds_set_launcher_icon_and_destructive_buttons_from_lan`
+  (confirmed failing against pre-fix source — both controls present in a LAN
+  session's rendered HTML — green after), plus their localhost-still-sees-them
+  companions.
+
+### Fixed (2026-07-24 doc/dead-code cleanup, `docs/AUDIT_2026-07-21.md`)
+
+A batch of small, independently-verified doc/comment fixes and dead-code removals from the
+audit board. Each was re-verified against current code before touching it — one finding
+(`build_chat_edit_parameters`'s kaisuukenId NOTE) turned out already fixed, and the
+`--open-browser` flag turned out to live in `pixai_gallery.py` (not
+`pixai_gallery_backup.py` as filed) and to be a genuine, working, human-typed CLI
+convenience, not dead code — left alone in both cases, documented in the audit board.
+
+- `/api/view-presets`'s docstring no longer claims there's no delete-view UI — a Delete
+  button next to the saved-view select has existed for a while, wired to the same
+  pre-existing `{delete: name}` endpoint shape the docstring already anticipated.
+- `tests/test_route_tiers.py`'s stale "FINDING (2026-07-19, unresolved)" comment about
+  `api_server_stop`/`api_server_restart` is corrected: the owner decided 2026-07-19 they
+  stay LOGIN-tier on purpose, and the routes' docstrings already say "Login required," not
+  "Localhost-only" — the finding was closed, the comment just never caught up.
+- `docs/architecture.md` and `wiki/How-It-Works.md`'s on-disk layout diagrams now note the
+  Pixeltable semantic-search index, which lives entirely outside `out_dir` (Pixeltable's own
+  default home, `~/.pixeltable`) and was undocumented in both.
+- `wiki/Generating.md`'s Mode-fallback paragraph sat under the "web gallery" heading even
+  though its last sentence described CLI-only behavior, reading as if the drawer had the
+  CLI's auto-fallback-and-retry when it (and the Loom, which reuses the same submit path)
+  does not. Moved the CLI fact to the CLI section; `wiki/Troubleshooting.md` was already
+  correct.
+- `config.example.json`'s auth comments corrected two false claims (AUTH_USERS is not
+  "CLI only" — the web bootstrap and Control Panel's Users tab can also write it; login is
+  not a blanket "gates every non-localhost request" — it's three tiers, including a small
+  PUBLIC surface reachable with no session at all) and added the previously-undocumented
+  `AUTH_EPOCH_SEQ` key, matching how `ARTWORK_LIST_HASH` was documented. The same
+  "gates every non-localhost request" pre-universal-login phrasing, stale since the
+  2026-07-19 change that removed the localhost bypass entirely, was also corrected in
+  `pixai_gallery.py`'s `/login` docstring, `pixai_gallery_backup.py`'s web-accounts
+  comment block, and `tests/test_web_auth.py`'s module docstring.
+- `docs/curation_reference_builder.py`'s own docstring now cites
+  `docs/archive/CURATION_STANDARD_2026-07-17.md`, where the file actually moved to.
+- `wiki/Generating.md`'s `--suggest-prompt` caveat dropped an unsubstantiated "fails on
+  sufficiently old media" guess (the endpoint is image-only, full stop — not age-limited)
+  and now just says the example id is illustrative.
+- `wiki/Collections.md`'s "Send to Video … up to 9" is corrected to 6, the real cap
+  (`Gen.addVideoRefs()`/`bulkSendVideo()`).
+- Restored, in general form, a "watch for stale duplicate checkouts on this machine"
+  warning that a 2026-07-17 doc consolidation dropped from `docs/STATE.md` without ever
+  restoring — the specific folder it originally named is confirmed gone, so it's now stated
+  as the standing rule rather than reattached to a path that no longer exists.
+- Removed a genuinely-unused local: `App()` in `loom/master-storyboard.jsx` destructured
+  `generateShot` from `useGenerationPipeline()`'s return value with no remaining use, after
+  an earlier fix stopped threading it into `LoomV2` as a prop.
+- `static/mg-gallery-picker.js`: removed 3 of its 4 documented optional attributes
+  (`show-source`, `show-upload`, `show-copy-prompt`) — each had zero callers anywhere
+  except the component's own standalone dev-verification page
+  (`static/mg-gallery-picker.html`, updated to match) and no automated-test coverage.
+  `show-type` stays; the Loom's own mount uses it.
+- `pixai_gallery_backup.py`'s `_BUCKET_PRIORITY` comment no longer implies `--organize`
+  currently produces or prefers `batches/` folders — no reachable code path has been able
+  to create one since the old live-organize-into-batches mode's `organize_adv_live` flag
+  lost its only CLI wiring; a `batches/` folder found on disk today is legacy data only,
+  still worth preferring as a keeper if one exists. (The deeper dead `organize_adv_live`
+  branches inside `run_download` itself are a separate, larger follow-up, flagged
+  out-of-scope for this pass.)
+- `docs/STATE.md` now records why `<mg-cost-badge>`'s `compact` attribute and `mg-cost`
+  event have no production consumer yet without being dead code (audit O14): both are
+  declared public API of a deliberately host-agnostic component, banked for the
+  not-yet-wired cost-to-finish pill and the D-12 web-component consolidation.
+
+### Changed (2026-07-24, picker/field unification — O12, O13, L536, reclassified HIGH severity)
+
+The three items above were separately-tracked symptoms of ONE root cause: the gallery and
+the Loom each hand-rolled their own model picker, gallery/reference picker, and generate
+field set, so any given fix (LoRA support, a Size slider, a field) only ever landed on
+whichever surface someone happened to be touching. This pass finishes the migration that
+makes that class of drift structurally impossible: both surfaces now run on the SAME
+`<mg-model-picker>`/`<mg-gallery-picker>` components, and the gallery's old duplicate
+implementations are deleted, not just patched around.
+
+**L536 — the Loom's Image tab reaches full PixAI field parity.** Advanced (negative/steps/
+CFG scale, plus a "using this model's tuned preset" note + reset, mirroring the gallery's
+`applyModelDefaults()` exactly), all 8 aspect-ratio buttons, Size + custom W×H, Mode, Count,
+Seed, High-priority (Turbo), and Prompt helper — same field names/defaults/order as the
+gallery's own Generate tab. One new `buildImgGenBody()` helper (`loom/src/loom-mutations.js`)
+assembles the exact `/api/generate` body from model + LoRAs + the new field state, shared by
+both the debounced cost-preview badge and the real submit, so the price a user agrees to can
+never drift from what's actually sent. Base-model picks now also resolve `model_type` (the
+Loom never fetched this before), which incidentally closes a real dangling loose end found in
+review: the LoRA↔base incompatibility warning (`loraIncompat()`) was imported into
+`master-storyboard.jsx` with zero call sites since D-11 explicitly deferred it for exactly
+this missing piece — it's wired now, matching the gallery's own warning chip + Go-button gate.
+
+**O12 — the gallery's Generate tab now runs on `<mg-model-picker>`, not `#model-flyout`.**
+Two lazily-mounted instances (`kind="base"`, and `kind="lora" multi market` for LoRAs) replace
+the flyout's own hand-rolled search/grid/hover-preview/market UI entirely — `search()`,
+`render()`, `selectCard()`, `toggleLora()`, and the card-hover debounce are deleted from
+`pixai_gallery.py`, not left alongside a second, newly-unreachable copy. `<mg-model-picker>`
+gained a new opt-in `market` attribute (Popular/Newest sort + the same 6 category chips the
+old flyout had for LoRAs — `/api/model-search` already accepted `sort=`/`category=`, only the
+client UI was missing) so the gallery's LoRA browsing loses nothing in the swap; OFF by
+default, so the Loom's existing LoRA mount is untouched. Page size (`size=12` → `24`, matching
+the old flyout) shipped as an earlier, safe, additive step in this same pass.
+
+**O13 — the gallery's own picker is `<mg-gallery-picker>`, not `#pick-modal`.** The `Picker`
+module is a thin mount/unmount bridge now (mirroring the Loom's existing `openPick`/
+`bindGalleryPicker` pattern) instead of a second, independent PickerCore-rendering
+implementation; its public contract (`open(callback, opts)` / `close()`) is unchanged, so its
+four call sites (the img2img reference picker, the Edit tab's source picker, the additional-
+reference slot, and `<mg-generate-drawer>`'s `mg-pick-request` bridge) needed no changes.
+`show-source`/`show-upload`/`show-copy-prompt` — all three real, gallery-only features — were
+restored to `<mg-gallery-picker>` (see Removed, 2026-07-24 doc/dead-code cleanup, above: a
+same-night dead-code sweep had just deleted them as having "zero callers outside the dev
+harness," which stopped being true the moment this migration needed them) so the swap loses
+nothing; the Size slider O13 originally flagged as gallery-missing arrives for free as part of
+adopting the same component the Loom already had it on.
+
+Both migrations were live-verified against a real running server (synthetic local catalog,
+real thumbnail files, no PixAI network touched): logged in through the real `/login` page,
+drove the gallery's reference-image pick, the Edit-tab source pick, the video-drawer's
+`mg-pick-request` bridge, a base-model pick (including its version/metadata resolve and
+error-handling path), and a LoRA multi-select add/remove — all through the real DOM event
+path a click would take, not just source assertions. Zero console errors throughout. Full
+suites green at every step: 993 Python, 261 Loom.
+
+Two small, deliberate, documented behavior changes from the consolidation, neither treated as
+a silent regression: (1) the LoRA picker's old hard cap of 6 (`if(loras.length>=6) return;`)
+is not reproduced — `<mg-model-picker>`'s own multi-select already optimistically highlights
+a picked card before the host's listener ever runs, so silently refusing the add here would
+leave the picker showing a card as selected that never made it into the submitted LoRA list,
+which is worse than no cap; the Loom's identical mount has run uncapped since D-11 with no
+issue. (2) Removing a LoRA via its chip's own × no longer force-refreshes the picker grid (the
+old `search()` this relied on no longer exists) — the removed entry's card can stay visually
+highlighted in the picker until the user clicks that same card again, which self-heals it
+immediately; `loras` (and therefore what actually submits) is correct the instant the × is
+clicked, regardless of the grid's own highlight state.
+
+**Not done in this pass** — precise, scoped, NOT started: exposing a model/LoRA's other
+version rows (`resolve_version_meta()` in `pixai_gallery_backup.py` still always takes
+`rows[0]`; PixAI's own site lists releases/iterations beyond the first, confirmed live by
+the owner, all on one fixed architecture — no cross-architecture switching, an earlier draft
+of this session assumed otherwise and was reverted before shipping); LoRA search results
+filtered or sorted by the selected base model's architecture (`model_search_rest()` already
+returns each row's loose `base_model` category string, but mapping it reliably onto the
+strict `modelType` enum `loraIncompat()` uses needs a live data point this offline pass
+couldn't get); a `sampling_method` field (fetched by `/api/model-version`, delivered to the
+client, read by neither surface — and no UI slot exists for it on either side); and any
+`capabilities`-driven per-model gating (fetched, never read; what the real capability
+strings mean needs a live PixAI capture, not something derivable from this checkout). See
+`docs/AUDIT_2026-07-21.md`'s O12/O13/L536 rows for exact next steps on each.
+
+### Fixed (2026-07-24, `picker-parity-round2` — O12 reopened + re-fixed: layout, Loom flyout, LoRA architecture filter, version selection, tuned-preset surfacing)
+
+The owner live-tested the O12/O13 migration above immediately after it shipped and found it
+incomplete: **"Full parity is not achieved from where I sit."** Three concrete problems, plus
+the two "Not done in this pass" items from the entry directly above folded in per owner
+instruction ("fold these two in now rather than deferring a third time" — no live PixAI
+capture needed for either, both were already fully specified). This entry reopens O12 in
+`docs/AUDIT_2026-07-21.md` with an honest account of what was a genuine verification miss
+(layout, Loom presentation) versus what was an already-disclosed remainder (LoRA architecture
+filtering) before re-closing it. `O13` (`<mg-gallery-picker>`, a completely different
+component — the general image-reference picker) was investigated and confirmed unaffected;
+see its own note in the audit doc.
+
+**Problem 1 — the Gallery's "Models & LoRAs" panel showed ~2 rows of cards then a large dead
+area.** Root cause: TWO independent height constraints fighting each other. `#model-flyout`'s
+`.gen-body` was an `overflow-y:auto` scroll container, AND `<mg-model-picker>`'s own `.mg-grid`
+had a hardcoded `max-height:320px` completely independent of the panel's real (often much
+taller) available height — so on any flyout taller than ~380px, `.gen-body`'s genuine extra
+height just sat there empty below the capped grid. Fixed in the shared component itself
+(`static/mg-model-picker.js`): the element's own default changed from `display:block` to
+`display:flex;flex-direction:column`, and `.mg-grid` from a fixed `max-height:320px` to
+`flex:1 1 auto` with no cap — in an UNconstrained parent (the standalone verification page,
+or any future plain mount) this sizes to content exactly as `display:block` did before, zero
+regression there; a host that actually constrains the element's height now hands real room to
+the grid, which becomes the ONE scrolling region. New host-scoped CSS hands that real height
+down the chain: `#model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;
+min-height:0;}` / `#gen-picker-host{flex:1;min-height:0;...}` / `mg-model-picker{flex:1;
+min-height:0;}` in `pixai_gallery.py`, scoped to `#model-flyout` only — `#gen-drawer`'s own
+`.gen-body` (the main Generate form, a plain tall scrolling form) is untouched.
+
+**Problem 2 — the Loom's Image tab rendered the model/LoRA picker CRAMMED INLINE** into the
+~560px right rail: model result cards, a "hide LoRA picker" toggle sitting in the middle of
+the results, then a SECOND search box, then more LoRA cards, all stacked in the narrow
+column. Owner: *"Loom picker is a cramped mess. it does not have a flyout like the gallery."*
+Fixed in `loom/master-storyboard.jsx`: both `<mg-model-picker>` mounts move out of the
+tab-conditional inline flow into a new `.lv-mpick-veil` — a `position:fixed` overlay covering
+the full viewport with a Models/LoRAs segment toggle (mirrors the Gallery's `#model-flyout`
+presentation as closely as the Loom's own established overlay idiom allows — a centered modal
+matching the Loom's existing `.sb-pick-ov`/`.lv-df-veil` pattern, since the Loom has no
+per-side "dock" concept the way the Gallery's `#gen-drawer` does). The old `loraOpen` inline
+show/hide boolean is gone. Both pickers lazy-mount on first open (mirrors the Gallery's
+`ensurePickers()` — "only fetch on first open," not an always-mounted base+LoRA fetch on
+every Loom load just because the right rail happens to be expanded on its default Video tab),
+then stay mounted for the rest of the session (CSS-hidden via `display`/`.open`, never
+unmounted) so a close/reopen never loses either picker's search/scroll state — placed
+alongside the always-mounted `<mg-generate-drawer>` so it survives Image/Edit/Reference/Video
+tab switches, not just picker-segment switches.
+
+**Problem 3 — LoRA search showed zero architecture filtering.** Root-caused live against the
+owner's real PixAI account (by the orchestrating session): `base_model` (from `category`) is
+PixAI's content CATEGORY (style/pose/character/…), never architecture — a prior investigation
+wrongly assumed otherwise. The real signal is `modelType`/`loraBaseModelType` on a model
+version, obtainable for every search row in ONE request via the `generationModels` GraphQL
+connection (confirmed live: real rows return e.g. `modelType:"MULTI_LORA",
+loraBaseModelType:"SD_V1_MODEL"`). `model_search_market_gql()` (`pixai_gallery_backup.py`)
+now requests `latestVersion{modelType loraBaseModelType}` and surfaces them as
+`model_type`/`lora_base_model_type` — the same key names `resolve_version_meta()` already
+uses, so callers don't care which search path produced a row.
+
+New pure function `annotate_lora_compat(results, base_model_type)`: SOFT-SORTS — compatible-
+or-unknown first, confirmed-mismatch last, stable within each group — and tags every row with
+a `compat` ('yes'/'no'/'unknown') instead of hard-filtering. **Soft sort chosen over a hard
+filter deliberately:** a hard filter would make the Popular/Newest/category market-browsing
+modes strictly worse for discovery (an owner who wants to browse "what's popular" shouldn't
+lose rows just because no base is picked, or see nothing at all if their chosen base happens
+to be a rare architecture); soft-sort keeps every row reachable while still surfacing the
+compatible ones first and flagging the rest, and reuses `is_lora_compatible()`'s own
+already-shipped fail-open rule (an unknown architecture is never treated as a hard negative —
+sorts with the compatible group, but is NOT badged as confirmed-compatible, which would
+overclaim data the function doesn't have). `/api/model-search` applies it whenever
+`kind=lora&base_type=<model_type>` is present; absent (or `kind=base`) leaves results
+completely untouched.
+
+**REST vs. GraphQL, resolved:** `model_search_rest()`'s oRPC endpoint has no equivalent
+architecture field to request at all (confirmed by inspecting its full response shape) — so
+LoRA search (`kind=lora`) now ALWAYS routes through the GraphQL connection, for every query,
+not just the category/Newest subset that already used it. Base-model search is UNCHANGED
+(REST by default, GraphQL only for category/Newest — architecture filtering is a LoRA-picker
+concept only). Trade-off, stated honestly: LoRA cards now uniformly show the "leaner"
+GraphQL-sourced preview (no description/refCount/official badge) instead of REST's richer
+one — already true for any LoRA search that hit a category chip or Newest before this change,
+now true for 100% of LoRA searches; the card template already tolerates missing fields
+(hides them). "Popular" sort's true REST-side popularity ranking is lost the same way it
+already was for category/Newest picks — the connection's default order stands in.
+
+Client wiring: `<mg-model-picker>` gained an opt-in `base-type` attribute, set by the host to
+the currently-selected base model's resolved `model_type` (both hosts already resolve this
+for their existing post-selection `is_lora_compatible()` gate — this reuses it, not a new
+resolve). Threaded into `/api/model-search` as `base_type=` and re-searches automatically
+when it changes, so switching the selected base re-sorts/re-badges already-open LoRA results
+live. Renders the server's `compat` tag as a small badge (`✓ compatible` / `⚠ different arch`
+/ nothing for `unknown`).
+
+**Version selection (new).** `resolve_version_meta()` always silently took `rows[0]`
+("presumed latest") from `GET /generation-model/{id}/versions` and discarded every other
+published release — PixAI's own site offers a version selector on model/LoRA cards, this app
+had none. New `list_model_versions()` maps EVERY row through the identical per-row shape
+(split out as `_version_row_to_meta()` so the two functions can never drift on what a
+"version" means), labeled (`Latest`, `v2`, `v3`, … + the row's own `createdAt` date when
+present) via position in the list. `/api/model-version?model_id=…&all=1` exposes it — same
+ONE GET as the existing default shape, no new network surface, no N+1. A version `<select>`
+now appears next to the model row in both the Gallery (`#gen-version`) and the Loom
+(`.lv-versel`) whenever a model has more than one release; switching re-applies that
+version's own resolved meta (model_type, tuned preset, capabilities) with no extra network
+call, since the full list is already in hand. `/api/generate` now honors an explicitly-chosen
+`version_id` **if and only if it's confirmed to belong to the picked model's own real version
+list** (validated server-side against `list_model_versions`, never trusted blind) — this
+preserves the original anti-race guarantee byte-for-byte (a stale version_id from a fast
+model switch, or one belonging to a different model entirely, still safely falls back to the
+newest version, exactly as before this feature existed) while finally letting a deliberate,
+validated choice through. **Scope, stated honestly:** the UI ships for base-model selection
+only in this pass — a per-LoRA-chip version selector is a real, disclosed, NOT-yet-built
+remainder; the backend capability (`list_model_versions`, the `?all=1` route mode) is fully
+general and already works for LoRA model_ids too, so adding that control later is additive UI
+work, not a new backend investment.
+
+**Tuned-preset / capabilities surfacing (new).** `resolve_version_meta()` already returns
+`sampling_method` and `capabilities` on every base-model pick — `negative_prompt`/
+`sampling_steps`/`cfg_scale` were ALREADY prefilled into the Advanced section (confirmed by
+reading the shipped code, `pixai_gallery.py`'s `applyModelDefaults()` / the Loom's identical
+`bindPicker` logic — this predates this pass), but `sampling_method` and `capabilities` were
+resolved and silently thrown away in both surfaces. Both now surface: `sampling_method` as
+read-only text appended to the existing "✓ using this model's tuned preset" note (e.g. "…
+tuned preset (Euler a)"); `capabilities` as small read-only badges next to the model row
+(`#gen-caps` / `.lv-caps`). **`sampling_method` is deliberately READ-ONLY, not a new submit
+parameter:** this app never sends an explicit `samplingMethod` to `createGenerationTask`
+anywhere today (PixAI picks its own default sampler; only Mode/`inferenceProfile` is
+user-facing) — unlike `inferenceProfile`, which has a confirmed, tested server-rejection
+retry path (`submit_generation()`), there is no confirmed-safe fallback if an arbitrary
+sampler value were rejected per-model, and this pass has no live PixAI access to verify one.
+Surfacing it read-only is still real progress on the owner's actual complaint ("model traits
+run deep and it's all in their info cards already") without risking a silent generation
+failure this pass can't safely guard against.
+
+**Testing.** Fail-first pytest for `annotate_lora_compat` (the core pure function) — including
+a genuine mutation-test pass (temporarily broke the fail-open unknown-architecture handling,
+confirmed the test caught it, restored, confirmed green again) — plus `list_model_versions`,
+the `model_search_market_gql` architecture-field extension, and `/api/generate`'s
+validated-version-choice logic (both the honored-choice and the falls-back-to-latest-when-
+invalid paths). Route-level tests for `/api/model-search`'s `base_type=` wiring and
+`kind=lora`-always-GraphQL routing, and `/api/model-version?all=1`. Loom JS source-presence
+tests (this repo's established pattern for `master-storyboard.jsx`/`static/*.js`, which have
+no jsdom harness) for the overlay markup/lazy-mount/Escape-close behavior and the shared
+component's layout CSS + `base-type` wiring. **1,057 Python tests, 301 Loom JS tests, both
+green.**
+
+**Live verification.** This worktree has no live PixAI credentials (confirmed: no
+`config.json` present), so verification split two ways. (1) Layout (problems 1/2): started an
+isolated local server from this exact worktree, logged in via the real bootstrap flow, and
+measured the ACTUAL rendered DOM via `getBoundingClientRect()`/`getComputedStyle()` on a live
+page — screenshots were unavailable in this session's Browser pane (`computer{action:
+screenshot}` timed out consistently; `read_page`/`javascript_tool` worked normally), so this
+substitutes exact pixel measurement, arguably stronger evidence for a layout question than a
+visual check. Reproduced the ORIGINAL bug on the same live page first (temporarily reinstating
+the old CSS via inline style, scoped to the one visible element only) before confirming the
+fix: dead space below the grid went from **535px to 0px** in a 789px-tall panel (Gallery); the
+Loom's picker panel's bounding box was measured starting at x=410 while the narrow right
+rail's own bounds start at x=720 — i.e. genuinely extends outside and centers across the FULL
+1280px viewport, not confined to the rail. (2) Data-dependent behavior (problems 3/4/5): no
+live PixAI account to search real LoRAs against, so the network layer was mocked with
+response data matching the CONFIRMED real shape from the task brief, and driven through the
+REAL custom-element/React event path (dispatching genuine `mg-pick` events, not calling
+internal functions directly) on both live pages: picking a base model correctly propagated
+`model_type` into the LoRA picker's `base-type` attribute on both surfaces, the real
+`/api/model-search` request carried `base_type=`, results rendered in the correct
+compatible-first/unknown/mismatch-last order with the correct badges, the version `<select>`
+populated and re-applying a non-latest version correctly cleared/updated the capabilities
+note, and the overlay's lazy-mount persisted across a close/reopen with zero additional
+fetches. Zero console errors on either surface (the Loom's real in-browser Babel-standalone
+path, not just the `esbuild` bundle, which was also rebuilt and confirmed to compile clean).
+
 ## [2.3.0] - 2026-07-23 — More security hardening, the Folio of Honors, and LoRA support in the Loom
 
 ### Changed

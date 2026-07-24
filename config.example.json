@@ -15,7 +15,6 @@
   "MODEL_DETAIL_HASH": "",
   "DELETE_TASK_HASH": "",
   "ARTWORK_LIST_HASH": "",
-  "ARTWORK_DETAIL_HASH": "",
 
   "_comment_read_only": "Set true to refuse every credit-spending or account-deleting call outright -- CLI or web, and even with --confirm/--apply/--yes passed. A safety net for a first run, testing, or handing the tool to someone else. See the Trust & Safety wiki page.",
   "READ_ONLY": false,
@@ -23,9 +22,12 @@
   "_comment_legacy": "DEPRECATED legacy fallback for users WITHOUT an API key. U3T is the 'u3t' field from a graphql request Payload; the short-lived Bearer token then goes in token.txt / PIXAI_TOKEN / --token and must be re-captured every few hours. Leave blank when using PIXAI_API_KEY (recommended).",
   "U3T": "",
 
-  "_comment_auth": "Session-based login for the web gallery (gates every non-localhost request -- see docs/architecture.md). Neither field is something you type in by hand.",
+  "_comment_auth": "Session-based login for the web gallery. Routes split into three tiers, NOT a blanket 'login gates every non-localhost request': a handful are PUBLIC with no session at all (the login page, logout, /branding, the PWA manifest); most need any LOGIN session (local or LAN); a few destructive/config-writing routes are LOCALHOST-only even for a logged-in LAN session. See tests/test_route_tiers.py and docs/architecture.md. Neither field below is something you type in by hand.",
   "_comment_auth_secret": "AUTH_SECRET_KEY signs the Flask session cookie. Auto-generated (secrets.token_hex(32)) and written here the first time the gallery server starts if this is blank/absent -- never set it yourself.",
   "AUTH_SECRET_KEY": "",
-  "_comment_auth_users": "AUTH_USERS is a list of {\"username\": ..., \"password_hash\": ...} accounts for logging into the gallery from another device on your LAN. Managed ONLY via the CLI -- never edit this by hand and never paste a plaintext password here: python pixai_gallery_backup.py --add-web-user (interactive, hashes with werkzeug) / --remove-web-user <username> / --list-web-users. Empty (the default) means LAN login is impossible until you add an account.",
-  "AUTH_USERS": []
+  "_comment_auth_users": "AUTH_USERS is a list of {\"username\": ..., \"password_hash\": ...} accounts for logging into the gallery from another device on your LAN. Managed via the CLI (python pixai_gallery_backup.py --add-web-user (interactive, hashes with werkzeug) / --remove-web-user <username> / --list-web-users) -- but NOT only the CLI: the first-run web bootstrap creates an account when AUTH_USERS is empty, and once logged in, Control Panel -> Users can add/remove accounts too (removing an account that isn't your own needs the server's own machine). Never edit this by hand and never paste a plaintext password here. Empty (the default) means LAN login is impossible until an account exists.",
+  "AUTH_USERS": [],
+
+  "_comment_auth_epoch": "AUTH_EPOCH_SEQ is an install-wide monotonic counter the app writes itself (every /logout bumps it) to support session revocation -- never set it yourself. A legacy config with no existing value gets a 1,000,000 margin on first mint so cookies issued before this existed can't be walked back through. See docs/STATE.md's Web auth section.",
+  "AUTH_EPOCH_SEQ": 0
 }

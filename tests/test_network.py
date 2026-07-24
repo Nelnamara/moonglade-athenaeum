@@ -132,6 +132,31 @@ class TestResolveMedia:
         assert url is None
 
 
+def test_variant_detection_cluster_is_gone():
+    """The --variant CLI flag was deleted in D-5, but its whole self-referential support
+    cluster survived as dead code: detect_variant() looped test_variant() over
+    VARIANT_CANDIDATES, test_variant() called media_url() (MEDIA_TMPL-based), and nothing
+    outside that chain ever called any of the three -- run_probe (the one plausible caller)
+    actually calls resolve_media() above, a separate urls-list/URL_VARIANT_PREFERENCE
+    mechanism (audit 2026-07-21, O7; a prior pass's claim that run_probe still needed this
+    cluster via detect_variant() was wrong, re-verified here). Zero callers anywhere,
+    confirmed by a repo-wide grep -- not even a test exercised it."""
+    import re
+    from pathlib import Path
+    dead_names = ("detect_variant", "test_variant", "media_url", "MEDIA_TMPL", "VARIANT_CANDIDATES")
+    for name in dead_names:
+        assert not hasattr(core, name), name
+    src = (Path(__file__).resolve().parents[1] / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    for name in dead_names:
+        # word-boundary, not substring -- "_media_url" (a live dict key elsewhere) must not
+        # false-fail this on "media_url".
+        assert not re.search(r'\b' + re.escape(name) + r'\b', src), name
+    # The LIVE mechanism (resolve_media's own resolution path) must be untouched.
+    assert hasattr(core, "MEDIA_BASE")
+    assert hasattr(core, "resolve_media")
+    assert hasattr(core, "URL_VARIANT_PREFERENCE")
+
+
 # ---------------------------------------------------------------------------
 # _quick_count() — verify it returns 0 on PixAIError without raising
 # ---------------------------------------------------------------------------
@@ -243,7 +268,7 @@ from types import SimpleNamespace
 def _dl_args(out, **kw):
     base = dict(
         out=str(out), token="t", page_size=20, max=0, delay=0,
-        name_length=40, name_sep="_", organize_live=False, organize_adv_live=False,
+        name_length=40, name_sep="_", organize_live=False,
         convert=None, jpeg_quality=92, jpeg_bg="white", keep_webp=False,
         collect_only=False, full_meta=False, update=False, update_grace=2,
     )
@@ -285,6 +310,26 @@ def test_resume_skips_on_disk_without_redownload(tmp_path, mocker):
     names = [str(c.args[2]) for c in dl.call_args_list]  # stem is 3rd positional
     assert any("new1" in n for n in names)
     assert not any("known" in n for n in names)
+
+
+def test_resume_ignores_quarantined_deleted_file(tmp_path, mocker):
+    """B11 (audit 2026-07-21): the startup disk-index walk's skip_dirs never learned
+    about _deleted/ (only 'gallery'/'_duplicates') -- so a media_id purged locally
+    (moved to _deleted/ by purge_media_local) is still indexed as 'already done' and
+    resume/--update silently never re-downloads it, exactly as if it were a live file."""
+    from pixai_gallery import DELETED_DIRNAME
+    qdir = tmp_path / DELETED_DIRNAME
+    qdir.mkdir(parents=True)
+    (qdir / "x_known.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+    mocker.patch.object(core, "gql", side_effect=[_page("known", False)])
+
+    core.run_download(_dl_args(tmp_path))
+
+    names = [str(c.args[2]) for c in dl.call_args_list]
+    assert any("known" in n for n in names), (
+        "a file quarantined under _deleted/ was indexed as 'already done' and "
+        "never re-downloaded")
 
 
 def test_resume_does_not_skip_a_zero_byte_file(tmp_path, mocker):
@@ -369,6 +414,71 @@ class TestDownloadNeverWritesAZeroByteFile:
         assert not (tmp_path / "stem.webp").exists(), (
             "an empty response body was promoted to a real file on disk")
         assert not list(tmp_path.glob("*.part")), "a stray .part file was left behind"
+
+
+class TestDownloadVerifiesContentLength:
+    """The mid-stream cousin of the zero-byte guard above (owner field-test 2026-07-23,
+    'Videos corrupt on collect'): a connection cut MID-body can end the chunk stream
+    cleanly, so download() wrote fewer bytes than the server's Content-Length promised
+    and still promoted the .part -- a permanent truncated file, invisible to resume
+    forever after. A short body must now fail the attempt through the same
+    retry/backoff path as any other network error. Only enforced when the body is not
+    content-encoded: requests decompresses gzip/br inside iter_content, so the header
+    counts different bytes than we write."""
+
+    @staticmethod
+    def _resp(mocker, headers, chunks):
+        resp = mocker.MagicMock()
+        resp.status_code = 200
+        resp.headers = headers
+        resp.raise_for_status.return_value = None
+        resp.iter_content.return_value = iter(chunks)
+        resp.__enter__ = mocker.Mock(return_value=resp)
+        resp.__exit__ = mocker.Mock(return_value=False)
+        return resp
+
+    def test_short_body_is_never_promoted_and_rides_the_retry_path(
+            self, mock_session, mocker, tmp_path):
+        mocker.patch("time.sleep")                  # retry backoff -- don't really wait
+        vid = {"Content-Type": "video/mp4", "Content-Length": "1000"}
+        short = self._resp(mocker, vid, [b"x" * 400])   # cut mid-body, stream ends cleanly
+        good = self._resp(mocker, vid, [b"y" * 1000])
+        mock_session.get.side_effect = [short, good]
+
+        status, path = core.download(mock_session, "http://x/vid", tmp_path / "stem",
+                                     retries=1)
+
+        assert status == "ok"
+        assert path is not None and path.read_bytes() == b"y" * 1000, (
+            "a short body was promoted instead of retried")
+        assert not list(tmp_path.glob("*.part"))
+        assert mock_session.get.call_count == 2     # attempt 1 failed short, attempt 2 won
+
+    def test_short_body_with_retries_exhausted_is_a_fail_not_a_file(
+            self, mock_session, mocker, tmp_path):
+        short = self._resp(mocker, {"Content-Type": "video/mp4", "Content-Length": "1000"},
+                           [b"x" * 400])
+        mock_session.get.return_value = short
+
+        status, path = core.download(mock_session, "http://x/vid", tmp_path / "stem",
+                                     retries=0)
+
+        assert status == "fail" and path is None
+        assert not list(tmp_path.glob("stem*")), (
+            "a truncated body left a permanent file on disk")
+
+    def test_content_encoded_body_is_exempt_from_the_check(
+            self, mock_session, mocker, tmp_path):
+        # gzip: iter_content yields DECOMPRESSED bytes, so 400 written vs 1000 promised
+        # is normal, not truncation -- must not false-fail the download.
+        resp = self._resp(mocker, {"Content-Type": "image/webp", "Content-Length": "1000",
+                                   "Content-Encoding": "gzip"}, [b"z" * 400])
+        mock_session.get.return_value = resp
+
+        status, path = core.download(mock_session, "http://x/img", tmp_path / "stem",
+                                     retries=0)
+
+        assert status == "ok" and path is not None and path.stat().st_size == 400
 
 
 def test_update_mode_stops_early(tmp_path, mocker):
@@ -547,6 +657,116 @@ def test_sync_artworks_resolves_userid_via_session(tmp_path, mocker):
     assert res["artworks"] == 0 and core.USER_ID == "resolved-99"   # ran instead of raising
 
 
+def test_artwork_detail_hash_config_key_is_gone():
+    """ARTWORK_DETAIL_HASH was read from config.json with a baked-in default, same shape as
+    its sibling ARTWORK_LIST_HASH just above -- but unlike that sibling (used by
+    artwork_list_gql/run_sync_artworks right here in this file), nothing anywhere ever reads
+    ARTWORK_DETAIL_HASH (audit 2026-07-21, schema-config-drift appendix row: "read from config
+    and given a baked default, then never used anywhere"). config.example.json documented it
+    as a settable override, so that mention goes too -- its live sibling stays."""
+    import json
+    from pathlib import Path
+    assert not hasattr(core, "ARTWORK_DETAIL_HASH")
+    assert hasattr(core, "ARTWORK_LIST_HASH")   # the live sibling must be untouched
+    repo_root = Path(__file__).resolve().parents[1]
+    src = (repo_root / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    assert "ARTWORK_DETAIL_HASH" not in src
+    example_cfg = json.loads((repo_root / "config.example.json").read_text(encoding="utf-8"))
+    assert "ARTWORK_DETAIL_HASH" not in example_cfg
+    assert "ARTWORK_LIST_HASH" in example_cfg   # sibling override documentation stays
+
+
+def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker):
+    """B16 (audit 2026-07-21): already_downloaded() gates --sync-artworks --with-videos'
+    resume check on find_files_for_media_id's default _IMAGE_EXTS-only matcher -- no
+    .mp4 ever matches, so it's a guaranteed-False no-op for videos. Every video fired a
+    full resolve_media round trip on every single run, even one already on disk."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} |
+                                           {"media_id": "unrelated", "filename": "x_unrelated.png"}])
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "clip_V1.mp4").write_bytes(b"already here")
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    conn = {"edges": [{"node": {"id": "aw1", "mediaId": "", "title": "Anim",
+                                "visibility": "PUBLIC", "isNsfw": False,
+                                "likedCount": 0, "commentCount": 0, "aesScore": 0,
+                                "tacks": [], "videoMediaId": "V1"}}],
+            "pageInfo": {"hasPreviousPage": False}}
+    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    # Mocked with a well-formed return (not a bare MagicMock): if the bug fires and
+    # this DOES get called, _fetch_video must still complete cleanly so the failure
+    # shows up as the assertion below, not an incidental unpack/network crash.
+    resolve = mocker.patch.object(core, "resolve_media",
+                                  return_value=("http://example.com/v.mp4", {"width": "1"}))
+    mocker.patch.object(core, "download",
+                        return_value=("ok", tmp_path / "videos" / "clip_V1.mp4"))
+
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+                                                 with_videos=True, workers=1))
+
+    resolve.assert_not_called()
+    assert res["videos"] == 1
+
+
+def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker):
+    """B15: unlike gql() (retries 4x, then RAISES), artwork_list_gql swallows a
+    RequestException/non-200/bad-JSON with NO retry and just returns None (see its
+    own docstring: 'Returns the Relay connection dict ... or None on failure'). On
+    page 1 that correctly raises; on page 2+ the pagination loop treats it EXACTLY
+    like a legitimate 'no more pages' and breaks silently -- the run then reports a
+    complete-looking total for what is actually a partial sync. FAILS before the
+    fix: run_sync_artworks's return dict has no 'fail' key at all, so res['fail']
+    raises KeyError."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    page1 = {"edges": [{"node": {"id": "aw1", "mediaId": "m1", "title": "Page1 Art",
+                                 "visibility": "PUBLIC", "isNsfw": False,
+                                 "likedCount": 1, "commentCount": 0}}],
+             "pageInfo": {"hasPreviousPage": True, "startCursor": "cursor2"}}
+    # Page 1 succeeds; page 2's fetch "fails" (artwork_list_gql's own failure mode: None).
+    mocker.patch.object(core, "artwork_list_gql", side_effect=[page1, None])
+
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+
+    assert res["artworks"] == 1                 # page 1's artwork still landed -- not discarded
+    assert res["fail"] == 1                      # but the early stop is now visible, not silent
+
+
+def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mocker):
+    """B15: a video that fails to download after retries (download() returns
+    ('fail', None), the same status run_download's own dl['fail'] counts) must be
+    just as visible here -- currently it's silently absorbed into a lower
+    'Videos saved/present: N of M' console tally with no return-value or job-status
+    signal at all. FAILS before the fix for the same reason as the pagination
+    test: no 'fail' key in the return dict."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    conn = {"edges": [{"node": {"id": "aw1", "mediaId": "m1", "title": "Animated",
+                                "visibility": "PUBLIC", "isNsfw": False,
+                                "likedCount": 0, "commentCount": 0,
+                                "videoMediaId": "vid1"}}],
+            "pageInfo": {"hasPreviousPage": False}}
+    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    # already_downloaded_video, not already_downloaded -- B16 (merged separately, same
+    # sweep) redirected this call site to the video-aware matcher.
+    mocker.patch.object(core, "already_downloaded_video", return_value=None)
+    mocker.patch.object(core, "resolve_media", return_value=("https://x/vid1.mp4", {}))
+    mocker.patch.object(core, "download", return_value=("fail", None))
+
+    res = core.run_sync_artworks(SimpleNamespace(
+        out=str(tmp_path), token=None, delay=0, with_videos=True, workers=1))
+
+    assert res["videos"] == 0                    # the failed video was not counted as saved
+    assert res["fail"] == 1                       # and the failure is now visible
+
+
 def test_resolve_loras(mocker):
     mocker.patch.object(core, "model_name_gql",
                         side_effect=lambda s, vid: {"111": "DetailLora", "222": "222"}.get(str(vid), str(vid)))
@@ -689,3 +909,48 @@ def test_run_account_info_reports_real_reason(mocker, capsys):
     mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("connection reset"))
     core.run_account_info(SimpleNamespace(token=None))
     assert "temporary" in capsys.readouterr().out.lower()
+
+def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
+    """getTaskById returns the task's top-level paidCredit for HISTORICAL tasks (the
+    same persisted response our full-meta path replays -- verified against a real
+    captured task, 2026-07-04), so --backfill-full-meta can recover spend history:
+
+    - a row fetched because its meta is missing also gains paid_credit, and
+    - --with-credit (mirroring --with-loras) re-processes rows whose meta is already
+      complete but whose paid_credit is blank, without touching their existing meta.
+    """
+    from pixai_gallery import save_catalog, load_catalog, CATALOG_FIELDS
+
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        # t1: meta missing -> fetched by a plain --backfill-full-meta run
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "t1",
+                                           "filename": "a.png"},
+        # t2: meta complete, cost unknown -> fetched only with --with-credit
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m2", "task_id": "t2",
+                                           "filename": "b.png", "prompt_full": "kept",
+                                           "seed": "77"},
+    ])
+    tasks = {
+        "t1": {"parameters": {"prompts": "night elf druid"}, "outputs": {"seed": 5},
+               "paidCredit": 300},
+        "t2": {"parameters": {"prompts": "ignored -- row already has meta"},
+               "outputs": {}, "paidCredit": 0},
+    }
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: tasks[str(tid)])
+
+    # Pass 1: plain backfill -> t1 fetched (missing meta) and gains cost; t2 untouched.
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["m1"]["prompt_full"] == "night elf druid"
+    assert rows["m1"]["paid_credit"] == "300"        # historical cost recovered
+    assert rows["m2"]["paid_credit"] == ""           # complete row not re-fetched
+
+    # Pass 2: --with-credit -> t2 re-fetched for its blank cost; existing meta kept;
+    # its genuinely-free cost stored as '0', never '' .
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+                                                with_credit=True))
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["m2"]["paid_credit"] == "0"
+    assert rows["m2"]["prompt_full"] == "kept" and rows["m2"]["seed"] == "77"
