@@ -35,7 +35,7 @@ QUICK START
   python pixai_gallery_backup.py --max 40    # small test first
 """
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 import argparse
 import csv
