@@ -3272,18 +3272,82 @@ def create_app(out_dir: Path):
     _watch_status = {"connected": False, "last_event_at": None, "mirrored": 0,
                       "events_seen": 0, "last_error": None, "started_at": None}
 
+    # ---- Single-flight collect (per task id, in-process) -------------------------
+    # THREE uncoordinated collectors live in this process: the always-on live-mirror
+    # watcher below, /api/task-status's done-poll, and /api/import-task (whose
+    # already-catalogued precheck narrows the window but cannot close it). Two of them
+    # landing on the same just-finished task seconds apart used to run
+    # core.collect_generation twice concurrently: download() skipped the second copy,
+    # but both passes then ran video_faststart on the same clip, and the two
+    # concurrent ffmpeg remuxes corrupted it (see video_faststart's docstring). Now
+    # the first entrant per task id runs the real collect while any later entrant
+    # waits, then answers from the catalog instead of re-downloading. In-process only
+    # by design: the CLI's --watch-backup is a separate process, which is exactly why
+    # video_faststart's unique temp name is the load-bearing cross-process guard --
+    # this layer just stops the gallery process from double-collecting at all.
+    _collect_mu = threading.Lock()          # guards the in-flight map itself
+    _collect_inflight = {}                  # task_id -> {"lock", "waiters", "done"}
+
+    def _collected_from_catalog(tid):
+        """A finished collect's outcome, re-read from the catalog, in
+        collect_generation's return shape (saved=0: THIS caller downloaded nothing)."""
+        con = _connect(db_path)
+        try:
+            rows = con.execute("SELECT media_id, is_video FROM catalog WHERE task_id=?",
+                               (str(tid),)).fetchall()
+        finally:
+            con.close()
+        if not rows:
+            return None
+        return {"media_ids": [r[0] for r in rows], "saved": 0,
+                "is_video": any(str(r[1] or "") == "1" for r in rows)}
+
+    def _collect_single_flight(core, session, tid):
+        """core.collect_generation, but never twice concurrently for the same task id."""
+        tid = str(tid)
+        with _collect_mu:
+            ent = _collect_inflight.get(tid)
+            if ent is None:
+                ent = _collect_inflight[tid] = {"lock": threading.Lock(),
+                                                "waiters": 0, "done": False}
+            ent["waiters"] += 1
+        try:
+            with ent["lock"]:
+                if ent["done"]:
+                    # A concurrent collect for this task finished while we waited --
+                    # its media is downloaded + catalogued, so report that instead of
+                    # re-downloading (and, for a video, re-remuxing). If it somehow
+                    # catalogued nothing (every download failed), fall through and
+                    # retry for real.
+                    got = _collected_from_catalog(tid)
+                    if got is not None:
+                        return got
+                got = core.collect_generation(session, tid, str(out_dir))
+                ent["done"] = True
+                return got
+        finally:
+            with _collect_mu:
+                ent["waiters"] -= 1
+                if ent["waiters"] <= 0:
+                    _collect_inflight.pop(tid, None)   # keep the map from growing forever
+
     def _watch_mirror(tid):
         """Download + catalog one finished task off the watcher's event loop (own
         session per call, matching the CLI's --watch-backup pattern)."""
         import pixai_gallery_backup as core
         try:
             session = core._make_session(None)
-            core.collect_generation(session, tid, str(out_dir))
+            _collect_single_flight(core, session, tid)
             with _watch_lock:
                 _watch_status["mirrored"] += 1
         except Exception as e:
             with _watch_lock:
                 _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+
+    # The closures above are unreachable from outside create_app; the test suite
+    # drives the watcher-mirror path through this seam (conftest disables the real
+    # watcher thread via MOONGLADE_DISABLE_WATCH).
+    app.extensions["mg_watch_mirror"] = _watch_mirror
 
     def _reconcile_job(tid, ws_status):
         """Resolve OUR Activity/job log for a task straight from a live event, so a
@@ -8778,7 +8842,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         _log_job(job_id, status="running", type="import", label="Import task " + tid)
         try:
             core, session = _gen_session()
-            res = core.collect_generation(session, tid, str(out_dir))
+            res = _collect_single_flight(core, session, tid)
             n, mids = int(res.get("saved") or 0), (res.get("media_ids") or [])
             _log_job(job_id, status="done", media_ids=mids,
                      label="Imported {} media from task {}".format(n, tid))
@@ -11811,7 +11875,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             st = core.generation_status(session, tid)
             if st["phase"] == "done":
-                got = core.collect_generation(session, tid, str(out_dir))
+                got = _collect_single_flight(core, session, tid)
                 # authoritative done event -- written server-side so the Jobs card gets the
                 # outcome even if the browser tab that submitted it has since closed.
                 _log_job(tid, status="done", media_ids=got["media_ids"],
