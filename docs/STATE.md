@@ -320,6 +320,22 @@ users.
   was already resolved at pick time. Shared component change, so both surfaces got the real
   version data for free; only the per-chip UI (`renderLoras()` in `pixai_gallery.py`, the
   `imgLoras.map` chip render in `master-storyboard.jsx`) needed writing twice.
+- **Capability gating on the Advanced panel (Negative prompt / Steps / CFG scale), on both
+  the gallery and the Loom** (2026-07-24). `extra.compatibility` (which of these a model
+  actually honors — probed live 2026-07-06, memory `pixai-model-capability-schema`, e.g.
+  Tsubaki.2 ignores CFG scale entirely and runs steps FIXED at 16) and `extra.restrictions`
+  (real min/max bounds) are now extracted by `_version_row_to_meta()` — previously fetched
+  nowhere, so an editable control that silently did nothing was indistinguishable from one
+  that worked. A field the model doesn't honor is disabled (never hidden) with a plain
+  tooltip; fails open on unknown/absent data — only an explicit `false` disables anything,
+  matching every other fail-open gate in this app. **Real bug caught live, not by source
+  reading:** the gallery's first version only set an input's `min`/`max` when the new
+  model's `restrictions` had them, so switching FROM a restricted model TO an unrestricted
+  one left the field's bounds stuck at the previous model's numbers — confirmed
+  reproducible, then fixed so `gateField()` always resolves min/max to either the model's
+  real bounds or the field's own default. The Loom's declarative JSX never had this failure
+  mode (it recomputes fresh every render) — the same class of bug an imperative DOM-mutation
+  copy is prone to and a declarative one structurally can't have.
 
 ## Achievements / The Folio of Honors
 

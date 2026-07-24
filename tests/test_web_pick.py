@@ -1561,6 +1561,31 @@ def test_generate_drawer_gates_on_the_real_account_lora_cap(tmp_path):
     assert "if(window.Gen && Gen.refreshLoraCap) Gen.refreshLoraCap();" in html   # Acct pushes the cap into Gen on every refresh
 
 
+def test_generate_drawer_gates_advanced_controls_by_model_compatibility(tmp_path):
+    """extra.compatibility (probed live 2026-07-06, memory pixai-model-capability-schema)
+    says which Advanced-panel params a model actually HONORS -- e.g. Tsubaki.2 ignores CFG
+    scale entirely and runs sampling steps FIXED at 16. An editable control that silently
+    does nothing was worse than no control at all -- gateField() disables it (never hides;
+    the owner can still see it exists and why it's off) and fails OPEN on unknown/absent
+    data (only an explicit `false` disables anything), same convention as every other
+    fail-open gate in this app."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "function gateField(id, honored, bounds, defMin, defMax){" in html
+    assert "var off = honored===false;" in html                # fail open: undefined/true never disables
+    assert "f.title = off ? 'This model doesn\\u2019t use this setting' : '';" in html
+    # min/max must ALWAYS resolve to something (the model's own bounds, or the field's real
+    # default) -- never left conditionally untouched, or a stale bound from a PREVIOUSLY
+    # selected model leaks forward onto one with no restrictions at all (caught live 2026-07-24).
+    assert "if(defMin!=null) f.min = (bounds&&bounds.min!=null) ? bounds.min : defMin;" in html
+    assert "if(defMax!=null) f.max = (bounds&&bounds.max!=null) ? bounds.max : defMax;" in html
+    assert "gateField('gen-neg', compat.negativePrompt, null);" in html
+    assert "gateField('gen-steps', compat.samplingSteps, restr.samplingSteps, 1, 150);" in html
+    assert "gateField('gen-cfg', compat.cfgScale, restr.cfgScale, 1, 30);" in html
+    assert "selected.compatibility=v.compatibility||{}; selected.restrictions=v.restrictions||{};" in html
+    assert "applyCapabilityGating();" in html                  # called from applyVersion, covers both onBasePick + pickVersion
+
+
 def test_generate_drawer_offers_a_per_lora_version_selector(tmp_path):
     """resolve_version_meta() (and the old single-fetch LoRA resolve) always silently took
     the newest release; PixAI's own model/LoRA cards offer a version selector, the base

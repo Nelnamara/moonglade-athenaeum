@@ -1003,6 +1003,7 @@ ${"=".repeat(48)}
 .lv-tab{flex:1;text-align:center;font:600 10px/1 system-ui;padding:6px 4px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lv-tab.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
 .lv-in{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:7px;padding:7px 8px;color:var(--text);font:11px/1.3 system-ui;}
+.cap-off{opacity:.4;cursor:not-allowed;}
 .lv-in:focus{outline:0;border-color:var(--accent);}
 .lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:2px 5px;cursor:pointer;}
 .lv-minichip:hover{border-color:var(--accent);color:var(--accent);}
@@ -1300,6 +1301,8 @@ ${"=".repeat(48)}
               model_type: v.model_type || "",
               sampling_method: v.sampling_method || "",
               capabilities: v.capabilities || [],
+              compatibility: v.compatibility || {},
+              restrictions: v.restrictions || {},
               versions
             } : cur);
             const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
@@ -1326,7 +1329,9 @@ ${"=".repeat(48)}
         version_id: v.version_id || "",
         model_type: v.model_type || "",
         sampling_method: v.sampling_method || "",
-        capabilities: v.capabilities || []
+        capabilities: v.capabilities || [],
+        compatibility: v.compatibility || {},
+        restrictions: v.restrictions || {}
       }));
       const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
       setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
@@ -1860,45 +1865,61 @@ ${"=".repeat(48)}
             placeholder: "describe the reference still (subject, pose, composition, light)\u2026",
             onChange: (ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))
           }
-        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), /* @__PURE__ */ React.createElement("details", null, /* @__PURE__ */ React.createElement("summary", { style: { cursor: "pointer", color: "var(--subtext)", fontSize: 11 } }, "Advanced"), /* @__PURE__ */ React.createElement(
-          "textarea",
-          {
-            className: "lv-ta",
-            style: { marginTop: 5 },
-            value: imgAdv.negative,
-            placeholder: "lowres, text, watermark\u2026",
-            onChange: (ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))
-          }
-        ), /* @__PURE__ */ React.createElement("div", { className: "lv-row2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "Steps"), /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            className: "lv-in",
-            type: "number",
-            min: "1",
-            max: "150",
-            step: "1",
-            value: imgAdv.steps,
-            onChange: (ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))
-          }
-        )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "CFG scale"), /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            className: "lv-in",
-            type: "number",
-            min: "1",
-            max: "30",
-            step: "0.5",
-            value: imgAdv.cfg,
-            onChange: (ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))
-          }
-        ))), modelDefaults && /* @__PURE__ */ React.createElement("div", { className: "lv-advnote" }, /* @__PURE__ */ React.createElement("span", null, "\u2713 using this model's tuned preset"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-mini2", style: { margin: 0 }, onClick: () => {
-          setImgAdv((a) => ({
-            ...a,
-            negative: modelDefaults.negative_prompt || a.negative,
-            steps: modelDefaults.sampling_steps || a.steps,
-            cfg: modelDefaults.cfg_scale || a.cfg
-          }));
-        } }, "\u21B6 reset"))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Aspect"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, [
+        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), (() => {
+          const compat = imgModel && imgModel.compatibility || {};
+          const restr = imgModel && imgModel.restrictions || {};
+          const negOff = compat.negativePrompt === false;
+          const stepsOff = compat.samplingSteps === false;
+          const cfgOff = compat.cfgScale === false;
+          const stepsB = restr.samplingSteps || {};
+          const cfgB = restr.cfgScale || {};
+          const offTitle = "This model doesn\u2019t use this setting";
+          return /* @__PURE__ */ React.createElement("details", null, /* @__PURE__ */ React.createElement("summary", { style: { cursor: "pointer", color: "var(--subtext)", fontSize: 11 } }, "Advanced"), /* @__PURE__ */ React.createElement(
+            "textarea",
+            {
+              className: "lv-ta" + (negOff ? " cap-off" : ""),
+              style: { marginTop: 5 },
+              value: imgAdv.negative,
+              placeholder: "lowres, text, watermark\u2026",
+              disabled: negOff,
+              title: negOff ? offTitle : "",
+              onChange: (ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))
+            }
+          ), /* @__PURE__ */ React.createElement("div", { className: "lv-row2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "Steps"), /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              className: "lv-in" + (stepsOff ? " cap-off" : ""),
+              type: "number",
+              min: stepsB.min != null ? stepsB.min : 1,
+              max: stepsB.max != null ? stepsB.max : 150,
+              step: "1",
+              value: imgAdv.steps,
+              disabled: stepsOff,
+              title: stepsOff ? offTitle : "",
+              onChange: (ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))
+            }
+          )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "CFG scale"), /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              className: "lv-in" + (cfgOff ? " cap-off" : ""),
+              type: "number",
+              min: cfgB.min != null ? cfgB.min : 1,
+              max: cfgB.max != null ? cfgB.max : 30,
+              step: "0.5",
+              value: imgAdv.cfg,
+              disabled: cfgOff,
+              title: cfgOff ? offTitle : "",
+              onChange: (ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))
+            }
+          ))), modelDefaults && /* @__PURE__ */ React.createElement("div", { className: "lv-advnote" }, /* @__PURE__ */ React.createElement("span", null, "\u2713 using this model's tuned preset"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-mini2", style: { margin: 0 }, onClick: () => {
+            setImgAdv((a) => ({
+              ...a,
+              negative: modelDefaults.negative_prompt || a.negative,
+              steps: modelDefaults.sampling_steps || a.steps,
+              cfg: modelDefaults.cfg_scale || a.cfg
+            }));
+          } }, "\u21B6 reset")));
+        })(), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Aspect"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, [
           [1, 1, "1:1"],
           [3, 4, "3:4"],
           [4, 3, "4:3"],

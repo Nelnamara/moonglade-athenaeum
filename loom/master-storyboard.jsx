@@ -507,6 +507,7 @@ const V2_STYLES = `
 .lv-tab{flex:1;text-align:center;font:600 10px/1 system-ui;padding:6px 4px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lv-tab.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
 .lv-in{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:7px;padding:7px 8px;color:var(--text);font:11px/1.3 system-ui;}
+.cap-off{opacity:.4;cursor:not-allowed;}
 .lv-in:focus{outline:0;border-color:var(--accent);}
 .lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:2px 5px;cursor:pointer;}
 .lv-minichip:hover{border-color:var(--accent);color:var(--accent);}
@@ -816,6 +817,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             setImgModel((cur) => (cur && cur.model_id === m.model_id) ? {
               ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
               sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+              compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
               versions,
             } : cur);
             const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
@@ -846,6 +848,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     setImgModel((cur) => ({
       ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
       sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+      compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
     }));
     const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
     setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
@@ -1629,17 +1632,37 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               names/defaults/order as pixai_gallery.py's #gen-mode-generate, submitted via
               buildImgGenBody() (loom-mutations.js) so the price badge below and the real
               submit in genImage() can never disagree about what these fields do. */}
+          {(() => {
+            // Capability gating (extra.compatibility, probed live 2026-07-06 -- memory
+            // pixai-model-capability-schema): which of these params THIS model actually
+            // honors, mirroring pixai_gallery.py's gateField()/applyCapabilityGating()
+            // exactly. Fails OPEN on unknown/absent data -- only an explicit `false`
+            // disables anything (imgModel==null or a never-probed model -> compat={} ->
+            // every field stays enabled, same as today).
+            const compat = (imgModel && imgModel.compatibility) || {};
+            const restr = (imgModel && imgModel.restrictions) || {};
+            const negOff = compat.negativePrompt === false;
+            const stepsOff = compat.samplingSteps === false;
+            const cfgOff = compat.cfgScale === false;
+            const stepsB = restr.samplingSteps || {};
+            const cfgB = restr.cfgScale || {};
+            const offTitle = "This model doesn’t use this setting";
+            return (
           <details>
             <summary style={{ cursor: "pointer", color: "var(--subtext)", fontSize: 11 }}>Advanced</summary>
-            <textarea className="lv-ta" style={{ marginTop: 5 }} value={imgAdv.negative}
-              placeholder="lowres, text, watermark…"
+            <textarea className={"lv-ta" + (negOff ? " cap-off" : "")} style={{ marginTop: 5 }} value={imgAdv.negative}
+              placeholder="lowres, text, watermark…" disabled={negOff} title={negOff ? offTitle : ""}
               onChange={(ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))} />
             <div className="lv-row2">
               <div><label className="lv-lab" style={{ margin: "6px 0 3px" }}>Steps</label>
-                <input className="lv-in" type="number" min="1" max="150" step="1" value={imgAdv.steps}
+                <input className={"lv-in" + (stepsOff ? " cap-off" : "")} type="number"
+                  min={stepsB.min != null ? stepsB.min : 1} max={stepsB.max != null ? stepsB.max : 150} step="1"
+                  value={imgAdv.steps} disabled={stepsOff} title={stepsOff ? offTitle : ""}
                   onChange={(ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))} /></div>
               <div><label className="lv-lab" style={{ margin: "6px 0 3px" }}>CFG scale</label>
-                <input className="lv-in" type="number" min="1" max="30" step="0.5" value={imgAdv.cfg}
+                <input className={"lv-in" + (cfgOff ? " cap-off" : "")} type="number"
+                  min={cfgB.min != null ? cfgB.min : 1} max={cfgB.max != null ? cfgB.max : 30} step="0.5"
+                  value={imgAdv.cfg} disabled={cfgOff} title={cfgOff ? offTitle : ""}
                   onChange={(ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))} /></div>
             </div>
             {modelDefaults && (
@@ -1654,6 +1677,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               </div>
             )}
           </details>
+            );
+          })()}
           <label className="lv-lab">Aspect</label>
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
             {[[1, 1, "1:1"], [3, 4, "3:4"], [4, 3, "4:3"], [2, 3, "2:3"], [3, 2, "3:2"],

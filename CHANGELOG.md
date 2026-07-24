@@ -38,6 +38,17 @@ git tags. Full prose notes for tagged versions live on
   `version_id`/`lora_base_type`/`trigger_words` with no new network call. The fetch change
   lives in the shared `mg-model-picker.js`, so both surfaces got the real data for free; only
   the per-chip UI was written twice.
+- **Capability gating on the Advanced panel, on both the gallery and the Loom.**
+  `extra.compatibility` (which params a model actually honors — e.g. Tsubaki.2 ignores CFG
+  scale and runs steps fixed at 16) and `extra.restrictions` (real min/max bounds) are now
+  extracted and used, closing a gap probed live back on 2026-07-06 but never wired up: an
+  editable Negative prompt/Steps/CFG control that silently did nothing was worse than none
+  at all. A field the model doesn't honor is disabled (never hidden) with a plain tooltip;
+  fails open on unknown data. Caught live during this pass, not by source reading: an
+  earlier version of the gallery's gate only touched an input's min/max when the new
+  model's restrictions had them, so switching from a restricted model to an unrestricted one
+  left the bounds stuck at the previous model's numbers — fixed so the gate always resolves
+  min/max to either the model's real bounds or the field's own default.
 
 ### Fixed
 

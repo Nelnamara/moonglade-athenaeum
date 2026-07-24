@@ -5773,6 +5773,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-lbl{color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;}
   .gen-ta{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 9px;font-size:13px;font-family:inherit;resize:vertical;}
   .gen-ta:focus,.gen-sel:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+  .cap-off{opacity:.4;cursor:not-allowed;}
   #gen-selname{color:var(--lavender);font-size:12.5px;margin-bottom:8px;}
   .gen-aspects{display:flex;gap:5px;flex-wrap:wrap;}
   .gen-aspects button{padding:4px 9px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
@@ -6887,7 +6888,41 @@ var Gen = (function(){
     selected.negative_prompt=v.negative_prompt||''; selected.sampling_steps=v.sampling_steps||null;
     selected.cfg_scale=v.cfg_scale||null; selected.sampling_method=v.sampling_method||'';
     selected.capabilities=v.capabilities||[];
+    selected.compatibility=v.compatibility||{}; selected.restrictions=v.restrictions||{};
     if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');
+    applyCapabilityGating();
+  }
+  // extra.compatibility (probed live 2026-07-06, memory pixai-model-capability-schema) says
+  // which Advanced-panel params THIS model actually honors -- e.g. Tsubaki.2 ignores CFG
+  // scale and runs sampling steps FIXED at 16 regardless of what the field says. Showing an
+  // editable control that silently does nothing is worse than showing nothing: disable it
+  // (not hide -- the owner can still see the field exists and why it's off) with a plain
+  // tooltip. Fails OPEN on unknown data (compatibility==={} for a model never probed, or any
+  // key simply absent) -- only an EXPLICIT `false` disables anything, matching every other
+  // fail-open gate in this app (is_lora_compatible, annotate_lora_compat, ...). restrictions
+  // (real min/max bounds, e.g. {samplingSteps:{min:16,max:50}}) clamp the field's own
+  // hardcoded HTML bounds when the model publishes tighter ones.
+  //
+  // defMin/defMax are ALWAYS applied when bounds doesn't cover them -- caught live: an
+  // earlier version only set min/max when `bounds` had them, so switching FROM a model with
+  // real restrictions TO one with none left the field's min/max stuck at the PREVIOUS
+  // model's numbers (imperative DOM attributes persist across calls unless explicitly
+  // touched -- unlike React's declarative re-render, which recomputes from scratch every
+  // time and never had this bug on the Loom's own copy of this same gate).
+  function gateField(id, honored, bounds, defMin, defMax){
+    var f=el(id); if(!f) return;
+    var off = honored===false;
+    f.disabled = off;
+    f.title = off ? 'This model doesn\\u2019t use this setting' : '';
+    f.classList.toggle('cap-off', off);
+    if(defMin!=null) f.min = (bounds&&bounds.min!=null) ? bounds.min : defMin;
+    if(defMax!=null) f.max = (bounds&&bounds.max!=null) ? bounds.max : defMax;
+  }
+  function applyCapabilityGating(){
+    var s=selected||{}, compat=s.compatibility||{}, restr=s.restrictions||{};
+    gateField('gen-neg', compat.negativePrompt, null);
+    gateField('gen-steps', compat.samplingSteps, restr.samplingSteps, 1, 150);
+    gateField('gen-cfg', compat.cfgScale, restr.cfgScale, 1, 30);
   }
   // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
   // always silently took the newest release and discarded the rest. #gen-version lists every
