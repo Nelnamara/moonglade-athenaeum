@@ -746,9 +746,11 @@ fact", so roughly twenty items became contractually invisible until this audit w
   power user + community member" persona bucket held live, unactioned feature requests that went
   invisible when the file was archived — the same failure the audit-board reconciliation already
   fixed once (see "The audit board" above), recurring in a section that reconciliation never
-  reached. Checked against the current code 2026-07-22; still genuinely open: **credit ledger**
-  (`paidCredit` is fetched per-task but never written to the catalog — no spend charts, no
-  cost-per-model); **remix from the lightbox** (load an image's full recipe — prompt/negative/
+  reached. Checked against the current code 2026-07-22; still genuinely open: **credit ledger — the
+  VIEW half only** (the data half shipped 2026-07-23 on branch `paid-credit-persist`: the
+  `paid_credit` catalog column is written at every capture site and recoverable for old rows
+  via `--backfill-full-meta --with-credit`; spend charts / cost-per-model views remain
+  unbuilt); **remix from the lightbox** (load an image's full recipe — prompt/negative/
   model/LoRAs/size/seed — back into the Generate drawer; no matching code found under any name);
   **model/LoRA favorites + recents in the picker**, originally scoped local-only ("server-stored
   like Snippets") — the owner's 2026-07-22 ask wants these sourced from the user's real PixAI
