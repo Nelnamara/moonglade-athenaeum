@@ -202,6 +202,30 @@ def test_gallery_picker_is_the_shared_mg_gallery_picker_component(tmp_path):
     assert "Picker.onFilter" not in html and "Picker.onScroll" not in html and "Picker.toggleCopy" not in html
 
 
+def test_gallery_model_flyout_is_the_shared_mg_model_picker_component(tmp_path):
+    """O12 (Phase 2): #model-flyout's own hand-rolled search/grid/hover-preview/market UI is
+    two <mg-model-picker> instances now (kind="base" and kind="lora" multi market), lazily
+    mounted into #gen-picker-host on first open -- not the old #gen-grid/#gen-q/.gen-card
+    rendering. Same 'new surface present + old one gone' shape as the O13 test above."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "/static/mg-model-picker.js" in html
+    assert 'id="gen-picker-host"' in html
+    assert "document.createElement('mg-model-picker')" in html
+    assert "basePickerEl.setAttribute('kind','base');" in html
+    assert "loraPickerEl.setAttribute('kind','lora');" in html
+    assert "loraPickerEl.setAttribute('multi','');" in html
+    assert "loraPickerEl.setAttribute('market','');" in html   # O13's sort/category parity for LoRAs
+    assert "addEventListener('mg-pick', function(e){ onBasePick(e.detail); });" in html
+    assert "addEventListener('mg-pick', function(e){ onLoraPick(e.detail.model, e.detail.selected); });" in html
+    # the old hand-rolled grid/search/market chrome is gone
+    for old_id in ('id="gen-grid"', 'id="gen-empty"', 'id="gen-q"', 'id="mkt-sort"',
+                   'id="mkt-cats"', 'id="mkt-popular"', 'id="mkt-newest"'):
+        assert old_id not in html, "old #model-flyout grid markup survived the O12 migration: " + old_id
+    assert "function selectCard(" not in html and "function toggleLora(" not in html
+    assert "function search(){" not in html and "function render(rows" not in html
+
+
 def test_collections_endpoint(tmp_path):
     rows = [_row(media_id="1", filename="a_1.png", collections="Banners,Faves",
                  created_at="2025-01-01T00:00:00"),
@@ -457,16 +481,26 @@ def test_snippets_are_independent_for_accounts_differing_only_by_case(tmp_path):
 
 
 def test_gallery_model_preview_hover_is_debounced_not_instant(tmp_path):
-    """Same D-11 fix as the Loom's mg-model-picker.js: a raw mouseenter re-triggered an
-    instant, freshly-repositioned popup on every card the mouse passed over while
-    scanning the grid. This is fundamentally a feel/timing bug (real verification is
-    manual, in a browser) -- this only guards against reverting to the raw wiring."""
+    """D-11 fix, originally landed as the gallery's OWN scheduleShowPreview/cancelPreview
+    (a raw mouseenter re-triggered an instant, freshly-repositioned popup on every card the
+    mouse passed over while scanning the grid). O12 (Phase 2) moved the whole search-grid
+    -- including this debounce -- into the shared <mg-model-picker> component, so the
+    gallery gets the fix by LOADING that component now, not by hand-rolling its own copy.
+    This is fundamentally a feel/timing bug (real verification is manual, in a browser) --
+    this only guards against a future edit reverting to raw, un-debounced wiring, wherever
+    that wiring now lives."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
-    assert "c.onmouseenter=function(){ scheduleShowPreview(m, c); };" in html
-    assert "c.onmouseleave=cancelPreview;" in html
-    assert "function scheduleShowPreview(m, anchor){" in html
-    assert "function cancelPreview(){ clearTimeout(previewTimer); hidePreview(); }" in html
+    assert "/static/mg-model-picker.js" in html   # the gallery's own grid IS this component now
+    # The old hand-rolled copy must be gone, not just superseded -- two independently-
+    # debounced implementations is exactly the kind of drift this migration exists to end.
+    assert "function scheduleShowPreview(" not in html
+    assert "function cancelPreview(" not in html
+
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
+    assert "c.addEventListener('mouseenter', function () { self._schedulePreview(m, c); });" in picker_js
+    assert "_schedulePreview(m, anchor) {" in picker_js
+    assert "_cancelPreview() {" in picker_js
 
 
 def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path):
@@ -1433,17 +1467,26 @@ def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
     that never explained itself (audit: fail-open, 2026-07-21). Fixed: the lookup's
     failure path is distinguished from success (entry.failed), Go is gated on every
     added LoRA having actually resolved, and generate() refuses to submit even if
-    something got the disabled button clicked anyway."""
+    something got the disabled button clicked anyway.
+
+    O12 (Phase 2): the LoRA pick/resolve lifecycle itself (the fetch that sets
+    entry.failed) moved into <mg-model-picker>'s own _toggleMulti() -- the gallery's
+    onLoraPick() only consumes the ALREADY-resolved-or-failed entry the component hands
+    it. So the failed-tracking assertions now check mg-model-picker.js; everything that
+    still lives in pixai_gallery.py (the Go-button gate, generate()'s submit-time guard,
+    anyLoraUnresolved() itself) is unchanged and still checked against the gallery page."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     # The silent-drop shape must be gone: a bare `.catch(function(){ renderLoras(); });`
     # right after the model-version fetch, with no failed-state tracking at all.
     assert ".catch(function(){ renderLoras(); });" not in html
-    assert "entry.failed=true" in html
-    assert "entry.failed=!entry.version_id" in html
     assert "function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }" in html
     assert "anyIncompat() || anyLoraUnresolved()" in html          # Go button gate
     assert "if(anyLoraUnresolved()){ el('gen-lora-note').scrollIntoView" in html   # submit-time guard
+
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
+    assert "entry.failed = true;" in picker_js
+    assert "entry.failed = !entry.version_id;" in picker_js
 
 
 def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch):
