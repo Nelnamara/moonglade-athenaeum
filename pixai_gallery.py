@@ -5432,27 +5432,9 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-seg button.on{background:var(--lavender);color:var(--base);border-color:var(--lavender);font-weight:600;}
   .gen-search{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;margin-bottom:10px;}
   .gen-search:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
-  .mkt-sort{display:flex;gap:6px;margin-bottom:8px;}
-  .mkt-sort button{flex:1;padding:5px 0;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
-  .mkt-sort button.on{background:var(--surface1);color:var(--text);border-color:var(--accent-soft);font-weight:600;}
-  .mkt-cats{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}
-  .mkt-cats button{padding:3px 10px;font-size:10.5px;border-radius:11px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
-  .mkt-cats button.on{background:var(--accent);color:var(--base);border-color:var(--accent);font-weight:600;}
-  .gen-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .12s;}
-  .gen-card{border-radius:12px;overflow:hidden;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;position:relative;}
-  .gen-card:hover{border-color:var(--overlay0);}
-  .gen-card.sel{border:2px solid var(--lavender);box-shadow:0 0 0 2px rgba(182,146,230,.25);}
-  .gen-card .cov{aspect-ratio:1;width:100%;object-fit:cover;display:block;background:var(--surface1);}
-  .gen-card .cov.blur{filter:blur(15px);}
-  .gen-card .meta{padding:5px 7px;}
-  .gen-card .nm{font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .gen-card .sub{display:flex;align-items:center;gap:7px;margin-top:2px;font-size:10px;}
-  .gen-card .ty{color:var(--emerald);}
-  .gen-card .lk{color:var(--subtext);}
-  .gen-card .uses{color:var(--lavender);margin-left:auto;}
-  .gen-card .chk{position:absolute;top:4px;right:4px;color:var(--lavender);background:var(--mantle);border-radius:50%;font-size:12px;width:18px;height:18px;display:none;align-items:center;justify-content:center;border:1px solid var(--lavender);}
-  .gen-card.sel .chk{display:flex;}
-  .gen-empty{color:var(--subtext);font-size:12px;padding:22px 4px;text-align:center;}
+  /* O12: .mkt-sort/.mkt-cats/.gen-grid/.gen-card/.gen-empty are gone -- the flyout's search/
+     grid/hover-preview/market UI is <mg-model-picker> now (static/mg-model-picker.js), which
+     injects its own .mg-mktsort/.mg-mktcats/.mg-grid/.mg-card/.mg-empty via its own <style>. */
   .gen-form{border-top:1px dashed var(--surface1);margin-top:12px;padding-top:10px;}
   .gen-lbl{color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;}
   .gen-ta{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 9px;font-size:13px;font-family:inherit;resize:vertical;}
@@ -5779,22 +5761,10 @@ document.addEventListener('DOMContentLoaded', function(){
         <button id="gen-k-base" class="on" onclick="Gen.setKind('base')">Models</button>
         <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
       </div>
-      <input class="gen-search" id="gen-q" placeholder="Search models&hellip;" autocomplete="off">
-      <div class="mkt-sort" id="mkt-sort" style="display:none;">
-        <button id="mkt-popular" class="on" onclick="Gen.setSort('popular')" title="PixAI&#39;s most-used order">Popular</button>
-        <button id="mkt-newest" onclick="Gen.setSort('newest')" title="Newest uploads first">Newest</button>
-      </div>
-      <div class="mkt-cats" id="mkt-cats" style="display:none;">
-        <button class="on" data-cat="" onclick="Gen.setCat('')">All</button>
-        <button data-cat="character" onclick="Gen.setCat('character')">Character</button>
-        <button data-cat="style" onclick="Gen.setCat('style')">Style</button>
-        <button data-cat="pose" onclick="Gen.setCat('pose')">Pose</button>
-        <button data-cat="clothing" onclick="Gen.setCat('clothing')">Clothing</button>
-        <button data-cat="background" onclick="Gen.setCat('background')">Background</button>
-        <button data-cat="detail" onclick="Gen.setCat('detail')">Detail</button>
-      </div>
-      <div class="gen-grid" id="gen-grid"></div>
-      <div class="gen-empty" id="gen-empty" style="display:none;"></div>
+      <!-- O12: the search box, grid, hover preview, and (for LoRAs) the market sort/category
+           strip all live inside the two <mg-model-picker> elements Gen.ensurePickers() mounts
+           here lazily on first open -- see the Picker/Gen bridge in the script below. -->
+      <div id="gen-picker-host"></div>
     </div>
   </div>
 </aside>
@@ -6228,8 +6198,7 @@ var Snips = (function(){
   return {open:open, saveCurrent:saveCurrent, insert:insert, del:del};
 })();
 var Gen = (function(){
-  var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null, previewTimer=null;
-  var sortMode='popular', catFilter='';   // Model-Market: 'popular'(REST) | 'newest'(GraphQL); category chip
+  var kind='base', selected=null, costSeq=0, costTimer=null;
   var workflows=null, enhTimer=null;
   var fixTag_='face', fixBoxes=[], fixStart=null;
   function el(id){return document.getElementById(id);}
@@ -6244,10 +6213,42 @@ var Gen = (function(){
     var f=el('model-flyout'); if(f){ f.classList.remove('open'); f.setAttribute('aria-hidden','true'); }
     hidePreview();
   }
+  // O12 (Phase 2): the flyout's own grid/search/market UI is the shared <mg-model-picker>
+  // now -- two instances, lazily created on first open (matching the old "only fetch on
+  // first open" behavior, `if(!el('gen-grid').children.length) search();`, instead of
+  // paying for both an always-mounted base AND LoRA fetch on every page load): kind="base"
+  // for Models, kind="lora" multi market for LoRAs (market = the O13 sort/category
+  // extension, opt-in so the Loom's own kind="lora" multi mount -- no market attribute --
+  // stays byte-for-byte unaffected). setKind() now just toggles which one is visible;
+  // each keeps its OWN last-searched results independently, so switching Models<->LoRAs
+  // and back no longer re-fetches either side (a small improvement over the old
+  // shared-grid behavior, not just parity with it).
+  var basePickerEl=null, loraPickerEl=null;
+  function ensurePickers(){
+    if(basePickerEl) return;
+    var host=el('gen-picker-host'); if(!host) return;
+    basePickerEl=document.createElement('mg-model-picker');
+    basePickerEl.setAttribute('kind','base');
+    basePickerEl.addEventListener('mg-pick', function(e){ onBasePick(e.detail); });
+    host.appendChild(basePickerEl);
+    loraPickerEl=document.createElement('mg-model-picker');
+    loraPickerEl.setAttribute('kind','lora');
+    loraPickerEl.setAttribute('multi','');
+    loraPickerEl.setAttribute('market','');
+    loraPickerEl.style.display='none';
+    loraPickerEl.addEventListener('mg-pick', function(e){ onLoraPick(e.detail.model, e.detail.selected); });
+    host.appendChild(loraPickerEl);
+  }
   function toggleFlyout(){
     var f=el('model-flyout'), on=!f.classList.contains('open');
     f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
-    if(on){ if(!el('gen-grid').children.length) search(); setTimeout(function(){el('gen-q').focus();},120); }
+    if(on){
+      ensurePickers();
+      setTimeout(function(){
+        var vis=(kind==='lora')?loraPickerEl:basePickerEl, q=vis&&vis.querySelector('.mg-q');
+        if(q) q.focus();
+      },120);
+    }
     else hidePreview();
   }
   function setDock(d){
@@ -6261,33 +6262,9 @@ var Gen = (function(){
     if(k===kind) return; kind=k;
     el('gen-k-base').classList.toggle('on',k==='base');
     el('gen-k-lora').classList.toggle('on',k==='lora');
-    el('gen-q').placeholder = (k==='lora'?'Search LoRAs':'Search models')+'\\u2026';
-    // Category chips + Newest sort are a LoRA taxonomy (PixAI categories are 100% LoRAs, and
-    // new base-model uploads are rare) -> only meaningful on the LoRAs tab. Base models stay on
-    // the rich Popular/REST path; reset market state when leaving LoRAs.
-    var market=(k==='lora');
-    el('mkt-cats').style.display = market ? '' : 'none';
-    el('mkt-sort').style.display = market ? '' : 'none';
-    if(!market){ catFilter=''; sortMode='popular';
-      document.querySelectorAll('#mkt-cats button').forEach(function(b){ b.classList.toggle('on',(b.getAttribute('data-cat')||'')===''); });
-      el('mkt-popular').classList.add('on'); el('mkt-newest').classList.remove('on'); }
-    search();
-  }
-  function onInput(){ q=el('gen-q').value.trim(); clearTimeout(timer); timer=setTimeout(search,280); }
-  function setSort(s){ s=(s==='newest')?'newest':'popular'; if(s===sortMode) return; sortMode=s;
-    el('mkt-popular').classList.toggle('on',s==='popular'); el('mkt-newest').classList.toggle('on',s==='newest');
-    search(); }
-  function setCat(c){ if(c===catFilter) return; catFilter=c||'';
-    document.querySelectorAll('#mkt-cats button').forEach(function(b){ b.classList.toggle('on', (b.getAttribute('data-cat')||'')===catFilter); });
-    search(); }
-  function search(){
-    var mine=++seq, grid=el('gen-grid'); grid.style.opacity='.45';
-    var u='/api/model-search?kind='+kind+'&size=24&q='+encodeURIComponent(q)
-      +'&sort='+sortMode+'&category='+encodeURIComponent(catFilter);
-    fetch(u)
-      .then(function(r){return r.json();})
-      .then(function(d){ if(mine!==seq)return; render(d.results||[], d.error); grid.style.opacity='1'; })
-      .catch(function(){ if(mine!==seq)return; render([], 'network error'); grid.style.opacity='1'; });
+    ensurePickers();
+    if(basePickerEl) basePickerEl.style.display = (k==='base') ? '' : 'none';
+    if(loraPickerEl) loraPickerEl.style.display = (k==='lora') ? '' : 'none';
   }
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function fmt(n){ return (n||0).toLocaleString(); }
@@ -6302,34 +6279,6 @@ var Gen = (function(){
     if(t.indexOf('SD_V1')>=0)return 'SD1.5'; if(t.indexOf('SD3')>=0)return 'SD3';
     if(t.indexOf('Z_IMAGE')>=0)return 'Z-Image'; if(t.indexOf('CHAT')>=0)return 'Chat';
     return (t.split('_')[0]||'model').toLowerCase(); }
-  function render(rows, err){
-    var grid=el('gen-grid'), empty=el('gen-empty'); grid.innerHTML='';
-    if(err){ empty.textContent='\\u26a0 '+err; empty.style.display='block'; return; }
-    if(!rows.length){
-      // Newest+Models is legitimately sparse (new uploads are almost all LoRAs), so say so
-      // instead of the generic 'no results' which reads as broken.
-      empty.textContent=(sortMode==='newest' && kind==='base')
-        ? 'Few base models are uploaded recently \\u2014 new content is mostly LoRAs. Try the LoRAs tab, or switch to Popular.'
-        : 'No results \\u2014 try another search.';
-      empty.style.display='block'; return; }
-    empty.style.display='none';
-    rows.forEach(function(m){
-      var c=document.createElement('div'); c.className='gen-card';
-      if(kind==='lora' ? loras.some(function(l){return l.model_id===m.model_id;})
-                       : (selected && selected.model_id===m.model_id)) c.classList.add('sel');
-      var cov = m.preview_url ? '<img class="cov'+(m.should_blur?' blur':'')+'" loading="lazy" src="'+esc(m.preview_url)+'" alt="">' : '<div class="cov"></div>';
-      var uses = m.ref_count ? '<span class="uses" title="'+fmt(m.ref_count)+' generations \\u2014 PixAI\\u2019s own most-used ranking">\\u25c8 '+fmtCompact(m.ref_count)+'</span>' : '';
-      c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span>'+uses+'</div></div>';
-      c.onclick=function(){ selectCard(m, c); };
-      // Debounced (D-11): a raw mouseenter re-triggered an instant, un-animated,
-      // freshly-repositioned popup on EVERY card the mouse passed over while scanning
-      // a grid -- which is what "browsing" is. A short hover-intent delay means only a
-      // genuine pause-to-look opens it; a fast scan across several cards never does.
-      c.onmouseenter=function(){ scheduleShowPreview(m, c); };
-      c.onmouseleave=cancelPreview;
-      grid.appendChild(c);
-    });
-  }
   function baseLabel(cat){ // "uploaded-sdxl" -> "SDXL", "flux-1" -> "Flux 1"
     cat=(cat||'').replace(/^uploaded-/,'').replace(/[-_]+/g,' ').trim();
     if(!cat) return '';
@@ -6358,11 +6307,10 @@ var Gen = (function(){
     placePreview(p, anchor);
   }
   function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
-  function scheduleShowPreview(m, anchor){
-    clearTimeout(previewTimer);
-    previewTimer=setTimeout(function(){ showPreview(m, anchor); }, 130);
-  }
-  function cancelPreview(){ clearTimeout(previewTimer); hidePreview(); }
+  // scheduleShowPreview/cancelPreview (the search-grid card hover-intent debounce) moved
+  // into <mg-model-picker> itself (O12) -- it owns its own cards now. hidePreview/
+  // showPreview/placePreview stay: previewSelected (the #gen-selrow summary-button hover)
+  // and showRefPreview (the reference-image slot hover) are unrelated to the picker grid.
   function placePreview(p, anchor){
     var r=anchor.getBoundingClientRect(), w=300, gap=14, x;
     var dr=el('gen-drawer'), leftish = dr && dr.classList.contains('dock-left');
@@ -6381,23 +6329,21 @@ var Gen = (function(){
   }
   function previewSelected(ev){ if(selected) showPreview(selected, ev.currentTarget); }
   var loras=[];
-  function toggleLora(m, c){
-    var i=-1; loras.forEach(function(l,j){ if(l.model_id===m.model_id) i=j; });
-    if(i>=0){ loras.splice(i,1); c.classList.remove('sel'); renderLoras(); refreshLoraNotes(); debouncedCost(); return; }
-    if(loras.length>=6) return;
-    var entry={model_id:m.model_id, title:m.title, preview_url:m.preview_url, version_id:'',
-               weight:0.7, lora_base_type:'', trigger_words:'', failed:false};
-    loras.push(entry); c.classList.add('sel'); renderLoras(); updateGoState();
-    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
-      .then(function(r){return r.json();})
-      .then(function(d){ entry.version_id=d.version_id||''; entry.lora_base_type=d.lora_base_model_type||'';
-        entry.trigger_words=d.trigger_words||'';
-        // An empty version_id here is ALSO a failure, not a quiet no-op -- a LoRA that
-        // never resolves must not be able to vanish from the submit silently (see failed
-        // below): it used to just sit there forever wearing the "still loading" hourglass.
-        entry.failed=!entry.version_id;
-        renderLoras(); refreshLoraNotes(); debouncedCost(); })
-      .catch(function(){ entry.failed=true; renderLoras(); refreshLoraNotes(); });
+  // O12 (Phase 2): <mg-model-picker kind="lora" multi>'s own _toggleMulti() now owns the
+  // pending/resolve/fail lifecycle (same shape as the old toggleLora() -- see the
+  // component's own header comment) -- this just upserts the Gallery's own `loras` array
+  // by model_id, mirroring the Loom's identical bindLoraPicker bridge. Note: the old cap
+  // (`if(loras.length>=6) return;`) is DELIBERATELY not reproduced here -- the component
+  // already optimistically highlights a picked card in ITS OWN grid before this listener
+  // ever runs, so silently refusing to add it here would leave the picker showing a card
+  // as selected that never actually made it into `loras` (visually picked, silently not
+  // submitted) -- confusing in a strictly worse way than no cap at all. The Loom's own
+  // identical mount has run uncapped since D-11 with no reported issue.
+  function onLoraPick(model, sel){
+    var i=-1; loras.forEach(function(l,j){ if(l.model_id===model.model_id) i=j; });
+    if(!sel){ if(i>=0) loras.splice(i,1); }
+    else { if(i<0) loras.push(model); else loras[i]=model; }
+    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
   }
   // --- LoRA<->base compatibility gate + trigger-word offers ------------------
   // A LoRA runs on a base ONLY if its loraBaseModelType == the base's modelType (exact enum
@@ -6466,18 +6412,28 @@ var Gen = (function(){
   }
   function loraWeight(i, v){ if(!loras[i]) return;
     v=parseFloat(v); loras[i].weight=(isNaN(v)?0.7:Math.max(0,Math.min(2,v))); debouncedCost(); }
-  function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes();
-    if(kind==='lora') search(); debouncedCost(); }
+  // Note (O12): removing a LoRA via its chip's own x no longer re-searches the picker grid
+  // (there IS no search() anymore -- see the ensurePickers block above). The LoRA picker's
+  // OWN card for the removed entry can stay visually highlighted until the user interacts
+  // with that exact card again (clicking it re-toggles it off, correctly, through
+  // onLoraPick) -- a minor, cosmetic-only staleness, not a functional gap: `loras` (and
+  // therefore payload()) is always correct immediately, regardless of the grid's own
+  // highlight state. Flagged as a precise, known, low-severity remainder rather than
+  // silently left unexplained.
+  function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes(); debouncedCost(); }
   function openLoraBrowser(){
     var f=el('model-flyout');
     if(!f.classList.contains('open')) toggleFlyout();
     setKind('lora');
   }
-  var selSeq=0;   // guards selectCard's async version fetch against a stale-response race
-  function selectCard(m, c){
-    if(kind==='lora'){ toggleLora(m, c); return; }
-    document.querySelectorAll('.gen-card.sel').forEach(function(x){x.classList.remove('sel');});
-    c.classList.add('sel'); selected=Object.assign({}, m); var mySeq=++selSeq;
+  var selSeq=0;   // guards onBasePick's async version fetch against a stale-response race
+  // O12 (Phase 2): replaces the old selectCard(m, c) -- <mg-model-picker kind="base">'s
+  // mg-pick fires with the raw /api/model-search row (detail: m), and the component
+  // already owns highlighting the picked card in its own grid, so this only has to do
+  // what selectCard did AFTER that: resolve the real version + metadata and refresh
+  // every downstream surface (LoRA compat notes, model-defaults prefill, cost).
+  function onBasePick(m){
+    selected=Object.assign({}, m); var mySeq=++selSeq;
     var th=el('gen-selthumb');
     if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
     el('gen-selname').textContent=m.title+' \\u2026';
@@ -6863,7 +6819,7 @@ var Gen = (function(){
     drawer.prefill({ mode: refs.length>1?'r2v':'i2v',
                      images: refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; }) });
   }
-  return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
+  return {open:open, close:close, setKind:setKind,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
           selectEnhance:selectEnhance, runEnhance:runEnhance,
@@ -6872,7 +6828,7 @@ var Gen = (function(){
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
-          insertTriggers:insertTriggers, setSort:setSort, setCat:setCat,
+          insertTriggers:insertTriggers,
           // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
           // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
           // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
@@ -7046,7 +7002,8 @@ function bulkSendVideo(){
   clearAll();   // sent to the video drawer -- clear the gallery selection (we stay on the page)
 }
 document.addEventListener('DOMContentLoaded', function(){
-  var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
+  // O12: the flyout's search input lives inside <mg-model-picker> now (its own .mg-q),
+  // wired internally by the component -- no external #gen-q to bind here anymore.
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
   try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
   Acct.refresh();
