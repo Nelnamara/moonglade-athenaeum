@@ -42,6 +42,40 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 
 ### Added
 
+- **Trash / quarantine restore panel** (2026-07-24; docs/AUDIT_2026-07-21.md's restore-panel
+  row, scoped 2026-07-23, now shipped). `_deleted/` had ~12k quarantined files with no restore
+  UI even though the delete confirm promises files are "recoverable" — a false promise in
+  practice until now. Ships as a **floating overlay panel** opened from a new "Open trash…"
+  button in the Control Panel (`Trash.open()`/`Trash.close()` in `PANEL_HTML`'s own script,
+  reusing the Folio of Honors/Contests/YourArt `.ach-modal`/`.ach-panel` chrome — copied into
+  `PANEL_HTML`'s `<style>` the same way `.p-tabs`/`.htab` already are, since this page
+  deliberately doesn't load `static/mg-notify.js`) — **not** a page embedded in the Panel's own
+  layout, matching the owner's earlier correction on this exact point ("Achievements come up
+  in a floating panel as well"). Server side: `list_quarantined()` is a directory scan (not a
+  catalog query — the whole point of `purge_media_local` is that the row is already gone),
+  paginated newest-first so a ~12k-file trash costs one cheap `os.scandir()`/`stat()` pass per
+  request, never O(everything) worth of thumbnail work — thumbnails are generated on demand for
+  only the current page (`_ensure_trash_thumbs()`, threaded like `build_thumbnails()`) by
+  reusing the existing `make_thumbnail()`/`make_video_thumbnail()` functions, writing into the
+  SAME `thumb_dir` slot `purge_media_local` already frees, so the unmodified existing
+  `/thumbs/<media_id>.jpg` route serves them — no new thumbnail logic or serving route.
+  `purge_media_local` now also snapshots the row to a `<media_id>.json` sidecar in `_deleted/`
+  before deleting it from the catalog, so `restore_quarantined_media()` can reinsert a FULL row
+  (rating/collections/prompt/task_id/…) on restore, not just a bare filename; files quarantined
+  before this feature (or any sidecar write that failed) fall back to the file's own mtime for
+  a "deleted" date and a minimal restored row. Four new routes: `GET /api/trash/list`
+  (paginated listing) and `POST /api/trash/restore` are **LOGIN** tier (recovering something is
+  not the same trust question as destroying it); `POST /api/trash/delete-forever` (selected
+  items) and `POST /api/trash/empty` (the whole trash) are **LOCALHOST**-only + a server-side
+  `confirm: true` body flag (matching `api_panel_run`'s existing destructive-action contract),
+  with the client additionally demanding a typed "DELETE" via `prompt()` before either call
+  fires (mirroring `confirmBulkDeleteCloud()`'s existing pattern byte-for-byte) — the
+  LOCALHOST-only actions are hidden from a LAN session's view of the panel's own affordances,
+  not just rejected server-side. All four routes registered + verified in
+  `tests/test_route_tiers.py`'s catch-all tier sweep. 32 new fail-first tests in
+  `tests/test_trash.py` (directory-scan pagination/sidecar-vs-mtime fallback, restore/
+  delete-forever/empty-trash, the sidecar-vs-real-file disambiguation, and the LAN-refusal +
+  confirm-required shape of both destructive routes).
 - **`paid_credit` is persisted — what every generation actually cost is now catalog data**
   (2026-07-23; data layer only, no UI/charts yet). New catalog column `paid_credit` (the
   server-reported actual credit cost of the row's task; `'0'` = free via card/daily,
