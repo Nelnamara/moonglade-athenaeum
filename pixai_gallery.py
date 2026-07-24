@@ -2901,11 +2901,13 @@ body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
    UNDER the modal/celebration tier that must keep covering them -- .sb-seq / .sb-pick-ov and the
    frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 / .m2-conf (520/521).
    Loom-only: this block ships only in _LOOM_SHELL, so the gallery's own #jobs-fab keeps 234.
-   !important for the same mg-notify.js cascade-timing reason as the bottom rule above. Known
-   residual (z-only can't fix it): Deep Focus's .lv-df-veil (450) and the nested 600 preview
-   flyouts render INSIDE .lv-overlay, so from the root they're part of the single 400 atom and
-   these corner FABs paint over them -- cosmetic only; the real fix hoists those overlays to
-   .sb-root level (owner-visible refactor, deferred). */
+   !important for the same mg-notify.js cascade-timing reason as the bottom rule above.
+   FIXED 2026-07-24 (was a known residual): Deep Focus's .lv-df-veil (450) and its nested
+   flyouts render INSIDE .lv-overlay, so from the root they were part of the single 400 atom
+   and these corner FABs painted over them. A DOM hoist wasn't needed after all --
+   master-storyboard.jsx now toggles a `.lv-overlay-df` class onto .lv-overlay itself while
+   Deep Focus is open (z-index 450, matching the veil's own intended value), which lifts the
+   whole atom back above these FABs in the root context for as long as Deep Focus stays open. */
 #jobs-fab  { z-index: 401 !important; }
 #jobs-tray { z-index: 402 !important; }
 
