@@ -652,6 +652,94 @@ waiting; the "together" grouping still applies to what's left below.
   - Recurring, standing complaint (not new): **marks render too small** wherever they show in
     the app (today: the header at 42px) — the owner has said so since the beginning. Treat as
     a real sizing defect to fix alongside any mark-system work, not a taste question.
+- **Reward-tier schema proposal — scoped 2026-07-24 on branch `reward-bundle-scoping`
+  (shape only, not built, not populated — filling it in is the owner's creative call).**
+  `docs/achievements_roster_57.json`'s `roster.achievements[]` already carries a prestige
+  `tier` field (`common`/`rare`/`epic`/`legendary`/`feat`) plus two ad hoc, already-populated
+  reward fields — `skin` (a skin id string, non-empty on 3 of 57) and `banner_reward` (bool,
+  true on exactly 1 of 57) — so no new TIER field is needed; what's missing is a REWARD field
+  distinct from prestige tier. Proposed addition, same shape on every achievement object:
+  **`reward_kind`** (`none` / `icon` / `skin` / `banner` — deliberately not named
+  `reward_tier` as D-8's own phrasing suggests, to avoid colliding with the existing `tier`
+  field; related concepts, not the same one) plus **`reward_id`** (a string bundle/asset
+  pointer, e.g. `"nightfallen"`, empty when `reward_kind` is `none`). Two achievements sharing
+  one `reward_id` (say, a low-tier one and an epic one) is what expresses "these unlock
+  together as one themed bundle" without forcing every bundle piece onto a single
+  achievement. Optionally, a new top-level `roster.bundles[]` catalog (sibling to
+  `buckets`/`tracks`) gives each theme one place to name its actual mark id / skin id / banner
+  asset — today that mapping exists only as prose in this file. **Two reconciliation notes for
+  whoever builds this:** (1) `pixai_gallery.py`'s `ACHIEVEMENTS` list (`:781`) is a
+  hand-transcribed runtime copy of the JSON roster, not loaded from the JSON at runtime (same
+  pattern as the `LADDER_TRACKS` comment at `:1526-1530`) — any new field lands in both places
+  by hand, whenever it's actually populated; (2) the existing `skin`/`banner_reward` values on
+  `hoardsmith`/`reel-director`/`menagerie`/`the-great-library` predate the bundle design and
+  each carry only one piece (a skin id, or a bare flag with no specific banner named) — they
+  need reconciling into the new fields, not just left alongside them.
+- **Reward-bundle decision ledger + gap list — scoped 2026-07-24.** Every mark/banner/skin
+  pairing decided so far, compiled from D-8 (`docs/AUDIT_2026-07-21.md`) and the mark-decisions
+  bullet above, cross-checked against the live code rather than re-derived from scratch:
+
+  | Bundle theme | Mark | Skin | Banner | Status |
+  |---|---|---|---|---|
+  | *(default)* | Void Sentinel | — | — | ships free/ungated |
+  | *(removed)* | ~~Gem Tome~~ | — | — | owner: delete from the mark roster |
+  | Nightfallen | Moonwell Eclipse | Nightfallen (currently **free** — see below) | #100 | picked |
+  | Verdant Grove | Vine Crescent | Verdant Grove | *(none picked yet)* | picked, no banner yet |
+  | Ember Court | Winged Crescent (**art not remade yet**) | Embercourt | *(none picked yet)* | picked, blocked on art |
+  | Moonlit Silver | *(none picked yet)* | Moonlit Silver | task `2030243024291694139` | picked, no mark yet |
+
+  Plus the standalone default: **banner #62 is the current live default** (`banner.png`,
+  already shipped, not tied to any achievement).
+
+  **Open tension found while compiling, not recorded in any prior doc:** `nightfallen` and
+  `moonglade` are the two skins flagged `"free": True` in `SKINS` (`pixai_gallery.py:1512-1523`)
+  — Nightfallen is not achievement-gated at all today. The Moonwell-Eclipse-unlocks-with-
+  Nightfallen decision doesn't say whether Nightfallen should become gated too, or stay free
+  while only its matching mark is the gated half of that bundle. Needs an explicit owner call.
+
+  **Observation, not a decision:** the app's only 3 skin-gated achievements today are all
+  epic-tier ladder rungs, and their skin ids already match 3 of the 4 bundle themes above —
+  `hoardsmith`→`moonlit` (Moonlit Silver), `reel-director`→`ember` (Embercourt),
+  `menagerie`→`verdant` (Verdant Grove). If the owner wants to reuse rather than reassign,
+  those three are natural anchors for those three bundles' skin half; only Nightfallen has no
+  existing achievement anchor at all.
+
+  **Gap count — how many of the 57 still need a reward assignment:**
+
+  | Bucket | Total | Carry *any* existing reward marker | Gap |
+  |---|---:|---:|---:|
+  | ladder | 29 | 4 — `hoardsmith`/`reel-director`/`menagerie` (a bare skin id each); `the-great-library` (the banner flag, no specific banner named) | 25 |
+  | milestone | 9 | 0 | 9 |
+  | mastery | 8 | 0 | 8 |
+  | feat | 11 | 0 (2 carry unrelated hardcoded rewards outside this system entirely — `under-the-hood` unlocks custom branding, `triggered` unlocks the roast-toggle — see below) | 11 |
+
+  None of the 4 "marked" achievements has a complete `reward_kind` + `reward_id` under the new
+  bundle model — a bare skin id or a bare boolean isn't a bundle pointer to a specific mark or
+  banner. So the honest count is **0 of 57 fully assigned under the new design, 4 partially
+  (and in need of reconciling, not just extending), 53 blank**.
+
+  **Structural constraint worth knowing before assigning:** not every ladder reaches every
+  prestige tier — `vault`/`gallery`/`sweep`/`vigil` cap at 2 rungs each (never reach
+  `legendary`; `vault`/`gallery` never touch `common` either), so a strict per-track "climb to
+  legendary, get the banner" rule can't produce a banner for those four tracks without adding a
+  rung. Milestones (9 achievements, `common`/`rare` tiers only) and Masteries (8, `rare`/`epic`
+  only) never reach `legendary` at all, so a uniform `tier`→`reward_kind` rule can't produce a
+  banner outside the ladder bucket either. Also open: the owner's own phrasing named
+  `low→icon / epic→skin / legendary→banner` — whether `rare` counts as "low" alongside
+  `common`, or wants its own `reward_kind`, isn't stated anywhere yet.
+
+  **Ready to wire up once tiers are assigned (not built):** `compute_achievements()`
+  (`pixai_gallery.py:1759-1817`) is where `earned_skins` gets built and `banner_reward` passed
+  through today — there is no equivalent mark/bundle logic yet. `SKINS` (`:1512-1524`) is the
+  only existing reward-asset catalog; there is no parallel `MARKS` list gating icons to
+  achievements — the marks system (`list_marks`/`load_branding`, `:1562-1620`) is purely a
+  machine-local file-drop, unconditional for anyone regardless of achievement state. `docs/ART.md`
+  §2 row 18 confirms the banner slot itself is singular today (`branding/banner.png`, one file,
+  no pool) — building "banner defaults vs. unlock pool" is new infrastructure, not just a data
+  mapping. Client-side, the reward line renders at `static/mg-notify.js:519-520` (`card()`, the
+  Folio's grid tiles) and `:863-865` (`_mkMoment()`, the unlock toast's reward ribbon) — both
+  read `skin`/`banner_reward` directly today and would need a third `reward_kind==='icon'`
+  branch alongside once marks are wired to achievements.
 - **The easter egg — CONFIRMED 2026-07-23: `under-the-hood` IS it, but its current trigger
   logic is wrong and the owner wants it rethought.** Today it fires (unlocking nothing, just
   a hidden feat) when ANY custom mark file exists in `branding/marks/` — i.e. the achievement
@@ -669,6 +757,39 @@ waiting; the "together" grouping still applies to what's left below.
   trigger should be once defaults ship correctly (the current "empty folder" condition stops
   making sense the moment there IS a default), and how the "unlocks full custom branding"
   payoff should work when defaults are already unlocked for everyone.
+  **Three trigger-redesign options, scoped 2026-07-24 (not picked — needs the owner's go):**
+  1. **Non-default mark, not just any mark.** Keep the existing `list_marks()`-based detection
+     (`sweep_telemetry()`, `pixai_gallery.py:2048-2058`) but compare against a known
+     shipped-default id set instead of "count ≥ 1" — fire only when a mark id absent from that
+     set appears. Smallest change (still file-drop detection, still literally "you dropped in
+     your own mark"), but needs the shipped defaults to be identifiable in code (today
+     `marks.json` carries no "is this a shipped default" flag) — and it only answers the
+     owner's objection (2) (the empty-folder precondition), not objection (1): a stranger still
+     has to already know the file-drop mechanic exists before they can trigger it at all.
+  2. **Visiting an internals-only surface for the first time.** The name fits an admin/
+     engine-room page more literally than a file-drop — e.g. a first visit to `/panel` (if it
+     turns out not to be prominently linked from the main nav) or a raw diagnostics view. Easy
+     to detect (a page-view event), no shipped-defaults bookkeeping needed. Risk: the Control
+     Panel is core to running the app day to day (syncs, jobs), so it may not read as "hidden"
+     enough to feel like a real find — needs checking how discoverable it already is before
+     this reads as an egg rather than a normal feature tour.
+  3. **A genuine hidden technical action** — a devtools-console-only hook (a `window.___`
+     function a curious user finds by reading the page's JS, in the spirit of the classic
+     "you opened the console" web easter egg), an undocumented CLI flag, or a direct hit on an
+     unlinked API route/query param. Closest to the name and the roast text ("you opened a
+     door you had no business finding") and fully decoupled from the branding-defaults problem
+     — no precondition about what ships in `branding/` at all. `api_ach_event()`
+     (`pixai_gallery.py:10780-10792`) already whitelists named front-end event beacons
+     (`konami`/`docs`/`narrator`) into `telem_flag()` calls — a console hook could reuse that
+     exact mechanism with one new event name, so this is less new infrastructure than it first
+     sounds. Tradeoff: several sub-choices (console hook vs. CLI flag vs. URL param), each with
+     a different discoverability profile, need picking.
+
+  All three leave the **payoff** open too (this file's own prior wording, still true): marks
+  already work for anyone regardless of achievement state today — there is no code gate an
+  earned `under-the-hood` currently switches on — so whichever trigger is picked, the reward
+  stays celebratory (badge, roast, the file-map pictogram art) unless the owner also wants a
+  real functional gate added, which is a separate decision.
 - **"Toast badge grows to its home marker" — CORRECTION 2026-07-23, this was a REAL
   regression, not an unfinished idea.** Owner: "this was actually live until the achievement
   revamp debacle... one of the lost facts." The archived note this file's prior wording was
