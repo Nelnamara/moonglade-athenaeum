@@ -188,6 +188,7 @@ ROUTE_TIERS = {
     ("loom_set", "POST"): LOGIN,
     ("loom_delete", "POST"): LOGIN,
     ("loom_handoff", "POST"): LOGIN,
+    ("loom_video_duration", "GET"): LOGIN,
     ("api_loom_export", "POST"): LOGIN,
     ("api_loom_export_bundle", "POST"): LOGIN,
     ("api_loom_export_cancel", "POST"): LOGIN,
