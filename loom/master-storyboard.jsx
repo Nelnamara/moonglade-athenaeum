@@ -521,9 +521,10 @@ const V2_STYLES = `
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
-.lv-loratoggle{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);
-  border-radius:5px;padding:3px 7px;cursor:pointer;margin:7px 0 5px;}
-.lv-loratoggle:hover{border-color:var(--accent);color:var(--accent);}
+/* The show/hide toggle reuses .lv-chip (the same toggle-chip chrome as the Video tab's
+   Continuity/Mode controls) -- this rule only adds the standalone spacing .lv-chips'
+   flex-gap would otherwise supply. Do not re-add background/border/color/font here. */
+.lv-loratoggle{display:inline-block;margin:7px 0 5px;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
@@ -1302,7 +1303,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               ))}
             </div>
           )}
-          <button type="button" className="lv-loratoggle" onClick={() => setLoraOpen((v) => !v)}>
+          <button type="button" className={"lv-chip lv-loratoggle" + (loraOpen ? " on" : "")} onClick={() => setLoraOpen((v) => !v)}>
             {loraOpen ? "− hide LoRA picker" : "+ add LoRA"}
           </button>
           {loraOpen && <mg-model-picker ref={bindLoraPicker} kind="lora" multi></mg-model-picker>}
