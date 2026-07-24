@@ -11729,6 +11729,28 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:120]}), 500
         return jsonify({"ok": True})
 
+    def _find_local_video_file(mid):
+        """Resolve a catalog media_id to its local video file on disk: try the catalog's
+        stored filename first, then fall back to the shared media-id matcher (SAME exact
+        media_id_of(p) == mid check and _duplicates/_deleted quarantine exclusion as every
+        other matcher in this file -- B17, audit 2026-07-21: a bare glob fallback used to
+        have neither, so a quarantined file was a valid hit and a shorter media_id could
+        match as a substring of a longer, unrelated one's filename). find_files_for_media_id
+        defaults to images, hence the explicit exts=vid_exts. Returns a Path or None.
+
+        Shared by /api/loom/handoff (frame extraction) and /api/loom/video-duration
+        (footage-import fallback probe) -- both need the exact same file before they can
+        hand it to ffmpeg/ffprobe; one resolver, not two independently-drifting copies."""
+        vid_exts = (".mp4", ".webm", ".mov", ".mkv")
+        row = get_row(db_path, mid) or {}
+        fn = row.get("filename") or ""
+        if fn:
+            cand = out_dir / fn
+            if cand.is_file() and cand.suffix.lower() in vid_exts:
+                return cand
+        fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
+        return fallback[0] if fallback else None
+
     @app.route("/api/loom/handoff", methods=["POST"])
     def loom_handoff():
         """Frame handoff: given a generated shot's video media_id, extract its LAST frame,
@@ -11750,26 +11772,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             trim_out = None
         try:
             core, session = _gen_session()
-            vid_exts = (".mp4", ".webm", ".mov", ".mkv")
-            vid = None
-            # find_files_for_media_id defaults to images -- resolve via the catalog's
-            # stored filename first, then fall back to the SAME shared matcher with
-            # exts=vid_exts, so the fallback gets the same exact media_id_of(p) == mid
-            # check and _duplicates/_deleted quarantine exclusion as every other
-            # matcher in this file (B17, audit 2026-07-21: the fallback used to be a
-            # bare '*<mid>.*' glob with neither -- a file under _deleted/ or
-            # _duplicates/ was a valid hit, and a shorter media_id could match as a
-            # substring of a longer, unrelated one's filename).
-            row = get_row(db_path, mid) or {}
-            fn = row.get("filename") or ""
-            if fn:
-                cand = out_dir / fn
-                if cand.is_file() and cand.suffix.lower() in vid_exts:
-                    vid = cand
-            if vid is None:
-                fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
-                if fallback:
-                    vid = fallback[0]
+            vid = _find_local_video_file(mid)
             if vid is None:
                 return jsonify({"error": "clip not downloaded yet -- generate/collect it first"}), 200
             fdir = out_dir / "loom" / "_frames"
@@ -11782,6 +11785,32 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"frame_media_id": str(frame_mid), "duration": dur})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/loom/video-duration")
+    def loom_video_duration():
+        """Real duration (seconds) of an already-catalogued video, via ffprobe on the local
+        file -- fallback for the Footage tab's import-as-footage picker (loom/master-
+        storyboard.jsx's importPickedFootage) when the catalog's own video_duration column
+        is blank (rows predating that column, or whose request-duration was never captured
+        -- see CATALOG_FIELDS/video_duration). Shares _find_local_video_file and
+        probe_video_duration with /api/loom/handoff (the latter also powers the Edit Bay's
+        reel) -- same resolver, same probing utility, nothing new invented. Read-only,
+        local-file-only -- no PixAI session needed. Login required, matching every other
+        /api/loom/* route."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        mid = (request.args.get("media_id") or "").strip()
+        if not mid:
+            return jsonify({"error": "media_id required", "duration": None}), 400
+        try:
+            vid = _find_local_video_file(mid)
+            if vid is None:
+                return jsonify({"error": "video file not found locally", "duration": None}), 200
+            import pixai_gallery_backup as core
+            return jsonify({"duration": core.probe_video_duration(str(vid))})
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
 
     @app.route("/api/loom/generate", methods=["POST"])
     def loom_generate():
