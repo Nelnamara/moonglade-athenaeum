@@ -725,6 +725,12 @@ ${"=".repeat(48)}
   }
   var V2_STYLES = `
 .lv-overlay{position:fixed;inset:0;z-index:400;background:var(--base);display:flex;flex-direction:column;}
+/* While Deep Focus is open, lift the WHOLE overlay's root-context z-index to .lv-df-veil's
+   own intended 450 (see the "AUDIT_2026-07-21.md" comment above the .lv-overlay mount) so
+   the body-level corner FABs -- #jobs-fab/#jobs-tray at 401/402 -- stop painting over Deep
+   Focus and its nested flyouts, which are otherwise contained inside .lv-overlay's own
+   stacking context and can never out-rank a root-level sibling on their own. */
+.lv-overlay.lv-overlay-df{z-index:450;}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
@@ -1805,7 +1811,7 @@ ${"=".repeat(48)}
       },
       "\u21E9 drag an image here to add it as a cast reference"
     ));
-    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" + (deepFocus ? " lv-overlay-df" : "") }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
       "label",
       {
         className: "lv-draft" + (project.draft ? " on" : ""),

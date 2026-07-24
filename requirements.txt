@@ -1,6 +1,8 @@
 requests
 truststore ; python_version >= "3.10"
 pillow
+numpy        # pixai_similar.py's CLIP-embedding array output (module-scope import, unlike
+             # that same file's genuinely lazy heavy deps -- pixeltable/torch/transformers)
 websockets   # --watch / --watch-backup, and the web gallery's auto-starting live-mirror thread
 
 # gallery server (optional)

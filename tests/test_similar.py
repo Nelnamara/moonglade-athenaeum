@@ -110,6 +110,31 @@ def test_sync_row_by_row_fallback_skips_bad_row(tmp_path, monkeypatch):
     assert n == 2
 
 
+# --- scan_dir: quarantine exclusion ---------------------------------------------
+
+def test_scan_dir_excludes_quarantine_dirs(tmp_path):
+    """AUDIT_2026-07-21.md `invariants`: --rebuild-similar must not re-embed images that
+    were already quarantined (_duplicates/, from --dedup) or purged (_deleted/, from the
+    gallery's delete). scan_dir already skipped gallery/ (thumbnails) -- this pins the same
+    treatment for the two quarantine dirs, matching find_image_file/find_files_for_media_id's
+    exclusion set (pixai_gallery.py, INVARIANT 6) that the rest of the codebase already uses
+    to keep purged/quarantined files out of every other surface."""
+    (tmp_path / "images").mkdir()
+    (tmp_path / "gallery").mkdir()
+    (tmp_path / "_duplicates").mkdir()
+    (tmp_path / "_deleted").mkdir()
+    (tmp_path / "images" / "prompt_task_live1.png").write_bytes(b"x")
+    (tmp_path / "gallery" / "thumb_live1.png").write_bytes(b"x")
+    (tmp_path / "_duplicates" / "prompt_task_dup1.png").write_bytes(b"x")
+    (tmp_path / "_deleted" / "prompt_task_gone1.png").write_bytes(b"x")
+
+    found = {mid for mid, _ in S.scan_dir(tmp_path)}
+
+    assert found == {"live1"}, (
+        "scan_dir must only yield the live image, not the gallery thumbnail or the "
+        "quarantined/purged copies under _duplicates/ or _deleted/")
+
+
 # --- similar: self-exclusion + k limit -----------------------------------------
 
 def test_similar_excludes_self_and_limits_k(monkeypatch):
