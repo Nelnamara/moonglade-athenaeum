@@ -28,12 +28,17 @@ const KNOWN_CONTROL_CLASSES = ["lv-chip", "lv-draft", "lv-mini2", "lv-routebtn",
 describe("LoRA picker show/hide toggle carries real control chrome", () => {
   test("the toggle button's className reuses an existing small-button/chip class", () => {
     // Grab the LoRA toggle button itself, not any other className in the file.
+    // picker-parity-round2: this used to show/hide the LoRA picker INLINE
+    // (onClick={() => setLoraOpen...}); it now opens the shared overlay pre-selected to
+    // LoRAs (onClick={() => { setPickerKind("lora"); setPickerOpen(true); }}) -- the
+    // regression this test guards (real control chrome, not bespoke under-styled link
+    // text) is unchanged by that rename, only WHAT the click does changed.
     const btnMatch = storyboardSrc.match(
-      /<button[^>]*className=\{?"([^"{]*)"?\}?[^>]*onClick=\{\(\) => setLoraOpen/
+      /<button[^>]*className=\{?"([^"{]*)"?\}?[^>]*onClick=\{\(\) => \{ setPickerKind\("lora"\)/
     );
-    assert.ok(btnMatch, "could not locate the LoRA picker's show/hide <button> " +
-      "(onClick={() => setLoraOpen...}) in master-storyboard.jsx -- has it moved or " +
-      "been renamed?");
+    assert.ok(btnMatch, "could not locate the LoRA picker's overlay-opening <button> " +
+      "(onClick={() => { setPickerKind(\"lora\")...) in master-storyboard.jsx -- has it " +
+      "moved or been renamed?");
     const classAttr = btnMatch[1];
     const classes = classAttr.split(/\s+/).filter(Boolean);
     const reusesKnownControl = classes.some((c) => KNOWN_CONTROL_CLASSES.includes(c));

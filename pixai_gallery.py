@@ -5848,6 +5848,15 @@ document.addEventListener('DOMContentLoaded', function(){
   #gen-selrow:hover{border-color:var(--overlay0);}
   #gen-selthumb{width:30px;height:30px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
   #gen-selrow .hint{margin-left:auto;color:var(--overlay0);font-size:11px;flex:0 0 auto;}
+  /* picker-parity-round2 (2026-07-24, problem 4/5): resolve_version_meta() already fetches
+     a version's OTHER releases + the author's own sampling_method/capabilities -- this was
+     being resolved and thrown away. #gen-selmeta surfaces both: a real version picker
+     (PixAI's own model/LoRA cards have one; ours had none) and read-only capability tags. */
+  #gen-selmeta{display:none;flex-direction:column;gap:6px;margin-top:6px;}
+  #gen-selmeta.show{display:flex;}
+  #gen-version{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);font-size:11.5px;padding:5px 7px;}
+  #gen-caps{display:flex;flex-wrap:wrap;gap:5px;}
+  #gen-caps .cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);}
   #model-flyout{position:absolute;top:0;right:100%;height:100%;width:372px;max-width:92vw;background:var(--mantle);border:1px solid var(--surface1);border-right:none;display:none;flex-direction:column;box-shadow:-14px 0 34px rgba(0,0,0,.4);}
   #model-flyout.open{display:flex;}
   #model-flyout .x{margin-left:auto;}
@@ -5855,6 +5864,17 @@ document.addEventListener('DOMContentLoaded', function(){
   /* Top/bottom docks are thin full-width bars -- an edge-popped flyout gets clipped.
      Render the model browser as a centered overlay instead so it's never obscured. */
   #gen-drawer.dock-top #model-flyout,#gen-drawer.dock-bottom #model-flyout{position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);width:540px;max-width:92vw;height:auto;max-height:82vh;border:1px solid var(--surface1);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);}
+  /* picker-parity-round2 (2026-07-24): owner's live test found the flyout showing only ~2
+     rows of cards then a large dead area filling the rest of the panel -- .gen-body was
+     BOTH the outer overflow:auto scroll container AND <mg-model-picker>'s own .mg-grid had
+     an independent fixed max-height:320px (see mg-model-picker.js), so on any flyout taller
+     than ~380px .gen-body's real extra height just sat there empty below the capped grid.
+     Fix: hand the real height all the way down so the GRID is the one scrolling region,
+     matching every other picker in the app. Scoped to #model-flyout only -- #gen-drawer's
+     own .gen-body (the main Generate form, a plain tall scrolling form) is untouched. */
+  #model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;min-height:0;}
+  #model-flyout #gen-picker-host{flex:1;min-height:0;display:flex;flex-direction:column;}
+  #model-flyout mg-model-picker{flex:1;min-height:0;}
   /* O13: #pick-scrim/#pick-modal/.pick-filters and their CSS are gone -- <mg-gallery-picker>
      (static/mg-gallery-picker.js) brings its own complete self-contained overlay/box/filter
      chrome, injected client-side. #similar-modal below is UNRELATED (Similar.js, not Picker)
@@ -5917,6 +5937,11 @@ document.addEventListener('DOMContentLoaded', function(){
       <span id="gen-selname">none &mdash; browse models</span>
       <span class="hint">&#9666; browse</span>
     </button>
+    <div id="gen-selmeta">
+      <select id="gen-version" onclick="event.stopPropagation()" onchange="Gen.pickVersion(this.value)"
+              title="This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead" aria-label="Model version"></select>
+      <div id="gen-caps"></div>
+    </div>
     <div class="gen-lbl">LoRAs</div>
     <div id="gen-loras"></div>
     <div id="gen-lora-note"></div>
@@ -5949,7 +5974,7 @@ document.addEventListener('DOMContentLoaded', function(){
           </label>
         </div>
         <div id="gen-modeldefaults" style="display:none;justify-content:space-between;align-items:center;margin-top:6px;">
-          <span style="font-size:10.5px;color:var(--overlay0);">&#10003; using this model's tuned preset</span>
+          <span id="gen-modeldefaults-label" style="font-size:10.5px;color:var(--overlay0);">&#10003; using this model's tuned preset</span>
           <button type="button" class="snip-btn" onclick="Gen.resetModelDefaults()">&#8630; reset</button>
         </div>
       </details>
@@ -6771,25 +6796,89 @@ var Gen = (function(){
     var th=el('gen-selthumb');
     if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
     el('gen-selname').textContent=m.title+' \\u2026';
-    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
+    // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
+    // ONE request either way (same endpoint), but now returns every published release
+    // (versions[0] is the same "latest" resolve_version_meta always gave) so the version
+    // picker + sampling_method + capabilities the app was resolving and throwing away can
+    // finally be shown, not just negative/steps/cfg (which were already wired -- see
+    // applyModelDefaults below).
+    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id)+'&all=1')
       .then(function(r){return r.json();})
       .then(function(d){ if(mySeq!==selSeq) return;   // a newer pick superseded this fetch
-        selected.version_id=d.version_id||''; selected.model_type=d.model_type||'';
-        selected.negative_prompt=d.negative_prompt||''; selected.sampling_steps=d.sampling_steps||null;
-        selected.cfg_scale=d.cfg_scale||null;
-        el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)');
+        var versions=(d&&d.versions)||[], v=versions[0]||{};
+        selected.versions=versions;
+        applyVersion(v);
+        el('gen-selname').textContent=m.title+(v.version_id?'':' (no version!)');
+        renderVersions(versions, v.version_id);
         refreshLoraNotes();   // re-check any attached LoRAs against the new base + set go-state
         applyModelDefaults();
         refreshCost(); })
       .catch(function(){ if(mySeq===selSeq) el('gen-selname').textContent=m.title; });
   }
+  // Copy one resolved version's meta (list_model_versions row shape) onto `selected` --
+  // shared by onBasePick's initial (latest) resolve and pickVersion's switch, so the two
+  // can never disagree about which fields a "version" carries.
+  function applyVersion(v){
+    selected.version_id=v.version_id||''; selected.model_type=v.model_type||'';
+    selected.negative_prompt=v.negative_prompt||''; selected.sampling_steps=v.sampling_steps||null;
+    selected.cfg_scale=v.cfg_scale||null; selected.sampling_method=v.sampling_method||'';
+    selected.capabilities=v.capabilities||[];
+    if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');
+  }
+  // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
+  // always silently took the newest release and discarded the rest. #gen-version lists every
+  // one (core.list_model_versions, via ?all=1 above); switching re-applies that version's OWN
+  // meta (a different release can carry a different tuned preset, in principle a different
+  // model_type) through the exact same applyVersion() onBasePick uses, then re-runs the same
+  // downstream refresh -- no extra network call, the data's already in hand.
+  function pickVersion(vid){
+    if(!selected||!selected.versions) return;
+    var v=selected.versions.filter(function(x){ return x.version_id===vid; })[0];
+    if(!v) return;
+    applyVersion(v);
+    el('gen-selname').textContent=selected.title+(v.version_id?'':' (no version!)');
+    renderCaps(v.capabilities);
+    refreshLoraNotes();
+    applyModelDefaults();
+    refreshCost();
+  }
+  function renderVersions(versions, currentId){
+    var wrap=el('gen-selmeta'), sel=el('gen-version');
+    if(!wrap||!sel) return;
+    if(!versions.length){ wrap.classList.remove('show'); sel.innerHTML=''; renderCaps([]); return; }
+    sel.innerHTML=versions.map(function(v){
+      return '<option value="'+esc(v.version_id)+'"'+(v.version_id===currentId?' selected':'')+'>'+esc(v.label||v.version_id)+'</option>';
+    }).join('');
+    var cur=versions.filter(function(v){ return v.version_id===currentId; })[0]||versions[0];
+    renderCaps(cur.capabilities);
+    wrap.classList.add('show');
+  }
+  // problem 5: `extra.capabilities` (PixAI's own descriptive tags -- "high-resolution",
+  // "pose-accuracy", ...) was resolved by resolve_version_meta and never shown anywhere.
+  // Read-only badges -- these are not a submit param, just what PixAI's own info card says
+  // the model is good at.
+  function renderCaps(caps){
+    var box=el('gen-caps'); if(!box) return;
+    box.innerHTML=(caps||[]).map(function(c){ return '<span class="cap">'+esc(c)+'</span>'; }).join('');
+  }
   // Prefill negative/steps/cfg from the model author's own tuned preset (resolve_version_meta
   // already fetches these; the drawer just never used them). Only for fields the model actually
   // has data for -- a model with no tuned preset leaves whatever's already in the fields alone.
+  // problem 5: sampling_method is READ-ONLY informational text here, not a new submit field --
+  // the create mutation is never called with an explicit samplingMethod anywhere in this app
+  // (PixAI picks its own default sampler; only Mode/inferenceProfile is user-facing), and
+  // unlike inferenceProfile (which has a confirmed server-rejection retry path,
+  // submit_generation()) there is no confirmed-safe way to force an arbitrary sampler per
+  // model without risking a silent submit rejection this pass has no safety net for. Showing
+  // it is still real, honest progress -- the owner can now actually SEE what preset a model's
+  // author tuned, which was the concrete complaint ("it's all in their info cards already").
   function applyModelDefaults(){
-    var note=el('gen-modeldefaults'); if(!note) return;
-    var s=selected||{}, has=s.negative_prompt||s.sampling_steps||s.cfg_scale;
+    var note=el('gen-modeldefaults'), lbl=el('gen-modeldefaults-label'); if(!note) return;
+    var s=selected||{}, has=s.negative_prompt||s.sampling_steps||s.cfg_scale||s.sampling_method;
     note.style.display = has ? 'flex' : 'none';
+    if(lbl) lbl.textContent = s.sampling_method
+      ? ('\\u2713 using this model\\'s tuned preset (' + s.sampling_method + ')')
+      : '\\u2713 using this model\\'s tuned preset';
     if(!has) return;
     if(s.negative_prompt) el('gen-neg').value=s.negative_prompt;
     if(s.sampling_steps) el('gen-steps').value=s.sampling_steps;
@@ -7188,7 +7277,7 @@ var Gen = (function(){
           // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
           // gone -- the component owns all of that now.
           setEditSub:setEditSub, setEditModel:setEditModel, addVideoRefs:addVideoRefs,
-          resetModelDefaults:resetModelDefaults,
+          resetModelDefaults:resetModelDefaults, pickVersion:pickVersion,
           get selected(){return selected;}};
 })();
 // Gallery mount wiring for <mg-generate-drawer>: the component is picker-agnostic and fires
@@ -10704,17 +10793,32 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_model_search():
         """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key. Login required
         (any session, local or LAN).
-        ?q=&kind=base|lora&size=N&offset=N&category=&sort=popular|newest.
+        ?q=&kind=base|lora&size=N&offset=N&category=&sort=popular|newest&base_type=.
 
-        Two data sources by design: the REST /search (default) has RICH rows (description /
-        refCount / official badge) but silently ignores market filters; the GraphQL
-        `generationModels` connection actually honors category + a Newest sort but has leaner
-        rows. So we use GraphQL ONLY when a category or Newest is requested, REST otherwise --
-        the card renders both (leaner rows just hide the missing fields)."""
+        Three data sources by design: REST /search (base models' default) has RICH rows
+        (description / refCount / official badge) but silently ignores market filters AND
+        has no per-row architecture field; the GraphQL `generationModels` connection honors
+        category + a Newest sort AND (picker-parity-round2, 2026-07-24) carries
+        modelType/loraBaseModelType per row too. LoRA search (kind=lora) ALWAYS uses GraphQL
+        now, regardless of category/sort -- architecture-aware compat sort/badging
+        (base_type=) needs that per-row data on every LoRA search, not just the
+        category/Newest subset, and REST's oRPC endpoint has no equivalent field to request
+        it from (confirmed by inspecting its full response shape -- see
+        docs/AUDIT_2026-07-21.md). Base-model search is UNCHANGED (REST by default, GraphQL
+        only for category/Newest) -- architecture filtering is a LoRA-picker concept only,
+        base models don't get compat-sorted against anything.
+
+        base_type=<model_type>: the CALLER's already-resolved selected base model's own
+        model_type (the Gallery/Loom already resolve this today for the post-selection
+        is_lora_compatible() gate -- this just reuses it). When present on a kind=lora
+        request, results are soft-sorted (compatible-or-unknown first, confirmed-mismatch
+        last) and each row gets a `compat` tag -- see annotate_lora_compat(). Absent/kind=base
+        -> results pass through unmodified, exactly as before this param existed."""
         q = (request.args.get("q") or "").strip()
         usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
         category = (request.args.get("category") or "").strip().lower()
         sort = (request.args.get("sort") or "").strip().lower()
+        base_type = (request.args.get("base_type") or "").strip()
         try:
             size = max(1, min(int(request.args.get("size") or 24), 50))
             offset = max(0, int(request.args.get("offset") or 0))
@@ -10722,12 +10826,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             size, offset = 24, 0
         try:
             core, session = _gen_session()
-            use_market = category in core.MARKET_CATEGORIES or sort == "newest"
+            use_market = usage == "LORA" or category in core.MARKET_CATEGORIES or sort == "newest"
             if use_market:
-                return jsonify(core.model_search_market_gql(
-                    session, keyword=q, category=category, sort=sort, usage=usage, limit=size))
-            return jsonify(core.model_search_rest(session, keyword=q, usage=usage,
-                                                  size=size, offset=offset))
+                payload = core.model_search_market_gql(
+                    session, keyword=q, category=category, sort=sort, usage=usage, limit=size)
+            else:
+                payload = core.model_search_rest(session, keyword=q, usage=usage,
+                                                  size=size, offset=offset)
+            if usage == "LORA" and base_type:
+                payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
+            return jsonify(payload)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "results": []}), 200
 
@@ -10736,12 +10844,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Resolve a model_id (from the grid) to its generatable version id + the version
         metadata the picker needs: model_type (for LoRA↔base compat), lora_base_model_type,
         trigger_words (to offer inserting into the prompt), and the author's tuned preset.
-        Login required; read-only, one API call."""
+        Login required; read-only, one API call.
+
+        ?all=1 (picker-parity-round2, 2026-07-24): return EVERY published version instead of
+        just the resolved latest -- {versions:[...]}, same per-row shape plus `label`/
+        `is_latest` -- so the picker can offer a real choice (see
+        core.list_model_versions). Default (no ?all) is UNCHANGED: the single resolved-latest
+        shape every existing caller already expects."""
         mid = (request.args.get("model_id") or "").strip()
         if not mid:
             return jsonify({"error": "model_id required", "version_id": ""}), 400
         try:
             core, session = _gen_session()
+            if (request.args.get("all") or "").strip() in ("1", "true"):
+                return jsonify({"versions": core.list_model_versions(session, mid)})
             return jsonify(core.resolve_version_meta(session, mid))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
@@ -11962,15 +12078,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
             args = _gen_args_from_payload(body)
-            # Authoritative model resolution: if the drawer sent the base model_id, re-resolve
-            # the CURRENT version server-side and IGNORE the client's cached version_id (which
-            # can be stale/raced). This is what stops gens landing as "Unknown model" + missing
-            # the feed. Falls back to the client version_id when no model_id was sent.
+            # Authoritative model resolution: if the drawer sent the base model_id, resolve
+            # its REAL version list server-side and never trust the client's version_id blind.
+            # picker-parity-round2 (2026-07-24): the client's version_id is now honored IF it
+            # names one of model_id's own real versions (the version picker lets the owner
+            # choose a specific release, not just the latest) -- otherwise (absent, stale from
+            # a fast model switch, or belonging to a DIFFERENT model_id entirely) this falls
+            # back to the newest version, exactly like before this existed. Either way the
+            # client's raw version_id is NEVER submitted un-validated, which is what originally
+            # stopped gens landing as "Unknown model" + missing the feed. Falls back to the
+            # client version_id as-is only when no model_id was sent at all (back-compat).
             _mid = str(body.get("model_id") or "").strip()
             if _mid:
-                _vid = (core.resolve_version_meta(session, _mid) or {}).get("version_id") or ""
-                if _vid:
-                    args.model = _vid
+                _client_vid = str(body.get("version_id") or "").strip()
+                _versions = core.list_model_versions(session, _mid)
+                _chosen = next((v for v in _versions if v.get("version_id") == _client_vid),
+                               None) if _client_vid else None
+                if _chosen:
+                    args.model = _chosen["version_id"]
+                elif _versions:
+                    args.model = _versions[0]["version_id"]
             if not args.model:
                 return jsonify({"error": "pick a model first"}), 400
             if not args.prompt:
