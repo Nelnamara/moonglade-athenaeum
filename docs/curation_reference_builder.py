@@ -1,6 +1,6 @@
 """Moonglade art curation workspace — the REFERENCE IMPLEMENTATION of the house
-Curation Standard (docs/CURATION_STANDARD.md). Clone this for any vote/selection
-artifact; never start a picker from a blank file.
+Curation Standard (docs/archive/CURATION_STANDARD_2026-07-17.md). Clone this for
+any vote/selection artifact; never start a picker from a blank file.
 
 Click-to-enlarge lightbox, Pick toggle (primary), optional star-rank, notes,
 picks tray, export, localStorage persistence, hard completeness assertion.
