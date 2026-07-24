@@ -5826,6 +5826,8 @@ document.addEventListener('DOMContentLoaded', function(){
   #fix-img{max-width:100%;display:block;border-radius:8px;}
   #fix-canvas{position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;}
   #gen-loras{display:flex;flex-direction:column;gap:5px;}
+  .lora-cap{color:var(--subtext);font-weight:400;text-transform:none;letter-spacing:0;}
+  .lora-cap.over{color:var(--red);font-weight:600;}
   #gen-lora-note{display:flex;flex-direction:column;gap:5px;}
   #gen-lora-note:empty{display:none;}
   .lora-warn{font-size:11px;line-height:1.4;padding:6px 9px;border-radius:6px;background:rgba(243,139,168,.09);border:1px solid var(--red);color:var(--red);}
@@ -5942,7 +5944,7 @@ document.addEventListener('DOMContentLoaded', function(){
               title="This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead" aria-label="Model version"></select>
       <div id="gen-caps"></div>
     </div>
-    <div class="gen-lbl">LoRAs</div>
+    <div class="gen-lbl">LoRAs <span id="gen-lora-cap" class="lora-cap"></span></div>
     <div id="gen-loras"></div>
     <div id="gen-lora-note"></div>
     <button type="button" id="lora-add" onclick="Gen.openLoraBrowser()">+ Add LoRA</button>
@@ -6410,6 +6412,11 @@ var Acct = (function(){
   function chip(){ return document.getElementById('acct-chip'); }
   function claimEl(){ return document.getElementById('acct-claim'); }
   var CKEY='mg_acct';
+  // The real, live per-generation LoRA cap for this account (membership.privilege.lora,
+  // falling back to freeUserLora -- see /api/account). Not cached across reloads like the
+  // rest of the chip's data: it's read fresh every refresh() so it never drifts stale
+  // against an actual subscription change, and Gen reads it live via Acct.loraCap().
+  var loraCap=null;
   function daysUntil(d){ if(!d) return 999; var t=(new Date(d+'T00:00:00')).getTime();
     return isNaN(t)?999:Math.ceil((t-Date.now())/86400000); }
   function paint(d){
@@ -6440,6 +6447,8 @@ var Acct = (function(){
       // Only a fully-successful read (credits present) updates the chip; a transient
       // miss or error keeps the last-known value instead of blanking it.
       if(d.error || d.credits==null){ coverage(d); return; }
+      loraCap = (d.lora_cap!=null) ? d.lora_cap : null;
+      if(window.Gen && Gen.refreshLoraCap) Gen.refreshLoraCap();
       var good={credits:d.credits, cards:(d.cards!=null?d.cards:0), cards_by:d.cards_by,
                 card_expiry:d.card_expiry, claim_credits:d.claim_credits, sub:d.sub};
       try{ localStorage.setItem(CKEY, JSON.stringify(good)); }catch(e){}
@@ -6464,7 +6473,7 @@ var Acct = (function(){
       +' generation tasks archived locally'+(pct>=99.5?' \\u2014 complete backup \\u2728':'');
     b.style.display='';
   }
-  return {refresh:refresh, claim:claim};
+  return {refresh:refresh, claim:claim, loraCap:function(){ return loraCap; }};
 })();
 /* ---- First-run wizard: paste a key, then trigger the first sync as a Panel job ---- */
 var Setup = (function(){
@@ -6725,13 +6734,21 @@ var Gen = (function(){
   // generation could fire missing a LoRA the user believed was included, with nothing on
   // screen but an hourglass that never explained itself.
   function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }
-  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat() || anyLoraUnresolved(); }
+  function overLoraCap(){ var cap=window.Acct&&Acct.loraCap?Acct.loraCap():null; return cap!=null && loras.length>cap; }
+  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat() || anyLoraUnresolved() || overLoraCap(); }
   function triggersInPrompt(tw){
     var first=(tw||'').split(',')[0].trim().toLowerCase();
     return first && (el('gen-prompt').value||'').toLowerCase().indexOf(first)>=0;
   }
   function refreshLoraNotes(){
     var box=el('gen-lora-note'); if(!box) return; box.innerHTML='';
+    if(overLoraCap()){                               // over the account's real cap (blocking)
+      var cap=Acct.loraCap();
+      var w0=document.createElement('div'); w0.className='lora-warn';
+      w0.innerHTML='\\u26a0 Your account allows <b>'+cap+' LoRA'+(cap===1?'':'s')+'</b> per generation \\u2014 remove '
+        +(loras.length-cap)+' to continue.';
+      box.appendChild(w0);
+    }
     loras.forEach(function(e){                      // incompatibility warnings (blocking)
       if(!loraIncompat(e)) return;
       var w=document.createElement('div'); w.className='lora-warn';
@@ -6768,6 +6785,24 @@ var Gen = (function(){
         +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>';
       box.appendChild(d);
     });
+    paintLoraCap();
+  }
+  // The account's real per-generation LoRA entitlement (Acct.loraCap(), sourced from
+  // membership.privilege via /api/account -- see that route's comment). Purely informational
+  // + a pre-submit guard (updateGoState below), never hides the "+ Add LoRA" button or blocks
+  // the picker's own selection -- refusing an add there would leave a card visually selected
+  // in the picker that never actually landed in `loras` (the exact reason the old 6-LoRA cap
+  // was NOT reproduced during the O12 migration, see CHANGELOG). Unknown cap (null, e.g. a
+  // fresh account or a transient /api/account miss) shows nothing rather than a false "no
+  // limit" or a made-up number.
+  function paintLoraCap(){
+    var s=el('gen-lora-cap'); if(!s) return;
+    var cap=window.Acct&&Acct.loraCap?Acct.loraCap():null;
+    if(cap==null){ s.textContent=''; return; }
+    var over=loras.length>cap;
+    s.textContent='\\u00b7 '+loras.length+' / '+cap;
+    s.classList.toggle('over', over);
+    updateGoState();   // the cap can arrive (or change) after LoRAs are already picked
   }
   function loraWeight(i, v){ if(!loras[i]) return;
     v=parseFloat(v); loras[i].weight=(isNaN(v)?0.7:Math.max(0,Math.min(2,v))); debouncedCost(); }
@@ -7277,7 +7312,7 @@ var Gen = (function(){
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
-          insertTriggers:insertTriggers,
+          insertTriggers:insertTriggers, refreshLoraCap:paintLoraCap,
           // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
           // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
           // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
@@ -11139,6 +11174,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     except (TypeError, ValueError):
                         pass
             sub = me.get("subscription") or {}
+            # Real per-account LoRA-per-generation entitlement, straight from PixAI's own
+            # membership data -- already fetched by account_info() for the CLI's --account
+            # dashboard (run_account_info), never previously reached the web app, so the
+            # picker had no real cap to enforce or show. `lora` wins when present (mirrors
+            # the CLI's own field-check order -- an account's live paid entitlement);
+            # `freeUserLora` is the fallback for an account with no `lora` value at all.
+            # Exact coexistence semantics of the two fields are unconfirmed (no live account
+            # to probe against from this checkout) -- treated as a soft pre-submit guard the
+            # client can warn from, not a hard block, since PixAI's own server is the real
+            # authority on any submit that slips past it.
+            priv = ((me.get("membership") or {}).get("privilege")) or {}
+            lora_cap = priv.get("lora")
+            if lora_cap is None:
+                lora_cap = priv.get("freeUserLora")
             # Backup coverage: server's lifetime TASK count vs distinct tasks we hold locally.
             # Both are task counts (not images), so the ratio is honest.
             try:
@@ -11156,7 +11205,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "server_tasks": server_tasks, "local_tasks": local_tasks,
                             "coverage_pct": coverage,
                             "followers": me.get("followerCount"),
-                            "following": me.get("followingCount")})
+                            "following": me.get("followingCount"),
+                            "lora_cap": lora_cap})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
