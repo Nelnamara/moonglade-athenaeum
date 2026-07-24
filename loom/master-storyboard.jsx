@@ -24,7 +24,7 @@ import {
   friendlyGenErr, classifyTaskStatus,
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
-  loraIncompat, resolveLoraPayload, anyLoraUnresolved,
+  loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
   landInFirstAct, importedFootagePatch,
   buildImgGenBody,
 } from "./src/loom-mutations.js";
@@ -546,6 +546,8 @@ const V2_STYLES = `
    .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
    the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
 .lv-loratoggle{display:inline-block;margin:7px 0 5px;}
+.lv-loracap{margin-left:8px;font-size:10.5px;color:var(--subtext);}
+.lv-loracap.over{color:var(--coral);font-weight:600;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
@@ -1590,6 +1592,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <button type="button" className="lv-chip lv-loratoggle" onClick={() => { setPickerKind("lora"); setPickerOpen(true); }}>
             + add LoRA
           </button>
+          {acct && acct.lora_cap != null && (
+            <span className={"lv-loracap" + (overLoraCap(imgLoras, acct.lora_cap) ? " over" : "")}>
+              {imgLoras.length} / {acct.lora_cap} LoRAs
+            </span>
+          )}
           <label className="lv-lab">Image prompt</label>
           <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
@@ -1681,11 +1688,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
           <mg-cost-badge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." card-label="a card"></mg-cost-badge>
           <button className="lv-go"
-            disabled={busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type))}
+            disabled={busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap)}
             onClick={() => genImage(active)}>
             {busyI ? (gi.msg || "generating…")
               : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…"
               : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA — remove or switch base"
+              : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + ((imgLoras.length - acct.lora_cap) === 1 ? "" : "s") + " to continue"
               : "✦ Generate reference image"}
           </button>
           {gi.phase === "error" && <div className="lv-gerr">{gi.msg}</div>}

@@ -314,6 +314,14 @@ export function anyLoraUnresolved(loras) {
   return (loras || []).some((l) => !l.version_id);
 }
 
+// The account's real per-generation LoRA cap (membership.privilege.lora / freeUserLora,
+// fetched via /api/account -- see pixai_gallery.py's api_account for the field's own
+// comment). Mirrors the gallery's overLoraCap() exactly: cap==null (unknown -- a fresh
+// account, or a transient /api/account miss) never blocks, only a REAL known cap does.
+export function overLoraCap(loras, cap) {
+  return cap != null && (loras || []).length > cap;
+}
+
 // ---------- Image-tab generation dimensions + submit/price body (L536) ----------
 // Ported from pixai_gallery.py's Gen.d8(): round to the nearest multiple of 8 and clamp to
 // PixAI's real [64,4096] bounds -- the server's own _dim only floors to /8 and never clamps,

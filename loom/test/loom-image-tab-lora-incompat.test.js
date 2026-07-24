@@ -42,8 +42,27 @@ describe("Image tab LoRA↔base compatibility warning (L536 closes the D-11 defe
 
   test("the Generate button is disabled while any attached LoRA is incompatible with the selected base", () => {
     assert.match(src,
-      /disabled=\{busyI \|\| anyLoraUnresolved\(imgLoras\) \|\| imgLoras\.some\(\(l\) => loraIncompat\(imgModel && imgModel\.model_type, l\.lora_base_type\)\)\}/,
+      /disabled=\{busyI \|\| anyLoraUnresolved\(imgLoras\) \|\| imgLoras\.some\(\(l\) => loraIncompat\(imgModel && imgModel\.model_type, l\.lora_base_type\)\) \|\| overLoraCap\(imgLoras, acct && acct\.lora_cap\)\}/,
       "Go must stay gated on incompatibility, not just unresolved -- an incompatible-but-" +
-      "RESOLVED LoRA is still not safe to submit");
+      "RESOLVED LoRA is still not safe to submit -- and now also on the account's real LoRA cap");
+  });
+});
+
+describe("Image tab real per-account LoRA cap (mirrors the gallery's overLoraCap)", () => {
+  test("a live cap indicator renders next to + add LoRA once acct.lora_cap is known", () => {
+    assert.match(src,
+      /\{acct && acct\.lora_cap != null && \(\s*\n\s*<span className=\{"lv-loracap" \+ \(overLoraCap\(imgLoras, acct\.lora_cap\) \? " over" : ""\)\}>/,
+      "the indicator must stay hidden entirely (not show a false '0 / null') until a real " +
+      "cap is known -- an unknown cap must never read as 'no limit'");
+  });
+
+  test("the Go button's label explains the real cap when exceeded, with correct singular/plural", () => {
+    assert.match(src,
+      /overLoraCap\(imgLoras, acct && acct\.lora_cap\) \? "remove " \+ \(imgLoras\.length - acct\.lora_cap\) \+ " LoRA" \+ \(\(imgLoras\.length - acct\.lora_cap\) === 1 \? "" : "s"\) \+ " to continue"/,
+      "over-cap must tell the owner exactly how many to remove, not just refuse silently");
+  });
+
+  test("overLoraCap is imported from loom-mutations.js, not redefined locally", () => {
+    assert.match(src, /loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,/);
   });
 });

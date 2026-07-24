@@ -382,6 +382,9 @@ ${"=".repeat(48)}
   function anyLoraUnresolved(loras) {
     return (loras || []).some((l) => !l.version_id);
   }
+  function overLoraCap(loras, cap) {
+    return cap != null && (loras || []).length > cap;
+  }
   function snap8(n) {
     return Math.max(64, Math.min(4096, Math.round((Number(n) || 0) / 8) * 8));
   }
@@ -1039,6 +1042,8 @@ ${"=".repeat(48)}
    .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
    the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
 .lv-loratoggle{display:inline-block;margin:7px 0 5px;}
+.lv-loracap{margin-left:8px;font-size:10.5px;color:var(--subtext);}
+.lv-loracap.over{color:var(--coral);font-weight:600;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
@@ -1826,7 +1831,7 @@ ${"=".repeat(48)}
         })), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-chip lv-loratoggle", onClick: () => {
           setPickerKind("lora");
           setPickerOpen(true);
-        } }, "+ add LoRA"), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
+        } }, "+ add LoRA"), acct && acct.lora_cap != null && /* @__PURE__ */ React.createElement("span", { className: "lv-loracap" + (overLoraCap(imgLoras, acct.lora_cap) ? " over" : "") }, imgLoras.length, " / ", acct.lora_cap, " LoRAs"), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lv-ta",
@@ -1981,10 +1986,10 @@ ${"=".repeat(48)}
           "button",
           {
             className: "lv-go",
-            disabled: busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)),
+            disabled: busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap),
             onClick: () => genImage(active)
           },
-          busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : "\u2726 Generate reference image"
+          busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + (imgLoras.length - acct.lora_cap === 1 ? "" : "s") + " to continue" : "\u2726 Generate reference image"
         ), gi.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gi.msg), gi.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gi.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "cast" ? " on" : ""), onClick: () => routeImg(routeTarget || active, "cast", active.c.id) }, "cast")), gi.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gi.routed, sel ? " \xB7 it now feeds this shot's video gen" : "")));
       } else if (tab === "Edit") {
         const ge = genEditState[active.c.id] || {};
