@@ -69,8 +69,10 @@ var LoomBundle = (() => {
       const d = r.mediaId || imgSrc(r.thumbId, r.source);
       if (d) items.push({ tag: r.tag, d, kind: "ref", id: r.id });
     });
-    items.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
-    return items;
+    const kindRank = (it) => it.kind === "frame" ? 0 : 1;
+    const sortNum = (it) => it.kind === "frame" ? 0 : tagNum(it.tag);
+    items.sort((a, b) => kindRank(a) - kindRank(b) || sortNum(a) - sortNum(b));
+    return items.slice(0, 6);
   };
   var noImgSrc = () => null;
   var positionTag = (entry, project, imgSrc, id) => {
@@ -101,8 +103,10 @@ var LoomBundle = (() => {
     const L = [`[${code} \u2014 "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
     if (c.connect === "extend" && prev) L.push(`Continue seamlessly from the previous clip ${prev.code} (upload it as @video1).`);
     if (c.connect === "flf") {
-      if (c.openFrame.desc || c.openFrame.tag) L.push(`Opening frame ${c.openFrame.tag || "(first image)"}: ${c.openFrame.desc || "\u2014"}`);
-      if (c.closeFrame.desc || c.closeFrame.tag) L.push(`Closing frame ${c.closeFrame.tag || "(last image)"}: ${c.closeFrame.desc || "\u2014"}`);
+      const openTag = positionTag(entry, p, resolve, "openFrame") || c.openFrame.tag;
+      const closeTag = positionTag(entry, p, resolve, "closeFrame") || c.closeFrame.tag;
+      if (c.openFrame.desc || openTag) L.push(`Opening frame ${openTag || "(first image)"}: ${c.openFrame.desc || "\u2014"}`);
+      if (c.closeFrame.desc || closeTag) L.push(`Closing frame ${closeTag || "(last image)"}: ${c.closeFrame.desc || "\u2014"}`);
     }
     L.push("", c.prompt || "(prompt tbd)");
     if (c.connect === "extend" || c.connect === "flf") L.push(CONTINUITY_PHRASE);
@@ -132,7 +136,7 @@ var LoomBundle = (() => {
   var shotPayload = (entry, project, imgSrc) => {
     const c = entry.c;
     const imgs = shotImageRefs(entry, project, imgSrc);
-    const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
+    const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source).slice(0, 3);
     return {
       mode: c.mode,
       prompt: shotText(entry, project, imgSrc),
@@ -1688,6 +1692,7 @@ ${"=".repeat(48)}
         {
           which: "open",
           frame: active.c.openFrame,
+          liveTag: positionTag(active, project, imgSrc, "openFrame"),
           discreet: active.c.discreet,
           framePrev: frameSrc,
           storeThumb,
@@ -1709,6 +1714,7 @@ ${"=".repeat(48)}
         {
           which: "close",
           frame: active.c.closeFrame,
+          liveTag: positionTag(active, project, imgSrc, "closeFrame"),
           discreet: active.c.discreet,
           framePrev: frameSrc,
           storeThumb,
@@ -2004,6 +2010,7 @@ ${"=".repeat(48)}
         {
           which: "open",
           frame: c.openFrame,
+          liveTag: positionTag(live, project, imgSrc, "openFrame"),
           discreet: c.discreet,
           framePrev: frameSrc,
           storeThumb,
@@ -2015,6 +2022,7 @@ ${"=".repeat(48)}
         {
           which: "close",
           frame: c.closeFrame,
+          liveTag: positionTag(live, project, imgSrc, "closeFrame"),
           discreet: c.discreet,
           framePrev: frameSrc,
           storeThumb,
@@ -3381,7 +3389,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (e.target === e.currentTarget) onClose();
     } }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-box", style: { height: "auto", width: 520 } }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Import a collection"), /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: onClose, title: "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 12.5, color: "var(--ink2)", margin: "0 0 4px", lineHeight: 1.5 } }, "Pull a gallery collection in as reusable ", /* @__PURE__ */ React.createElement("b", null, "@image"), " references. Each keeps its PixAI media_id, so every one generates ", /* @__PURE__ */ React.createElement("b", null, "free"), " \u2014 no re-upload."), /* @__PURE__ */ React.createElement("div", { className: "sb-pick-filters" }, /* @__PURE__ */ React.createElement("select", { value: sel, onChange: (e) => setSel(e.target.value), style: { flex: 1, maxWidth: "none" } }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Choose a collection\u2026"), colls.map((c) => /* @__PURE__ */ React.createElement("option", { key: c, value: c }, c)))), sel && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--ink3)", margin: "6px 0 0" } }, total.toLocaleString(), " image", total === 1 ? "" : "s", total > CAP ? ` \u2014 importing the newest ${CAP}` : ""), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn amber sm", disabled: !sel, onClick: doImport }, "Import references"))));
   }
-  function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, openPick, extraBtn }) {
+  function FrameSlot({ which, frame, liveTag, discreet, framePrev, onPatch, storeThumb, openPick, extraBtn }) {
     const img = framePrev(frame);
     return /* @__PURE__ */ React.createElement("div", { className: "sb-frame" }, /* @__PURE__ */ React.createElement("div", { className: "sb-framehead" }, /* @__PURE__ */ React.createElement("span", { className: "sb-lab" }, which === "open" ? "Opening frame" : "Closing frame"), openPick && /* @__PURE__ */ React.createElement(
       "button",
@@ -3391,7 +3399,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         onClick: () => openPick((mid) => onPatch({ mediaId: mid, thumbId: "", source: "" }))
       },
       "\u25A4"
-    ), /* @__PURE__ */ React.createElement("input", { className: "sb-tagin sb-mono", placeholder: "@image1", value: frame.tag, onChange: (e) => onPatch({ tag: e.target.value }) })), /* @__PURE__ */ React.createElement("label", { className: "sb-frameprev" + (discreet ? " discreet" : ""), title: "Attach image" }, img ? /* @__PURE__ */ React.createElement("img", { src: img, alt: which }) : "\uFF0B attach frame", /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("span", { className: "sb-tagin sb-mono", title: "This slot's live @imageN \u2014 computed from position, not editable" }, liveTag || "\u2014")), /* @__PURE__ */ React.createElement("label", { className: "sb-frameprev" + (discreet ? " discreet" : ""), title: "Attach image" }, img ? /* @__PURE__ */ React.createElement("img", { src: img, alt: which }) : "\uFF0B attach frame", /* @__PURE__ */ React.createElement(
       "input",
       {
         type: "file",

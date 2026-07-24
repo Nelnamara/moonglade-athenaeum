@@ -7,7 +7,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
-  flat, shotText, pickTarget, pickVideoTarget, durOf, reelStats, effectivePrompt,
+  flat, shotText, pickTarget, pickVideoTarget, positionTag, durOf, reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
@@ -1505,7 +1505,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           </div>
         )}
         <div className="lv-framehandoff">
-          <FrameSlot which="open" frame={active.c.openFrame} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+          <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("openFrame", p)}
             extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
                 title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
@@ -1513,7 +1513,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
               : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
           <div className="sb-conn-mid">&#8594;</div>
-          <FrameSlot which="close" frame={active.c.closeFrame} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+          <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("closeFrame", p)} />
         </div>
         {/* The Image/Edit/Reference/Video tab strip lives in the rail's .lv-sidehead
@@ -1867,10 +1867,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 <span className="sb-hint">the shot's base prompt &mdash; Camera, Lighting and cast are woven in on top when it generates</span>
               </div>
               <div className="lv-df-frames">
-                <FrameSlot which="open" frame={c.openFrame} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                <FrameSlot which="open" frame={c.openFrame} liveTag={positionTag(live, project, imgSrc, "openFrame")} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
                   onPatch={(p) => dfPatchFrame("openFrame", p)} />
                 <div className="sb-conn-mid">&#8594;</div>
-                <FrameSlot which="close" frame={c.closeFrame} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                <FrameSlot which="close" frame={c.closeFrame} liveTag={positionTag(live, project, imgSrc, "closeFrame")} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
                   onPatch={(p) => dfPatchFrame("closeFrame", p)} />
               </div>
               <div className="sb-field">
@@ -3146,7 +3146,7 @@ function ImportCollection({ onImport, onClose }) {
   );
 }
 
-function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, openPick, extraBtn }) {
+function FrameSlot({ which, frame, liveTag, discreet, framePrev, onPatch, storeThumb, openPick, extraBtn }) {
   const img = framePrev(frame);
   return (
     <div className="sb-frame">
@@ -3154,7 +3154,17 @@ function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, ope
         <span className="sb-lab">{which === "open" ? "Opening frame" : "Closing frame"}</span>
         {openPick && <button className="sb-ico" title="Pick from the gallery"
           onClick={() => openPick((mid) => onPatch({ mediaId: mid, thumbId: "", source: "" }))}>▤</button>}
-        <input className="sb-tagin sb-mono" placeholder="@image1" value={frame.tag} onChange={(e) => onPatch({ tag: e.target.value })} />
+        {/* Read-only, DERIVED from this frame's guaranteed live slot (shotImageRefs()/
+            positionTag() in loom-core.js), never a free-text field the owner can independently
+            edit here. Opening/Closing Frame always reserve the first slot(s) now (see
+            loom-core.js's frame-reservation comment), so this is simply "@image1"/"@image2"
+            whenever the frame has a resolvable image in this shot, and a dash otherwise --
+            never stale text that can drift out of sync with what the composed prompt and the
+            Multi-Reference drawer's own bank actually cite for the same picture (the owner's
+            2026-07-23 live-test bug: this used to be a plain <input> writing straight into
+            frame.tag, a second, independently-settable "@imageN" that could silently disagree
+            with the shot's real, live numbering). */}
+        <span className="sb-tagin sb-mono" title="This slot's live @imageN — computed from position, not editable">{liveTag || "—"}</span>
       </div>
       <label className={"sb-frameprev" + (discreet ? " discreet" : "")} title="Attach image">
         {img ? <img src={img} alt={which} /> : "＋ attach frame"}
