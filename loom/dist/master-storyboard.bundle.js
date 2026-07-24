@@ -2333,10 +2333,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
           setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...cls.duration ? { actualDur: cls.duration } : {} });
           setBatchOutcome(cardId, "done");
+          if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
         } else if (cls.phase === "failed") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
           setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
           setBatchOutcome(cardId, "failed");
+          if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
         } else if (elapsed > POLL_CEILING_MS) {
           pause();
         } else if (elapsed > POLL_STALE_AT_MS) {
