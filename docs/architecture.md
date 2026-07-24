@@ -84,7 +84,7 @@ easy to miss next to the headline commands — the user-facing walkthroughs live
 | All create paths | `--params-json` `--poll-timeout` `--kaisuuken-id` `--no-card` | `--params-json` returns early from the param builders — it overrides every other generation flag; `--poll-timeout` is seconds (default 300) |
 | Download shaping | `--delay` `--count-page-size` `--collect-only` `--name-length` `--name-sep` | `--delay` is a seconds float throttling most API loops, not just downloads; `--collect-only` forces the serial path; `--count-page-size` errors server-side above ~10k |
 | Format conversion | `--convert` `--convert-existing` `--jpeg-quality` `--jpeg-bg` `--keep-webp` | need Pillow; `--convert-existing` is a standalone no-token pass and defaults to png; the `.webp` is replaced unless `--keep-webp` |
-| Metadata backfill | `--backfill-meta` `--backfill-full-meta` `--with-loras` | `--backfill-meta` fills url/width/height only; `--with-loras` widens `--backfill-full-meta` to rows missing LoRA data (long run) |
+| Metadata backfill | `--backfill-meta` `--backfill-full-meta` `--with-loras` `--with-credit` | `--backfill-meta` fills url/width/height only; `--with-loras` widens `--backfill-full-meta` to rows missing LoRA data, `--with-credit` to rows missing their recorded credit cost (`paid_credit`) — each a long run |
 | Catalog repair | `--fix-model-names` `--relabel-removed` `--faststart-videos` `--restore-orphans` | `--relabel-removed` only acts with `--fix-model-names`; `--restore-orphans` is the one thing that makes `--verify-dupes` write; `--faststart-videos` needs ffmpeg on PATH and is idempotent |
 | Watch / niche | `--watch-seconds` `--all-contests` | modifiers for `--watch` (seconds; 0 = until Ctrl-C) and `--contests` (include ended) |
 
@@ -135,8 +135,13 @@ Notable columns: identity/timing (`media_id`, `task_id`, `filename`, `created_at
 full meta (`prompt_full`, `seed`, `steps`, `sampler`, `cfg_scale`, `model_id/name`,
 `loras`, `negative_prompt`, `clip_skip`), published-artwork data (`title`,
 `is_published`, `liked_count`, `art_tags`, …), video (`is_video`,
-`poster_media_id`, `video_duration`), provenance (`source` = online/api/local), and
-`deleted_remote` (flagged by reconcile).
+`poster_media_id`, `video_duration`), provenance (`source` = online/api/local),
+`deleted_remote` (flagged by reconcile), and `paid_credit` — the task's
+server-reported actual credit cost, captured at poll/collect/full-meta time and
+recoverable for older rows via `--backfill-full-meta --with-credit`. It is
+task-level (repeated on each of the task's media rows, so spend totals count once
+per `task_id`); `'0'` is a real value (free card / daily-free gen), `''` means
+never captured.
 
 ## On-disk layout
 

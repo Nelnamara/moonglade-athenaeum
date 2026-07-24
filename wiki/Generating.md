@@ -88,7 +88,8 @@ Generated images are tagged `source='api'` — filter to them in the gallery via
 Turn any catalog image into a short clip (image-to-video). Same preview/confirm safety —
 but **video is expensive** (a V4.0 5-second clip is ~27,500 credits, ~50–100× an image),
 so the preview shouts the cost, and the actual charge is read back from the server
-(`paidCredit`) after it runs. Clips download into `videos/` and catalog as `is_video`.
+(`paidCredit`) after it runs and stored in the catalog (`paid_credit`). Clips download
+into `videos/` and catalog as `is_video`.
 
 **Web:** the Generate drawer's **Video** tab — pick a source image, set model / duration
 (5/6/10/15s; 15 is V4.0-only, see below) / mode (Basic cheaper, Professional), optional

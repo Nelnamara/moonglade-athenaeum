@@ -909,3 +909,48 @@ def test_run_account_info_reports_real_reason(mocker, capsys):
     mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("connection reset"))
     core.run_account_info(SimpleNamespace(token=None))
     assert "temporary" in capsys.readouterr().out.lower()
+
+def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
+    """getTaskById returns the task's top-level paidCredit for HISTORICAL tasks (the
+    same persisted response our full-meta path replays -- verified against a real
+    captured task, 2026-07-04), so --backfill-full-meta can recover spend history:
+
+    - a row fetched because its meta is missing also gains paid_credit, and
+    - --with-credit (mirroring --with-loras) re-processes rows whose meta is already
+      complete but whose paid_credit is blank, without touching their existing meta.
+    """
+    from pixai_gallery import save_catalog, load_catalog, CATALOG_FIELDS
+
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        # t1: meta missing -> fetched by a plain --backfill-full-meta run
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "t1",
+                                           "filename": "a.png"},
+        # t2: meta complete, cost unknown -> fetched only with --with-credit
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m2", "task_id": "t2",
+                                           "filename": "b.png", "prompt_full": "kept",
+                                           "seed": "77"},
+    ])
+    tasks = {
+        "t1": {"parameters": {"prompts": "night elf druid"}, "outputs": {"seed": 5},
+               "paidCredit": 300},
+        "t2": {"parameters": {"prompts": "ignored -- row already has meta"},
+               "outputs": {}, "paidCredit": 0},
+    }
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: tasks[str(tid)])
+
+    # Pass 1: plain backfill -> t1 fetched (missing meta) and gains cost; t2 untouched.
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["m1"]["prompt_full"] == "night elf druid"
+    assert rows["m1"]["paid_credit"] == "300"        # historical cost recovered
+    assert rows["m2"]["paid_credit"] == ""           # complete row not re-fetched
+
+    # Pass 2: --with-credit -> t2 re-fetched for its blank cost; existing meta kept;
+    # its genuinely-free cost stored as '0', never '' .
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+                                                with_credit=True))
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["m2"]["paid_credit"] == "0"
+    assert rows["m2"]["prompt_full"] == "kept" and rows["m2"]["seed"] == "77"

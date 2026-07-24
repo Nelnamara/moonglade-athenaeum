@@ -599,6 +599,57 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
         "column".format(missing))
 
 
+def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
+    """paid_credit (added 2026-07-23) followed the three-place contract; this locks the
+    upgrade path for a real pre-paid_credit install: a catalog.db built from every
+    column EXCEPT paid_credit, holding a populated row, must gain the column via
+    _MIGRATIONS on a plain _connect() with the existing row's data intact -- and the
+    migrated db must round-trip a real credit value."""
+    import sqlite3
+    from pixai_gallery import _connect
+
+    assert "paid_credit" in CATALOG_FIELDS   # the contract half: the field exists at all
+    pre_fields = [f for f in CATALOG_FIELDS if f != "paid_credit"]
+    db = tmp_path / "pre_paid_credit.db"
+    con = sqlite3.connect(str(db))
+    con.execute("CREATE TABLE catalog ({})".format(
+        ", ".join(("media_id TEXT PRIMARY KEY" if f == "media_id" else "{} TEXT".format(f))
+                  for f in pre_fields)))
+    con.execute("INSERT INTO catalog (media_id, task_id, filename, rating) VALUES (?,?,?,?)",
+                ("m1", "t1", "keep.png", "5"))
+    con.commit()
+    con.close()
+
+    rows = load_catalog(db)          # load_catalog -> _connect() runs _MIGRATIONS
+    assert rows[0]["media_id"] == "m1" and rows[0]["filename"] == "keep.png"
+    assert rows[0]["rating"] == "5"                 # no data loss
+    assert rows[0]["paid_credit"] in ("", None)     # migrated in, blank default
+
+    row = dict(rows[0])
+    row["paid_credit"] = "2750"
+    save_catalog(db, [row])
+    got = load_catalog(db)[0]
+    assert got["paid_credit"] == "2750" and got["filename"] == "keep.png"
+    _connect(db).close()             # re-connect after the fact stays harmless (idempotent)
+
+
+def test_catalog_stats_totals_paid_credit_once_per_task(tmp_path, capsys):
+    """--catalog-stats spend total: paid_credit is a TASK-level cost repeated on each of
+    the task's media rows, so a 2-image batch must count once, not twice. '0' rows are
+    real free gens (a task in the tally, adding nothing); '' rows are untracked and must
+    not be counted as free."""
+    save_catalog(tmp_path / "catalog.db", [
+        _make_row(media_id="a1", task_id="t1", filename="a1.png", paid_credit="100"),
+        _make_row(media_id="a2", task_id="t1", filename="a2.png", paid_credit="100"),
+        _make_row(media_id="b1", task_id="t2", filename="b1.png", paid_credit="0"),
+        _make_row(media_id="c1", task_id="t3", filename="c1.png"),   # untracked ('')
+    ])
+    core.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
+    out = capsys.readouterr().out
+    assert "Credits tracked" in out
+    assert "100 spent across 2 tasks (1 free)" in out
+
+
 def test_save_and_load_roundtrip(tmp_path):
     db = tmp_path / "catalog.db"
     rows = [
