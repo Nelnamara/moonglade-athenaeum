@@ -309,6 +309,17 @@ users.
   Exact coexistence semantics of `lora` vs `freeUserLora` are unconfirmed (no live subscribed
   account available to probe from this checkout) — `lora` wins when both are present,
   mirroring the CLI's own field-check order.
+- **Per-LoRA version selection, on both the gallery and the Loom** (2026-07-24). Mirrors the
+  base model's own version switcher (`#gen-version`/`.lv-versel`, picker-parity-round2):
+  resolving a LoRA (`mg-model-picker.js`'s `_toggleMulti`) now hits `/api/model-version`
+  with `&all=1` instead of the plain single fetch, so the entry carries a full `versions`
+  array (every published release), not just the silently-assumed latest. A version `<select>`
+  appears on a LoRA's chip only when it actually has more than one release — the common
+  single-version case renders nothing extra — and switching applies that version's own
+  `version_id`/`lora_base_type`/`trigger_words` with no new network call, since the full list
+  was already resolved at pick time. Shared component change, so both surfaces got the real
+  version data for free; only the per-chip UI (`renderLoras()` in `pixai_gallery.py`, the
+  `imgLoras.map` chip render in `master-storyboard.jsx`) needed writing twice.
 
 ## Achievements / The Folio of Honors
 

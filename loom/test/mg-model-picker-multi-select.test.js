@@ -24,12 +24,21 @@ test("mg-model-picker.js supports an opt-in multi-select mode", () => {
     "card selection state must branch on _multi, or the .sel class breaks in one mode");
 });
 
-test("a picked LoRA resolves version_id/lora_base_type/trigger_words via /api/model-version", () => {
-  assert.match(src, /fetch\('\/api\/model-version\?model_id='/,
-    "each multi-select pick must resolve real generation metadata, the same endpoint " +
-    "the Gallery's own toggleLora() already uses -- without it, version_id stays '' " +
-    "and the LoRA can never actually be submitted");
-  assert.match(src, /entry\.lora_base_type\s*=\s*d\.lora_base_model_type/);
+test("a picked LoRA resolves version_id/lora_base_type/trigger_words via /api/model-version?all=1", () => {
+  // &all=1 (per-LoRA version selection): every published release, not just resolve_version_meta's
+  // silently-assumed rows[0] -- entry.versions is stashed so a per-chip selector (the host's job,
+  // same split as the base model's #gen-version/.lv-versel) can offer a real choice, mirroring
+  // exactly how onBasePick/bindPicker already do it for base models.
+  assert.match(src, /fetch\('\/api\/model-version\?model_id=' \+ encodeURIComponent\(m\.model_id\) \+ '&all=1'\)/,
+    "each multi-select pick must resolve real generation metadata AND every published " +
+    "version, the same endpoint/param the base-model picker already uses -- without it, " +
+    "version_id stays '' and the LoRA can never actually be submitted, and there's no " +
+    "version list for a per-chip selector to offer");
+  assert.match(src, /var versions = \(d && d\.versions\) \|\| \[\], v = versions\[0\] \|\| \{\};/);
+  assert.match(src, /entry\.version_id = v\.version_id \|\| '';/);
+  assert.match(src, /entry\.lora_base_type\s*=\s*v\.lora_base_model_type/);
+  assert.match(src, /entry\.versions = versions;/,
+    "the full version list must ride the entry so a host can render a per-chip selector");
 });
 
 test("an unresolved/failed LoRA is marked failed, never silently dropped", () => {

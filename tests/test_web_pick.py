@@ -1561,6 +1561,25 @@ def test_generate_drawer_gates_on_the_real_account_lora_cap(tmp_path):
     assert "if(window.Gen && Gen.refreshLoraCap) Gen.refreshLoraCap();" in html   # Acct pushes the cap into Gen on every refresh
 
 
+def test_generate_drawer_offers_a_per_lora_version_selector(tmp_path):
+    """resolve_version_meta() (and the old single-fetch LoRA resolve) always silently took
+    the newest release; PixAI's own model/LoRA cards offer a version selector, the base
+    model already got one (picker-parity-round2). This closes the matching gap for an
+    already-added LoRA chip: a <select> appears only when the LoRA actually has more than
+    one published release (mirrors the base model's #gen-version -- the common single-
+    version case renders nothing extra), and picking a different one applies its OWN
+    version_id/lora_base_type/trigger_words with no new network call (the full version list
+    was already resolved when the LoRA was first picked, by mg-model-picker.js's
+    ?all=1 fetch)."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "l.versions&&l.versions.length>1" in html          # conditional, not always-shown
+    assert 'onchange="Gen.loraPickVersion(' in html
+    assert "function loraPickVersion(i, vid){" in html
+    assert "l.version_id=v.version_id||''; l.lora_base_type=v.lora_base_model_type||'';" in html
+    assert "loraPickVersion:loraPickVersion" in html           # exposed on Gen's public API
+
+
 def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
     """A LoRA whose /api/model-version lookup never resolves (still pending, or
     permanently failed) used to just vanish from payload()'s loras filter -- the

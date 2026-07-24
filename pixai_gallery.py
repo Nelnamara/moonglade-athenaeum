@@ -5838,11 +5838,12 @@ document.addEventListener('DOMContentLoaded', function(){
   .lora-trig button.done{background:var(--surface1);color:var(--subtext);cursor:default;}
   .lora-chip.incompat{border-color:var(--red);}
   .lora-chip.incompat .nm{color:var(--red);}
-  .lora-chip{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12px;color:var(--text);}
+  .lora-chip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:5px 8px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12px;color:var(--text);}
   .lora-chip img{width:24px;height:24px;border-radius:4px;object-fit:cover;flex:0 0 auto;}
   .lora-chip .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .lora-chip input{width:58px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:11.5px;padding:2px 4px;}
   .lora-chip .rm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
+  .lora-chip select.ver{flex:1 1 100%;margin-top:1px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:10.5px;padding:2px 4px;}
   .lora-chip .rm:hover{color:var(--red);}
   #lora-add{width:100%;margin-top:5px;padding:5px 0;font-size:11.5px;border-radius:6px;background:transparent;color:var(--subtext);border:1px dashed var(--surface1);cursor:pointer;}
   #lora-add:hover{color:var(--text);border-color:var(--overlay0);}
@@ -6779,10 +6780,20 @@ var Gen = (function(){
       var d=document.createElement('div'); d.className='lora-chip'+((loraIncompat(l)||l.failed)?' incompat':'');
       var badge=l.version_id?'':(l.failed?' \\u26a0':' \\u23f3');
       var titleAttr=l.failed?(esc(l.title)+' \\u2014 could not load; remove it (\\u00d7) and re-add to retry'):esc(l.title);
+      // Per-LoRA version selection: only when the LoRA actually HAS more than one
+      // published release (l.versions, resolved alongside version_id itself -- see
+      // mg-model-picker.js's _toggleMulti ?all=1 fetch) -- the common single-version
+      // case renders nothing extra. Wraps onto its own line (.lora-chip's flex-wrap)
+      // rather than cramming a third control into the name/weight/remove row.
+      var verSel=(l.versions&&l.versions.length>1)
+        ?('<select class="ver" title="This LoRA\\u2019s published releases \\u2014 PixAI defaults to the latest; pick another to use it instead" onchange="Gen.loraPickVersion('+i+', this.value)">'
+          +l.versions.map(function(v){ return '<option value="'+esc(v.version_id)+'"'+(v.version_id===l.version_id?' selected':'')+'>'+esc(v.label||v.version_id)+'</option>'; }).join('')
+          +'</select>') : '';
       d.innerHTML=(l.preview_url?'<img src="'+esc(l.preview_url)+'" alt="">':'')
         +'<span class="nm" title="'+titleAttr+'">'+esc(l.title)+badge+'</span>'
         +'<input type="number" step="0.05" min="0" max="2" value="'+l.weight+'" title="Weight" onchange="Gen.loraWeight('+i+', this.value)">'
-        +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>';
+        +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>'
+        +verSel;
       box.appendChild(d);
     });
     paintLoraCap();
@@ -6815,6 +6826,18 @@ var Gen = (function(){
   // highlight state. Flagged as a precise, known, low-severity remainder rather than
   // silently left unexplained.
   function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes(); debouncedCost(); }
+  // Switch an already-added LoRA to a different published release -- mirrors pickVersion()
+  // (the base model's own version switcher) exactly, just applied to loras[i] instead of the
+  // single `selected` object. No extra network call: l.versions was already resolved in full
+  // when the LoRA was first picked (mg-model-picker.js's _toggleMulti, ?all=1).
+  function loraPickVersion(i, vid){
+    var l=loras[i]; if(!l||!l.versions) return;
+    var v=l.versions.filter(function(x){ return x.version_id===vid; })[0];
+    if(!v) return;
+    l.version_id=v.version_id||''; l.lora_base_type=v.lora_base_model_type||'';
+    l.trigger_words=v.trigger_words||''; l.failed=!l.version_id;
+    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
+  }
   function openLoraBrowser(){
     var f=el('model-flyout');
     if(!f.classList.contains('open')) toggleFlyout();
@@ -7312,7 +7335,7 @@ var Gen = (function(){
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
-          insertTriggers:insertTriggers, refreshLoraCap:paintLoraCap,
+          insertTriggers:insertTriggers, refreshLoraCap:paintLoraCap, loraPickVersion:loraPickVersion,
           // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
           // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
           // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
