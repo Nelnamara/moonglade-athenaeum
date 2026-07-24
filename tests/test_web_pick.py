@@ -1546,6 +1546,21 @@ def test_generate_card_has_seed_field(tmp_path):
     assert 'id="gen-seed"' in html and "seed:(el('gen-seed')" in html   # UI + payload wire the seed
 
 
+def test_generate_drawer_gates_on_the_real_account_lora_cap(tmp_path):
+    """The account's real LoRA-per-generation cap (Acct.loraCap(), sourced from
+    membership.privilege via /api/account) now shows next to the LoRAs label, blocks
+    Generate when exceeded, and warns with the exact count to remove -- rather than the
+    old behavior of no cap at all (see the O12 CHANGELOG note on why a silent hard-refuse
+    in the picker itself was deliberately rejected)."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert 'id="gen-lora-cap"' in html                      # the indicator next to "LoRAs"
+    assert "function overLoraCap(){ var cap=window.Acct&&Acct.loraCap?Acct.loraCap():null; return cap!=null && loras.length>cap; }" in html
+    assert "anyIncompat() || anyLoraUnresolved() || overLoraCap()" in html   # Go button gate
+    assert "Your account allows " in html                   # the over-cap warning text
+    assert "if(window.Gen && Gen.refreshLoraCap) Gen.refreshLoraCap();" in html   # Acct pushes the cap into Gen on every refresh
+
+
 def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
     """A LoRA whose /api/model-version lookup never resolves (still pending, or
     permanently failed) used to just vanish from payload()'s loras filter -- the
@@ -1723,6 +1738,40 @@ def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     assert d["card_expiry"] == "2026-07-17" and len(d["cards_by"]) == 2
     assert d["claim_credits"] == 30000 and "pixai-daily-credits" in d["claim_ids"]
     assert d["sub"]["end"] == "2026-07-27" and d["sub"]["cancel"] is True
+
+
+def test_account_surfaces_the_real_membership_lora_cap(tmp_path, monkeypatch):
+    """PixAI's own account API already returns the account's real per-generation LoRA
+    entitlement (membership.privilege.{lora,freeUserLora}) -- account_info() already fetches
+    it (see the CLI's --account dashboard, run_account_info), but nothing ever exposed it to
+    the web app, so the picker had no idea what the real cap was. `lora` wins when both are
+    present (mirrors the CLI's own field-check order); `free_user_lora` is the fallback for
+    an account with no paid `lora` entitlement at all."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {
+        "quotaAmount": 140,
+        "membership": {"privilege": {"lora": 15, "freeUserLora": 2}}})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/account").get_json()
+    assert d["lora_cap"] == 15
+
+
+def test_account_lora_cap_falls_back_to_free_user_lora(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {
+        "quotaAmount": 140,
+        "membership": {"privilege": {"freeUserLora": 2}}})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/account").get_json()
+    assert d["lora_cap"] == 2
+
+
+def test_account_lora_cap_null_when_membership_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 140})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/account").get_json()
+    assert d["lora_cap"] is None
 
 
 def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):

@@ -294,6 +294,19 @@ users.
   → `/api/enhance`, priced-and-confirmed before it spends. A search box below browses the rest
   of PixAI's ComfyUI catalog into `#enh-list`. The Fix sub-tab is a separate box-coordinate
   hand/face fixer (`/api/fix` → `submit_fixer`).
+- **The LoRA picker now shows and enforces the account's real per-generation LoRA cap**
+  (2026-07-24, gallery only so far — the Loom is tracked as its own remaining step).
+  `membership.privilege.{lora,freeUserLora}` — real data PixAI's own account API already
+  returns — is fetched by `account_info()` (previously only surfaced in the `--account` CLI
+  dashboard) and now exposed via `/api/account`'s `lora_cap` field. The LoRAs label shows a
+  live "N / cap" count (red once over), Generate disables with a clear "remove N to continue"
+  message when exceeded, and it's a soft pre-submit guard, not a hard block in the picker
+  itself — refusing the pick there would leave a card visually selected in
+  `<mg-model-picker>`'s own multi-select state that never actually landed in the drawer's
+  `loras[]`, the same reason the old 6-LoRA cap was never reproduced during the O12
+  migration. Exact coexistence semantics of `lora` vs `freeUserLora` are unconfirmed (no live
+  subscribed account available to probe from this checkout) — `lora` wins when both are
+  present, mirroring the CLI's own field-check order.
 
 ## Achievements / The Folio of Honors
 

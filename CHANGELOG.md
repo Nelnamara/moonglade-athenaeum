@@ -15,6 +15,19 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Added
+
+- **The LoRA picker shows and enforces the account's real per-generation LoRA cap** (gallery
+  only so far — the Loom is next). PixAI's own account API already returns it
+  (`membership.privilege.lora`, falling back to `freeUserLora`) and this app already fetched
+  it for the `--account` CLI dashboard, but it never reached the web picker, which had no cap
+  at all. `/api/account` now exposes `lora_cap`; the LoRAs label shows a live "N / cap" count
+  (red once over), and Generate disables with a clear "remove N to continue" message when
+  exceeded. Deliberately a soft pre-submit guard rather than a hard refusal inside the picker
+  itself — blocking the pick there would leave a card visually selected in
+  `<mg-model-picker>`'s own state that never landed in the drawer's LoRA list, the same reason
+  the old 6-LoRA cap was dropped during the O12 migration rather than reproduced.
+
 ### Fixed
 
 - **The model picker's squished thumbnails and dead scrolling, and picking a model no longer
