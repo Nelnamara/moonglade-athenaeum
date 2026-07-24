@@ -15,9 +15,15 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
-Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small items —
-8 parallel agents plus 7 cross-file gap-fills, ~40 real fixes total. 872 Python tests pass,
-128 Loom tests pass, CI green.
+## [2.4.0] - 2026-07-24 — Concurrent generations, real trash recovery, and a nasty video-corruption bug fixed
+
+A trash/quarantine restore panel, field-operator search (`model:`, `rating:>=3`, …),
+concurrent generations (no more waiting for one render to finish before starting the next),
+real credit-cost tracking in the catalog, and a full unification of the model/image pickers
+across the Loom and the gallery — plus a data-loss video-corruption bug found and fixed, the
+last open Privacy Blur security gap closed, and the audit board's entire Tier 1-5 defect list
+(security, breakage, orphaned code, doc lies, test gaps) driven to zero open items. 1,057
+Python tests pass, 301 Loom tests pass, CI green.
 
 ### Removed
 
