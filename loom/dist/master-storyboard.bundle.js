@@ -915,9 +915,10 @@ ${"=".repeat(48)}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
-.lv-loratoggle{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);
-  border-radius:5px;padding:3px 7px;cursor:pointer;margin:7px 0 5px;}
-.lv-loratoggle:hover{border-color:var(--accent);color:var(--accent);}
+/* The show/hide toggle reuses .lv-chip (the same toggle-chip chrome as the Video tab's
+   Continuity/Mode controls) -- this rule only adds the standalone spacing .lv-chips'
+   flex-gap would otherwise supply. Do not re-add background/border/color/font here. */
+.lv-loratoggle{display:inline-block;margin:7px 0 5px;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
@@ -1528,7 +1529,7 @@ ${"=".repeat(48)}
             onClick: () => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))
           },
           "\xD7"
-        )))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-loratoggle", onClick: () => setLoraOpen((v) => !v) }, loraOpen ? "\u2212 hide LoRA picker" : "+ add LoRA"), loraOpen && /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindLoraPicker, kind: "lora", multi: true }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
+        )))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-chip lv-loratoggle" + (loraOpen ? " on" : ""), onClick: () => setLoraOpen((v) => !v) }, loraOpen ? "\u2212 hide LoRA picker" : "+ add LoRA"), loraOpen && /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindLoraPicker, kind: "lora", multi: true }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lv-ta",
@@ -1640,7 +1641,7 @@ ${"=".repeat(48)}
             setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" }));
           }
         }
-      )) : /* @__PURE__ */ React.createElement("div", { className: "lv-assetprev" }, as.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement(
+      )) : /* @__PURE__ */ React.createElement("div", { className: "lv-assetprev", title: as.kind === "video" ? "Video asset \u2014 poster from your gallery" : void 0 }, as.kind === "video" && src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : as.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement(
         "input",
         {
           className: "lv-in",
@@ -1685,7 +1686,7 @@ ${"=".repeat(48)}
     })), !(project.assets || []).length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No cast yet \u2014 add one below."), /* @__PURE__ */ React.createElement("button", { className: "lv-addcast", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
       const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
       return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-    }), "image", true) }, "+ add from gallery"), /* @__PURE__ */ React.createElement(
+    }), "all", true) }, "+ add from gallery"), /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "lv-addcast",
