@@ -1463,7 +1463,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f);
                     setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" })); }} />
               </label>
-            ) : <div className="lv-assetprev">{as.kind === "video" ? "🎞" : "♪"}</div>}
+            ) : <div className="lv-assetprev" title={as.kind === "video" ? "Video asset — poster from your gallery" : undefined}>
+              {/* A gallery-picked video resolves its /thumbs/<mid>.jpg poster through
+                  frameSrc exactly like an image does -- the bare film emoji made a
+                  successful video import invisible here (issue #3's visibility half).
+                  The emoji stays as the no-poster fallback (e.g. a hand-retyped kind). */}
+              {as.kind === "video" && src ? <img src={src} alt="" /> : (as.kind === "video" ? "🎞" : "♪")}
+            </div>}
             <input className="lv-in" style={{ flex: "1 1 100px" }} value={as.name} placeholder="name"
               onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, name: e.target.value }))} />
             <input className="lv-tagin" value={as.tag}
@@ -1494,10 +1500,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         })}</div>
       )}
       {!(project.assets || []).length && <div className="lv-ph">No cast yet — add one below.</div>}
+      {/* Opens on "all" (both kinds), not "image": with an image-only default an
+          already-rendered video was absent from the view entirely, and the type
+          dropdown's combined option didn't surface videos either (it submitted '',
+          which the server maps to image-only) -- issue #3's reachability half. */}
       <button className="lv-addcast" onClick={() => openPick((mid, thumb, isVideo) => setAssets((a) => {
         const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
         return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-      }), "image", true)}>+ add from gallery</button>
+      }), "all", true)}>+ add from gallery</button>
       <button className="lv-addcast" onClick={() => setImportOpen(true)}
         title="Pull a whole gallery collection in as reusable @image references">&#8623; Import collection</button>
     </>
