@@ -74,6 +74,11 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 
 ### Security
 
+- **`moonglade_mcp.py`'s setup-instructions docstring no longer hardcodes the owner's real
+  Windows username path.** `claude mcp add`'s copy-pasteable example (`C:\Users\gwilkins\...`)
+  and the matching `MOONGLADE_OUT` example (`D:\Moonglade Athenaeum\...`) are now generic
+  placeholders (`C:\Users\<you>\...`, `D:\path\to\...`), matching CLAUDE.md's "no real
+  credentials or user-specific values in any committed file" rule.
 - **The Similar modal ("more like this") no longer leaks unblurred NSFW lookalikes.**
   `/api/similar` now includes `is_nsfw` in its response, and the client sets `data-nsfw`
   on its hand-cloned cards, so Privacy Blur now covers this surface like every other one.
@@ -313,6 +318,27 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   which two models no free card ever covers, and which Shot modes are gated per model.
 - `wiki/Collections.md` now documents the "Remove from «collection»" action and the
   Actions ▾ menu it lives behind.
+
+### Fixed
+
+- **`--rebuild-similar` no longer re-embeds quarantined or purged images.** `pixai_similar.py`'s
+  `scan_dir` excluded only `gallery/` (thumbnails); it now also skips `_duplicates/` (--dedup)
+  and `_deleted/` (gallery delete), matching `find_image_file`/`find_files_for_media_id`'s
+  existing exclusion set (INVARIANT 6). A purged or quarantined image can no longer surface as
+  a "similar" match. Fail-first tested:
+  `tests/test_similar.py::test_scan_dir_excludes_quarantine_dirs`.
+- **`numpy` is now a declared dependency.** `pixai_similar.py` imports it unconditionally at
+  module scope, but it was missing from `requirements.txt` — a clean install could break on a
+  machine where nothing else happens to pull it in transitively. Fail-first tested:
+  `tests/test_requirements.py::test_numpy_is_a_declared_dependency`.
+- **The Loom's corner FABs (Activity chip, help button) no longer paint over the Deep Focus
+  veil.** `.lv-df-veil` renders as a DOM descendant of `.lv-overlay`, so its `z-index:450` only
+  ever competed inside `.lv-overlay`'s own stacking context — at the root, the whole overlay
+  was just `z-index:400`, which lost to the body-level `#jobs-fab`/`#jobs-tray` (401/402).
+  `.lv-overlay` now picks up a `.lv-overlay-df` modifier class while Deep Focus is open, raising
+  its own root-context z-index to 450 (Deep Focus's own intended value) — no DOM move needed.
+  `loom/dist/master-storyboard.bundle.js` rebuilt to match. Regression-tested:
+  `loom/test/loom-df-veil-stacking.test.js`.
 
 ## [2.3.0] - 2026-07-23 — More security hardening, the Folio of Honors, and LoRA support in the Loom
 

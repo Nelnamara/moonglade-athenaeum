@@ -5,11 +5,11 @@ Reuses pixai_gallery.py's catalog helpers + pixai_similar.similar() -- no SQL is
 reimplemented here. Read-mostly; set_rating / add_to_collection are the only writes.
 
 Config: env MOONGLADE_OUT = the backup dir that holds catalog.db (e.g.
-"D:\\Moonglade Athenaeum\\pixai_backup"). Falls back to ./pixai_backup next to this file.
+"D:\\path\\to\\pixai_backup"). Falls back to ./pixai_backup next to this file.
 
 Register in Claude Code:
-    claude mcp add moonglade -e MOONGLADE_OUT="D:\\Moonglade Athenaeum\\pixai_backup" \\
-        -- python "C:\\Users\\gwilkins\\source\\repos\\pixai-gallery-backup\\moonglade_mcp.py"
+    claude mcp add moonglade -e MOONGLADE_OUT="D:\\path\\to\\pixai_backup" \\
+        -- python "C:\\Users\\<you>\\source\\repos\\pixai-gallery-backup\\moonglade_mcp.py"
 Then restart Claude Code; tools appear as moonglade:search_catalog, moonglade:similar, ...
 
 NOTE: the Similar tool loads the Pixeltable index (embedded Postgres). Don't run a
