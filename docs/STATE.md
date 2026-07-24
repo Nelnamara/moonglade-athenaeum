@@ -28,13 +28,12 @@ Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owne
 generations, serves a local searchable web gallery, generates images and videos through
 PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
 the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
-is **v2.3.0** (2026-07-23 — the Folio of Honors redesign, LoRA support + cost badges across
-the Loom's Image/Edit/Reference tabs, per-account splits for the last three shared-file
-stores (Toolbox presets, prompt snippets, Loom storyboards), the account-eviction gate, a
-2026-07-22 sweep through the rest of the audit board's high-severity list, and two further
-security fixes — Cache Storage purge on sign-out, and a host-path redaction re-spin covering
-37 sites — both adversarially reviewed before shipping; full detail in `CHANGELOG.md`'s
-`[2.3.0]` block). `loom-v2` and `master` are in sync as of that release — check
+is **v2.4.0** (2026-07-24 — concurrent generations, a trash/quarantine restore panel,
+field-operator search, real credit-cost tracking, a full unification of the model/image
+pickers across the Loom and the gallery, a data-loss video-corruption bug fixed, the last
+open Privacy Blur security gap closed, and the audit board's Tier 1-5 defect list driven to
+zero open items; full detail in `CHANGELOG.md`'s `[2.4.0]` block). `loom-v2` and `master` are
+in sync as of that release — check
 `git rev-list --count origin/master..origin/loom-v2` for the live count rather than trusting
 a number here, since new work may already have landed on `loom-v2` since. See
 `docs/AUDIT_2026-07-21.md` for what's still open. Each release is a `--no-ff` merge of
