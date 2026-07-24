@@ -157,7 +157,7 @@
       var mine = ++this._seq, self = this;
       if (this._grid) this._grid.style.opacity = '.45';
       var u = '/api/model-search?kind=' + encodeURIComponent(this._kind) +
-              '&size=12&q=' + encodeURIComponent(this._q || '');
+              '&size=24&q=' + encodeURIComponent(this._q || '');
       fetch(u).then(function (r) { return r.json(); }).then(function (d) {
         if (mine !== self._seq) return;
         self._render((d && d.results) || [], d && d.error);
