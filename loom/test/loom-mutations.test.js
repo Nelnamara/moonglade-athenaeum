@@ -579,7 +579,7 @@ describe("resolveGenDims (L536, ported from pixai_gallery.py's Gen.dims())", () 
 
 describe("buildImgGenBody (L536)", () => {
   test("assembles the full /api/generate-shaped body from model + loras + advanced state", () => {
-    const imgModel = { model_id: "M1", title: "Base" };
+    const imgModel = { model_id: "M1", title: "Base", version_id: "V-CHOSEN" };
     const imgLoras = [{ model_id: "L1", version_id: "V1", weight: 0.8 },
                       { model_id: "L2", version_id: "", weight: 0.5 }];   // still pending -> filtered
     const imgAdv = { negative: "lowres", steps: 30, cfg: 6, aspectW: 16, aspectH: 9, size: 1536,
@@ -587,6 +587,9 @@ describe("buildImgGenBody (L536)", () => {
                      highPriority: true, promptHelper: false };
     const body = buildImgGenBody(imgModel, imgLoras, imgAdv, "a moonlit forest");
     assert.equal(body.model_id, "M1");
+    // problem 4: a specifically-chosen (non-latest) version rides along so /api/generate
+    // can honor it instead of always silently re-resolving the newest.
+    assert.equal(body.version_id, "V-CHOSEN");
     assert.equal(body.prompt, "a moonlit forest");
     assert.deepEqual(body.loras, [{ version_id: "V1", weight: 0.8 }]);   // unresolved one dropped
     assert.equal(body.negative, "lowres");
@@ -604,6 +607,7 @@ describe("buildImgGenBody (L536)", () => {
   test("sane defaults when imgModel is null and imgAdv is empty (matches the gallery's own defaults)", () => {
     const body = buildImgGenBody(null, [], {}, "");
     assert.equal(body.model_id, "");
+    assert.equal(body.version_id, "");
     assert.equal(body.mode, "auto");
     assert.equal(body.steps, 25);
     assert.equal(body.cfg, 7);
