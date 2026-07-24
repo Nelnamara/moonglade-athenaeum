@@ -2195,10 +2195,25 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // SequencePlayer on it forever (it never reaches the advance threshold).
         setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
         setBatchOutcome(cardId, "done");
+        // Nudge the shared Activity tracker (static/mg-notify.js's JobsCard) the INSTANT
+        // this shot's own poll -- the live, real-time signal the per-shot badge above
+        // already trusts -- learns the task is done, exactly like the gallery's own
+        // Jobs.poll() does on its done branch (mg-notify.js). Without this the tray was
+        // only ever as fresh as ITS OWN independent, unsynchronized ~2.5-7s poll cycle
+        // (register() above is register-ONLY, no poll of its own -- see that comment), a
+        // second, unsynchronized hop that let the two surfaces visibly disagree about the
+        // same task and made the tray read as frozen when that hop lagged. window.JobsCard
+        // is guaranteed loaded here for the same reason window.Jobs is (mg-notify.js
+        // always ships in the Loom's shell).
+        if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
       } else if (cls.phase === "failed") {
         setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
         setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
         setBatchOutcome(cardId, "failed");
+        // Same nudge as the done branch above, mirroring mg-notify.js's Jobs.poll() on its
+        // own failed branch -- a failed shot must not leave the tray stuck on stale
+        // "running" until its own independent cycle happens to catch up.
+        if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
       } else if (elapsed > POLL_CEILING_MS) {
         pause();
       } else if (elapsed > POLL_STALE_AT_MS) {
