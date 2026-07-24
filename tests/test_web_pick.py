@@ -1408,6 +1408,76 @@ def test_import_task_by_id(tmp_path, monkeypatch):
     assert 'id="import-tid"' in html and "importTask()" in html            # the panel card + wiring
 
 
+def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatch):
+    """THE BUG (docs/AUDIT_2026-07-21.md, owner-2026-07-23, task 2037215124834251576):
+    a generation finishes on PixAI's side but our own /api/task-status never gets a
+    chance to run for it -- the polling browser tab closed, or a transient exception
+    left it at 'running' by api_task_status()'s own deliberate design -- so the job
+    sits at 'running' in jobs.jsonl forever. The owner's real recovery for exactly this
+    is a manual task-id import through THIS route -- but the import only ever wrote a
+    brand-new 'import-<suffix>' job and never touched the ORIGINAL orphaned job_id
+    (which, for a web-submitted generate job, IS the numeric task id), so the Activity
+    card kept spinning on the orphan forever even after the real media had landed.
+    Recovering the same task id an orphan is keyed on must close that original entry."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = login_existing_client(cli)
+    tid = "2037215124834251576"
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+
+    d = cli.post("/api/import-task", json={"task_id": tid}).get_json()
+    assert d["ok"] and d["saved"] == 1
+
+    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    assert by_id[tid]["status"] == "done", "the original orphaned entry was never closed"
+    assert by_id[tid]["media_ids"] == ["m1"]
+    # the recovery's own new job_id still exists too -- this closes the orphan
+    # IN ADDITION TO, not instead of, the import's own activity entry.
+    assert any(j.get("type") == "import" for j in by_id.values())
+
+
+def test_import_task_closes_orphan_on_the_already_cataloged_path_too(tmp_path):
+    """Same bug, the OTHER success branch: if the task's media is already in the
+    catalog (the "behind the milk" short-circuit -- e.g. the live-mirror watcher
+    collected it moments before the owner clicked Recover), the original orphaned job
+    entry must still get closed. Without this, a recovery landing on the
+    already-cataloged branch does nothing for the stuck Activity card at all."""
+    tid = "999"
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    save_catalog(tmp_path / "catalog.db", [_row(media_id="ex1", filename="e.png", task_id=tid,
+                                                created_at="2025-01-02T00:00:00")])
+    cli = login_client(tmp_path)
+
+    d = cli.post("/api/import-task", json={"task_id": tid}).get_json()
+    assert d.get("already") is True
+
+    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    assert by_id[tid]["status"] == "done", "the already-cataloged path left the orphan spinning"
+
+
+def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch):
+    """If the owner already dismissed the orphaned entry by hand, a later recovery must
+    not resurrect it with a new event -- dismiss is an explicit user action and stays
+    respected, same as every other job in the log."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = login_existing_client(cli)
+    tid = "2222"
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    core.append_job_event(tmp_path, tid, dismissed=True)
+
+    cli.post("/api/import-task", json={"task_id": tid})
+
+    from pixai_gallery_backup import _reconstruct_jobs
+    jobs_by_id, _order, _n = _reconstruct_jobs(tmp_path)
+    assert jobs_by_id[tid]["status"] == "running"       # untouched
+    assert jobs_by_id[tid]["dismissed"] is True
+
+
 def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     """The header balance surface exposes per-card breakdown + soonest expiry, claimable
     free credits, and the subscription cliff — the data the chip/badge/warnings render."""
