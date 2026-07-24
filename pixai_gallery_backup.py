@@ -6423,8 +6423,7 @@ def run_download(args, progress=None):
             "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
             "this file).")
 
-    if not getattr(args, "organize_adv_live", False):
-        img_dir.mkdir(parents=True, exist_ok=True)
+    img_dir.mkdir(parents=True, exist_ok=True)
 
     # ONE fast tree walk at startup (os.scandir, ~free stat() on Windows): seed
     # the progress count AND build the on-disk media_id index. Resume is then an
@@ -6526,12 +6525,10 @@ def run_download(args, progress=None):
     consecutive_known_pages = 0
 
     # Parallel downloads: only for the common flat-download case. collect_only does
-    # no downloads, and organize-adv-live has per-folder side effects that assume
-    # serial ordering -- both fall back to the serial path.
+    # no downloads, so it falls back to the serial path.
     workers = max(1, getattr(args, "workers", 1) or 1)
     parallel = (workers > 1
-                and not getattr(args, "collect_only", False)
-                and not getattr(args, "organize_adv_live", False))
+                and not getattr(args, "collect_only", False))
     if parallel:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         print("Parallel downloads: {} workers.\n".format(workers))
@@ -6672,7 +6669,6 @@ def run_download(args, progress=None):
                     continue   # video task: its poster still is NOT a standalone image
                 meta = extract_meta(node)
                 all_mids = media_ids_for(node)
-                is_batch = len(all_mids) > 1
 
                 # Fetch full task detail once per task_id (cached; batches cost 1 call)
                 full_meta = {}
@@ -6688,21 +6684,7 @@ def run_download(args, progress=None):
                         time.sleep(args.delay)
                     full_meta = _full_meta_cache.get(meta["task_id"], {})
 
-                if getattr(args, "organize_adv_live", False):
-                    if is_batch:
-                        folder_name = build_stem_name(
-                            meta["prompt_preview"], meta["task_id"], "",
-                            args.name_length, args.name_sep)
-                        task_folder = out / "batches" / folder_name
-                    else:
-                        month = (meta.get("created_at") or "")[:7] or "unknown-date"
-                        task_folder = out / month
-                    if not getattr(args, "collect_only", False):
-                        task_folder.mkdir(parents=True, exist_ok=True)
-                else:
-                    task_folder = img_dir
-
-                batch_results = []
+                task_folder = img_dir
                 for idx, mid in enumerate(all_mids):
                     existing = (None if getattr(args, "collect_only", False)
                                 else on_disk_by_mid.get(mid))
@@ -6725,12 +6707,9 @@ def run_download(args, progress=None):
                         _tick()
                         continue
                     page_new += 1  # this media_id is not yet on disk
-                    if getattr(args, "organize_adv_live", False) and is_batch:
-                        stem_name = "{:02d}_{}".format(idx + 1, mid)
-                    else:
-                        stem_name = build_stem_name(
-                            meta["prompt_preview"], meta["task_id"], mid,
-                            args.name_length, args.name_sep)
+                    stem_name = build_stem_name(
+                        meta["prompt_preview"], meta["task_id"], mid,
+                        args.name_length, args.name_sep)
                     stem = task_folder / stem_name
                     url, info = resolve_media(session, mid)
                     w, h = info.get("width", ""), info.get("height", "")
@@ -6776,7 +6755,6 @@ def run_download(args, progress=None):
                     written.add(mid)
                     if path and status in ("ok", "skip"):
                         on_disk_by_mid[mid] = path  # keep index current within the run
-                        batch_results.append((idx, mid, path, info))
                     if status == "ok":
                         _check_time_capsule(meta.get("created_at"), out)
                         time.sleep(args.delay)
@@ -6786,43 +6764,6 @@ def run_download(args, progress=None):
             # re-pull never blanks local curation (collections/rating/tags/...).
             if page_rows:
                 save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
-
-                if getattr(args, "organize_adv_live", False) and batch_results:
-                    if is_batch:
-                        prompt_txt = task_folder / "_prompt.txt"
-                        if not prompt_txt.exists():
-                            lines = [
-                                "Prompt (preview): {}".format(meta["prompt_preview"]),
-                                "Task ID         : {}".format(meta["task_id"]),
-                                "Created         : {}".format(meta["created_at"]),
-                                "Status          : {}".format(meta["status"]),
-                                "Source          : PixAI",
-                                "", "Images in this batch:",
-                            ]
-                            for _, _, bp, bi in batch_results:
-                                lines.append("  {}  ({}x{})".format(
-                                    bp.name, bi.get("width", "?"), bi.get("height", "?")))
-                            prompt_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                    else:
-                        idx_path = task_folder / "_index.csv"
-                        new_file = not idx_path.exists()
-                        with open(idx_path, "a", newline="", encoding="utf-8") as f_idx:
-                            w_idx = csv.DictWriter(f_idx, fieldnames=[
-                                "filename", "media_id", "task_id", "prompt_preview",
-                                "width", "height", "created_at", "status"])
-                            if new_file:
-                                w_idx.writeheader()
-                            for _, bi_mid, bi_path, bi_info in batch_results:
-                                w_idx.writerow({
-                                    "filename": bi_path.name,
-                                    "media_id": bi_mid,
-                                    "task_id": meta["task_id"],
-                                    "prompt_preview": meta["prompt_preview"],
-                                    "width": bi_info.get("width", ""),
-                                    "height": bi_info.get("height", ""),
-                                    "created_at": meta["created_at"],
-                                    "status": meta["status"],
-                                })
 
                 seen += 1
                 if args.max and seen >= args.max:
