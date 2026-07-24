@@ -89,6 +89,20 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 
 ### Fixed
 
+- **The Loom's own Activity tracker widget no longer goes stale mid-render, and no longer
+  visibly disagrees with the per-shot "RENDERING… (task …)" badge** (owner field-test
+  2026-07-23, `docs/AUDIT_2026-07-21.md` owner-2026-07-23 lens — "functionally dead" tracker
+  and "status mismatch" were the same root cause). `generateShot` deliberately registers each
+  submission with the shared job log via `Jobs.register()` only (no second poll loop — the
+  Loom's own `pollShot` already owns real completion handling), but that left the shared
+  Activity tray (`static/mg-notify.js`'s `JobsCard`) with no way to learn a shot finished
+  except its own independent, unsynchronized ~2.5–7s poll cycle — a second hop the gallery's
+  equivalent path never has, since `Jobs.poll()` there calls `JobsCard.refresh()` the instant
+  it sees a terminal phase. `pollShot`'s `tick()` now makes that same call on its own `done`
+  and `failed` branches, so the tray catches up the moment the shot's own (live, working) poll
+  learns the truth, instead of drifting until its own cycle happens to catch up. The per-shot
+  badge itself is unchanged. Fail-first tested:
+  `loom/test/loom-activity-tracker-live-update.test.js`.
 - **Generate no longer locks until the task finishes — PixAI itself runs generations in
   parallel, so every gen panel now does too** (owner field-test 2026-07-23). The lock was
   two separate mechanisms, both fixed the same way: the gallery's `runTask()` (shared by
