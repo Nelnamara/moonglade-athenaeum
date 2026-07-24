@@ -268,7 +268,7 @@ from types import SimpleNamespace
 def _dl_args(out, **kw):
     base = dict(
         out=str(out), token="t", page_size=20, max=0, delay=0,
-        name_length=40, name_sep="_", organize_live=False, organize_adv_live=False,
+        name_length=40, name_sep="_", organize_live=False,
         convert=None, jpeg_quality=92, jpeg_bg="white", keep_webp=False,
         collect_only=False, full_meta=False, update=False, update_grace=2,
     )

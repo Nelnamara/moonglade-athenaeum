@@ -21,6 +21,17 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 
 ### Removed
 
+- **Dead live-organize-into-batches code path removed from `run_download`.** The
+  `organize_adv_live` runtime flag it was gated on has had no CLI argument setting it true
+  since before this changelog's history (`--organize-adv` is only a back-compat alias for
+  `--organize`, unrelated); confirmed via a full-repo grep (source + tests) that nothing
+  ever sets it truthy. Simplified all five branches to their always-taken path: `img_dir`
+  is now created unconditionally, the parallel-download gate dropped its always-true
+  `organize_adv_live` clause, `task_folder` is always `img_dir`, filenames always go
+  through `build_stem_name`, and the orphaned `_prompt.txt`/`_index.csv` batch-writing
+  block (plus the `is_batch`/`batch_results` bookkeeping that only fed it) is gone.
+  `--organize`'s month-folder normalization and its own legacy-`batches/`-tidying are
+  untouched — this was only the unreachable *creation* path. 985 tests pass.
 - **Internal dev/creative-process narration is out of the shipped code.** Code comments and
   test docstrings across `pixai_gallery.py`, `pixai_gallery_backup.py`, `static/mg-notify.js`,
   `static/mg-generate-drawer.js`, `loom/master-storyboard.jsx`, and seven test files no longer
