@@ -4690,20 +4690,23 @@ document.addEventListener('DOMContentLoaded', function() {
        (see /login and that function's docstring). Hide them for anyone else and
        show a small read-only note instead of dead buttons. Browse/curate +
        community stay available to everyone.
-       Import is the one documented exception inside this same gate: it renders for
-       every LOGIN-tier session right alongside Generate/The Loom, but
-       /api/import-local (below) is actually LOCALHOST-tier -- it writes files onto
-       the server's own machine, so it re-checks _is_local_request() itself. A
-       signed-in, non-local LAN session therefore sees a working-looking Import
-       button that always 403s when clicked. Not a security hole (the real gate is
-       correct and server-side) -- just a UX wart; gating the button's own
-       visibility on the real local check instead of this blanket flag is a
-       follow-up left to the owner, not done here. #}
+       Import needs MORE than that: /api/import-local (below) is actually
+       LOCALHOST-tier, because it writes files onto the server's own machine, so
+       it re-checks _is_local_request() itself. The button is therefore nested
+       behind its own `is_true_local` check -- the real, un-hardcoded
+       _is_local_request() result computed in index() below, the same value
+       `can_delete_cloud` already uses for "Delete from PixAI" -- instead of the
+       blanket `is_local` flag every other button in this block uses. FIXED
+       2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3, previously a documented but
+       un-fixed gap): a signed-in, non-local LAN session no longer sees a
+       working-looking Import button that always 403'd on click. #}
     {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
+    {% if is_true_local %}
     <button type="button" class="btn" onclick="ImportUI.open()" title="Import local files (images, a folder, or a .zip) into your library">&#8593; Import</button>
+    {% endif %}
     <a class="btn b-loom" href="/loom" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     {% endif %}
     <button type="button" class="btn b-ach" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
@@ -8259,6 +8262,9 @@ function savePrompt() {
     <div class="jobrow" id="jobs-safe"></div>
     <div style="font-size:12px;color:var(--overlay0);margin:16px 0 8px;">Changes files &middot; asks first</div>
     <div class="jobrow" id="jobs-danger"></div>
+    {% if not panel_is_local %}
+    <div class="p-note" style="margin-top:0;">Destructive actions (Organize, Dedup, Rebuild thumbnails, and the rest) are restricted to the machine running the gallery &mdash; sign in there to use them.</div>
+    {% endif %}
     <details class="jobs-adv" style="margin-top:16px;">
       <summary style="font-size:12px;color:var(--overlay0);cursor:pointer;user-select:none;">Advanced &middot; sync variants the one-click Sync doesn't cover</summary>
       <div style="font-size:11.5px;color:var(--overlay0);margin:8px 0;line-height:1.5;">These re-walk the full account rather than the incremental default. Slower, all read/append (never delete).</div>
@@ -8318,13 +8324,15 @@ function savePrompt() {
 
   <div class="p-sec">
     <h2>&#127912; Branding</h2>
-    <div class="p-note">The <b>banner mark</b> &mdash; the icon beside the title &mdash; and its animation. <b>Set launcher icon</b> writes a Desktop shortcut whose icon is the selected mark (a .pyw can't carry its own icon; the shortcut can). The favicon stays the Gem Tome.</div>
+    <div class="p-note">The <b>banner mark</b> &mdash; the icon beside the title &mdash; and its animation. {% if panel_is_local %}<b>Set launcher icon</b> writes a Desktop shortcut whose icon is the selected mark (a .pyw can't carry its own icon; the shortcut can).{% else %}<b>Set launcher icon</b> is restricted to the machine running the gallery &mdash; sign in there to use it.{% endif %} The favicon stays the Gem Tome.</div>
     <div id="brand-marks" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;"></div>
     <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
       <div><div class="p-fl">Animation</div>
         <select id="brand-anim" class="p-sel"></select></div>
       <button class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="saveBrand()"><span class="t">Save</span></button>
+      {% if panel_is_local %}
       <button class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="setLauncher()" title="Creates/updates the Desktop 'Moonglade Athenaeum' shortcut; its icon becomes the selected mark"><span class="t">&#128279; Set launcher icon</span></button>
+      {% endif %}
       <span id="brand-status" style="font-size:12.5px;color:var(--subtext);"></span>
     </div>
   </div>
@@ -9404,9 +9412,32 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/panel")
     def panel():
-        # actions -> Maintenance buttons (panel_visible only). all_actions -> the
-        # scheduler dropdown, which needs the background-only jobs too (that's their
-        # only home now that they're not buttons).
+        # panel_is_local is computed FIRST because it now drives several things below,
+        # not just the Users tab it started as (2026-07-22): which PANEL_ACTIONS become
+        # Maintenance buttons at all, whether "Set launcher icon" renders in the
+        # Branding section, panel_out_dir's redaction, and the Users tab's Add/Remove UI.
+        # FIXED 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): a LAN session used to see
+        # every destructive Maintenance button (Organize, Dedup, Rebuild thumbnails, ...)
+        # and "Set launcher icon" render normally, then hit a confirm-dialog-then-403
+        # dead end on click -- api_panel_run/api_branding_shortcut were always correctly
+        # gated server-side (never a security hole), but the owner's call was to gate
+        # visibility on the real check too instead of leaving that a known UX gap.
+        # Hiding controls a caller can't use avoids the dead end; the server enforces
+        # the same boundary regardless of what this flag renders, so getting this wrong
+        # is a UX regression, not a security one.
+        panel_is_local = _is_local_request()
+        # actions -> Maintenance buttons: panel_visible ones, and (as of this fix)
+        # destructive ones ONLY when panel_is_local -- a LAN session's Maintenance tab
+        # now simply never receives Organize/Dedup/Rebuild-thumbnails/etc. in its
+        # ACTIONS payload, so renderJobs() has nothing to render into #jobs-danger and
+        # needed no change of its own; PANEL_HTML shows one explanatory note in that
+        # now-empty row instead (see the `{% if not panel_is_local %}` beside
+        # #jobs-danger). all_actions -> the scheduler dropdown, deliberately NOT
+        # filtered by locality: it needs the background-only jobs too (that's their
+        # only home now that they're not buttons), and loadSchedule() already excludes
+        # every destructive action from that dropdown for everyone, local or LAN --
+        # scheduling a destructive job was never a feature, so there's nothing more to
+        # hide there.
         all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"],
                         "advanced": v.get("advanced", False),
                         "int_param": v.get("int_param", False),
@@ -9414,7 +9445,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         "int_range": v.get("int_range")}
                        for k, v in PANEL_ACTIONS.items()]
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
-                  if v.get("panel_visible", True)]
+                  if v.get("panel_visible", True) and (panel_is_local or not v["destructive"])]
         import pixai_gallery_backup as core
         # Reuse whatever csrf token this session already carries (set at login
         # time by _establish_session) -- only mint one here if it's somehow
@@ -9431,14 +9462,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # question than the one below. A server install path is a different kind of
         # fact -- it identifies the owner's machine, not a fellow account -- and the
         # front door never signed up to expose it past the loopback boundary.
-        panel_out_dir = str(out_dir) if _is_local_request() else "(local to the server)"
-        # panel_is_local drives the Users tab's UI: as of 2026-07-22, adding an account
-        # or removing someone ELSE's is LOCALHOST-only (api_users_add/_remove) -- a LAN
-        # session can still remove its OWN row. Hiding the controls it can't use avoids
-        # a confirm-dialog-then-403 dead end; the server enforces the same boundary
-        # regardless of what this flag renders, so getting this wrong is a UX
-        # regression, not a security one.
-        panel_is_local = _is_local_request()
+        panel_out_dir = str(out_dir) if panel_is_local else "(local to the server)"
         return render_template_string(
             PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
             all_actions_json=json.dumps(all_actions),
@@ -9967,22 +9991,25 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # wizard; that conjunct hid it from them. That viewer can no longer reach this line.
         # `is_local` below (the header template's flag for showing the owner-only
         # Generate/Loom/Panel controls vs. the read-only note) is hardcoded True for the
-        # identical reason -- same call site, same guarantee. Import is the one
-        # documented exception: it renders under this same flag (grouped with
-        # Generate/Loom in the header) but /api/import-local re-checks the stricter
-        # _is_local_request() itself, so a signed-in, non-local LAN session sees the
-        # button but always gets a 403 -- see the head-nav comment above the Import
-        # button itself for the full explanation. `can_delete_cloud` is a
-        # DIFFERENT, narrower flag: it drives whether the "Delete from PixAI" bulk-action
-        # button renders at all. That button posts to /delete-tasks-bulk, which is gated
-        # to the stricter _is_local_request() (irreversible cloud deletion, same trust
-        # tier as /api/branding/shortcut) -- a real, un-hardcoded check, so a logged-in
-        # LAN session sees "Delete locally" but not "Delete from PixAI".
+        # identical reason -- same call site, same guarantee: those three are genuinely
+        # LOGIN-tier, matching their own route gating.
+        # `is_true_local` is the REAL, un-hardcoded _is_local_request() result. It now
+        # gates the Import button's own visibility (see the head-nav comment above it),
+        # FIXED 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): a signed-in, non-local
+        # LAN session used to see a working-looking Import button that always 403'd,
+        # because /api/import-local re-checks the stricter _is_local_request() itself
+        # while the button's old visibility only checked the blanket is_local flag.
+        # `can_delete_cloud` reuses this SAME value for a different control -- whether
+        # the "Delete from PixAI" bulk-action button renders at all. That button posts
+        # to /delete-tasks-bulk, which is gated to the same stricter _is_local_request()
+        # (irreversible cloud deletion, same trust tier as /api/branding/shortcut), so a
+        # logged-in LAN session sees "Delete locally" but not "Delete from PixAI".
         import pixai_gallery_backup as _core
         _fresh_cfg = _core._load_config()
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
         catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
-        can_delete_cloud = _is_local_request()
+        is_true_local = _is_local_request()
+        can_delete_cloud = is_true_local
         # The header's Sign out control is a POST form now (see INDEX_HTML), so this
         # page has to carry the session's csrf token the same way /login's form and
         # the Panel do. setdefault, never a fresh mint: _establish_session already set
@@ -9998,7 +10025,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             collection=collection, collections=collections,
             rows=page_rows, total=total, page=page, stats=stats,
             needs_key=needs_key, catalog_empty=catalog_empty,
-            build_stamp=build_stamp, is_local=True, can_delete_cloud=can_delete_cloud,
+            build_stamp=build_stamp, is_local=True, is_true_local=is_true_local,
+            can_delete_cloud=can_delete_cloud,
             logged_in_user=session.get("user"), csrf=session["csrf"],
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
