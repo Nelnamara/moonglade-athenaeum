@@ -29,7 +29,19 @@
      - mg-pick's detail becomes { model, selected } (selected=true on add/resolve-update,
        false on remove) instead of the raw row -- a deliberate shape difference gated on
        the new opt-in attribute, not a change to the existing single-value contract.
-     - `.selected` (getter) returns the current multi-select array. */
+     - `.selected` (getter) returns the current multi-select array.
+
+   O12/O13 (Phase 2): opt-in `market` boolean attribute (`<mg-model-picker kind="lora" multi
+   market>`), added for the gallery's LoRA browsing parity. OFF by default -- the Loom's
+   existing kind="lora" multi mount does not set it, so it is byte-for-byte unaffected.
+   When present, renders a Popular/Newest sort toggle + the same 6 category chips
+   (character/style/pose/clothing/background/detail) the gallery's own #model-flyout has
+   for LoRAs, and threads sort=/category= into /api/model-search (the server already
+   honors both -- see pixai_gallery.py's api_model_search -- only the client-side UI was
+   missing). Independent of `kind`: the HOST decides when market makes sense (the gallery
+   only ever sets it on its LoRA mount, matching its own long-standing "sort/category are a
+   LoRA taxonomy, base models don't get them" design), the same way `show-type` on
+   mg-gallery-picker.js is host-gated rather than baked into a mode. */
 (function () {
   'use strict';
   if (window.customElements && customElements.get('mg-model-picker')) return;
@@ -79,6 +91,18 @@
     'mg-model-picker .mg-q{width:100%;box-sizing:border-box;background:var(--base,#0c0a1c);',
     ' border:1px solid var(--surface1,#3a3460);border-radius:8px;padding:7px 9px;color:var(--text,#d6d2e2);font:13px/1.2 system-ui;}',
     'mg-model-picker .mg-q:focus{outline:0;border-color:var(--accent,#b692e6);}',
+    /* O13 market UI (sort + category), opt-in via the `market` attribute -- same shape as
+       the gallery's own #mkt-sort/#mkt-cats. */
+    'mg-model-picker .mg-mktsort{display:flex;gap:6px;margin-top:8px;}',
+    'mg-model-picker .mg-mktsort button{flex:1;padding:5px 0;font-size:11px;border-radius:6px;background:var(--surface0,#211f3a);',
+    ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
+    'mg-model-picker .mg-mktsort button.on{background:var(--surface1,#3a3460);color:var(--text,#d6d2e2);',
+    ' border-color:var(--accent,#b692e6);font-weight:600;}',
+    'mg-model-picker .mg-mktcats{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}',
+    'mg-model-picker .mg-mktcats button{padding:3px 10px;font-size:10.5px;border-radius:11px;background:var(--surface0,#211f3a);',
+    ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
+    'mg-model-picker .mg-mktcats button.on{background:var(--accent,#b692e6);color:var(--base,#0c0a1c);',
+    ' border-color:var(--accent,#b692e6);font-weight:600;}',
     'mg-model-picker .mg-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px;',
     ' max-height:320px;overflow:auto;transition:opacity .12s;}',
     'mg-model-picker .mg-card{position:relative;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
@@ -126,8 +150,12 @@
       this._value = null;
       this._multi = this.hasAttribute('multi');
       this._selected = [];
+      this._market = this.hasAttribute('market');
+      this._sort = 'popular';
+      this._category = '';
       this.innerHTML =
         '<input class="mg-q" type="text" placeholder="search models…" aria-label="Search models">' +
+        (this._market ? this._marketSkeleton() : '') +
         '<div class="mg-empty"></div>' +
         '<div class="mg-grid" role="listbox"></div>' +
         '<div class="mg-preview" aria-hidden="true"></div>';
@@ -137,7 +165,43 @@
       this._preview = this.querySelector('.mg-preview');
       var self = this;
       this._input.addEventListener('input', function () { self._q = self._input.value; self._debounce(); });
+      if (this._market) {
+        this.querySelectorAll('.mg-mktsort button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var s = b.getAttribute('data-sort');
+            if (s === self._sort) return;
+            self._sort = s;
+            self.querySelectorAll('.mg-mktsort button').forEach(function (x) { x.classList.toggle('on', x === b); });
+            self._search();
+          });
+        });
+        this.querySelectorAll('.mg-mktcats button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var c = b.getAttribute('data-cat') || '';
+            if (c === self._category) return;
+            self._category = c;
+            self.querySelectorAll('.mg-mktcats button').forEach(function (x) { x.classList.toggle('on', x === b); });
+            self._search();
+          });
+        });
+      }
       this._search(); // browse-on-open: empty query -> the API's popular list
+    }
+
+    // O13: Popular/Newest sort + the gallery's 6 LoRA category chips, same list as
+    // pixai_gallery.py's #mkt-cats (All is the '' category, not a real server value).
+    _marketSkeleton() {
+      return (
+        '<div class="mg-mktsort"><button type="button" class="on" data-sort="popular">Popular</button>' +
+        '<button type="button" data-sort="newest">Newest</button></div>' +
+        '<div class="mg-mktcats"><button type="button" class="on" data-cat="">All</button>' +
+        '<button type="button" data-cat="character">Character</button>' +
+        '<button type="button" data-cat="style">Style</button>' +
+        '<button type="button" data-cat="pose">Pose</button>' +
+        '<button type="button" data-cat="clothing">Clothing</button>' +
+        '<button type="button" data-cat="background">Background</button>' +
+        '<button type="button" data-cat="detail">Detail</button></div>'
+      );
     }
 
     static get observedAttributes() { return ['kind']; }
@@ -158,6 +222,9 @@
       if (this._grid) this._grid.style.opacity = '.45';
       var u = '/api/model-search?kind=' + encodeURIComponent(this._kind) +
               '&size=24&q=' + encodeURIComponent(this._q || '');
+      if (this._market) {
+        u += '&sort=' + encodeURIComponent(this._sort) + '&category=' + encodeURIComponent(this._category);
+      }
       fetch(u).then(function (r) { return r.json(); }).then(function (d) {
         if (mine !== self._seq) return;
         self._render((d && d.results) || [], d && d.error);
