@@ -1,6 +1,6 @@
-"""Session-based web-gallery login auth: the auth pass that gates every
-network-originated (non-localhost) request behind a login (see
-pixai_gallery.py's _is_authorized_request() and /login /logout, and
+"""Session-based web-gallery login auth: the auth pass that gates EVERY request
+behind a login, including from the server's own machine -- there is no
+localhost bypass (see pixai_gallery.py's _is_authorized_request() and /login /logout, and
 pixai_gallery_backup.py's get_or_create_secret_key/add_or_update_web_user/
 remove_web_user/verify_web_user/list_web_users).
 
