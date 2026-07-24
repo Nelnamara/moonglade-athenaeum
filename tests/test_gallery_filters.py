@@ -209,6 +209,36 @@ def test_collection_health_excludes_deleted_and_branding(tmp_path):
     assert h["total_files"] == 1   # only the real, non-deleted, non-branding image counts
 
 
+def test_collection_health_uncataloged_is_disk_minus_catalog(tmp_path):
+    """Integrity job (audit 2026-07-21, Curator #9): uncataloged =
+    on_disk_ids - catalog_ids, exactly. Fixture is built so the four candidate
+    computations -- correct difference, the reverse difference, the union, and
+    the intersection -- all land on DIFFERENT counts, so a directional bug
+    (reporting catalog-not-on-disk, or a union/intersection instead of the
+    disk-not-in-catalog difference) can't accidentally still pass:
+      shared (on disk AND cataloged):      111            (1 id)
+      disk-only (should BE 'uncataloged'): 999, 888       (2 ids)
+      catalog-only (the OTHER direction,
+        already covered by 'missing'):     222, 333, 444  (3 ids)
+    correct answer (disk - catalog) = 2; reverse (catalog - disk) = 3;
+    union = 6; intersection = 1 -- all distinct from each other."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="111", filename="111.webp", created_at="2024-03-01", model_name="ModelA"),
+        _row(media_id="222", filename="222.webp", created_at="2024-03-01", model_name="ModelA"),
+        _row(media_id="333", filename="333.webp", created_at="2024-03-01", model_name="ModelA"),
+        _row(media_id="444", filename="444.webp", created_at="2024-03-01", model_name="ModelA"),
+    ])
+    (tmp_path / "2024-03").mkdir()
+    (tmp_path / "2024-03" / "111.webp").write_bytes(b"data")   # shared: cataloged + on disk
+    (tmp_path / "2024-03" / "999.webp").write_bytes(b"data")   # disk-only: on disk, no catalog row
+    (tmp_path / "2024-03" / "888.webp").write_bytes(b"data")   # disk-only: on disk, no catalog row
+    # 222/333/444 stay catalog-only: a row + filename, but no file ever placed on disk.
+    h = collection_health(tmp_path, db)
+    assert h["uncataloged"] == 2          # {999, 888} -- disk files with no catalog row
+    assert h["missing"] == 3              # {222, 333, 444} -- the reverse direction, unaffected
+
+
 def test_published_and_tag_filters(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [
