@@ -34,6 +34,7 @@
   <div class="row">
     <button id="btnPlain">Open (Loom parity — image only)</button>
     <button id="btnFull">Open (with the Type dropdown)</button>
+    <button id="btnGallery">Open (gallery parity — source + upload + copy-prompt)</button>
   </div>
   <div id="out">picked: (none)</div>
 
@@ -42,18 +43,21 @@
     <li>Collection/rating/sort filters should work; typing should filter after a short pause.</li>
     <li>Escape, the ✕, or clicking the dark backdrop should close it (fires <code>mg-close</code>).</li>
     <li>Clicking an image tile fires <code>mg-pick</code> and closes it — check the line below updates.</li>
-    <li>The second button also adds the Image/Video/All type dropdown (<code>show-type</code>) —
-      the one optional attribute this component still has (dead-code pass, 2026-07-24, removed the
-      other three: show-source/show-upload/show-copy-prompt had zero callers outside this page).</li>
+    <li>The second button adds the Image/Video/All type dropdown (<code>show-type</code>) — the Loom's
+      own mount uses this one.</li>
+    <li>The third button adds <code>show-source</code>/<code>show-upload</code>/<code>show-copy-prompt</code> —
+      the gallery's <code>#pick-modal</code> replacement (O13) uses all three. Upload should POST to
+      <code>/api/upload</code> and pick the result; the copy-prompt checkbox should persist across opens
+      (localStorage <code>pick-copyprompt</code>, same key the old <code>#pick-modal</code> used).</li>
   </ol>
 
   <script src="/static/picker-core.js"></script>
   <script src="/static/mg-gallery-picker.js"></script>
   <script>
-    function openPicker(withType) {
+    function openPicker(attrs) {
       var el = document.createElement('mg-gallery-picker');
       el.setAttribute('default-type', 'image');
-      if (withType) { el.setAttribute('show-type', ''); }
+      (attrs || []).forEach(function (a) { el.setAttribute(a, ''); });
       el.addEventListener('mg-pick', function (e) {
         document.getElementById('out').textContent = 'picked: ' + JSON.stringify(e.detail, null, 1);
         el.remove();
@@ -61,8 +65,11 @@
       el.addEventListener('mg-close', function () { el.remove(); });
       document.body.appendChild(el);
     }
-    document.getElementById('btnPlain').addEventListener('click', function () { openPicker(false); });
-    document.getElementById('btnFull').addEventListener('click', function () { openPicker(true); });
+    document.getElementById('btnPlain').addEventListener('click', function () { openPicker([]); });
+    document.getElementById('btnFull').addEventListener('click', function () { openPicker(['show-type']); });
+    document.getElementById('btnGallery').addEventListener('click', function () {
+      openPicker(['show-source', 'show-upload', 'show-copy-prompt']);
+    });
   </script>
 </body>
 </html>
