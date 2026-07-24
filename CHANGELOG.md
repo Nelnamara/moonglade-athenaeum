@@ -89,6 +89,24 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 
 ### Fixed
 
+- **Generate no longer locks until the task finishes — PixAI itself runs generations in
+  parallel, so every gen panel now does too** (owner field-test 2026-07-23). The lock was
+  two separate mechanisms, both fixed the same way: the gallery's `runTask()` (shared by
+  Generate/Edit/Enhance/Fix) and the shared `<mg-generate-drawer>` (the gallery's Video tab
+  and the Loom's Deep Focus) each disabled their Go button from submit until the task's poll
+  reached a terminal phase. Both now free the button the moment the **server answers the
+  submit** — accepted or rejected — not when the render finishes, and each concurrent
+  submission gets its own line appended into the result strip instead of one shared
+  `innerHTML` a second submission would overwrite (the drawer's poll loop also moved off a
+  single shared timer that a second submission used to clobber via `clearTimeout`, onto a
+  per-submission timer set). The Loom's per-shot pipeline (`generateShot`/`pollShot`/
+  `batchGenerate`) needed no change — it already keys generation state per shot id and fires
+  polling without awaiting it, so different shots already rendered concurrently;
+  `batchGenerate`'s own `todo` filter already refuses to resubmit a shot still `"wip"`. Spend
+  gates (the Fix tab's `window.confirm`, the live `/api/price` check) are unchanged and still
+  gate every submission. Fail-first tested: `tests/test_concurrent_generations.py`,
+  `loom/test/mg-generate-drawer-concurrent.test.js`,
+  `loom/test/loom-batch-generate-concurrency.test.js`.
 - **Videos no longer corrupt on collect** (owner field-test 2026-07-23: two clips fine on
   PixAI's side truncated mid-play locally — byte forensics traced it to two concurrent
   `ffmpeg +faststart` remuxes interleaving writes into the SAME deterministic temp file,
