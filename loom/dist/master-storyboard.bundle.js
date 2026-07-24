@@ -405,6 +405,10 @@ ${"=".repeat(48)}
     });
     return {
       model_id: imgModel && imgModel.model_id || "",
+      // picker-parity-round2 (problem 4): the CHOSEN version, when the owner picked one
+      // other than the latest via the version selector -- '' (absent) when they haven't,
+      // which /api/generate already treats as "resolve the newest" (unchanged fallback).
+      version_id: imgModel && imgModel.version_id || "",
       prompt: prompt || "",
       loras: resolveLoraPayload(imgLoras),
       negative: a.negative || "",
@@ -1029,9 +1033,11 @@ ${"=".repeat(48)}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
-/* The show/hide toggle reuses .lv-chip (the same toggle-chip chrome as the Video tab's
-   Continuity/Mode controls) -- this rule only adds the standalone spacing .lv-chips'
-   flex-gap would otherwise supply. Do not re-add background/border/color/font here. */
+/* picker-parity-round2 (2026-07-24): this used to be a show/hide toggle that expanded the
+   LoRA <mg-model-picker> INLINE into this ~280px rail column -- the owner's exact complaint
+   ("cramped mess... does not have a flyout like the gallery"). It now opens the SAME
+   .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
+   the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
 .lv-loratoggle{display:inline-block;margin:7px 0 5px;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
@@ -1041,6 +1047,40 @@ ${"=".repeat(48)}
 .lv-lchip input{width:52px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
+/* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
+   <mg-model-picker> INLINE in this ~280px rail (cramped: results, a toggle button, a
+   SECOND search box, more results, all stacked). Now a trigger row (mirrors
+   pixai_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
+   -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
+   cramped-inline one here and a proper flyout there. */
+.lv-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:11.5px;text-align:left;}
+.lv-selrow:hover{border-color:var(--line2);}
+.lv-selthumb{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
+.lv-selname{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-selhint{flex:0 0 auto;font-size:10px;}
+.lv-caps{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.lv-cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);color:var(--ink2);}
+.lv-cap.method{color:var(--amber);border-color:var(--amber-d);}
+.lv-versel{margin-top:6px;}
+/* Floating overlay for the Model/LoRA picker -- centered modal, matching the Loom's own
+   established .sb-pick-ov/.lv-df-veil pattern (this file has no per-side "dock" concept for
+   the right rail the way the Gallery's #gen-drawer does, so a centered panel is the
+   idiomatic Loom equivalent of "floats as its own proper overlay panel", not an attempt to
+   pixel-clone the Gallery's specific side-docked mechanics). z-index 470: above
+   .lv-overlay/.lv-df-veil (400/450, this picker can be opened from within Deep Focus too)
+   and below .sb-seq/.sb-pick-ov (500, an unrelated picker-within-a-picker must still win). */
+.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:rgba(6,4,16,.76);display:none;align-items:center;justify-content:center;padding:20px;}
+.lv-mpick-veil.open{display:flex;}
+.lv-mpick-panel{background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:var(--shadow);width:460px;max-width:94vw;height:min(640px,86vh);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;}
+.lv-mpick-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex:none;}
+.lv-mpick-head .t{font-size:14px;font-weight:600;flex:1;}
+.lv-mpick-head .x{background:none;border:none;color:var(--ink2);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
+.lv-mpick-head .x:hover{color:var(--coral);}
+.lv-mpick-seg{display:flex;gap:6px;padding:10px 14px 0;flex:none;}
+.lv-mpick-seg button{flex:1;padding:6px 0;border-radius:7px;background:transparent;border:1px solid var(--line);color:var(--ink2);cursor:pointer;font-size:12px;}
+.lv-mpick-seg button.on{background:var(--panel2);color:var(--ink);border-color:var(--amber);font-weight:600;}
+.lv-mpick-body{padding:10px 14px 14px;display:flex;flex-direction:column;min-height:0;flex:1;}
+.lv-mpick-body mg-model-picker{flex:1;min-height:0;}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
@@ -1165,7 +1205,8 @@ ${"=".repeat(48)}
     const [handoff, setHandoff] = useState("");
     const [deepFocus, setDeepFocus] = useState(null);
     const [dfPalFor, setDfPalFor] = useState(null);
-    const [loraOpen, setLoraOpen] = useState(false);
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const [pickerKind, setPickerKind] = useState("base");
     const [leftTab, setLeftTab] = useState("cast");
     const [leftCollapsed, setLeftCollapsed] = useState(false);
     const [density, setDensity] = useState("detailed");
@@ -1222,26 +1263,46 @@ ${"=".repeat(48)}
       window.addEventListener("keydown", onKey);
       return () => window.removeEventListener("keydown", onKey);
     }, [deepFocus]);
+    useEffect(() => {
+      if (!pickerOpen) return;
+      const onKey = (ev) => {
+        if (ev.key === "Escape") setPickerOpen(false);
+      };
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [pickerOpen]);
+    const [pickerMounted, setPickerMounted] = useState(false);
+    useEffect(() => {
+      if (pickerOpen) setPickerMounted(true);
+    }, [pickerOpen]);
     const imgModelSeqRef = useRef(0);
     const bindPicker = useCallback((el) => {
       if (el && !el._mgBound) {
         el._mgBound = true;
         el.addEventListener("mg-pick", (e) => {
-          const m = { model_id: e.detail.model_id, title: e.detail.title };
+          const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
           setImgModel(m);
           setModelDefaults(null);
           const mySeq = ++imgModelSeqRef.current;
-          fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id)).then((r) => r.json()).then((d) => {
+          fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
             if (mySeq !== imgModelSeqRef.current) return;
-            setImgModel((cur) => cur && cur.model_id === m.model_id ? { ...cur, model_type: d.model_type || "" } : cur);
-            const has = d.negative_prompt || d.sampling_steps || d.cfg_scale;
-            setModelDefaults(has ? { negative_prompt: d.negative_prompt || "", sampling_steps: d.sampling_steps || null, cfg_scale: d.cfg_scale || null } : null);
+            const versions = d && d.versions || [], v = versions[0] || {};
+            setImgModel((cur) => cur && cur.model_id === m.model_id ? {
+              ...cur,
+              version_id: v.version_id || "",
+              model_type: v.model_type || "",
+              sampling_method: v.sampling_method || "",
+              capabilities: v.capabilities || [],
+              versions
+            } : cur);
+            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
             if (has) {
               setImgAdv((cur) => ({
                 ...cur,
-                negative: d.negative_prompt || cur.negative,
-                steps: d.sampling_steps || cur.steps,
-                cfg: d.cfg_scale || cur.cfg
+                negative: v.negative_prompt || cur.negative,
+                steps: v.sampling_steps || cur.steps,
+                cfg: v.cfg_scale || cur.cfg
               }));
             }
           }).catch(() => {
@@ -1249,6 +1310,28 @@ ${"=".repeat(48)}
         });
       }
     }, [setImgModel, setImgAdv, setModelDefaults]);
+    const pickVersion = useCallback((vid) => {
+      if (!imgModel || !imgModel.versions) return;
+      const v = imgModel.versions.find((x) => x.version_id === vid);
+      if (!v) return;
+      setImgModel((cur) => ({
+        ...cur,
+        version_id: v.version_id || "",
+        model_type: v.model_type || "",
+        sampling_method: v.sampling_method || "",
+        capabilities: v.capabilities || []
+      }));
+      const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+      setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+      if (has) {
+        setImgAdv((a) => ({
+          ...a,
+          negative: v.negative_prompt || a.negative,
+          steps: v.sampling_steps || a.steps,
+          cfg: v.cfg_scale || a.cfg
+        }));
+      }
+    }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
     const bindLoraPicker = useCallback((el) => {
       if (el && !el._mgBound) {
         el._mgBound = true;
@@ -1692,7 +1775,20 @@ ${"=".repeat(48)}
       } else if (tab === "Image") {
         const gi = genImgState[active.c.id] || {};
         const busyI = gi.phase === "submitting" || gi.phase === "running";
-        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Model ", imgModel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\xB7 ", imgModel.title) : null), /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindPicker, kind: "base" }), imgLoras.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "lv-loras" }, imgLoras.map((l) => {
+        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Model"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-selrow", onClick: () => {
+          setPickerKind("base");
+          setPickerOpen(true);
+        } }, imgModel && imgModel.preview_url ? /* @__PURE__ */ React.createElement("img", { className: "lv-selthumb", src: imgModel.preview_url, alt: "" }) : null, /* @__PURE__ */ React.createElement("span", { className: "lv-selname" }, imgModel ? imgModel.title : "none \u2014 browse models"), /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-selhint" }, "\u2630 browse")), imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && /* @__PURE__ */ React.createElement("div", { className: "lv-caps" }, imgModel.sampling_method ? /* @__PURE__ */ React.createElement("span", { className: "lv-cap method" }, imgModel.sampling_method) : null, (imgModel.capabilities || []).map((c) => /* @__PURE__ */ React.createElement("span", { key: c, className: "lv-cap" }, c))), imgModel && imgModel.versions && imgModel.versions.length > 1 && /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            className: "lv-in lv-versel",
+            value: imgModel.version_id || "",
+            onChange: (ev) => pickVersion(ev.target.value),
+            title: "This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead",
+            "aria-label": "Model version"
+          },
+          imgModel.versions.map((v) => /* @__PURE__ */ React.createElement("option", { key: v.version_id, value: v.version_id }, v.label || v.version_id))
+        ), imgLoras.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "lv-loras" }, imgLoras.map((l) => {
           const incompat = loraIncompat(imgModel && imgModel.model_type, l.lora_base_type);
           return /* @__PURE__ */ React.createElement("div", { key: l.model_id, className: "lv-lchip" + (l.failed || incompat ? " failed" : "") }, /* @__PURE__ */ React.createElement(
             "span",
@@ -1726,7 +1822,10 @@ ${"=".repeat(48)}
             },
             "\xD7"
           ));
-        })), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-chip lv-loratoggle" + (loraOpen ? " on" : ""), onClick: () => setLoraOpen((v) => !v) }, loraOpen ? "\u2212 hide LoRA picker" : "+ add LoRA"), loraOpen && /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindLoraPicker, kind: "lora", multi: true }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
+        })), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-chip lv-loratoggle", onClick: () => {
+          setPickerKind("lora");
+          setPickerOpen(true);
+        } }, "+ add LoRA"), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lv-ta",
@@ -1955,7 +2054,32 @@ ${"=".repeat(48)}
           openPick,
           onPatch: (p) => patchFrame("closeFrame", p)
         }
-      )), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement("mg-generate-drawer", { ref: bindGenDrawer, "data-loom-ctx": "", style: { display: tab === "Video" ? "" : "none" } }), videoTrailer);
+      )), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement("mg-generate-drawer", { ref: bindGenDrawer, "data-loom-ctx": "", style: { display: tab === "Video" ? "" : "none" } }), videoTrailer, /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          className: "lv-mpick-veil" + (pickerOpen ? " open" : ""),
+          onClick: (ev) => {
+            if (ev.target === ev.currentTarget) setPickerOpen(false);
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-panel", role: "dialog", "aria-label": "Models and LoRAs" }, /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-head" }, /* @__PURE__ */ React.createElement("span", { className: "t" }, "Models & LoRAs"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "x", onClick: () => setPickerOpen(false), "aria-label": "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: pickerKind === "base" ? "on" : "", onClick: () => setPickerKind("base") }, "Models"), /* @__PURE__ */ React.createElement("button", { type: "button", className: pickerKind === "lora" ? "on" : "", onClick: () => setPickerKind("lora") }, "LoRAs")), /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-body" }, pickerMounted && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+          "mg-model-picker",
+          {
+            ref: bindPicker,
+            kind: "base",
+            style: { display: pickerKind === "base" ? "flex" : "none" }
+          }
+        ), /* @__PURE__ */ React.createElement(
+          "mg-model-picker",
+          {
+            ref: bindLoraPicker,
+            kind: "lora",
+            multi: true,
+            "base-type": imgModel && imgModel.model_type || "",
+            style: { display: pickerKind === "lora" ? "flex" : "none" }
+          }
+        ))))
+      ));
     }
     const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), /* @__PURE__ */ React.createElement("details", { className: "lv-look", open: !!(project.look || "").trim() }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F3A8} Project look", (project.look || "").trim() ? "" : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 a style line added to every shot")), /* @__PURE__ */ React.createElement(
       "textarea",

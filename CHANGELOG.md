@@ -724,6 +724,177 @@ client, read by neither surface — and no UI slot exists for it on either side)
 strings mean needs a live PixAI capture, not something derivable from this checkout). See
 `docs/AUDIT_2026-07-21.md`'s O12/O13/L536 rows for exact next steps on each.
 
+### Fixed (2026-07-24, `picker-parity-round2` — O12 reopened + re-fixed: layout, Loom flyout, LoRA architecture filter, version selection, tuned-preset surfacing)
+
+The owner live-tested the O12/O13 migration above immediately after it shipped and found it
+incomplete: **"Full parity is not achieved from where I sit."** Three concrete problems, plus
+the two "Not done in this pass" items from the entry directly above folded in per owner
+instruction ("fold these two in now rather than deferring a third time" — no live PixAI
+capture needed for either, both were already fully specified). This entry reopens O12 in
+`docs/AUDIT_2026-07-21.md` with an honest account of what was a genuine verification miss
+(layout, Loom presentation) versus what was an already-disclosed remainder (LoRA architecture
+filtering) before re-closing it. `O13` (`<mg-gallery-picker>`, a completely different
+component — the general image-reference picker) was investigated and confirmed unaffected;
+see its own note in the audit doc.
+
+**Problem 1 — the Gallery's "Models & LoRAs" panel showed ~2 rows of cards then a large dead
+area.** Root cause: TWO independent height constraints fighting each other. `#model-flyout`'s
+`.gen-body` was an `overflow-y:auto` scroll container, AND `<mg-model-picker>`'s own `.mg-grid`
+had a hardcoded `max-height:320px` completely independent of the panel's real (often much
+taller) available height — so on any flyout taller than ~380px, `.gen-body`'s genuine extra
+height just sat there empty below the capped grid. Fixed in the shared component itself
+(`static/mg-model-picker.js`): the element's own default changed from `display:block` to
+`display:flex;flex-direction:column`, and `.mg-grid` from a fixed `max-height:320px` to
+`flex:1 1 auto` with no cap — in an UNconstrained parent (the standalone verification page,
+or any future plain mount) this sizes to content exactly as `display:block` did before, zero
+regression there; a host that actually constrains the element's height now hands real room to
+the grid, which becomes the ONE scrolling region. New host-scoped CSS hands that real height
+down the chain: `#model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;
+min-height:0;}` / `#gen-picker-host{flex:1;min-height:0;...}` / `mg-model-picker{flex:1;
+min-height:0;}` in `pixai_gallery.py`, scoped to `#model-flyout` only — `#gen-drawer`'s own
+`.gen-body` (the main Generate form, a plain tall scrolling form) is untouched.
+
+**Problem 2 — the Loom's Image tab rendered the model/LoRA picker CRAMMED INLINE** into the
+~560px right rail: model result cards, a "hide LoRA picker" toggle sitting in the middle of
+the results, then a SECOND search box, then more LoRA cards, all stacked in the narrow
+column. Owner: *"Loom picker is a cramped mess. it does not have a flyout like the gallery."*
+Fixed in `loom/master-storyboard.jsx`: both `<mg-model-picker>` mounts move out of the
+tab-conditional inline flow into a new `.lv-mpick-veil` — a `position:fixed` overlay covering
+the full viewport with a Models/LoRAs segment toggle (mirrors the Gallery's `#model-flyout`
+presentation as closely as the Loom's own established overlay idiom allows — a centered modal
+matching the Loom's existing `.sb-pick-ov`/`.lv-df-veil` pattern, since the Loom has no
+per-side "dock" concept the way the Gallery's `#gen-drawer` does). The old `loraOpen` inline
+show/hide boolean is gone. Both pickers lazy-mount on first open (mirrors the Gallery's
+`ensurePickers()` — "only fetch on first open," not an always-mounted base+LoRA fetch on
+every Loom load just because the right rail happens to be expanded on its default Video tab),
+then stay mounted for the rest of the session (CSS-hidden via `display`/`.open`, never
+unmounted) so a close/reopen never loses either picker's search/scroll state — placed
+alongside the always-mounted `<mg-generate-drawer>` so it survives Image/Edit/Reference/Video
+tab switches, not just picker-segment switches.
+
+**Problem 3 — LoRA search showed zero architecture filtering.** Root-caused live against the
+owner's real PixAI account (by the orchestrating session): `base_model` (from `category`) is
+PixAI's content CATEGORY (style/pose/character/…), never architecture — a prior investigation
+wrongly assumed otherwise. The real signal is `modelType`/`loraBaseModelType` on a model
+version, obtainable for every search row in ONE request via the `generationModels` GraphQL
+connection (confirmed live: real rows return e.g. `modelType:"MULTI_LORA",
+loraBaseModelType:"SD_V1_MODEL"`). `model_search_market_gql()` (`pixai_gallery_backup.py`)
+now requests `latestVersion{modelType loraBaseModelType}` and surfaces them as
+`model_type`/`lora_base_model_type` — the same key names `resolve_version_meta()` already
+uses, so callers don't care which search path produced a row.
+
+New pure function `annotate_lora_compat(results, base_model_type)`: SOFT-SORTS — compatible-
+or-unknown first, confirmed-mismatch last, stable within each group — and tags every row with
+a `compat` ('yes'/'no'/'unknown') instead of hard-filtering. **Soft sort chosen over a hard
+filter deliberately:** a hard filter would make the Popular/Newest/category market-browsing
+modes strictly worse for discovery (an owner who wants to browse "what's popular" shouldn't
+lose rows just because no base is picked, or see nothing at all if their chosen base happens
+to be a rare architecture); soft-sort keeps every row reachable while still surfacing the
+compatible ones first and flagging the rest, and reuses `is_lora_compatible()`'s own
+already-shipped fail-open rule (an unknown architecture is never treated as a hard negative —
+sorts with the compatible group, but is NOT badged as confirmed-compatible, which would
+overclaim data the function doesn't have). `/api/model-search` applies it whenever
+`kind=lora&base_type=<model_type>` is present; absent (or `kind=base`) leaves results
+completely untouched.
+
+**REST vs. GraphQL, resolved:** `model_search_rest()`'s oRPC endpoint has no equivalent
+architecture field to request at all (confirmed by inspecting its full response shape) — so
+LoRA search (`kind=lora`) now ALWAYS routes through the GraphQL connection, for every query,
+not just the category/Newest subset that already used it. Base-model search is UNCHANGED
+(REST by default, GraphQL only for category/Newest — architecture filtering is a LoRA-picker
+concept only). Trade-off, stated honestly: LoRA cards now uniformly show the "leaner"
+GraphQL-sourced preview (no description/refCount/official badge) instead of REST's richer
+one — already true for any LoRA search that hit a category chip or Newest before this change,
+now true for 100% of LoRA searches; the card template already tolerates missing fields
+(hides them). "Popular" sort's true REST-side popularity ranking is lost the same way it
+already was for category/Newest picks — the connection's default order stands in.
+
+Client wiring: `<mg-model-picker>` gained an opt-in `base-type` attribute, set by the host to
+the currently-selected base model's resolved `model_type` (both hosts already resolve this
+for their existing post-selection `is_lora_compatible()` gate — this reuses it, not a new
+resolve). Threaded into `/api/model-search` as `base_type=` and re-searches automatically
+when it changes, so switching the selected base re-sorts/re-badges already-open LoRA results
+live. Renders the server's `compat` tag as a small badge (`✓ compatible` / `⚠ different arch`
+/ nothing for `unknown`).
+
+**Version selection (new).** `resolve_version_meta()` always silently took `rows[0]`
+("presumed latest") from `GET /generation-model/{id}/versions` and discarded every other
+published release — PixAI's own site offers a version selector on model/LoRA cards, this app
+had none. New `list_model_versions()` maps EVERY row through the identical per-row shape
+(split out as `_version_row_to_meta()` so the two functions can never drift on what a
+"version" means), labeled (`Latest`, `v2`, `v3`, … + the row's own `createdAt` date when
+present) via position in the list. `/api/model-version?model_id=…&all=1` exposes it — same
+ONE GET as the existing default shape, no new network surface, no N+1. A version `<select>`
+now appears next to the model row in both the Gallery (`#gen-version`) and the Loom
+(`.lv-versel`) whenever a model has more than one release; switching re-applies that
+version's own resolved meta (model_type, tuned preset, capabilities) with no extra network
+call, since the full list is already in hand. `/api/generate` now honors an explicitly-chosen
+`version_id` **if and only if it's confirmed to belong to the picked model's own real version
+list** (validated server-side against `list_model_versions`, never trusted blind) — this
+preserves the original anti-race guarantee byte-for-byte (a stale version_id from a fast
+model switch, or one belonging to a different model entirely, still safely falls back to the
+newest version, exactly as before this feature existed) while finally letting a deliberate,
+validated choice through. **Scope, stated honestly:** the UI ships for base-model selection
+only in this pass — a per-LoRA-chip version selector is a real, disclosed, NOT-yet-built
+remainder; the backend capability (`list_model_versions`, the `?all=1` route mode) is fully
+general and already works for LoRA model_ids too, so adding that control later is additive UI
+work, not a new backend investment.
+
+**Tuned-preset / capabilities surfacing (new).** `resolve_version_meta()` already returns
+`sampling_method` and `capabilities` on every base-model pick — `negative_prompt`/
+`sampling_steps`/`cfg_scale` were ALREADY prefilled into the Advanced section (confirmed by
+reading the shipped code, `pixai_gallery.py`'s `applyModelDefaults()` / the Loom's identical
+`bindPicker` logic — this predates this pass), but `sampling_method` and `capabilities` were
+resolved and silently thrown away in both surfaces. Both now surface: `sampling_method` as
+read-only text appended to the existing "✓ using this model's tuned preset" note (e.g. "…
+tuned preset (Euler a)"); `capabilities` as small read-only badges next to the model row
+(`#gen-caps` / `.lv-caps`). **`sampling_method` is deliberately READ-ONLY, not a new submit
+parameter:** this app never sends an explicit `samplingMethod` to `createGenerationTask`
+anywhere today (PixAI picks its own default sampler; only Mode/`inferenceProfile` is
+user-facing) — unlike `inferenceProfile`, which has a confirmed, tested server-rejection
+retry path (`submit_generation()`), there is no confirmed-safe fallback if an arbitrary
+sampler value were rejected per-model, and this pass has no live PixAI access to verify one.
+Surfacing it read-only is still real progress on the owner's actual complaint ("model traits
+run deep and it's all in their info cards already") without risking a silent generation
+failure this pass can't safely guard against.
+
+**Testing.** Fail-first pytest for `annotate_lora_compat` (the core pure function) — including
+a genuine mutation-test pass (temporarily broke the fail-open unknown-architecture handling,
+confirmed the test caught it, restored, confirmed green again) — plus `list_model_versions`,
+the `model_search_market_gql` architecture-field extension, and `/api/generate`'s
+validated-version-choice logic (both the honored-choice and the falls-back-to-latest-when-
+invalid paths). Route-level tests for `/api/model-search`'s `base_type=` wiring and
+`kind=lora`-always-GraphQL routing, and `/api/model-version?all=1`. Loom JS source-presence
+tests (this repo's established pattern for `master-storyboard.jsx`/`static/*.js`, which have
+no jsdom harness) for the overlay markup/lazy-mount/Escape-close behavior and the shared
+component's layout CSS + `base-type` wiring. **1,057 Python tests, 301 Loom JS tests, both
+green.**
+
+**Live verification.** This worktree has no live PixAI credentials (confirmed: no
+`config.json` present), so verification split two ways. (1) Layout (problems 1/2): started an
+isolated local server from this exact worktree, logged in via the real bootstrap flow, and
+measured the ACTUAL rendered DOM via `getBoundingClientRect()`/`getComputedStyle()` on a live
+page — screenshots were unavailable in this session's Browser pane (`computer{action:
+screenshot}` timed out consistently; `read_page`/`javascript_tool` worked normally), so this
+substitutes exact pixel measurement, arguably stronger evidence for a layout question than a
+visual check. Reproduced the ORIGINAL bug on the same live page first (temporarily reinstating
+the old CSS via inline style, scoped to the one visible element only) before confirming the
+fix: dead space below the grid went from **535px to 0px** in a 789px-tall panel (Gallery); the
+Loom's picker panel's bounding box was measured starting at x=410 while the narrow right
+rail's own bounds start at x=720 — i.e. genuinely extends outside and centers across the FULL
+1280px viewport, not confined to the rail. (2) Data-dependent behavior (problems 3/4/5): no
+live PixAI account to search real LoRAs against, so the network layer was mocked with
+response data matching the CONFIRMED real shape from the task brief, and driven through the
+REAL custom-element/React event path (dispatching genuine `mg-pick` events, not calling
+internal functions directly) on both live pages: picking a base model correctly propagated
+`model_type` into the LoRA picker's `base-type` attribute on both surfaces, the real
+`/api/model-search` request carried `base_type=`, results rendered in the correct
+compatible-first/unknown/mismatch-last order with the correct badges, the version `<select>`
+populated and re-applying a non-latest version correctly cleared/updated the capabilities
+note, and the overlay's lazy-mount persisted across a close/reopen with zero additional
+fetches. Zero console errors on either surface (the Loom's real in-browser Babel-standalone
+path, not just the `esbuild` bundle, which was also rebuilt and confirmed to compile clean).
+
 ## [2.3.0] - 2026-07-23 — More security hardening, the Folio of Honors, and LoRA support in the Loom
 
 ### Changed
