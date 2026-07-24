@@ -190,11 +190,17 @@ def similar(query_path, k: int = 48, exclude_media_id=None):
 
 def scan_dir(root, cap=None):
     """Helper: yield (media_id, path) for every image under root (media_id = INVARIANT 1,
-    the last '_'-delimited stem chunk). For bootstrap builds off the organized backup tree."""
+    the last '_'-delimited stem chunk). For bootstrap builds off the organized backup tree.
+
+    Skips gallery/ (thumbnails) plus the two quarantine dirs, _duplicates/ (--dedup) and
+    _deleted/ (gallery delete) -- the same exclusion set pixai_gallery.py's
+    find_image_file/find_files_for_media_id use (INVARIANT 6), so a purged or quarantined
+    image never gets (re-)embedded into the similarity index."""
     exts = {".png", ".jpg", ".jpeg", ".webp"}
+    excluded_dirs = {"gallery", "_duplicates", "_deleted"}
     n = 0
     for p in Path(root).rglob("*"):
-        if p.suffix.lower() in exts and "gallery" not in {q.lower() for q in p.parts}:
+        if p.suffix.lower() in exts and not excluded_dirs & {q.lower() for q in p.parts}:
             yield (p.stem.split("_")[-1], p)
             n += 1
             if cap and n >= cap:
