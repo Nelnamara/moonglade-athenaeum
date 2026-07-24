@@ -79,6 +79,11 @@ CATALOG_FIELDS = [
     # BlurHash string for instant gallery placeholders, and PixAI's per-category NSFW
     # classifier scores as a JSON blob {porn,sexy,hentai,neutral,drawings}.
     "blurhash", "nsfw_scores",
+    # Server-reported ACTUAL credit cost of the row's task (captured at poll/collect/
+    # full-meta time). TASK-level: repeated on each of the task's media rows, so spend
+    # totals must count once per task_id. '0' is a real value (free card / daily-free
+    # gen); '' means never captured -- never conflate the two.
+    "paid_credit",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -126,7 +131,8 @@ CREATE TABLE IF NOT EXISTS catalog (
     deleted_remote  TEXT DEFAULT '',
     collections     TEXT DEFAULT '',
     blurhash        TEXT DEFAULT '',
-    nsfw_scores     TEXT DEFAULT ''
+    nsfw_scores     TEXT DEFAULT '',
+    paid_credit     TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -185,6 +191,7 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN collections TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN blurhash TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN nsfw_scores TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN paid_credit TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):

@@ -319,3 +319,38 @@ def test_submit_fixer_needs_a_box(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"id": "x"})
     with pytest.raises(core.PixAIError):
         core.submit_fixer(object(), "M", [])
+
+
+def test_run_generate_persists_paid_credit(monkeypatch, tmp_path):
+    """The catalog write is where paidCredit stops being throwaway poll output: a
+    --generate run must store the task's server-reported actual cost (getTaskById's
+    top-level paidCredit) on every row it catalogs -- it's a TASK-level value,
+    repeated on each of the task's media rows."""
+    _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda s, t: {"createdAt": "2026-07-23T00:00:00Z",
+                                      "outputs": _BATCH_OUTPUTS, "paidCredit": 2750})
+    args = SimpleNamespace(out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
+                           confirm=True, task_id="", token=None)
+    core.run_generate(args)
+    rows = pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    assert {r["media_id"]: r.get("paid_credit") for r in rows} == {"A": "2750", "B": "2750"}
+
+
+def test_collect_generation_persists_paid_credit_zero_not_blank(monkeypatch, tmp_path):
+    """collect_generation is the shared collect for the web async poll (/api/task-status)
+    and the --watch-backup live mirror. paidCredit 0 is a REAL value (a free card /
+    daily-free gen) and must be stored as '0' -- never collapsed into '' (unknown)."""
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda s, t: {"createdAt": "2026-07-23T00:00:00Z",
+                                      "outputs": {"mediaId": "M1", "seed": "9"},
+                                      "paidCredit": 0})
+    monkeypatch.setattr(core, "resolve_media",
+                        lambda s, m: ("https://cdn/" + m, {"width": 8, "height": 8}))
+    monkeypatch.setattr(core, "download",
+                        lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
+    monkeypatch.setattr(pixai_gallery, "make_thumbnail", lambda *a, **k: None)
+    got = core.collect_generation(object(), "T1", str(tmp_path))
+    assert got["media_ids"] == ["M1"]
+    rows = pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    assert rows[0].get("paid_credit") == "0"
