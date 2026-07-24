@@ -26,7 +26,10 @@ generations cost 0). Its controls map onto the same PixAI parameters:
 | **High priority** | `priority` | off (500, cheaper) by default; on = 1000 (faster, more credits) |
 
 Submit and the result drops straight into your catalog, tagged `source='api'`, and
-appears in the gallery.
+appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
+generations in parallel, so you can queue up several in a row (Generate, Edit, Enhance,
+Fix, and the Video tab all work this way) and each one tracks and reports its own result
+independently.
 
 ### The model-vs-version-id gotcha
 `createGenerationTask` needs a model's **version id**, not its model id. A model page
