@@ -844,13 +844,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       // behavior (still correct for a SUBMIT, since the drawer's own payload() reads its live
       // slots directly -- only durability/re-weaving into the composed prompt was missing).
       el.addEventListener("mg-pick-request", (e) => {
-        const { slot, bank, mode: reqMode, respond } = e.detail;
+        const { slot, bank, mode: reqMode } = e.detail;
         if (bank !== "primary" || reqMode !== "r2v") {
-          openPick((mid, thumb) => respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
+          openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
           return;
         }
         openPick((mid, thumb, isVideo, duration, isNsfw) => {
-          respond(mid, thumb, isNsfw);   // keep the drawer's own immediate slot/chip repaint
+          e.detail.respond(mid, thumb, isNsfw);   // keep the drawer's own immediate slot/chip repaint
           const a = activeRef.current; if (!a) return;
           const proj = projectRef.current;
           const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId]
