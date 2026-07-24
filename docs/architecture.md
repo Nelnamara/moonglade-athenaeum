@@ -26,7 +26,7 @@ gallery.
 | `media_ids_for()` | `mediaId` + `batchMediaIds` for a task node |
 | `extract_meta()` | Pulls `id`, `createdAt`, `promptsPreview`, `status` |
 | `resolve_media()` | Fetch media object, pick the `PUBLIC` full-res URL |
-| `download()` | Stream to disk with resume + retries; optional convert |
+| `download()` | Stream to disk with resume + retries; optional convert. Writes to a `.part` temp, promoted only when the body arrived whole: an empty body AND a body shorter than the server's `Content-Length` both fail the attempt through the retry/backoff path instead of leaving a permanent truncated file (the length check is skipped when the response is content-encoded, since requests decompresses inside `iter_content`) |
 | `convert_image()` | WebP→PNG/JPEG via Pillow; flattens alpha for JPEG |
 | `embed_metadata()` | Write prompt/IDs/date into PNG text chunks or JPEG EXIF |
 | `build_stem_name()` | Filesystem-safe names from prompt |
@@ -44,7 +44,8 @@ gallery.
 | `run_generate()` | `--generate`: create images via `createGenerationTask` (ad-hoc POST), poll, download, catalog as `source='api'`. Preview unless `--confirm`. `--task-id` recovers an already-created task for free |
 | `build_video_parameters()` / `run_generate_video()` | `--generate-video`: image-to-video (`i2vPro`) — VERIFIED submit `{priority, i2vPro:{model,mediaId,[tailMediaId],mode,duration,generateAudio,audioLanguage,[cameraMovement]…}, isPrivate, enablePreview, hidePrompts, modelId}`. **No top-level `channel` field** — `--video-channel` maps to the boolean `isPrivate`, not a `channel` key. Enums banked (`--camera-movement`, `--video-channel`, duration 5/6/10/15). Preview unless `--confirm`; captures `paidCredit`; downloads mp4 into `videos/` |
 | `build_reference_video_parameters()` / `run_reference_video()` | `--reference-video`: multi-image/video/audio reference — VERIFIED **top-level `referenceVideo`** block (NOT i2vPro): `{priority, referenceVideo:{model,prompt,duration(int),referenceImageMediaIds/…VideoMediaIds/…AudioMediaIds}, isPrivate, modelId}`. `--ref-image/--ref-video/--ref-audio` (media_id OR local file, auto-uploaded), cited in `--prompt` as `@image1/@video1/@audio1`. Preview unless `--confirm` |
-| `_download_video_task()` | Shared video download+catalog (used by both i2v and reference-video): `video_outputs` → `media_file_gql.fileUrl` → `download` → catalog `is_video='1'` + poster thumbnail |
+| `_download_video_task()` | Shared video download+catalog (used by both i2v and reference-video): `video_outputs` → `media_file_gql.fileUrl` → `download` → catalog `is_video='1'` + poster thumbnail → `video_faststart` (deliberately run on download status `"skip"` too, so it backfills clips downloaded before auto-faststart shipped) |
+| `video_faststart()` | Lossless `ffmpeg -c copy -movflags +faststart` remux so iOS/Safari can stream a clip (PixAI serves moov-at-the-end mp4s). Concurrency-safe: the remux temp name is **unique per invocation** (uuid suffix, real extension last so ffmpeg picks the muxer) — two collectors can legitimately remux the same clip at once (gallery live-mirror + a task-status poll, or the separate `--watch-backup` process), and a deterministic temp name let their ffmpeg runs interleave into one file, corrupting the survivor mid-clip. Failures never raise (a collect must not die on a cosmetic remux) but are `vlog()`ed |
 | `_maybe_dump_params()` | `--dump-params`: print a task's full submit `parameters` (esp. on `--task-id` recovery) — bank any shape (multiRef/referenceVideo/…) with NO browser capture |
 | `upload_media()` | `--upload`: local file → `media_id` via the 3-step S3 handshake (`uploadMedia` presign → PUT bytes → `uploadMedia` register). Plain mutation over `gql_adhoc`; **free**. Unblocks inpaint / Edit / LoRA "bring your own image" |
 | `build_chat_edit_parameters()` / `run_edit_image()` | `--edit-image`: instruct editing via `createGenerationTask` with a `chat` block (`prompts`+`mediaId`/`mediaIds`+`modelId`+`modelConfig`). `--edit-src` takes a catalog `media_id` OR a local file (auto-uploaded on `--confirm`); repeat for multi-image reference. Preview unless `--confirm` |
@@ -254,7 +255,13 @@ asserts it against a live request, so it is the authority when prose and code di
 - **Live events** (`--watch`): a graphql-transport-ws subscription to
   `wss://gw.pixai.art/graphql` (root field `personalEvents`) drives `--watch-backup` and
   the gallery server's always-on **live-mirror** watcher, so gens land the instant they
-  finish instead of waiting on the next `--update`.
+  finish instead of waiting on the next `--update`. Collects are **single-flight per
+  task id** inside the gallery process: the live-mirror watcher, `/api/task-status`'s
+  done-poll, and `/api/import-task` share a per-task lock, so the first entrant runs
+  the real `collect_generation` and any concurrent entrant waits, then answers from the
+  catalog instead of re-downloading (a double collect used to run two concurrent
+  `video_faststart` remuxes on the same clip). The CLI's `--watch-backup` is a separate
+  process, which `video_faststart`'s unique temp name covers.
 - **Control Panel**: whitelisted CLI subprocesses with a live log + real progress bar
   (`~=MGPROG=~done|total|new` lines under `MOONGLADE_PROGRESS=1`), a cancel action, and an
   hour-granular scheduler (`destructive` actions excluded). Server Stop/Restart is
