@@ -256,7 +256,22 @@ asserts it against a live request, so it is the authority when prose and code di
   usage manual is `docs/LOOM.md`.
 - **Async engine**: submit (`/api/generate|edit|enhance|fix|loom/generate`) → poll
   (`/api/task-status`) → auto-download + catalog (`source='api'`). Free cards auto-apply
-  on every create path.
+  on every create path. `/api/task-status`'s 'running' branch deliberately never writes to
+  `jobs.jsonl` (only its `done`/`failed` branches do), so a job's log entry can be
+  orphaned — stuck at `status:"running"` forever — if nothing ever calls that route's
+  done/failed branch for it (the polling tab closed, or a transient exception hit the
+  route's fail-soft `except`). Two things close that gap: (1) `/api/import-task`'s task-id
+  recovery, on either of its success paths (fresh collect or "already cataloged"), also
+  closes that task id's OWN pre-existing non-terminal job entry (same `status="done"`
+  event shape `/api/task-status` itself writes) — not just the new `import-<suffix>` job
+  the recovery logs for itself; (2) `/api/jobs` runs `resolve_orphan_jobs(..., min_age=
+  core.JOBS_ORPHAN_SWEEP_AGE)` on every poll (same "runs opportunistically off an existing
+  poll" shape as `maybe_compact_jobs` beside it) to re-check any `generate` job stuck
+  `running` past that age against PixAI's real status — resolving it for real when
+  possible, or marking it a distinct non-terminal `status="stale"` (visible + dismissable
+  in the Activity card, never silently dropped) when PixAI itself can't be reached. The
+  live-mirror watcher separately runs the same reconciliation once, unconditionally
+  (`min_age=0`), at startup, to catch anything orphaned by a prior server session.
 - **Live events** (`--watch`): a graphql-transport-ws subscription to
   `wss://gw.pixai.art/graphql` (root field `personalEvents`) drives `--watch-backup` and
   the gallery server's always-on **live-mirror** watcher, so gens land the instant they

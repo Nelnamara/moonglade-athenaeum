@@ -1091,22 +1091,33 @@
       // files failed after retries -- distinct from both a clean 'done' and a hard
       // 'failed'. Must be terminal/dismissable like the other two, or it's stuck
       // looking permanently in-progress with no way to clear it.
-      var st=j.status||'running', fin=(st==='done'||st==='failed'||st==='done_with_errors');
+      //
+      // stale: the server's own orphan-reconciliation sweep (resolve_orphan_jobs,
+      // /api/jobs) found a job stuck 'running' past its age threshold AND couldn't reach
+      // PixAI to find out its real state -- distinct from done_with_errors (that's a
+      // completed run with partial failures) and from a plain failed. NOT in the
+      // backend's terminal set (a later sweep can still resolve it for real, or a
+      // task-id recovery closes it), but shown + dismissable like one so it never just
+      // looks like an ordinary still-in-progress spinner forever.
+      var st=j.status||'running';
+      var fin=(st==='done'||st==='failed'||st==='done_with_errors'||st==='stale');
       var ic = st==='done'
              ? '<span class="jt-ok jt-glyph">✓</span><img class="jt-nel" src="/branding/mascots/trk_done.png" onerror="this.remove()">'
              : st==='done_with_errors'
              ? '<span class="jt-warn jt-glyph">⚠</span><img class="jt-nel" src="/branding/mascots/trk_done.png" onerror="this.remove()">'
              : st==='failed'
              ? '<span class="jt-err jt-glyph">⚠</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
+             : st==='stale'
+             ? '<span class="jt-warn jt-glyph">?</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
              : '<span class="jt-spin"><img class="jt-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span>';
       var mid=(j.media_ids||[])[0]||'';
       var thumb=(st==='done'&&mid)?'<a class="jt-thumb" href="/image/'+encodeURIComponent(mid)+'"><img src="/thumbs/'+encodeURIComponent(mid)+'.jpg" alt=""></a>':'';
       var bar='';
       if(st==='running' && j.total){ var pct=Math.min(100, Math.round((j.done||0)/j.total*100)); bar='<div class="jt-bar"><i style="width:'+pct+'%"></i></div>'; }
-      var errmsg=((st==='failed'||st==='done_with_errors')&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
+      var errmsg=((st==='failed'||st==='done_with_errors'||st==='stale')&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
       var sub='<div class="jt-sub"><span class="jt-kind">'+esc(kindLabel(j.type))+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
       var x=fin?'<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">×</button>':'';
-      var cls=st==='failed'?' st-failed':(st==='done_with_errors'?' st-warn':'');
+      var cls=st==='failed'?' st-failed':((st==='done_with_errors'||st==='stale')?' st-warn':'');
       return '<div class="jt-item'+cls+'"><div class="jt-ic">'+ic+'</div>'
            +'<div class="jt-main"><div class="jt-lab">'+esc(j.label||'Generation')+'</div>'+sub+bar+errmsg+'</div>'
            +thumb+x+'</div>';

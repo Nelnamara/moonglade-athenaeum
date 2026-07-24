@@ -370,6 +370,91 @@ def test_reaper_still_leaves_running_jobs_alone_in_dict_form(tmp_path):
     assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["777"]["status"] == "running"
 
 
+# ------------------------------------------------------- fix 2: age-gated reconciliation
+
+def test_resolve_orphan_jobs_min_age_skips_jobs_that_are_not_old_enough_yet(tmp_path):
+    """The ongoing /api/jobs sweep passes a real min_age so a job that's only just been
+    submitted (its own Generate card is very likely still actively polling it) is never
+    even asked about -- asking would be pointless PixAI traffic on every poll for every
+    normal, healthy generation."""
+    core.append_job_event(tmp_path, "1", status="running", type="generate")   # ts ~ now
+    asked = []
+    n = core.resolve_orphan_jobs(tmp_path, lambda tid: asked.append(tid) or "done", min_age=1800)
+    assert n == 0 and asked == []
+    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["1"]["status"] == "running"
+
+
+def test_stale_job_reconciliation_marks_stale_when_pixai_cannot_be_reached(tmp_path):
+    """THE FIX (docs/AUDIT_2026-07-21.md, owner-2026-07-23, fix 2): a job stuck at
+    'running' well past a reasonable age gets re-checked against PixAI's real status.
+    When that check itself fails (network error -- PixAI's own state genuinely can't be
+    determined), the job must NOT be silently left exactly as it was forever, and must
+    NOT be guessed into 'done' or 'failed' -- either guess could be wrong and would hide
+    real evidence from the owner. It gets a distinct, visible 'stale' marker instead,
+    with the failure reason recorded, so the owner can see a job got stuck AND that we
+    tried and couldn't confirm why -- never a silent, untraceable disappearance."""
+    old_ts = time.time() - 3700           # well past the 1800s threshold used below
+    core.append_job_event(tmp_path, "2037215124834251576", status="running",
+                          type="generate", label="Generated", ts=old_ts)
+
+    def _network_error(tid):
+        raise RuntimeError("connection reset")
+
+    n = core.resolve_orphan_jobs(tmp_path, _network_error, min_age=1800)
+
+    assert n == 0                                    # NOT resolved to done/failed
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["2037215124834251576"]
+    assert job["status"] == "stale", "a failed status check silently vanished instead of being marked"
+    assert job["status"] not in core._JOBS_TERMINAL   # never guessed into a false done/failed
+    assert job.get("error")                           # the owner can see WHY it's stuck
+
+
+def test_stale_job_reconciliation_resolves_a_real_orphan_when_pixai_confirms_it(tmp_path):
+    """The other half: when PixAI CAN be reached and reports the aged job actually
+    finished (or failed), the sweep resolves it for real -- 'stale' is only for when the
+    check itself is impossible, not a substitute for actually asking."""
+    old_ts = time.time() - 3700
+    core.append_job_event(tmp_path, "5551", status="running", type="generate", ts=old_ts)
+    n = core.resolve_orphan_jobs(tmp_path, lambda tid: "done", min_age=1800)
+    assert n == 1
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["5551"]
+    assert job["status"] == "done"
+
+
+def test_stale_job_reconciliation_refreshes_ts_for_a_confirmed_still_running_aged_job(tmp_path):
+    """A job that crosses min_age but IS genuinely still running (PixAI confirms
+    'running', no error) must not get re-asked on literally every subsequent poll for as
+    long as it stays running -- a real video generation can easily run past 30 minutes.
+    The sweep refreshes its ts on a confirmed-alive check, resetting the min_age clock,
+    so the next ask waits another full min_age instead of firing again immediately."""
+    old_ts = time.time() - 3700
+    core.append_job_event(tmp_path, "9001", status="running", type="generate", ts=old_ts)
+    core.resolve_orphan_jobs(tmp_path, lambda tid: "running", min_age=1800)
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["9001"]
+    assert job["status"] == "running"
+    assert job["ts"] > old_ts + 3000, "ts was not refreshed -- the job will be re-asked every poll"
+
+
+def test_api_jobs_endpoint_reconciles_a_stale_orphan_on_poll(tmp_path, monkeypatch):
+    """End-to-end: /api/jobs itself (not just the library function) runs the sweep --
+    same 'runs opportunistically off an existing poll' shape as maybe_compact_jobs right
+    beside it. A generate job old enough to cross JOBS_ORPHAN_SWEEP_AGE, whose PixAI
+    status check fails, comes back from a plain GET /api/jobs already marked 'stale'."""
+    cli = _authed_client(tmp_path)
+    old_ts = time.time() - core.JOBS_ORPHAN_SWEEP_AGE - 100
+    core.append_job_event(tmp_path, "2037215124834251576", status="running",
+                          type="generate", label="Generated", ts=old_ts)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def _boom(session, tid):
+        raise RuntimeError("network blip")
+    monkeypatch.setattr(core, "generation_status", _boom)
+
+    jobs = cli.get("/api/jobs").get_json()["jobs"]
+    by_id = {j["job_id"]: j for j in jobs}
+    assert by_id["2037215124834251576"]["status"] == "stale"
+
+
 def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypatch):
     """A task PixAI calls 'done' whose outputs carry no media is TERMINAL -- it produced
     nothing and never will. /api/task-status used to let that fall into the catch-all

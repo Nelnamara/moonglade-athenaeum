@@ -3538,12 +3538,21 @@ def create_app(out_dir: Path):
         except Exception:                          # noqa: BLE001 -- reconciling must not kill the watcher
             pass
 
-    def _reconcile_orphan_jobs():
-        """One-shot on watcher start: ask PixAI the real status of any job still marked
-        'running' and resolve stale ones (read-only; no spend). Catches jobs orphaned when
-        the app closed or a Generate card was dismissed before its poll resolved -- e.g. a
-        task that failed while nobody was watching. Session is built lazily so a log with
-        no running generate jobs costs nothing."""
+    def _reconcile_orphan_jobs(min_age=0):
+        """Ask PixAI the real status of any job still marked 'running' and resolve stale
+        ones (read-only; no spend). Catches jobs orphaned when the app closed or a
+        Generate card was dismissed before its poll resolved -- e.g. a task that failed
+        while nobody was watching. Session is built lazily so a log with no qualifying
+        running generate jobs costs nothing.
+
+        `min_age` defaults to 0 -- check EVERYTHING immediately -- for the one-shot call
+        at watcher startup (_watch_loop, below): anything still 'running' from a prior
+        server session deserves an immediate look. api_jobs() below calls this on every
+        poll with min_age=core.JOBS_ORPHAN_SWEEP_AGE instead, so a job only just
+        submitted (still being actively polled by its own Generate card) is never asked
+        about at all -- see resolve_orphan_jobs()'s and JOBS_ORPHAN_SWEEP_AGE's own
+        docstrings for why 0 there would be wrong (re-checks a live video gen on every
+        poll) and why --poll-timeout's 300s would ALSO be wrong (false-flags one)."""
         import pixai_gallery_backup as core
         box = {"s": None}
         def _status(tid):
@@ -3557,7 +3566,7 @@ def create_app(out_dir: Path):
             # with the documented string, so nothing caught the caller disagreeing.
             return core.generation_status(box["s"], tid)["phase"]
         try:
-            core.resolve_orphan_jobs(out_dir, _status)
+            core.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
         except Exception:                          # noqa: BLE001
             pass
 
@@ -9010,6 +9019,37 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
+    def _close_orphan_if_resolved(tid, media_ids, is_video):
+        """A task-id recovery (below) just independently confirmed real media for `tid`.
+        If `tid` ALSO has its own job entry that's still non-terminal -- the orphan case:
+        api_task_status()'s own done/failed write never ran for it (its polling browser
+        tab stopped, or a transient exception left it at 'running' per that route's
+        deliberate design), so it's been spinning in the Activity card forever even
+        though the generation finished -- close THAT original entry too, not just the
+        new 'import-<suffix>' job api_import_task logs for the recovery action itself.
+        Otherwise the Activity card keeps showing a phantom stuck spinner permanently
+        disconnected from reality, even after the real media has landed.
+
+        Writes the EXACT event shape api_task_status()'s own done branch writes
+        (status='done', media_ids, is_video) so a reader of jobs.jsonl can't tell "task-
+        status resolved it" from "a manual recovery resolved it" -- same file, same
+        fields, same convention.
+
+        Reads the RAW reconstructed log (core._reconstruct_jobs), not read_jobs()'s
+        filtered view, so a very old orphan -- one read_jobs() would already be hiding
+        past JOBS_MAX_AGE -- still gets closed rather than silently left at 'running' in
+        the log forever. Skips a job the owner already dismissed (respects that explicit
+        action instead of resurrecting it with a new event). Fails soft: the recovery
+        itself must succeed even if this bookkeeping doesn't."""
+        try:
+            import pixai_gallery_backup as _core
+            jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
+            orig = jobs_by_id.get(tid)
+            if orig and not orig.get("dismissed") and orig.get("status") not in _core._JOBS_TERMINAL:
+                _log_job(tid, status="done", media_ids=media_ids, is_video=is_video)
+        except Exception:                          # noqa: BLE001 -- bookkeeping must not break recovery
+            pass
+
     @app.route("/api/import-task", methods=["POST"])
     def api_import_task():
         """Pull ONE generation/edit task's media into the gallery by its task id -- recovers
@@ -9030,11 +9070,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # just report it's here + hand back its media so the UI can jump straight to it.
         con = _connect(db_path)
         try:
-            pre = [r[0] for r in con.execute(
-                "SELECT media_id FROM catalog WHERE task_id=?", (tid,)).fetchall()]
+            pre_rows = con.execute(
+                "SELECT media_id, is_video FROM catalog WHERE task_id=?", (tid,)).fetchall()
         finally:
             con.close()
-        if pre:
+        if pre_rows:
+            pre = [r[0] for r in pre_rows]
+            _close_orphan_if_resolved(tid, pre, bool(pre_rows[0][1]))
             return jsonify({"ok": True, "already": True, "saved": 0, "media_ids": pre})
         job_id = "import-" + tid[-8:]
         _log_job(job_id, status="running", type="import", label="Import task " + tid)
@@ -9044,6 +9086,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             n, mids = int(res.get("saved") or 0), (res.get("media_ids") or [])
             _log_job(job_id, status="done", media_ids=mids,
                      label="Imported {} media from task {}".format(n, tid))
+            if mids:
+                _close_orphan_if_resolved(tid, mids, bool(res.get("is_video")))
             return jsonify({"ok": True, "saved": n, "media_ids": mids,
                             "is_video": bool(res.get("is_video"))})
         except Exception as e:
@@ -12116,9 +12160,19 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/jobs")
     def api_jobs():
         """Reconstructed job list for the Jobs card (newest-first) -- the paper trail that
-        survives a reload. The card polls this. Login required, like the creation suite."""
+        survives a reload. The card polls this. Login required, like the creation suite.
+
+        Also runs the ongoing orphan-reconciliation sweep (_reconcile_orphan_jobs,
+        min_age=JOBS_ORPHAN_SWEEP_AGE) before reading -- the same "runs opportunistically
+        off an existing poll" shape as maybe_compact_jobs just below it. This is what
+        catches a job that gets orphaned WHILE the server keeps running (the watcher's own
+        sweep only fires once, at startup) -- e.g. the browser tab polling
+        /api/task-status was closed, or the live-mirror watcher missed the WS event, and
+        the task finished on PixAI's side with nothing here ever the wiser. Fails soft
+        (see _reconcile_orphan_jobs); a reconciliation problem must never break the card."""
         import pixai_gallery_backup as core
         try:
+            _reconcile_orphan_jobs(min_age=core.JOBS_ORPHAN_SWEEP_AGE)
             jobs = core.read_jobs(out_dir)
             core.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
         except Exception:
