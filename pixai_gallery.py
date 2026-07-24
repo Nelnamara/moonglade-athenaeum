@@ -2346,6 +2346,11 @@ def collection_health(out_dir, db_path):
         # catalog rows that claim a file but whose media_id isn't on disk
         cat_rows = con.execute(
             "SELECT media_id, filename FROM catalog WHERE filename != ''").fetchall()
+        # every media_id the catalog knows about at all (regardless of filename) --
+        # the same "already cataloged" definition run_import_local() uses, so the
+        # health count and what --import-local/Import would actually do stay in sync
+        catalog_ids = {mid for (mid,) in con.execute(
+            "SELECT media_id FROM catalog WHERE media_id != ''").fetchall()}
     finally:
         con.close()
 
@@ -2386,6 +2391,12 @@ def collection_health(out_dir, db_path):
         if (not mid or mid not in on_disk_ids)
         and (fn or "").replace("\\", "/") not in on_disk_rels)
 
+    # Integrity job (audit 2026-07-21, Curator #9): on-disk media with NO catalog
+    # row at all -- the mirror image of `missing` above. Scoped exactly like
+    # on_disk_ids is scoped throughout this function (images only; gallery/
+    # _duplicates/_deleted/branding already excluded from the disk walk).
+    uncataloged = on_disk_ids - catalog_ids
+
     return {
         "total_files": total_files,
         "total_bytes": total_bytes,
@@ -2400,6 +2411,7 @@ def collection_health(out_dir, db_path):
         "full_meta_pct": round(100 * with_full / with_image) if with_image else 0,
         "rated": rated,
         "missing": missing,
+        "uncataloged": len(uncataloged),
         "by_month": [(m, c) for (m, c) in by_month],
         "top_models": [(m, c) for (m, c) in top_models],
         "published": published,
@@ -7664,6 +7676,7 @@ function savePrompt() {
     {{ stat('Duplicates', '{:,}'.format(h.dup_redundant), 'warn' if h.dup_redundant else '') }}
     {{ stat('Reclaimable', h.dup_bytes_h, 'warn' if h.dup_bytes else '') }}
     {{ stat('Missing files', '{:,}'.format(h.missing), 'bad' if h.missing else '') }}
+    {{ stat('Uncataloged', '{:,}'.format(h.uncataloged), 'warn' if h.uncataloged else '') }}
   </div>
 
   <h2 style="margin:28px 0 10px;font-size:16px;">Images by month</h2>
@@ -7736,10 +7749,11 @@ function savePrompt() {
     {% endfor %}
   </div>
 
-  {% if h.dup_redundant or h.missing %}
+  {% if h.dup_redundant or h.missing or h.uncataloged %}
   <div style="margin-top:24px;padding:12px 16px;background:var(--mantle);border-radius:8px;font-size:13px;color:var(--subtext);">
     {% if h.dup_redundant %}<div>· {{ '{:,}'.format(h.dup_redundant) }} duplicate copies ({{ h.dup_bytes_h }}). Run <code>--dedup</code> to quarantine.</div>{% endif %}
     {% if h.missing %}<div>· {{ '{:,}'.format(h.missing) }} catalog rows reference a file that's missing on disk. Re-run a download to refetch.</div>{% endif %}
+    {% if h.uncataloged %}<div>· {{ '{:,}'.format(h.uncataloged) }} file(s) on disk aren't in the catalog. Use the <a href="{{ url_for('index') }}" style="color:var(--lavender);">↑ Import</a> button on the gallery, or run <code>--import-local</code>, to catalog them.</div>{% endif %}
   </div>
   {% endif %}
   {% if h.dup_redundant %}
