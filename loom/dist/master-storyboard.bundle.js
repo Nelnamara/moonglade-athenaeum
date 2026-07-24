@@ -49,9 +49,45 @@ var LoomBundle = (() => {
   var connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
   var flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}` })));
   var effectivePrompt = (c) => c.promptOverride ? c.promptOverrideText || "" : c.prompt || "";
-  var shotText = (entry, p) => {
+  var shotImageRefs = (entry, project, imgSrc) => {
+    const c = entry.c;
+    const tagNum = (t) => {
+      const m = /(\d+)/.exec(t || "");
+      return m ? +m[1] : 99;
+    };
+    const items = [];
+    (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id)).forEach((as) => {
+      const d = as.mediaId || imgSrc(as.thumbId, as.source);
+      if (d) items.push({ tag: as.tag, d, kind: "cast", id: as.id });
+    });
+    [["@image8", "openFrame", c.openFrame], ["@image9", "closeFrame", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, key, f]) => {
+      if (!f) return;
+      const d = f.mediaId || imgSrc(f.thumbId, f.source);
+      if (d) items.push({ tag: f.tag || fallbackTag, d, kind: "frame", id: key });
+    });
+    (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
+      const d = r.mediaId || imgSrc(r.thumbId, r.source);
+      if (d) items.push({ tag: r.tag, d, kind: "ref", id: r.id });
+    });
+    items.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
+    return items;
+  };
+  var noImgSrc = () => null;
+  var positionTag = (entry, project, imgSrc, id) => {
+    const items = shotImageRefs(entry, project, imgSrc);
+    const idx = items.findIndex((it) => it.id === id);
+    return idx < 0 ? null : "@image" + (idx + 1);
+  };
+  var pickTarget = (entry, project, imgSrc, slot) => {
+    const items = shotImageRefs(entry, project, imgSrc);
+    const existing = items[slot];
+    if (existing) return { type: "replace", kind: existing.kind, id: existing.id };
+    return { type: "append", tag: nextTag(items, "@image") };
+  };
+  var shotText = (entry, p, imgSrc) => {
     const { c, code, ai } = entry;
     if (c.promptOverride) return effectivePrompt(c);
+    const resolve = imgSrc || noImgSrc;
     const idx = flat(p).findIndex((x) => x.c.id === c.id);
     const prev = idx > 0 ? flat(p)[idx - 1] : null;
     const L = [`[${code} \u2014 "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
@@ -66,11 +102,17 @@ var LoomBundle = (() => {
     const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id));
     if (usedCast.length) {
       L.push("", "Keep consistent:");
-      usedCast.forEach((as) => L.push(`  ${as.name} \u2014 ${as.lock ? "maintain exact appearance from " : "reference "}${as.tag}`));
+      usedCast.forEach((as) => {
+        const tag = positionTag(entry, p, resolve, as.id) || as.tag;
+        L.push(`  ${as.name} \u2014 ${as.lock ? "maintain exact appearance from " : "reference "}${tag}`);
+      });
     }
     if (c.refs.length) {
       L.push("", "Other references:");
-      c.refs.forEach((r) => L.push(`  ${r.tag} \u2014 ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`));
+      c.refs.forEach((r) => {
+        const tag = positionTag(entry, p, resolve, r.id) || r.tag;
+        L.push(`  ${tag} \u2014 ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`);
+      });
     }
     if (c.camera) L.push("", `Camera: ${c.camera}`);
     if (c.lighting) L.push(`Lighting/Mood: ${c.lighting}`);
@@ -81,29 +123,11 @@ var LoomBundle = (() => {
   };
   var shotPayload = (entry, project, imgSrc) => {
     const c = entry.c;
-    const tagNum = (t) => {
-      const m = /(\d+)/.exec(t || "");
-      return m ? +m[1] : 99;
-    };
-    const imgs = [];
-    (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id)).forEach((as) => {
-      const d = as.mediaId || imgSrc(as.thumbId, as.source);
-      if (d) imgs.push({ tag: as.tag, d });
-    });
-    [["@image8", c.openFrame], ["@image9", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, f]) => {
-      if (!f) return;
-      const d = f.mediaId || imgSrc(f.thumbId, f.source);
-      if (d) imgs.push({ tag: f.tag || fallbackTag, d });
-    });
-    (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
-      const d = r.mediaId || imgSrc(r.thumbId, r.source);
-      if (d) imgs.push({ tag: r.tag, d });
-    });
+    const imgs = shotImageRefs(entry, project, imgSrc);
     const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
-    imgs.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
     return {
       mode: c.mode,
-      prompt: shotText(entry, project),
+      prompt: shotText(entry, project, imgSrc),
       images: imgs.map((x) => x.d),
       video_refs: vids,
       duration: c.duration,
@@ -1146,6 +1170,8 @@ ${"=".repeat(48)}
     const activeRef = useRef(null);
     const projectRef = useRef(project);
     projectRef.current = project;
+    const thumbsRef = useRef(thumbs);
+    thumbsRef.current = thumbs;
     const genDrawerRef = useRef(null);
     const promptDirtyRef = useRef(false);
     const genTargetRef = useRef(null);
@@ -1179,7 +1205,32 @@ ${"=".repeat(48)}
           a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
         });
         el.addEventListener("mg-pick-request", (e) => {
-          openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
+          const { slot, bank, mode: reqMode, respond } = e.detail;
+          if (bank !== "primary" || reqMode !== "r2v") {
+            openPick((mid, thumb) => respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
+            return;
+          }
+          openPick((mid, thumb, isVideo, duration, isNsfw) => {
+            respond(mid, thumb, isNsfw);
+            const a = activeRef.current;
+            if (!a) return;
+            const proj = projectRef.current;
+            const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
+            const plan = pickTarget(a, proj, resolve, slot);
+            if (plan.type === "replace" && plan.kind === "cast") {
+              setAssets((arr) => arr.map((x) => x.id !== plan.id ? x : { ...x, mediaId: String(mid), thumbId: "", source: "" }));
+            } else if (plan.type === "replace" && plan.kind === "ref") {
+              const apply = (c) => ({ ...c, refs: c.refs.map((r) => r.id !== plan.id ? r : { ...r, mediaId: String(mid), thumbId: "", source: "" }) });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            } else if (plan.type === "replace" && plan.kind === "frame") {
+              const apply = (c) => ({ ...c, [plan.id]: { ...c[plan.id], mediaId: String(mid), thumbId: "", source: "" } });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            } else {
+              const newRef = { ...buildNewRef("image", uid()), tag: plan.tag, mediaId: String(mid) };
+              const apply = (c) => ({ ...c, refs: [...c.refs, newRef] });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            }
+          }, "image");
         });
         el.addEventListener("mg-submit", (e) => {
           const a = activeRef.current;

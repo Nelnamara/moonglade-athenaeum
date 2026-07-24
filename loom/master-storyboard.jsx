@@ -7,7 +7,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
-  flat, shotText, durOf, reelStats, effectivePrompt,
+  flat, shotText, pickTarget, durOf, reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
@@ -764,6 +764,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // last ran on would go stale the moment the project changes without a re-bind.
   const projectRef = useRef(project);
   projectRef.current = project;
+  // Same staleness reasoning as projectRef, for the mg-pick-request handler below (also
+  // bound once, also needs to resolve local thumbId-based images at whatever moment the
+  // owner actually completes a pick, not whichever render bindGenDrawer last ran on).
+  const thumbsRef = useRef(thumbs);
+  thumbsRef.current = thumbs;
   const genDrawerRef = useRef(null);
   const promptDirtyRef = useRef(false);
   // The drawer resolves its OWN completion target via activeRef at listener-registration
@@ -827,8 +832,55 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         const apply = (c) => ({ ...c, audioGen, audioLanguage });
         a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
       });
+      // AUDIT_2026-07-21.md's pinned "reference picker corruption" row, requirement 2: a
+      // successful pick used to ONLY ever call e.detail.respond(), which writes into the
+      // drawer's own PRIVATE _imgSlots/_vidSlots array and nothing else -- invisible to the
+      // rest of the app, and silently discarded the next time ANY host-tracked field changes
+      // and the prefill effect below rebuilds the drawer's bank fresh from buildShotPayload().
+      // That is why "the Image References panel never advances past its original entries" --
+      // a pick had nowhere durable to land. Scoped to the Multi-Reference bank specifically
+      // (bank:"primary", mode:"r2v") -- the exact panel the owner's bug is about; i2v/flf's
+      // single Start/End-frame slot and the r2v video-ref bank keep the prior ephemeral-only
+      // behavior (still correct for a SUBMIT, since the drawer's own payload() reads its live
+      // slots directly -- only durability/re-weaving into the composed prompt was missing).
       el.addEventListener("mg-pick-request", (e) => {
-        openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
+        const { slot, bank, mode: reqMode, respond } = e.detail;
+        if (bank !== "primary" || reqMode !== "r2v") {
+          openPick((mid, thumb) => respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
+          return;
+        }
+        openPick((mid, thumb, isVideo, duration, isNsfw) => {
+          respond(mid, thumb, isNsfw);   // keep the drawer's own immediate slot/chip repaint
+          const a = activeRef.current; if (!a) return;
+          const proj = projectRef.current;
+          const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId]
+            : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
+          const plan = pickTarget(a, proj, resolve, slot);
+          if (plan.type === "replace" && plan.kind === "cast") {
+            // Cast assets are project-GLOBAL (shared identity across every shot that uses
+            // them) -- same setAssets() call the Cast & assets panel's own "Pick from your
+            // gallery" icon already makes (line ~1458), so this stays consistent with the
+            // one other place a cast member's picture is replaced.
+            setAssets((arr) => arr.map((x) => x.id !== plan.id ? x : { ...x, mediaId: String(mid), thumbId: "", source: "" }));
+          } else if (plan.type === "replace" && plan.kind === "ref") {
+            // c.refs lives on the CARD, not project.acts -- setRef (which goes through
+            // patchRef/project.acts) would silently no-op for the "__draft__" card, so this
+            // uses the same direct setCard/setDraftCard idiom as every other handler here.
+            const apply = (c) => ({ ...c, refs: c.refs.map((r) => r.id !== plan.id ? r : { ...r, mediaId: String(mid), thumbId: "", source: "" }) });
+            a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+          } else if (plan.type === "replace" && plan.kind === "frame") {
+            const apply = (c) => ({ ...c, [plan.id]: { ...c[plan.id], mediaId: String(mid), thumbId: "", source: "" } });
+            a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+          } else {
+            // A genuinely NEW reference (the "+ add" slot, past everything this shot already
+            // supplies) -- append it to the shot's own refs so it persists and re-weaves into
+            // the composed prompt at its real (positional) tag, instead of vanishing the
+            // moment anything else re-triggers the prefill effect below.
+            const newRef = { ...buildNewRef("image", uid()), tag: plan.tag, mediaId: String(mid) };
+            const apply = (c) => ({ ...c, refs: [...c.refs, newRef] });
+            a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+          }
+        }, "image");
       });
       el.addEventListener("mg-submit", (e) => {
         const a = activeRef.current;
