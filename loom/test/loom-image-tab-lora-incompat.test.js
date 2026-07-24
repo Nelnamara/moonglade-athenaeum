@@ -123,3 +123,21 @@ describe("Image tab Advanced-panel capability gating (extra.compatibility, mirro
     assert.match(src, /min=\{cfgB\.min != null \? cfgB\.min : 1\} max=\{cfgB\.max != null \? cfgB\.max : 30\}/);
   });
 });
+
+describe("Picker: don't search the hidden tab on open (owner report 2026-07-24, \"still slow\")", () => {
+  test("both picker elements are captured in refs the ensureSearched effect can reach later", () => {
+    assert.match(src, /const basePickerElRef = useRef\(null\);/);
+    assert.match(src, /const loraPickerElRef = useRef\(null\);/);
+    assert.match(src, /basePickerElRef\.current = el;\s*\n\s*if \(el && !el\._mgBound\) \{/,
+      "must be set unconditionally on every callback invocation, not only the first bind, " +
+      "or the ref goes stale across a remount");
+    assert.match(src, /loraPickerElRef\.current = el;\s*\n\s*if \(el && !el\._mgBound\) \{/);
+  });
+
+  test("an effect calls ensureSearched() on whichever picker is visible whenever the mounted tab changes", () => {
+    assert.match(src,
+      /useEffect\(\(\) => \{\s*\n\s*if \(!pickerMounted\) return;\s*\n\s*const vis = pickerKind === "base" \? basePickerElRef\.current : loraPickerElRef\.current;\s*\n\s*if \(vis && vis\.ensureSearched\) vis\.ensureSearched\(\);\s*\n\s*\}, \[pickerMounted, pickerKind\]\);/,
+      "must key on [pickerMounted, pickerKind] -- the hidden tab needs its OWN search the " +
+      "moment it's revealed, not just once on initial mount");
+  });
+});

@@ -6635,6 +6635,12 @@ var Gen = (function(){
     ensurePickers();
     if(basePickerEl) basePickerEl.style.display = (k==='base') ? '' : 'none';
     if(loraPickerEl) loraPickerEl.style.display = (k==='lora') ? '' : 'none';
+    // Owner report 2026-07-24 ("still slow"): both pickers used to search on mount even
+    // while hidden, so opening the flyout always fired two searches at once for a tab
+    // nobody had asked to see yet. ensureSearched() is a no-op after the first real call,
+    // so switching tabs back and forth still never re-fetches.
+    var vis = (k==='base') ? basePickerEl : loraPickerEl;
+    if(vis && vis.ensureSearched) vis.ensureSearched();
   }
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function fmt(n){ return (n||0).toLocaleString(); }

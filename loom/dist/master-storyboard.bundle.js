@@ -1283,7 +1283,10 @@ ${"=".repeat(48)}
       if (pickerOpen) setPickerMounted(true);
     }, [pickerOpen]);
     const imgModelSeqRef = useRef(0);
+    const basePickerElRef = useRef(null);
+    const loraPickerElRef = useRef(null);
     const bindPicker = useCallback((el) => {
+      basePickerElRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
         el.addEventListener("mg-pick", (e) => {
@@ -1345,6 +1348,7 @@ ${"=".repeat(48)}
       }
     }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
     const bindLoraPicker = useCallback((el) => {
+      loraPickerElRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
         el.addEventListener("mg-pick", (e) => {
@@ -1360,6 +1364,11 @@ ${"=".repeat(48)}
         });
       }
     }, [setImgLoras]);
+    useEffect(() => {
+      if (!pickerMounted) return;
+      const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
+      if (vis && vis.ensureSearched) vis.ensureSearched();
+    }, [pickerMounted, pickerKind]);
     const imgCostRef = useRef(null);
     const editCostRef = useRef(null);
     const refCostRef = useRef(null);
