@@ -540,9 +540,11 @@ const V2_STYLES = `
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
-/* The show/hide toggle reuses .lv-chip (the same toggle-chip chrome as the Video tab's
-   Continuity/Mode controls) -- this rule only adds the standalone spacing .lv-chips'
-   flex-gap would otherwise supply. Do not re-add background/border/color/font here. */
+/* picker-parity-round2 (2026-07-24): this used to be a show/hide toggle that expanded the
+   LoRA <mg-model-picker> INLINE into this ~280px rail column -- the owner's exact complaint
+   ("cramped mess... does not have a flyout like the gallery"). It now opens the SAME
+   .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
+   the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
 .lv-loratoggle{display:inline-block;margin:7px 0 5px;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
@@ -552,6 +554,40 @@ const V2_STYLES = `
 .lv-lchip input{width:52px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
+/* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
+   <mg-model-picker> INLINE in this ~280px rail (cramped: results, a toggle button, a
+   SECOND search box, more results, all stacked). Now a trigger row (mirrors
+   pixai_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
+   -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
+   cramped-inline one here and a proper flyout there. */
+.lv-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:11.5px;text-align:left;}
+.lv-selrow:hover{border-color:var(--line2);}
+.lv-selthumb{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
+.lv-selname{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-selhint{flex:0 0 auto;font-size:10px;}
+.lv-caps{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.lv-cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);color:var(--ink2);}
+.lv-cap.method{color:var(--amber);border-color:var(--amber-d);}
+.lv-versel{margin-top:6px;}
+/* Floating overlay for the Model/LoRA picker -- centered modal, matching the Loom's own
+   established .sb-pick-ov/.lv-df-veil pattern (this file has no per-side "dock" concept for
+   the right rail the way the Gallery's #gen-drawer does, so a centered panel is the
+   idiomatic Loom equivalent of "floats as its own proper overlay panel", not an attempt to
+   pixel-clone the Gallery's specific side-docked mechanics). z-index 470: above
+   .lv-overlay/.lv-df-veil (400/450, this picker can be opened from within Deep Focus too)
+   and below .sb-seq/.sb-pick-ov (500, an unrelated picker-within-a-picker must still win). */
+.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:rgba(6,4,16,.76);display:none;align-items:center;justify-content:center;padding:20px;}
+.lv-mpick-veil.open{display:flex;}
+.lv-mpick-panel{background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:var(--shadow);width:460px;max-width:94vw;height:min(640px,86vh);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;}
+.lv-mpick-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex:none;}
+.lv-mpick-head .t{font-size:14px;font-weight:600;flex:1;}
+.lv-mpick-head .x{background:none;border:none;color:var(--ink2);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
+.lv-mpick-head .x:hover{color:var(--coral);}
+.lv-mpick-seg{display:flex;gap:6px;padding:10px 14px 0;flex:none;}
+.lv-mpick-seg button{flex:1;padding:6px 0;border-radius:7px;background:transparent;border:1px solid var(--line);color:var(--ink2);cursor:pointer;font-size:12px;}
+.lv-mpick-seg button.on{background:var(--panel2);color:var(--ink);border-color:var(--amber);font-weight:600;}
+.lv-mpick-body{padding:10px 14px 14px;display:flex;flex-direction:column;min-height:0;flex:1;}
+.lv-mpick-body mg-model-picker{flex:1;min-height:0;}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
@@ -676,7 +712,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // This state belongs to Deep Focus but has to live up here, at LoomV2's real top level, same
   // as deepFocus itself; the IIFE below only reads/writes it via closure.
   const [dfPalFor, setDfPalFor] = useState(null);     // which term-palette is open in Deep Focus, or null
-  const [loraOpen, setLoraOpen] = useState(false);    // D-11: is the Image tab's "+ Add LoRA" picker expanded
+  // picker-parity-round2 (problem 2): replaces the old loraOpen boolean (D-11), which just
+  // toggled the LoRA <mg-model-picker> INLINE into this rail -- the owner's exact complaint.
+  // pickerOpen/pickerKind instead drive the floating .lv-mpick-veil overlay (mirrors
+  // pixai_gallery.py's #model-flyout open state + Models/LoRAs segment), opened via either
+  // the Model row's trigger (kind="base") or "+ add LoRA" (kind="lora").
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerKind, setPickerKind] = useState("base");
   const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage'
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
@@ -717,6 +759,21 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [deepFocus]);
+  // picker-parity-round2: Escape closes the model/LoRA overlay, same as every other veil
+  // in this file (deepFocus above, the Export popover, ProjectSwitcher).
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onKey = (ev) => { if (ev.key === "Escape") setPickerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickerOpen]);
+  // picker-parity-round2: lazy-mount both <mg-model-picker> instances on FIRST open (mirrors
+  // pixai_gallery.py's ensurePickers() -- "only fetch on first open", not an always-mounted
+  // base+LoRA fetch on every Loom load just because the right rail happens to be expanded).
+  // Once true, stays true -- the pickers then persist (hidden via .lv-mpick-veil's own
+  // display:none/.open) so a close/reopen never loses either one's search/scroll state.
+  const [pickerMounted, setPickerMounted] = useState(false);
+  useEffect(() => { if (pickerOpen) setPickerMounted(true); }, [pickerOpen]);
   // Bridge the shared <mg-model-picker> web component to React: a ref callback (React
   // doesn't route custom events through JSX props) that binds the 'mg-pick' listener once.
   // imgModelSeqRef guards the /api/model-version fetch below the same way the Gallery's own
@@ -727,7 +784,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     if (el && !el._mgBound) {
       el._mgBound = true;
       el.addEventListener("mg-pick", (e) => {
-        const m = { model_id: e.detail.model_id, title: e.detail.title };
+        const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
         setImgModel(m);
         setModelDefaults(null);
         // L536 + D-11: resolve model_type (so the LoRA compat warning has a real base to
@@ -736,20 +793,30 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         // pixai_gallery.py's Gen.applyModelDefaults() exactly: only for fields the model
         // actually has data for, and it OVERWRITES whatever's currently in imgAdv, same as
         // the Gallery's own (deliberate, already-shipped) behavior on every base-model pick.
+        // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
+        // ONE request either way (same endpoint), but now returns every published release
+        // (versions[0] is the same "latest" the old fetch always resolved) so the version
+        // picker + sampling_method + capabilities the app was resolving and discarding can
+        // finally be shown, mirroring pixai_gallery.py's onBasePick/applyVersion exactly.
         const mySeq = ++imgModelSeqRef.current;
-        fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id))
+        fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
           .then((r) => r.json())
           .then((d) => {
             if (mySeq !== imgModelSeqRef.current) return;   // a newer pick superseded this fetch
-            setImgModel((cur) => (cur && cur.model_id === m.model_id) ? { ...cur, model_type: d.model_type || "" } : cur);
-            const has = d.negative_prompt || d.sampling_steps || d.cfg_scale;
-            setModelDefaults(has ? { negative_prompt: d.negative_prompt || "", sampling_steps: d.sampling_steps || null, cfg_scale: d.cfg_scale || null } : null);
+            const versions = (d && d.versions) || [], v = versions[0] || {};
+            setImgModel((cur) => (cur && cur.model_id === m.model_id) ? {
+              ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+              sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+              versions,
+            } : cur);
+            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
             if (has) {
               setImgAdv((cur) => ({
                 ...cur,
-                negative: d.negative_prompt || cur.negative,
-                steps: d.sampling_steps || cur.steps,
-                cfg: d.cfg_scale || cur.cfg,
+                negative: v.negative_prompt || cur.negative,
+                steps: v.sampling_steps || cur.steps,
+                cfg: v.cfg_scale || cur.cfg,
               }));
             }
           })
@@ -757,6 +824,31 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       });
     }
   }, [setImgModel, setImgAdv, setModelDefaults]);
+  // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
+  // always silently took the newest release. imgModel.versions (populated by bindPicker's
+  // ?all=1 fetch above) lists every one -- switching re-applies that version's OWN meta (a
+  // different release can, in principle, carry a different tuned preset or model_type)
+  // through the same shape bindPicker uses, no extra network call, the data's already in
+  // hand.
+  const pickVersion = useCallback((vid) => {
+    if (!imgModel || !imgModel.versions) return;
+    const v = imgModel.versions.find((x) => x.version_id === vid);
+    if (!v) return;
+    setImgModel((cur) => ({
+      ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+      sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+    }));
+    const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+    setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+    if (has) {
+      setImgAdv((a) => ({
+        ...a,
+        negative: v.negative_prompt || a.negative,
+        steps: v.sampling_steps || a.steps,
+        cfg: v.cfg_scale || a.cfg,
+      }));
+    }
+  }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
   // D-11: the LoRA picker uses mg-model-picker's opt-in `multi` mode, whose mg-pick
   // detail shape is { model, selected } (not the raw row bindPicker above expects) --
   // upsert-by-model_id on selected=true (covers both the initial pending entry and the
@@ -1433,8 +1525,35 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       const busyI = gi.phase === "submitting" || gi.phase === "running";
       tabBody = (
         <div>
-          <label className="lv-lab">Model {imgModel ? <span className="lv-dim">· {imgModel.title}</span> : null}</label>
-          <mg-model-picker ref={bindPicker} kind="base"></mg-model-picker>
+          <label className="lv-lab">Model</label>
+          {/* picker-parity-round2 (problem 2): a trigger row, not an inline-mounted picker --
+              mirrors pixai_gallery.py's own #gen-selrow. The actual <mg-model-picker
+              kind="base"> lives in the always-mounted .lv-mpick-veil overlay below (outside
+              this tab-conditional block, next to <mg-generate-drawer>), matching that
+              element's own "survive tab switches, CSS-hide instead of unmount" contract. */}
+          <button type="button" className="lv-selrow" onClick={() => { setPickerKind("base"); setPickerOpen(true); }}>
+            {imgModel && imgModel.preview_url ? <img className="lv-selthumb" src={imgModel.preview_url} alt="" /> : null}
+            <span className="lv-selname">{imgModel ? imgModel.title : "none — browse models"}</span>
+            <span className="lv-dim lv-selhint">☰ browse</span>
+          </button>
+          {/* problem 5: sampling_method/capabilities were resolved by bindPicker above and
+              discarded -- read-only surfacing (not a submit field, see the Gallery's own
+              identical applyModelDefaults() comment for why sampling_method stays display-only). */}
+          {imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && (
+            <div className="lv-caps">
+              {imgModel.sampling_method ? <span className="lv-cap method">{imgModel.sampling_method}</span> : null}
+              {(imgModel.capabilities || []).map((c) => <span key={c} className="lv-cap">{c}</span>)}
+            </div>
+          )}
+          {/* problem 4: a real version choice (PixAI's own model/LoRA cards have one; ours
+              had none) -- only shown once there's actually more than one release to choose
+              from. */}
+          {imgModel && imgModel.versions && imgModel.versions.length > 1 && (
+            <select className="lv-in lv-versel" value={imgModel.version_id || ""} onChange={(ev) => pickVersion(ev.target.value)}
+              title="This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead" aria-label="Model version">
+              {imgModel.versions.map((v) => <option key={v.version_id} value={v.version_id}>{v.label || v.version_id}</option>)}
+            </select>
+          )}
           {imgLoras.length > 0 && (
             <div className="lv-loras">
               {imgLoras.map((l) => {
@@ -1462,10 +1581,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               })}
             </div>
           )}
-          <button type="button" className={"lv-chip lv-loratoggle" + (loraOpen ? " on" : "")} onClick={() => setLoraOpen((v) => !v)}>
-            {loraOpen ? "− hide LoRA picker" : "+ add LoRA"}
+          <button type="button" className="lv-chip lv-loratoggle" onClick={() => { setPickerKind("lora"); setPickerOpen(true); }}>
+            + add LoRA
           </button>
-          {loraOpen && <mg-model-picker ref={bindLoraPicker} kind="lora" multi></mg-model-picker>}
           <label className="lv-lab">Image prompt</label>
           <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
@@ -1684,6 +1802,40 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             Camera controls and two quality controls for the same setting. */}
         <mg-generate-drawer ref={bindGenDrawer} data-loom-ctx="" style={{ display: tab === "Video" ? "" : "none" }}></mg-generate-drawer>
         {videoTrailer}
+        {/* picker-parity-round2 (problem 2): the Model/LoRA picker overlay -- a floating
+            panel, not squeezed inline into this rail (the owner's exact complaint). Lazy-
+            mounted (pickerMounted above), then left mounted for the rest of the session --
+            CSS-hidden via .open/inline display instead of unmounted, so a close/reopen never
+            loses either picker's search/scroll state, matching the Gallery's own
+            #model-flyout (created once by ensurePickers(), display toggled after that).
+            pickerKind only switches which of the two is VISIBLE, same as the Gallery's
+            setKind() -- both mount together and stay mounted, matching that "each keeps its
+            OWN last-searched results independently" contract exactly. base-type on the LoRA
+            mount reuses imgModel.model_type -- already resolved for the LoRA-compat warning
+            above -- so switching the selected base re-sorts/re-badges LoRA results live. */}
+        <div className={"lv-mpick-veil" + (pickerOpen ? " open" : "")}
+          onClick={(ev) => { if (ev.target === ev.currentTarget) setPickerOpen(false); }}>
+          <div className="lv-mpick-panel" role="dialog" aria-label="Models and LoRAs">
+            <div className="lv-mpick-head">
+              <span className="t">Models &amp; LoRAs</span>
+              <button type="button" className="x" onClick={() => setPickerOpen(false)} aria-label="Close">&times;</button>
+            </div>
+            <div className="lv-mpick-seg">
+              <button type="button" className={pickerKind === "base" ? "on" : ""} onClick={() => setPickerKind("base")}>Models</button>
+              <button type="button" className={pickerKind === "lora" ? "on" : ""} onClick={() => setPickerKind("lora")}>LoRAs</button>
+            </div>
+            <div className="lv-mpick-body">
+              {pickerMounted && (
+                <>
+                  <mg-model-picker ref={bindPicker} kind="base"
+                    style={{ display: pickerKind === "base" ? "flex" : "none" }}></mg-model-picker>
+                  <mg-model-picker ref={bindLoraPicker} kind="lora" multi base-type={(imgModel && imgModel.model_type) || ""}
+                    style={{ display: pickerKind === "lora" ? "flex" : "none" }}></mg-model-picker>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

@@ -1936,7 +1936,16 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
 
     category: one of MARKET_CATEGORIES (ignored if not). sort: 'newest' -> orderBy -createdAt;
     anything else -> the connection's default order. usage MODEL/LORA splits base vs LoRA rows
-    (the connection conflates them). Read-only, no spend."""
+    (the connection conflates them). Read-only, no spend.
+
+    `latestVersion` also requests modelType/loraBaseModelType (picker-parity-round2,
+    2026-07-24) -- confirmed live: real rows come back e.g. modelType:"MULTI_LORA",
+    loraBaseModelType:"SD_V1_MODEL". Costs nothing extra (same request, no additional
+    round trip) and is what lets api_model_search's LoRA path do architecture-aware
+    sort/badging (see annotate_lora_compat) through this GraphQL connection, which -- unlike
+    REST's oRPC search -- actually carries this per-row. Surfaced as `model_type` /
+    `lora_base_model_type`, the SAME key names model_search_rest's sibling
+    resolve_version_meta() already uses, so callers don't care which path produced a row."""
     cat = (category or "").strip().lower()
     # category/orderBy come from a fixed whitelist -> safe to interpolate; keyword stays a
     # bound $variable (never interpolate user text into a query).
@@ -1947,8 +1956,8 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         args.append('orderBy:"-createdAt"')
     q = ("query($k:String,$n:Int){ generationModels(" + ", ".join(args) + "){ "
          "pageInfo{ hasNextPage } edges { node { id title type isNsfw likedCount "
-         "latestVersion { id } media { id urls { url } } tags { name } author { displayName } "
-         "createdAt } } } }")
+         "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
+         "tags { name } author { displayName } createdAt } } } }")
     data = (gql_adhoc(session, q, {"k": keyword or "", "n": int(limit)}) or {}).get("generationModels") or {}
     want_lora = (usage or "MODEL").upper() == "LORA"
     out = []
@@ -1960,6 +1969,7 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             continue
         if not want_lora and (is_lora or "VIDEO" in mtype):
             continue
+        lv = n.get("latestVersion") or {}
         out.append({
             "title": n.get("title") or "",
             "type": n.get("type") or "",
@@ -1967,7 +1977,7 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             "liked_count": int(n.get("likedCount") or 0),
             "should_blur": bool(n.get("isNsfw")),
             "preview_url": _model_preview_url(n.get("media")),
-            "has_version": bool((n.get("latestVersion") or {}).get("id")),
+            "has_version": bool(lv.get("id")),
             # REST-only rich fields absent here -> empty so the card hides them.
             "description": "", "base_model": "", "curations": [], "official": False,
             "comment_count": 0, "ref_count": 0, "author_id": "",
@@ -1976,6 +1986,11 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             "tags": [t.get("name") for t in (n.get("tags") or []) if t.get("name")][:8],
             "author": (n.get("author") or {}).get("displayName") or "",
             "created_at": n.get("createdAt") or "",
+            # Architecture, for LoRA compat sort/badging (annotate_lora_compat) -- '' when
+            # the connection has no version yet, same empty-string convention as everywhere
+            # else in this file (never None, so a naive .strip()/comparison never explodes).
+            "model_type": lv.get("modelType") or "",
+            "lora_base_model_type": lv.get("loraBaseModelType") or "",
         })
     return {"results": out, "has_more": bool((data.get("pageInfo") or {}).get("hasNextPage"))}
 
@@ -1997,40 +2012,24 @@ def workflow_catalog(session, first=80):
     return out
 
 
-def resolve_version_meta(session, model_id):
-    """Resolve a model's latest generatable version AND the metadata we were throwing away.
-    One GET /v2/generation-model/{id}/versions call returns everything below; the earlier
-    resolve_latest_version() kept only the id. Read-only.
+def _empty_version_meta():
+    return {"version_id": "", "model_type": "", "lora_base_model_type": "",
+            "trigger_words": "", "negative_prompt": "", "sampling_method": "",
+            "sampling_steps": None, "cfg_scale": None, "capabilities": []}
 
-    Returns {version_id, model_type, lora_base_model_type, trigger_words, negative_prompt,
-    sampling_method, sampling_steps, cfg_scale, capabilities}. All keys always present
-    (empty/None when the model has no version or the field is absent).
+
+def _version_row_to_meta(r):
+    """One row of GET /v2/generation-model/{id}/versions -> the picker-facing meta shape.
+    Split out of resolve_version_meta (picker-parity-round2, 2026-07-24) so
+    list_model_versions can map EVERY row through the IDENTICAL logic instead of a second
+    hand-copy -- resolve_version_meta (rows[0] only) and list_model_versions (all rows)
+    must never drift apart on what a 'version' means.
 
     - model_type: this version's architecture enum (SDXL_MODEL / DIT7B_MODEL / MULTI_LORA / ...).
     - lora_base_model_type: for a LoRA, the base-model family it REQUIRES (null for base models).
       A LoRA runs on a base iff lora_base_model_type == the base's model_type (see is_lora_compatible).
     - trigger_words: the LoRA's activation tokens (extra.triggerWords|trainedWords); '' if none.
-    - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer.
-
-    NOTE (2026-07-24): `/generation-model/{id}/versions` returns MULTIPLE rows per model --
-    confirmed on PixAI's own site, which lists them as separate releases/iterations, all on
-    the SAME fixed architecture (a LoRA is NOT multi-architecture; loraBaseModelType is
-    consistent across a given LoRA's rows -- an earlier draft of this fix assumed otherwise
-    and was reverted). This function still always takes rows[0] (presumed latest) and
-    discards the rest -- there is no way to pick a different release. See docs/AUDIT_2026-07-21.md
-    for the tracked remainder: exposing the full row list to the picker UI is real, scoped,
-    NOT-yet-built follow-on work, deliberately not attempted in this pass."""
-    empty = {"version_id": "", "model_type": "", "lora_base_model_type": "",
-             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
-             "sampling_steps": None, "cfg_scale": None, "capabilities": []}
-    try:
-        data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
-    except PixAIError:
-        return empty
-    rows = data if isinstance(data, list) else (data or {}).get("data") or []
-    if not rows:
-        return empty
-    r = rows[0]
+    - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer."""
     extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
     caps = extra.get("capabilities")
     return {
@@ -2044,6 +2043,68 @@ def resolve_version_meta(session, model_id):
         "cfg_scale": extra.get("cfgScale"),
         "capabilities": [c for c in caps if isinstance(c, str)] if isinstance(caps, list) else [],
     }
+
+
+def resolve_version_meta(session, model_id):
+    """Resolve a model's latest generatable version AND the metadata we were throwing away.
+    One GET /v2/generation-model/{id}/versions call returns everything below; the earlier
+    resolve_latest_version() kept only the id. Read-only.
+
+    Returns {version_id, model_type, lora_base_model_type, trigger_words, negative_prompt,
+    sampling_method, sampling_steps, cfg_scale, capabilities}. All keys always present
+    (empty/None when the model has no version or the field is absent).
+
+    NOTE: `/generation-model/{id}/versions` returns MULTIPLE rows per model -- confirmed on
+    PixAI's own site, which lists them as separate releases/iterations, all on the SAME
+    fixed architecture (a LoRA is NOT multi-architecture; loraBaseModelType is consistent
+    across a given LoRA's rows -- an earlier draft of this fix assumed otherwise and was
+    reverted). This function still always takes rows[0] (presumed latest) -- it's the
+    fast path used right after a pick, where "latest" is the right default. To offer a
+    real choice among the other rows, see list_model_versions() below (picker-parity-round2,
+    2026-07-24), which maps the FULL list through the same per-row shape."""
+    try:
+        data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
+    except PixAIError:
+        return _empty_version_meta()
+    rows = data if isinstance(data, list) else (data or {}).get("data") or []
+    if not rows:
+        return _empty_version_meta()
+    return _version_row_to_meta(rows[0])
+
+
+def list_model_versions(session, model_id):
+    """Every published version/release row for a model/LoRA -- not just resolve_version_meta's
+    rows[0]. PixAI's own site offers a version selector on model/LoRA cards; this is what
+    lets our picker do the same instead of always silently resolving the latest
+    (docs/AUDIT_2026-07-21.md's tracked O12/O13 remainder, closed picker-parity-round2,
+    2026-07-24). Same ONE GET as resolve_version_meta (no new network surface, no N+1) --
+    each row mapped through the identical _version_row_to_meta shape, so a chosen
+    version_id carries real model_type/lora_base_model_type/tuned-preset data, not a
+    stripped-down id-only listing.
+
+    Adds two UI-facing fields per row: `label` (a human position tag -- 'Latest' for the
+    first/presumed-newest row, matching resolve_version_meta's own long-standing rows[0]
+    assumption, else 'vN' counting back from it, with the row's own createdAt date appended
+    when present) and `is_latest` (True only for that first row) -- so a picker can render
+    a real choice without inventing version numbers PixAI doesn't actually provide. Rows
+    with no id are skipped (nothing to select). Read-only."""
+    try:
+        data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
+    except PixAIError:
+        return []
+    rows = data if isinstance(data, list) else (data or {}).get("data") or []
+    out = []
+    n = len(rows)
+    for i, r in enumerate(rows):
+        meta = _version_row_to_meta(r)
+        if not meta["version_id"]:
+            continue
+        created = (r.get("createdAt") or "").strip()
+        tag = "Latest" if i == 0 else "v{}".format(n - i)
+        meta["label"] = tag + (" · " + created[:10] if created else "")
+        meta["is_latest"] = (i == 0)
+        out.append(meta)
+    return out
 
 
 def resolve_latest_version(session, model_id):
@@ -2068,6 +2129,45 @@ def is_lora_compatible(base_model_type, lora_base_model_type):
     if not b or not lo:
         return True
     return b == lo
+
+
+def annotate_lora_compat(results, base_model_type):
+    """Soft-sort + tag a LoRA search-results list by architecture compatibility with a
+    selected base model (docs/AUDIT_2026-07-21.md's LoRA-arch-filter item; the root-caused
+    mechanism confirmed live: a row's real architecture is `lora_base_model_type`, sourced
+    from GraphQL's `latestVersion.loraBaseModelType` via model_search_market_gql -- NEVER
+    the `base_model` field, which is PixAI's content CATEGORY, not architecture).
+
+    Pure reorder + tag over ALREADY-fetched rows -- makes no network call itself, so it
+    behaves identically (and is independently testable) no matter which search path
+    produced `results`. `base_model_type`: the caller's already-resolved selected base
+    model's `model_type` (the exact value the post-selection is_lora_compatible() gate
+    already uses) -- '' / None means "no base picked yet", and `results` is returned
+    completely unmodified (browsing before picking a base must not be touched).
+
+    SOFT SORT, deliberately not a hard filter (see CHANGELOG.md for the full reasoning):
+    stable-partitions rows into "compatible-or-unknown" first, "confirmed incompatible"
+    last -- the SAME fail-open rule as is_lora_compatible() itself, so this can never hide
+    a LoRA the picker doesn't have enough data to judge. Each row gains a `compat` tag --
+    'yes' | 'no' | 'unknown' -- so the client can badge precisely: an 'unknown' row SORTS
+    with the compatible group (fail-open) but is NOT badged as confirmed-compatible, which
+    would overclaim data this function doesn't have."""
+    bt = (base_model_type or "").strip()
+    if not bt:
+        return results
+    tagged = []
+    for row in results:
+        lbt = (row.get("lora_base_model_type") or "").strip()
+        if not lbt:
+            compat = "unknown"
+        else:
+            compat = "yes" if is_lora_compatible(bt, lbt) else "no"
+        row = dict(row)
+        row["compat"] = compat
+        tagged.append(row)
+    head = [r for r in tagged if r["compat"] != "no"]
+    tail = [r for r in tagged if r["compat"] == "no"]
+    return head + tail
 
 
 def run_list_models(args):
