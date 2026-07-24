@@ -309,6 +309,8 @@ var LoomBundle = (() => {
       return "Out of balance for this model \u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
     if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
       return "PixAI's content filter blocked this generation \u2014 that's decided on PixAI's side, not in the Loom.";
+    if (/inferenceProfile/i.test(s))
+      return "That quality setting isn't available for this model \u2014 try Auto instead.";
     return s || "generation failed";
   }
   function classifyTaskStatus(d) {
