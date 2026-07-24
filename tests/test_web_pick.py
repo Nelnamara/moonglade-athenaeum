@@ -94,6 +94,23 @@ def test_gallery_images_type_filter_and_paging(tmp_path):
     assert da["total"] == 6 and "9" in [m["media_id"] for m in da["images"]]
 
 
+def test_gallery_images_empty_type_stays_images_only(tmp_path):
+    """An EXPLICIT empty type (?type=) means images-only, same as absent -- load-bearing
+    back-compat in both directions (issue #3's root): the gallery's vanilla Picker sends
+    type='' and must never start surfacing videos (picker-core.js seeds '' for exactly
+    that reason), which is why <mg-gallery-picker>'s combined "Image + video" option has
+    to submit the server's real both-kinds value, type=all, instead of ''. If this
+    mapping ever flips to "both", the Loom picker won't break -- the gallery Picker
+    will."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00"),
+        _row(media_id="9", filename="v_9.mp4", is_video="1",
+             created_at="2025-02-01T00:00:00"),
+    ])
+    d = cli.get("/api/gallery-images?type=").get_json()
+    assert d["total"] == 1 and [m["media_id"] for m in d["images"]] == ["1"]
+
+
 def test_gallery_images_includes_is_nsfw_for_privacy_blur(tmp_path):
     """Audit 2026-07-21, S5 (the remaining half): /api/similar already projects is_nsfw
     (fixed 2026-07-23) but /api/gallery-images -- the route the gallery Picker,
