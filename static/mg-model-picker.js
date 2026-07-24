@@ -41,7 +41,33 @@
    missing). Independent of `kind`: the HOST decides when market makes sense (the gallery
    only ever sets it on its LoRA mount, matching its own long-standing "sort/category are a
    LoRA taxonomy, base models don't get them" design), the same way `show-type` on
-   mg-gallery-picker.js is host-gated rather than baked into a mode. */
+   mg-gallery-picker.js is host-gated rather than baked into a mode.
+
+   picker-parity-round2 (2026-07-24): two follow-ups found on the owner's live test of the
+   above.
+
+   1) LAYOUT: .mg-grid used to be a fixed `max-height:320px`, so a host that gives this
+   element real vertical room (the gallery's #model-flyout, sized to fill most of the
+   viewport) left a large dead area below the grid instead of using it. The element's own
+   default is now `display:flex;flex-direction:column` (was `display:block`) with
+   `.mg-grid{flex:1 1 auto}` and no max-height -- inside an UNconstrained parent (the
+   standalone verification page below, or any future plain mount) this behaves EXACTLY like
+   `display:block` did (a flex column with no assigned height sizes to its content, same as
+   a block), so nothing regresses there; a HOST that actually constrains the element's
+   height (via its own CSS -- see pixai_gallery.py's `#model-flyout mg-model-picker` and the
+   Loom's `.lv-mpick-body mg-model-picker`) now gets a grid that fills exactly that height
+   and scrolls internally, instead of a second independent 320px cap fighting the host's own
+   scroll container.
+
+   2) ARCHITECTURE-AWARE LoRA sort/badge: opt-in `base-type` attribute
+   (`<mg-model-picker kind="lora" ... base-type="SDXL_MODEL">`), set/updated by the HOST to
+   the currently-selected base model's resolved `model_type` (both hosts already resolve
+   this today for their own post-selection is_lora_compatible() gate -- this just reuses
+   it). Threaded into /api/model-search as `base_type=`, which soft-sorts + tags results
+   server-side (pixai_gallery_backup.py's annotate_lora_compat -- see that function for the
+   full compatible/unknown/incompatible reasoning); this component's only job is to render
+   the `compat` tag it comes back with as a small badge on the card. No `base-type` set (or
+   kind="base") -> byte-for-byte unaffected, same as `market`'s own opt-in contract. */
 (function () {
   'use strict';
   if (window.customElements && customElements.get('mg-model-picker')) return;
@@ -72,6 +98,18 @@
     if (t.indexOf('CHAT') >= 0) return 'Chat';
     return (t.split('_')[0] || 'model').toLowerCase();
   }
+  // picker-parity-round2: render the server's `compat` tag (annotate_lora_compat,
+  // pixai_gallery_backup.py) as a small badge. Hardcoded strings per branch, never the raw
+  // tag value as visible text -- there's nothing untrusted in a same-origin JSON enum, but
+  // matching this file's existing esc()-everything-dynamic discipline costs nothing.
+  // 'unknown' (or no tag at all, i.e. no base selected) renders NOTHING -- see
+  // annotate_lora_compat's own docstring: badging an unresolved architecture as compatible
+  // would overclaim data the server doesn't have.
+  function compatBadge(compat) {
+    if (compat === 'yes') return '<span class="mg-cbadge yes">&#10003; compatible</span>';
+    if (compat === 'no') return '<span class="mg-cbadge no" title="Different base architecture than the selected model &mdash; would fail on submit">&#9888; different arch</span>';
+    return '';
+  }
   function baseLabel(cat) {
     cat = (cat || '').replace(/^uploaded-/, '').replace(/[-_]+/g, ' ').trim();
     if (!cat) return '';
@@ -87,24 +125,37 @@
   // ---- one injected <style>, scoped to the element, reading the shared app tokens ----
   var STYLE_ID = 'mg-model-picker-style';
   var MG_CSS = [
-    'mg-model-picker{display:block;font:13px/1.4 system-ui,sans-serif;color:var(--text,#d6d2e2);}',
+    /* picker-parity-round2: flex column, not block -- lets a host that actually
+       constrains this element's height (e.g. #model-flyout mg-model-picker /
+       .lv-mpick-body mg-model-picker) hand real vertical room down to .mg-grid via
+       flex:1 below. In an unconstrained parent this sizes to content exactly like
+       `display:block` used to (see the file header comment), so nothing regresses for a
+       plain/standalone mount. min-height:0 lets it actually SHRINK inside a flex
+       ancestor instead of the classic flex content-minimum trap. */
+    'mg-model-picker{display:flex;flex-direction:column;min-height:0;font:13px/1.4 system-ui,sans-serif;color:var(--text,#d6d2e2);}',
     'mg-model-picker .mg-q{width:100%;box-sizing:border-box;background:var(--base,#0c0a1c);',
-    ' border:1px solid var(--surface1,#3a3460);border-radius:8px;padding:7px 9px;color:var(--text,#d6d2e2);font:13px/1.2 system-ui;}',
+    ' border:1px solid var(--surface1,#3a3460);border-radius:8px;padding:7px 9px;color:var(--text,#d6d2e2);font:13px/1.2 system-ui;flex:none;}',
     'mg-model-picker .mg-q:focus{outline:0;border-color:var(--accent,#b692e6);}',
     /* O13 market UI (sort + category), opt-in via the `market` attribute -- same shape as
-       the gallery's own #mkt-sort/#mkt-cats. */
-    'mg-model-picker .mg-mktsort{display:flex;gap:6px;margin-top:8px;}',
+       the gallery's own #mkt-sort/#mkt-cats. flex:none -- natural size, never stretched. */
+    'mg-model-picker .mg-mktsort{display:flex;gap:6px;margin-top:8px;flex:none;}',
     'mg-model-picker .mg-mktsort button{flex:1;padding:5px 0;font-size:11px;border-radius:6px;background:var(--surface0,#211f3a);',
     ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
     'mg-model-picker .mg-mktsort button.on{background:var(--surface1,#3a3460);color:var(--text,#d6d2e2);',
     ' border-color:var(--accent,#b692e6);font-weight:600;}',
-    'mg-model-picker .mg-mktcats{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}',
+    'mg-model-picker .mg-mktcats{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;flex:none;}',
     'mg-model-picker .mg-mktcats button{padding:3px 10px;font-size:10.5px;border-radius:11px;background:var(--surface0,#211f3a);',
     ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
     'mg-model-picker .mg-mktcats button.on{background:var(--accent,#b692e6);color:var(--base,#0c0a1c);',
     ' border-color:var(--accent,#b692e6);font-weight:600;}',
+    /* picker-parity-round2: was a fixed max-height:320px (the O12/O13-round bug -- a tall
+       host left dead space below this fixed cap instead of the grid using it). Now a flex
+       item that fills whatever room the (flex-column) host element above has, with its own
+       internal scroll for overflow -- see the file header comment for the unconstrained-
+       parent fallback behavior. min-height keeps it from ever looking collapsed to nothing
+       while a search is in flight in a very short host. */
     'mg-model-picker .mg-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px;',
-    ' max-height:320px;overflow:auto;transition:opacity .12s;}',
+    ' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity .12s;}',
     'mg-model-picker .mg-card{position:relative;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
     ' border-radius:8px;overflow:hidden;cursor:pointer;}',
     'mg-model-picker .mg-card:hover{border-color:var(--accent,#b692e6);}',
@@ -114,7 +165,15 @@
     'mg-model-picker .mg-meta{padding:5px 6px;}',
     'mg-model-picker .mg-nm{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
     'mg-model-picker .mg-sub{display:flex;gap:7px;margin-top:2px;font-size:9.5px;color:var(--subtext,#9a93ab);flex-wrap:wrap;}',
-    'mg-model-picker .mg-empty{color:var(--subtext,#9a93ab);font-size:12px;padding:12px 4px;display:none;font-style:italic;}',
+    /* picker-parity-round2: architecture-compat badge (base-type attribute -> server
+       `compat` tag, see the file header comment). 'yes' = confirmed same architecture as
+       the selected base, 'no' = confirmed different (would fail on submit) -- 'unknown'
+       rows get no badge at all (see annotate_lora_compat's docstring: badging an unknown
+       as compatible would overclaim data the app doesn't have). */
+    'mg-model-picker .mg-cbadge{display:inline-block;margin-top:3px;font-size:9px;padding:1px 6px;border-radius:5px;font-weight:600;}',
+    'mg-model-picker .mg-cbadge.yes{background:rgba(148,226,178,.16);color:var(--green,#94e2b2);}',
+    'mg-model-picker .mg-cbadge.no{background:rgba(243,139,168,.16);color:var(--red,#f38ba8);}',
+    'mg-model-picker .mg-empty{color:var(--subtext,#9a93ab);font-size:12px;padding:12px 4px;display:none;font-style:italic;flex:none;}',
     /* the floating preview -- fixed so the Loom canvas transform:scale() can't distort it */
     'mg-model-picker .mg-preview{position:fixed;z-index:600;width:300px;background:var(--mantle,#131024);',
     ' border:1px solid var(--surface1,#3a3460);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);',
@@ -153,6 +212,11 @@
       this._market = this.hasAttribute('market');
       this._sort = 'popular';
       this._category = '';
+      // picker-parity-round2: the currently-selected base model's resolved model_type, set
+      // (and kept updated) by the host -- see the file header comment. Only meaningful for
+      // kind="lora"; a base-kind mount reads it but never sends it (nothing to compat-sort
+      // a base model against).
+      this._baseType = this.getAttribute('base-type') || '';
       this.innerHTML =
         '<input class="mg-q" type="text" placeholder="search models…" aria-label="Search models">' +
         (this._market ? this._marketSkeleton() : '') +
@@ -204,10 +268,18 @@
       );
     }
 
-    static get observedAttributes() { return ['kind']; }
+    static get observedAttributes() { return ['kind', 'base-type']; }
     attributeChangedCallback(name, _old, val) {
       if (name === 'kind' && this._built && val && val !== this._kind) {
         this._kind = val; this._search();
+      }
+      // picker-parity-round2: base-type changes (a new base model picked, or cleared)
+      // after the LoRA picker's own results are already on screen -- re-search so the
+      // compat sort/badges reflect the NEW base immediately, not just on the next
+      // keystroke/category click. '' is a legitimate value (base cleared), so this fires
+      // even when val is falsy -- unlike 'kind' above, which never goes empty in practice.
+      if (name === 'base-type' && this._built && (val || '') !== this._baseType) {
+        this._baseType = val || ''; this._search();
       }
     }
 
@@ -224,6 +296,12 @@
               '&size=24&q=' + encodeURIComponent(this._q || '');
       if (this._market) {
         u += '&sort=' + encodeURIComponent(this._sort) + '&category=' + encodeURIComponent(this._category);
+      }
+      // picker-parity-round2: architecture-aware compat sort/badge -- LoRA only (nothing
+      // to compat-sort a base-model search against), and only once a base is actually
+      // selected (empty base-type -> server leaves results untouched, see api_model_search).
+      if (this._kind === 'lora' && this._baseType) {
+        u += '&base_type=' + encodeURIComponent(this._baseType);
       }
       fetch(u).then(function (r) { return r.json(); }).then(function (d) {
         if (mine !== self._seq) return;
@@ -251,7 +329,8 @@
         var uses = m.ref_count ? '<span>◈ ' + fmtCompact(m.ref_count) + '</span>' : '';
         c.innerHTML = cov +
           '<div class="mg-meta"><div class="mg-nm" title="' + esc(m.title) + '">' + esc(m.title) + '</div>' +
-          '<div class="mg-sub"><span>' + tyShort(m.type) + '</span><span>♥ ' + fmt(m.liked_count) + '</span>' + uses + '</div></div>';
+          '<div class="mg-sub"><span>' + tyShort(m.type) + '</span><span>♥ ' + fmt(m.liked_count) + '</span>' + uses + '</div>' +
+          compatBadge(m.compat) + '</div>';
         c.addEventListener('click', function () { self._pick(m, c); });
         // Debounced (D-11): a raw mouseenter re-triggered an instant, un-animated,
         // freshly-repositioned popup on every card the mouse passed over while

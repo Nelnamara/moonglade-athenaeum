@@ -22,9 +22,15 @@ const src = readFileSync(path.join(__dirname, "../master-storyboard.jsx"), "utf8
 
 describe("Image tab LoRA↔base compatibility warning (L536 closes the D-11 deferral)", () => {
   test("bindPicker resolves the selected base model's model_type", () => {
-    assert.match(src, /setImgModel\(\(cur\) => \(cur && cur\.model_id === m\.model_id\) \? \{ \.\.\.cur, model_type: d\.model_type \|\| "" \} : cur\)/,
-      "bindPicker must capture the base model's model_type from /api/model-version, or " +
-      "loraIncompat has nothing real to compare a picked LoRA against");
+    // picker-parity-round2 (problem 4/5): bindPicker's fetch grew from the single-version
+    // shape (`d.model_type`) to ?all=1's version LIST (`v.model_type`, v = versions[0], the
+    // same "latest" the old fetch always resolved) so the version picker + sampling_method +
+    // capabilities can be shown too -- model_type capture itself is unchanged in spirit,
+    // just reading from the new shape.
+    assert.match(src,
+      /setImgModel\(\(cur\) => \(cur && cur\.model_id === m\.model_id\) \? \{\s*\n\s*\.\.\.cur, version_id: v\.version_id \|\| "", model_type: v\.model_type \|\| "",/,
+      "bindPicker must capture the base model's model_type from /api/model-version?all=1, " +
+      "or loraIncompat has nothing real to compare a picked LoRA against");
   });
 
   test("each LoRA chip computes incompat via the (previously dead) imported loraIncompat()", () => {
