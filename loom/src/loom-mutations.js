@@ -306,3 +306,51 @@ export function resolveLoraPayload(loras) {
 export function anyLoraUnresolved(loras) {
   return (loras || []).some((l) => !l.version_id);
 }
+
+// ---------- Image-tab generation dimensions + submit/price body (L536) ----------
+// Ported from pixai_gallery.py's Gen.d8(): round to the nearest multiple of 8 and clamp to
+// PixAI's real [64,4096] bounds -- the server's own _dim only floors to /8 and never clamps,
+// so a client that skips this could ask for a size the server accepts but PixAI's own site
+// never would.
+export function snap8(n) {
+  return Math.max(64, Math.min(4096, Math.round((Number(n) || 0) / 8) * 8));
+}
+
+// Ported from pixai_gallery.py's Gen.dims(), minus the DOM reads: custom W×H (both > 0)
+// wins; otherwise an aspect-ratio pair scaled so the long edge equals `size`. Same shape,
+// now unit-tested here instead of only ever exercised by hand in a browser.
+export function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}) {
+  const cw = Number(customW) || 0, ch = Number(customH) || 0;
+  if (cw > 0 && ch > 0) return { w: snap8(cw), h: snap8(ch), custom: true };
+  const rw = Number(aspectW) || 1, rh = Number(aspectH) || 1;
+  const sz = Number(size) || 1024;
+  const w = rw >= rh ? sz : (sz * rw / rh);
+  const h = rw >= rh ? (sz * rh / rw) : sz;
+  return { w: snap8(w), h: snap8(h), custom: false };
+}
+
+// The Image tab's full /api/generate (and /api/price preview) body -- ONE shape shared by
+// the debounced cost badge and the real submit, so the badge can never show a price for
+// different settings than what actually submits (see master-storyboard.jsx's imgCostRef
+// effect and genImage()). `imgAdv` is the Advanced-section state L536 added for full
+// PixAI field parity with pixai_gallery.py's own Generate tab -- this is the JS mirror of
+// that tab's payload(), same field names/defaults, minus the DOM reads.
+export function buildImgGenBody(imgModel, imgLoras, imgAdv, prompt) {
+  const a = imgAdv || {};
+  const dims = resolveGenDims({ aspectW: a.aspectW, aspectH: a.aspectH, size: a.size,
+                                customW: a.customW, customH: a.customH });
+  return {
+    model_id: (imgModel && imgModel.model_id) || "",
+    prompt: prompt || "",
+    loras: resolveLoraPayload(imgLoras),
+    negative: a.negative || "",
+    width: dims.w, height: dims.h,
+    mode: a.mode || "auto",
+    steps: Number(a.steps) || 25,
+    cfg: Number(a.cfg) || 7,
+    count: Number(a.count) || 1,
+    seed: String(a.seed || "").trim(),
+    high_priority: !!a.highPriority,
+    prompt_helper: !!a.promptHelper,
+  };
+}

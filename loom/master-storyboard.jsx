@@ -26,6 +26,7 @@ import {
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved,
   landInFirstAct, importedFootagePatch,
+  buildImgGenBody,
 } from "./src/loom-mutations.js";
 
 /* =========================================================================
@@ -515,6 +516,12 @@ const V2_STYLES = `
 .lv-drafttarget select.lv-sel{display:block;width:100%;flex:none;padding:7px 8px;font-size:11px;}
 .lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
+/* L536: Image tab field-parity additions -- a 2-up row (Size/Custom W×H, Mode/Count) and a
+   labeled checkbox row, mirroring pixai_gallery.py's .gen-row/.gen-check at the same sizing. */
+.lv-row2{display:flex;gap:8px;margin-top:8px;}
+.lv-row2>div{flex:1;min-width:0;}
+.lv-ck{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:11px;margin-top:8px;cursor:pointer;}
+.lv-advnote{display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--overlay0);}
 /* Deep Focus: double-click a board card to open a maximized, distraction-free editor
    for just that shot (title/mode/duration/frames) without leaving the V2 overlay. */
 .lv-df-veil{position:fixed;inset:0;z-index:450;background:rgba(6,4,14,.72);display:flex;align-items:center;justify-content:center;padding:24px;}
@@ -659,7 +666,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -712,12 +719,44 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   }, [deepFocus]);
   // Bridge the shared <mg-model-picker> web component to React: a ref callback (React
   // doesn't route custom events through JSX props) that binds the 'mg-pick' listener once.
+  // imgModelSeqRef guards the /api/model-version fetch below the same way the Gallery's own
+  // selectCard() guards its identical fetch with a local selSeq/mySeq pair: a fast second
+  // pick must not let the FIRST pick's now-stale response land after it.
+  const imgModelSeqRef = useRef(0);
   const bindPicker = useCallback((el) => {
     if (el && !el._mgBound) {
       el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
+      el.addEventListener("mg-pick", (e) => {
+        const m = { model_id: e.detail.model_id, title: e.detail.title };
+        setImgModel(m);
+        setModelDefaults(null);
+        // L536 + D-11: resolve model_type (so the LoRA compat warning has a real base to
+        // compare against -- the Loom never fetched this at all before) and prefill the
+        // model author's own tuned preset (negative/steps/cfg), mirroring
+        // pixai_gallery.py's Gen.applyModelDefaults() exactly: only for fields the model
+        // actually has data for, and it OVERWRITES whatever's currently in imgAdv, same as
+        // the Gallery's own (deliberate, already-shipped) behavior on every base-model pick.
+        const mySeq = ++imgModelSeqRef.current;
+        fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id))
+          .then((r) => r.json())
+          .then((d) => {
+            if (mySeq !== imgModelSeqRef.current) return;   // a newer pick superseded this fetch
+            setImgModel((cur) => (cur && cur.model_id === m.model_id) ? { ...cur, model_type: d.model_type || "" } : cur);
+            const has = d.negative_prompt || d.sampling_steps || d.cfg_scale;
+            setModelDefaults(has ? { negative_prompt: d.negative_prompt || "", sampling_steps: d.sampling_steps || null, cfg_scale: d.cfg_scale || null } : null);
+            if (has) {
+              setImgAdv((cur) => ({
+                ...cur,
+                negative: d.negative_prompt || cur.negative,
+                steps: d.sampling_steps || cur.steps,
+                cfg: d.cfg_scale || cur.cfg,
+              }));
+            }
+          })
+          .catch(() => {});
+      });
     }
-  }, [setImgModel]);
+  }, [setImgModel, setImgAdv, setModelDefaults]);
   // D-11: the LoRA picker uses mg-model-picker's opt-in `multi` mode, whose mg-pick
   // detail shape is { model, selected } (not the raw row bindPicker above expects) --
   // upsert-by-model_id on selected=true (covers both the initial pending entry and the
@@ -1013,9 +1052,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     if (!badge) return;
     const prompt = (active.c.imgPrompt || "").trim();
     if (!imgModel || !prompt || anyLoraUnresolved(imgLoras)) { badge.clear(); return; }
-    const t = setTimeout(() => priceInto(imgCostRef, { model_id: imgModel.model_id, prompt }), 250);
+    // L536: price the SAME body genImage() will actually submit (size/mode/count/seed/etc
+    // all affect real PixAI cost) -- imgAdv is safe as a dependency here despite being an
+    // object: unlike active.c/project.assets, it's leaf useState that only gets a new
+    // reference when a field genuinely changes, never as a side effect of an unrelated re-render.
+    const t = setTimeout(() => priceInto(imgCostRef, buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)), 250);
     return () => clearTimeout(t);
-  }, [imgModel, imgLoras, active.c.id, active.c.imgPrompt]);
+  }, [imgModel, imgLoras, imgAdv, active.c.id, active.c.imgPrompt]);
   useEffect(() => {
     const badge = editCostRef.current;
     if (!badge) return;
@@ -1394,9 +1437,20 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <mg-model-picker ref={bindPicker} kind="base"></mg-model-picker>
           {imgLoras.length > 0 && (
             <div className="lv-loras">
-              {imgLoras.map((l) => (
-                <div key={l.model_id} className={"lv-lchip" + (l.failed ? " failed" : "")}>
-                  <span className="lv-lnm" title={l.title}>{l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : ""}</span>
+              {imgLoras.map((l) => {
+                // L536 + D-11: the base-model-compat warning D-11 explicitly deferred
+                // ("would need the Loom to additionally resolve the selected base model's
+                // own type, which it doesn't today") -- bindPicker above now DOES resolve
+                // it, so the already-imported, already-tested loraIncompat() (previously
+                // dead weight in this file) has real data to compare against. Reuses the
+                // .failed visual treatment -- both states mean "this LoRA won't work as-is".
+                const incompat = loraIncompat(imgModel && imgModel.model_type, l.lora_base_type);
+                return (
+                <div key={l.model_id} className={"lv-lchip" + ((l.failed || incompat) ? " failed" : "")}>
+                  <span className="lv-lnm"
+                    title={incompat ? l.title + " — needs a different base architecture than the one selected; remove it or switch the base" : l.title}>
+                    {l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : (incompat ? " ⚠" : "")}
+                  </span>
                   <input type="number" step="0.05" min="0" max="2" value={l.weight}
                     title="Weight"
                     onChange={(ev) => { const w = +ev.target.value || 0;
@@ -1404,7 +1458,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   <button type="button" className="lv-lrm" title="Remove"
                     onClick={() => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))}>×</button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
           <button type="button" className={"lv-chip lv-loratoggle" + (loraOpen ? " on" : "")} onClick={() => setLoraOpen((v) => !v)}>
@@ -1415,8 +1470,100 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
           {sel && <button className="lv-mini2" onClick={() => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, (c.openFrame && c.openFrame.desc) || "", c.lighting || ""].filter(Boolean).join(", ") }))}>&#8615; seed from shot description</button>}
+          {/* L536: full PixAI field parity with the gallery's own Generate tab (owner-decided
+              scope, 2026-07-23) -- Advanced (negative/steps/cfg), 8 aspect-ratio buttons,
+              Size + custom W×H, Mode, Count, Seed, High-priority, Prompt helper. Same field
+              names/defaults/order as pixai_gallery.py's #gen-mode-generate, submitted via
+              buildImgGenBody() (loom-mutations.js) so the price badge below and the real
+              submit in genImage() can never disagree about what these fields do. */}
+          <details>
+            <summary style={{ cursor: "pointer", color: "var(--subtext)", fontSize: 11 }}>Advanced</summary>
+            <textarea className="lv-ta" style={{ marginTop: 5 }} value={imgAdv.negative}
+              placeholder="lowres, text, watermark…"
+              onChange={(ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))} />
+            <div className="lv-row2">
+              <div><label className="lv-lab" style={{ margin: "6px 0 3px" }}>Steps</label>
+                <input className="lv-in" type="number" min="1" max="150" step="1" value={imgAdv.steps}
+                  onChange={(ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))} /></div>
+              <div><label className="lv-lab" style={{ margin: "6px 0 3px" }}>CFG scale</label>
+                <input className="lv-in" type="number" min="1" max="30" step="0.5" value={imgAdv.cfg}
+                  onChange={(ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))} /></div>
+            </div>
+            {modelDefaults && (
+              <div className="lv-advnote">
+                <span>&#10003; using this model's tuned preset</span>
+                <button type="button" className="lv-mini2" style={{ margin: 0 }} onClick={() => {
+                  setImgAdv((a) => ({ ...a,
+                    negative: modelDefaults.negative_prompt || a.negative,
+                    steps: modelDefaults.sampling_steps || a.steps,
+                    cfg: modelDefaults.cfg_scale || a.cfg }));
+                }}>&#8630; reset</button>
+              </div>
+            )}
+          </details>
+          <label className="lv-lab">Aspect</label>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {[[1, 1, "1:1"], [3, 4, "3:4"], [4, 3, "4:3"], [2, 3, "2:3"], [3, 2, "3:2"],
+              [9, 16, "9:16"], [16, 9, "16:9"], [3, 1, "3:1"]].map(([rw, rh, label]) => (
+              <button key={label} type="button"
+                className={"lv-chip" + (imgAdv.aspectW === rw && imgAdv.aspectH === rh ? " on" : "")}
+                onClick={() => setImgAdv((a) => ({ ...a, aspectW: rw, aspectH: rh }))}>{label}</button>
+            ))}
+          </div>
+          <div className="lv-row2">
+            <div><label className="lv-lab">Size · long edge</label>
+              <select className="lv-sel" style={{ width: "100%" }} value={imgAdv.size}
+                onChange={(ev) => setImgAdv((a) => ({ ...a, size: +ev.target.value }))}>
+                <option value="768">S · 768</option>
+                <option value="1024">M · 1024</option>
+                <option value="1536">L · 1536</option>
+                <option value="2048">XL · 2048</option>
+              </select></div>
+            <div><label className="lv-lab">Custom W&times;H <span className="lv-dim">· overrides</span></label>
+              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                <input className="lv-in" type="number" min="64" max="4096" step="8" placeholder="W" value={imgAdv.customW}
+                  onChange={(ev) => setImgAdv((a) => ({ ...a, customW: ev.target.value }))} />
+                <span className="lv-dim">&times;</span>
+                <input className="lv-in" type="number" min="64" max="4096" step="8" placeholder="H" value={imgAdv.customH}
+                  onChange={(ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))} />
+              </div></div>
+          </div>
+          <div className="lv-dim" style={{ fontSize: 11, marginTop: 5 }}>
+            {(() => { const d = resolveGenDims(imgAdv); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}
+          </div>
+          <div className="lv-row2">
+            <div><label className="lv-lab">Mode</label>
+              <select className="lv-sel" style={{ width: "100%" }} value={imgAdv.mode}
+                onChange={(ev) => setImgAdv((a) => ({ ...a, mode: ev.target.value }))}>
+                <option value="auto">Auto</option><option value="lite">Lite</option>
+                <option value="standard">Standard</option><option value="pro">Pro</option>
+                <option value="ultra">Ultra</option>
+              </select></div>
+            <div><label className="lv-lab">Count</label>
+              <select className="lv-sel" style={{ width: "100%" }} value={imgAdv.count}
+                onChange={(ev) => setImgAdv((a) => ({ ...a, count: +ev.target.value }))}>
+                <option value="1">1</option><option value="2">2</option>
+                <option value="3">3</option><option value="4">4</option>
+              </select></div>
+          </div>
+          <label className="lv-lab">Seed <span className="lv-dim">· blank = random</span></label>
+          <input className="lv-in" type="number" placeholder="random" value={imgAdv.seed}
+            onChange={(ev) => setImgAdv((a) => ({ ...a, seed: ev.target.value }))} />
+          <label className="lv-ck" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it.">
+            <input type="checkbox" checked={imgAdv.highPriority}
+              onChange={(ev) => setImgAdv((a) => ({ ...a, highPriority: ev.target.checked }))} /> High priority · Turbo (faster)</label>
+          <label className="lv-ck">
+            <input type="checkbox" checked={imgAdv.promptHelper}
+              onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
           <mg-cost-badge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." card-label="a card"></mg-cost-badge>
-          <button className="lv-go" disabled={busyI || anyLoraUnresolved(imgLoras)} onClick={() => genImage(active)}>{busyI ? (gi.msg || "generating…") : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…" : "✦ Generate reference image"}</button>
+          <button className="lv-go"
+            disabled={busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type))}
+            onClick={() => genImage(active)}>
+            {busyI ? (gi.msg || "generating…")
+              : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…"
+              : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA — remove or switch base"
+              : "✦ Generate reference image"}
+          </button>
           {gi.phase === "error" && <div className="lv-gerr">{gi.msg}</div>}
           {gi.mid && (
             <div className="lv-imgresult">
@@ -2159,6 +2306,27 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
   const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
   const [imgLoras, setImgLoras] = useState([]);           // D-11: [{model_id,title,version_id,weight,lora_base_type,trigger_words,failed}]
+  // L536: the Image tab's Advanced/aspect/size/mode/count/seed/checkbox state -- full PixAI
+  // field parity with pixai_gallery.py's own Generate tab (owner-decided scope, 2026-07-23:
+  // "full PixAI parity, not a curated subset, for BOTH the Gallery and the Loom"). Lives
+  // alongside imgModel/imgLoras (drawer-wide, not per-shot) for the same reason those do --
+  // one Image-tab "form" shared across whichever shot is active, matching the Gallery's own
+  // single Generate drawer. Defaults mirror the Gallery's HTML exactly (gen-size selected=
+  // 1024, gen-steps value=25, gen-cfg value=7, gen-ph checked, 1:1 aspect .on by default).
+  const [imgAdv, setImgAdv] = useState(() => ({
+    negative: "", steps: 25, cfg: 7,
+    aspectW: 1, aspectH: 1, size: 1024, customW: "", customH: "",
+    mode: "auto", count: 1, seed: "", highPriority: false, promptHelper: true,
+  }));
+  // The model author's own tuned preset (negative/steps/cfg), fetched via /api/model-version
+  // when a BASE model resolves -- mirrors pixai_gallery.py's Gen.applyModelDefaults() (D-11
+  // audit note: "resolve_version_meta already fetches these; the drawer just never used
+  // them" -- true of the Gallery's OWN drawer at the time; the Loom never fetched
+  // /api/model-version for its base model at all, so it never even had the data). Only
+  // fields the model actually has data for are prefilled; a model with no tuned preset
+  // leaves imgAdv's current negative/steps/cfg alone. modelDefaults holds what was offered
+  // (for the "using this model's tuned preset" note); null when the current model has none.
+  const [modelDefaults, setModelDefaults] = useState(null);
   const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
   const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
   const [batching, setBatching] = useState(false);
@@ -2465,11 +2633,15 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const prompt = (c.imgPrompt || "").trim();
     if (!imgModel) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "pick a model first" } })); return; }
     if (!prompt) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter an image prompt" } })); return; }
-    if (!(await confirmSpend({ model_id: imgModel.model_id, prompt }, `Generate a reference image for ${c.title || "this shot"}?`))) return;
+    if (anyLoraUnresolved(imgLoras)) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "still waiting on a LoRA to resolve" } })); return; }
+    // L536: ONE body, shared by the price check just below and the real submit two lines
+    // later -- so the free-card/cost check the user is agreeing to is exactly what fires.
+    const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
+    if (!(await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`))) return;
     setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_id: imgModel.model_id, prompt, loras: resolveLoraPayload(imgLoras) }) });
+        body: JSON.stringify(body) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating…" } }));
@@ -2637,7 +2809,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
 
   return {
     genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
-    imgLoras, setImgLoras, genEditState, setGenEditState,
+    imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
+    genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
     generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate,
@@ -2746,7 +2919,8 @@ export default function App() {
   }, [pickCb]);
 
   const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
-    imgLoras, setImgLoras, genEditState, setGenEditState,
+    imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
+    genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
     pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate }
@@ -2857,7 +3031,9 @@ export default function App() {
         setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
         moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
         genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
-        imgLoras={imgLoras} setImgLoras={setImgLoras} genImage={genImage} routeImg={routeImg}
+        imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
+        modelDefaults={modelDefaults} setModelDefaults={setModelDefaults}
+        genImage={genImage} routeImg={routeImg}
         genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
         projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
         batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
