@@ -4372,13 +4372,16 @@ __DESIGN_TOKENS__
   .card .meta .date  { font-size: 10px; color: var(--overlay0); }
   /* Privacy blur (opt-in toggle): blur every thumbnail until hover. Useful on
      LAN / mobile / over-the-shoulder. NSFW-flagged cards (data-nsfw="1") blur
-     more heavily when the flag is known. Audit 2026-07-21 S5: .pick-cell (the gallery
-     Picker's own grid, .pick-modal below) never carried ANY of this -- picking an
-     image painted the whole catalog unblurred regardless of Privacy Blur. Same two
-     rules, same selector shape, just a second class. */
-  body.privacy-blur .card img, body.privacy-blur .pick-cell img, body.privacy-blur #gen-ref-slot img { filter: blur(16px); transition: filter .12s; }
-  body.privacy-blur .card[data-nsfw="1"] img, body.privacy-blur .pick-cell[data-nsfw="1"] img, body.privacy-blur #gen-ref-slot[data-nsfw="1"] img { filter: blur(28px); }
-  body.privacy-blur .card:hover img, body.privacy-blur .pick-cell:hover img, body.privacy-blur #gen-ref-slot:hover img { filter: none; }
+     more heavily when the flag is known. Audit 2026-07-21 S5 originally added a
+     .pick-cell branch here for the old #pick-modal's own grid; O13 (Phase 2) replaced
+     that grid with <mg-gallery-picker>, which carries its OWN privacy-blur rule for
+     .mg-pk-cell (mg-gallery-picker.js's injected <style>) -- so .pick-cell would only
+     ever match a class this page no longer produces. Dropped rather than left as a
+     rule matching nothing; #gen-ref-slot (the Generate tab's own reference-image slot,
+     unrelated to the picker grid) still needs its branch here. */
+  body.privacy-blur .card img, body.privacy-blur #gen-ref-slot img { filter: blur(16px); transition: filter .12s; }
+  body.privacy-blur .card[data-nsfw="1"] img, body.privacy-blur #gen-ref-slot[data-nsfw="1"] img { filter: blur(28px); }
+  body.privacy-blur .card:hover img, body.privacy-blur #gen-ref-slot:hover img { filter: none; }
   .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
   /* --accent, not --lavender: the two are the same colour in the default skin, so this
      read as correct, but a skin that retints --accent (nightfallen: #a678f0 vs a
@@ -5763,27 +5766,9 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-seg button.on{background:var(--lavender);color:var(--base);border-color:var(--lavender);font-weight:600;}
   .gen-search{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;margin-bottom:10px;}
   .gen-search:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
-  .mkt-sort{display:flex;gap:6px;margin-bottom:8px;}
-  .mkt-sort button{flex:1;padding:5px 0;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
-  .mkt-sort button.on{background:var(--surface1);color:var(--text);border-color:var(--accent-soft);font-weight:600;}
-  .mkt-cats{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}
-  .mkt-cats button{padding:3px 10px;font-size:10.5px;border-radius:11px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
-  .mkt-cats button.on{background:var(--accent);color:var(--base);border-color:var(--accent);font-weight:600;}
-  .gen-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .12s;}
-  .gen-card{border-radius:12px;overflow:hidden;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;position:relative;}
-  .gen-card:hover{border-color:var(--overlay0);}
-  .gen-card.sel{border:2px solid var(--lavender);box-shadow:0 0 0 2px rgba(182,146,230,.25);}
-  .gen-card .cov{aspect-ratio:1;width:100%;object-fit:cover;display:block;background:var(--surface1);}
-  .gen-card .cov.blur{filter:blur(15px);}
-  .gen-card .meta{padding:5px 7px;}
-  .gen-card .nm{font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .gen-card .sub{display:flex;align-items:center;gap:7px;margin-top:2px;font-size:10px;}
-  .gen-card .ty{color:var(--emerald);}
-  .gen-card .lk{color:var(--subtext);}
-  .gen-card .uses{color:var(--lavender);margin-left:auto;}
-  .gen-card .chk{position:absolute;top:4px;right:4px;color:var(--lavender);background:var(--mantle);border-radius:50%;font-size:12px;width:18px;height:18px;display:none;align-items:center;justify-content:center;border:1px solid var(--lavender);}
-  .gen-card.sel .chk{display:flex;}
-  .gen-empty{color:var(--subtext);font-size:12px;padding:22px 4px;text-align:center;}
+  /* O12: .mkt-sort/.mkt-cats/.gen-grid/.gen-card/.gen-empty are gone -- the flyout's search/
+     grid/hover-preview/market UI is <mg-model-picker> now (static/mg-model-picker.js), which
+     injects its own .mg-mktsort/.mg-mktcats/.mg-grid/.mg-card/.mg-empty via its own <style>. */
   .gen-form{border-top:1px dashed var(--surface1);margin-top:12px;padding-top:10px;}
   .gen-lbl{color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;}
   .gen-ta{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 9px;font-size:13px;font-family:inherit;resize:vertical;}
@@ -5870,12 +5855,10 @@ document.addEventListener('DOMContentLoaded', function(){
   /* Top/bottom docks are thin full-width bars -- an edge-popped flyout gets clipped.
      Render the model browser as a centered overlay instead so it's never obscured. */
   #gen-drawer.dock-top #model-flyout,#gen-drawer.dock-bottom #model-flyout{position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);width:540px;max-width:92vw;height:auto;max-height:82vh;border:1px solid var(--surface1);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);}
-  #pick-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
-  #pick-scrim.open{display:block;}
-  #pick-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
-  .pick-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
-  .pick-filters select{background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:5px 8px;font-size:12px;}
-  #pick-modal.open{display:flex;}
+  /* O13: #pick-scrim/#pick-modal/.pick-filters and their CSS are gone -- <mg-gallery-picker>
+     (static/mg-gallery-picker.js) brings its own complete self-contained overlay/box/filter
+     chrome, injected client-side. #similar-modal below is UNRELATED (Similar.js, not Picker)
+     and still uses the shared .pick-head/.pick-empty rules further down, kept as-is. */
   #similar-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
   #similar-scrim.open{display:block;}
   #similar-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
@@ -5889,21 +5872,11 @@ document.addEventListener('DOMContentLoaded', function(){
   .pick-head{display:flex;align-items:center;margin-bottom:10px;}
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
   .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
-  /* FIXED row height -- the bulletproof image-grid pattern. No aspect-ratio, no
-     percentage heights, so cells can't collapse to slivers or blow out tall. */
-  #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));grid-auto-rows:120px;gap:8px;overflow-y:auto;transition:opacity .12s;flex:1;min-height:120px;align-content:start;}
-  .pick-cell{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--surface0);}
-  .pick-cell:hover{border-color:var(--lavender);}
-  /* aspect-ratio on the IMG (not the cell) -- mirrors the main gallery grid. Putting it
-     on the cell + height:100% on the img is a percentage-height-against-indefinite-height
-     trap: the img blows out to its intrinsic height and cells overlap into a torn smear. */
-  .pick-cell{grid-row:span 1;}
-  .pick-cell img{width:100%;height:100%;object-fit:cover;display:block;background:var(--surface0);}
+  /* .pick-head/.pick-empty above are shared with #similar-modal (Similar.js) and stay live.
+     #pick-grid/.pick-cell/#pick-up/#pick-more below were exclusively the old #pick-modal's
+     own grid/upload/load-more chrome -- gone with it (O13); <mg-gallery-picker> has its own
+     .mg-pk-grid/.mg-pk-cell/.mg-pk-upload (infinite-scroll, no separate load-more button). */
   .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
-  #pick-up{flex:0 0 auto;height:33px;padding:0 12px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;}
-  #pick-up:hover{border-color:var(--overlay0);}
-  #pick-more{margin-top:10px;padding:8px 0;width:100%;flex:0 0 auto;font-size:12.5px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;}
-  #pick-more:hover{border-color:var(--lavender);color:var(--lavender);}
   #model-preview{position:fixed;z-index:220;width:300px;max-width:80vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);display:none;overflow:hidden;pointer-events:none;}
   #model-preview.open{display:block;}
   #model-preview img{width:100%;max-height:340px;object-fit:cover;display:block;background:var(--surface1);}
@@ -6122,60 +6095,15 @@ document.addEventListener('DOMContentLoaded', function(){
         <button id="gen-k-base" class="on" onclick="Gen.setKind('base')">Models</button>
         <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
       </div>
-      <input class="gen-search" id="gen-q" placeholder="Search models&hellip;" autocomplete="off">
-      <div class="mkt-sort" id="mkt-sort" style="display:none;">
-        <button id="mkt-popular" class="on" onclick="Gen.setSort('popular')" title="PixAI&#39;s most-used order">Popular</button>
-        <button id="mkt-newest" onclick="Gen.setSort('newest')" title="Newest uploads first">Newest</button>
-      </div>
-      <div class="mkt-cats" id="mkt-cats" style="display:none;">
-        <button class="on" data-cat="" onclick="Gen.setCat('')">All</button>
-        <button data-cat="character" onclick="Gen.setCat('character')">Character</button>
-        <button data-cat="style" onclick="Gen.setCat('style')">Style</button>
-        <button data-cat="pose" onclick="Gen.setCat('pose')">Pose</button>
-        <button data-cat="clothing" onclick="Gen.setCat('clothing')">Clothing</button>
-        <button data-cat="background" onclick="Gen.setCat('background')">Background</button>
-        <button data-cat="detail" onclick="Gen.setCat('detail')">Detail</button>
-      </div>
-      <div class="gen-grid" id="gen-grid"></div>
-      <div class="gen-empty" id="gen-empty" style="display:none;"></div>
+      <!-- O12: the search box, grid, hover preview, and (for LoRAs) the market sort/category
+           strip all live inside the two <mg-model-picker> elements Gen.ensurePickers() mounts
+           here lazily on first open -- see the Picker/Gen bridge in the script below. -->
+      <div id="gen-picker-host"></div>
     </div>
   </div>
 </aside>
-<div id="pick-scrim" onclick="Picker.close()"></div>
-<div id="pick-modal" aria-hidden="true" aria-label="Pick from your gallery">
-  <div class="pick-head"><span class="t">&#9648; Select from your gallery</span>
-    <button class="x" onclick="Picker.close()" aria-label="Close">&times;</button></div>
-  <div style="display:flex;gap:6px;">
-    <input class="gen-search" id="pick-q" style="flex:1;" placeholder="Search your images&hellip;" autocomplete="off">
-    <button type="button" id="pick-up" onclick="Picker.upload()" title="Upload a local file (free)">&#8679; Upload</button>
-    <input type="file" id="pick-file" accept="image/*" style="display:none;" onchange="Picker.onFile()">
-  </div>
-  <div class="pick-filters">
-    <select id="pick-collection" onchange="Picker.onFilter()">
-      <option value="">All collections</option>
-      {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-    </select>
-    <select id="pick-source" onchange="Picker.onFilter()">
-      <option value="">Any source</option>
-      <option value="api">Generated (AI)</option>
-      <option value="local">Imported local</option>
-    </select>
-    <select id="pick-rating" onchange="Picker.onFilter()">
-      <option value="0">Any rating</option>
-      <option value="1">&#9733;+</option><option value="2">&#9733;&#9733;+</option>
-      <option value="3">&#9733;&#9733;&#9733;+</option><option value="4">&#9733;&#9733;&#9733;&#9733;+</option>
-      <option value="5">&#9733;&#9733;&#9733;&#9733;&#9733;</option>
-    </select>
-    <select id="pick-sort" onchange="Picker.onFilter()">
-      <option value="newest">Newest first</option>
-      <option value="oldest">Oldest first</option>
-    </select>
-  </div>
-  <label class="gen-check" style="margin:0 0 8px;"><input type="checkbox" id="pick-copy" onchange="Picker.toggleCopy()"> Copy the image&rsquo;s prompt to the clipboard when picking</label>
-  <div id="pick-grid" onscroll="Picker.onScroll()"></div>
-  <div class="pick-empty" id="pick-empty" style="display:none;"></div>
-  <button type="button" id="pick-more" onclick="Picker.more()" style="display:none;">Load more</button>
-</div>
+<!-- O13: the gallery's picker is <mg-gallery-picker> now (mounted/unmounted by the
+     Picker IIFE below on open()/close()) -- no static markup needed here anymore. -->
 <div id="similar-scrim" onclick="Similar.close()"></div>
 <div id="similar-modal" aria-hidden="true" aria-label="Visually similar images">
   <div class="pick-head"><span class="t">✧ Visually similar</span>
@@ -6293,6 +6221,11 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script src="/static/picker-core.js"></script>
+<!-- O12/O13 (Phase 2): the Generate tab's model/LoRA flyout and the gallery's own picker are
+     the shared <mg-model-picker>/<mg-gallery-picker> components now (same two the Loom's
+     _LOOM_SHELL already loads) -- see Gen's model-flyout bridge and the Picker IIFE below. -->
+<script src="/static/mg-model-picker.js"></script>
+<script src="/static/mg-gallery-picker.js"></script>
 <!-- <mg-cost-badge> is the one renderer for "this costs N credits / a free card covers it"
      (static/mg-cost-badge.js). Loaded FIRST because it is a hard dependency of three things on
      this page: the Generate and Edit tabs' own cost lines below, and <mg-generate-drawer>'s
@@ -6301,11 +6234,11 @@ document.addEventListener('DOMContentLoaded', function(){
      spends -- a silent failure on the spend path, which is why the pairing has a test
      (test_web_pick.py::test_cost_badge_ships_with_every_price_surface) and not just a habit. -->
 <script src="/static/mg-cost-badge.js"></script>
-<!-- The shared <mg-generate-drawer> now mounts in the gallery's Video tab too (not just the
-     Loom, which loads it in _LOOM_SHELL). It's picker-agnostic -- no mg-model-picker /
-     mg-gallery-picker dependency -- so this one script plus the badge above is all the gallery
-     mount needs; the host wires its mg-pick-request to the gallery Picker in the inline JS
-     below. -->
+<!-- The shared <mg-generate-drawer> mounts in the gallery's Video tab too (not just the Loom,
+     which loads it in _LOOM_SHELL). It remains picker-agnostic itself -- no mg-model-picker /
+     mg-gallery-picker dependency of its OWN -- those two are loaded above for the Generate
+     tab's model-flyout and Picker, unrelated to the drawer; the drawer's own mg-pick-request
+     is wired to the gallery Picker in the inline JS below, same as always. -->
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
@@ -6413,77 +6346,40 @@ var YourArt = (function(){
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
   return { open:open, close:close };
 })();
+// O13 (Phase 2): the gallery's own picker is the shared <mg-gallery-picker> web component
+// now, mount-to-open / unmount-to-close -- same pattern the Loom's openPick/bindGalleryPicker
+// already uses (master-storyboard.jsx). PickerCore/rendering/filters/infinite-scroll all live
+// INSIDE the component (static/mg-gallery-picker.js) now; this IIFE is just the bridge that
+// keeps Picker's own public contract -- open(callback, opts), close() -- unchanged, so its 4
+// existing call sites (refPick, the edit-ref "+ ref" slot, the edit-source Pick button, the
+// mg-pick-request listener) needed zero changes. show-source/show-upload/show-copy-prompt
+// (all three were the gallery's own #pick-modal features -- see mg-gallery-picker.js's header)
+// keep this a byte-for-byte feature match for the surface it replaces, not a downgrade.
 var Picker = (function(){
-  // Browse/filter/page/infinite-scroll logic lives in PickerCore now (shared with the
-  // Loom's GalleryPick); this IIFE is a thin DOM-binding shim over it -- same ids, same
-  // CSS, same 3 call sites, same behavior as before the refactor.
-  var cb=null, core=null, forcedType='';   // forcedType: a caller-forced media filter for one open session (e.g. 'video')
-  function el(id){return document.getElementById(id);}
-  function readFilters(){
-    var v=function(id){ var e=el(id); return e?e.value:''; };
-    return {collection:v('pick-collection'), source:v('pick-source'), rating_min:v('pick-rating'), sort:v('pick-sort')};
-  }
-  function markLoading(){ el('pick-grid').style.opacity='.5'; var mb=el('pick-more'); if(mb) mb.style.display='none'; }
-  function ensureCore(){
-    if(core) return core;
-    // type stays '' -- /api/gallery-images already treats '' the same as an absent
-    // param (defaults to "image"), so this is byte-identical to the pre-refactor
-    // behavior (images only) with no explicit type filter in this UI.
-    core = PickerCore.create({
-      onResults: function(imgs, meta){
-        var grid=el('pick-grid'), empty=el('pick-empty'), moreBtn=el('pick-more');
-        grid.style.opacity='1';
-        if(!meta.append) grid.innerHTML='';
-        if(!imgs.length && !meta.append){ empty.textContent='No images found.'; empty.style.display='block'; if(moreBtn) moreBtn.style.display='none'; return; }
-        empty.style.display='none';
-        imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
-          if(m.is_nsfw==='1') c.setAttribute('data-nsfw','1');
-          c.innerHTML='<img loading="lazy" decoding="async" src="'+m.thumb+'" alt="">';
-          c.onclick=function(){ pick(m); }; grid.appendChild(c); });
-        if(moreBtn) moreBtn.style.display = meta.hasMore ? '' : 'none';
-        // If the loaded tiles don't fill the grid there's no scrollbar to drive infinite
-        // scroll -- pull one more page so it overflows (core caps this so a tall window
-        // can't runaway-load; the Load-more button covers the rest).
-        core.maybeFillPage(grid);
-      },
-      onError: function(){ el('pick-grid').style.opacity='1'; }
+  var cb=null, el=null;
+  function open(callback, opts){
+    close();   // idempotent: a stray double-open replaces rather than stacks two overlays
+    cb=callback;
+    el=document.createElement('mg-gallery-picker');
+    el.setAttribute('default-type', (opts&&opts.type==='video')?'video':'image');
+    el.setAttribute('show-source', '');
+    el.setAttribute('show-upload', '');
+    el.setAttribute('show-copy-prompt', '');
+    el.addEventListener('mg-pick', function(e){
+      var f=cb, d=e.detail; close();
+      // is_nsfw: the component's mg-pick detail is a real boolean (its own internal
+      // is_nsfw === '1' -> boolean conversion); every caller downstream of Picker.open
+      // (Gen.renderGenRef's data-nsfw setter, in particular) still does the app-wide
+      // '1'/'' STRING check, so convert back at the boundary rather than silently
+      // breaking Privacy Blur on a picked reference image.
+      if(f) f(d.media_id, d.thumb, d.prompt||'', d.is_nsfw?'1':'');
     });
-    return core;
+    el.addEventListener('mg-close', function(){ close(); });
+    document.body.appendChild(el);
   }
-  function open(callback, opts){ cb=callback; forcedType=(opts&&opts.type)||'';
-    el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
-    el('pick-q').value=''; markLoading();
-    ensureCore().setFilters(Object.assign({q:''}, readFilters(), {type:forcedType}));
-    setTimeout(function(){el('pick-q').focus();},120);
-    try{ el('pick-copy').checked = localStorage.getItem('pick-copyprompt')==='1'; }catch(e){} }
-  function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; forcedType=''; }
-  function onInput(){ ensureCore().setQuery(el('pick-q').value.trim()); }
-  function onFilter(){ markLoading(); ensureCore().setFilters(Object.assign(readFilters(), {type:forcedType})); }
-  function pick(m, thumb){
-    try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
-    var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'', m.is_nsfw||'');
-  }
-  function more_(){ ensureCore().loadMore(); }
-  function onScroll(){ ensureCore().onScroll(el('pick-grid'), 320); }
-  function toggleCopy(){ try{ localStorage.setItem('pick-copyprompt', el('pick-copy').checked?'1':'0'); }catch(e){} }
-  function upload(){ el('pick-file').click(); }
-  function onFile(){
-    var f=el('pick-file').files[0]; if(!f) return;
-    var empty=el('pick-empty'); empty.textContent='Uploading '+f.name+'\\u2026'; empty.style.display='block';
-    var fd=new FormData(); fd.append('file', f);
-    fetch('/api/upload',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
-      el('pick-file').value='';
-      if(d.error||!d.media_id){ empty.textContent='\\u26a0 Upload failed: '+(d.error||'no media id'); return; }
-      empty.style.display='none';
-      pick({media_id:d.media_id, prompt:''}, URL.createObjectURL(f));
-    }).catch(function(){ el('pick-file').value=''; empty.textContent='\\u26a0 Upload failed (network).'; });
-  }
-  return {open:open, close:close, onInput:onInput, onFilter:onFilter, onScroll:onScroll, more:more_, toggleCopy:toggleCopy, upload:upload, onFile:onFile};
+  function close(){ if(el){ el.remove(); el=null; } cb=null; }
+  return {open:open, close:close};
 })();
-document.addEventListener('DOMContentLoaded', function(){
-  var pq=document.getElementById('pick-q'); if(pq) pq.addEventListener('input', Picker.onInput);
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') Picker.close(); });
-});
 /* ---- Account balance chip (credits + free cards) in the header ---- */
 var Acct = (function(){
   function chip(){ return document.getElementById('acct-chip'); }
@@ -6636,8 +6532,7 @@ var Snips = (function(){
   return {open:open, saveCurrent:saveCurrent, insert:insert, del:del};
 })();
 var Gen = (function(){
-  var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null, previewTimer=null;
-  var sortMode='popular', catFilter='';   // Model-Market: 'popular'(REST) | 'newest'(GraphQL); category chip
+  var kind='base', selected=null, costSeq=0, costTimer=null;
   var workflows=null, enhTimer=null;
   var fixTag_='face', fixBoxes=[], fixStart=null;
   function el(id){return document.getElementById(id);}
@@ -6652,10 +6547,42 @@ var Gen = (function(){
     var f=el('model-flyout'); if(f){ f.classList.remove('open'); f.setAttribute('aria-hidden','true'); }
     hidePreview();
   }
+  // O12 (Phase 2): the flyout's own grid/search/market UI is the shared <mg-model-picker>
+  // now -- two instances, lazily created on first open (matching the old "only fetch on
+  // first open" behavior, `if(!el('gen-grid').children.length) search();`, instead of
+  // paying for both an always-mounted base AND LoRA fetch on every page load): kind="base"
+  // for Models, kind="lora" multi market for LoRAs (market = the O13 sort/category
+  // extension, opt-in so the Loom's own kind="lora" multi mount -- no market attribute --
+  // stays byte-for-byte unaffected). setKind() now just toggles which one is visible;
+  // each keeps its OWN last-searched results independently, so switching Models<->LoRAs
+  // and back no longer re-fetches either side (a small improvement over the old
+  // shared-grid behavior, not just parity with it).
+  var basePickerEl=null, loraPickerEl=null;
+  function ensurePickers(){
+    if(basePickerEl) return;
+    var host=el('gen-picker-host'); if(!host) return;
+    basePickerEl=document.createElement('mg-model-picker');
+    basePickerEl.setAttribute('kind','base');
+    basePickerEl.addEventListener('mg-pick', function(e){ onBasePick(e.detail); });
+    host.appendChild(basePickerEl);
+    loraPickerEl=document.createElement('mg-model-picker');
+    loraPickerEl.setAttribute('kind','lora');
+    loraPickerEl.setAttribute('multi','');
+    loraPickerEl.setAttribute('market','');
+    loraPickerEl.style.display='none';
+    loraPickerEl.addEventListener('mg-pick', function(e){ onLoraPick(e.detail.model, e.detail.selected); });
+    host.appendChild(loraPickerEl);
+  }
   function toggleFlyout(){
     var f=el('model-flyout'), on=!f.classList.contains('open');
     f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
-    if(on){ if(!el('gen-grid').children.length) search(); setTimeout(function(){el('gen-q').focus();},120); }
+    if(on){
+      ensurePickers();
+      setTimeout(function(){
+        var vis=(kind==='lora')?loraPickerEl:basePickerEl, q=vis&&vis.querySelector('.mg-q');
+        if(q) q.focus();
+      },120);
+    }
     else hidePreview();
   }
   function setDock(d){
@@ -6669,33 +6596,9 @@ var Gen = (function(){
     if(k===kind) return; kind=k;
     el('gen-k-base').classList.toggle('on',k==='base');
     el('gen-k-lora').classList.toggle('on',k==='lora');
-    el('gen-q').placeholder = (k==='lora'?'Search LoRAs':'Search models')+'\\u2026';
-    // Category chips + Newest sort are a LoRA taxonomy (PixAI categories are 100% LoRAs, and
-    // new base-model uploads are rare) -> only meaningful on the LoRAs tab. Base models stay on
-    // the rich Popular/REST path; reset market state when leaving LoRAs.
-    var market=(k==='lora');
-    el('mkt-cats').style.display = market ? '' : 'none';
-    el('mkt-sort').style.display = market ? '' : 'none';
-    if(!market){ catFilter=''; sortMode='popular';
-      document.querySelectorAll('#mkt-cats button').forEach(function(b){ b.classList.toggle('on',(b.getAttribute('data-cat')||'')===''); });
-      el('mkt-popular').classList.add('on'); el('mkt-newest').classList.remove('on'); }
-    search();
-  }
-  function onInput(){ q=el('gen-q').value.trim(); clearTimeout(timer); timer=setTimeout(search,280); }
-  function setSort(s){ s=(s==='newest')?'newest':'popular'; if(s===sortMode) return; sortMode=s;
-    el('mkt-popular').classList.toggle('on',s==='popular'); el('mkt-newest').classList.toggle('on',s==='newest');
-    search(); }
-  function setCat(c){ if(c===catFilter) return; catFilter=c||'';
-    document.querySelectorAll('#mkt-cats button').forEach(function(b){ b.classList.toggle('on', (b.getAttribute('data-cat')||'')===catFilter); });
-    search(); }
-  function search(){
-    var mine=++seq, grid=el('gen-grid'); grid.style.opacity='.45';
-    var u='/api/model-search?kind='+kind+'&size=24&q='+encodeURIComponent(q)
-      +'&sort='+sortMode+'&category='+encodeURIComponent(catFilter);
-    fetch(u)
-      .then(function(r){return r.json();})
-      .then(function(d){ if(mine!==seq)return; render(d.results||[], d.error); grid.style.opacity='1'; })
-      .catch(function(){ if(mine!==seq)return; render([], 'network error'); grid.style.opacity='1'; });
+    ensurePickers();
+    if(basePickerEl) basePickerEl.style.display = (k==='base') ? '' : 'none';
+    if(loraPickerEl) loraPickerEl.style.display = (k==='lora') ? '' : 'none';
   }
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function fmt(n){ return (n||0).toLocaleString(); }
@@ -6710,34 +6613,6 @@ var Gen = (function(){
     if(t.indexOf('SD_V1')>=0)return 'SD1.5'; if(t.indexOf('SD3')>=0)return 'SD3';
     if(t.indexOf('Z_IMAGE')>=0)return 'Z-Image'; if(t.indexOf('CHAT')>=0)return 'Chat';
     return (t.split('_')[0]||'model').toLowerCase(); }
-  function render(rows, err){
-    var grid=el('gen-grid'), empty=el('gen-empty'); grid.innerHTML='';
-    if(err){ empty.textContent='\\u26a0 '+err; empty.style.display='block'; return; }
-    if(!rows.length){
-      // Newest+Models is legitimately sparse (new uploads are almost all LoRAs), so say so
-      // instead of the generic 'no results' which reads as broken.
-      empty.textContent=(sortMode==='newest' && kind==='base')
-        ? 'Few base models are uploaded recently \\u2014 new content is mostly LoRAs. Try the LoRAs tab, or switch to Popular.'
-        : 'No results \\u2014 try another search.';
-      empty.style.display='block'; return; }
-    empty.style.display='none';
-    rows.forEach(function(m){
-      var c=document.createElement('div'); c.className='gen-card';
-      if(kind==='lora' ? loras.some(function(l){return l.model_id===m.model_id;})
-                       : (selected && selected.model_id===m.model_id)) c.classList.add('sel');
-      var cov = m.preview_url ? '<img class="cov'+(m.should_blur?' blur':'')+'" loading="lazy" src="'+esc(m.preview_url)+'" alt="">' : '<div class="cov"></div>';
-      var uses = m.ref_count ? '<span class="uses" title="'+fmt(m.ref_count)+' generations \\u2014 PixAI\\u2019s own most-used ranking">\\u25c8 '+fmtCompact(m.ref_count)+'</span>' : '';
-      c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span>'+uses+'</div></div>';
-      c.onclick=function(){ selectCard(m, c); };
-      // Debounced (D-11): a raw mouseenter re-triggered an instant, un-animated,
-      // freshly-repositioned popup on EVERY card the mouse passed over while scanning
-      // a grid -- which is what "browsing" is. A short hover-intent delay means only a
-      // genuine pause-to-look opens it; a fast scan across several cards never does.
-      c.onmouseenter=function(){ scheduleShowPreview(m, c); };
-      c.onmouseleave=cancelPreview;
-      grid.appendChild(c);
-    });
-  }
   function baseLabel(cat){ // "uploaded-sdxl" -> "SDXL", "flux-1" -> "Flux 1"
     cat=(cat||'').replace(/^uploaded-/,'').replace(/[-_]+/g,' ').trim();
     if(!cat) return '';
@@ -6766,11 +6641,10 @@ var Gen = (function(){
     placePreview(p, anchor);
   }
   function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
-  function scheduleShowPreview(m, anchor){
-    clearTimeout(previewTimer);
-    previewTimer=setTimeout(function(){ showPreview(m, anchor); }, 130);
-  }
-  function cancelPreview(){ clearTimeout(previewTimer); hidePreview(); }
+  // scheduleShowPreview/cancelPreview (the search-grid card hover-intent debounce) moved
+  // into <mg-model-picker> itself (O12) -- it owns its own cards now. hidePreview/
+  // showPreview/placePreview stay: previewSelected (the #gen-selrow summary-button hover)
+  // and showRefPreview (the reference-image slot hover) are unrelated to the picker grid.
   function placePreview(p, anchor){
     var r=anchor.getBoundingClientRect(), w=300, gap=14, x;
     var dr=el('gen-drawer'), leftish = dr && dr.classList.contains('dock-left');
@@ -6789,23 +6663,21 @@ var Gen = (function(){
   }
   function previewSelected(ev){ if(selected) showPreview(selected, ev.currentTarget); }
   var loras=[];
-  function toggleLora(m, c){
-    var i=-1; loras.forEach(function(l,j){ if(l.model_id===m.model_id) i=j; });
-    if(i>=0){ loras.splice(i,1); c.classList.remove('sel'); renderLoras(); refreshLoraNotes(); debouncedCost(); return; }
-    if(loras.length>=6) return;
-    var entry={model_id:m.model_id, title:m.title, preview_url:m.preview_url, version_id:'',
-               weight:0.7, lora_base_type:'', trigger_words:'', failed:false};
-    loras.push(entry); c.classList.add('sel'); renderLoras(); updateGoState();
-    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
-      .then(function(r){return r.json();})
-      .then(function(d){ entry.version_id=d.version_id||''; entry.lora_base_type=d.lora_base_model_type||'';
-        entry.trigger_words=d.trigger_words||'';
-        // An empty version_id here is ALSO a failure, not a quiet no-op -- a LoRA that
-        // never resolves must not be able to vanish from the submit silently (see failed
-        // below): it used to just sit there forever wearing the "still loading" hourglass.
-        entry.failed=!entry.version_id;
-        renderLoras(); refreshLoraNotes(); debouncedCost(); })
-      .catch(function(){ entry.failed=true; renderLoras(); refreshLoraNotes(); });
+  // O12 (Phase 2): <mg-model-picker kind="lora" multi>'s own _toggleMulti() now owns the
+  // pending/resolve/fail lifecycle (same shape as the old toggleLora() -- see the
+  // component's own header comment) -- this just upserts the Gallery's own `loras` array
+  // by model_id, mirroring the Loom's identical bindLoraPicker bridge. Note: the old cap
+  // (`if(loras.length>=6) return;`) is DELIBERATELY not reproduced here -- the component
+  // already optimistically highlights a picked card in ITS OWN grid before this listener
+  // ever runs, so silently refusing to add it here would leave the picker showing a card
+  // as selected that never actually made it into `loras` (visually picked, silently not
+  // submitted) -- confusing in a strictly worse way than no cap at all. The Loom's own
+  // identical mount has run uncapped since D-11 with no reported issue.
+  function onLoraPick(model, sel){
+    var i=-1; loras.forEach(function(l,j){ if(l.model_id===model.model_id) i=j; });
+    if(!sel){ if(i>=0) loras.splice(i,1); }
+    else { if(i<0) loras.push(model); else loras[i]=model; }
+    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
   }
   // --- LoRA<->base compatibility gate + trigger-word offers ------------------
   // A LoRA runs on a base ONLY if its loraBaseModelType == the base's modelType (exact enum
@@ -6874,18 +6746,28 @@ var Gen = (function(){
   }
   function loraWeight(i, v){ if(!loras[i]) return;
     v=parseFloat(v); loras[i].weight=(isNaN(v)?0.7:Math.max(0,Math.min(2,v))); debouncedCost(); }
-  function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes();
-    if(kind==='lora') search(); debouncedCost(); }
+  // Note (O12): removing a LoRA via its chip's own x no longer re-searches the picker grid
+  // (there IS no search() anymore -- see the ensurePickers block above). The LoRA picker's
+  // OWN card for the removed entry can stay visually highlighted until the user interacts
+  // with that exact card again (clicking it re-toggles it off, correctly, through
+  // onLoraPick) -- a minor, cosmetic-only staleness, not a functional gap: `loras` (and
+  // therefore payload()) is always correct immediately, regardless of the grid's own
+  // highlight state. Flagged as a precise, known, low-severity remainder rather than
+  // silently left unexplained.
+  function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes(); debouncedCost(); }
   function openLoraBrowser(){
     var f=el('model-flyout');
     if(!f.classList.contains('open')) toggleFlyout();
     setKind('lora');
   }
-  var selSeq=0;   // guards selectCard's async version fetch against a stale-response race
-  function selectCard(m, c){
-    if(kind==='lora'){ toggleLora(m, c); return; }
-    document.querySelectorAll('.gen-card.sel').forEach(function(x){x.classList.remove('sel');});
-    c.classList.add('sel'); selected=Object.assign({}, m); var mySeq=++selSeq;
+  var selSeq=0;   // guards onBasePick's async version fetch against a stale-response race
+  // O12 (Phase 2): replaces the old selectCard(m, c) -- <mg-model-picker kind="base">'s
+  // mg-pick fires with the raw /api/model-search row (detail: m), and the component
+  // already owns highlighting the picked card in its own grid, so this only has to do
+  // what selectCard did AFTER that: resolve the real version + metadata and refresh
+  // every downstream surface (LoRA compat notes, model-defaults prefill, cost).
+  function onBasePick(m){
+    selected=Object.assign({}, m); var mySeq=++selSeq;
     var th=el('gen-selthumb');
     if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
     el('gen-selname').textContent=m.title+' \\u2026';
@@ -7291,7 +7173,7 @@ var Gen = (function(){
     drawer.prefill({ mode: refs.length>1?'r2v':'i2v',
                      images: refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; }) });
   }
-  return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
+  return {open:open, close:close, setKind:setKind,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
           selectEnhance:selectEnhance, runEnhance:runEnhance,
@@ -7300,7 +7182,7 @@ var Gen = (function(){
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
-          insertTriggers:insertTriggers, setSort:setSort, setCat:setCat,
+          insertTriggers:insertTriggers,
           // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
           // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
           // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
@@ -7474,7 +7356,8 @@ function bulkSendVideo(){
   clearAll();   // sent to the video drawer -- clear the gallery selection (we stay on the page)
 }
 document.addEventListener('DOMContentLoaded', function(){
-  var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
+  // O12: the flyout's search input lives inside <mg-model-picker> now (its own .mg-q),
+  // wired internally by the component -- no external #gen-q to bind here anymore.
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
   try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
   Acct.refresh();

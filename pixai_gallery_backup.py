@@ -2010,7 +2010,16 @@ def resolve_version_meta(session, model_id):
     - lora_base_model_type: for a LoRA, the base-model family it REQUIRES (null for base models).
       A LoRA runs on a base iff lora_base_model_type == the base's model_type (see is_lora_compatible).
     - trigger_words: the LoRA's activation tokens (extra.triggerWords|trainedWords); '' if none.
-    - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer."""
+    - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer.
+
+    NOTE (2026-07-24): `/generation-model/{id}/versions` returns MULTIPLE rows per model --
+    confirmed on PixAI's own site, which lists them as separate releases/iterations, all on
+    the SAME fixed architecture (a LoRA is NOT multi-architecture; loraBaseModelType is
+    consistent across a given LoRA's rows -- an earlier draft of this fix assumed otherwise
+    and was reverted). This function still always takes rows[0] (presumed latest) and
+    discards the rest -- there is no way to pick a different release. See docs/AUDIT_2026-07-21.md
+    for the tracked remainder: exposing the full row list to the picker UI is real, scoped,
+    NOT-yet-built follow-on work, deliberately not attempted in this pass."""
     empty = {"version_id": "", "model_type": "", "lora_base_model_type": "",
              "trigger_words": "", "negative_prompt": "", "sampling_method": "",
              "sampling_steps": None, "cfg_scale": None, "capabilities": []}
