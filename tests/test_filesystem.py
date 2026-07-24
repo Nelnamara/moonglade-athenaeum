@@ -234,6 +234,74 @@ def test_video_faststart_skips_already_faststart(tmp_path, monkeypatch):
     assert core.video_faststart(tmp_path / "x.webm") is False   # non-mp4 ignored
 
 
+def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
+    """THE VIDEO-CORRUPTION BUG (owner field-test 2026-07-23): two collectors remux the
+    same clip seconds apart -- the gallery's live-mirror watcher and a /api/task-status
+    done-poll in one process, or the CLI's --watch-backup in another. video_faststart's
+    temp name used to be DETERMINISTIC (stem + '.__fstmp__' + ext), so both concurrent
+    ffmpeg runs wrote into the SAME temp file and the surviving full-length mp4 carried
+    the other run's stale bytes: it played, then stopped mid-way. The temp is now unique
+    per invocation, so whatever the overlap, the final file must be exactly ONE remux's
+    complete output -- never a mix.
+
+    The ffmpeg invocation is stubbed with a slow two-phase writer carrying a distinct
+    per-instance marker byte; events force the interleaving (instance 1 writes its
+    second half only after instance 2 finished) so a shared temp file deterministically
+    ends up half-and-half."""
+    import subprocess
+    import threading
+
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))       # NOT faststart -> both remux
+
+    HALF = 256
+    role_mu = threading.Lock()
+    state = {"n": 0}
+    both_open = threading.Barrier(2, timeout=10)   # both runs mid-flight before either writes
+    one_wrote_first_half = threading.Event()
+    two_finished = threading.Event()
+
+    def fake_ffmpeg(cmd, **kw):
+        out = cmd[-1]                                # ffmpeg's output path is the last arg
+        with role_mu:
+            state["n"] += 1
+            role = state["n"]                        # 1 = first invocation, 2 = second
+        marker = b"\x0a" if role == 1 else b"\x0b"
+        fh = open(out, "wb")
+        try:
+            both_open.wait()
+            if role == 1:
+                fh.write(marker * HALF); fh.flush()
+                one_wrote_first_half.set()
+                assert two_finished.wait(10)
+                fh.write(marker * HALF); fh.flush()  # lands AFTER 2's whole output
+            else:
+                assert one_wrote_first_half.wait(10)
+                fh.write(marker * HALF); fh.flush()
+                fh.write(marker * HALF); fh.flush()
+        finally:
+            fh.close()
+            if role == 2:
+                two_finished.set()
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_ffmpeg)
+
+    t1 = threading.Thread(target=core.video_faststart, args=(clip,))
+    t2 = threading.Thread(target=core.video_faststart, args=(clip,))
+    t1.start(); t2.start()
+    t1.join(15); t2.join(15)
+    assert not t1.is_alive() and not t2.is_alive()
+
+    final = clip.read_bytes()
+    assert final in (b"\x0a" * (2 * HALF), b"\x0b" * (2 * HALF)), (
+        "the surviving clip mixes bytes from two concurrent remuxes "
+        "(first byte {!r}, last byte {!r}, {} bytes)".format(
+            final[:1], final[-1:], len(final)))
+    assert not list(tmp_path.glob("*__fstmp__*")), "leftover remux temp files"
+
+
 def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
