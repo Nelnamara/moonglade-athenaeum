@@ -529,6 +529,14 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   generation (the Loom board's per-shot/"Generate all" path, distinct from the Video Deep
   Focus tab above), and `loom/src/loom-core.js`'s aggregate summary behind the cost-to-finish
   pill.
+- **`<mg-cost-badge>`'s `compact` attribute and `mg-cost` event have no production consumer
+  yet — by design, not as dead code.** Both are declared public API of a deliberately
+  host-agnostic component (see the file's own header comment): `compact` was built for the
+  not-yet-wired cost-to-finish pill above, and `mg-cost` is precisely the DOM-level signal
+  that would carry a price update across the no-build-global (`static/*.js`) <-> esbuild-module
+  (`loom/*.jsx`) wall the Option-A consolidation stopped at. Do NOT delete either as unused —
+  a future pass wiring the cost-to-finish pill / the D-12 architecture consolidation needs
+  exactly this surface. (Audit O14/L479, confirmed still true 2026-07-24.)
 - Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
   live-QA'd step.
 
@@ -721,6 +729,14 @@ fact", so roughly twenty items became contractually invisible until this audit w
   sorted Canva dump, Live Nel Cutouts, Nelnamara Fine Images, Banners, `logos_cut`, Stickers,
   App icon candidates, Forge, plus `make_anim_webp.bat` / `make_green_source.bat` /
   `_assemble_webp.py`). The served `D:\...\branding\` set stays live and separate.
+- **Watch for stale duplicate checkouts elsewhere on this machine.** The 2026-07-17 doc
+  consolidation that created this section originally carried a fourth bullet here flagging a
+  stale duplicate `branding/` folder under `Desktop\pixai-gallery-backup-master` — dropped in
+  that pass and never restored (found + re-verified 2026-07-24; that specific folder is
+  confirmed gone now, so it isn't repeated as a live fact). The standing rule it existed to
+  state still holds: if another copy of this repo or its assets turns up anywhere on disk,
+  don't assume it's safe to ignore or silently delete — flag it to the owner and confirm which
+  copy is actually live before touching either, same caution as the D:/C: drift above.
 
 ---
 

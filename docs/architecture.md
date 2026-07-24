@@ -182,6 +182,13 @@ pixai_backup/
 └─ jobs.jsonl              append-only activity/job log
 ```
 
+**Not shown above — the Pixeltable semantic-search index lives OUTSIDE `out_dir`.**
+`pixai_similar.py` never points Pixeltable at `out_dir`, so its embedded-Postgres CLIP
+table (dir `moonglade`, table `moonglade.images`) lands in Pixeltable's own default
+home, `~/.pixeltable` (`%USERPROFILE%\.pixeltable` on Windows) — a machine-local sidecar
+keyed by `media_id` against `catalog.db`, not part of a backup of `out_dir`, and rebuilt
+via `sync()` rather than restored if it's missing on a fresh machine.
+
 Thumbnails are keyed by `media_id`, **not** content-addressed — the filename is an
 identity, not a digest of the bytes. Because `--rebuild-thumbs` regenerates them IN PLACE
 at that same key, they're served `public, max-age=300` (short, not immutable) so a repair

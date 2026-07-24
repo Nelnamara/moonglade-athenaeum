@@ -2888,7 +2888,6 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenRefState,
       batching,
       batchTally,
-      generateShot,
       pollShot,
       useExistingVideo,
       genImage,

@@ -41,8 +41,10 @@ you the correct version id — prefer those.
 Lite/Standard suit older SD models; Pro/Ultra are for newer types. The drawer's Mode
 picker doesn't filter by model, so picking an unsupported combination shows an error on
 submit rather than falling back (a rejected submit still costs no credits) — pick
-**Auto** if you're not sure. The CLI's `--mode` (below) does auto-fall-back and retry
-once on an unsupported mode.
+**Auto** if you're not sure. The Loom's own per-shot draft generation reuses this same
+drawer submit path, so it has the same behavior — no auto-fallback there either; see
+[Troubleshooting](Troubleshooting#unknown-inferenceprofile-) if you hit this. (The CLI
+is different — see `--mode` below.)
 
 ### LoRAs are add-ons, not base models
 A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via the
@@ -72,7 +74,7 @@ python pixai_gallery_backup.py --generate --task-id <id>
 | `--prompt` / `--negative` | — | the prompts |
 | `--model` | Tsubaki.2 | model **version** id |
 | `--lora VERSIONID:WEIGHT` | — | repeatable |
-| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` |
+| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` — unlike the web drawer/Loom, an unsupported mode here auto-falls-back to the model's default and retries once instead of erroring (a rejected submit costs no credits either way) |
 | `--priority` / `--high-priority` | `500` | 500 = standard (cheaper), 1000 = high |
 | `--no-prompt-helper` | off | use the prompt literally |
 | `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | |
@@ -252,10 +254,10 @@ python pixai_gallery_backup.py --suggest-prompt "C:\pics\ref.png"     # a local 
 > network). (The web gallery's own Suggest Prompt button only ever appears on image detail
 > pages for exactly this reason.) Point it at an image, not a clip.
 >
-> The exact catalog `media_id` above is just an example from this repo's own history — PixAI's
-> endpoint can fail on sufficiently old media even when it's a real image, so don't be
-> surprised if that specific number doesn't reproduce; swap in any recent image `media_id`
-> from your own catalog.
+> The exact catalog `media_id` above is just an example from this repo's own history and
+> won't exist in your catalog — swap in any image `media_id` from your own catalog. The
+> endpoint is image-only, full stop; it isn't age-limited (an earlier version of this note
+> guessed otherwise and was wrong).
 
 Copy a suggestion straight into `--generate --prompt "…"` to riff on an image's style.
 

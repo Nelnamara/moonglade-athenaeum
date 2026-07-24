@@ -245,7 +245,8 @@ def _save_config(cfg):
 
 # ---------------------------------------------------------------------------
 # Web gallery login accounts -- session-based auth for pixai_gallery.py's Flask
-# app (gates every non-localhost request; see _is_authorized_request() there).
+# app (gates EVERY request, local or remote -- there is no localhost bypass; see
+# _is_authorized_request() there).
 # Stored in config.json (the existing convention for secrets -- it already holds
 # PIXAI_API_KEY): AUTH_SECRET_KEY signs the Flask session cookie, AUTH_USERS is a
 # list of {"username", "password_hash"} (werkzeug.security -- scrypt as of modern
@@ -2244,7 +2245,13 @@ def cmd_convert_existing(args, out):
 # ---------------------------------------------------------------------------
 # Keeper priority when the same image lives in several buckets: lower wins
 # (i.e. we KEEP the most-organized copy and remove the rest). This reinforces
-# --organize's layout instead of fighting it.
+# --organize's layout instead of fighting it. "batches" ranks first as LEGACY
+# ONLY -- no reachable code path creates a batches/ folder anymore (the old
+# live-organize-into-batches mode lived behind an `organize_adv_live` runtime
+# flag that no CLI argument has ever set since; --organize's real, current
+# output is month folders only, and its own run tidies up leftover legacy
+# batches/ dirs -- see below). A batches/ folder found here is pre-existing
+# data from an older run, still worth preferring as a keeper if one exists.
 _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 
 

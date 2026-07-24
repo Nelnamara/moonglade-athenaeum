@@ -377,6 +377,70 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 - `wiki/Collections.md` now documents the "Remove from «collection»" action and the
   Actions ▾ menu it lives behind.
 
+### Fixed (2026-07-24 doc/dead-code cleanup, `docs/AUDIT_2026-07-21.md`)
+
+A batch of small, independently-verified doc/comment fixes and dead-code removals from the
+audit board. Each was re-verified against current code before touching it — one finding
+(`build_chat_edit_parameters`'s kaisuukenId NOTE) turned out already fixed, and the
+`--open-browser` flag turned out to live in `pixai_gallery.py` (not
+`pixai_gallery_backup.py` as filed) and to be a genuine, working, human-typed CLI
+convenience, not dead code — left alone in both cases, documented in the audit board.
+
+- `/api/view-presets`'s docstring no longer claims there's no delete-view UI — a Delete
+  button next to the saved-view select has existed for a while, wired to the same
+  pre-existing `{delete: name}` endpoint shape the docstring already anticipated.
+- `tests/test_route_tiers.py`'s stale "FINDING (2026-07-19, unresolved)" comment about
+  `api_server_stop`/`api_server_restart` is corrected: the owner decided 2026-07-19 they
+  stay LOGIN-tier on purpose, and the routes' docstrings already say "Login required," not
+  "Localhost-only" — the finding was closed, the comment just never caught up.
+- `docs/architecture.md` and `wiki/How-It-Works.md`'s on-disk layout diagrams now note the
+  Pixeltable semantic-search index, which lives entirely outside `out_dir` (Pixeltable's own
+  default home, `~/.pixeltable`) and was undocumented in both.
+- `wiki/Generating.md`'s Mode-fallback paragraph sat under the "web gallery" heading even
+  though its last sentence described CLI-only behavior, reading as if the drawer had the
+  CLI's auto-fallback-and-retry when it (and the Loom, which reuses the same submit path)
+  does not. Moved the CLI fact to the CLI section; `wiki/Troubleshooting.md` was already
+  correct.
+- `config.example.json`'s auth comments corrected two false claims (AUTH_USERS is not
+  "CLI only" — the web bootstrap and Control Panel's Users tab can also write it; login is
+  not a blanket "gates every non-localhost request" — it's three tiers, including a small
+  PUBLIC surface reachable with no session at all) and added the previously-undocumented
+  `AUTH_EPOCH_SEQ` key, matching how `ARTWORK_LIST_HASH` was documented. The same
+  "gates every non-localhost request" pre-universal-login phrasing, stale since the
+  2026-07-19 change that removed the localhost bypass entirely, was also corrected in
+  `pixai_gallery.py`'s `/login` docstring, `pixai_gallery_backup.py`'s web-accounts
+  comment block, and `tests/test_web_auth.py`'s module docstring.
+- `docs/curation_reference_builder.py`'s own docstring now cites
+  `docs/archive/CURATION_STANDARD_2026-07-17.md`, where the file actually moved to.
+- `wiki/Generating.md`'s `--suggest-prompt` caveat dropped an unsubstantiated "fails on
+  sufficiently old media" guess (the endpoint is image-only, full stop — not age-limited)
+  and now just says the example id is illustrative.
+- `wiki/Collections.md`'s "Send to Video … up to 9" is corrected to 6, the real cap
+  (`Gen.addVideoRefs()`/`bulkSendVideo()`).
+- Restored, in general form, a "watch for stale duplicate checkouts on this machine"
+  warning that a 2026-07-17 doc consolidation dropped from `docs/STATE.md` without ever
+  restoring — the specific folder it originally named is confirmed gone, so it's now stated
+  as the standing rule rather than reattached to a path that no longer exists.
+- Removed a genuinely-unused local: `App()` in `loom/master-storyboard.jsx` destructured
+  `generateShot` from `useGenerationPipeline()`'s return value with no remaining use, after
+  an earlier fix stopped threading it into `LoomV2` as a prop.
+- `static/mg-gallery-picker.js`: removed 3 of its 4 documented optional attributes
+  (`show-source`, `show-upload`, `show-copy-prompt`) — each had zero callers anywhere
+  except the component's own standalone dev-verification page
+  (`static/mg-gallery-picker.html`, updated to match) and no automated-test coverage.
+  `show-type` stays; the Loom's own mount uses it.
+- `pixai_gallery_backup.py`'s `_BUCKET_PRIORITY` comment no longer implies `--organize`
+  currently produces or prefers `batches/` folders — no reachable code path has been able
+  to create one since the old live-organize-into-batches mode's `organize_adv_live` flag
+  lost its only CLI wiring; a `batches/` folder found on disk today is legacy data only,
+  still worth preferring as a keeper if one exists. (The deeper dead `organize_adv_live`
+  branches inside `run_download` itself are a separate, larger follow-up, flagged
+  out-of-scope for this pass.)
+- `docs/STATE.md` now records why `<mg-cost-badge>`'s `compact` attribute and `mg-cost`
+  event have no production consumer yet without being dead code (audit O14): both are
+  declared public API of a deliberately host-agnostic component, banked for the
+  not-yet-wired cost-to-finish pill and the D-12 web-component consolidation.
+
 ## [2.3.0] - 2026-07-23 — More security hardening, the Folio of Honors, and LoRA support in the Loom
 
 ### Changed
