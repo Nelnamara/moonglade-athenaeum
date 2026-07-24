@@ -258,6 +258,40 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 - **The Loom's board cards now show when a shot's opening frame is already continuity-linked
   to the previous shot's closing frame** — a small badge, restoring a pure-logic function
   (`frameLinked`/new `continuityLinked`) that had zero callers since the V1→V2 migration.
+- **The live-mirror watcher no longer goes silently dead while still reporting itself
+  healthy** (2026-07-23, `docs/AUDIT_2026-07-21.md` owner-2026-07-23 — same "Job Tracker"
+  reliability thread as the orphaned-jobs fix above, a distinct root cause). Live-checked
+  via the app's own `/api/watch/status` on a real running server: `connected: true,
+  last_error: null`, but `last_event_at` was ~21 minutes stale despite active generations
+  finishing in that window — two of three generations that night sat spinning in the
+  Activity tray for 13+ minutes even though PixAI had actually finished them in under a
+  minute. The WebSocket had gone silent (no error, no close frame, not even a keepalive
+  ping) but nothing was watching for that shape of failure — `_watch_loop`'s reconnect/
+  backoff logic only runs when `core._watch_events_async` raises, and a socket that just
+  stops producing frames never raises anything on its own. Fix: `_watch_events_async`'s
+  receive loop now awaits each frame with `asyncio.wait_for(ws.recv(),
+  timeout=_WS_STALE_TIMEOUT)`; a lapse raises the new `WatchStaleError` (a `PixAIError`
+  subclass), which lands in `_watch_loop`'s existing `except`/backoff/reconnect exactly
+  like any other dropped connection — no new thread, no polling, one bound on how long a
+  single `recv()` may block. `_WS_STALE_TIMEOUT` = 240s (4 minutes): comfortably past any
+  real per-frame cadence (the incident's own generations finished in under a minute, and
+  ordinary keepalive pings are far more frequent than that) so a healthy connection is
+  never cycled just for a quiet stretch, while still decisively shorter than the ~20-minute
+  gap this was built to catch — see the constant's own comment in
+  `pixai_gallery_backup.py` for the full reasoning. Deliberately NOT gated on whether jobs
+  are "actively running": a watcher that's been silently dead for a while can't be trusted
+  to know what's actually running either, so an unconditional idle-timeout is the simpler,
+  safer check. `/api/watch/status` gains two additive fields for visibility —
+  `stale_reconnects` (count) and `last_stale_reconnect_at` (timestamp) — surfaced in the
+  Panel's watch-status line only once nonzero; every existing reader of that endpoint is
+  unaffected. Fail-first tested: `tests/test_watch.py::
+  test_watch_raises_when_connection_goes_stale_despite_looking_healthy` (confirmed failing
+  against pre-fix code — `AttributeError: module has no attribute '_WS_STALE_TIMEOUT'` —
+  then green) plus a companion `test_watch_pings_reset_the_staleness_clock` proving a
+  steady trickle of bare keepalive pings, with no real events at all, does NOT trip the
+  watchdog. Out of scope, deliberately: the separate, still-unresolved bug in the
+  browser's own `/api/task-status` poll that also failed to catch those two stuck jobs —
+  a different mechanism, not touched here.
 
 ### Removed
 

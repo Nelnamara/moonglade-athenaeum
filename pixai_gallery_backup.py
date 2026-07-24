@@ -114,6 +114,19 @@ class EmptyOutputsError(PixAIError):
     `except PixAIError` keeps catching it unchanged."""
 
 
+class WatchStaleError(PixAIError):
+    """Raised by `_watch_events_async` when the WebSocket has gone silent for too
+    long -- see `_WS_STALE_TIMEOUT`. Exists to be distinguishable from an ordinary
+    connection failure at `_watch_loop`'s catch site, the same reasoning as
+    EmptyOutputsError above: a ConnectionClosed/OSError there means the socket
+    itself reported trouble, but this means the socket looked fine (no error, no
+    close frame) while nothing arrived on it for longer than PixAI's normal event
+    cadence -- a distinct failure mode worth counting separately (see
+    `_watch_status["stale_reconnects"]`) so it stays visible instead of blending
+    into ordinary reconnect noise. Subclasses PixAIError so every existing
+    `except PixAIError` / `except Exception` keeps catching it unchanged."""
+
+
 # ---------------------------------------------------------------------------
 # Verbose diagnostics
 # ---------------------------------------------------------------------------
@@ -5318,11 +5331,49 @@ _WS_SUBSCRIPTION = (
 # 'completed' frame is the one carrying a populated mediaId, so that's when we mirror.
 _WS_DONE_STATUS = "completed"
 
+# How long the receive loop below will wait for the NEXT frame off the wire --
+# a `next` event, a `newNotification`, or even just a server `ping` keepalive --
+# before deciding the connection is a zombie and forcing a reconnect. This is
+# NOT "no taskUpdated in N seconds" (an account can be legitimately idle for
+# hours between generations); it is "nothing at all arrived, including PixAI's
+# own keepalive pings", which is what a genuinely dead-but-not-yet-errored
+# socket looks like -- exactly the incident this guards against: `connected`
+# stayed True and `last_error` stayed None for ~21 minutes while real
+# generations finished and produced zero `taskUpdated` frames.
+#
+# Picking the number: the two things we actually know are (1) real generations
+# in the incident finished in under a minute on PixAI's side, so any live
+# session doing real work produces frames on a sub-minute cadence, not a
+# multi-minute one; and (2) the failure was silent for ~21 minutes, so the
+# threshold needs to be decisively shorter than that to matter, while staying
+# well clear of ordinary lulls (a slow multi-minute video render between
+# frames, a user idling between submissions) so a healthy connection is never
+# cycled just for being briefly quiet. 240s (4 minutes) sits in the middle of
+# that gap: an order of magnitude past any real per-frame cadence we've
+# observed (so no thrash under normal bursty use), but leaves ~5x headroom
+# before it would matter compared to tonight's ~20-minute silent gap, and
+# lines up with the same magnitude as this app's other liveness clocks
+# (--poll-timeout's 300s generate default; JOBS_ORPHAN_SWEEP_AGE's much
+# coarser 30-minute sweep is a different, slower-moving safety net, not a
+# reason to match it here).
+_WS_STALE_TIMEOUT = 240
+
 
 async def _watch_events_async(auth_header, on_event, seconds):
     """Connect, handshake, subscribe to personalEvents, and dispatch each `next` frame's
     payload to on_event(dict). Replies to server pings. Runs until `seconds` elapses (None =
-    until cancelled). Read-only: sends only connection_init / subscribe / pong / complete."""
+    until cancelled). Read-only: sends only connection_init / subscribe / pong / complete.
+
+    Every frame off the wire -- a `next`, a `ping`, anything -- resets a
+    `_WS_STALE_TIMEOUT`-second clock. If that clock lapses, raises WatchStaleError
+    instead of waiting forever on a socket that reports no error but has gone
+    silent (see `_WS_STALE_TIMEOUT`'s comment for why that happens and how the
+    number was picked). WatchStaleError is just another exception out of this
+    coroutine, so any caller that already reconnects on failure -- `_watch_loop`
+    in pixai_gallery.py's outer while-True/backoff, and `run_watch` below's own
+    try/except -- handles it for free with no special-casing needed at the call
+    site; it exists only so a caller that WANTS to tell "went stale" apart from
+    "socket errored" can."""
     import asyncio
     import websockets
     async def _run():
@@ -5338,7 +5389,18 @@ async def _watch_events_async(auth_header, on_event, seconds):
                                       "payload": {"query": _WS_SUBSCRIPTION}}))
             on_event({"__meta__": "subscribed"})
             while True:
-                msg = json.loads(await ws.recv())
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=_WS_STALE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    # Converted to a WatchStaleError HERE, not left as a bare
+                    # asyncio.TimeoutError, so it can never be mistaken for (or
+                    # accidentally swallowed by) the outer bounded-run timeout
+                    # below, which catches that same exception type for a
+                    # completely different reason (the `seconds` run budget).
+                    raise WatchStaleError(
+                        "no frame from PixAI in {}s (not even a keepalive ping) -- "
+                        "treating the connection as dead".format(_WS_STALE_TIMEOUT))
+                msg = json.loads(raw)
                 mtype = msg.get("type")
                 if mtype == "ping":
                     await ws.send(json.dumps({"type": "pong"})); continue
