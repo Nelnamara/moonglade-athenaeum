@@ -1295,7 +1295,7 @@ ${"=".repeat(48)}
           fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
             if (mySeq !== imgModelSeqRef.current) return;
             const versions = d && d.versions || [], v = versions[0] || {};
-            setImgModel((cur) => cur && cur.model_id === m.model_id ? {
+            setImgModel((cur) => cur ? {
               ...cur,
               version_id: v.version_id || "",
               model_type: v.model_type || "",

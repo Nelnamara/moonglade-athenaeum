@@ -336,6 +336,43 @@ users.
   real bounds or the field's own default. The Loom's declarative JSX never had this failure
   mode (it recomputes fresh every render) — the same class of bug an imperative DOM-mutation
   copy is prone to and a declarative one structurally can't have.
+- **The picker's continuous scroll, and a real Loom-only version-dropdown bug, both found
+  during the owner's first live test against his real account** (2026-07-24). Three
+  findings, all confirmed against real behavior, not source reading alone:
+  - **Pagination never worked, on either surface.** `has_more` had been computed correctly
+    server-side since picker-parity-round2 — nothing client-side had ever read it or asked
+    for a next page, and for the GraphQL path (every LoRA search, plus any base-model
+    search using a category filter or "Newest" sort) there was no way to even ask: the
+    query requested `pageInfo{hasNextPage}` but not `endCursor`, and accepted no `after`
+    argument. Added forward Relay-cursor paging (`model_search_market_gql`'s `after`
+    param) — the same Relay Connection spec this app already relies on elsewhere
+    (`page_variables`'s before/last cursor paging for task history, just the reverse
+    direction), not a guess. `/api/model-search` now accepts a single opaque `cursor=` the
+    client just echoes back; the route decides what it means per-request (a real GraphQL
+    cursor on the market path, a plain offset on the REST path) so the client never needs
+    to know which path is serving it. `<mg-model-picker>`'s `.mg-grid` now has a scroll
+    listener that fetches and APPENDS a next page near the bottom, sharing one URL-builder
+    with the initial search so a continuation can never silently drift onto different
+    filters, with its own staleness guard (a fresh search supersedes an in-flight
+    continuation) and a visible "loading more…" indicator. A transient error mid-scroll
+    leaves pagination state untouched rather than wedging it closed, so the next scroll
+    simply retries. Live-verified end to end: two mocked pages, confirmed the grid holds
+    both (not replaced), in order, with `has_more`/`cursor` updating correctly at each step.
+  - **A real Loom-only bug in the base-model version-resolve guard**, confirmed by the
+    owner testing the identical model on both surfaces: the gallery showed a version
+    dropdown, the Loom didn't. The Loom's resolve-fetch updater carried an extra
+    `cur.model_id === m.model_id` condition on top of the sequence-counter guard the
+    Gallery's own `onBasePick` has always used alone — redundant for the "a newer pick
+    superseded this one" case the counter already covers correctly, but a real liability
+    for anything else that can touch `imgModel` while the fetch is in flight, silently
+    dropping the entire versions/compatibility/restrictions payload with nothing visibly
+    wrong. Simplified to match the Gallery's proven, simpler guard exactly.
+  - **The architecture-aware LoRA sort/badge mechanism was traced end to end and found
+    structurally correct** — `base-type` is set correctly on both surfaces, the server
+    requests the right GraphQL fields and soft-sorts correctly, the client renders the
+    `compat` badge correctly. No bug found; still needs the owner's live confirmation it's
+    now visibly working, since fixing pagination changes how much of the sorted list is
+    ever on screen at once to judge it by.
 
 ## Achievements / The Folio of Honors
 

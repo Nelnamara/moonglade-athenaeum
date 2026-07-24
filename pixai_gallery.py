@@ -10892,7 +10892,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_model_search():
         """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key. Login required
         (any session, local or LAN).
-        ?q=&kind=base|lora&size=N&offset=N&category=&sort=popular|newest&base_type=.
+        ?q=&kind=base|lora&size=N&cursor=&category=&sort=popular|newest&base_type=.
 
         Three data sources by design: REST /search (base models' default) has RICH rows
         (description / refCount / official badge) but silently ignores market filters AND
@@ -10907,6 +10907,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         only for category/Newest) -- architecture filtering is a LoRA-picker concept only,
         base models don't get compat-sorted against anything.
 
+        cursor= (owner report 2026-07-24: the picker "scrolls a few rows and stops -- no
+        continuous scroll"): an OPAQUE token from a previous response's `next_cursor` --
+        the client just echoes it back with no idea which search path is serving it; THIS
+        route decides what it means for the CURRENT request. On the GraphQL path it's the
+        real Relay endCursor, passed straight through as `after=`. On the REST path (which
+        has no cursor concept, only a raw int offset) it's a base-10 offset string, parsed
+        here and passed as `offset=`; the response's own `next_cursor` is then computed as
+        offset+size so the next request stays a plain opaque round-trip either way. Always
+        '' when the underlying `has_more` is false, regardless of what math would otherwise
+        produce -- a client must never be handed a cursor that pages past a real end.
+        Absent/malformed cursor == first page, same as no cursor was ever sent.
+
         base_type=<model_type>: the CALLER's already-resolved selected base model's own
         model_type (the Gallery/Loom already resolve this today for the post-selection
         is_lora_compatible() gate -- this just reuses it). When present on a kind=lora
@@ -10918,20 +10930,23 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         category = (request.args.get("category") or "").strip().lower()
         sort = (request.args.get("sort") or "").strip().lower()
         base_type = (request.args.get("base_type") or "").strip()
+        cursor = (request.args.get("cursor") or "").strip()
         try:
             size = max(1, min(int(request.args.get("size") or 24), 50))
-            offset = max(0, int(request.args.get("offset") or 0))
         except ValueError:
-            size, offset = 24, 0
+            size = 24
         try:
             core, session = _gen_session()
             use_market = usage == "LORA" or category in core.MARKET_CATEGORIES or sort == "newest"
             if use_market:
                 payload = core.model_search_market_gql(
-                    session, keyword=q, category=category, sort=sort, usage=usage, limit=size)
+                    session, keyword=q, category=category, sort=sort, usage=usage,
+                    limit=size, after=(cursor or None))
             else:
+                offset = int(cursor) if cursor.isdigit() else 0
                 payload = core.model_search_rest(session, keyword=q, usage=usage,
                                                   size=size, offset=offset)
+                payload["next_cursor"] = str(offset + size) if payload.get("has_more") else ""
             if usage == "LORA" and base_type:
                 payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
             return jsonify(payload)
