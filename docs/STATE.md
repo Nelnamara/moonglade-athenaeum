@@ -858,7 +858,7 @@ surface: no visual build from prose alone.
 | [ledger](https://claude.ai/code/artifact/d1ee39a1-db65-487b-a6ef-067ea6d1392d) | Per-achievement mascot + badge assignment | Live |
 | [Chibi Library · assign uses](https://claude.ai/code/artifact/1998636d-9043-41e8-900d-797c67fd04f2) | Chibi browser + use assignment | Live |
 | [Cohesion Map](https://claude.ai/code/artifact/4229e98c-4ac3-4e86-820a-72a57465c066) | Top-down app map | Live |
-| [Moonglade Banners — defaults & unlocks](https://claude.ai/code/artifact/7919cec3-aec7-41d0-8efc-8fb2d0f4cdb5) | Banner picks for the banner-unlock reward, which isn't built yet (D-8) | Live |
+| [Moonglade Banners — defaults & unlocks](https://claude.ai/code/artifact/7919cec3-aec7-41d0-8efc-8fb2d0f4cdb5) | The 194-candidate banner board with the judging panel's pre-scores (top: #100 and #82 at 19/20) — NOT final picks: the owner's Default/Unlock tags saved only to the voting browser's localStorage (`mg_banner_board_v1`), never exported back. Re-open in the voting browser and Export to recover them, or re-tag. Feeds D-8 | Live |
 | [Moonglade Model Deck](https://claude.ai/code/artifact/9f16f42d-2541-4dd9-935a-0f9d0f39c7c4) | Model research deck | Mirror — `docs/archive/MODEL_DECK_2026-07-11.md` is truth |
 
 **Parked**
