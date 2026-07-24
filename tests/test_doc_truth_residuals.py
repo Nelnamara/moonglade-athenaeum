@@ -18,10 +18,18 @@ def _read(relpath):
 # ---------------------------------------------------------------------------
 # P3 residual: the header's hardcoded is_local=True and the "^ Import" button.
 # /api/import-local IS correctly re-checked server-side as LOCALHOST-tier (no real
-# security hole) -- but the comments that justify hardcoding is_local=True name only
-# Generate/Loom/Panel (genuinely LOGIN-tier) and never mention Import (LOCALHOST-tier),
-# so a signed-in LAN session sees a working-looking Import button that always 403s with
-# no comment explaining why.
+# security hole) -- originally, the comments that justify hardcoding is_local=True
+# named only Generate/Loom/Panel (genuinely LOGIN-tier) and never mentioned Import
+# (LOCALHOST-tier), so a signed-in LAN session saw a working-looking Import button
+# that always 403'd with no comment explaining why (comment-only fix, 2026-07-23,
+# commit e36976d). FIXED FOR REAL 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): the
+# button's own VISIBILITY is now also gated on the real `is_true_local` check (see
+# tests/test_route_tiers.py's test_index_withholds_the_import_button_from_a_lan_session
+# for the behavioral regression test), so a LAN session no longer even sees the
+# button, let alone a 403 after clicking it. The two tests below still hold: they
+# pin that the comments explaining is_local's hardcode continue to name Import and
+# its real tier accurately, now describing why the button is gated differently
+# rather than just flagging that it's an exception.
 # ---------------------------------------------------------------------------
 
 def test_head_nav_comment_names_import_as_the_localhost_exception():
@@ -42,11 +50,12 @@ def test_head_nav_comment_names_import_as_the_localhost_exception():
 
 
 def test_is_local_hardcode_comment_names_import_as_the_documented_exception():
-    """Same underlying gap, the other nearby comment: the one explaining why
+    """Same underlying area, the other nearby comment: the one explaining why
     `is_local=True` is a safe hardcode (right next to the render_template_string call
-    that does it) names Generate/Loom/Panel as the surfaces it gates but never mentions
-    Import -- so a reader has no clue the Import button it also gates is actually
-    LOCALHOST-tier and will 403 for a LOGIN-tier LAN session."""
+    that does it) must name Generate/Loom/Panel as the surfaces it gates AND still
+    call out Import as the one control that needs the stricter, real
+    `is_true_local` check instead -- so a reader has no doubt Import is actually
+    LOCALHOST-tier, not LOGIN-tier like its neighbors."""
     src = _read("pixai_gallery.py")
     start = src.index("# `is_local` below")
     end = src.index("is_local=True", start)
