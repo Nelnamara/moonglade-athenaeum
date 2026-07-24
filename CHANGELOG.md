@@ -100,6 +100,38 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   and the Loom, in both `.jsx` and the compiled bundle), and there's no existing
   by-id icon lookup to resolve an already-submitted model/LoRA against — real new plumbing
   across multiple surfaces, not a cheap addition.
+- **The Loom's Footage tab can now import an already-rendered gallery video straight onto
+  the board as real, placeable footage** — the actual gap behind GitHub issue #3, found
+  after live-testing that issue's earlier "picker selection" fix
+  (`docs/AUDIT_2026-07-21.md`, `owner-2026-07-23` row): that fix correctly made a rendered
+  video reachable and visible through the picker, but routed every pick into Cast & Assets
+  (a reusable `@tag` prompt reference), with no way to actually place an already-rendered
+  clip into an Act. Footage's own "Browse library" button now imports the picked video as
+  a REAL shot entry — `status:"done"`, `resultMid` set to the picked media — landing in the
+  project's first act (creating one if the project has none yet) and appearing in Finished
+  Shots immediately; the owner repositions it from there via each shot card's existing
+  "move to…" dropdown, the same mechanism a rendered shot already uses, not new UI. The
+  button is now locked to video only (Cast & Assets keeps its own separate "+ add from
+  gallery," reference use case, video included) since an imported "shot" can only be a
+  video. Duration comes from the catalog's own `video_duration` where present, falling back
+  to a new local `ffprobe` route (`/api/loom/video-duration`, sharing `_find_local_video_file`
+  and `probe_video_duration` with the existing frame-handoff route) for older rows that
+  predate that column. Imported entries carry `imported:true` for provenance — no PixAI
+  task backs the clip — surfaced as a small badge on the board card and the Finished-Shots
+  filmstrip. Clicking the per-shot "Generate video" button on one is a safe, already-live
+  no-op: live-verified against a real running server that it's `<mg-generate-drawer>`'s own
+  pre-existing `_hasAnyRef` guard (static/mg-generate-drawer.js) that catches it today —
+  "Pick a source image first.", no request fired, footage untouched — not the
+  `generateShot`/`shotPayload().hasInput` path (that one is batch-only and unreachable for
+  an imported card regardless, since `batchGenerate` already excludes `status:"done"`
+  shots before ever calling it; it still carries an imported-aware message as a defensive
+  fallback). Both `batchGenerate` and the standing cost estimate already exclude
+  `status:"done"` shots, so an imported clip is never accidentally resubmitted or priced.
+  Fail-first tested: two new pure helpers in
+  `loom/src/loom-mutations.js` (`importedFootagePatch`, `landInFirstAct`,
+  `loom/test/loom-mutations.test.js`), rewritten/extended source-presence coverage in
+  `loom/test/loom-picker-video-import.test.js`, and `tests/test_web_pick.py` for the new
+  server route.
 
 ### Security
 

@@ -53,6 +53,27 @@ export const patchCardById = (project, cardId, patch) => ({
 export const setPromptOverride = (c, text) => ({ ...c, promptOverride: true, promptOverrideText: text });
 export const clearPromptOverride = (c) => ({ ...c, promptOverride: false, promptOverrideText: "" });
 
+// The patch an already-rendered gallery video applies on top of a fresh blank card
+// (newCard(), master-storyboard.jsx -- the one place a shot's other default fields are
+// decided; deliberately NOT duplicated here) to become a REAL, placeable Finished-Shots
+// entry instead of an empty one: pre-done, its resultMid already the picked media, no
+// generation needed. `imported:true` is provenance -- no PixAI task backs this resultMid,
+// unlike every other done card -- so re-roll/cost/debugging logic can tell the two apart
+// (see generateShot's !hasInput branch in master-storyboard.jsx: an imported card has no
+// cast/frames/refs, so hasInput is false by construction and a re-roll attempt safely
+// no-ops with an explanatory message instead of silently discarding the footage or
+// spending credits). `duration` comes from the SAME picker field useExistingVideo already
+// trusts (catalog `video_duration`, or the /api/loom/video-duration probe fallback) --
+// only written as actualDur when it resolves to a real positive number, so a blank/zero
+// duration leaves newCard's own default (8s) standing rather than writing a lying zero.
+export const importedFootagePatch = (mediaId, duration) => {
+  const dur = Number(duration);
+  return {
+    status: "done", resultMid: mediaId, trimIn: 0, trimOut: null, imported: true,
+    ...(dur > 0 ? { actualDur: dur } : {}),
+  };
+};
+
 export const patchAct = (project, actId, patch) => ({
   ...project,
   acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch }),
@@ -64,6 +85,20 @@ export const appendCardToAct = (project, actId, card) => ({
   ...project,
   acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: [...a.cards, card] }),
 });
+
+// Land `card` in the project's FIRST act, creating one (named via nextActName, same
+// as addAct's own convention) if the project doesn't have one yet -- so importing a
+// gallery video as footage always has somewhere honest to go without inventing new
+// "which act" UI. The owner repositions it afterward through that card's own existing
+// "move to..." dropdown (moveCardToAct), exactly like any other shot. `newActId` is
+// caller-supplied (id generation is a side effect that stays out of this pure layer,
+// same contract as buildDuplicateCard's newCardId/newRefIds).
+export const landInFirstAct = (project, card, newActId) => {
+  const first = project.acts[0];
+  const withAct = first ? project
+    : appendAct(project, { id: newActId, name: nextActName(project), collapsed: false, cards: [] });
+  return appendCardToAct(withAct, first ? first.id : newActId, card);
+};
 
 // Build the shape of a duplicated card (deep clone, fresh ids, reset render
 // state) -- everything dupCard() did except id generation, which the caller

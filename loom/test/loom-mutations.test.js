@@ -10,6 +10,7 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved,
+  landInFirstAct, importedFootagePatch,
 } from "../src/loom-mutations.js";
 import { flat, shotText, actLetter } from "../src/loom-core.js";
 
@@ -165,6 +166,51 @@ describe("appendCardToAct / insertCardAfter", () => {
     const p = makeProject([makeAct("a1", [makeCard({ id: "c1" }), makeCard({ id: "c2" }), makeCard({ id: "c3" })])]);
     const out = insertCardAfter(p, "a1", "c1", makeCard({ id: "cNew" }));
     assert.deepEqual(out.acts[0].cards.map((c) => c.id), ["c1", "cNew", "c2", "c3"]);
+  });
+});
+
+describe("landInFirstAct", () => {
+  test("appends the card to the project's first act, leaving other acts untouched", () => {
+    const p = makeProject([
+      makeAct("a1", [makeCard({ id: "c1" })]),
+      makeAct("a2", [makeCard({ id: "c2" })]),
+    ]);
+    const card = makeCard({ id: "imported1", status: "done", resultMid: "M1" });
+    const out = landInFirstAct(p, card, "unused-act-id");
+    assert.deepEqual(out.acts[0].cards.map((c) => c.id), ["c1", "imported1"]);
+    assert.deepEqual(out.acts[1].cards.map((c) => c.id), ["c2"]);   // second act untouched
+    assert.equal(p.acts[0].cards.length, 1, "original project must not be mutated");
+  });
+  test("creates a first act (via nextActName) when the project has none yet", () => {
+    const p = makeProject([]);
+    const card = makeCard({ id: "imported1", status: "done", resultMid: "M1" });
+    const out = landInFirstAct(p, card, "new-act-id");
+    assert.equal(out.acts.length, 1);
+    assert.equal(out.acts[0].id, "new-act-id");
+    assert.equal(out.acts[0].name, "Act 1");
+    assert.deepEqual(out.acts[0].cards.map((c) => c.id), ["imported1"]);
+  });
+});
+
+describe("importedFootagePatch", () => {
+  test("marks the patch done + imported, with the picked media as resultMid and a full reset trim", () => {
+    const patch = importedFootagePatch("MEDIA123", "12.5");
+    assert.equal(patch.status, "done");
+    assert.equal(patch.resultMid, "MEDIA123");
+    assert.equal(patch.imported, true);
+    assert.equal(patch.trimIn, 0);
+    assert.equal(patch.trimOut, null);
+    assert.equal(patch.actualDur, 12.5);
+  });
+  test("omits actualDur (leaving newCard's own default duration standing) when the duration is blank, zero, or negative", () => {
+    assert.equal("actualDur" in importedFootagePatch("M1", ""), false);
+    assert.equal("actualDur" in importedFootagePatch("M1", undefined), false);
+    assert.equal("actualDur" in importedFootagePatch("M1", "0"), false);
+    assert.equal("actualDur" in importedFootagePatch("M1", "-3"), false);
+    assert.equal("actualDur" in importedFootagePatch("M1", "not-a-number"), false);
+  });
+  test("accepts a real (already-parsed) number, not just a string", () => {
+    assert.equal(importedFootagePatch("M1", 9).actualDur, 9);
   });
 });
 
