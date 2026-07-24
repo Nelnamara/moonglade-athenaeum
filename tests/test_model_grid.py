@@ -115,6 +115,112 @@ def test_is_lora_compatible_exact_equality_fails_open():
     assert core.is_lora_compatible(None, None) is True
 
 
+def test_list_model_versions_full_shape_and_labels(monkeypatch):
+    """Problem 4 (docs/AUDIT_2026-07-21.md's tracked O12/O13 remainder): exposes EVERY
+    published version -- not just resolve_version_meta's rows[0] -- through the SAME
+    per-row shape, plus a human `label` + `is_latest` for the picker UI."""
+    rows = [
+        {"id": "V3", "modelType": "SDXL_MODEL", "loraBaseModelType": None,
+         "createdAt": "2026-07-20T00:00:00Z",
+         "extra": {"negativePrompts": "nsfw", "samplingMethod": "Euler a",
+                   "samplingSteps": 28, "cfgScale": 5}},
+        {"id": "V2", "modelType": "SDXL_MODEL", "loraBaseModelType": None,
+         "createdAt": "2026-06-01T00:00:00Z", "extra": {}},
+        {"id": "V1", "modelType": "SDXL_MODEL", "loraBaseModelType": None,
+         "createdAt": "", "extra": {}},
+    ]
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: rows)
+    out = core.list_model_versions(object(), "M1")
+    assert [v["version_id"] for v in out] == ["V3", "V2", "V1"]     # server order preserved
+    assert out[0]["label"] == "Latest · 2026-07-20" and out[0]["is_latest"] is True
+    assert out[1]["label"] == "v2 · 2026-06-01" and out[1]["is_latest"] is False
+    assert out[2]["label"] == "v1" and out[2]["is_latest"] is False   # no createdAt -> no date
+    # full per-row meta, not just an id -- the whole point of exposing the list
+    assert out[0]["sampling_method"] == "Euler a" and out[0]["cfg_scale"] == 5
+    assert out[0]["negative_prompt"] == "nsfw"
+
+
+def test_list_model_versions_skips_rows_with_no_id(monkeypatch):
+    rows = [{"id": "", "modelType": "SDXL_MODEL"}, {"id": "V1", "modelType": "SDXL_MODEL"}]
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: rows)
+    out = core.list_model_versions(object(), "M1")
+    assert [v["version_id"] for v in out] == ["V1"]
+    assert out[0]["is_latest"] is False    # it was rows[1] by ORIGINAL position, not rows[0]
+
+
+def test_list_model_versions_empty_and_network_error(monkeypatch):
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])
+    assert core.list_model_versions(object(), "x") == []
+
+    def boom(*a, **k):
+        raise core.PixAIError("nope")
+    monkeypatch.setattr(core, "_rest_get", boom)
+    assert core.list_model_versions(object(), "x") == []
+
+
+def test_resolve_version_meta_and_list_model_versions_agree_on_rows0(monkeypatch):
+    """The two must never drift on what rows[0] means -- resolve_version_meta's fast path
+    and list_model_versions' first entry are the SAME row through the SAME mapping."""
+    rows = [{"id": "V2", "modelType": "MULTI_LORA", "loraBaseModelType": "SDXL_MODEL",
+             "extra": {"triggerWords": "trig"}},
+            {"id": "V1", "modelType": "MULTI_LORA", "loraBaseModelType": "SDXL_MODEL", "extra": {}}]
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: rows)
+    single = core.resolve_version_meta(object(), "M1")
+    listed = core.list_model_versions(object(), "M1")
+    assert listed[0]["version_id"] == single["version_id"] == "V2"
+    assert listed[0]["trigger_words"] == single["trigger_words"] == "trig"
+    assert listed[0]["model_type"] == single["model_type"]
+
+
+# ---- annotate_lora_compat (problem 3: architecture-aware LoRA sort/badge) -----------------
+# Mock rows use the CONFIRMED-live shape: `lora_base_model_type`, sourced from GraphQL's
+# latestVersion.loraBaseModelType (model_search_market_gql) -- e.g. real rows come back as
+# modelType:"MULTI_LORA", loraBaseModelType:"SD_V1_MODEL" -- NEVER `base_model` (PixAI's
+# content category, confirmed NOT architecture; see the function's own docstring).
+
+def test_annotate_lora_compat_sorts_compatible_first_and_tags_every_row():
+    rows = [
+        {"model_id": "1", "title": "Mismatch LoRA", "lora_base_model_type": "SD_V1_MODEL"},
+        {"model_id": "2", "title": "Match LoRA", "lora_base_model_type": "MMDIT26A_MODEL"},
+        {"model_id": "3", "title": "Unknown-arch LoRA", "lora_base_model_type": ""},
+        {"model_id": "4", "title": "Another match", "lora_base_model_type": "MMDIT26A_MODEL"},
+    ]
+    out = core.annotate_lora_compat(rows, "MMDIT26A_MODEL")
+    # SOFT sort: compatible + unknown float to the front (fail-open, same rule as
+    # is_lora_compatible), a CONFIRMED mismatch sinks to the back -- nothing is ever hidden,
+    # and each group keeps its original relative order (stable partition).
+    assert [r["model_id"] for r in out] == ["2", "3", "4", "1"]
+    assert {r["model_id"]: r["compat"] for r in out} == {"1": "no", "2": "yes", "3": "unknown", "4": "yes"}
+
+
+def test_annotate_lora_compat_case_insensitive_like_is_lora_compatible():
+    rows = [{"model_id": "1", "lora_base_model_type": "sdxl_model"}]
+    assert core.annotate_lora_compat(rows, "SDXL_MODEL")[0]["compat"] == "yes"
+
+
+def test_annotate_lora_compat_passthrough_when_no_base_selected():
+    """Browsing LoRAs before picking a base must be completely untouched -- no sort, no tag."""
+    rows = [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}]
+    out = core.annotate_lora_compat(rows, "")
+    assert out is rows and "compat" not in out[0]
+    assert core.annotate_lora_compat(rows, None) is rows
+
+
+def test_annotate_lora_compat_does_not_mutate_input_rows():
+    rows = [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}]
+    core.annotate_lora_compat(rows, "SDXL_MODEL")
+    assert "compat" not in rows[0]   # a fresh copy is returned -- the caller's own list/dicts are untouched
+
+
+def test_annotate_lora_compat_all_incompatible_still_returns_everything():
+    """A hard filter would empty the grid here -- the soft-sort contract must not drop rows,
+    only reorder + tag them, even when NOTHING matches."""
+    rows = [{"model_id": "1", "lora_base_model_type": "SD_V1_MODEL"},
+            {"model_id": "2", "lora_base_model_type": "SD3_MODEL"}]
+    out = core.annotate_lora_compat(rows, "MMDIT26A_MODEL")
+    assert len(out) == 2 and all(r["compat"] == "no" for r in out)
+
+
 def test_web_generate_pipeline(monkeypatch, tmp_path):
     # web_generate = submit -> poll -> task detail -> download/catalog; all reused parts
     # mocked so no network / no spend. Verifies it threads the pieces + returns media_ids.
@@ -171,6 +277,33 @@ def test_model_search_market_gql(monkeypatch):
     r2 = core.model_search_market_gql(object(), category="concept", usage="LORA")
     assert 'category:' not in captured["query"]          # 'concept' not whitelisted
     assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
+
+
+def test_model_search_market_gql_requests_and_surfaces_architecture_fields(monkeypatch):
+    """picker-parity-round2 (problem 3): the query gained latestVersion{modelType
+    loraBaseModelType} -- confirmed live against the owner's real account (real rows come
+    back e.g. modelType:"MULTI_LORA", loraBaseModelType:"SD_V1_MODEL") -- surfaced as
+    model_type/lora_base_model_type on every row, the SAME key names resolve_version_meta
+    already uses, so annotate_lora_compat doesn't care which search path produced a row."""
+    captured = {}
+
+    def fake_gql(session, query, vars=None):
+        captured["query"] = query
+        return {"generationModels": {"pageInfo": {"hasNextPage": False}, "edges": [
+            {"node": {"id": "9", "title": "Eris LoRA", "type": "MULTI_LORA", "isNsfw": False,
+                      "likedCount": 1, "latestVersion": {"id": "v9", "modelType": "MULTI_LORA",
+                                                          "loraBaseModelType": "SD_V1_MODEL"},
+                      "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""}},
+            {"node": {"id": "10", "title": "No version yet", "type": "MULTI_LORA", "isNsfw": False,
+                      "likedCount": 0, "latestVersion": {}, "media": {"urls": []},
+                      "tags": [], "author": {}, "createdAt": ""}},
+        ]}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    r = core.model_search_market_gql(object(), usage="LORA")
+    assert "modelType loraBaseModelType" in captured["query"]
+    assert r["results"][0]["model_type"] == "MULTI_LORA"
+    assert r["results"][0]["lora_base_model_type"] == "SD_V1_MODEL"
+    assert r["results"][1]["model_type"] == "" and r["results"][1]["lora_base_model_type"] == ""
 
 
 def test_task_image_media_prefers_batch_over_grid():

@@ -226,6 +226,87 @@ def test_gallery_model_flyout_is_the_shared_mg_model_picker_component(tmp_path):
     assert "function search(){" not in html and "function render(rows" not in html
 
 
+def test_model_flyout_grid_fills_the_panel_instead_of_a_fixed_320px_cap(tmp_path):
+    """picker-parity-round2 (problem 1): the owner's live screenshot showed only ~2 rows of
+    cards then a large dead area filling the rest of #model-flyout's real height. Root cause
+    was TWO independent height constraints fighting each other: .gen-body was an
+    overflow:auto scroll container AND <mg-model-picker>'s own .mg-grid had a fixed
+    max-height:320px (see mg-model-picker.js's own tests for that half of the fix) -- so on
+    any flyout taller than ~380px, .gen-body's real extra height just sat there empty below
+    the capped grid. Fix: hand the real height down to the GRID so IT is the one scrolling
+    region, scoped to #model-flyout only (the main Generate form's own .gen-body is a plain
+    tall scrolling form and must stay untouched)."""
+    cli = _authed_client(tmp_path, [])
+    html = cli.get("/").get_data(as_text=True)
+    assert "#model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;min-height:0;}" in html
+    assert "#model-flyout #gen-picker-host{flex:1;min-height:0;display:flex;flex-direction:column;}" in html
+    assert "#model-flyout mg-model-picker{flex:1;min-height:0;}" in html
+    # #gen-drawer's own .gen-body (the main form) must be UNTOUCHED -- only ONE overflow:auto
+    # rule for the base .gen-body class, not overridden away by this fix.
+    assert html.count(".gen-body{padding:12px 14px;overflow-y:auto;flex:1;}") == 1
+
+
+def test_model_flyout_surfaces_version_picker_and_capabilities(tmp_path):
+    """picker-parity-round2 (problems 4/5): resolve_version_meta() already fetches a
+    model's OTHER releases + the author's own sampling_method/capabilities -- this was being
+    resolved and thrown away. #gen-version/#gen-caps surface both; base-type wiring feeds
+    the resolved architecture into the LoRA picker for problem 3's compat sort/badge."""
+    cli = _authed_client(tmp_path, [])
+    html = cli.get("/").get_data(as_text=True)
+    assert 'id="gen-version"' in html and 'onchange="Gen.pickVersion(this.value)"' in html
+    assert 'id="gen-caps"' in html
+    assert 'id="gen-modeldefaults-label"' in html   # sampling_method note target
+    assert "pickVersion:pickVersion" in html         # exposed on the Gen public object
+    # every base pick re-resolves via ?all=1 (the version LIST, not just the latest)...
+    assert "fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id)+'&all=1')" in html
+    # ...and feeds the resolved architecture straight into the LoRA picker (problem 3)
+    assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
+
+
+def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_path, monkeypatch):
+    """picker-parity-round2 (problem 3): LoRA search needs real per-row architecture data
+    (modelType/loraBaseModelType) on EVERY search, not just category/Newest browsing -- REST
+    has no such field to request (confirmed by inspecting its full response shape -- see
+    pixai_gallery_backup.py's model_search_rest), so kind=lora now always routes through
+    model_search_market_gql (GraphQL), regardless of category/sort. Base-model search
+    (kind=base) is UNCHANGED -- REST by default, GraphQL only for category/Newest."""
+    calls = {"rest": 0, "gql": 0}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "model_search_rest",
+                        lambda *a, **k: calls.__setitem__("rest", calls["rest"] + 1) or {"results": [], "has_more": False})
+    monkeypatch.setattr(core, "model_search_market_gql",
+                        lambda *a, **k: calls.__setitem__("gql", calls["gql"] + 1) or {"results": [], "has_more": False})
+    cli = _authed_client(tmp_path, [])
+    # plain keyword LoRA search, no category, no sort=newest -- would have hit REST before this pass
+    r = cli.get("/api/model-search?kind=lora&q=eris")
+    assert r.status_code == 200
+    assert calls == {"rest": 0, "gql": 1}
+    # base-model search under the SAME conditions is unaffected -- still REST by default
+    cli.get("/api/model-search?kind=base&q=eris")
+    assert calls == {"rest": 1, "gql": 1}
+
+
+def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatch):
+    """base_type= (the caller's already-resolved selected base model_type) threads into
+    annotate_lora_compat for kind=lora only -- a base-model search has nothing to
+    compat-sort against, so it ignores the param entirely even if sent."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "model_search_market_gql",
+                        lambda *a, **k: {"results": [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}],
+                                          "has_more": False})
+    monkeypatch.setattr(core, "model_search_rest",
+                        lambda *a, **k: {"results": [{"model_id": "9"}], "has_more": False})
+    cli = _authed_client(tmp_path, [])
+    d = cli.get("/api/model-search?kind=lora&base_type=SDXL_MODEL").get_json()
+    assert d["results"][0]["compat"] == "yes"
+    # no base_type -> untouched (no compat key added at all)
+    d2 = cli.get("/api/model-search?kind=lora").get_json()
+    assert "compat" not in d2["results"][0]
+    # base kind ignores base_type entirely (nothing to compat-sort a base model against)
+    d3 = cli.get("/api/model-search?kind=base&base_type=SDXL_MODEL").get_json()
+    assert "compat" not in d3["results"][0]
+
+
 def test_collections_endpoint(tmp_path):
     rows = [_row(media_id="1", filename="a_1.png", collections="Banners,Faves",
                  created_at="2025-01-01T00:00:00"),

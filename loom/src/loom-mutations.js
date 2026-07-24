@@ -348,6 +348,10 @@ export function buildImgGenBody(imgModel, imgLoras, imgAdv, prompt) {
                                 customW: a.customW, customH: a.customH });
   return {
     model_id: (imgModel && imgModel.model_id) || "",
+    // picker-parity-round2 (problem 4): the CHOSEN version, when the owner picked one
+    // other than the latest via the version selector -- '' (absent) when they haven't,
+    // which /api/generate already treats as "resolve the newest" (unchanged fallback).
+    version_id: (imgModel && imgModel.version_id) || "",
     prompt: prompt || "",
     loras: resolveLoraPayload(imgLoras),
     negative: a.negative || "",
