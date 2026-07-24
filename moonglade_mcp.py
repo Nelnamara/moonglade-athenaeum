@@ -47,6 +47,9 @@ def _slim(row):
         "is_video": row.get("is_video"),
         "source": row.get("source"),
         "liked_count": row.get("liked_count"),
+        # Actual credit cost of the row's task ('0' = free via card/daily, '' = never
+        # captured). Task-level: batch siblings repeat the same value.
+        "paid_credit": row.get("paid_credit") or "",
         "dimensions": "{}x{}".format(row.get("width") or "?", row.get("height") or "?"),
         "filename": row.get("filename"),
     }

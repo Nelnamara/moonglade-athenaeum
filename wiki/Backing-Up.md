@@ -55,11 +55,15 @@ python pixai_gallery_backup.py --backfill-full-meta   # fill existing catalog ro
 ```
 
 Captures the complete prompt, seed, steps, sampler, CFG, human-readable model name,
-and LoRAs.
+LoRAs, and the generation's actual credit cost (`paid_credit`; `0` = free via a card
+or the daily free tier).
 
 - `--backfill-full-meta --with-loras` widens the backfill to rows that already have
   full meta but no LoRA data yet (older images predate LoRA capture) — a long run,
   since each needs its task re-fetched.
+- `--backfill-full-meta --with-credit` does the same for the credit cost: rows
+  cataloged before cost tracking (2026-07-23) recover what they actually cost from
+  the task record — also a long run. `--catalog-stats` then shows the spend total.
 - `--backfill-meta` (no "full") is the lightweight sibling: it only fills missing
   url/width/height, no prompt/seed/model fetching.
 
