@@ -123,3 +123,73 @@ def test_watch_no_ack_raises(monkeypatch):
         assert False, "expected PixAIError when no connection_ack"
     except core.PixAIError as e:
         assert "handshake" in str(e).lower()
+
+
+# --- Staleness watchdog ----------------------------------------------------------
+# The real incident this guards against: the WebSocket never errored and never sent
+# a close frame -- it just stopped producing ANY frame, including PixAI's own
+# keepalive pings, for ~21 minutes while real generations were finishing. Before this
+# fix, the receive loop's `await ws.recv()` had no timeout at all, so a socket in
+# that state hung the loop forever: `connected` stayed True and `last_error` stayed
+# None indefinitely (verified live via `/api/watch/status`), and nothing in
+# `_watch_loop`'s outer reconnect/backoff logic ever ran because no exception was
+# ever raised to trigger it.
+
+class _SilentAfterAckWS(_FakeWS):
+    """Answers the connection_ack handshake normally, then goes silent forever on
+    every subsequent recv() -- exactly a zombie connection that looks open but
+    produces nothing, not even a ping."""
+    async def recv(self):
+        if self._i < len(self.script):
+            return await super().recv()
+        # No more scripted frames: block far longer than any timeout under test,
+        # so this only resolves if something is broken and the wait_for around it
+        # failed to cancel us.
+        await asyncio.sleep(10)
+        raise AssertionError("recv() blocked past its wait_for timeout -- the "
+                              "staleness watchdog did not fire")
+
+
+def test_watch_raises_when_connection_goes_stale_despite_looking_healthy(monkeypatch):
+    """Fail-first case: reproduces 'connected but silently dead'. A tiny
+    _WS_STALE_TIMEOUT stands in for the real several-minute one so the test itself
+    stays fast; the mechanism under test is the same either way -- ws.recv() is
+    awaited with a timeout, and a lapse raises WatchStaleError instead of hanging."""
+    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", 0.05)
+    ws = _SilentAfterAckWS([json.dumps({"type": "connection_ack"})])
+    monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
+    got = []
+    try:
+        asyncio.run(core._watch_events_async("Bearer x", got.append, None))
+        assert False, "expected WatchStaleError when the socket goes silent"
+    except core.WatchStaleError as e:
+        assert "no frame" in str(e).lower()             # says what happened
+        assert str(core._WS_STALE_TIMEOUT) in str(e)    # names the timeout it hit
+        # WatchStaleError must still be a PixAIError so nothing that already does a
+        # bare `except PixAIError` (or `except Exception`, like _watch_loop) needs
+        # to change to start handling it.
+        assert isinstance(e, core.PixAIError)
+    # subscribed fired first -- this is genuinely the "looked connected" case, not a
+    # handshake failure.
+    assert got and got[0].get("__meta__") == "subscribed"
+
+
+def test_watch_pings_reset_the_staleness_clock(monkeypatch):
+    """Companion/negative case: a steady trickle of frames -- even bare keepalive
+    pings, no real taskUpdated events -- must NOT trip the watchdog, since a quiet
+    account (no generations running) is a normal, healthy state, not a stale one."""
+    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", 0.05)
+    script = [json.dumps({"type": "connection_ack"})]
+    script += [json.dumps({"type": "ping"})] * 5   # each one comfortably under 0.05s apart
+    script += [json.dumps({"type": "complete"})]
+
+    class _PacedWS(_FakeWS):
+        async def recv(self):
+            await asyncio.sleep(0.01)   # well inside the timeout -- never lets it lapse
+            return await super().recv()
+
+    ws = _PacedWS(script)
+    monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
+    got = []
+    asyncio.run(core._watch_events_async("Bearer x", got.append, None))   # must not raise
+    assert any(m.get("type") == "pong" for m in ws.sent)   # still answered every ping
