@@ -8467,8 +8467,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
-        """Session-based login gate for every non-localhost request (see
-        _is_authorized_request() above). GET renders the form; POST verifies the
+        """Session-based login gate -- for EVERY request, including from the server's
+        own machine; there is no localhost bypass (see _is_authorized_request()
+        above). GET renders the form; POST verifies the
         CSRF token, then credentials, then signs in. Any failure (rate-limited,
         bad CSRF, bad credentials) re-renders the SAME form with one generic
         "invalid username or password" message -- never which field was wrong --
@@ -11229,8 +11230,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         the same kind of thing as the install-wide skin choice. They lived in
         localStorage before this, one private set per browser; the client pushes a legacy
         set up through POST {merge} once, existing names winning ties. POST {name, query}
-        saves one; POST {delete: name} removes one (no UI for it yet -- the verb exists so
-        the select's reserved delete affordance has something to call).
+        saves one; POST {delete: name} removes one, wired to a "Delete" button next to the
+        saved-view select (see deletePreset() in the page script).
 
         The account comes from the SESSION and is never accepted from the request body:
         a client that could name its own key could read and overwrite anyone's set, which
