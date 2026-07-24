@@ -374,6 +374,15 @@ describe("friendlyGenErr", () => {
   test("recognizes content-moderation errors", () => {
     assert.match(friendlyGenErr("content policy violation"), /content filter/);
   });
+  test("recognizes an unsupported quality-mode (inferenceProfile) rejection", () => {
+    // Real shape of the raw GraphQL error PixAI returns when the chosen Mode isn't
+    // supported by the selected model type (found live 2026-07-24). The server-side
+    // retry (submit_generation()) now recovers from this automatically -- this message
+    // is only the backstop for whatever slips past that.
+    assert.match(
+      friendlyGenErr('GraphQL error: unknown inferenceProfile "ultra" for model type "SDXL_MODEL"'),
+      /quality setting/);
+  });
   test("falls back to the raw string, or a default for empty input", () => {
     assert.equal(friendlyGenErr("weird one-off error"), "weird one-off error");
     assert.equal(friendlyGenErr(""), "generation failed");
