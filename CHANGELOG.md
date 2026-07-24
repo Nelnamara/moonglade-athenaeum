@@ -89,6 +89,32 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 
 ### Fixed
 
+- **Orphaned jobs no longer spin in the Activity card forever** (`docs/AUDIT_2026-07-21.md`,
+  `owner-2026-07-23`, reproduced against the owner's own `jobs.jsonl`: task
+  `2037215124834251576` logged one `"running"` event and never got a second one, though
+  the generation had actually finished on PixAI's side). Two fixes:
+  - **A task-id recovery (`/api/import-task`) now closes the ORIGINAL orphaned job entry
+    too**, not just the new `import-<suffix>` job it logs for the recovery action itself —
+    on either success path (a fresh collect, or the "already cataloged" short-circuit).
+    Previously, recovering a stuck task correctly imported the media but left the Activity
+    card spinning on the orphan forever, permanently disconnected from reality.
+  - **`/api/jobs` now runs an ongoing reconciliation sweep** (`resolve_orphan_jobs(...,
+    min_age=JOBS_ORPHAN_SWEEP_AGE)`, same "runs opportunistically off an existing poll"
+    shape as `maybe_compact_jobs` beside it) that re-checks any `generate` job stuck
+    `"running"` for more than `JOBS_ORPHAN_SWEEP_AGE` (30 minutes — comfortably past any
+    real single generation, including video's own 600s `--poll-timeout`, while still
+    surfacing an orphan same-day rather than waiting on `JOBS_MAX_AGE`'s 24h silent
+    drop-from-view) against PixAI's real task status. A job that resolves for real gets its
+    true terminal event; a job whose status check itself fails (PixAI unreachable) is
+    marked a new, distinct, dismissable `"stale"` state instead of being silently left
+    exactly as-is or guessed into a false `done`/`failed` — the owner can always see that a
+    job got stuck. The live-mirror watcher's own startup sweep is unchanged (`min_age=0`,
+    checks everything once immediately). Fail-first tested:
+    `tests/test_web_pick.py::test_import_task_closes_the_original_orphaned_job_entry` (+ the
+    already-cataloged and dismissed-orphan variants beside it) and
+    `tests/test_jobs.py::test_stale_job_reconciliation_marks_stale_when_pixai_cannot_be_reached`
+    (+ the min-age-gate, real-resolve, and ts-refresh-throttle variants beside it, plus an
+    end-to-end `/api/jobs` test).
 - **Generate no longer locks until the task finishes — PixAI itself runs generations in
   parallel, so every gen panel now does too** (owner field-test 2026-07-23). The lock was
   two separate mechanisms, both fixed the same way: the gallery's `runTask()` (shared by
