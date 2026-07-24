@@ -2561,10 +2561,59 @@ def find_image_file(out_dir, media_id, filename):
 DELETED_DIRNAME = "_deleted"
 
 
+def _trash_meta_path(out_dir, media_id):
+    """Sidecar path for a quarantined item's snapshotted catalog row (see
+    _snapshot_before_purge). Lives beside the quarantined file itself, keyed by
+    media_id rather than filename so it's a one-line lookup from either direction."""
+    return Path(out_dir) / DELETED_DIRNAME / "{}.json".format(media_id)
+
+
+def _read_trash_meta(out_dir, media_id):
+    """The snapshotted row for a quarantined media_id, or None if it predates this
+    feature (2026-07-24) or the write failed at purge time. Never raises -- a
+    missing/corrupt sidecar just means the trash panel falls back to bare
+    filename/mtime, not an error."""
+    p = _trash_meta_path(out_dir, media_id)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _snapshot_before_purge(db_path, out_dir, media_id):
+    """Write out_dir/_deleted/<media_id>.json with the row's own fields (rating,
+    collections, prompt, task_id, ...) BEFORE delete_from_catalog() removes it for
+    good. docs/AUDIT_2026-07-21.md's scoping note on the restore-panel row: "ratings/
+    collections on old purges are gone (no manifest existed -- a purge-time snapshot
+    for future deletes is part of the build)" -- this is that snapshot. The trash
+    panel's restore path reads it back to reinsert a FULL row instead of a bare
+    media_id/filename stub; its list path reads it for a real deleted_at instead of
+    guessing from file mtime. Best-effort: a write failure must never block the
+    purge itself, same fail-soft contract as the file-move/thumb-unlink around it."""
+    import time
+    row = get_row(db_path, media_id)
+    if not row:
+        return
+    snap = dict(row)
+    snap["_deleted_at"] = time.time()
+    try:
+        _trash_meta_path(out_dir, media_id).write_text(
+            json.dumps(snap), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantine=True):
     """Remove a media's catalog row + (regenerable) thumbnail, and either move its
     file to out_dir/_deleted/ (default, recoverable) or hard-delete it. Returns the
-    new quarantine location (Path) when moved, else None."""
+    new quarantine location (Path) when moved, else None.
+
+    When quarantining, also snapshots the about-to-be-deleted catalog row to a JSON
+    sidecar (see _snapshot_before_purge) so a later restore can recover more than a
+    bare filename. Skipped in hard-delete mode (quarantine=False): nothing is left
+    to restore, so there's nothing worth snapshotting."""
     out_dir = Path(out_dir)
     img = find_image_file(out_dir, media_id, filename)
     moved = None
@@ -2575,6 +2624,7 @@ def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantin
             dest = qdir / img.name
             if dest.exists():                       # don't clobber an earlier delete
                 dest = qdir / "{}_{}{}".format(img.stem, media_id, img.suffix)
+            _snapshot_before_purge(db_path, out_dir, media_id)
             try:
                 img.replace(dest)                   # atomic move on the same volume
                 moved = dest
@@ -2644,6 +2694,275 @@ def make_video_thumbnail(video_path, thumb_path):
                 os.unlink(tmp)
             except OSError:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Trash / quarantine panel -- list, restore, permanently delete
+# ---------------------------------------------------------------------------
+# docs/AUDIT_2026-07-21.md's restore-panel row, scoped 2026-07-23: _deleted/ has ~12k
+# files with no restore UI even though the delete confirm promises "recoverable".
+# These are directory-scan helpers, deliberately NOT catalog queries -- the whole
+# point of purge_media_local is that the catalog row is already gone by the time a
+# file lands here, so there is nothing in catalog.db left to query.
+
+def _find_quarantined_file(out_dir, media_id):
+    """The actual media file (never a .json sidecar) in _deleted/ for media_id, or
+    None. media_id_of() on a bare "<media_id>.json" sidecar resolves to the same
+    media_id as the real file (its stem IS the media_id), so this explicitly
+    restricts the extension to real media -- a naive media_id_of() match alone would
+    pick either file depending on directory order."""
+    import pixai_gallery_backup as core
+    qdir = Path(out_dir) / DELETED_DIRNAME
+    if not qdir.exists():
+        return None
+    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    for p in qdir.glob("*"):
+        if p.is_file() and p.suffix.lower() in media_exts and media_id_of(p) == media_id:
+            return p
+    return None
+
+
+def list_quarantined(out_dir, page=1, page_size=60):
+    """Directory-scan listing of out_dir/_deleted/, newest-deleted-first, paginated.
+
+    Not backed by the catalog (see module note above). Sidecar '<media_id>.json'
+    files (written by purge_media_local since 2026-07-24) supply an exact deleted_at
+    plus prompt/rating/collections/etc; older quarantined files -- or any sidecar
+    write that failed -- fall back to the file's own mtime.
+
+    mtime is only ever a FALLBACK, never the primary sort key when a sidecar
+    exists -- found live-verifying this feature: purge_media_local moves a file
+    into _deleted/ with img.replace(dest), a same-volume rename, and a rename does
+    NOT update a file's mtime on Windows/NTFS (mtime tracks content writes, not
+    moves). So a quarantined file's mtime is really "when it was originally
+    downloaded", not "when it was deleted" -- sorting a batch of freshly-purged
+    items (which DO have an accurate sidecar) by mtime alone silently reordered
+    them by download date instead, which a synthetic multi-item live check caught
+    immediately (an older-downloaded, just-deleted image sorted BELOW a
+    newer-downloaded one deleted earlier the same session).
+
+    All sidecars are read up front to build that sort key -- NOT deferred to just
+    the current page the way thumbnail generation is (see _ensure_trash_thumbs) --
+    but this stays cheap: sidecars only exist for files purged since 2026-07-24, a
+    small and slowly-growing set, never the ~12k-file legacy backlog they're
+    scanned alongside (which has no sidecars to read at all, by definition -- nothing
+    wrote one before this feature existed). Only os.scandir() + stat() (metadata
+    only, no content read) touches every file in the backlog; JSON parsing is
+    bounded by however many sidecars actually exist. Returns (items, total, total_bytes)."""
+    import pixai_gallery_backup as core
+    qdir = Path(out_dir) / DELETED_DIRNAME
+    if not qdir.exists():
+        return [], 0, 0
+
+    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    entries = []
+    meta_by_id = {}
+    with os.scandir(qdir) as it:
+        for e in it:
+            if not e.is_file():
+                continue
+            if e.name.lower().endswith(".json"):
+                mid = Path(e.name).stem
+                meta = _read_trash_meta(out_dir, mid)
+                if meta:
+                    meta_by_id[mid] = meta
+                continue
+            if Path(e.name).suffix.lower() not in media_exts:
+                continue
+            try:
+                st = e.stat()
+            except OSError:
+                continue
+            entries.append((e.name, st.st_size, st.st_mtime))
+
+    total = len(entries)
+    total_bytes = sum(s for _, s, _ in entries)
+
+    def _sort_key(entry):
+        name, _size, mtime = entry
+        meta = meta_by_id.get(media_id_of(name))
+        return (meta or {}).get("_deleted_at") or mtime
+
+    entries.sort(key=_sort_key, reverse=True)
+    page = max(1, page)
+    page_size = max(1, min(page_size, 200))
+    start = (page - 1) * page_size
+    page_entries = entries[start:start + page_size]
+
+    items = []
+    for name, size, mtime in page_entries:
+        media_id = media_id_of(name)
+        is_video = Path(name).suffix.lower() in core._VIDEO_EXTS
+        meta = meta_by_id.get(media_id)
+        deleted_at = (meta or {}).get("_deleted_at") or mtime
+        prompt = ((meta or {}).get("prompt_full") or (meta or {}).get("prompt_preview") or "")
+        items.append({
+            "media_id": media_id, "filename": name, "size": size,
+            "deleted_at": deleted_at, "is_video": "1" if is_video else "",
+            "prompt": prompt[:2000], "has_meta": bool(meta),
+        })
+    return items, total, total_bytes
+
+
+def _ensure_trash_thumbs(out_dir, thumb_dir, items, workers=6):
+    """Generate thumbnails for exactly the quarantined items on ONE page -- reuses
+    make_thumbnail()/make_video_thumbnail() (the same two functions build_thumbnails()
+    calls for the live catalog), not new image-resize logic. Can't reuse
+    build_thumbnails() itself: its file resolution (find_image_file /
+    find_files_for_media_id) deliberately EXCLUDES _deleted/ -- a quarantined file
+    must never resolve as a live survivor (INVARIANT 6) -- so it would never find
+    anything sitting in the trash to begin with. Threaded like build_thumbnails() for
+    the same reason it is: a page that happens to be video-heavy would otherwise pay
+    each ffmpeg extract's cost serially, and this runs synchronously inside a
+    request. purge_media_local already frees each media_id's thumb_dir slot when it
+    quarantines the file, so writing back into that SAME slot means the existing,
+    unmodified /thumbs/<media_id>.jpg route serves the result -- no new serving
+    route needed."""
+    qdir = Path(out_dir) / DELETED_DIRNAME
+    work = []
+    for it in items:
+        thumb_path = Path(thumb_dir) / "{}.jpg".format(it["media_id"])
+        if thumb_path.exists():
+            continue
+        work.append((qdir / it["filename"], thumb_path, it["is_video"] == "1"))
+    if not work:
+        return
+
+    def _one(item):
+        src, thumb_path, is_vid = item
+        if not src.exists():
+            return False
+        return (make_video_thumbnail(src, thumb_path) if is_vid
+                else make_thumbnail(src, thumb_path))
+
+    if len(work) > 1 and workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for fut in as_completed([ex.submit(_one, it) for it in work]):
+                try:
+                    fut.result()
+                except Exception:
+                    pass
+    else:
+        for it in work:
+            _one(it)
+
+
+def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
+    """Move a quarantined file back out of _deleted/ and reinsert its catalog row.
+
+    Restores to out_dir/images/<filename> -- purge_media_local only ever remembered
+    the bare filename (see its own docstring), never the original month/batch
+    subfolder, so this is the same flat default location a fresh download or
+    --import-local would use; find_image_file()/find_files_for_media_id() already
+    search the whole tree, so the gallery works identically regardless of which
+    subfolder a file lives under.
+
+    If a purge-time sidecar exists (every purge since 2026-07-24), the FULL row --
+    rating, collections, prompt, task_id, everything -- comes back. Older quarantined
+    files (or a sidecar write that failed) get a minimal row: just media_id/filename,
+    so the file is visible in the gallery again even though its history is genuinely
+    gone (there was never a manifest before this feature -- see
+    docs/AUDIT_2026-07-21.md's scoping note on this row). A live re-fetch of the
+    task via getTaskById (mentioned as possible in that same note) is deliberately
+    NOT attempted here: it would turn a local file-move into a network call with its
+    own failure modes, for metadata that's "nice to have" on a handful of pre-feature
+    orphans, not "needed to make the file visible again".
+
+    Returns {"ok": True, "media_id":, "filename":} or {"ok": False, "error":}."""
+    out_dir = Path(out_dir)
+    src = _find_quarantined_file(out_dir, media_id)
+    if not src:
+        return {"ok": False, "error": "not found in trash"}
+
+    images_dir = out_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    dest = images_dir / src.name
+    if dest.exists():                             # a same-named live file already exists
+        dest = images_dir / "{}_{}{}".format(src.stem, media_id, src.suffix)
+    try:
+        src.replace(dest)
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+
+    meta = _read_trash_meta(out_dir, media_id)
+    row = {f: (meta.get(f, "") if meta else "") for f in CATALOG_FIELDS}
+    row["media_id"] = media_id
+    row["filename"] = dest.name
+    save_catalog(db_path, [row])
+
+    meta_path = _trash_meta_path(out_dir, media_id)
+    if meta_path.exists():
+        try:
+            meta_path.unlink()
+        except OSError:
+            pass
+    return {"ok": True, "media_id": media_id, "filename": dest.name}
+
+
+def delete_quarantined_forever(out_dir, thumb_dir, media_id):
+    """Permanently unlink a quarantined file + its sidecar meta + any thumbnail the
+    trash panel generated for it while it sat in _deleted/. Irreversible -- the
+    caller (api_trash_delete_forever) is LOCALHOST + confirm=true for exactly this
+    reason. Returns True if a media file was actually removed."""
+    out_dir = Path(out_dir)
+    src = _find_quarantined_file(out_dir, media_id)
+    removed = False
+    if src:
+        try:
+            src.unlink()
+            removed = True
+        except OSError:
+            pass
+    meta_path = _trash_meta_path(out_dir, media_id)
+    if meta_path.exists():
+        try:
+            meta_path.unlink()
+        except OSError:
+            pass
+    tp = Path(thumb_dir) / "{}.jpg".format(media_id)
+    if tp.exists():
+        try:
+            tp.unlink()
+        except OSError:
+            pass
+    return removed
+
+
+def empty_trash(out_dir, thumb_dir):
+    """Permanently wipe EVERY file in out_dir/_deleted/ -- the nuclear option behind
+    LOCALHOST + confirm=true + the client's own typed-DELETE prompt
+    (api_trash_empty()). Same per-item cleanup as delete_quarantined_forever(), just
+    walked once instead of media_id-by-media_id. Returns the number of MEDIA files
+    removed (sidecars don't count toward the number shown to the owner)."""
+    qdir = Path(out_dir) / DELETED_DIRNAME
+    if not qdir.exists():
+        return 0
+    import pixai_gallery_backup as core
+    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    removed = 0
+    for p in list(qdir.glob("*")):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in media_exts:      # sidecar .json (or stray junk)
+            try:
+                p.unlink()
+            except OSError:
+                pass
+            continue
+        mid = media_id_of(p)
+        tp = Path(thumb_dir) / "{}.jpg".format(mid)
+        if tp.exists():
+            try:
+                tp.unlink()
+            except OSError:
+                pass
+        try:
+            p.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 def probe_has_audio(path, timeout=15):
@@ -7871,6 +8190,34 @@ function savePrompt() {
   .u-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;color:var(--text);}
   .u-row .btn{flex:none;}
   .u-you{font-size:11px;color:var(--accent);margin-left:8px;}
+  /* Trash panel (2026-07-24) -- a floating overlay opened from the button below,
+     same pattern as the Folio of Honors/Contests/YourArt modals (#ach-modal /
+     #contest-modal / #art-modal), NOT a page embedded in this Panel's own layout.
+     .ach-modal/.ach-panel/.ach-x/.ach-htitle/.ach-hsub are that shared base modal
+     chrome, normally injected by static/mg-notify.js -- copied here rather than
+     loaded via <script src>, same reasoning + same precedent as the .p-tabs/.htab
+     copy above (mg-notify.js also wires up the Jobs tray/Achievement modals this
+     page doesn't otherwise use). Do not restyle these independently of that source. */
+  .ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}
+  .ach-modal.open{display:flex;}
+  .ach-panel{position:relative;width:760px;max-width:96vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:16px;box-shadow:0 30px 90px rgba(0,0,0,.6);padding:24px 26px 28px;}
+  .ach-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--subtext);font-size:26px;line-height:1;cursor:pointer;}
+  .ach-x:hover{color:var(--text);}
+  .ach-htitle{font-size:21px;font-weight:700;color:var(--text);letter-spacing:.01em;}
+  .ach-hsub{font-size:12px;color:var(--subtext);margin-top:3px;}
+  /* Trash-specific: the grid/toolbar/cells, all new -- no shared-chrome equivalent exists yet. */
+  .tr-panel{width:920px;max-width:96vw;height:82vh;display:flex;flex-direction:column;}
+  .tr-toolbar{display:flex;align-items:center;gap:10px;margin:14px 0 10px;flex-wrap:wrap;}
+  .tr-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));grid-auto-rows:min-content;gap:10px;align-content:start;padding:2px;}
+  .tr-cell{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;}
+  .tr-cell:hover{border-color:var(--lavender);}
+  .tr-cell.sel{outline:2px solid var(--accent);}
+  .tr-cell img{width:100%;height:120px;object-fit:cover;display:block;background:var(--surface1);}
+  .tr-cell .tr-check{position:absolute;top:6px;left:6px;width:17px;height:17px;accent-color:var(--accent);}
+  .tr-cell .tr-vid{position:absolute;top:6px;right:6px;background:rgba(6,4,16,.72);color:var(--text);font-size:9px;border-radius:4px;padding:1px 6px;}
+  .tr-cell .tr-cap{padding:5px 7px;font-size:10.5px;color:var(--subtext);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .tr-empty{text-align:center;padding:34px;color:var(--subtext);font-size:13px;}
+  .tr-foot{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:11px;color:var(--overlay0);}
 </style>
 <header>
   <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
@@ -7895,6 +8242,14 @@ function savePrompt() {
     <div style="margin-top:14px;">
       <a class="btn" href="{{ url_for('export_csv_download') }}" download>&#11015; Download catalog (CSV)</a>
       <span style="font-size:11.5px;color:var(--overlay0);margin-left:8px;">saves to your Downloads &mdash; doesn&rsquo;t touch the backup folder</span>
+    </div>
+  </div>
+
+  <div class="p-sec">
+    <h2>&#128465; Trash</h2>
+    <div class="p-note" style="margin-top:0;">Deleted images and videos are quarantined in <code>_deleted/</code>, not destroyed &mdash; recoverable here until you permanently remove them.</div>
+    <div style="margin-top:10px;">
+      <button type="button" class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="Trash.open()"><span class="t">&#128465; Open trash&hellip;</span></button>
     </div>
   </div>
 
@@ -8034,6 +8389,36 @@ function savePrompt() {
   </div>
   </div>
 </div>
+<!-- Trash panel: a FLOATING OVERLAY (sibling of .panel above, not nested inside it),
+     opened by the "Open trash..." button in the Trash card above via Trash.open().
+     Same #ach-modal/.ach-panel chrome pattern as the gallery's Folio of
+     Honors/Contests/YourArt modals -- see the CSS comment near .ach-modal above. -->
+<div id="trash-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Trash.close()">
+  <div class="ach-panel tr-panel" role="dialog" aria-label="Trash">
+    <button type="button" class="ach-x" onclick="Trash.close()" aria-label="Close">&times;</button>
+    <div class="ach-htitle">&#128465; Trash</div>
+    <div class="ach-hsub" id="tr-sub">Loading&hellip;</div>
+    <div class="tr-toolbar">
+      <label class="p-check"><input type="checkbox" id="tr-selall" onchange="Trash.toggleAll(this.checked)"> Select all loaded</label>
+      <span style="flex:1"></span>
+      <button type="button" class="btn" onclick="Trash.restoreSelected()">&#8634; Restore selected</button>
+      {% if panel_is_local %}
+      <button type="button" class="btn btn-danger" onclick="Trash.deleteSelected()">Delete forever</button>
+      {% endif %}
+    </div>
+    <div id="tr-grid" class="tr-grid" onscroll="Trash.onScroll()"></div>
+    <div class="tr-empty" id="tr-empty" style="display:none;">Nothing in the trash.</div>
+    <div class="tr-foot">
+      <span id="tr-status"></span>
+      <span style="flex:1"></span>
+      {% if panel_is_local %}
+      <button type="button" class="btn btn-danger" onclick="Trash.emptyAll()">Empty trash&hellip;</button>
+      {% else %}
+      <span style="font-size:11px;color:var(--overlay0);">Delete-forever &amp; Empty trash need the machine running the gallery &mdash; restore is available here.</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
 <div id="srv-overlay">
   <div class="srv-box"><div class="srv-spin" id="srv-spin"></div>
     <div class="srv-msg" id="srv-msg">Working&hellip;</div>
@@ -8053,6 +8438,181 @@ var ACTIONS = {{ actions_json|safe }};       // Maintenance buttons -- panel_vis
 var ALL_ACTIONS = {{ all_actions_json|safe }};  // scheduler dropdown -- includes background-only jobs
 var CSRF = "{{ csrf }}";   // same session-based token every other mutating form in this app uses
 function el(i){return document.getElementById(i);}
+// --- Trash panel: floating overlay opened from the "Open trash..." button above,
+// same #ach-modal/.ach-panel pattern as the gallery's Folio of Honors/Contests/
+// YourArt modals (see the CSS comment near .ach-modal). Self-contained (no
+// dependency on mg-notify.js's Ach object, which this page doesn't load) --------
+var Trash = (function(){
+  var page = 1, limit = 60, total = 0, loading = false, exhausted = false;
+  var selected = {};
+  function open(){
+    el('trash-modal').classList.add('open');
+    el('trash-modal').setAttribute('aria-hidden', 'false');
+    reset();
+    load();
+  }
+  function close(){
+    el('trash-modal').classList.remove('open');
+    el('trash-modal').setAttribute('aria-hidden', 'true');
+  }
+  function reset(){
+    page = 1; total = 0; loading = false; exhausted = false; selected = {};
+    el('tr-grid').innerHTML = '';
+    el('tr-empty').style.display = 'none';
+    el('tr-selall').checked = false;
+    el('tr-status').textContent = '';
+    el('tr-sub').textContent = 'Loading…';
+  }
+  function describeTotal(){
+    el('tr-sub').textContent = total.toLocaleString() + ' item' + (total === 1 ? '' : 's') + ' in the trash';
+  }
+  function load(){
+    if (loading || exhausted) return;
+    loading = true;
+    fetch('/api/trash/list?page=' + page + '&limit=' + limit)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        loading = false;
+        total = d.total || 0;
+        var got = (d.items || []).length;
+        (d.items || []).forEach(renderCell);
+        exhausted = got === 0 || (page * limit) >= total;
+        page += 1;
+        describeTotal();
+        el('tr-empty').style.display = (total === 0) ? 'block' : 'none';
+        maybeFillPage();
+      })
+      .catch(function(){
+        loading = false;
+        el('tr-sub').innerHTML = '<span class="st-failed">could not load the trash</span>';
+      });
+  }
+  function maybeFillPage(){
+    // If the loaded cells don't yet overflow the grid, there's no scrollbar to
+    // drive onScroll()'s infinite-scroll -- pull one more page, same fix as the
+    // gallery Picker's own maybeFillPage (picker-core.js).
+    var g = el('tr-grid');
+    if (!exhausted && !loading && g.scrollHeight <= g.clientHeight + 4) load();
+  }
+  function onScroll(){
+    var g = el('tr-grid');
+    if (g.scrollTop + g.clientHeight > g.scrollHeight - 300) load();
+  }
+  function humanSize(n){
+    n = +n || 0;
+    if (n >= 1073741824) return (n / 1073741824).toFixed(1) + ' GB';
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+    if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+    return n + ' B';
+  }
+  function humanDate(ts){
+    if (!ts) return '';
+    try { return new Date(ts * 1000).toLocaleDateString(); } catch (e) { return ''; }
+  }
+  function renderCell(it){
+    if (el('tr-grid').querySelector('[data-mid="' + it.media_id + '"]')) return;   // already rendered
+    var c = document.createElement('div');
+    c.className = 'tr-cell';
+    c.dataset.mid = it.media_id;
+    c.title = it.prompt || it.filename;
+    c.innerHTML =
+      '<input type="checkbox" class="tr-check">' +
+      '<img loading="lazy" decoding="async" src="' + it.thumb + '" alt="">' +
+      (it.is_video === '1' ? '<span class="tr-vid">&#9654;</span>' : '') +
+      '<div class="tr-cap">' + escH2(it.filename) + '<br>' + humanSize(it.size) + ' · ' + humanDate(it.deleted_at) + '</div>';
+    var cb = c.querySelector('.tr-check');
+    cb.addEventListener('click', function(e){ e.stopPropagation(); toggle(it.media_id, cb.checked, c); });
+    c.addEventListener('click', function(){ cb.checked = !cb.checked; toggle(it.media_id, cb.checked, c); });
+    el('tr-grid').appendChild(c);
+  }
+  function toggle(mid, on, cellEl){
+    if (on) selected[mid] = true; else delete selected[mid];
+    (cellEl || el('tr-grid').querySelector('[data-mid="' + mid + '"]')).classList.toggle('sel', !!on);
+    updateSelStatus();
+  }
+  function toggleAll(on){
+    el('tr-grid').querySelectorAll('.tr-cell').forEach(function(c){
+      var mid = c.dataset.mid, cb = c.querySelector('.tr-check');
+      cb.checked = on; c.classList.toggle('sel', on);
+      if (on) selected[mid] = true; else delete selected[mid];
+    });
+    updateSelStatus();
+  }
+  function updateSelStatus(){
+    var n = Object.keys(selected).length;
+    el('tr-status').textContent = n ? (n + ' selected') : '';
+  }
+  function removeCells(ids){
+    ids.forEach(function(mid){
+      var c = el('tr-grid').querySelector('[data-mid="' + mid + '"]');
+      if (c) c.remove();
+      delete selected[mid];
+    });
+    total = Math.max(0, total - ids.length);
+    describeTotal();
+    updateSelStatus();
+    if (!el('tr-grid').children.length) el('tr-empty').style.display = 'block';
+    maybeFillPage();
+  }
+  function restoreSelected(){
+    var ids = Object.keys(selected);
+    if (!ids.length) { alert('Select one or more items first (check the boxes, or "Select all loaded").'); return; }
+    el('tr-status').innerHTML = '<span class="st-running">Restoring&hellip;</span>';
+    fetch('/api/trash/restore', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({media_ids: ids})})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var restored = d.restored || [], errs = d.errors || [];
+        removeCells(restored);
+        var msg = restored.length + ' restored';
+        if (errs.length) msg += ', ' + errs.length + ' failed';
+        el('tr-status').innerHTML = '<span class="' + (errs.length ? 'st-warn' : 'st-done') + '">' + msg + '</span>';
+      })
+      .catch(function(){ el('tr-status').innerHTML = '<span class="st-failed">network error</span>'; });
+  }
+  function deleteSelected(){
+    var ids = Object.keys(selected);
+    if (!ids.length) { alert('Select one or more items first (check the boxes, or "Select all loaded").'); return; }
+    if (!confirm('Permanently delete ' + ids.length + ' item(s)? This cannot be undone.')) return;
+    var typed = prompt('This permanently deletes ' + ids.length + ' file(s) from disk. Type DELETE to confirm:');
+    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+    el('tr-status').innerHTML = '<span class="st-running">Deleting&hellip;</span>';
+    fetch('/api/trash/delete-forever', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({media_ids: ids, confirm: true})})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        removeCells(ids);
+        el('tr-status').innerHTML = '<span class="st-done">' + (d.deleted || 0) + ' permanently deleted</span>';
+      })
+      .catch(function(){ el('tr-status').innerHTML = '<span class="st-failed">network error</span>'; });
+  }
+  function emptyAll(){
+    if (!total) { alert('The trash is already empty.'); return; }
+    if (!confirm('Permanently delete ALL ' + total.toLocaleString() + ' item(s) in the trash? This cannot be undone.')) return;
+    var typed = prompt('This empties the ENTIRE trash (' + total.toLocaleString() + ' files) permanently. Type DELETE to confirm:');
+    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+    el('tr-status').innerHTML = '<span class="st-running">Emptying trash&hellip;</span>';
+    fetch('/api/trash/empty', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({confirm: true})})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        reset();
+        total = 0;
+        describeTotal();
+        el('tr-empty').style.display = 'block';
+        el('tr-status').innerHTML = '<span class="st-done">emptied (' + (d.deleted || 0) + ' files removed)</span>';
+      })
+      .catch(function(){ el('tr-status').innerHTML = '<span class="st-failed">network error</span>'; });
+  }
+  return {open: open, close: close, onScroll: onScroll, toggleAll: toggleAll,
+          restoreSelected: restoreSelected, deleteSelected: deleteSelected, emptyAll: emptyAll};
+})();
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') {
+    var m = el('trash-modal');
+    if (m && m.classList.contains('open')) Trash.close();
+  }
+});
 // --- Panel tab bar (Maintenance / Users) -----------------------------------
 function setPanelTab(tab){
   document.querySelectorAll('#panel-tabs .htab').forEach(function(b){
@@ -9641,6 +10201,98 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _log_job(job_id, status="failed", error="could not start delete thread: " + _redact_host_paths(str(e))[:160])
             return _back(delerr="could not start bulk delete -- try again")
         return _back(bulkdel="started", n=total)
+
+    # -------------------------------------------------------------------
+    # Trash / quarantine panel -- the floating panel opened from the Control
+    # Panel (NOT a routed page of its own). See docs/AUDIT_2026-07-21.md's
+    # restore-panel row for the decided design (floating overlay, directory
+    # scan, restore=LOGIN, delete-forever/empty=LOCALHOST+typed confirm).
+    # -------------------------------------------------------------------
+
+    @app.route("/api/trash/list")
+    def api_trash_list():
+        """List out_dir/_deleted/ for the Control Panel's Trash panel -- a directory
+        scan, not a catalog query (purge_media_local's whole point is that the
+        catalog row is already gone by the time a file lands here). Paginated
+        (?page=&limit=) so a ~12k-file quarantine never costs more than one page's
+        worth of thumbnail work per request -- see list_quarantined()'s and
+        _ensure_trash_thumbs()'s docstrings. Thumbnails are generated on demand for
+        exactly the page returned and then served by the EXISTING /thumbs/<media_id>.jpg
+        route (no new serving route needed -- see _ensure_trash_thumbs()). LOGIN tier:
+        seeing what's recoverable is the same trust level as browsing the live
+        gallery, not a destructive action."""
+        try:
+            page = max(1, int(request.args.get("page") or 1))
+            limit = max(1, min(int(request.args.get("limit") or 60), 200))
+        except ValueError:
+            page, limit = 1, 60
+        items, total, total_bytes = list_quarantined(out_dir, page=page, page_size=limit)
+        _ensure_trash_thumbs(out_dir, thumb_dir, items)
+        for it in items:
+            it["thumb"] = "/thumbs/{}.jpg".format(it["media_id"])
+        return jsonify({"items": items, "total": total, "total_bytes": total_bytes,
+                        "page": page, "limit": limit})
+
+    @app.route("/api/trash/restore", methods=["POST"])
+    def api_trash_restore():
+        """Restore one or more quarantined files back into the library. LOGIN tier --
+        recovering something you (or anyone signed in) deleted is not the same trust
+        question as permanently destroying it. Matches the decided design in
+        docs/AUDIT_2026-07-21.md: restore=LOGIN, delete-forever/empty=LOCALHOST."""
+        body = request.get_json(silent=True) or {}
+        media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+        restored, errors = [], []
+        for mid in media_ids:
+            res = restore_quarantined_media(out_dir, thumb_dir, db_path, mid)
+            if res.get("ok"):
+                restored.append(mid)
+            else:
+                errors.append({"media_id": mid, "error": res.get("error", "unknown error")})
+        if restored:
+            telem_bump("trash_restored", len(restored), out_dir=out_dir)
+        return jsonify({"restored": restored, "errors": errors})
+
+    @app.route("/api/trash/delete-forever", methods=["POST"])
+    def api_trash_delete_forever():
+        """Permanently destroy one or more SELECTED quarantined files -- no more
+        recovery after this. LOCALHOST-only (the owner physically at the machine),
+        same trust tier as /delete-tasks-bulk and the Panel's other destructive
+        actions, and requires confirm=true in the body on top of that -- the same
+        belt-and-suspenders shape api_panel_run already uses for its destructive
+        actions. The client's own typed "DELETE" prompt (Trash.deleteSelected() in
+        the Panel template, mirroring confirmBulkDeleteCloud()'s existing pattern) is
+        what actually stands between a misclick and data loss; confirm=true here just
+        proves the client meant to send the request at all, it is not itself the
+        security boundary -- the LOCALHOST check is."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        if not body.get("confirm"):
+            return jsonify({"error": "confirm required"}), 400
+        media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+        n = sum(1 for mid in media_ids
+               if delete_quarantined_forever(out_dir, thumb_dir, mid))
+        telem_bump("trash_purged_forever", n, out_dir=out_dir)
+        return jsonify({"deleted": n})
+
+    @app.route("/api/trash/empty", methods=["POST"])
+    def api_trash_empty():
+        """Empty the ENTIRE trash -- every file under out_dir/_deleted/, not just a
+        selection. Same LOCALHOST + confirm=true contract as
+        api_trash_delete_forever() (see its docstring); the client demands the same
+        typed "DELETE" word first (Trash.emptyAll())."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        if not body.get("confirm"):
+            return jsonify({"error": "confirm required"}), 400
+        n = empty_trash(out_dir, thumb_dir)
+        telem_bump("trash_purged_forever", n, out_dir=out_dir)
+        return jsonify({"deleted": n})
 
     @app.route("/rate/<media_id>", methods=["POST"])
     def rate(media_id):

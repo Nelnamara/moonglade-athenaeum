@@ -105,6 +105,8 @@ ROUTE_TIERS = {
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
     ("api_import_local", "POST"): LOCALHOST,         # writes files into the backup + shells thumbnails
     ("api_users_add", "POST"): LOCALHOST,           # mints a new persistent login (2026-07-22)
+    ("api_trash_delete_forever", "POST"): LOCALHOST,  # irreversible local file deletion (2026-07-24)
+    ("api_trash_empty", "POST"): LOCALHOST,           # irreversible local file deletion (2026-07-24)
 
     # -- LOGIN: any authorized session ---------------------------------------
     ("index", "GET"): LOGIN,
@@ -146,6 +148,12 @@ ROUTE_TIERS = {
     ("collection_remove", "POST"): LOGIN,
     ("export_zip", "POST"): LOGIN,
     ("export_csv_download", "GET"): LOGIN,
+
+    # trash / quarantine panel (2026-07-24) -- restore is LOGIN (recovering
+    # something is not the same trust question as destroying it forever); see
+    # api_trash_delete_forever/api_trash_empty above in the LOCALHOST section.
+    ("api_trash_list", "GET"): LOGIN,
+    ("api_trash_restore", "POST"): LOGIN,
 
     # credit-spending generation surface -- the five routes the hand-maintained
     # lists in test_web_auth.py never covered.
