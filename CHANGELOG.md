@@ -71,6 +71,24 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   `wiki/Generating.md` (edit tuning / video tuning / shared create flags / `--contests`),
   and real `help=` text added to the two flags that had none (`--audio-language`,
   `--poll-timeout`).
+- **Activity tray job detail popover (owner field-report 2026-07-23): two stuck
+  generations, no way to recover their task id without server access.** Clicking any row
+  in the Activity tray now opens a small popover (`static/mg-notify.js`'s `JobsCard`) with
+  the job's **Task ID** (one-click copy via `navigator.clipboard`, fully guarded — a
+  missing clipboard API or a rejected write degrades to a silent no-op, never a thrown
+  error), a real clock **Time Sent**, and an elapsed **Time Spent** (live-ticking while the
+  job is still running). Backend fix underneath: `pixai_gallery_backup.py`'s
+  `_reconstruct_jobs` used to let every later event's merge overwrite `ts` with its own
+  timestamp, so a finished job's true registration time was unrecoverable by the time it
+  reached `read_jobs()` — it now stamps a `started_at` off the FIRST event for a job_id and
+  never lets a later merge clobber it (survives compaction too), sourced entirely from
+  timestamps already being logged, no new capture needed. Escape and click-outside close
+  the popover, matching the tray's existing dismiss patterns. Investigated the owner's
+  model/LoRA-icon stretch idea and skipped it: no submit path threads model/LoRA info into
+  `Jobs.register()`/`Jobs.track()` today (four independent call sites across the gallery
+  and the Loom, in both `.jsx` and the compiled bundle), and there's no existing
+  by-id icon lookup to resolve an already-submitted model/LoRA against — real new plumbing
+  across multiple surfaces, not a cheap addition.
 
 ### Security
 

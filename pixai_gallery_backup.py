@@ -961,7 +961,20 @@ def _reconstruct_jobs(out_dir):
     """Replay the whole log, collapsing by job_id. Returns (jobs_by_id, first_seen_order,
     raw_line_count). A terminal (done/failed) job is sticky: a later non-terminal event (a
     stale/interleaved heartbeat) can neither revert its status nor inject progress fields
-    onto it -- only an explicit dismiss is honored once a job has finished."""
+    onto it -- only an explicit dismiss is honored once a job has finished.
+
+    `started_at` (owner field-report 2026-07-23: two stuck generations, no way to recover
+    their task id without server access) -- the FIRST event's `ts` is the job's true
+    registration time, but every later event's `cur.update(rec)` used to blindly overwrite
+    `ts` with its own, so by the time a job reached a terminal state the original start
+    time was gone, and "time spent" was not reconstructable client-side. Stamped here, once,
+    off the first event seen for a job_id, and never touched again by later merges (later
+    events don't carry their own `started_at` key, so `cur.update(rec)` can't clobber it).
+    `rec.setdefault` (not a plain assignment) also makes this correct across compaction: a
+    compacted log's single surviving line for a job already HAS a real `started_at` baked
+    in from a prior reconstruction, and re-deriving it from that line's own `ts` (the last
+    known event, not the true start) would be wrong -- setdefault leaves an already-present
+    value alone."""
     jobs, order, n = {}, [], 0
     try:
         with _jobs_path(out_dir).open("r", encoding="utf-8") as fh:
@@ -979,6 +992,7 @@ def _reconstruct_jobs(out_dir):
                     continue
                 cur = jobs.get(jid)
                 if cur is None:
+                    rec.setdefault("started_at", rec.get("ts"))
                     jobs[jid] = rec
                     order.append(jid)
                 elif cur.get("status") in _JOBS_TERMINAL and rec.get("status") not in _JOBS_TERMINAL:
@@ -1024,7 +1038,10 @@ def _select_jobs(jobs, order, now, keep, max_age):
 
 def read_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE, now=None):
     """Current job list for the web card: newest-first, collapsed by job_id, dismissed
-    removed, stale jobs aged out, finished history capped to keep (running never capped)."""
+    removed, stale jobs aged out, finished history capped to keep (running never capped).
+    Each job carries both `ts` (its most recent event) and `started_at` (its registration
+    event -- see `_reconstruct_jobs`), so a caller can compute elapsed time for a running
+    job (now - started_at) or a finished one (ts - started_at) without a backend change."""
     jobs, order, _n = _reconstruct_jobs(out_dir)
     if not jobs:
         return []
