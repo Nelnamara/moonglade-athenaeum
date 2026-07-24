@@ -12,6 +12,9 @@
 
    Usage (mount-to-open / unmount-to-close, matching the Loom's existing pickCb pattern):
      <mg-gallery-picker default-type="image"></mg-gallery-picker>
+   default-type is image (the default) | video | all -- "all" browses both kinds and is
+   sent to the server as type=all (NOT '': the server maps an empty type to "image" for
+   the gallery Picker's back-compat, which is exactly how videos used to go missing).
    Optional boolean attributes (all OFF by default, so the first adopter's behavior is a
    byte-for-byte match of what it already had -- no surface added silently):
      show-type          -- render the Image/Video/All type dropdown
@@ -99,8 +102,14 @@
       if (this._built) return;
       this._built = true;
 
+      // 'all' is a REAL filter value here, not '': /api/gallery-images maps an empty
+      // type to "image" (deliberate back-compat for the gallery's vanilla Picker --
+      // see picker-core.js's filter-seeding comment), so submitting '' from the
+      // combined option silently made the "Image + video" view images-only and left
+      // rendered videos unreachable from the Loom's left-rail picker (issue #3).
+      // The server resolves type=all to "both kinds" already.
       var dt = this.getAttribute('default-type');
-      this._type = dt === 'video' ? 'video' : dt === 'all' ? '' : 'image';
+      this._type = dt === 'video' ? 'video' : dt === 'all' ? 'all' : 'image';
       this._q = ''; this._collection = ''; this._rating = 0; this._sort = 'newest';
       this._showType = this.hasAttribute('show-type');
       this._showSource = this.hasAttribute('show-source');
@@ -115,6 +124,11 @@
       this._count = this.querySelector('.mg-pk-count');
       this._collEl = this.querySelector('[data-f="collection"]');
       this._typeEl = this.querySelector('[data-f="type"]');
+      // Sync the DISPLAYED value with the resolved default: without this the select
+      // always shows its first option ("Image + video") whatever the active filter is,
+      // so a video-first mount lies about what it's showing, and the next _readFilters()
+      // re-reads the wrong displayed value and silently drops the real filter.
+      if (this._typeEl) this._typeEl.value = this._type;
       this._sourceEl = this.querySelector('[data-f="source"]');
       this._ratingEl = this.querySelector('[data-f="rating"]');
       this._sortEl = this.querySelector('[data-f="sort"]');
@@ -179,7 +193,7 @@
     _skeleton() {
       var opt = function (v, label) { return '<option value="' + esc(v) + '">' + esc(label) + '</option>'; };
       var typeSel = this._showType
-        ? '<select data-f="type"><option value="">Image + video</option>' +
+        ? '<select data-f="type"><option value="all">Image + video</option>' +
           '<option value="image">Images</option><option value="video">Videos</option></select>' : '';
       var sourceSel = this._showSource
         ? '<select data-f="source">' + opt('', 'Any source') + opt('api', 'Generated (AI)') +
