@@ -194,6 +194,17 @@ var LoomBundle = (() => {
   });
   var setPromptOverride = (c, text) => ({ ...c, promptOverride: true, promptOverrideText: text });
   var clearPromptOverride = (c) => ({ ...c, promptOverride: false, promptOverrideText: "" });
+  var importedFootagePatch = (mediaId, duration) => {
+    const dur = Number(duration);
+    return {
+      status: "done",
+      resultMid: mediaId,
+      trimIn: 0,
+      trimOut: null,
+      imported: true,
+      ...dur > 0 ? { actualDur: dur } : {}
+    };
+  };
   var patchAct = (project, actId, patch) => ({
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch })
@@ -203,6 +214,11 @@ var LoomBundle = (() => {
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: [...a.cards, card] })
   });
+  var landInFirstAct = (project, card, newActId) => {
+    const first = project.acts[0];
+    const withAct = first ? project : appendAct(project, { id: newActId, name: nextActName(project), collapsed: false, cards: [] });
+    return appendCardToAct(withAct, first ? first.id : newActId, card);
+  };
   var buildDuplicateCard = (card, newCardId, newRefIds) => ({
     ...JSON.parse(JSON.stringify(card)),
     id: newCardId,
@@ -816,6 +832,11 @@ ${"=".repeat(48)}
    as "shot generation status" and margin-left:0 so it sits with mode/duration on the left
    instead of racing .lv-st's own margin-left:auto for the row's one right-aligned slot. */
 .lv-st.linked{margin-left:0;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 16%,transparent);}
+/* Imported-footage provenance badge -- coexists with the real status pill the same way
+   .linked does (margin-left:0, not competing for the row's one auto-margined slot).
+   Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
+   rather than inventing a new color. */
+.lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
@@ -1077,7 +1098,7 @@ ${"=".repeat(48)}
       )
     )));
   }
-  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
@@ -1467,7 +1488,7 @@ ${"=".repeat(48)}
           })()),
           /* @__PURE__ */ React.createElement("div", { className: "lv-code" }, e.code),
           /* @__PURE__ */ React.createElement("div", { className: "lv-ctitle" }, e.c.title || "untitled"),
-          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), linked && /* @__PURE__ */ React.createElement("span", { className: "lv-st linked", title: "Opening frame matches the previous shot's closing frame \u2014 continuous across the cut" }, "linked"), /* @__PURE__ */ React.createElement(
+          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), linked && /* @__PURE__ */ React.createElement("span", { className: "lv-st linked", title: "Opening frame matches the previous shot's closing frame \u2014 continuous across the cut" }, "linked"), e.c.imported && /* @__PURE__ */ React.createElement("span", { className: "lv-st imported", title: "Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo" }, "imported"), /* @__PURE__ */ React.createElement(
             "span",
             {
               className: "lv-st " + st,
@@ -1784,10 +1805,30 @@ ${"=".repeat(48)}
       const id = await storeThumb(file);
       setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: nextTag(a, "@image"), thumbId: id, source: file.name, lock: false }]);
     };
-    const footageList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-footagehead" }, /* @__PURE__ */ React.createElement("span", { className: "lv-castrow-h" }, "Finished shots"), /* @__PURE__ */ React.createElement("button", { className: "lv-browsebtn", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
-      const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
-      return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-    }), "video", true) }, "\u2315 Browse library")), finished.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-footage" }, finished.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lv-fclip " + (e.c.id === selShot ? "sel" : ""), onClick: () => setSelShot(e.c.id) }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + e.c.resultMid + ".jpg", alt: "" }), /* @__PURE__ */ React.createElement("div", { className: "lv-fmeta" }, /* @__PURE__ */ React.createElement("b", null, e.code), /* @__PURE__ */ React.createElement("span", null, durOf2(e.c), "s"))))) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No rendered shots yet \u2014 generate one and it lands here."), /* @__PURE__ */ React.createElement(
+    const importPickedFootage = async (mid, duration) => {
+      let dur = parseFloat(duration);
+      if (!(dur > 0)) {
+        try {
+          const r = await fetch("/api/loom/video-duration?media_id=" + encodeURIComponent(mid));
+          const d = await r.json();
+          if (d && d.duration) dur = d.duration;
+        } catch {
+        }
+      }
+      setSelShot(importFootage(mid, dur));
+    };
+    const footageList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-footagehead" }, /* @__PURE__ */ React.createElement("span", { className: "lv-castrow-h" }, "Finished shots"), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "lv-browsebtn",
+        title: "Import an already-rendered video from your gallery straight onto the board as a real, placeable shot",
+        onClick: () => openPick((mid, thumb, isVideo, duration) => {
+          if (!isVideo) return;
+          importPickedFootage(mid, duration);
+        }, "video")
+      },
+      "\u2315 Browse library"
+    )), finished.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-footage" }, finished.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lv-fclip " + (e.c.id === selShot ? "sel" : ""), onClick: () => setSelShot(e.c.id) }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + e.c.resultMid + ".jpg", alt: "" }), /* @__PURE__ */ React.createElement("div", { className: "lv-fmeta" }, /* @__PURE__ */ React.createElement("b", null, e.code), e.c.imported && /* @__PURE__ */ React.createElement("span", { title: "Imported from your gallery, not rendered by this project" }, "\u21AF"), /* @__PURE__ */ React.createElement("span", null, durOf2(e.c), "s"))))) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No rendered shots yet \u2014 generate one and it lands here."), /* @__PURE__ */ React.createElement(
       "div",
       {
         className: "lv-dropzone" + (dzHover ? " hover" : ""),
@@ -2250,6 +2291,11 @@ Your currently-open board is left untouched.`)) return;
       setProject((p) => appendCardToAct(p, aId, c));
       setOpen((o) => ({ ...o, [c.id]: true }));
     };
+    const importFootage = (mediaId, duration) => {
+      const c = newCard(importedFootagePatch(mediaId, duration));
+      setProject((p) => landInFirstAct(p, c, uid()));
+      return c.id;
+    };
     const dupCard = (aId, card) => {
       const clone = buildDuplicateCard(card, uid(), card.refs.map(() => uid()));
       setProject((p) => insertCardAfter(p, aId, card.id, clone));
@@ -2280,6 +2326,7 @@ Your currently-open board is left untouched.`)) return;
       setAssets,
       setCardStatus,
       addCard,
+      importFootage,
       dupCard,
       delCard,
       moveCard,
@@ -2348,7 +2395,8 @@ Generate anyway?`);
       const c = entry.c;
       const p = shotPayload2(entry);
       if (!p.hasInput) {
-        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } }));
+        const msg = c.imported ? 'Imported footage \u2014 nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via "Use an existing video instead".' : "attach a frame or cast image first";
+        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
         return { ok: false, reason: "no-input" };
       }
       if (!opts.skipConfirm) {
@@ -2832,6 +2880,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setAssets,
       setCardStatus,
       addCard,
+      importFootage,
       dupCard,
       delCard,
       moveCard,
@@ -3003,6 +3052,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         storeThumb,
         setAct,
         addCard,
+        importFootage,
         dupCard,
         delCard,
         moveCard,

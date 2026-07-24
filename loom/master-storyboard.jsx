@@ -25,6 +25,7 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved,
+  landInFirstAct, importedFootagePatch,
 } from "./src/loom-mutations.js";
 
 /* =========================================================================
@@ -390,6 +391,11 @@ const V2_STYLES = `
    as "shot generation status" and margin-left:0 so it sits with mode/duration on the left
    instead of racing .lv-st's own margin-left:auto for the row's one right-aligned slot. */
 .lv-st.linked{margin-left:0;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 16%,transparent);}
+/* Imported-footage provenance badge -- coexists with the real status pill the same way
+   .linked does (margin-left:0, not competing for the row's one auto-margined slot).
+   Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
+   rather than inventing a new color. */
+.lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
@@ -647,7 +653,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -1174,6 +1180,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     <div className="lv-ctitle">{e.c.title || "untitled"}</div>
                     <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
                       {linked && <span className="lv-st linked" title="Opening frame matches the previous shot's closing frame — continuous across the cut">linked</span>}
+                      {e.c.imported && <span className="lv-st imported" title="Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo">imported</span>}
                       <span className={"lv-st " + st}
                         onClick={paused ? (ev) => { ev.stopPropagation(); pollShot(e.c.id, e.c.pendingTaskId); } : undefined}
                         style={paused ? { cursor: "pointer" } : undefined}
@@ -1605,29 +1612,54 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     </>
   );
   const finished = entries.filter((e) => e.c.resultMid);
-  // Dropped/browsed footage becomes a reusable Cast & Assets reference -- "footage" itself
-  // means "this project's own rendered shots" (keyed off resultMid), so external media has
-  // nowhere else honest to land. addAssetFromFile only handles images; video files are
-  // directed to "Browse library" instead of a half-built local-video-upload path.
+  // "Finished shots" is every shot card with a resultMid, however it got one -- this
+  // project's own render pipeline (generateShot/pollShot) OR "Browse library" below,
+  // which imports an already-rendered CATALOG video straight onto the board as a real,
+  // placeable shot (importFootage -> landInFirstAct + importedFootagePatch, loom-mutations.js).
+  // That's the footage tab's whole purpose, so its own button now means "bring this video
+  // in", not "cite it in a prompt" -- Cast & Assets keeps its own separate "+ add from
+  // gallery" button (above) for the reference use case, video included (type=all).
+  // addAssetFromFile (the drop zone below) still only handles local IMAGE files -- there's
+  // still no local-video-upload path here (out of scope); a dragged/dropped video has
+  // nowhere to land except through the picker above.
   const addAssetFromFile = async (file) => {
     if (!file || !file.type || !file.type.startsWith("image/")) return;
     const id = await storeThumb(file);
     setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: nextTag(a, "@image"), thumbId: id, source: file.name, lock: false }]);
   };
+  // Resolve a picked video's real length before landing it: the picker already threads the
+  // catalog's own `video_duration` straight through (same field useExistingVideo trusts) --
+  // only fall back to a local ffprobe (server route, older/legacy rows with a blank column)
+  // when that's missing, rather than leaving an imported clip's duration silently wrong.
+  const importPickedFootage = async (mid, duration) => {
+    let dur = parseFloat(duration);
+    if (!(dur > 0)) {
+      try {
+        const r = await fetch("/api/loom/video-duration?media_id=" + encodeURIComponent(mid));
+        const d = await r.json();
+        if (d && d.duration) dur = d.duration;
+      } catch { /* leave dur unresolved -- importFootage falls back to newCard's own default */ }
+    }
+    setSelShot(importFootage(mid, dur));
+  };
   const footageList = (
     <>
       <div className="lv-footagehead">
         <span className="lv-castrow-h">Finished shots</span>
-        <button className="lv-browsebtn" onClick={() => openPick((mid, thumb, isVideo) => setAssets((a) => {
-          const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
-          return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-        }), "video", true)}>&#8981; Browse library</button>
+        <button className="lv-browsebtn"
+          title="Import an already-rendered video from your gallery straight onto the board as a real, placeable shot"
+          onClick={() => openPick((mid, thumb, isVideo, duration) => {
+            if (!isVideo) return;   // picker is locked to video below; defensive only
+            importPickedFootage(mid, duration);
+          }, "video")}>&#8981; Browse library</button>
       </div>
       {finished.length
         ? <div className="lv-footage">{finished.map((e) => (
             <div key={e.c.id} className={"lv-fclip " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
               <img src={"/thumbs/" + e.c.resultMid + ".jpg"} alt="" />
-              <div className="lv-fmeta"><b>{e.code}</b><span>{durOf(e.c)}s</span></div>
+              <div className="lv-fmeta"><b>{e.code}</b>
+                {e.c.imported && <span title="Imported from your gallery, not rendered by this project">&#8623;</span>}
+                <span>{durOf(e.c)}s</span></div>
             </div>))}</div>
         : <div className="lv-ph">No rendered shots yet — generate one and it lands here.</div>}
       <div className={"lv-dropzone" + (dzHover ? " hover" : "")}
@@ -2069,6 +2101,15 @@ function useShotMutations(project, setProject) {
   const addCard = (aId) => { const c = newCard();
     setProject((p) => appendCardToAct(p, aId, c));
     setOpen((o) => ({ ...o, [c.id]: true })); };
+  // Land an already-rendered gallery video as a REAL shot entry -- Finished Shots +
+  // the existing per-card "move to..." dropdown -- instead of a Cast & Assets
+  // reference. See the Footage tab's "Browse library" button (LoomV2) for the only
+  // caller. Returns the new card's id so the caller can select it.
+  const importFootage = (mediaId, duration) => {
+    const c = newCard(importedFootagePatch(mediaId, duration));
+    setProject((p) => landInFirstAct(p, c, uid()));
+    return c.id;
+  };
   const dupCard = (aId, card) => {
     const clone = buildDuplicateCard(card, uid(), card.refs.map(() => uid()));
     setProject((p) => insertCardAfter(p, aId, card.id, clone));
@@ -2091,7 +2132,7 @@ function useShotMutations(project, setProject) {
   const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
 
   return { open, setOpen, setCard, setAct, setAssets, setCardStatus,
-    addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
+    addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot };
 }
 
@@ -2174,7 +2215,24 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const c = entry.c;
     const p = shotPayload(entry);
     if (!p.hasInput) {
-      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } }));
+      // Investigated, not assumed, what "re-roll on imported footage" actually does (an
+      // imported clip -- c.imported, see importedFootagePatch -- has no cast/frames/refs,
+      // so hasInput is false by construction): this branch is NOT the thing that protects
+      // it in practice. generateShot has exactly one caller, batchGenerate, whose own
+      // `todo` filter already excludes status:"done" -- importedFootagePatch always sets
+      // that -- so an imported card never reaches here via "Generate all" either. The real
+      // per-shot "Generate video" click lives entirely in <mg-generate-drawer>'s own
+      // _generate() (static/mg-generate-drawer.js), a SEPARATE, pre-existing guard
+      // (_hasAnyRef) with its own message ("Pick a source image first."/"Pick at least one
+      // reference first.") -- live-verified: clicking it on an imported shot fires no
+      // fetch, spends nothing, and leaves the footage untouched. This message stays as a
+      // defensive fallback in case a future refactor ever re-routes per-shot generation
+      // through generateShot the way it once did (see the LoomV2-dead-generateShot-prop
+      // history) -- but do not mistake it for the operative guard today.
+      const msg = c.imported
+        ? "Imported footage — nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via \"Use an existing video instead\"."
+        : "attach a frame or cast image first";
+      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
       return { ok: false, reason: "no-input" };
     }
     // GUARDRAIL: never spend credits silently. Check cost + free-card, confirm any credit spend.
@@ -2645,7 +2703,7 @@ export default function App() {
     projList, projMenu, setProjMenu, projectApi, importBackup, activeId } = useProjectStore(setSelShot);
 
   const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
-    addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
+    addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot } = useShotMutations(project, setProject);
 
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
@@ -2780,7 +2838,7 @@ export default function App() {
         project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
         selShot={selShot} setSelShot={setSelShot} useExistingVideo={useExistingVideo} genState={genState}
         thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
-        setAct={setAct} addCard={addCard} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
+        setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
         moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
         genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
         imgLoras={imgLoras} setImgLoras={setImgLoras} genImage={genImage} routeImg={routeImg}
