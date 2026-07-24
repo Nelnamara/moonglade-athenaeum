@@ -6,7 +6,7 @@
 
 **Back up · browse · generate · curate** — a complete local companion for **your own** [PixAI.art](https://pixai.art) work.
 
-![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.8%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey) [![Tests](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml/badge.svg)](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml)
+![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.9%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey) [![Tests](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml/badge.svg)](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml)
 
 *The local web gallery — your entire PixAI history, full-resolution, searchable.*
 
@@ -70,16 +70,7 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 | **Generate** | Full creation suite in the **web gallery** (dockable drawer: image · edit/enhance/fix · video with gallery-picked references), plus a matching CLI — model + LoRA pickers, live cost preview, and **free generation cards auto-apply** so covered gens cost 0 credits; results drop straight into your catalog. **The Loom** is a full video storyboard tool built on top of it, for multi-shot sequences with continuity |
 | **Curate** | **Collections** (group images/videos without moving files) · **Select mode** with drag-paint multi-select · star ratings · inline prompt edit · bulk find/replace · the **Folio of Honors** tracks achievements as your archive grows |
 | **Stay in sync** | Instant incremental updates · live **event watch** (`--watch --watch-backup` auto-collects finishing gens) · bulk delete locally or cloud-side · `--reconcile-deleted` for cloud-deleted orphans · Collection Health dashboard |
-| **Run & control** | Web **Control Panel**: one-click maintenance jobs with a real progress bar and a Stop button, scheduled auto-backups, and **server Stop/Restart from the browser** · double-click `Serve Gallery` launcher · **make it yours**: pick your header mark + its animation, and set the Desktop launcher icon to match |
-
-### Collections & Select mode
-*Toggle **Select**, drag across images to paint a selection, then **+ Add to Collection** — files never move, and it survives Organize.*
-
-### Generate, and watch it appear
-*Model/LoRA pickers, quality modes, cheaper priority by default. New images land in the same catalog you browse.*
-
-### Collection Health
-*Storage, full-meta coverage, duplicates, images-by-month, top models/LoRAs/tags, prompt word-cloud.*
+| **Run & control** | Web **Control Panel**: one-click maintenance jobs with a real progress bar and a Stop button, scheduled auto-backups, and **server Stop/Restart from the browser** · double-click `Serve Gallery` launcher · **make it yours**: drop your own header marks into `pixai_backup/branding/marks/` and pick one + its animation, then set the Desktop launcher icon to match (none ship — bring your own art) |
 
 ---
 

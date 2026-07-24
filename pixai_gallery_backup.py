@@ -14,10 +14,10 @@ You own the copyright to images you generate on PixAI. Keep the rate modest.
 HOW IMAGES ARE FETCHED
 --------------------------------------------------------------------------------
 Task summaries don't contain image URLs -- they contain media IDs. PixAI serves
-media at:   https://api.pixai.art/v1/media/<mediaId>/<variant>
-where <variant> is e.g. "thumbnail" (small) or the full-resolution one. This
-script auto-detects the full-res variant by testing a real media ID once, then
-reuses it. Run --probe to see the detection result before committing.
+media at:   https://api.pixai.art/v1/media/<mediaId>
+Fetching that object returns a `urls` list of variants (PUBLIC/ORIGINAL/etc);
+resolve_media() picks the best one via URL_VARIANT_PREFERENCE. Run --probe to
+see the resolution result before committing.
 
 --------------------------------------------------------------------------------
 SECURITY MODEL (unchanged)
@@ -30,12 +30,12 @@ QUICK START
 --------------------------------------------------------------------------------
   pip install requests truststore
   set PIXAI_TOKEN ...   (your OS's way)
-  python pixai_gallery_backup.py --probe     # detect full-res variant, sanity-check
+  python pixai_gallery_backup.py --probe     # resolve full-res media URL, sanity-check
   python pixai_gallery_backup.py             # download everything (backward)
   python pixai_gallery_backup.py --max 40    # small test first
 """
 
-__version__ = "2.2.0"
+__version__ = "2.4.0"
 
 import argparse
 import csv
@@ -55,7 +55,7 @@ from pathlib import Path
 from pixai_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
                             save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
                             media_id_of, find_files_for_media_id, build_thumbnails,
-                            _NO_WINDOW)
+                            _NO_WINDOW, DELETED_DIRNAME)
 
 
 def _ensure_db(out):
@@ -114,6 +114,19 @@ class EmptyOutputsError(PixAIError):
     `except PixAIError` keeps catching it unchanged."""
 
 
+class WatchStaleError(PixAIError):
+    """Raised by `_watch_events_async` when the WebSocket has gone silent for too
+    long -- see `_WS_STALE_TIMEOUT`. Exists to be distinguishable from an ordinary
+    connection failure at `_watch_loop`'s catch site, the same reasoning as
+    EmptyOutputsError above: a ConnectionClosed/OSError there means the socket
+    itself reported trouble, but this means the socket looked fine (no error, no
+    close frame) while nothing arrived on it for longer than PixAI's normal event
+    cadence -- a distinct failure mode worth counting separately (see
+    `_watch_status["stale_reconnects"]`) so it stays visible instead of blending
+    into ordinary reconnect noise. Subclasses PixAIError so every existing
+    `except PixAIError` / `except Exception` keeps catching it unchanged."""
+
+
 # ---------------------------------------------------------------------------
 # Verbose diagnostics
 # ---------------------------------------------------------------------------
@@ -135,7 +148,14 @@ def set_verbose(on):
 
 def vlog(msg):
     """Print a diagnostic line prefixed with seconds-since-enabled, but only in
-    verbose mode. Writes to stdout so the GUI log pane captures it too."""
+    verbose mode. Writes to stdout so the GUI log pane captures it too. Also
+    always forwarded to the persistent file logger (pixai_logging), regardless
+    of verbose state, so a run's diagnostics are on record even if -v wasn't
+    passed -- this is the one call site touched to give every existing vlog()
+    caller file-logging for free, rather than threading a logger through ~100
+    of them individually."""
+    import pixai_logging
+    pixai_logging.get_logger().debug(msg)
     if not _VERBOSE:
         return
     t0 = _VERBOSE_T0 if _VERBOSE_T0 is not None else time.monotonic()
@@ -225,7 +245,8 @@ def _save_config(cfg):
 
 # ---------------------------------------------------------------------------
 # Web gallery login accounts -- session-based auth for pixai_gallery.py's Flask
-# app (gates every non-localhost request; see _is_authorized_request() there).
+# app (gates EVERY request, local or remote -- there is no localhost bypass; see
+# _is_authorized_request() there).
 # Stored in config.json (the existing convention for secrets -- it already holds
 # PIXAI_API_KEY): AUTH_SECRET_KEY signs the Flask session cookie, AUTH_USERS is a
 # list of {"username", "password_hash"} (werkzeug.security -- scrypt as of modern
@@ -639,12 +660,22 @@ def _check_read_only(action):
     claim_reward are the choke points the WEB app's generate/edit/enhance/fix/delete/
     claim routes all funnel through -- but the CLI's run_generate, run_generate_video,
     run_reference_video, run_enhance and run_edit_image each build their OWN gql_adhoc
-    call (for retry logic submit_generation doesn't have) instead of calling through a
-    choke point, and until 2026-07-21 none of them called this. Found by audit: with
-    READ_ONLY=True and --confirm, all five reached the mutation, and the free-card
-    check fired first -- a live network call before the guard even ran. Each of those
-    five now calls this as the FIRST statement of its actual-submit branch, before any
-    upload or card-check, not just before the mutation itself.
+    call instead of calling through a choke point, and until 2026-07-21 none of them
+    called this. Found by audit: with READ_ONLY=True and --confirm, all five reached
+    the mutation, and the free-card check fired first -- a live network call before the
+    guard even ran. Each of those five now calls this as the FIRST statement of its
+    actual-submit branch, before any upload or card-check, not just before the mutation
+    itself.
+
+    run_generate is a partial exception since 2026-07-24: the inferenceProfile retry
+    that used to be its own reason for building a separate gql_adhoc call now lives in
+    submit_generation() instead (shared with every other caller), so run_generate calls
+    THROUGH that choke point for the mutation itself -- but it still keeps this direct
+    call too, because _apply_kaisuuken's free-card check is a real network call that
+    happens BEFORE submit_generation() is reached, so a guard living only inside
+    submit_generation() would let that call through first under READ_ONLY, same bug as
+    the paragraph above. The other four CLI runners are unchanged -- inferenceProfile is
+    only ever set by plain image-generation params, so they never needed the retry.
 
     upload_media() is deliberately NOT gated here -- it costs no credits and is not one
     of the four actions CLAUDE.md's contract lists (submit a generation, submit a fix,
@@ -678,8 +709,6 @@ MODEL_DETAIL_HASH = _cfg.get("MODEL_DETAIL_HASH", "") or \
 # PixAI frontend update rotates them.
 ARTWORK_LIST_HASH = _cfg.get("ARTWORK_LIST_HASH", "") or \
     "ce6f4a6e63fe210c7f77b29c7b8bdce8b7ede4d4520c01de1d36e01b224918a5"
-ARTWORK_DETAIL_HASH = _cfg.get("ARTWORK_DETAIL_HASH", "") or \
-    "ac39a87c58451559f9dcbf2c04862c1ee3260f9645ed60fdfb574e41689a6766"
 CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 # Deletion mutation (deleteGenerationTask). Also a public persisted hash. It only
 # ever touches YOUR OWN tasks, and the destructive paths are independently gated by
@@ -691,11 +720,8 @@ DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "") or \
 DELETE_OPERATION = "deleteGenerationTask"
 # ===========================================================================
 
-# Media URL: https://api.pixai.art/v1/media/<id>/<variant>
-MEDIA_TMPL = "https://api.pixai.art/v1/media/{id}/{variant}"
+# Media URL: https://api.pixai.art/v1/media/<id>
 MEDIA_BASE = "https://api.pixai.art/v1/media/{id}"
-# Tried in order; first one returning a real image (and not the thumbnail) wins.
-VARIANT_CANDIDATES = ["original", "orig", "full", "hd", "public", "raw", "thumbnail"]
 # ===========================================================================
 
 
@@ -822,6 +848,23 @@ JOBS_MAX_AGE = 24 * 3600       # drop FINISHED jobs older than this (seconds)
 _JOBS_TERMINAL = ("done", "failed", "done_with_errors")
 _JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many lines
 
+# How stale a 'running' job has to be before the ongoing /api/jobs reconciliation
+# sweep (resolve_orphan_jobs, called with min_age=this from pixai_gallery.py's
+# api_jobs()) will re-ask PixAI for its real status. This is a *different* clock
+# from --poll-timeout: --poll-timeout (300s generate / 600s video, see argparse
+# defaults) bounds how long the CLI waits on ONE task it's actively watching --
+# it's "the task itself timed out". This bounds something else: "the client
+# stopped watching" (a closed tab, a dead Generate card, a crashed browser) while
+# the task itself may still be legitimately in flight. Picking --poll-timeout's
+# own 300s here would false-flag any real generation slower than 5 minutes --
+# ordinary for video -- as an orphan on every single /api/jobs poll (the web
+# generate path never re-stamps a running job's `ts` past its initial submit
+# event, so nothing else naturally resets that clock). 1800s (30 minutes) is
+# comfortably past every known real generation time (routine within minutes;
+# --poll-timeout only waits up to 600s even for video) while still surfacing a
+# genuine orphan same-day, far short of JOBS_MAX_AGE's 24h silent drop-from-view.
+JOBS_ORPHAN_SWEEP_AGE = 30 * 60
+
 
 def _jobs_path(out_dir):
     return Path(out_dir) / JOBS_LOG_NAME
@@ -895,7 +938,7 @@ def _cli_job_start(out_dir, label):
         return None
 
 
-def _cli_job_finish(out_dir, job_id, error=None, warn=0):
+def _cli_job_finish(out_dir, job_id, error=None, warn=0, warn_detail=None):
     """Terminal event for a _cli_job_start job. No-op if no job was started.
 
     `warn` (D-4): a partial-failure count from a run that otherwise completed (some
@@ -903,15 +946,22 @@ def _cli_job_finish(out_dir, job_id, error=None, warn=0):
     as its own terminal status, "done_with_errors", distinct from both "done" (clean)
     and "failed" (the run itself raised) -- so a scheduled/automated caller, or the
     Panel's Jobs tray, can tell "ran but lost files" apart from either extreme instead
-    of everything but a hard crash collapsing into a silent "done"."""
+    of everything but a hard crash collapsing into a silent "done".
+
+    `warn_detail` (B15): overrides the default "file(s) failed to download" noun
+    phrase for a caller whose `warn` count isn't about downloaded files -- e.g.
+    run_sync_artworks, where it can mean a page fetch that failed mid-pagination or
+    a failed video download. The done_with_errors status/marker mechanism itself is
+    unchanged; only the human-readable detail text differs."""
     if not job_id:
         return
     try:
         if error is not None:
             append_job_event(out_dir, job_id, status="failed", error=str(error))
         elif warn:
+            detail = warn_detail or "file(s) failed to download"
             append_job_event(out_dir, job_id, status="done_with_errors",
-                             error="{} file(s) failed to download".format(warn))
+                             error="{} {}".format(warn, detail))
         else:
             append_job_event(out_dir, job_id, status="done")
     except Exception:                                       # noqa: BLE001 -- fail-soft logging
@@ -922,7 +972,20 @@ def _reconstruct_jobs(out_dir):
     """Replay the whole log, collapsing by job_id. Returns (jobs_by_id, first_seen_order,
     raw_line_count). A terminal (done/failed) job is sticky: a later non-terminal event (a
     stale/interleaved heartbeat) can neither revert its status nor inject progress fields
-    onto it -- only an explicit dismiss is honored once a job has finished."""
+    onto it -- only an explicit dismiss is honored once a job has finished.
+
+    `started_at` (owner field-report 2026-07-23: two stuck generations, no way to recover
+    their task id without server access) -- the FIRST event's `ts` is the job's true
+    registration time, but every later event's `cur.update(rec)` used to blindly overwrite
+    `ts` with its own, so by the time a job reached a terminal state the original start
+    time was gone, and "time spent" was not reconstructable client-side. Stamped here, once,
+    off the first event seen for a job_id, and never touched again by later merges (later
+    events don't carry their own `started_at` key, so `cur.update(rec)` can't clobber it).
+    `rec.setdefault` (not a plain assignment) also makes this correct across compaction: a
+    compacted log's single surviving line for a job already HAS a real `started_at` baked
+    in from a prior reconstruction, and re-deriving it from that line's own `ts` (the last
+    known event, not the true start) would be wrong -- setdefault leaves an already-present
+    value alone."""
     jobs, order, n = {}, [], 0
     try:
         with _jobs_path(out_dir).open("r", encoding="utf-8") as fh:
@@ -940,6 +1003,7 @@ def _reconstruct_jobs(out_dir):
                     continue
                 cur = jobs.get(jid)
                 if cur is None:
+                    rec.setdefault("started_at", rec.get("ts"))
                     jobs[jid] = rec
                     order.append(jid)
                 elif cur.get("status") in _JOBS_TERMINAL and rec.get("status") not in _JOBS_TERMINAL:
@@ -985,30 +1049,68 @@ def _select_jobs(jobs, order, now, keep, max_age):
 
 def read_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE, now=None):
     """Current job list for the web card: newest-first, collapsed by job_id, dismissed
-    removed, stale jobs aged out, finished history capped to keep (running never capped)."""
+    removed, stale jobs aged out, finished history capped to keep (running never capped).
+    Each job carries both `ts` (its most recent event) and `started_at` (its registration
+    event -- see `_reconstruct_jobs`), so a caller can compute elapsed time for a running
+    job (now - started_at) or a finished one (ts - started_at) without a backend change."""
     jobs, order, _n = _reconstruct_jobs(out_dir)
     if not jobs:
         return []
     return _select_jobs(jobs, order, time.time() if now is None else now, keep, max_age)
 
 
-def resolve_orphan_jobs(out_dir, status_fn):
+def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
     """Resolve jobs stuck at 'running' by asking `status_fn(task_id)` for their true state
     and appending a terminal event when it has finished. Only PixAI-task-keyed generate
     jobs (job_id is the numeric task id) are checked -- panel/delete jobs are local and
     self-report. `status_fn` returns 'running' | 'done' | 'failed' (a raised exception on
     one job is skipped, not fatal). Fixes jobs orphaned when a Generate card was closed
-    before its poll resolved. Returns the number of jobs resolved to a terminal state."""
+    before its poll resolved. Returns the number of jobs resolved to a terminal state.
+
+    `min_age` (seconds, default 0): skip jobs whose last event is younger than this --
+    don't even call `status_fn`. 0 means "ask about every non-terminal generate job right
+    now", which is what the ONE-SHOT call at live-mirror watcher startup wants (catch
+    anything left stuck from a prior server session, immediately). A real `min_age`
+    (JOBS_ORPHAN_SWEEP_AGE) is for the ONGOING reconciliation sweep api_jobs() runs on
+    every poll -- see that constant's comment for why 300s/--poll-timeout is the wrong
+    number to reuse here.
+
+    Two behaviors below are gated on `min_age` being truthy, so the min_age=0 (startup)
+    call keeps its exact original behavior -- unchanged from before this parameter
+    existed, still exactly what every pre-existing test pins:
+
+    - A `status_fn` call that comes back genuinely still 'running' for an aged-in job
+      writes a lightweight 'running' heartbeat, refreshing that job's `ts`. Nothing else
+      does this for a web-submitted generate job (api_task_status()'s own 'running' branch
+      never writes to the log at all), so without it, once a job crosses min_age it would
+      get re-asked on literally every subsequent /api/jobs poll for as long as it keeps
+      genuinely running -- a real video generation easily outlives 30 minutes. The
+      heartbeat resets the min_age clock, so a still-genuinely-running job is only
+      re-checked once per min_age, not once per poll.
+    - A `status_fn` call that RAISES for an aged-in job is recorded as 'stale' -- a
+      distinct, visible, non-terminal status meaning "still stuck, and we couldn't reach
+      PixAI to find out why" -- instead of silently left untouched. Un-gated (min_age=0),
+      a single transient blip on a job that's merely SECONDS old would immediately get
+      branded 'stale', which is wrong -- that's exactly the "transient blip" case
+      api_task_status()'s own except-clause deliberately declines to treat as terminal.
+      Gating on min_age means only a job that has ALREADY been stuck a while, and is now
+      ALSO unreachable, gets the marker."""
     resolved = 0
+    now = time.time() if now is None else now
     for j in read_jobs(out_dir):
         if j.get("status") in _JOBS_TERMINAL:
             continue
         jid = str(j.get("job_id") or "")
         if j.get("type") != "generate" or not jid.isdigit():
             continue
+        if min_age and (now - float(j.get("ts") or 0)) < min_age:
+            continue
         try:
             phase = status_fn(jid)
         except Exception:                          # noqa: BLE001 -- one bad lookup must not stop the rest
+            if min_age:
+                append_job_event(out_dir, jid, status="stale",
+                                 error="couldn't reach PixAI to verify this job's real status")
             continue
         if isinstance(phase, dict):
             # Tolerate a caller handing us generation_status()'s whole
@@ -1023,6 +1125,8 @@ def resolve_orphan_jobs(out_dir, status_fn):
             append_job_event(out_dir, jid, status=phase,
                              error=("task " + phase if phase == "failed" else None))
             resolved += 1
+        elif min_age:
+            append_job_event(out_dir, jid, status="running")   # refresh ts; see docstring
     return resolved
 
 
@@ -1198,6 +1302,19 @@ def already_downloaded(root, media_id):
     return matches[0] if matches else None
 
 
+def already_downloaded_video(root, media_id):
+    """Video-aware sibling of already_downloaded() (B16, audit 2026-07-21).
+
+    already_downloaded() alone is a guaranteed-False no-op for videos: its default
+    matcher (find_files_for_media_id's _IMAGE_EXTS) never matches .mp4/.webm/etc,
+    so --sync-artworks --with-videos' resume check fired a full resolve_media
+    network round trip on every single run, even for a video already on disk. Same
+    shared matcher, same exact-match + quarantine-exclusion contract -- just
+    _VIDEO_EXTS instead of the image-only default."""
+    matches = find_files_for_media_id(root, media_id, exts=_VIDEO_EXTS)
+    return matches[0] if matches else None
+
+
 # ---------------------------------------------------------------------------
 # Content hashing (shared by --audit content dedup and organize's same-bytes check)
 # ---------------------------------------------------------------------------
@@ -1280,12 +1397,6 @@ def extract_meta(node):
 URL_VARIANT_PREFERENCE = ["PUBLIC", "ORIGINAL", "ORIG", "FULL", "THUMBNAIL", "STILL_THUMBNAIL"]
 
 
-def media_url(mid, variant):
-    if variant in ("", None):
-        return MEDIA_BASE.format(id=mid)
-    return MEDIA_TMPL.format(id=mid, variant=variant)
-
-
 def resolve_media(session, mid):
     """Fetch the media object and return (best_full_res_url, info_dict).
 
@@ -1319,38 +1430,6 @@ def resolve_media(session, mid):
         mid, "url" if chosen else "NO-URL",
         info.get("width"), info.get("height"), time.monotonic() - _t))
     return chosen, info
-
-
-def test_variant(session, mid, variant):
-    """Return (status_code, content_type, size_str, is_image)."""
-    try:
-        r = session.get(media_url(mid, variant), stream=True, timeout=30)
-        ct = r.headers.get("Content-Type", "")
-        size = r.headers.get("Content-Length", "?")
-        is_img = (r.status_code == 200 and ct.lower().startswith("image"))
-        r.close()
-        return (r.status_code, ct, size, is_img)
-    except requests.RequestException as e:
-        return ("ERR", str(e)[:60], "", False)
-
-
-def detect_variant(session, mid, verbose=False):
-    """Pick the first candidate that returns a real image, preferring non-thumbnail."""
-    best = None
-    for v in VARIANT_CANDIDATES + [""]:
-        code, ct, size, is_img = test_variant(session, mid, v)
-        label = v or "(base)"
-        if verbose:
-            print("  {:<10} -> {} {} {}".format(
-                label, code, ct, ("" if size == "?" else size + " bytes")))
-        if is_img and best is None and v != "thumbnail":
-            best = v
-    if best is None:
-        # fall back to thumbnail if it's the only thing that worked
-        code, ct, size, is_img = test_variant(session, mid, "thumbnail")
-        if is_img:
-            best = "thumbnail"
-    return best
 
 
 def ext_from_ct(ct):
@@ -1498,6 +1577,11 @@ def download(session, url, stem, retries=3, convert=None,
                 dest = stem.with_name(stem.name + ext)
                 tmp = dest.with_suffix(dest.suffix + ".part")
                 dest.parent.mkdir(parents=True, exist_ok=True)   # fresh backup dir may lack images/
+                # Content-Length is only comparable to bytes-written when the body is NOT
+                # content-encoded: requests decompresses gzip/br inside iter_content, so a
+                # compressed response's header counts different bytes than we write.
+                expect = int(r.headers.get("Content-Length") or 0)
+                enc = (r.headers.get("Content-Encoding") or "identity").strip().lower()
                 nbytes = 0
                 with open(tmp, "wb") as fh:
                     for chunk in r.iter_content(chunk_size=65536):
@@ -1515,6 +1599,18 @@ def download(session, url, stem, retries=3, convert=None,
                     vlog("download {} -> empty response body ({:.2f}s), retrying".format(
                         stem.name, time.monotonic() - _t))
                     raise requests.RequestException("empty response body")
+                if expect and enc == "identity" and nbytes != expect:
+                    # The connection was cut MID-body but the chunk stream ended
+                    # "cleanly", so no exception fired -- promoting this .part would
+                    # create a permanent truncated file (a video that stops playing
+                    # mid-way), invisible to resume forever after, exactly like the
+                    # zero-byte case above. Fail the attempt through the same
+                    # retry/backoff path instead.
+                    tmp.unlink()
+                    vlog("download {} -> short body ({:,} of {:,} bytes, {:.2f}s), retrying".format(
+                        stem.name, nbytes, expect, time.monotonic() - _t))
+                    raise requests.RequestException(
+                        "short body: got {} of {} bytes".format(nbytes, expect))
                 _atomic_replace(tmp, dest)   # retry a transient Windows lock on the .part file
                 vlog("download {} -> {:,} bytes in {:.2f}s".format(
                     dest.name, nbytes, time.monotonic() - _t))
@@ -1550,8 +1646,17 @@ def page_variables(page_size, before=None):
 _FULL_META_FIELDS = (
     "prompt_full", "natural_prompt", "seed", "steps",
     "sampler", "cfg_scale", "model_id", "model_name", "loras",
-    "negative_prompt", "clip_skip",
+    "negative_prompt", "clip_skip", "paid_credit",
 )
+
+
+def _paid_credit_str(task):
+    """Catalog-string form of a task dict's server-reported `paidCredit` (the ACTUAL
+    credit cost, known once the task ran). '' when the field is absent/null (unknown)
+    -- never coerce that to '0', because '0' is a real, meaningful value (a free card
+    or daily-free gen). Task-level: callers stamp it on each of the task's media rows."""
+    v = (task or {}).get("paidCredit")
+    return "" if v is None else str(v)
 
 
 def task_detail_gql(session, task_id):
@@ -1770,11 +1875,6 @@ def _model_preview_url(media):
     return next((u for u in urls if "/thumb/" in u), urls[0] if urls else "")
 
 
-def is_lora_type(model_type):
-    """True if a model type is a LoRA (can't be used as a base model)."""
-    return "LORA" in (model_type or "").upper()
-
-
 def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
     """Search models/LoRAs via the oRPC GET /v2/generation-model/search endpoint. Unlike
     the GraphQL `generationModels` connection (which conflates base models + LoRAs), this
@@ -1836,7 +1936,16 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
 
     category: one of MARKET_CATEGORIES (ignored if not). sort: 'newest' -> orderBy -createdAt;
     anything else -> the connection's default order. usage MODEL/LORA splits base vs LoRA rows
-    (the connection conflates them). Read-only, no spend."""
+    (the connection conflates them). Read-only, no spend.
+
+    `latestVersion` also requests modelType/loraBaseModelType (picker-parity-round2,
+    2026-07-24) -- confirmed live: real rows come back e.g. modelType:"MULTI_LORA",
+    loraBaseModelType:"SD_V1_MODEL". Costs nothing extra (same request, no additional
+    round trip) and is what lets api_model_search's LoRA path do architecture-aware
+    sort/badging (see annotate_lora_compat) through this GraphQL connection, which -- unlike
+    REST's oRPC search -- actually carries this per-row. Surfaced as `model_type` /
+    `lora_base_model_type`, the SAME key names model_search_rest's sibling
+    resolve_version_meta() already uses, so callers don't care which path produced a row."""
     cat = (category or "").strip().lower()
     # category/orderBy come from a fixed whitelist -> safe to interpolate; keyword stays a
     # bound $variable (never interpolate user text into a query).
@@ -1847,8 +1956,8 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         args.append('orderBy:"-createdAt"')
     q = ("query($k:String,$n:Int){ generationModels(" + ", ".join(args) + "){ "
          "pageInfo{ hasNextPage } edges { node { id title type isNsfw likedCount "
-         "latestVersion { id } media { id urls { url } } tags { name } author { displayName } "
-         "createdAt } } } }")
+         "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
+         "tags { name } author { displayName } createdAt } } } }")
     data = (gql_adhoc(session, q, {"k": keyword or "", "n": int(limit)}) or {}).get("generationModels") or {}
     want_lora = (usage or "MODEL").upper() == "LORA"
     out = []
@@ -1860,6 +1969,7 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             continue
         if not want_lora and (is_lora or "VIDEO" in mtype):
             continue
+        lv = n.get("latestVersion") or {}
         out.append({
             "title": n.get("title") or "",
             "type": n.get("type") or "",
@@ -1867,7 +1977,7 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             "liked_count": int(n.get("likedCount") or 0),
             "should_blur": bool(n.get("isNsfw")),
             "preview_url": _model_preview_url(n.get("media")),
-            "has_version": bool((n.get("latestVersion") or {}).get("id")),
+            "has_version": bool(lv.get("id")),
             # REST-only rich fields absent here -> empty so the card hides them.
             "description": "", "base_model": "", "curations": [], "official": False,
             "comment_count": 0, "ref_count": 0, "author_id": "",
@@ -1876,6 +1986,11 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             "tags": [t.get("name") for t in (n.get("tags") or []) if t.get("name")][:8],
             "author": (n.get("author") or {}).get("displayName") or "",
             "created_at": n.get("createdAt") or "",
+            # Architecture, for LoRA compat sort/badging (annotate_lora_compat) -- '' when
+            # the connection has no version yet, same empty-string convention as everywhere
+            # else in this file (never None, so a naive .strip()/comparison never explodes).
+            "model_type": lv.get("modelType") or "",
+            "lora_base_model_type": lv.get("loraBaseModelType") or "",
         })
     return {"results": out, "has_more": bool((data.get("pageInfo") or {}).get("hasNextPage"))}
 
@@ -1897,31 +2012,24 @@ def workflow_catalog(session, first=80):
     return out
 
 
-def resolve_version_meta(session, model_id):
-    """Resolve a model's latest generatable version AND the metadata we were throwing away.
-    One GET /v2/generation-model/{id}/versions call returns everything below; the earlier
-    resolve_latest_version() kept only the id. Read-only.
+def _empty_version_meta():
+    return {"version_id": "", "model_type": "", "lora_base_model_type": "",
+            "trigger_words": "", "negative_prompt": "", "sampling_method": "",
+            "sampling_steps": None, "cfg_scale": None, "capabilities": []}
 
-    Returns {version_id, model_type, lora_base_model_type, trigger_words, negative_prompt,
-    sampling_method, sampling_steps, cfg_scale, capabilities}. All keys always present
-    (empty/None when the model has no version or the field is absent).
+
+def _version_row_to_meta(r):
+    """One row of GET /v2/generation-model/{id}/versions -> the picker-facing meta shape.
+    Split out of resolve_version_meta (picker-parity-round2, 2026-07-24) so
+    list_model_versions can map EVERY row through the IDENTICAL logic instead of a second
+    hand-copy -- resolve_version_meta (rows[0] only) and list_model_versions (all rows)
+    must never drift apart on what a 'version' means.
 
     - model_type: this version's architecture enum (SDXL_MODEL / DIT7B_MODEL / MULTI_LORA / ...).
     - lora_base_model_type: for a LoRA, the base-model family it REQUIRES (null for base models).
       A LoRA runs on a base iff lora_base_model_type == the base's model_type (see is_lora_compatible).
     - trigger_words: the LoRA's activation tokens (extra.triggerWords|trainedWords); '' if none.
     - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer."""
-    empty = {"version_id": "", "model_type": "", "lora_base_model_type": "",
-             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
-             "sampling_steps": None, "cfg_scale": None, "capabilities": []}
-    try:
-        data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
-    except PixAIError:
-        return empty
-    rows = data if isinstance(data, list) else (data or {}).get("data") or []
-    if not rows:
-        return empty
-    r = rows[0]
     extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
     caps = extra.get("capabilities")
     return {
@@ -1935,6 +2043,68 @@ def resolve_version_meta(session, model_id):
         "cfg_scale": extra.get("cfgScale"),
         "capabilities": [c for c in caps if isinstance(c, str)] if isinstance(caps, list) else [],
     }
+
+
+def resolve_version_meta(session, model_id):
+    """Resolve a model's latest generatable version AND the metadata we were throwing away.
+    One GET /v2/generation-model/{id}/versions call returns everything below; the earlier
+    resolve_latest_version() kept only the id. Read-only.
+
+    Returns {version_id, model_type, lora_base_model_type, trigger_words, negative_prompt,
+    sampling_method, sampling_steps, cfg_scale, capabilities}. All keys always present
+    (empty/None when the model has no version or the field is absent).
+
+    NOTE: `/generation-model/{id}/versions` returns MULTIPLE rows per model -- confirmed on
+    PixAI's own site, which lists them as separate releases/iterations, all on the SAME
+    fixed architecture (a LoRA is NOT multi-architecture; loraBaseModelType is consistent
+    across a given LoRA's rows -- an earlier draft of this fix assumed otherwise and was
+    reverted). This function still always takes rows[0] (presumed latest) -- it's the
+    fast path used right after a pick, where "latest" is the right default. To offer a
+    real choice among the other rows, see list_model_versions() below (picker-parity-round2,
+    2026-07-24), which maps the FULL list through the same per-row shape."""
+    try:
+        data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
+    except PixAIError:
+        return _empty_version_meta()
+    rows = data if isinstance(data, list) else (data or {}).get("data") or []
+    if not rows:
+        return _empty_version_meta()
+    return _version_row_to_meta(rows[0])
+
+
+def list_model_versions(session, model_id):
+    """Every published version/release row for a model/LoRA -- not just resolve_version_meta's
+    rows[0]. PixAI's own site offers a version selector on model/LoRA cards; this is what
+    lets our picker do the same instead of always silently resolving the latest
+    (docs/AUDIT_2026-07-21.md's tracked O12/O13 remainder, closed picker-parity-round2,
+    2026-07-24). Same ONE GET as resolve_version_meta (no new network surface, no N+1) --
+    each row mapped through the identical _version_row_to_meta shape, so a chosen
+    version_id carries real model_type/lora_base_model_type/tuned-preset data, not a
+    stripped-down id-only listing.
+
+    Adds two UI-facing fields per row: `label` (a human position tag -- 'Latest' for the
+    first/presumed-newest row, matching resolve_version_meta's own long-standing rows[0]
+    assumption, else 'vN' counting back from it, with the row's own createdAt date appended
+    when present) and `is_latest` (True only for that first row) -- so a picker can render
+    a real choice without inventing version numbers PixAI doesn't actually provide. Rows
+    with no id are skipped (nothing to select). Read-only."""
+    try:
+        data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
+    except PixAIError:
+        return []
+    rows = data if isinstance(data, list) else (data or {}).get("data") or []
+    out = []
+    n = len(rows)
+    for i, r in enumerate(rows):
+        meta = _version_row_to_meta(r)
+        if not meta["version_id"]:
+            continue
+        created = (r.get("createdAt") or "").strip()
+        tag = "Latest" if i == 0 else "v{}".format(n - i)
+        meta["label"] = tag + (" · " + created[:10] if created else "")
+        meta["is_latest"] = (i == 0)
+        out.append(meta)
+    return out
 
 
 def resolve_latest_version(session, model_id):
@@ -1959,6 +2129,45 @@ def is_lora_compatible(base_model_type, lora_base_model_type):
     if not b or not lo:
         return True
     return b == lo
+
+
+def annotate_lora_compat(results, base_model_type):
+    """Soft-sort + tag a LoRA search-results list by architecture compatibility with a
+    selected base model (docs/AUDIT_2026-07-21.md's LoRA-arch-filter item; the root-caused
+    mechanism confirmed live: a row's real architecture is `lora_base_model_type`, sourced
+    from GraphQL's `latestVersion.loraBaseModelType` via model_search_market_gql -- NEVER
+    the `base_model` field, which is PixAI's content CATEGORY, not architecture).
+
+    Pure reorder + tag over ALREADY-fetched rows -- makes no network call itself, so it
+    behaves identically (and is independently testable) no matter which search path
+    produced `results`. `base_model_type`: the caller's already-resolved selected base
+    model's `model_type` (the exact value the post-selection is_lora_compatible() gate
+    already uses) -- '' / None means "no base picked yet", and `results` is returned
+    completely unmodified (browsing before picking a base must not be touched).
+
+    SOFT SORT, deliberately not a hard filter (see CHANGELOG.md for the full reasoning):
+    stable-partitions rows into "compatible-or-unknown" first, "confirmed incompatible"
+    last -- the SAME fail-open rule as is_lora_compatible() itself, so this can never hide
+    a LoRA the picker doesn't have enough data to judge. Each row gains a `compat` tag --
+    'yes' | 'no' | 'unknown' -- so the client can badge precisely: an 'unknown' row SORTS
+    with the compatible group (fail-open) but is NOT badged as confirmed-compatible, which
+    would overclaim data this function doesn't have."""
+    bt = (base_model_type or "").strip()
+    if not bt:
+        return results
+    tagged = []
+    for row in results:
+        lbt = (row.get("lora_base_model_type") or "").strip()
+        if not lbt:
+            compat = "unknown"
+        else:
+            compat = "yes" if is_lora_compatible(bt, lbt) else "no"
+        row = dict(row)
+        row["compat"] = compat
+        tagged.append(row)
+    head = [r for r in tagged if r["compat"] != "no"]
+    tail = [r for r in tagged if r["compat"] == "no"]
+    return head + tail
 
 
 def run_list_models(args):
@@ -2038,6 +2247,10 @@ def extract_full_meta(task):
         "loras":          "",  # filled in by caller via resolve_loras()
         "negative_prompt": neg,
         "clip_skip":      str(clip) if clip != "" else "",
+        # getTaskById returns paidCredit top-level even for historical tasks (verified
+        # against a real captured task, 2026-07-04) -- so full-meta/backfill passes
+        # recover spend history, not just fresh generations.
+        "paid_credit":    _paid_credit_str(task),
     }
 
 
@@ -2151,7 +2364,13 @@ def cmd_convert_existing(args, out):
 # ---------------------------------------------------------------------------
 # Keeper priority when the same image lives in several buckets: lower wins
 # (i.e. we KEEP the most-organized copy and remove the rest). This reinforces
-# --organize's layout instead of fighting it.
+# --organize's layout instead of fighting it. "batches" ranks first as LEGACY
+# ONLY -- no reachable code path creates a batches/ folder anymore (the old
+# live-organize-into-batches mode lived behind an `organize_adv_live` runtime
+# flag that no CLI argument has ever set since; --organize's real, current
+# output is month folders only, and its own run tidies up leftover legacy
+# batches/ dirs -- see below). A batches/ folder found here is pre-existing
+# data from an older run, still worth preferring as a keeper if one exists.
 _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 
 
@@ -2171,15 +2390,23 @@ def _bucket_of(rel_path):
 
 def _scan_media_files(out_dir):
     """One walk of the tree. Yields (path, rel, bucket, media_id) for every image
-    file outside gallery/ and _duplicates/. Single source of truth for the audit."""
+    file outside gallery/, _duplicates/, and _deleted/. Single source of truth for
+    the audit (and, via verify_quarantine, the dedup-verify pass).
+
+    _deleted/ exclusion is B11 (audit 2026-07-21): without it, a locally-purged
+    image is a valid audit hit -- reported back as a live Class A duplicate of its
+    own quarantined self, and (via verify_quarantine's survivor index) potentially
+    treated as the "surviving keeper" a _duplicates/ copy is compared against."""
     gallery_dir = out_dir / "gallery"
     quarantine_dir = out_dir / "_duplicates"
+    deleted_dir = out_dir / DELETED_DIRNAME
     for p in out_dir.rglob("*"):
         if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
             continue
         if p.name.endswith(".part"):
             continue
-        if _is_under_dir(p, gallery_dir) or _is_under_dir(p, quarantine_dir):
+        if (_is_under_dir(p, gallery_dir) or _is_under_dir(p, quarantine_dir)
+                or _is_under_dir(p, deleted_dir)):
             continue
         rel = p.relative_to(out_dir)
         yield p, rel, _bucket_of(rel), media_id_of(p)
@@ -2541,11 +2768,6 @@ def cmd_verify_dupes(args, out):
     return res
 
 
-def run_verify_dupes(args):
-    """GUI/CLI wrapper for quarantine verification."""
-    cmd_verify_dupes(args, Path(args.out))
-
-
 def reconcile_catalog_with_disk(out_dir, db_path):
     """After files move/disappear, point each catalog row's filename+batch at the
     surviving on-disk file for that media_id. Rows whose file is gone keep their
@@ -2587,7 +2809,12 @@ def cmd_organize(args, out, img_dir, db_path):
     every move can be undone with --undo-organize. Idempotent (files already at
     their target are skipped), byte-safe (never overwrites a differing file), and
     dry-runnable. Metadata embedding (--embed-metadata) and conversion (--convert)
-    are opt-in. Imported (source='local') files and videos are left untouched."""
+    are opt-in. Imported (source='local') files, videos, and _deleted/ quarantine
+    are left untouched (B11, audit 2026-07-21: this is the only one of B11's five
+    quarantine-blind walks that actually MOVES files -- a stale _deleted/ remnant
+    sharing a media_id with the live catalogued copy collided with it in the move
+    plan, either hard-deleting one outright as a spurious "redundant" duplicate or
+    resurrecting the quarantined copy into the organized tree in its place)."""
     db_path = _ensure_db(out)
     meta_by_mid = {}
     for row in load_catalog(db_path):
@@ -2595,7 +2822,8 @@ def cmd_organize(args, out, img_dir, db_path):
         if mid:
             meta_by_mid[mid] = row
 
-    skip_dirs = (out / "gallery", out / "_duplicates", out / "videos", out / "imported")
+    skip_dirs = (out / "gallery", out / "_duplicates", out / "videos", out / "imported",
+                 out / DELETED_DIRNAME)
 
     def _target(mid, row, ext):
         month = (row.get("created_at") or "")[:7] or "unknown-date"
@@ -2996,17 +3224,6 @@ def run_count(args):
               "produced batches of several images -- all of them get downloaded.")
 
 
-def run_audit(args):
-    """GUI/CLI wrapper: read-only duplicate audit."""
-    cmd_audit(args, Path(args.out))
-
-
-def run_dedup(args):
-    """GUI/CLI wrapper: dedup (quarantine/delete + catalog reconcile)."""
-    out = Path(args.out)
-    cmd_dedup(args, out, out / "catalog.db")
-
-
 def artwork_list_gql(session, before=None, last=50):
     """GET listArtworks for the owner's own authorId. Returns the Relay
     connection dict (edges + pageInfo) or None on failure."""
@@ -3072,7 +3289,14 @@ def run_sync_artworks(args):
     """Page the owner's published artworks (listArtworks) and merge their
     metadata (title, published flag, NSFW flag, likes, comments, aes score, tags)
     onto matching catalog rows by media_id. Published artworks are a subset of
-    generations, so unmatched/undownloaded ones are simply skipped."""
+    generations, so unmatched/undownloaded ones are simply skipped.
+
+    Returns {"artworks", "matched", "videos", "fail"} (B15) -- "fail" counts a
+    pagination fetch that failed mid-run (artwork_list_gql has no retry of its own,
+    unlike gql()) plus any video that failed to download after retries; a non-zero
+    "fail" means this run is INCOMPLETE even though it didn't raise. Callers should
+    thread it into _cli_job_finish(warn=...) the same way run_download's own callers
+    thread dl['fail']."""
     out = Path(args.out)
     db_path = _ensure_db(out)
     # Build the session FIRST -- _make_session auto-resolves USER_ID from the API key when it
@@ -3089,6 +3313,8 @@ def run_sync_artworks(args):
     artworks = 0
     before = None
     page = 0
+    incomplete = False               # B15: True if pagination stopped on a failed
+                                      # fetch rather than legitimately running out of pages
     _prog = getattr(args, "progress", None)
     print("Syncing published artworks (listArtworks)...")
     while True:
@@ -3099,6 +3325,15 @@ def run_sync_artworks(args):
                 raise PixAIError(
                     "listArtworks returned no data. The ARTWORK_LIST_HASH may have "
                     "rotated after a PixAI update -- recapture it into config.json.")
+            # B15: unlike gql() (retries 4x, then raises), artwork_list_gql has no
+            # retry of its own -- a RequestException/non-200/bad-JSON on any page
+            # after the first is swallowed and returns None (see its own docstring).
+            # Treat that exactly like the download-retry-exhausted case: whatever was
+            # already collected is real and worth keeping, but the run is INCOMPLETE,
+            # not a clean finish -- it must not report a total that looks whole.
+            incomplete = True
+            print("\n  page {} fetch failed (no response) -- stopping pagination early. "
+                  "Results below are INCOMPLETE, not a full sync.".format(page))
             break
         edges = conn.get("edges", [])
         if not edges:
@@ -3139,6 +3374,7 @@ def run_sync_artworks(args):
 
     # Optionally download animated-artwork video files (videoMediaId) into videos/.
     vids_ok = 0
+    vids_failed = 0                  # B15: real failures after retries, not "missing"
     if with_videos and videos:
         vdir = out / "videos"
         vdir.mkdir(parents=True, exist_ok=True)
@@ -3148,7 +3384,7 @@ def run_sync_artworks(args):
 
         def _fetch_video(item):
             vmid, title = item
-            if already_downloaded(out, vmid):
+            if already_downloaded_video(out, vmid):
                 return "skip"
             url, info = resolve_media(session, vmid)
             if not url:
@@ -3165,12 +3401,34 @@ def run_sync_artworks(args):
                 vids_ok += 1
             elif status == "missing":
                 print("  no media url for video {} ({})".format(item[0], item[1]))
+            elif status == "fail":
+                # download() already retried internally before giving up -- same
+                # terminal "fail" status run_download's own dl['fail'] counts.
+                vids_failed += 1
+                print("  FAILED video {} ({})".format(item[0], item[1]))
         print("Videos saved/present: {} of {}.".format(vids_ok, len(videos)))
     elif videos and not with_videos:
         print("({} animated artworks have video; re-run with --with-videos to download them.)"
               .format(len(videos)))
 
-    return {"artworks": artworks, "matched": matched, "videos": vids_ok}
+    # B15: same "done_with_errors" visibility run_download's own callers already get --
+    # a loud console notice plus the same machine-readable marker for the Panel
+    # subprocess reader (this function is run as its own subprocess by the "sync-artworks"
+    # Panel action, exactly like a plain download). Exit code is unaffected by design,
+    # same rationale as run_download's own end-of-run notice.
+    fail = (1 if incomplete else 0) + vids_failed
+    if fail:
+        detail = []
+        if incomplete:
+            detail.append("artwork listing stopped early after a page fetch failed")
+        if vids_failed:
+            detail.append("{} video(s) failed to download after retries".format(vids_failed))
+        print("\n*** FINISHED WITH ERRORS: {} -- exit code is still 0 by design. ***"
+              .format("; ".join(detail)))
+        if os.environ.get("MOONGLADE_PROGRESS") == "1":
+            print("{}{}".format(PANEL_WARN_PREFIX, fail), flush=True)
+
+    return {"artworks": artworks, "matched": matched, "videos": vids_ok, "fail": fail}
 
 
 def run_sync_videos(args):
@@ -3283,6 +3541,7 @@ def run_sync_videos(args):
                     "status": "completed",
                     "is_video": "1",
                     "poster_media_id": o.get("poster_media_id", ""),
+                    "paid_credit": _paid_credit_str(task),   # actual cost, task-level
                     "video_duration": str(shared.get("duration") or ""),
                 })
                 _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
@@ -3379,7 +3638,18 @@ def video_faststart(path):
     +faststart) so iOS/Safari will play it over HTTP -- PixAI serves videos with moov at
     the END, which desktop tolerates but iOS refuses (MediaError 4). No re-encode, no
     quality loss. Returns True only when it rewrote the file; no-op (False) if ffmpeg is
-    absent, the file is already faststart, or the remux fails (original left untouched)."""
+    absent, the file is already faststart, or the remux fails (original left untouched).
+
+    The temp name is UNIQUE per invocation (uuid suffix), never derived from the
+    filename alone. Two collectors can legitimately remux the same clip seconds apart
+    (the gallery's live-mirror watcher and a /api/task-status done-poll both collect a
+    finished task, and the CLI's --watch-backup is a whole separate process), and with
+    a deterministic temp name their two concurrent ffmpeg runs interleaved writes into
+    the SAME temp file: the survivor was a full-length mp4 carrying the other run's
+    stale pre-shift bytes exactly one moov-size offset out of place -- it played fine
+    and then stopped mid-way. With unique temps any overlap is safe: each remux is
+    complete and self-contained, and whichever os.replace lands last wins with a
+    COMPLETE file either way."""
     p = Path(path)
     if p.suffix.lower() not in (".mp4", ".mov", ".m4v"):
         return False
@@ -3387,7 +3657,9 @@ def video_faststart(path):
     if not ff or not p.exists() or _mp4_is_faststart(p):
         return False
     import subprocess
-    tmp = p.with_name(p.stem + ".__fstmp__" + p.suffix)   # keep the real ext so ffmpeg picks the muxer
+    from uuid import uuid4
+    # unique per call; the real ext stays LAST so ffmpeg still picks the muxer by extension
+    tmp = p.with_name(p.stem + ".__fstmp__" + uuid4().hex[:8] + p.suffix)
     try:
         r = subprocess.run([ff, "-y", "-v", "error", "-i", str(p),
                             "-c", "copy", "-movflags", "+faststart", str(tmp)],
@@ -3396,11 +3668,13 @@ def video_faststart(path):
         if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
             os.replace(str(tmp), str(p))            # atomic swap
             return True
-    except Exception:                               # noqa: BLE001 -- remux must never crash a collect
-        pass
+    except Exception as e:                          # noqa: BLE001 -- remux must never crash a collect
+        # swallowed by design (a failed remux leaves the original playable), but never
+        # silently: a lost race or an odd ffmpeg failure must at least show under -v.
+        vlog("faststart remux failed for {}: {}".format(p.name, e))
     try:
         if tmp.exists():
-            tmp.unlink()
+            tmp.unlink()   # the temp is unique to THIS call, so this only ever cleans our own leftover
     except OSError:
         pass
     return False
@@ -3473,6 +3747,11 @@ def run_import_local(args):
     gallery_dir = out / "gallery"
     quarantine = out / "_duplicates"
     branding_dir = out / "branding"   # app chrome (banner/logo/marks) -- never gallery content
+    # B11 (audit 2026-07-21): purge_media_local() clears a purged image's catalog
+    # row when it moves the file to _deleted/, so without this exclusion the scan
+    # below sees an orphaned file with no existing row/media_id match and
+    # resurrects it as a brand-new source='local' row.
+    deleted_dir = out / DELETED_DIRNAME
 
     print("Scanning {} for media (this can take a moment on a large backup)...".format(src),
           flush=True)
@@ -3492,7 +3771,7 @@ def run_import_local(args):
         if _prog:
             _prog(idx + 1, total, 0)
         if not external and (_under(p, gallery_dir) or _under(p, quarantine)
-                             or _under(p, branding_dir)):
+                             or _under(p, branding_dir) or _under(p, deleted_dir)):
             continue
         is_vid = p.suffix.lower() in _VIDEO_EXTS
         if external:
@@ -3737,7 +4016,7 @@ REFVIDEO_MODEL_ID = "2003969750675682808"   # numeric model id for v4.0.1 refere
 
 def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_ids=(),
                                      audio_media_ids=(), model="v4.0.1",
-                                     model_id=REFVIDEO_MODEL_ID, duration=15,
+                                     model_id=REFVIDEO_MODEL_ID, duration=5,
                                      mode="professional", generate_audio=False,
                                      audio_language="english", is_private=False,
                                      priority=1000, kaisuuken_id=""):
@@ -3790,8 +4069,8 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     lengths. (Card auto-apply happens at the route: a V4.0 card makes it free.)
 
     `negative` only reaches i2vPro (I2V/FLF) -- the referenceVideo submit shape captured
-    2026-07-02 has no negativePrompts field, a genuine PixAI API gap (see docs/STATE.md's
-    Control Panel / web parity section), not an oversight here."""
+    2026-07-02 has no negativePrompts field at all. A genuine PixAI API gap, not an
+    oversight here -- R2V/V2V shots silently ignore a negative prompt if one is set."""
     m = (mode or "R2V").upper()
     imgs = [str(i) for i in (image_ids or []) if str(i).strip()]
     vids = [str(v) for v in (video_ids or []) if str(v).strip()]
@@ -3928,7 +4207,11 @@ def build_filter_parameters(media_id, filter_id, *, strength=0.77, is_private=Fa
 
 def _gen_video_parameters(args):
     """Build the i2v `parameters` from CLI/GUI args (thin wrapper over
-    build_video_parameters). `--params-json` overrides everything."""
+    build_video_parameters). `--params-json` overrides everything.
+
+    Snaps --duration to PixAI's allowed lengths (5/6/10/15) before it reaches the
+    builder -- the same snap build_shot_video_params (the Loom/web adapter) already
+    applies, now made a CLI guarantee too rather than a Loom-only one (B9)."""
     if getattr(args, "params_json", ""):
         return json.loads(args.params_json)
     return build_video_parameters(
@@ -3937,7 +4220,7 @@ def _gen_video_parameters(args):
         model=(getattr(args, "video_model", "") or getattr(args, "model", "")
                or DEFAULT_VIDEO_MODEL),
         tail_media_id=getattr(args, "tail", "") or "",
-        duration=getattr(args, "duration", 5) or 5,
+        duration=_snap_video_duration(getattr(args, "duration", 5) or 5),
         mode=getattr(args, "vmode", None) or "professional",
         generate_audio=bool(getattr(args, "audio", False)),
         audio_language=getattr(args, "audio_language", None) or "english",
@@ -4230,31 +4513,20 @@ def run_generate(args):
         task_id = existing_task
         print("Fetching existing task (no credits):", task_id)
     else:
-        # This CLI runner builds its own gql_adhoc call (for the inferenceProfile retry
-        # below) instead of going through submit_generation() -- so it needs its own
-        # _check_read_only, in the same place submit_generation puts it: before ANY
-        # network call this branch makes, including _apply_kaisuuken's free-card check.
+        # submit_generation() now owns both the actual mutation and the inferenceProfile
+        # retry (2026-07-24 -- shared with every other caller, including the web
+        # /api/generate route), so this CLI runner just calls through it instead of
+        # duplicating that logic. It still needs its OWN _check_read_only call here
+        # though, before _apply_kaisuuken's free-card check: that's a real network call
+        # that fires BEFORE submit_generation() is even reached below, so relying only on
+        # the guard inside submit_generation() would let it through first under
+        # READ_ONLY -- the exact bug _check_read_only's own docstring and
+        # tests/test_read_only_cli_paths.py describe finding.
         _check_read_only("submit a generation (spends credits)")
         print("Submitting generation task...")
         _apply_kaisuuken(session, params, args)
-        try:
-            created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
-        except PixAIError as e:
-            # inferenceProfile is model-type-specific; a rejected submit costs no
-            # credits, so if the chosen mode isn't supported, fall back to the
-            # model's default and retry once instead of failing the run.
-            if "inferenceProfile" in str(e) and "inferenceProfile" in params:
-                dropped = params.pop("inferenceProfile")
-                print("  mode '{}' not supported by this model; retrying on the "
-                      "model's default...".format(dropped))
-                created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
-            else:
-                raise
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        task_id = submit_generation(session, params)
         print("  task id:", task_id)
-        _bump_card_use(params)
 
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
                           interval=3, label="generate", fail_noun="generation")
@@ -4321,6 +4593,7 @@ def run_generate(args):
             "model_id": _pick("model_id", "modelId"),
             "model_name": fm.get("model_name", ""),
             "loras": fm.get("loras", ""),
+            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or params.get("width") or ""),
             "height": str((info or {}).get("height") or params.get("height") or ""),
         })
@@ -4379,6 +4652,7 @@ def _download_video_task(session, result, task_id, out, args, params):
             "negative_prompt": sent.get("negativePrompts", ""),
             "seed": str(o.get("seed") or ""),
             "poster_media_id": o.get("poster_media_id", ""),
+            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "video_duration": str(shared.get("duration") or sent.get("duration") or ""),
             "model_id": str(sent.get("model") or ""),
             "width": str(detail.get("width") or ""),
@@ -4452,11 +4726,19 @@ def _task_image_media(outputs):
 
 def _task_detail_query(session, task_id):
     """getTaskById via the persisted hash when available, else the ad-hoc `task(id:)` query
-    (same parameters+outputs shape -- verified). The ad-hoc fallback means --full-meta /
-    --backfill-full-meta no longer HARD-FAIL when TASK_DETAIL_HASH is missing from config."""
+    (same parameters+outputs shape -- verified). Despite the name, this ad-hoc-fallback
+    resilience is NOT shared by --full-meta / --backfill-full-meta: run_backfill_full_meta
+    and run_download's --full-meta branch both call task_detail_gql directly, bypassing
+    this function entirely (run_backfill_full_meta even raises PixAIError itself when
+    TASK_DETAIL_HASH is empty -- see its own guard, unconditional). The only real caller
+    is collect_generation (the --task-id / --dump-params recovery path), which is the one
+    place that actually gets this fallback. Rewiring the two CLI callers to use it too
+    would be a real behavior change -- not done here."""
     if TASK_DETAIL_HASH:
         return task_detail_gql(session, task_id)
-    q = "query($id: ID!) { task(id: $id) { id status createdAt parameters outputs } }"
+    # paidCredit rides along so the fallback path stores the actual cost too (the
+    # field is proven safe ad-hoc -- _GEN_STATUS already selects it on every poll).
+    q = "query($id: ID!) { task(id: $id) { id status createdAt parameters outputs paidCredit } }"
     return (gql_adhoc(session, q, {"id": str(task_id)}) or {}).get("task")
 
 
@@ -4490,6 +4772,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
             "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
             "model_name": model_name,
+            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
@@ -4514,9 +4797,29 @@ def _bump_card_use(params):
 
 def submit_generation(session, params):
     """Submit a createGenerationTask and return the task id immediately -- no wait, no
-    download. The card (if any) must already be attached to `params`. Raises on no id."""
+    download. The card (if any) must already be attached to `params`. Raises on no id.
+
+    inferenceProfile (the Mode quality setting) is MODEL-TYPE-SPECIFIC on PixAI's side --
+    some model types only accept lite/standard, others pro/ultra, and an unsupported value
+    gets the whole submit REJECTED with a raw GraphQL error. A rejected submit costs no
+    credits, so on that specific rejection this drops inferenceProfile and retries once on
+    the model's default instead of failing the call outright. This used to be a one-off
+    try/except living only inside the CLI's run_generate; moved here 2026-07-24 so every
+    caller gets it for free -- the web /api/generate, /api/edit and /api/loom/generate
+    routes, and run_generate itself, which now just calls through here (see its own
+    comment). Only params built by _gen_parameters ever carry inferenceProfile, so this
+    is a silent no-op for every other caller (edit/enhance/video params never set it)."""
     _check_read_only("submit a generation (spends credits)")
-    created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+    try:
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+    except PixAIError as e:
+        if "inferenceProfile" in str(e) and "inferenceProfile" in params:
+            dropped = params.pop("inferenceProfile")
+            print("  mode '{}' not supported by this model; retrying on the "
+                  "model's default...".format(dropped))
+            created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        else:
+            raise
     task_id = (created.get("createGenerationTask") or {}).get("id")
     if not task_id:
         raise PixAIError("no task id returned: " + json.dumps(created)[:200])
@@ -4694,10 +4997,13 @@ def run_reference_video(args):
     is_private = (getattr(args, "vchannel", "private") == "private")
 
     def _build(img_ids, vid_ids, aud_ids):
+        # Duration: default 5 (matches the argparse flag + the i2v sibling -- was 15 here,
+        # a real 3x cost divergence, B10), snapped to PixAI's allowed lengths before use
+        # for either preview or submit, same as the i2v CLI path (B9).
         return build_reference_video_parameters(
             prompt, image_media_ids=img_ids, video_media_ids=vid_ids, audio_media_ids=aud_ids,
             model=(getattr(args, "video_model", "") or "v4.0.1"),
-            duration=getattr(args, "duration", 15) or 15,
+            duration=_snap_video_duration(getattr(args, "duration", 5) or 5),
             mode=getattr(args, "vmode", None) or "professional",
             generate_audio=bool(getattr(args, "audio", False)),
             audio_language=getattr(args, "audio_language", None) or "english",
@@ -4956,6 +5262,7 @@ def run_edit_image(args):
             "prompt_full": prompt_used, "prompt_preview": (prompt_used or "")[:100],
             "model_id": str(chat.get("modelId") or fm.get("model_id") or ""),
             "model_name": fm.get("model_name", "") or "Edit",
+            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
@@ -5163,24 +5470,62 @@ def run_account_info(args):
 # far gentler on PixAI than periodic polling. Confirmed reachable with the same Bearer
 # token the tool already holds (see private/APP_OPERATIONS_FULL.md).
 #
-# STATUS: this `--watch` command is the live monitor + the capture tool for the ONE
-# unknown -- the exact `status` string a completed task emits. Run it, start a
-# generation in the PixAI web UI, and it prints the frames; that pins the completion
-# enum so a future event-driven backup can trigger on it (instead of polling).
+# STATUS: this `--watch` command is the shipped live monitor. With --watch-backup it
+# is also the event-driven backup mode -- each task's 'completed' frame (confirmed
+# lifecycle below) triggers an immediate download + catalog, instead of waiting on
+# the next polling pass.
 _WS_URI = "wss://gw.pixai.art/graphql"
 _WS_SUBSCRIPTION = (
     "subscription Watch { personalEvents { "
     "taskUpdated { id status updatedAt mediaId media { id urls { url } } priority userId } "
     "newNotification { id title createdAt userId } } }")
-# Confirmed lifecycle (owner-captured 2026-07-04): waiting -> running -> completed. The
+# Confirmed lifecycle: waiting -> running -> completed. The
 # 'completed' frame is the one carrying a populated mediaId, so that's when we mirror.
 _WS_DONE_STATUS = "completed"
+
+# How long the receive loop below will wait for the NEXT frame off the wire --
+# a `next` event, a `newNotification`, or even just a server `ping` keepalive --
+# before deciding the connection is a zombie and forcing a reconnect. This is
+# NOT "no taskUpdated in N seconds" (an account can be legitimately idle for
+# hours between generations); it is "nothing at all arrived, including PixAI's
+# own keepalive pings", which is what a genuinely dead-but-not-yet-errored
+# socket looks like -- exactly the incident this guards against: `connected`
+# stayed True and `last_error` stayed None for ~21 minutes while real
+# generations finished and produced zero `taskUpdated` frames.
+#
+# Picking the number: the two things we actually know are (1) real generations
+# in the incident finished in under a minute on PixAI's side, so any live
+# session doing real work produces frames on a sub-minute cadence, not a
+# multi-minute one; and (2) the failure was silent for ~21 minutes, so the
+# threshold needs to be decisively shorter than that to matter, while staying
+# well clear of ordinary lulls (a slow multi-minute video render between
+# frames, a user idling between submissions) so a healthy connection is never
+# cycled just for being briefly quiet. 240s (4 minutes) sits in the middle of
+# that gap: an order of magnitude past any real per-frame cadence we've
+# observed (so no thrash under normal bursty use), but leaves ~5x headroom
+# before it would matter compared to tonight's ~20-minute silent gap, and
+# lines up with the same magnitude as this app's other liveness clocks
+# (--poll-timeout's 300s generate default; JOBS_ORPHAN_SWEEP_AGE's much
+# coarser 30-minute sweep is a different, slower-moving safety net, not a
+# reason to match it here).
+_WS_STALE_TIMEOUT = 240
 
 
 async def _watch_events_async(auth_header, on_event, seconds):
     """Connect, handshake, subscribe to personalEvents, and dispatch each `next` frame's
     payload to on_event(dict). Replies to server pings. Runs until `seconds` elapses (None =
-    until cancelled). Read-only: sends only connection_init / subscribe / pong / complete."""
+    until cancelled). Read-only: sends only connection_init / subscribe / pong / complete.
+
+    Every frame off the wire -- a `next`, a `ping`, anything -- resets a
+    `_WS_STALE_TIMEOUT`-second clock. If that clock lapses, raises WatchStaleError
+    instead of waiting forever on a socket that reports no error but has gone
+    silent (see `_WS_STALE_TIMEOUT`'s comment for why that happens and how the
+    number was picked). WatchStaleError is just another exception out of this
+    coroutine, so any caller that already reconnects on failure -- `_watch_loop`
+    in pixai_gallery.py's outer while-True/backoff, and `run_watch` below's own
+    try/except -- handles it for free with no special-casing needed at the call
+    site; it exists only so a caller that WANTS to tell "went stale" apart from
+    "socket errored" can."""
     import asyncio
     import websockets
     async def _run():
@@ -5196,7 +5541,18 @@ async def _watch_events_async(auth_header, on_event, seconds):
                                       "payload": {"query": _WS_SUBSCRIPTION}}))
             on_event({"__meta__": "subscribed"})
             while True:
-                msg = json.loads(await ws.recv())
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=_WS_STALE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    # Converted to a WatchStaleError HERE, not left as a bare
+                    # asyncio.TimeoutError, so it can never be mistaken for (or
+                    # accidentally swallowed by) the outer bounded-run timeout
+                    # below, which catches that same exception type for a
+                    # completely different reason (the `seconds` run budget).
+                    raise WatchStaleError(
+                        "no frame from PixAI in {}s (not even a keepalive ping) -- "
+                        "treating the connection as dead".format(_WS_STALE_TIMEOUT))
+                msg = json.loads(raw)
                 mtype = msg.get("type")
                 if mtype == "ping":
                     await ws.send(json.dumps({"type": "pong"})); continue
@@ -5579,12 +5935,33 @@ def tag_search_gql(session, prefix, first=8):
 def run_suggest_prompt(args):
     """--suggest-prompt <media_id|file>: print PixAI's suggested prompt(s) for an image
     (the site's "Image to prompt"). A local file is uploaded first (free); a catalog
-    media_id is used directly. FREE and read-only -- spends no credits, no --confirm."""
+    media_id is used directly. FREE and read-only -- spends no credits, no --confirm.
+
+    PixAI's suggest-prompt endpoint is image-only and 500s on a video; the web gallery
+    already hides the "Suggest prompt" button for a video row (`row.is_video != '1'`
+    in pixai_gallery.py). Mirror that same gate here (B18 residual) so the CLI refuses
+    early with a clear message instead of surfacing that raw 500."""
     src = (getattr(args, "suggest_prompt", "") or "").strip()
     if not src:
         raise PixAIError("--suggest-prompt needs a catalog media_id or a local image file.")
+    is_local = _is_local_source(src)
+    if is_local:
+        if Path(src).suffix.lower() in _VIDEO_EXTS:
+            raise PixAIError(
+                "--suggest-prompt only works on images, not video -- {} looks like a "
+                "video file (PixAI's image-to-prompt endpoint doesn't support "
+                "video).".format(src))
+    else:
+        out = getattr(args, "out", "") or "pixai_backup"
+        row = next((r for r in load_catalog(Path(out) / "catalog.db")
+                    if r.get("media_id") == src), None)
+        if row and row.get("is_video") == "1":
+            raise PixAIError(
+                "--suggest-prompt only works on images, not video -- media {} is a video "
+                "in your catalog (PixAI's image-to-prompt endpoint doesn't support video; "
+                "the web gallery hides this button for videos for the same reason).".format(src))
     session = _make_session(getattr(args, "token", None))
-    if _is_local_source(src):
+    if is_local:
         print("Uploading image (free):", src)
         media_id = upload_media(session, src)
     else:
@@ -5721,7 +6098,7 @@ def _apply_kaisuuken(session, params, args):
             if attempt == 0:
                 time.sleep(1.5)
     if check_err is not None:
-        # On-theme, owner-requested wording (2026-07-22, D-1): mirrors the "job lost"
+        # On-theme wording: mirrors the "job lost"
         # message PixAI's own site shows on a similar random failure, rather than a raw
         # technical error -- still refuses to guess and silently spend credits, just
         # says so in the app's own voice instead of engineer-speak.
@@ -5917,11 +6294,27 @@ def run_catalog_stats(args):
             pending += 1
         if _prog and (i % 1000 == 0 or i + 1 == n):
             _prog(i + 1, n)
+    # paid_credit is a TASK-level cost stamped on each of the task's media rows --
+    # tally once per task_id (a 4-image batch is ONE spend), never per row. Rows
+    # with '' never tracked a cost and stay out of the tally entirely.
+    task_cost = {}
+    for row in rows:
+        pc = (row.get("paid_credit") or "").strip()
+        tid = row.get("task_id") or row.get("media_id")
+        if pc and tid not in task_cost:
+            try:
+                task_cost[tid] = int(float(pc))
+            except ValueError:
+                pass
     print("Catalog: {}".format(db_path))
     print("Total image entries : {}".format(total))
     print("  downloaded files  : {}".format(downloaded))
     print("  resolved, pending : {}".format(pending))
     print("  no URL (missing)  : {}".format(missing))
+    if task_cost:
+        print("Credits tracked     : {:,} spent across {:,} tasks ({:,} free)".format(
+            sum(task_cost.values()), len(task_cost),
+            sum(1 for v in task_cost.values() if v == 0)))
     disk_count, disk_bytes, thumb_count = _count_backup_images(out)
     if disk_count:
         print("Image files on disk : {}  ({})".format(disk_count, _format_size(disk_bytes)))
@@ -6023,21 +6416,29 @@ def run_backfill_full_meta(args):
 
     rows = load_catalog(db_path)
     with_loras = getattr(args, "with_loras", False)
+    with_credit = getattr(args, "with_credit", False)
 
     # Work per unique task_id (one API call covers all media in that task).
     # --with-loras also re-processes rows that have full meta but a blank `loras`
     # column (e.g. backfilled before LoRA tracking existed). It re-fetches their
     # getTaskById to extract parameters.lora.
+    # --with-credit is the same pattern for `paid_credit` (added 2026-07-23):
+    # getTaskById returns paidCredit for historical tasks, so rows cataloged before
+    # cost tracking existed can recover their real spend. Opt-in, like --with-loras,
+    # because it re-fetches every not-yet-costed task (long run on a big catalog).
     def _needs(r):
         if not r.get("prompt_full"):
             return True
         if with_loras and r.get("task_id") and not r.get("loras"):
             return True
+        if with_credit and r.get("task_id") and not r.get("paid_credit"):
+            return True
         return False
     needs_fill = [r for r in rows if _needs(r)]
     task_ids = list(dict.fromkeys(r["task_id"] for r in needs_fill if r.get("task_id")))
-    print("Found {:,} rows to fill across {:,} unique tasks{}.".format(
-        len(needs_fill), len(task_ids), " (incl. LoRAs)" if with_loras else ""))
+    print("Found {:,} rows to fill across {:,} unique tasks{}{}.".format(
+        len(needs_fill), len(task_ids), " (incl. LoRAs)" if with_loras else "",
+        " (incl. credit costs)" if with_credit else ""))
     if not task_ids:
         print("Nothing to backfill.")
         return
@@ -6157,20 +6558,21 @@ def run_download(args, progress=None):
             "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
             "this file).")
 
-    if not getattr(args, "organize_adv_live", False):
-        img_dir.mkdir(parents=True, exist_ok=True)
+    img_dir.mkdir(parents=True, exist_ok=True)
 
     # ONE fast tree walk at startup (os.scandir, ~free stat() on Windows): seed
     # the progress count AND build the on-disk media_id index. Resume is then an
     # O(1) dict lookup instead of an O(whole-tree) rglob per media_id -- the
     # latter made follow-up runs scale quadratically with collection size.
-    # Prunes gallery/ thumbnails and _duplicates/ quarantine.
+    # Prunes gallery/ thumbnails, _duplicates/ quarantine, and _deleted/ quarantine
+    # (B11, audit 2026-07-21: without this a locally-purged media_id is still
+    # indexed as "already done", so resume/--update never re-downloads it).
     already_done = 0
     disk_bytes = 0
     on_disk_by_mid = {}   # media_id -> Path of an existing full-res image
 
     def _iter_image_entries(root):
-        skip_dirs = {"gallery", "_duplicates"}
+        skip_dirs = {"gallery", "_duplicates", DELETED_DIRNAME}
         stack = [str(root)]
         while stack:
             try:
@@ -6258,12 +6660,10 @@ def run_download(args, progress=None):
     consecutive_known_pages = 0
 
     # Parallel downloads: only for the common flat-download case. collect_only does
-    # no downloads, and organize-adv-live has per-folder side effects that assume
-    # serial ordering -- both fall back to the serial path.
+    # no downloads, so it falls back to the serial path.
     workers = max(1, getattr(args, "workers", 1) or 1)
     parallel = (workers > 1
-                and not getattr(args, "collect_only", False)
-                and not getattr(args, "organize_adv_live", False))
+                and not getattr(args, "collect_only", False))
     if parallel:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         print("Parallel downloads: {} workers.\n".format(workers))
@@ -6404,7 +6804,6 @@ def run_download(args, progress=None):
                     continue   # video task: its poster still is NOT a standalone image
                 meta = extract_meta(node)
                 all_mids = media_ids_for(node)
-                is_batch = len(all_mids) > 1
 
                 # Fetch full task detail once per task_id (cached; batches cost 1 call)
                 full_meta = {}
@@ -6420,21 +6819,7 @@ def run_download(args, progress=None):
                         time.sleep(args.delay)
                     full_meta = _full_meta_cache.get(meta["task_id"], {})
 
-                if getattr(args, "organize_adv_live", False):
-                    if is_batch:
-                        folder_name = build_stem_name(
-                            meta["prompt_preview"], meta["task_id"], "",
-                            args.name_length, args.name_sep)
-                        task_folder = out / "batches" / folder_name
-                    else:
-                        month = (meta.get("created_at") or "")[:7] or "unknown-date"
-                        task_folder = out / month
-                    if not getattr(args, "collect_only", False):
-                        task_folder.mkdir(parents=True, exist_ok=True)
-                else:
-                    task_folder = img_dir
-
-                batch_results = []
+                task_folder = img_dir
                 for idx, mid in enumerate(all_mids):
                     existing = (None if getattr(args, "collect_only", False)
                                 else on_disk_by_mid.get(mid))
@@ -6457,12 +6842,9 @@ def run_download(args, progress=None):
                         _tick()
                         continue
                     page_new += 1  # this media_id is not yet on disk
-                    if getattr(args, "organize_adv_live", False) and is_batch:
-                        stem_name = "{:02d}_{}".format(idx + 1, mid)
-                    else:
-                        stem_name = build_stem_name(
-                            meta["prompt_preview"], meta["task_id"], mid,
-                            args.name_length, args.name_sep)
+                    stem_name = build_stem_name(
+                        meta["prompt_preview"], meta["task_id"], mid,
+                        args.name_length, args.name_sep)
                     stem = task_folder / stem_name
                     url, info = resolve_media(session, mid)
                     w, h = info.get("width", ""), info.get("height", "")
@@ -6508,7 +6890,6 @@ def run_download(args, progress=None):
                     written.add(mid)
                     if path and status in ("ok", "skip"):
                         on_disk_by_mid[mid] = path  # keep index current within the run
-                        batch_results.append((idx, mid, path, info))
                     if status == "ok":
                         _check_time_capsule(meta.get("created_at"), out)
                         time.sleep(args.delay)
@@ -6518,43 +6899,6 @@ def run_download(args, progress=None):
             # re-pull never blanks local curation (collections/rating/tags/...).
             if page_rows:
                 save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
-
-                if getattr(args, "organize_adv_live", False) and batch_results:
-                    if is_batch:
-                        prompt_txt = task_folder / "_prompt.txt"
-                        if not prompt_txt.exists():
-                            lines = [
-                                "Prompt (preview): {}".format(meta["prompt_preview"]),
-                                "Task ID         : {}".format(meta["task_id"]),
-                                "Created         : {}".format(meta["created_at"]),
-                                "Status          : {}".format(meta["status"]),
-                                "Source          : PixAI",
-                                "", "Images in this batch:",
-                            ]
-                            for _, _, bp, bi in batch_results:
-                                lines.append("  {}  ({}x{})".format(
-                                    bp.name, bi.get("width", "?"), bi.get("height", "?")))
-                            prompt_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                    else:
-                        idx_path = task_folder / "_index.csv"
-                        new_file = not idx_path.exists()
-                        with open(idx_path, "a", newline="", encoding="utf-8") as f_idx:
-                            w_idx = csv.DictWriter(f_idx, fieldnames=[
-                                "filename", "media_id", "task_id", "prompt_preview",
-                                "width", "height", "created_at", "status"])
-                            if new_file:
-                                w_idx.writeheader()
-                            for _, bi_mid, bi_path, bi_info in batch_results:
-                                w_idx.writerow({
-                                    "filename": bi_path.name,
-                                    "media_id": bi_mid,
-                                    "task_id": meta["task_id"],
-                                    "prompt_preview": meta["prompt_preview"],
-                                    "width": bi_info.get("width", ""),
-                                    "height": bi_info.get("height", ""),
-                                    "created_at": meta["created_at"],
-                                    "status": meta["status"],
-                                })
 
                 seen += 1
                 if args.max and seen >= args.max:
@@ -6802,6 +7146,10 @@ def main():
     ap.add_argument("--with-loras", action="store_true",
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no LoRA data yet (populates the loras column for older images; long run)")
+    ap.add_argument("--with-credit", action="store_true",
+                    help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
+                         "no recorded credit cost yet (recovers the paid_credit column for older "
+                         "generations from the task record; long run)")
     ap.add_argument("--export-csv", action="store_true",
                     help="export catalog.db to catalog.csv for interop/backup, then exit")
     ap.add_argument("--sync-artworks", action="store_true",
@@ -6888,7 +7236,8 @@ def main():
                           "(no new credits). Recovers a stranded generation that --update "
                           "can't see, since generated tasks don't enter the listing feed")
     gen.add_argument("--params-json", default="", help="raw parameters object (overrides the above)")
-    gen.add_argument("--poll-timeout", type=int, default=300)
+    gen.add_argument("--poll-timeout", type=int, default=300,
+                     help="seconds to wait for a submitted task to finish before giving up (default 300)")
     gen.add_argument("--confirm", action="store_true",
                      help="REQUIRED for --generate/--generate-video to actually submit (spends credits)")
     # --- image-to-video generation (shares --prompt/--negative/--model/--confirm/--task-id) ---
@@ -6905,7 +7254,8 @@ def main():
     gen.add_argument("--video-mode", dest="vmode", default="professional",
                      choices=["basic", "professional"], help="video quality tier")
     gen.add_argument("--audio", action="store_true", help="generate audio with the video")
-    gen.add_argument("--audio-language", dest="audio_language", default="english")
+    gen.add_argument("--audio-language", dest="audio_language", default="english",
+                     help="spoken language for --audio video sound (default english; no effect without --audio)")
     gen.add_argument("--video-prompt-helper", dest="video_prompt_helper", action="store_true",
                      help="enable PixAI's prompt-helper for video (off by default)")
     gen.add_argument("--camera-movement", dest="camera_movement", default="",
@@ -7017,6 +7367,8 @@ def main():
                     help="list gallery web-login usernames (never password hashes), then exit")
     args = ap.parse_args()
     set_verbose(getattr(args, "verbose", False))
+    import pixai_logging
+    pixai_logging.setup_logging(args.out, verbose=getattr(args, "verbose", False))
     # Give every command a progress callback (terminal bar, or Control Panel markers under
     # MOONGLADE_PROGRESS=1). Commands that report progress (audit/dedup/sync/...) pick it up;
     # the rest ignore it.
@@ -7067,7 +7419,18 @@ def main():
                 len(load_catalog(db_path)), csv_path))
             return
         if args.sync_artworks:
-            run_sync_artworks(args)
+            # B15: same job-tracking + done_with_errors wiring --sync already has (see
+            # above) -- previously this call had NO job logging at all, so a partial
+            # failure (mid-pagination break, a failed video download) was invisible
+            # everywhere: no Jobs-tray entry, no done_with_errors, nothing.
+            _job = _cli_job_start(out, "Artwork sync")
+            try:
+                res = run_sync_artworks(args)
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job, warn=(res or {}).get("fail", 0),
+                            warn_detail="issue(s) during artwork sync")
             return
         if args.sync_videos:
             run_sync_videos(args)

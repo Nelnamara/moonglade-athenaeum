@@ -25,17 +25,48 @@ if (!match) {
 }
 const localFriendlyGenErr = new Function("return (" + match[0] + ")")();
 
+// pixai_gallery.py's Gen IIFE (the Image tab's own inline <script>) is a THIRD hand-copy,
+// same reason as the drawer's -- see its own duplication-risk comment right above
+// renderResultInto(). Extracted the same way: pull the function's source as text out of
+// the Python file (it's a plain JS function embedded in a Python string, no Python syntax
+// inside it) and turn it into a live function.
+const gallerySrc = readFileSync(path.join(__dirname, "../../pixai_gallery.py"), "utf8");
+const galleryMatch = gallerySrc.match(/function friendlyGenErr\(raw\)\{[\s\S]*?\n  \}/);
+if (!galleryMatch) {
+  throw new Error(
+    "pixai_gallery.py's local friendlyGenErr(raw) was not found by this test's regex -- " +
+    "its signature or indentation changed. Update this test's extraction pattern to match, " +
+    "don't just delete the test."
+  );
+}
+// The Python source escapes JS's own backslash-u unicode escapes as \\uXXXX (so the
+// PYTHON string literal contains a real backslash before "u"); collapsing that to a
+// single backslash here is what makes the extracted text valid standalone JS again.
+const localFriendlyGenErrPy = new Function(
+  "return (" + galleryMatch[0].replace(/\\\\u/g, "\\u") + ")"
+)();
+
+const CASES = [
+  "INSUFFICIENT_BALANCE", "insufficient balance for this task", "40300010",
+  "content policy violation", "flagged as sensitive content", "Sensitive content.",
+  "prohibited content detected", "not allowed here", "violates our terms",
+  'unknown inferenceProfile "ultra" for model type "SDXL_MODEL"', "InferenceProfile rejected",
+  "some other random failure", "task failed", "cancelled", "rejected",
+  "", null, undefined, 0, false,
+];
+
 describe("mg-generate-drawer.js's local friendlyGenErr stays in parity with loom-mutations.js's real one", () => {
-  const cases = [
-    "INSUFFICIENT_BALANCE", "insufficient balance for this task", "40300010",
-    "content policy violation", "flagged as sensitive content", "Sensitive content.",
-    "prohibited content detected", "not allowed here", "violates our terms",
-    "some other random failure", "task failed", "cancelled", "rejected",
-    "", null, undefined, 0, false,
-  ];
-  cases.forEach((c) => {
+  CASES.forEach((c) => {
     test(`matches real friendlyGenErr for input ${JSON.stringify(c)}`, () => {
       assert.equal(localFriendlyGenErr(c), friendlyGenErr(c));
+    });
+  });
+});
+
+describe("pixai_gallery.py's local friendlyGenErr (Gen IIFE) stays in parity with loom-mutations.js's real one", () => {
+  CASES.forEach((c) => {
+    test(`matches real friendlyGenErr for input ${JSON.stringify(c)}`, () => {
+      assert.equal(localFriendlyGenErrPy(c), friendlyGenErr(c));
     });
   });
 });

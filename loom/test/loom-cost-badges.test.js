@@ -54,8 +54,13 @@ test("the Image tab's badge price body omits unresolved LoRAs from ever being su
 test("confirmSpend's window.confirm gate is UNCHANGED and still runs at submit time for all three tabs", () => {
   // genImage calls confirmSpend directly; genEdit/genRef go through runGen, which also
   // calls confirmSpend before ever hitting the network. The badge is additive.
-  assert.match(src, /if \(!\(await confirmSpend\(\{ model_id: imgModel\.model_id, prompt \}, `Generate a reference image/,
-    "genImage must still gate its real submit on confirmSpend");
+  //
+  // L536: genImage's confirmSpend argument changed from a narrow {model_id, prompt} to the
+  // FULL buildImgGenBody() shape (size/mode/count/seed/etc now all affect real cost) -- the
+  // gate itself is unchanged, only what it prices got more accurate. See
+  // loom-mutations.test.js's "buildImgGenBody" suite for the body-shape coverage.
+  assert.match(src, /const body = buildImgGenBody\(imgModel, imgLoras, imgAdv, prompt\);\s*\n\s*if \(!\(await confirmSpend\(body, `Generate a reference image/,
+    "genImage must still gate its real submit on confirmSpend, pricing the exact body it submits");
   assert.match(src, /const runGen = async \(setState, cardId, endpoint, body, priceBody, label\) => \{\s*\n\s*if \(priceBody && !\(await confirmSpend\(priceBody, label\)\)\) return;/,
     "runGen (genEdit/genRef's shared submit path) must still gate on confirmSpend");
   assert.match(src, /return window\.confirm\(`\$\{label\}/,

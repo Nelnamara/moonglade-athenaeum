@@ -131,21 +131,18 @@ not specced.
 | 18 | **Skin banners** | — | — | **No slot.** The 5 shipped skins are token swaps only (§1.1). "One banner per skin" was specced but never built; there is exactly one banner slot (#1), shared by every skin. Three sketch prompts are archived (§6) — none of the three names a shipped skin | ⬜ unbuilt |
 | 19 | **Progress-bar frames** | — | — | **No slot.** BAR9 was picked (§3) but `.ach-bar` is pure CSS (`:4760` — `--surface1` track, `--accent` fill) and no `branding/bar*` file is referenced anywhere | ⬜ decided, unbuilt |
 
-### On the banner size — unresolved, and the code will not settle it
+### On the banner size — RESOLVED: 1920×480 (owner, 2026-07-23)
 
-`banner.png` on disk is **1920×480**, and that is the master. Nothing enforces it: the code requires
-only that the file be named `banner.png`, and `#brand-banner` is `object-fit: cover`, so any
-ultra-wide crop renders.
+**The master banner size is 1920×480, displayed full size** — the owner's explicit call, made
+with the live default banner as the spec reference ("our live default banner is a good clue of
+the specs"). `banner.png` on disk is exactly that, measured. Nothing in code enforces it (the
+code requires only the `banner.png` filename, and `#brand-banner` is `object-fit: cover`, so an
+off-size crop still renders) — but 1920×480 is what new banner art gets cut to. Candidates at
+other sizes (e.g. the 2048×512 Grok set in the owner's Art Scratch) crop down to it.
 
-The sources never agreed, and they did not even agree about what they disagreed on:
-
-- **ART_SPECS §1** specs **2048×512 or wider**, and calls 1920×480 a retired figure that "no longer
-  describes anything" — i.e. it retires the number that actually shipped.
-- **ART_PROMPTS** (banner-v2 pass) says there is **"no agreed master size"**, and attributes
-  **1920×480 to ART_SPECS** — which is not what ART_SPECS says.
-- **ART_PROMPTS §1** (banner v1) specs a third thing again: **16:9**.
-
-**Unresolved. Pick one when the banner is next regenerated** and write it into the row above.
+The archived specs never agreed (ART_SPECS said 2048×512+, ART_PROMPTS said no-agreed-size and
+16:9 in different passes) — that disagreement is settled by the owner's call above; the archive
+copies stay as history.
 
 The *composition* rule, unlike the size, is settled — by the code, against the docs. With a real
 banner present the whole frame shows at full opacity with the mask off, cropped `center 32%`. So:

@@ -6,8 +6,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 // (which closes over `thumbs` state) under the ORIGINAL single-arg call shape.
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
-  maxTagNum, nextTag, frameLinked, connectMeta,
-  flat, shotText, durOf, reelStats, effectivePrompt,
+  maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
+  flat, shotText, pickTarget, pickVideoTarget, positionTag, durOf, reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
@@ -25,6 +25,8 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved,
+  landInFirstAct, importedFootagePatch,
+  buildImgGenBody,
 } from "./src/loom-mutations.js";
 
 /* =========================================================================
@@ -214,7 +216,8 @@ const elapsedLabel = (ms) => ms < 3600000 ? Math.round(ms / 60000) + "m" : (Math
 const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
 // CONNECT, CONTINUITY_PHRASE, actLetter, maxTagNum/nextTag, frameLinked, and
 // connectMeta now live in ./src/loom-core.js (imported above) -- Phase 1
-// tooling pass, 2026-07-16.
+// tooling pass, 2026-07-16. continuityLinked (same module) added 2026-07-23 to
+// give frameLinked a real caller -- see its use in the board card below.
 
 /* ---------- storage ---------- */
 const hasStore = typeof window !== "undefined" && window.storage;
@@ -296,10 +299,14 @@ function seedProject() {
 /* ============================ APP ============================ */
 // ─── Loom V2 — a fixed 4-region shell (left Cast&Assets/Footage, center board, right
 // Generate, top Timeline drawer), replacing the old free-floating dockable-panel system.
-// Locked design source: docs/ROADMAP_LOOM_ACHIEVEMENTS.md §1 + the two owner-approved
-// mockup artifacts (e41a3020 full shell, 84be1748 Timeline-only wireframe).
 const V2_STYLES = `
 .lv-overlay{position:fixed;inset:0;z-index:400;background:var(--base);display:flex;flex-direction:column;}
+/* While Deep Focus is open, lift the WHOLE overlay's root-context z-index to .lv-df-veil's
+   own intended 450 (see the "AUDIT_2026-07-21.md" comment above the .lv-overlay mount) so
+   the body-level corner FABs -- #jobs-fab/#jobs-tray at 401/402 -- stop painting over Deep
+   Focus and its nested flyouts, which are otherwise contained inside .lv-overlay's own
+   stacking context and can never out-rank a root-level sibling on their own. */
+.lv-overlay.lv-overlay-df{z-index:450;}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
@@ -386,6 +393,16 @@ const V2_STYLES = `
 .lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
 .lv-st.paused{color:var(--subtext);background:var(--base);border:1px dashed var(--subtext);}
+/* Continuity indicator (frameLinked/continuityLinked) -- reuses the .lv-st badge's own
+   font/padding/border-radius, just a distinct color (--cyan, not --green) so it never reads
+   as "shot generation status" and margin-left:0 so it sits with mode/duration on the left
+   instead of racing .lv-st's own margin-left:auto for the row's one right-aligned slot. */
+.lv-st.linked{margin-left:0;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 16%,transparent);}
+/* Imported-footage provenance badge -- coexists with the real status pill the same way
+   .linked does (margin-left:0, not competing for the row's one auto-margined slot).
+   Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
+   rather than inventing a new color. */
+.lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
@@ -499,6 +516,12 @@ const V2_STYLES = `
 .lv-drafttarget select.lv-sel{display:block;width:100%;flex:none;padding:7px 8px;font-size:11px;}
 .lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
+/* L536: Image tab field-parity additions -- a 2-up row (Size/Custom W×H, Mode/Count) and a
+   labeled checkbox row, mirroring pixai_gallery.py's .gen-row/.gen-check at the same sizing. */
+.lv-row2{display:flex;gap:8px;margin-top:8px;}
+.lv-row2>div{flex:1;min-width:0;}
+.lv-ck{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:11px;margin-top:8px;cursor:pointer;}
+.lv-advnote{display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--overlay0);}
 /* Deep Focus: double-click a board card to open a maximized, distraction-free editor
    for just that shot (title/mode/duration/frames) without leaving the V2 overlay. */
 .lv-df-veil{position:fixed;inset:0;z-index:450;background:rgba(6,4,14,.72);display:flex;align-items:center;justify-content:center;padding:24px;}
@@ -517,9 +540,12 @@ const V2_STYLES = `
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
-.lv-loratoggle{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);
-  border-radius:5px;padding:3px 7px;cursor:pointer;margin:7px 0 5px;}
-.lv-loratoggle:hover{border-color:var(--accent);color:var(--accent);}
+/* picker-parity-round2 (2026-07-24): this used to be a show/hide toggle that expanded the
+   LoRA <mg-model-picker> INLINE into this ~280px rail column -- the owner's exact complaint
+   ("cramped mess... does not have a flyout like the gallery"). It now opens the SAME
+   .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
+   the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
+.lv-loratoggle{display:inline-block;margin:7px 0 5px;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
@@ -528,6 +554,40 @@ const V2_STYLES = `
 .lv-lchip input{width:52px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
+/* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
+   <mg-model-picker> INLINE in this ~280px rail (cramped: results, a toggle button, a
+   SECOND search box, more results, all stacked). Now a trigger row (mirrors
+   pixai_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
+   -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
+   cramped-inline one here and a proper flyout there. */
+.lv-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:11.5px;text-align:left;}
+.lv-selrow:hover{border-color:var(--line2);}
+.lv-selthumb{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
+.lv-selname{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-selhint{flex:0 0 auto;font-size:10px;}
+.lv-caps{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.lv-cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);color:var(--ink2);}
+.lv-cap.method{color:var(--amber);border-color:var(--amber-d);}
+.lv-versel{margin-top:6px;}
+/* Floating overlay for the Model/LoRA picker -- centered modal, matching the Loom's own
+   established .sb-pick-ov/.lv-df-veil pattern (this file has no per-side "dock" concept for
+   the right rail the way the Gallery's #gen-drawer does, so a centered panel is the
+   idiomatic Loom equivalent of "floats as its own proper overlay panel", not an attempt to
+   pixel-clone the Gallery's specific side-docked mechanics). z-index 470: above
+   .lv-overlay/.lv-df-veil (400/450, this picker can be opened from within Deep Focus too)
+   and below .sb-seq/.sb-pick-ov (500, an unrelated picker-within-a-picker must still win). */
+.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:rgba(6,4,16,.76);display:none;align-items:center;justify-content:center;padding:20px;}
+.lv-mpick-veil.open{display:flex;}
+.lv-mpick-panel{background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:var(--shadow);width:460px;max-width:94vw;height:min(640px,86vh);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;}
+.lv-mpick-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex:none;}
+.lv-mpick-head .t{font-size:14px;font-weight:600;flex:1;}
+.lv-mpick-head .x{background:none;border:none;color:var(--ink2);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
+.lv-mpick-head .x:hover{color:var(--coral);}
+.lv-mpick-seg{display:flex;gap:6px;padding:10px 14px 0;flex:none;}
+.lv-mpick-seg button{flex:1;padding:6px 0;border-radius:7px;background:transparent;border:1px solid var(--line);color:var(--ink2);cursor:pointer;font-size:12px;}
+.lv-mpick-seg button.on{background:var(--panel2);color:var(--ink);border-color:var(--amber);font-weight:600;}
+.lv-mpick-body{padding:10px 14px 14px;display:flex;flex-direction:column;min-height:0;flex:1;}
+.lv-mpick-body mg-model-picker{flex:1;min-height:0;}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
@@ -642,7 +702,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -652,7 +712,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // This state belongs to Deep Focus but has to live up here, at LoomV2's real top level, same
   // as deepFocus itself; the IIFE below only reads/writes it via closure.
   const [dfPalFor, setDfPalFor] = useState(null);     // which term-palette is open in Deep Focus, or null
-  const [loraOpen, setLoraOpen] = useState(false);    // D-11: is the Image tab's "+ Add LoRA" picker expanded
+  // picker-parity-round2 (problem 2): replaces the old loraOpen boolean (D-11), which just
+  // toggled the LoRA <mg-model-picker> INLINE into this rail -- the owner's exact complaint.
+  // pickerOpen/pickerKind instead drive the floating .lv-mpick-veil overlay (mirrors
+  // pixai_gallery.py's #model-flyout open state + Models/LoRAs segment), opened via either
+  // the Model row's trigger (kind="base") or "+ add LoRA" (kind="lora").
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerKind, setPickerKind] = useState("base");
   const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage'
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
@@ -693,14 +759,96 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [deepFocus]);
+  // picker-parity-round2: Escape closes the model/LoRA overlay, same as every other veil
+  // in this file (deepFocus above, the Export popover, ProjectSwitcher).
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onKey = (ev) => { if (ev.key === "Escape") setPickerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickerOpen]);
+  // picker-parity-round2: lazy-mount both <mg-model-picker> instances on FIRST open (mirrors
+  // pixai_gallery.py's ensurePickers() -- "only fetch on first open", not an always-mounted
+  // base+LoRA fetch on every Loom load just because the right rail happens to be expanded).
+  // Once true, stays true -- the pickers then persist (hidden via .lv-mpick-veil's own
+  // display:none/.open) so a close/reopen never loses either one's search/scroll state.
+  const [pickerMounted, setPickerMounted] = useState(false);
+  useEffect(() => { if (pickerOpen) setPickerMounted(true); }, [pickerOpen]);
   // Bridge the shared <mg-model-picker> web component to React: a ref callback (React
   // doesn't route custom events through JSX props) that binds the 'mg-pick' listener once.
+  // imgModelSeqRef guards the /api/model-version fetch below the same way the Gallery's own
+  // selectCard() guards its identical fetch with a local selSeq/mySeq pair: a fast second
+  // pick must not let the FIRST pick's now-stale response land after it.
+  const imgModelSeqRef = useRef(0);
   const bindPicker = useCallback((el) => {
     if (el && !el._mgBound) {
       el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
+      el.addEventListener("mg-pick", (e) => {
+        const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
+        setImgModel(m);
+        setModelDefaults(null);
+        // L536 + D-11: resolve model_type (so the LoRA compat warning has a real base to
+        // compare against -- the Loom never fetched this at all before) and prefill the
+        // model author's own tuned preset (negative/steps/cfg), mirroring
+        // pixai_gallery.py's Gen.applyModelDefaults() exactly: only for fields the model
+        // actually has data for, and it OVERWRITES whatever's currently in imgAdv, same as
+        // the Gallery's own (deliberate, already-shipped) behavior on every base-model pick.
+        // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
+        // ONE request either way (same endpoint), but now returns every published release
+        // (versions[0] is the same "latest" the old fetch always resolved) so the version
+        // picker + sampling_method + capabilities the app was resolving and discarding can
+        // finally be shown, mirroring pixai_gallery.py's onBasePick/applyVersion exactly.
+        const mySeq = ++imgModelSeqRef.current;
+        fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
+          .then((r) => r.json())
+          .then((d) => {
+            if (mySeq !== imgModelSeqRef.current) return;   // a newer pick superseded this fetch
+            const versions = (d && d.versions) || [], v = versions[0] || {};
+            setImgModel((cur) => (cur && cur.model_id === m.model_id) ? {
+              ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+              sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+              versions,
+            } : cur);
+            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+            if (has) {
+              setImgAdv((cur) => ({
+                ...cur,
+                negative: v.negative_prompt || cur.negative,
+                steps: v.sampling_steps || cur.steps,
+                cfg: v.cfg_scale || cur.cfg,
+              }));
+            }
+          })
+          .catch(() => {});
+      });
     }
-  }, [setImgModel]);
+  }, [setImgModel, setImgAdv, setModelDefaults]);
+  // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
+  // always silently took the newest release. imgModel.versions (populated by bindPicker's
+  // ?all=1 fetch above) lists every one -- switching re-applies that version's OWN meta (a
+  // different release can, in principle, carry a different tuned preset or model_type)
+  // through the same shape bindPicker uses, no extra network call, the data's already in
+  // hand.
+  const pickVersion = useCallback((vid) => {
+    if (!imgModel || !imgModel.versions) return;
+    const v = imgModel.versions.find((x) => x.version_id === vid);
+    if (!v) return;
+    setImgModel((cur) => ({
+      ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+      sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+    }));
+    const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+    setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+    if (has) {
+      setImgAdv((a) => ({
+        ...a,
+        negative: v.negative_prompt || a.negative,
+        steps: v.sampling_steps || a.steps,
+        cfg: v.cfg_scale || a.cfg,
+      }));
+    }
+  }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
   // D-11: the LoRA picker uses mg-model-picker's opt-in `multi` mode, whose mg-pick
   // detail shape is { model, selected } (not the raw row bindPicker above expects) --
   // upsert-by-model_id on selected=true (covers both the initial pending entry and the
@@ -759,6 +907,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // last ran on would go stale the moment the project changes without a re-bind.
   const projectRef = useRef(project);
   projectRef.current = project;
+  // Same staleness reasoning as projectRef, for the mg-pick-request handler below (also
+  // bound once, also needs to resolve local thumbId-based images at whatever moment the
+  // owner actually completes a pick, not whichever render bindGenDrawer last ran on).
+  const thumbsRef = useRef(thumbs);
+  thumbsRef.current = thumbs;
   const genDrawerRef = useRef(null);
   const promptDirtyRef = useRef(false);
   // The drawer resolves its OWN completion target via activeRef at listener-registration
@@ -822,8 +975,94 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         const apply = (c) => ({ ...c, audioGen, audioLanguage });
         a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
       });
+      // AUDIT_2026-07-21.md's pinned "reference picker corruption" row, requirement 2: a
+      // successful pick used to ONLY ever call e.detail.respond(), which writes into the
+      // drawer's own PRIVATE _slots/_imgSlots/_vidSlots array and nothing else -- invisible
+      // to the rest of the app, and silently discarded the next time ANY host-tracked field
+      // changes and the prefill effect below rebuilds the drawer's banks fresh from
+      // buildShotPayload(). That is why "the Image References panel never advances past its
+      // original entries" -- a pick had nowhere durable to land. Commit 2e714fd fixed this
+      // for the Multi-Reference bank specifically (bank:"primary", mode:"r2v") -- the exact
+      // panel the owner's bug was about. Every other (bank, mode) combination the drawer can
+      // ever actually request now gets the same treatment: i2v/flf's Start/End-frame slots
+      // write into c.openFrame/c.closeFrame directly (no cast/ref folding needed -- a slot
+      // index maps unambiguously to one of the two), and r2v's separate video-reference bank
+      // (bank:"vid") goes through pickVideoTarget()'s own small plan (loom-core.js -- video
+      // refs store their media id in c.refs' .source, not .mediaId). The plain
+      // e.detail.respond()-only fallback stays as the last branch, for any (bank, mode) the
+      // dedicated cases above don't recognize -- forward-compatible dead code today, not a
+      // gap (still correct for a SUBMIT either way, since the drawer's own payload() reads
+      // its live slots directly regardless of what the host durably records).
       el.addEventListener("mg-pick-request", (e) => {
-        openPick((mid, thumb) => e.detail.respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
+        const { slot, bank, mode: reqMode } = e.detail;
+        if (bank === "primary" && reqMode === "r2v") {
+          openPick((mid, thumb, isVideo, duration, isNsfw) => {
+            e.detail.respond(mid, thumb, isNsfw);   // keep the drawer's own immediate slot/chip repaint
+            const a = activeRef.current; if (!a) return;
+            const proj = projectRef.current;
+            const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId]
+              : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
+            const plan = pickTarget(a, proj, resolve, slot);
+            if (plan.type === "replace" && plan.kind === "cast") {
+              // Cast assets are project-GLOBAL (shared identity across every shot that uses
+              // them) -- same setAssets() call the Cast & assets panel's own "Pick from your
+              // gallery" icon already makes (line ~1458), so this stays consistent with the
+              // one other place a cast member's picture is replaced.
+              setAssets((arr) => arr.map((x) => x.id !== plan.id ? x : { ...x, mediaId: String(mid), thumbId: "", source: "" }));
+            } else if (plan.type === "replace" && plan.kind === "ref") {
+              // c.refs lives on the CARD, not project.acts -- setRef (which goes through
+              // patchRef/project.acts) would silently no-op for the "__draft__" card, so this
+              // uses the same direct setCard/setDraftCard idiom as every other handler here.
+              const apply = (c) => ({ ...c, refs: c.refs.map((r) => r.id !== plan.id ? r : { ...r, mediaId: String(mid), thumbId: "", source: "" }) });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            } else if (plan.type === "replace" && plan.kind === "frame") {
+              const apply = (c) => ({ ...c, [plan.id]: { ...c[plan.id], mediaId: String(mid), thumbId: "", source: "" } });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            } else {
+              // A genuinely NEW reference (the "+ add" slot, past everything this shot already
+              // supplies) -- append it to the shot's own refs so it persists and re-weaves into
+              // the composed prompt at its real (positional) tag, instead of vanishing the
+              // moment anything else re-triggers the prefill effect below.
+              const newRef = { ...buildNewRef("image", uid()), tag: plan.tag, mediaId: String(mid) };
+              const apply = (c) => ({ ...c, refs: [...c.refs, newRef] });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            }
+          }, "image");
+        } else if (bank === "primary" && (reqMode === "i2v" || reqMode === "flf")) {
+          // i2v's single Start Frame slot is always slot 0; flf's Start/End Frame boxes
+          // request slot 0/1 respectively (see mg-generate-drawer.js's _renderSlots()/
+          // _renderEndSlot()) -- unlike the r2v bank there's no cast/ref folding to resolve,
+          // so this needs no pickTarget()-style plan, just the same direct openFrame/
+          // closeFrame merge FrameSlot's own "Pick from the gallery" icon already performs
+          // (patchFrame, ~line 1227) for Deep Focus's identical frame slots.
+          openPick((mid, thumb, isVideo, duration, isNsfw) => {
+            e.detail.respond(mid, thumb, isNsfw);
+            const a = activeRef.current; if (!a) return;
+            const key = slot === 1 ? "closeFrame" : "openFrame";
+            const apply = (c) => ({ ...c, [key]: { ...c[key], mediaId: String(mid), thumbId: "", source: "" } });
+            a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+          }, "image");
+        } else if (bank === "vid") {
+          // r2v's SEPARATE video-reference bank -- c.refs entries of kind:"video" hold their
+          // media id in .source (a numeric string), not .mediaId the way image refs do (see
+          // shotPayload()'s `vids` computation in loom-core.js), so this goes through its own
+          // small pickVideoTarget() plan rather than pickTarget()'s image-shaped one.
+          openPick((mid, thumb, isVideo, duration, isNsfw) => {
+            e.detail.respond(mid, thumb, isNsfw);
+            const a = activeRef.current; if (!a) return;
+            const plan = pickVideoTarget(a, slot);
+            if (plan.type === "replace") {
+              const apply = (c) => ({ ...c, refs: c.refs.map((r) => r.id !== plan.id ? r : { ...r, source: String(mid), thumbId: "" }) });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            } else {
+              const newRef = { ...buildNewRef("video", uid()), tag: plan.tag, source: String(mid) };
+              const apply = (c) => ({ ...c, refs: [...c.refs, newRef] });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            }
+          }, "video");
+        } else {
+          openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
+        }
       });
       el.addEventListener("mg-submit", (e) => {
         const a = activeRef.current;
@@ -865,7 +1104,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
 
   // Fixed Timeline drawer: hidden(0) / slim(default, scrubber only) / full(preview above
   // scrubber, real 16:9). The handle drags freely between 0 and TL_HEIGHTS.full, snapping
-  // to the nearest named state on release -- same mechanic as the owner-approved mockup.
+  // to the nearest named state on release.
   const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 };
   const tlPointerDown = (e) => { tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] }; e.currentTarget.setPointerCapture(e.pointerId); };
   const tlPointerMove = (e) => {
@@ -905,9 +1144,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     if (!badge) return;
     const prompt = (active.c.imgPrompt || "").trim();
     if (!imgModel || !prompt || anyLoraUnresolved(imgLoras)) { badge.clear(); return; }
-    const t = setTimeout(() => priceInto(imgCostRef, { model_id: imgModel.model_id, prompt }), 250);
+    // L536: price the SAME body genImage() will actually submit (size/mode/count/seed/etc
+    // all affect real PixAI cost) -- imgAdv is safe as a dependency here despite being an
+    // object: unlike active.c/project.assets, it's leaf useState that only gets a new
+    // reference when a field genuinely changes, never as a side effect of an unrelated re-render.
+    const t = setTimeout(() => priceInto(imgCostRef, buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)), 250);
     return () => clearTimeout(t);
-  }, [imgModel, imgLoras, active.c.id, active.c.imgPrompt]);
+  }, [imgModel, imgLoras, imgAdv, active.c.id, active.c.imgPrompt]);
   useEffect(() => {
     const badge = editCostRef.current;
     if (!badge) return;
@@ -1061,6 +1304,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 // the reload-time resume effect.
                 const paused = gs && gs.phase === "paused";
                 const st = paused ? "paused" : (gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status);
+                // Continuity indicator (frameLinked, via continuityLinked in loom-core.js):
+                // does this shot's OPENING frame already match the immediately-preceding
+                // shot's CLOSING frame (checked across the GLOBAL `entries` list, same
+                // cross-act "previous shot" convention the frame-handoff button already uses
+                // below -- see prevEntry/weavePrevEntry). Rendered only when true: a quiet
+                // affirmation, not a "you forgot this" warning -- most shots are deliberately
+                // connect:"new" (an intentional fresh look/place, per CONNECT.new's own hint),
+                // so a non-matching frame is usually the shot's INTENT, not a mistake to flag.
+                const linked = continuityLinked(entries, e.c.id);
                 return (
                   <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}
                     onDoubleClick={() => setDeepFocus(e)} title="Double-click to open in Deep Focus">
@@ -1068,6 +1320,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     <div className="lv-code">{e.code}</div>
                     <div className="lv-ctitle">{e.c.title || "untitled"}</div>
                     <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
+                      {linked && <span className="lv-st linked" title="Opening frame matches the previous shot's closing frame — continuous across the cut">linked</span>}
+                      {e.c.imported && <span className="lv-st imported" title="Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo">imported</span>}
                       <span className={"lv-st " + st}
                         onClick={paused ? (ev) => { ev.stopPropagation(); pollShot(e.c.id, e.c.pendingTaskId); } : undefined}
                         style={paused ? { cursor: "pointer" } : undefined}
@@ -1271,13 +1525,51 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       const busyI = gi.phase === "submitting" || gi.phase === "running";
       tabBody = (
         <div>
-          <label className="lv-lab">Model {imgModel ? <span className="lv-dim">· {imgModel.title}</span> : null}</label>
-          <mg-model-picker ref={bindPicker} kind="base"></mg-model-picker>
+          <label className="lv-lab">Model</label>
+          {/* picker-parity-round2 (problem 2): a trigger row, not an inline-mounted picker --
+              mirrors pixai_gallery.py's own #gen-selrow. The actual <mg-model-picker
+              kind="base"> lives in the always-mounted .lv-mpick-veil overlay below (outside
+              this tab-conditional block, next to <mg-generate-drawer>), matching that
+              element's own "survive tab switches, CSS-hide instead of unmount" contract. */}
+          <button type="button" className="lv-selrow" onClick={() => { setPickerKind("base"); setPickerOpen(true); }}>
+            {imgModel && imgModel.preview_url ? <img className="lv-selthumb" src={imgModel.preview_url} alt="" /> : null}
+            <span className="lv-selname">{imgModel ? imgModel.title : "none — browse models"}</span>
+            <span className="lv-dim lv-selhint">☰ browse</span>
+          </button>
+          {/* problem 5: sampling_method/capabilities were resolved by bindPicker above and
+              discarded -- read-only surfacing (not a submit field, see the Gallery's own
+              identical applyModelDefaults() comment for why sampling_method stays display-only). */}
+          {imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && (
+            <div className="lv-caps">
+              {imgModel.sampling_method ? <span className="lv-cap method">{imgModel.sampling_method}</span> : null}
+              {(imgModel.capabilities || []).map((c) => <span key={c} className="lv-cap">{c}</span>)}
+            </div>
+          )}
+          {/* problem 4: a real version choice (PixAI's own model/LoRA cards have one; ours
+              had none) -- only shown once there's actually more than one release to choose
+              from. */}
+          {imgModel && imgModel.versions && imgModel.versions.length > 1 && (
+            <select className="lv-in lv-versel" value={imgModel.version_id || ""} onChange={(ev) => pickVersion(ev.target.value)}
+              title="This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead" aria-label="Model version">
+              {imgModel.versions.map((v) => <option key={v.version_id} value={v.version_id}>{v.label || v.version_id}</option>)}
+            </select>
+          )}
           {imgLoras.length > 0 && (
             <div className="lv-loras">
-              {imgLoras.map((l) => (
-                <div key={l.model_id} className={"lv-lchip" + (l.failed ? " failed" : "")}>
-                  <span className="lv-lnm" title={l.title}>{l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : ""}</span>
+              {imgLoras.map((l) => {
+                // L536 + D-11: the base-model-compat warning D-11 explicitly deferred
+                // ("would need the Loom to additionally resolve the selected base model's
+                // own type, which it doesn't today") -- bindPicker above now DOES resolve
+                // it, so the already-imported, already-tested loraIncompat() (previously
+                // dead weight in this file) has real data to compare against. Reuses the
+                // .failed visual treatment -- both states mean "this LoRA won't work as-is".
+                const incompat = loraIncompat(imgModel && imgModel.model_type, l.lora_base_type);
+                return (
+                <div key={l.model_id} className={"lv-lchip" + ((l.failed || incompat) ? " failed" : "")}>
+                  <span className="lv-lnm"
+                    title={incompat ? l.title + " — needs a different base architecture than the one selected; remove it or switch the base" : l.title}>
+                    {l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : (incompat ? " ⚠" : "")}
+                  </span>
                   <input type="number" step="0.05" min="0" max="2" value={l.weight}
                     title="Weight"
                     onChange={(ev) => { const w = +ev.target.value || 0;
@@ -1285,19 +1577,111 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   <button type="button" className="lv-lrm" title="Remove"
                     onClick={() => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))}>×</button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
-          <button type="button" className="lv-loratoggle" onClick={() => setLoraOpen((v) => !v)}>
-            {loraOpen ? "− hide LoRA picker" : "+ add LoRA"}
+          <button type="button" className="lv-chip lv-loratoggle" onClick={() => { setPickerKind("lora"); setPickerOpen(true); }}>
+            + add LoRA
           </button>
-          {loraOpen && <mg-model-picker ref={bindLoraPicker} kind="lora" multi></mg-model-picker>}
           <label className="lv-lab">Image prompt</label>
           <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
           {sel && <button className="lv-mini2" onClick={() => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, (c.openFrame && c.openFrame.desc) || "", c.lighting || ""].filter(Boolean).join(", ") }))}>&#8615; seed from shot description</button>}
+          {/* L536: full PixAI field parity with the gallery's own Generate tab (owner-decided
+              scope, 2026-07-23) -- Advanced (negative/steps/cfg), 8 aspect-ratio buttons,
+              Size + custom W×H, Mode, Count, Seed, High-priority, Prompt helper. Same field
+              names/defaults/order as pixai_gallery.py's #gen-mode-generate, submitted via
+              buildImgGenBody() (loom-mutations.js) so the price badge below and the real
+              submit in genImage() can never disagree about what these fields do. */}
+          <details>
+            <summary style={{ cursor: "pointer", color: "var(--subtext)", fontSize: 11 }}>Advanced</summary>
+            <textarea className="lv-ta" style={{ marginTop: 5 }} value={imgAdv.negative}
+              placeholder="lowres, text, watermark…"
+              onChange={(ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))} />
+            <div className="lv-row2">
+              <div><label className="lv-lab" style={{ margin: "6px 0 3px" }}>Steps</label>
+                <input className="lv-in" type="number" min="1" max="150" step="1" value={imgAdv.steps}
+                  onChange={(ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))} /></div>
+              <div><label className="lv-lab" style={{ margin: "6px 0 3px" }}>CFG scale</label>
+                <input className="lv-in" type="number" min="1" max="30" step="0.5" value={imgAdv.cfg}
+                  onChange={(ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))} /></div>
+            </div>
+            {modelDefaults && (
+              <div className="lv-advnote">
+                <span>&#10003; using this model's tuned preset</span>
+                <button type="button" className="lv-mini2" style={{ margin: 0 }} onClick={() => {
+                  setImgAdv((a) => ({ ...a,
+                    negative: modelDefaults.negative_prompt || a.negative,
+                    steps: modelDefaults.sampling_steps || a.steps,
+                    cfg: modelDefaults.cfg_scale || a.cfg }));
+                }}>&#8630; reset</button>
+              </div>
+            )}
+          </details>
+          <label className="lv-lab">Aspect</label>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {[[1, 1, "1:1"], [3, 4, "3:4"], [4, 3, "4:3"], [2, 3, "2:3"], [3, 2, "3:2"],
+              [9, 16, "9:16"], [16, 9, "16:9"], [3, 1, "3:1"]].map(([rw, rh, label]) => (
+              <button key={label} type="button"
+                className={"lv-chip" + (imgAdv.aspectW === rw && imgAdv.aspectH === rh ? " on" : "")}
+                onClick={() => setImgAdv((a) => ({ ...a, aspectW: rw, aspectH: rh }))}>{label}</button>
+            ))}
+          </div>
+          <div className="lv-row2">
+            <div><label className="lv-lab">Size · long edge</label>
+              <select className="lv-sel" style={{ width: "100%" }} value={imgAdv.size}
+                onChange={(ev) => setImgAdv((a) => ({ ...a, size: +ev.target.value }))}>
+                <option value="768">S · 768</option>
+                <option value="1024">M · 1024</option>
+                <option value="1536">L · 1536</option>
+                <option value="2048">XL · 2048</option>
+              </select></div>
+            <div><label className="lv-lab">Custom W&times;H <span className="lv-dim">· overrides</span></label>
+              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                <input className="lv-in" type="number" min="64" max="4096" step="8" placeholder="W" value={imgAdv.customW}
+                  onChange={(ev) => setImgAdv((a) => ({ ...a, customW: ev.target.value }))} />
+                <span className="lv-dim">&times;</span>
+                <input className="lv-in" type="number" min="64" max="4096" step="8" placeholder="H" value={imgAdv.customH}
+                  onChange={(ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))} />
+              </div></div>
+          </div>
+          <div className="lv-dim" style={{ fontSize: 11, marginTop: 5 }}>
+            {(() => { const d = resolveGenDims(imgAdv); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}
+          </div>
+          <div className="lv-row2">
+            <div><label className="lv-lab">Mode</label>
+              <select className="lv-sel" style={{ width: "100%" }} value={imgAdv.mode}
+                onChange={(ev) => setImgAdv((a) => ({ ...a, mode: ev.target.value }))}>
+                <option value="auto">Auto</option><option value="lite">Lite</option>
+                <option value="standard">Standard</option><option value="pro">Pro</option>
+                <option value="ultra">Ultra</option>
+              </select></div>
+            <div><label className="lv-lab">Count</label>
+              <select className="lv-sel" style={{ width: "100%" }} value={imgAdv.count}
+                onChange={(ev) => setImgAdv((a) => ({ ...a, count: +ev.target.value }))}>
+                <option value="1">1</option><option value="2">2</option>
+                <option value="3">3</option><option value="4">4</option>
+              </select></div>
+          </div>
+          <label className="lv-lab">Seed <span className="lv-dim">· blank = random</span></label>
+          <input className="lv-in" type="number" placeholder="random" value={imgAdv.seed}
+            onChange={(ev) => setImgAdv((a) => ({ ...a, seed: ev.target.value }))} />
+          <label className="lv-ck" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it.">
+            <input type="checkbox" checked={imgAdv.highPriority}
+              onChange={(ev) => setImgAdv((a) => ({ ...a, highPriority: ev.target.checked }))} /> High priority · Turbo (faster)</label>
+          <label className="lv-ck">
+            <input type="checkbox" checked={imgAdv.promptHelper}
+              onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
           <mg-cost-badge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." card-label="a card"></mg-cost-badge>
-          <button className="lv-go" disabled={busyI || anyLoraUnresolved(imgLoras)} onClick={() => genImage(active)}>{busyI ? (gi.msg || "generating…") : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…" : "✦ Generate reference image"}</button>
+          <button className="lv-go"
+            disabled={busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type))}
+            onClick={() => genImage(active)}>
+            {busyI ? (gi.msg || "generating…")
+              : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…"
+              : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA — remove or switch base"
+              : "✦ Generate reference image"}
+          </button>
           {gi.phase === "error" && <div className="lv-gerr">{gi.msg}</div>}
           {gi.mid && (
             <div className="lv-imgresult">
@@ -1386,7 +1770,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           </div>
         )}
         <div className="lv-framehandoff">
-          <FrameSlot which="open" frame={active.c.openFrame} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+          <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("openFrame", p)}
             extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
                 title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
@@ -1394,7 +1778,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
               : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
           <div className="sb-conn-mid">&#8594;</div>
-          <FrameSlot which="close" frame={active.c.closeFrame} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+          <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
             onPatch={(p) => patchFrame("closeFrame", p)} />
         </div>
         {/* The Image/Edit/Reference/Video tab strip lives in the rail's .lv-sidehead
@@ -1411,8 +1795,47 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             render can't unmount the element and kill its in-flight poll -- CSS-hidden
             instead, exactly like every other tab's content stays out of the DOM flow
             without losing its live state. See the videoTrailer comment above. */}
-        <mg-generate-drawer ref={bindGenDrawer} style={{ display: tab === "Video" ? "" : "none" }}></mg-generate-drawer>
+        {/* data-loom-ctx tells the shared drawer's own CSS (static/mg-generate-drawer.js) to
+            hide its Camera + Basic/Professional controls -- this host already owns both (the
+            shot Camera field above, the top-strip Draft toggle) via its own state. Without
+            this attribute the drawer renders its own copies alongside the Loom's, showing two
+            Camera controls and two quality controls for the same setting. */}
+        <mg-generate-drawer ref={bindGenDrawer} data-loom-ctx="" style={{ display: tab === "Video" ? "" : "none" }}></mg-generate-drawer>
         {videoTrailer}
+        {/* picker-parity-round2 (problem 2): the Model/LoRA picker overlay -- a floating
+            panel, not squeezed inline into this rail (the owner's exact complaint). Lazy-
+            mounted (pickerMounted above), then left mounted for the rest of the session --
+            CSS-hidden via .open/inline display instead of unmounted, so a close/reopen never
+            loses either picker's search/scroll state, matching the Gallery's own
+            #model-flyout (created once by ensurePickers(), display toggled after that).
+            pickerKind only switches which of the two is VISIBLE, same as the Gallery's
+            setKind() -- both mount together and stay mounted, matching that "each keeps its
+            OWN last-searched results independently" contract exactly. base-type on the LoRA
+            mount reuses imgModel.model_type -- already resolved for the LoRA-compat warning
+            above -- so switching the selected base re-sorts/re-badges LoRA results live. */}
+        <div className={"lv-mpick-veil" + (pickerOpen ? " open" : "")}
+          onClick={(ev) => { if (ev.target === ev.currentTarget) setPickerOpen(false); }}>
+          <div className="lv-mpick-panel" role="dialog" aria-label="Models and LoRAs">
+            <div className="lv-mpick-head">
+              <span className="t">Models &amp; LoRAs</span>
+              <button type="button" className="x" onClick={() => setPickerOpen(false)} aria-label="Close">&times;</button>
+            </div>
+            <div className="lv-mpick-seg">
+              <button type="button" className={pickerKind === "base" ? "on" : ""} onClick={() => setPickerKind("base")}>Models</button>
+              <button type="button" className={pickerKind === "lora" ? "on" : ""} onClick={() => setPickerKind("lora")}>LoRAs</button>
+            </div>
+            <div className="lv-mpick-body">
+              {pickerMounted && (
+                <>
+                  <mg-model-picker ref={bindPicker} kind="base"
+                    style={{ display: pickerKind === "base" ? "flex" : "none" }}></mg-model-picker>
+                  <mg-model-picker ref={bindLoraPicker} kind="lora" multi base-type={(imgModel && imgModel.model_type) || ""}
+                    style={{ display: pickerKind === "lora" ? "flex" : "none" }}></mg-model-picker>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1444,7 +1867,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f);
                     setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" })); }} />
               </label>
-            ) : <div className="lv-assetprev">{as.kind === "video" ? "🎞" : "♪"}</div>}
+            ) : <div className="lv-assetprev" title={as.kind === "video" ? "Video asset — poster from your gallery" : undefined}>
+              {/* A gallery-picked video resolves its /thumbs/<mid>.jpg poster through
+                  frameSrc exactly like an image does -- the bare film emoji made a
+                  successful video import invisible here (issue #3's visibility half).
+                  The emoji stays as the no-poster fallback (e.g. a hand-retyped kind). */}
+              {as.kind === "video" && src ? <img src={src} alt="" /> : (as.kind === "video" ? "🎞" : "♪")}
+            </div>}
             <input className="lv-in" style={{ flex: "1 1 100px" }} value={as.name} placeholder="name"
               onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, name: e.target.value }))} />
             <input className="lv-tagin" value={as.tag}
@@ -1475,38 +1904,67 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         })}</div>
       )}
       {!(project.assets || []).length && <div className="lv-ph">No cast yet — add one below.</div>}
+      {/* Opens on "all" (both kinds), not "image": with an image-only default an
+          already-rendered video was absent from the view entirely, and the type
+          dropdown's combined option didn't surface videos either (it submitted '',
+          which the server maps to image-only) -- issue #3's reachability half. */}
       <button className="lv-addcast" onClick={() => openPick((mid, thumb, isVideo) => setAssets((a) => {
         const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
         return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-      }), "image", true)}>+ add from gallery</button>
+      }), "all", true)}>+ add from gallery</button>
       <button className="lv-addcast" onClick={() => setImportOpen(true)}
         title="Pull a whole gallery collection in as reusable @image references">&#8623; Import collection</button>
     </>
   );
   const finished = entries.filter((e) => e.c.resultMid);
-  // Dropped/browsed footage becomes a reusable Cast & Assets reference -- "footage" itself
-  // means "this project's own rendered shots" (keyed off resultMid), so external media has
-  // nowhere else honest to land. addAssetFromFile only handles images; video files are
-  // directed to "Browse library" instead of a half-built local-video-upload path.
+  // "Finished shots" is every shot card with a resultMid, however it got one -- this
+  // project's own render pipeline (generateShot/pollShot) OR "Browse library" below,
+  // which imports an already-rendered CATALOG video straight onto the board as a real,
+  // placeable shot (importFootage -> landInFirstAct + importedFootagePatch, loom-mutations.js).
+  // That's the footage tab's whole purpose, so its own button now means "bring this video
+  // in", not "cite it in a prompt" -- Cast & Assets keeps its own separate "+ add from
+  // gallery" button (above) for the reference use case, video included (type=all).
+  // addAssetFromFile (the drop zone below) still only handles local IMAGE files -- there's
+  // still no local-video-upload path here (out of scope); a dragged/dropped video has
+  // nowhere to land except through the picker above.
   const addAssetFromFile = async (file) => {
     if (!file || !file.type || !file.type.startsWith("image/")) return;
     const id = await storeThumb(file);
     setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: nextTag(a, "@image"), thumbId: id, source: file.name, lock: false }]);
   };
+  // Resolve a picked video's real length before landing it: the picker already threads the
+  // catalog's own `video_duration` straight through (same field useExistingVideo trusts) --
+  // only fall back to a local ffprobe (server route, older/legacy rows with a blank column)
+  // when that's missing, rather than leaving an imported clip's duration silently wrong.
+  const importPickedFootage = async (mid, duration) => {
+    let dur = parseFloat(duration);
+    if (!(dur > 0)) {
+      try {
+        const r = await fetch("/api/loom/video-duration?media_id=" + encodeURIComponent(mid));
+        const d = await r.json();
+        if (d && d.duration) dur = d.duration;
+      } catch { /* leave dur unresolved -- importFootage falls back to newCard's own default */ }
+    }
+    setSelShot(importFootage(mid, dur));
+  };
   const footageList = (
     <>
       <div className="lv-footagehead">
         <span className="lv-castrow-h">Finished shots</span>
-        <button className="lv-browsebtn" onClick={() => openPick((mid, thumb, isVideo) => setAssets((a) => {
-          const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
-          return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-        }), "video", true)}>&#8981; Browse library</button>
+        <button className="lv-browsebtn"
+          title="Import an already-rendered video from your gallery straight onto the board as a real, placeable shot"
+          onClick={() => openPick((mid, thumb, isVideo, duration) => {
+            if (!isVideo) return;   // picker is locked to video below; defensive only
+            importPickedFootage(mid, duration);
+          }, "video")}>&#8981; Browse library</button>
       </div>
       {finished.length
         ? <div className="lv-footage">{finished.map((e) => (
             <div key={e.c.id} className={"lv-fclip " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}>
               <img src={"/thumbs/" + e.c.resultMid + ".jpg"} alt="" />
-              <div className="lv-fmeta"><b>{e.code}</b><span>{durOf(e.c)}s</span></div>
+              <div className="lv-fmeta"><b>{e.code}</b>
+                {e.c.imported && <span title="Imported from your gallery, not rendered by this project">&#8623;</span>}
+                <span>{durOf(e.c)}s</span></div>
             </div>))}</div>
         : <div className="lv-ph">No rendered shots yet — generate one and it lands here.</div>}
       <div className={"lv-dropzone" + (dzHover ? " hover" : "")}
@@ -1519,8 +1977,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     </>
   );
 
+  // AUDIT_2026-07-21.md `state-owner-defects`: .lv-df-veil (z-index 450) renders as a
+  // DESCENDANT of .lv-overlay (z-index 400), so from the root stacking context it's part
+  // of the SAME 400 atom, not a real 450 -- the body-level corner FABs (#jobs-fab/#jobs-
+  // tray, z-index 401/402; see pixai_gallery.py's "Lift the Activity chip" comment) then
+  // paint OVER Deep Focus's veil and everything nested inside it, though the numbering
+  // says they shouldn't. The full fix (hoisting Deep Focus out to .sb-root level) is a
+  // bigger DOM refactor, deferred; this raises .lv-overlay's own root-context z-index to
+  // Deep Focus's intended 450 for as long as Deep Focus is open, so the corner FABs go
+  // back to losing the comparison the way every other 400+ overlay in this file already
+  // does -- no DOM move required.
   return (
-    <div className="lv-overlay">
+    <div className={"lv-overlay" + (deepFocus ? " lv-overlay-df" : "")}>
       <style>{V2_STYLES}</style>
       <div className="lv-top">
         <span className="lv-eyebrow">The Loom · V2</span>
@@ -1671,14 +2139,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   <label className="sb-toggle" title="Blur this shot's frames/refs on the board">
                     <input type="checkbox" checked={c.discreet} onChange={(ev) => dfPatch((cc) => ({ ...cc, discreet: ev.target.checked }))} />blur previews</label></div>
               </div>
-              {/* Base prompt. Deep Focus is now A home for c.prompt, not the only one -- the
-                  right panel's own Prompt field still writes it too. This is option 2 of the
-                  two the owner left open when the field was held back from the web-component
-                  migration (docs/STATE.md, "The Prompt textarea is the one piece deliberately
-                  held back"): give base-prompt editing a home in Deep Focus rather than let
-                  every hand-typed prompt become a frozen override. Placement matches the
-                  approved mockup -- after Mode/Duration/Discreet, before the frames -- so the
-                  field sits in the same reading order on both surfaces. */}
+              {/* Base prompt. Deep Focus is A home for c.prompt, not the only one -- the
+                  right panel's own Prompt field still writes it too. Editing the BASE prompt
+                  here (not a per-shot override) is deliberate: it keeps hand-typed prompts
+                  recomposable instead of freezing each one into an override. Placement --
+                  after Mode/Duration/Discreet, before the frames -- keeps the field in the
+                  same reading order on both surfaces. */}
               <div className="sb-field" style={{ marginTop: 10 }}>
                 <label className="sb-lab">Prompt</label>
                 <textarea className="lv-ta" value={c.prompt || ""} placeholder="what happens in this shot"
@@ -1700,10 +2166,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 <span className="sb-hint">the shot's base prompt &mdash; Camera, Lighting and cast are woven in on top when it generates</span>
               </div>
               <div className="lv-df-frames">
-                <FrameSlot which="open" frame={c.openFrame} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                <FrameSlot which="open" frame={c.openFrame} liveTag={positionTag(live, project, imgSrc, "openFrame")} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
                   onPatch={(p) => dfPatchFrame("openFrame", p)} />
                 <div className="sb-conn-mid">&#8594;</div>
-                <FrameSlot which="close" frame={c.closeFrame} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                <FrameSlot which="close" frame={c.closeFrame} liveTag={positionTag(live, project, imgSrc, "closeFrame")} discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
                   onPatch={(p) => dfPatchFrame("closeFrame", p)} />
               </div>
               <div className="sb-field">
@@ -1950,6 +2416,15 @@ function useShotMutations(project, setProject) {
   const addCard = (aId) => { const c = newCard();
     setProject((p) => appendCardToAct(p, aId, c));
     setOpen((o) => ({ ...o, [c.id]: true })); };
+  // Land an already-rendered gallery video as a REAL shot entry -- Finished Shots +
+  // the existing per-card "move to..." dropdown -- instead of a Cast & Assets
+  // reference. See the Footage tab's "Browse library" button (LoomV2) for the only
+  // caller. Returns the new card's id so the caller can select it.
+  const importFootage = (mediaId, duration) => {
+    const c = newCard(importedFootagePatch(mediaId, duration));
+    setProject((p) => landInFirstAct(p, c, uid()));
+    return c.id;
+  };
   const dupCard = (aId, card) => {
     const clone = buildDuplicateCard(card, uid(), card.refs.map(() => uid()));
     setProject((p) => insertCardAfter(p, aId, card.id, clone));
@@ -1972,7 +2447,7 @@ function useShotMutations(project, setProject) {
   const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
 
   return { open, setOpen, setCard, setAct, setAssets, setCardStatus,
-    addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
+    addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot };
 }
 
@@ -1983,6 +2458,27 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
   const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
   const [imgLoras, setImgLoras] = useState([]);           // D-11: [{model_id,title,version_id,weight,lora_base_type,trigger_words,failed}]
+  // L536: the Image tab's Advanced/aspect/size/mode/count/seed/checkbox state -- full PixAI
+  // field parity with pixai_gallery.py's own Generate tab (owner-decided scope, 2026-07-23:
+  // "full PixAI parity, not a curated subset, for BOTH the Gallery and the Loom"). Lives
+  // alongside imgModel/imgLoras (drawer-wide, not per-shot) for the same reason those do --
+  // one Image-tab "form" shared across whichever shot is active, matching the Gallery's own
+  // single Generate drawer. Defaults mirror the Gallery's HTML exactly (gen-size selected=
+  // 1024, gen-steps value=25, gen-cfg value=7, gen-ph checked, 1:1 aspect .on by default).
+  const [imgAdv, setImgAdv] = useState(() => ({
+    negative: "", steps: 25, cfg: 7,
+    aspectW: 1, aspectH: 1, size: 1024, customW: "", customH: "",
+    mode: "auto", count: 1, seed: "", highPriority: false, promptHelper: true,
+  }));
+  // The model author's own tuned preset (negative/steps/cfg), fetched via /api/model-version
+  // when a BASE model resolves -- mirrors pixai_gallery.py's Gen.applyModelDefaults() (D-11
+  // audit note: "resolve_version_meta already fetches these; the drawer just never used
+  // them" -- true of the Gallery's OWN drawer at the time; the Loom never fetched
+  // /api/model-version for its base model at all, so it never even had the data). Only
+  // fields the model actually has data for are prefilled; a model with no tuned preset
+  // leaves imgAdv's current negative/steps/cfg alone. modelDefaults holds what was offered
+  // (for the "using this model's tuned preset" note); null when the current model has none.
+  const [modelDefaults, setModelDefaults] = useState(null);
   const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
   const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
   const [batching, setBatching] = useState(false);
@@ -2055,7 +2551,24 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const c = entry.c;
     const p = shotPayload(entry);
     if (!p.hasInput) {
-      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } }));
+      // Investigated, not assumed, what "re-roll on imported footage" actually does (an
+      // imported clip -- c.imported, see importedFootagePatch -- has no cast/frames/refs,
+      // so hasInput is false by construction): this branch is NOT the thing that protects
+      // it in practice. generateShot has exactly one caller, batchGenerate, whose own
+      // `todo` filter already excludes status:"done" -- importedFootagePatch always sets
+      // that -- so an imported card never reaches here via "Generate all" either. The real
+      // per-shot "Generate video" click lives entirely in <mg-generate-drawer>'s own
+      // _generate() (static/mg-generate-drawer.js), a SEPARATE, pre-existing guard
+      // (_hasAnyRef) with its own message ("Pick a source image first."/"Pick at least one
+      // reference first.") -- live-verified: clicking it on an imported shot fires no
+      // fetch, spends nothing, and leaves the footage untouched. This message stays as a
+      // defensive fallback in case a future refactor ever re-routes per-shot generation
+      // through generateShot the way it once did (see the LoomV2-dead-generateShot-prop
+      // history) -- but do not mistake it for the operative guard today.
+      const msg = c.imported
+        ? "Imported footage — nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via \"Use an existing video instead\"."
+        : "attach a frame or cast image first";
+      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
       return { ok: false, reason: "no-input" };
     }
     // GUARDRAIL: never spend credits silently. Check cost + free-card, confirm any credit spend.
@@ -2119,7 +2632,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   // Softened 2026-07-18(pm): that fix's own give-up traded the bug for an opposite one -- at
   // 20min elapsed with neither done nor failed reported, it wrote a REAL terminal
   // status:"error" and severed pendingTaskId, indistinguishable from a genuine server failure
-  // and unrecoverable short of a fresh submit. The owner's own motivating case (a render that
+  // and unrecoverable short of a fresh submit. The motivating real case (a render that
   // LOOKED lost) turned out to be a content-moderation rejection surfacing late, not an actual
   // timeout -- so a merely-slow shot was being punished identically to one PixAI actually
   // killed. Elapsed time alone now only ever downgrades the poll cadence and escalates
@@ -2167,10 +2680,25 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // SequencePlayer on it forever (it never reaches the advance threshold).
         setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
         setBatchOutcome(cardId, "done");
+        // Nudge the shared Activity tracker (static/mg-notify.js's JobsCard) the INSTANT
+        // this shot's own poll -- the live, real-time signal the per-shot badge above
+        // already trusts -- learns the task is done, exactly like the gallery's own
+        // Jobs.poll() does on its done branch (mg-notify.js). Without this the tray was
+        // only ever as fresh as ITS OWN independent, unsynchronized ~2.5-7s poll cycle
+        // (register() above is register-ONLY, no poll of its own -- see that comment), a
+        // second, unsynchronized hop that let the two surfaces visibly disagree about the
+        // same task and made the tray read as frozen when that hop lagged. window.JobsCard
+        // is guaranteed loaded here for the same reason window.Jobs is (mg-notify.js
+        // always ships in the Loom's shell).
+        if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
       } else if (cls.phase === "failed") {
         setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
         setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
         setBatchOutcome(cardId, "failed");
+        // Same nudge as the done branch above, mirroring mg-notify.js's Jobs.poll() on its
+        // own failed branch -- a failed shot must not leave the tray stuck on stale
+        // "running" until its own independent cycle happens to catch up.
+        if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
       } else if (elapsed > POLL_CEILING_MS) {
         pause();
       } else if (elapsed > POLL_STALE_AT_MS) {
@@ -2257,11 +2785,15 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const prompt = (c.imgPrompt || "").trim();
     if (!imgModel) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "pick a model first" } })); return; }
     if (!prompt) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter an image prompt" } })); return; }
-    if (!(await confirmSpend({ model_id: imgModel.model_id, prompt }, `Generate a reference image for ${c.title || "this shot"}?`))) return;
+    if (anyLoraUnresolved(imgLoras)) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "still waiting on a LoRA to resolve" } })); return; }
+    // L536: ONE body, shared by the price check just below and the real submit two lines
+    // later -- so the free-card/cost check the user is agreeing to is exactly what fires.
+    const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
+    if (!(await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`))) return;
     setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_id: imgModel.model_id, prompt, loras: resolveLoraPayload(imgLoras) }) });
+        body: JSON.stringify(body) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating…" } }));
@@ -2429,7 +2961,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
 
   return {
     genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
-    imgLoras, setImgLoras, genEditState, setGenEditState,
+    imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
+    genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
     generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate,
@@ -2511,7 +3044,7 @@ export default function App() {
     projList, projMenu, setProjMenu, projectApi, importBackup, activeId } = useProjectStore(setSelShot);
 
   const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
-    addCard, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
+    addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot } = useShotMutations(project, setProject);
 
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
@@ -2531,16 +3064,17 @@ export default function App() {
       el._mgBound = true;
       el.addEventListener("mg-pick", (e) => {
         const cb = pickCb; setPickCb(null);
-        if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration);
+        if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration, e.detail.is_nsfw);
       });
       el.addEventListener("mg-close", () => setPickCb(null));
     }
   }, [pickCb]);
 
   const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
-    imgLoras, setImgLoras, genEditState, setGenEditState,
+    imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
+    genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
-    generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+    pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate }
     = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
   // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
@@ -2644,12 +3178,14 @@ export default function App() {
       <style>{STYLES}</style>
       <V2Boundary><LoomV2
         project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
-        selShot={selShot} setSelShot={setSelShot} generateShot={generateShot} useExistingVideo={useExistingVideo} genState={genState}
+        selShot={selShot} setSelShot={setSelShot} useExistingVideo={useExistingVideo} genState={genState}
         thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
-        setAct={setAct} addCard={addCard} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
+        setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
         moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
         genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
-        imgLoras={imgLoras} setImgLoras={setImgLoras} genImage={genImage} routeImg={routeImg}
+        imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
+        modelDefaults={modelDefaults} setModelDefaults={setModelDefaults}
+        genImage={genImage} routeImg={routeImg}
         genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
         projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
         batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
@@ -2938,7 +3474,7 @@ function ImportCollection({ onImport, onClose }) {
   );
 }
 
-function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, openPick, extraBtn }) {
+function FrameSlot({ which, frame, liveTag, discreet, framePrev, onPatch, storeThumb, openPick, extraBtn }) {
   const img = framePrev(frame);
   return (
     <div className="sb-frame">
@@ -2946,7 +3482,17 @@ function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, ope
         <span className="sb-lab">{which === "open" ? "Opening frame" : "Closing frame"}</span>
         {openPick && <button className="sb-ico" title="Pick from the gallery"
           onClick={() => openPick((mid) => onPatch({ mediaId: mid, thumbId: "", source: "" }))}>▤</button>}
-        <input className="sb-tagin sb-mono" placeholder="@image1" value={frame.tag} onChange={(e) => onPatch({ tag: e.target.value })} />
+        {/* Read-only, DERIVED from this frame's guaranteed live slot (shotImageRefs()/
+            positionTag() in loom-core.js), never a free-text field the owner can independently
+            edit here. Opening/Closing Frame always reserve the first slot(s) now (see
+            loom-core.js's frame-reservation comment), so this is simply "@image1"/"@image2"
+            whenever the frame has a resolvable image in this shot, and a dash otherwise --
+            never stale text that can drift out of sync with what the composed prompt and the
+            Multi-Reference drawer's own bank actually cite for the same picture (the owner's
+            2026-07-23 live-test bug: this used to be a plain <input> writing straight into
+            frame.tag, a second, independently-settable "@imageN" that could silently disagree
+            with the shot's real, live numbering). */}
+        <span className="sb-tagin sb-mono" title="This slot's live @imageN — computed from position, not editable">{liveTag || "—"}</span>
       </div>
       <label className={"sb-frameprev" + (discreet ? " discreet" : "")} title="Attach image">
         {img ? <img src={img} alt={which} /> : "＋ attach frame"}
