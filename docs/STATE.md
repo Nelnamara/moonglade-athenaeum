@@ -245,8 +245,11 @@ users.
   `--amber`→`--accent`), so switching skin in the gallery header re-colors the Loom. Every
   skin reaches both surfaces.
 - `<mg-model-picker>` and `<mg-gallery-picker>` are live framework-neutral custom elements in
-  `static/`, with standalone harnesses; the Loom mounts both via ref-callback bridges
-  (c24837c).
+  `static/`, with standalone harnesses. **Both surfaces mount both components now** (O12/O13,
+  2026-07-24): the Loom via ref-callback bridges (c24837c), the gallery's own Generate tab
+  (`#model-flyout` → two `<mg-model-picker>` instances) and its own image picker
+  (`#pick-modal` → `<mg-gallery-picker>`) via the same mount/unmount pattern, replacing the
+  old hand-rolled duplicates outright rather than adding a third copy alongside them.
 - Loom projects persist as one atomically-written file per key under `out_dir/loom/kv`, with
   the legacy `store.json` auto-migrated in on first touch (1710f04).
 - **Project export is a two-tier "Export ▾" menu** off `ProjectSwitcher` (the `ExportMenu`
@@ -537,8 +540,9 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   (`loom/*.jsx`) wall the Option-A consolidation stopped at. Do NOT delete either as unused —
   a future pass wiring the cost-to-finish pill / the D-12 architecture consolidation needs
   exactly this surface. (Audit O14/L479, confirmed still true 2026-07-24.)
-- Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
-  live-QA'd step.
+- Gallery adoption of `<mg-model-picker>`/`<mg-gallery-picker>` (replacing `#model-flyout`/
+  `#pick-modal`) shipped 2026-07-24 (O12/O13) — live-QA'd against a real running server. See
+  the Web components note above and `CHANGELOG.md`'s `[Unreleased]` for the full detail.
 
 ### Control Panel / web parity
 
