@@ -11,6 +11,7 @@ import {
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved,
   landInFirstAct, importedFootagePatch,
+  snap8, resolveGenDims, buildImgGenBody,
 } from "../src/loom-mutations.js";
 import { flat, shotText, actLetter } from "../src/loom-core.js";
 
@@ -512,5 +513,94 @@ describe("resolveLoraPayload / anyLoraUnresolved (D-11)", () => {
     assert.equal(anyLoraUnresolved([{ version_id: "v1" }, { version_id: "" }]), true);
     assert.equal(anyLoraUnresolved([{ version_id: "", failed: true }]), true);
     assert.equal(anyLoraUnresolved([]), false);
+  });
+});
+
+describe("snap8 (L536, ported from pixai_gallery.py's Gen.d8())", () => {
+  test("rounds to the nearest multiple of 8", () => {
+    assert.equal(snap8(1000), 1000);
+    assert.equal(snap8(1001), 1000);   // rounds down, unambiguous
+    assert.equal(snap8(1007), 1008);   // rounds up, unambiguous
+  });
+  test("clamps to PixAI's real [64, 4096] bounds", () => {
+    assert.equal(snap8(10), 64);
+    assert.equal(snap8(0), 64);
+    assert.equal(snap8(-50), 64);
+    assert.equal(snap8(9000), 4096);
+  });
+  test("non-numeric input does not throw and clamps to the floor", () => {
+    assert.equal(snap8(undefined), 64);
+    assert.equal(snap8(NaN), 64);
+  });
+});
+
+describe("resolveGenDims (L536, ported from pixai_gallery.py's Gen.dims())", () => {
+  test("square aspect at a preset size", () => {
+    assert.deepEqual(resolveGenDims({ aspectW: 1, aspectH: 1, size: 1024 }),
+      { w: 1024, h: 1024, custom: false });
+  });
+  test("wide aspect scales the SHORT edge down from the long-edge size", () => {
+    // 16:9 at size 1024 -> long edge (w) = 1024, h = 1024*9/16 = 576
+    assert.deepEqual(resolveGenDims({ aspectW: 16, aspectH: 9, size: 1024 }),
+      { w: 1024, h: 576, custom: false });
+  });
+  test("tall aspect scales the SHORT edge (w) down instead", () => {
+    // 9:16 at size 1024 -> long edge (h) = 1024, w = 1024*9/16 = 576
+    assert.deepEqual(resolveGenDims({ aspectW: 9, aspectH: 16, size: 1024 }),
+      { w: 576, h: 1024, custom: false });
+  });
+  test("custom W×H (both > 0) overrides the aspect/size entirely", () => {
+    assert.deepEqual(resolveGenDims({ aspectW: 1, aspectH: 1, size: 768, customW: 1200, customH: 896 }),
+      { w: 1200, h: 896, custom: true });
+  });
+  test("only ONE of custom W/H set does not count as custom -- falls back to aspect+size", () => {
+    const d = resolveGenDims({ aspectW: 1, aspectH: 1, size: 768, customW: 1200, customH: "" });
+    assert.equal(d.custom, false);
+    assert.equal(d.w, 768);
+  });
+  test("missing/zero inputs default the same way the gallery's own dims() does (1:1 @ 1024)", () => {
+    assert.deepEqual(resolveGenDims({}), { w: 1024, h: 1024, custom: false });
+    assert.deepEqual(resolveGenDims(), { w: 1024, h: 1024, custom: false });
+  });
+  test("results are snapped to a multiple of 8", () => {
+    const d = resolveGenDims({ aspectW: 3, aspectH: 2, size: 1000 });   // 1000*2/3 = 666.67
+    assert.equal(d.h % 8, 0);
+  });
+});
+
+describe("buildImgGenBody (L536)", () => {
+  test("assembles the full /api/generate-shaped body from model + loras + advanced state", () => {
+    const imgModel = { model_id: "M1", title: "Base" };
+    const imgLoras = [{ model_id: "L1", version_id: "V1", weight: 0.8 },
+                      { model_id: "L2", version_id: "", weight: 0.5 }];   // still pending -> filtered
+    const imgAdv = { negative: "lowres", steps: 30, cfg: 6, aspectW: 16, aspectH: 9, size: 1536,
+                     customW: "", customH: "", mode: "pro", count: 2, seed: "42",
+                     highPriority: true, promptHelper: false };
+    const body = buildImgGenBody(imgModel, imgLoras, imgAdv, "a moonlit forest");
+    assert.equal(body.model_id, "M1");
+    assert.equal(body.prompt, "a moonlit forest");
+    assert.deepEqual(body.loras, [{ version_id: "V1", weight: 0.8 }]);   // unresolved one dropped
+    assert.equal(body.negative, "lowres");
+    assert.equal(body.mode, "pro");
+    assert.equal(body.steps, 30);
+    assert.equal(body.cfg, 6);
+    assert.equal(body.count, 2);
+    assert.equal(body.seed, "42");
+    assert.equal(body.high_priority, true);
+    assert.equal(body.prompt_helper, false);
+    // 16:9 @ 1536 long edge -> w=1536, h=1536*9/16=864
+    assert.equal(body.width, 1536);
+    assert.equal(body.height, 864);
+  });
+  test("sane defaults when imgModel is null and imgAdv is empty (matches the gallery's own defaults)", () => {
+    const body = buildImgGenBody(null, [], {}, "");
+    assert.equal(body.model_id, "");
+    assert.equal(body.mode, "auto");
+    assert.equal(body.steps, 25);
+    assert.equal(body.cfg, 7);
+    assert.equal(body.width, 1024);
+    assert.equal(body.height, 1024);
+    assert.equal(body.high_priority, false);
+    assert.equal(body.prompt_helper, false);
   });
 });
