@@ -131,18 +131,34 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces(tmp_path):
     """Audit 2026-07-21, S5 (the client half): with is_nsfw now on the wire (test above),
     every surface rendering /api/gallery-images results needs to set data-nsfw on the card
     it builds, and body.privacy-blur needs a rule that actually blurs it -- neither existed
-    for the gallery Picker (.pick-cell), the Edit tab's single reference slot
-    (#gen-ref-slot), <mg-gallery-picker> (.mg-pk-cell), or the Generate drawer's reference
-    slots (.mgd-slot, all three renderers) before this pass. Source-checks since none of
-    these are build-step components with an in-repo DOM test harness."""
+    for the gallery Picker, the Edit tab's single reference slot (#gen-ref-slot),
+    <mg-gallery-picker> (.mg-pk-cell), or the Generate drawer's reference slots (.mgd-slot,
+    all three renderers) before this pass. Source-checks since none of these are build-step
+    components with an in-repo DOM test harness.
+
+    O13 (Phase 2) update: the gallery's own Picker no longer builds its own .pick-cell grid
+    at all -- it mounts the shared <mg-gallery-picker>, whose OWN is_nsfw/data-nsfw/privacy-
+    blur handling is covered by the picker_js assertions below (that coverage now applies to
+    the gallery too, not just the Loom). Picker.open's mg-pick bridge converts the
+    component's boolean is_nsfw back to the app-wide '1'/'' STRING convention at the
+    boundary, since Gen.renderGenRef's #gen-ref-slot setter (checked below) still does a
+    strict === '1' comparison -- this is the one place left in pixai_gallery.py that needs
+    is_nsfw to reach it as a real value, not just be forwarded blindly."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
-    assert "if(m.is_nsfw==='1') c.setAttribute('data-nsfw','1');" in html          # .pick-cell
-    assert "f(m.media_id, thumb||m.thumb, m.prompt||'', m.is_nsfw||'')" in html    # pick() -> respond chain
+    assert "if(f) f(d.media_id, d.thumb, d.prompt||'', d.is_nsfw?'1':'');" in html, (
+        "Picker.open's mg-pick bridge must convert the component's boolean is_nsfw back to "
+        "'1'/'' -- passing the raw boolean through would silently break the strict ===  '1' "
+        "check in Gen.renderGenRef's #gen-ref-slot setter below")
     assert "Picker.open(function(mid, thumb, prompt, is_nsfw){ d.respond(mid, thumb, is_nsfw); }" in html
     assert 'genRef={media_id:mid, thumb:thumb, is_nsfw:is_nsfw}' in html          # #gen-ref-slot
-    assert 'body.privacy-blur .pick-cell[data-nsfw="1"] img' in html
     assert 'body.privacy-blur #gen-ref-slot[data-nsfw="1"] img' in html
+    # The old #pick-modal grid (and its dead privacy-blur branch) must be functionally
+    # gone -- checked as the real CSS rule / DOM class assignment, not a bare substring,
+    # since explanatory comments in the CSS legitimately still mention the old name.
+    assert '.pick-cell{' not in html and "className='pick-cell'" not in html, (
+        "the old #pick-modal grid should be fully gone -- <mg-gallery-picker>'s own "
+        ".mg-pk-cell covers this now (see picker_js below)")
 
     picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-gallery-picker.js").read_text(encoding="utf-8")
     assert "if (m.is_nsfw === '1') c.setAttribute('data-nsfw', '1');" in picker_js
@@ -160,6 +176,30 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces(tmp_path):
 
     loom_bundle = (Path(__file__).resolve().parents[1] / "loom" / "dist" / "master-storyboard.bundle.js").read_text(encoding="utf-8")
     assert "is_nsfw" in loom_bundle or "isNsfw" in loom_bundle   # esbuild output stays in sync with the .jsx source
+
+
+def test_gallery_picker_is_the_shared_mg_gallery_picker_component(tmp_path):
+    """O13 (Phase 2): the gallery's own image picker is <mg-gallery-picker> now -- the same
+    component the Loom mounts -- instead of the old hand-rolled #pick-modal grid. Pins the
+    script include and the mount/bridge shape, and asserts the old markup/grid/upload/filter
+    IDs are gone, the same 'new surface present + old one gone' shape as
+    test_gallery_video_tab_is_the_shared_drawer_component (the Video tab's own Option-A
+    migration) -- so this swap can't silently regress back to the old hand-rolled form."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "/static/mg-gallery-picker.js" in html                    # component script on the gallery
+    assert "document.createElement('mg-gallery-picker')" in html     # mounted by Picker.open(), not static markup
+    assert "el.setAttribute('show-source', '');" in html             # gallery-parity attrs actually requested
+    assert "el.setAttribute('show-upload', '');" in html
+    assert "el.setAttribute('show-copy-prompt', '');" in html
+    assert "el.addEventListener('mg-pick'" in html
+    assert "el.addEventListener('mg-close'" in html
+    # the old hand-rolled picker markup/grid/upload/filter chrome is gone
+    for old_id in ('id="pick-modal"', 'id="pick-scrim"', 'id="pick-grid"', 'id="pick-q"',
+                   'id="pick-up"', 'id="pick-file"', 'id="pick-more"', 'id="pick-copy"',
+                   'id="pick-collection"', 'id="pick-source"', 'id="pick-rating"', 'id="pick-sort"'):
+        assert old_id not in html, "old #pick-modal markup survived the O13 migration: " + old_id
+    assert "Picker.onFilter" not in html and "Picker.onScroll" not in html and "Picker.toggleCopy" not in html
 
 
 def test_collections_endpoint(tmp_path):

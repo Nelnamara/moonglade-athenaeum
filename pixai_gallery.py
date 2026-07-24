@@ -4041,13 +4041,16 @@ __DESIGN_TOKENS__
   .card .meta .date  { font-size: 10px; color: var(--overlay0); }
   /* Privacy blur (opt-in toggle): blur every thumbnail until hover. Useful on
      LAN / mobile / over-the-shoulder. NSFW-flagged cards (data-nsfw="1") blur
-     more heavily when the flag is known. Audit 2026-07-21 S5: .pick-cell (the gallery
-     Picker's own grid, .pick-modal below) never carried ANY of this -- picking an
-     image painted the whole catalog unblurred regardless of Privacy Blur. Same two
-     rules, same selector shape, just a second class. */
-  body.privacy-blur .card img, body.privacy-blur .pick-cell img, body.privacy-blur #gen-ref-slot img { filter: blur(16px); transition: filter .12s; }
-  body.privacy-blur .card[data-nsfw="1"] img, body.privacy-blur .pick-cell[data-nsfw="1"] img, body.privacy-blur #gen-ref-slot[data-nsfw="1"] img { filter: blur(28px); }
-  body.privacy-blur .card:hover img, body.privacy-blur .pick-cell:hover img, body.privacy-blur #gen-ref-slot:hover img { filter: none; }
+     more heavily when the flag is known. Audit 2026-07-21 S5 originally added a
+     .pick-cell branch here for the old #pick-modal's own grid; O13 (Phase 2) replaced
+     that grid with <mg-gallery-picker>, which carries its OWN privacy-blur rule for
+     .mg-pk-cell (mg-gallery-picker.js's injected <style>) -- so .pick-cell would only
+     ever match a class this page no longer produces. Dropped rather than left as a
+     rule matching nothing; #gen-ref-slot (the Generate tab's own reference-image slot,
+     unrelated to the picker grid) still needs its branch here. */
+  body.privacy-blur .card img, body.privacy-blur #gen-ref-slot img { filter: blur(16px); transition: filter .12s; }
+  body.privacy-blur .card[data-nsfw="1"] img, body.privacy-blur #gen-ref-slot[data-nsfw="1"] img { filter: blur(28px); }
+  body.privacy-blur .card:hover img, body.privacy-blur #gen-ref-slot:hover img { filter: none; }
   .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
   /* --accent, not --lavender: the two are the same colour in the default skin, so this
      read as correct, but a skin that retints --accent (nightfallen: #a678f0 vs a
@@ -5536,12 +5539,10 @@ document.addEventListener('DOMContentLoaded', function(){
   /* Top/bottom docks are thin full-width bars -- an edge-popped flyout gets clipped.
      Render the model browser as a centered overlay instead so it's never obscured. */
   #gen-drawer.dock-top #model-flyout,#gen-drawer.dock-bottom #model-flyout{position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);width:540px;max-width:92vw;height:auto;max-height:82vh;border:1px solid var(--surface1);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);}
-  #pick-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
-  #pick-scrim.open{display:block;}
-  #pick-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
-  .pick-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
-  .pick-filters select{background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:5px 8px;font-size:12px;}
-  #pick-modal.open{display:flex;}
+  /* O13: #pick-scrim/#pick-modal/.pick-filters and their CSS are gone -- <mg-gallery-picker>
+     (static/mg-gallery-picker.js) brings its own complete self-contained overlay/box/filter
+     chrome, injected client-side. #similar-modal below is UNRELATED (Similar.js, not Picker)
+     and still uses the shared .pick-head/.pick-empty rules further down, kept as-is. */
   #similar-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
   #similar-scrim.open{display:block;}
   #similar-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
@@ -5555,21 +5556,11 @@ document.addEventListener('DOMContentLoaded', function(){
   .pick-head{display:flex;align-items:center;margin-bottom:10px;}
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
   .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
-  /* FIXED row height -- the bulletproof image-grid pattern. No aspect-ratio, no
-     percentage heights, so cells can't collapse to slivers or blow out tall. */
-  #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));grid-auto-rows:120px;gap:8px;overflow-y:auto;transition:opacity .12s;flex:1;min-height:120px;align-content:start;}
-  .pick-cell{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--surface0);}
-  .pick-cell:hover{border-color:var(--lavender);}
-  /* aspect-ratio on the IMG (not the cell) -- mirrors the main gallery grid. Putting it
-     on the cell + height:100% on the img is a percentage-height-against-indefinite-height
-     trap: the img blows out to its intrinsic height and cells overlap into a torn smear. */
-  .pick-cell{grid-row:span 1;}
-  .pick-cell img{width:100%;height:100%;object-fit:cover;display:block;background:var(--surface0);}
+  /* .pick-head/.pick-empty above are shared with #similar-modal (Similar.js) and stay live.
+     #pick-grid/.pick-cell/#pick-up/#pick-more below were exclusively the old #pick-modal's
+     own grid/upload/load-more chrome -- gone with it (O13); <mg-gallery-picker> has its own
+     .mg-pk-grid/.mg-pk-cell/.mg-pk-upload (infinite-scroll, no separate load-more button). */
   .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
-  #pick-up{flex:0 0 auto;height:33px;padding:0 12px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;}
-  #pick-up:hover{border-color:var(--overlay0);}
-  #pick-more{margin-top:10px;padding:8px 0;width:100%;flex:0 0 auto;font-size:12.5px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;}
-  #pick-more:hover{border-color:var(--lavender);color:var(--lavender);}
   #model-preview{position:fixed;z-index:220;width:300px;max-width:80vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);display:none;overflow:hidden;pointer-events:none;}
   #model-preview.open{display:block;}
   #model-preview img{width:100%;max-height:340px;object-fit:cover;display:block;background:var(--surface1);}
@@ -5807,41 +5798,8 @@ document.addEventListener('DOMContentLoaded', function(){
     </div>
   </div>
 </aside>
-<div id="pick-scrim" onclick="Picker.close()"></div>
-<div id="pick-modal" aria-hidden="true" aria-label="Pick from your gallery">
-  <div class="pick-head"><span class="t">&#9648; Select from your gallery</span>
-    <button class="x" onclick="Picker.close()" aria-label="Close">&times;</button></div>
-  <div style="display:flex;gap:6px;">
-    <input class="gen-search" id="pick-q" style="flex:1;" placeholder="Search your images&hellip;" autocomplete="off">
-    <button type="button" id="pick-up" onclick="Picker.upload()" title="Upload a local file (free)">&#8679; Upload</button>
-    <input type="file" id="pick-file" accept="image/*" style="display:none;" onchange="Picker.onFile()">
-  </div>
-  <div class="pick-filters">
-    <select id="pick-collection" onchange="Picker.onFilter()">
-      <option value="">All collections</option>
-      {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-    </select>
-    <select id="pick-source" onchange="Picker.onFilter()">
-      <option value="">Any source</option>
-      <option value="api">Generated (AI)</option>
-      <option value="local">Imported local</option>
-    </select>
-    <select id="pick-rating" onchange="Picker.onFilter()">
-      <option value="0">Any rating</option>
-      <option value="1">&#9733;+</option><option value="2">&#9733;&#9733;+</option>
-      <option value="3">&#9733;&#9733;&#9733;+</option><option value="4">&#9733;&#9733;&#9733;&#9733;+</option>
-      <option value="5">&#9733;&#9733;&#9733;&#9733;&#9733;</option>
-    </select>
-    <select id="pick-sort" onchange="Picker.onFilter()">
-      <option value="newest">Newest first</option>
-      <option value="oldest">Oldest first</option>
-    </select>
-  </div>
-  <label class="gen-check" style="margin:0 0 8px;"><input type="checkbox" id="pick-copy" onchange="Picker.toggleCopy()"> Copy the image&rsquo;s prompt to the clipboard when picking</label>
-  <div id="pick-grid" onscroll="Picker.onScroll()"></div>
-  <div class="pick-empty" id="pick-empty" style="display:none;"></div>
-  <button type="button" id="pick-more" onclick="Picker.more()" style="display:none;">Load more</button>
-</div>
+<!-- O13: the gallery's picker is <mg-gallery-picker> now (mounted/unmounted by the
+     Picker IIFE below on open()/close()) -- no static markup needed here anymore. -->
 <div id="similar-scrim" onclick="Similar.close()"></div>
 <div id="similar-modal" aria-hidden="true" aria-label="Visually similar images">
   <div class="pick-head"><span class="t">✧ Visually similar</span>
@@ -5959,6 +5917,11 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script src="/static/picker-core.js"></script>
+<!-- O12/O13 (Phase 2): the Generate tab's model/LoRA flyout and the gallery's own picker are
+     the shared <mg-model-picker>/<mg-gallery-picker> components now (same two the Loom's
+     _LOOM_SHELL already loads) -- see Gen's model-flyout bridge and the Picker IIFE below. -->
+<script src="/static/mg-model-picker.js"></script>
+<script src="/static/mg-gallery-picker.js"></script>
 <!-- <mg-cost-badge> is the one renderer for "this costs N credits / a free card covers it"
      (static/mg-cost-badge.js). Loaded FIRST because it is a hard dependency of three things on
      this page: the Generate and Edit tabs' own cost lines below, and <mg-generate-drawer>'s
@@ -5967,11 +5930,11 @@ document.addEventListener('DOMContentLoaded', function(){
      spends -- a silent failure on the spend path, which is why the pairing has a test
      (test_web_pick.py::test_cost_badge_ships_with_every_price_surface) and not just a habit. -->
 <script src="/static/mg-cost-badge.js"></script>
-<!-- The shared <mg-generate-drawer> now mounts in the gallery's Video tab too (not just the
-     Loom, which loads it in _LOOM_SHELL). It's picker-agnostic -- no mg-model-picker /
-     mg-gallery-picker dependency -- so this one script plus the badge above is all the gallery
-     mount needs; the host wires its mg-pick-request to the gallery Picker in the inline JS
-     below. -->
+<!-- The shared <mg-generate-drawer> mounts in the gallery's Video tab too (not just the Loom,
+     which loads it in _LOOM_SHELL). It remains picker-agnostic itself -- no mg-model-picker /
+     mg-gallery-picker dependency of its OWN -- those two are loaded above for the Generate
+     tab's model-flyout and Picker, unrelated to the drawer; the drawer's own mg-pick-request
+     is wired to the gallery Picker in the inline JS below, same as always. -->
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
@@ -6079,77 +6042,40 @@ var YourArt = (function(){
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
   return { open:open, close:close };
 })();
+// O13 (Phase 2): the gallery's own picker is the shared <mg-gallery-picker> web component
+// now, mount-to-open / unmount-to-close -- same pattern the Loom's openPick/bindGalleryPicker
+// already uses (master-storyboard.jsx). PickerCore/rendering/filters/infinite-scroll all live
+// INSIDE the component (static/mg-gallery-picker.js) now; this IIFE is just the bridge that
+// keeps Picker's own public contract -- open(callback, opts), close() -- unchanged, so its 4
+// existing call sites (refPick, the edit-ref "+ ref" slot, the edit-source Pick button, the
+// mg-pick-request listener) needed zero changes. show-source/show-upload/show-copy-prompt
+// (all three were the gallery's own #pick-modal features -- see mg-gallery-picker.js's header)
+// keep this a byte-for-byte feature match for the surface it replaces, not a downgrade.
 var Picker = (function(){
-  // Browse/filter/page/infinite-scroll logic lives in PickerCore now (shared with the
-  // Loom's GalleryPick); this IIFE is a thin DOM-binding shim over it -- same ids, same
-  // CSS, same 3 call sites, same behavior as before the refactor.
-  var cb=null, core=null, forcedType='';   // forcedType: a caller-forced media filter for one open session (e.g. 'video')
-  function el(id){return document.getElementById(id);}
-  function readFilters(){
-    var v=function(id){ var e=el(id); return e?e.value:''; };
-    return {collection:v('pick-collection'), source:v('pick-source'), rating_min:v('pick-rating'), sort:v('pick-sort')};
-  }
-  function markLoading(){ el('pick-grid').style.opacity='.5'; var mb=el('pick-more'); if(mb) mb.style.display='none'; }
-  function ensureCore(){
-    if(core) return core;
-    // type stays '' -- /api/gallery-images already treats '' the same as an absent
-    // param (defaults to "image"), so this is byte-identical to the pre-refactor
-    // behavior (images only) with no explicit type filter in this UI.
-    core = PickerCore.create({
-      onResults: function(imgs, meta){
-        var grid=el('pick-grid'), empty=el('pick-empty'), moreBtn=el('pick-more');
-        grid.style.opacity='1';
-        if(!meta.append) grid.innerHTML='';
-        if(!imgs.length && !meta.append){ empty.textContent='No images found.'; empty.style.display='block'; if(moreBtn) moreBtn.style.display='none'; return; }
-        empty.style.display='none';
-        imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
-          if(m.is_nsfw==='1') c.setAttribute('data-nsfw','1');
-          c.innerHTML='<img loading="lazy" decoding="async" src="'+m.thumb+'" alt="">';
-          c.onclick=function(){ pick(m); }; grid.appendChild(c); });
-        if(moreBtn) moreBtn.style.display = meta.hasMore ? '' : 'none';
-        // If the loaded tiles don't fill the grid there's no scrollbar to drive infinite
-        // scroll -- pull one more page so it overflows (core caps this so a tall window
-        // can't runaway-load; the Load-more button covers the rest).
-        core.maybeFillPage(grid);
-      },
-      onError: function(){ el('pick-grid').style.opacity='1'; }
+  var cb=null, el=null;
+  function open(callback, opts){
+    close();   // idempotent: a stray double-open replaces rather than stacks two overlays
+    cb=callback;
+    el=document.createElement('mg-gallery-picker');
+    el.setAttribute('default-type', (opts&&opts.type==='video')?'video':'image');
+    el.setAttribute('show-source', '');
+    el.setAttribute('show-upload', '');
+    el.setAttribute('show-copy-prompt', '');
+    el.addEventListener('mg-pick', function(e){
+      var f=cb, d=e.detail; close();
+      // is_nsfw: the component's mg-pick detail is a real boolean (its own internal
+      // is_nsfw === '1' -> boolean conversion); every caller downstream of Picker.open
+      // (Gen.renderGenRef's data-nsfw setter, in particular) still does the app-wide
+      // '1'/'' STRING check, so convert back at the boundary rather than silently
+      // breaking Privacy Blur on a picked reference image.
+      if(f) f(d.media_id, d.thumb, d.prompt||'', d.is_nsfw?'1':'');
     });
-    return core;
+    el.addEventListener('mg-close', function(){ close(); });
+    document.body.appendChild(el);
   }
-  function open(callback, opts){ cb=callback; forcedType=(opts&&opts.type)||'';
-    el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
-    el('pick-q').value=''; markLoading();
-    ensureCore().setFilters(Object.assign({q:''}, readFilters(), {type:forcedType}));
-    setTimeout(function(){el('pick-q').focus();},120);
-    try{ el('pick-copy').checked = localStorage.getItem('pick-copyprompt')==='1'; }catch(e){} }
-  function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; forcedType=''; }
-  function onInput(){ ensureCore().setQuery(el('pick-q').value.trim()); }
-  function onFilter(){ markLoading(); ensureCore().setFilters(Object.assign(readFilters(), {type:forcedType})); }
-  function pick(m, thumb){
-    try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
-    var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'', m.is_nsfw||'');
-  }
-  function more_(){ ensureCore().loadMore(); }
-  function onScroll(){ ensureCore().onScroll(el('pick-grid'), 320); }
-  function toggleCopy(){ try{ localStorage.setItem('pick-copyprompt', el('pick-copy').checked?'1':'0'); }catch(e){} }
-  function upload(){ el('pick-file').click(); }
-  function onFile(){
-    var f=el('pick-file').files[0]; if(!f) return;
-    var empty=el('pick-empty'); empty.textContent='Uploading '+f.name+'\\u2026'; empty.style.display='block';
-    var fd=new FormData(); fd.append('file', f);
-    fetch('/api/upload',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
-      el('pick-file').value='';
-      if(d.error||!d.media_id){ empty.textContent='\\u26a0 Upload failed: '+(d.error||'no media id'); return; }
-      empty.style.display='none';
-      pick({media_id:d.media_id, prompt:''}, URL.createObjectURL(f));
-    }).catch(function(){ el('pick-file').value=''; empty.textContent='\\u26a0 Upload failed (network).'; });
-  }
-  return {open:open, close:close, onInput:onInput, onFilter:onFilter, onScroll:onScroll, more:more_, toggleCopy:toggleCopy, upload:upload, onFile:onFile};
+  function close(){ if(el){ el.remove(); el=null; } cb=null; }
+  return {open:open, close:close};
 })();
-document.addEventListener('DOMContentLoaded', function(){
-  var pq=document.getElementById('pick-q'); if(pq) pq.addEventListener('input', Picker.onInput);
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') Picker.close(); });
-});
 /* ---- Account balance chip (credits + free cards) in the header ---- */
 var Acct = (function(){
   function chip(){ return document.getElementById('acct-chip'); }
