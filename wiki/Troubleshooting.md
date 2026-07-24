@@ -23,11 +23,13 @@ You used a **model** id where a **version** id is required. Don't paste from a
 `--list-models` (they resolve the version id). See [Generating](Generating).
 
 ## "unknown inferenceProfile …"
-The chosen **Mode** isn't supported by that model type. On the **CLI** (`--generate`) this is
-harmless — the tool auto-falls-back to the model's default and generates anyway (a rejected
-submit costs no credits). The **web app's Generate drawer and the Loom**
-don't have that fallback — there, an unsupported Mode surfaces as a plain error with nothing
-auto-retried. Leave Mode on **Auto** to avoid it everywhere.
+The chosen **Mode** isn't supported by that model type. This is harmless everywhere now
+(since 2026-07-24): the **CLI** (`--generate`) and the **web app's Generate tab** both
+auto-fall-back to the model's default and generate anyway — a rejected submit costs no
+credits either way, so the retry is free. You shouldn't see this raw message at all
+anymore; if you do, it's a friendlier "That quality setting isn't available for this
+model — try Auto instead" banner in most places, or (rarer) a case the retry itself
+didn't catch. Leave Mode on **Auto** if you'd rather not think about it.
 
 ## HTTPS / SSL certificate errors
 Behind antivirus or a corporate proxy: `pip install truststore` (Python 3.10+). The
