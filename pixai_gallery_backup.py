@@ -660,12 +660,22 @@ def _check_read_only(action):
     claim_reward are the choke points the WEB app's generate/edit/enhance/fix/delete/
     claim routes all funnel through -- but the CLI's run_generate, run_generate_video,
     run_reference_video, run_enhance and run_edit_image each build their OWN gql_adhoc
-    call (for retry logic submit_generation doesn't have) instead of calling through a
-    choke point, and until 2026-07-21 none of them called this. Found by audit: with
-    READ_ONLY=True and --confirm, all five reached the mutation, and the free-card
-    check fired first -- a live network call before the guard even ran. Each of those
-    five now calls this as the FIRST statement of its actual-submit branch, before any
-    upload or card-check, not just before the mutation itself.
+    call instead of calling through a choke point, and until 2026-07-21 none of them
+    called this. Found by audit: with READ_ONLY=True and --confirm, all five reached
+    the mutation, and the free-card check fired first -- a live network call before the
+    guard even ran. Each of those five now calls this as the FIRST statement of its
+    actual-submit branch, before any upload or card-check, not just before the mutation
+    itself.
+
+    run_generate is a partial exception since 2026-07-24: the inferenceProfile retry
+    that used to be its own reason for building a separate gql_adhoc call now lives in
+    submit_generation() instead (shared with every other caller), so run_generate calls
+    THROUGH that choke point for the mutation itself -- but it still keeps this direct
+    call too, because _apply_kaisuuken's free-card check is a real network call that
+    happens BEFORE submit_generation() is reached, so a guard living only inside
+    submit_generation() would let that call through first under READ_ONLY, same bug as
+    the paragraph above. The other four CLI runners are unchanged -- inferenceProfile is
+    only ever set by plain image-generation params, so they never needed the retry.
 
     upload_media() is deliberately NOT gated here -- it costs no credits and is not one
     of the four actions CLAUDE.md's contract lists (submit a generation, submit a fix,
@@ -4394,31 +4404,20 @@ def run_generate(args):
         task_id = existing_task
         print("Fetching existing task (no credits):", task_id)
     else:
-        # This CLI runner builds its own gql_adhoc call (for the inferenceProfile retry
-        # below) instead of going through submit_generation() -- so it needs its own
-        # _check_read_only, in the same place submit_generation puts it: before ANY
-        # network call this branch makes, including _apply_kaisuuken's free-card check.
+        # submit_generation() now owns both the actual mutation and the inferenceProfile
+        # retry (2026-07-24 -- shared with every other caller, including the web
+        # /api/generate route), so this CLI runner just calls through it instead of
+        # duplicating that logic. It still needs its OWN _check_read_only call here
+        # though, before _apply_kaisuuken's free-card check: that's a real network call
+        # that fires BEFORE submit_generation() is even reached below, so relying only on
+        # the guard inside submit_generation() would let it through first under
+        # READ_ONLY -- the exact bug _check_read_only's own docstring and
+        # tests/test_read_only_cli_paths.py describe finding.
         _check_read_only("submit a generation (spends credits)")
         print("Submitting generation task...")
         _apply_kaisuuken(session, params, args)
-        try:
-            created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
-        except PixAIError as e:
-            # inferenceProfile is model-type-specific; a rejected submit costs no
-            # credits, so if the chosen mode isn't supported, fall back to the
-            # model's default and retry once instead of failing the run.
-            if "inferenceProfile" in str(e) and "inferenceProfile" in params:
-                dropped = params.pop("inferenceProfile")
-                print("  mode '{}' not supported by this model; retrying on the "
-                      "model's default...".format(dropped))
-                created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
-            else:
-                raise
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
+        task_id = submit_generation(session, params)
         print("  task id:", task_id)
-        _bump_card_use(params)
 
         _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300),
                           interval=3, label="generate", fail_noun="generation")
@@ -4689,9 +4688,29 @@ def _bump_card_use(params):
 
 def submit_generation(session, params):
     """Submit a createGenerationTask and return the task id immediately -- no wait, no
-    download. The card (if any) must already be attached to `params`. Raises on no id."""
+    download. The card (if any) must already be attached to `params`. Raises on no id.
+
+    inferenceProfile (the Mode quality setting) is MODEL-TYPE-SPECIFIC on PixAI's side --
+    some model types only accept lite/standard, others pro/ultra, and an unsupported value
+    gets the whole submit REJECTED with a raw GraphQL error. A rejected submit costs no
+    credits, so on that specific rejection this drops inferenceProfile and retries once on
+    the model's default instead of failing the call outright. This used to be a one-off
+    try/except living only inside the CLI's run_generate; moved here 2026-07-24 so every
+    caller gets it for free -- the web /api/generate, /api/edit and /api/loom/generate
+    routes, and run_generate itself, which now just calls through here (see its own
+    comment). Only params built by _gen_parameters ever carry inferenceProfile, so this
+    is a silent no-op for every other caller (edit/enhance/video params never set it)."""
     _check_read_only("submit a generation (spends credits)")
-    created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+    try:
+        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+    except PixAIError as e:
+        if "inferenceProfile" in str(e) and "inferenceProfile" in params:
+            dropped = params.pop("inferenceProfile")
+            print("  mode '{}' not supported by this model; retrying on the "
+                  "model's default...".format(dropped))
+            created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        else:
+            raise
     task_id = (created.get("createGenerationTask") or {}).get("id")
     if not task_id:
         raise PixAIError("no task id returned: " + json.dumps(created)[:200])
