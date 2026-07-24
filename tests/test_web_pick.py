@@ -610,6 +610,63 @@ def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch):
     assert "not downloaded" in d["error"]
 
 
+def test_loom_video_duration_probes_local_file(tmp_path, monkeypatch):
+    """Footage-import fallback: when the catalog's own video_duration column is blank
+    (older row, or a request-duration that was never captured), the Footage tab probes
+    the real local file via ffprobe instead of leaving an imported clip's length wrong."""
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "shot_V9.mp4").write_bytes(b"fake")
+    monkeypatch.setattr(core, "probe_video_duration", lambda p: 7.25)
+
+    cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+                                  is_video="1", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/loom/video-duration?media_id=V9").get_json()
+    assert d == {"duration": 7.25}
+
+
+def test_loom_video_duration_requires_media_id(tmp_path):
+    cli = _authed_client(tmp_path, [])
+    r = cli.get("/api/loom/video-duration")
+    assert r.status_code == 400
+    assert r.get_json()["duration"] is None
+
+
+def test_loom_video_duration_missing_file_is_a_soft_miss_not_a_500(tmp_path):
+    """No catalog row and no file on disk -- a legitimate miss (e.g. a media_id from
+    another machine's catalog), not a server error; the client falls back to its own
+    default duration rather than being told to retry."""
+    cli = _authed_client(tmp_path, [])
+    r = cli.get("/api/loom/video-duration?media_id=nope")
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["duration"] is None
+    assert "not found" in d["error"]
+
+
+def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
+    """Same B17 quarantine contract as /api/loom/handoff (shared resolver,
+    _find_local_video_file): a file sitting under _deleted/ must not be probed as if
+    it were a live survivor."""
+    import pixai_gallery as g
+    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir.mkdir()
+    (qdir / "shot_V9.mp4").write_bytes(b"fake")
+    calls = []
+    monkeypatch.setattr(core, "probe_video_duration", lambda p: calls.append(p) or 9.0)
+
+    cli = _authed_client(tmp_path, [])
+    d = cli.get("/api/loom/video-duration?media_id=V9").get_json()
+    assert calls == [], "probed a file quarantined under _deleted/"
+    assert d["duration"] is None
+
+
+def test_loom_video_duration_requires_login(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+                                   is_video="1", created_at="2025-01-01T00:00:00")])
+    r = cli.get("/api/loom/video-duration?media_id=V9")
+    assert r.status_code == 401
+
+
 def test_gen_reference_image_passthrough():
     """Capture #14 (task 2030052367400863154): 'use as reference' = plain img2img,
     a top-level mediaId + strength on a standard submit."""
