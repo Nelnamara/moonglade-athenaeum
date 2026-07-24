@@ -1009,16 +1009,22 @@ def test_unauthenticated_lan_request_to_index_is_redirected_to_login(tmp_path):
 
 def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
     """A LAN request carrying a valid login session is authorized exactly like the
-    local owner -- the same Generate/Loom/Panel controls, no read-only banner. There
-    is only ONE access tier once you're behind the front door (a logged-in session --
-    see index()'s `is_local=True` comment for why that template flag is now a
-    hardcoded constant rather than a live check). Both views below are captured
-    AFTER logging in: an unauthenticated LOCAL request no longer gets the full owner
-    UI either (the loopback bypass is gone), so the only
-    real distinction left to prove is authenticated-vs-not, never the request's
-    address -- see test_unauthenticated_lan_request_to_index_is_redirected_to_login
-    for that side of the boundary. Community + browse surfaces (Contests / My Art)
-    render either way, as before."""
+    local owner for the LOGIN-tier controls this test actually checks -- Generate/Loom,
+    no read-only banner. There is only ONE access tier for THOSE once you're behind the
+    front door (a logged-in session -- see index()'s `is_local=True` comment for why
+    that template flag is now a hardcoded constant rather than a live check). Both
+    views below are captured AFTER logging in: an unauthenticated LOCAL request no
+    longer gets the full owner UI either (the loopback bypass is gone), so the only
+    real distinction left to prove for LOGIN-tier controls is authenticated-vs-not,
+    never the request's address -- see
+    test_unauthenticated_lan_request_to_index_is_redirected_to_login for that side of
+    the boundary. Community + browse surfaces (Contests / My Art) render either way,
+    as before. NOT claimed identical here, deliberately: the header also renders a
+    LOCALHOST-tier "^ Import" button, gated on the real `is_true_local` check rather
+    than this shared LOGIN-tier flag -- see
+    tests/test_route_tiers.py::test_index_withholds_the_import_button_from_a_lan_session
+    for that control's own local-vs-LAN pair (docs/AUDIT_2026-07-21.md P3/S5-3,
+    FIXED 2026-07-24)."""
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])

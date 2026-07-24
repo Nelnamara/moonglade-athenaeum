@@ -468,6 +468,33 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   its own root-context z-index to 450 (Deep Focus's own intended value) — no DOM move needed.
   `loom/dist/master-storyboard.bundle.js` rebuilt to match. Regression-tested:
   `loom/test/loom-df-veil-stacking.test.js`.
+- **Owner-only controls no longer walk a LAN session through a confirm dialog just to
+  403 it.** The "↑ Import" button, "Set launcher icon" (Panel → Branding), and every
+  destructive Panel Maintenance action (Organize, Dedup — apply/delete, Rebuild
+  thumbnails, Restore orphans, Undo organize) all used to render for ANY logged-in
+  session, local or LAN, because their visibility only checked the blanket `is_local`/
+  `panel_is_local` "is this session authorized at all" flag — never the same real
+  `_is_local_request()` gate their target routes (`/api/import-local`,
+  `/api/branding/shortcut`, `/api/panel/run`'s destructive branch) already enforced
+  server-side (`docs/AUDIT_2026-07-21.md` P3 and the reachability-lens finding under
+  §5, both explicitly left as "an owner UX call, not made" — the owner made the call
+  2026-07-24: gate visibility on the real check). Not a security hole (every
+  underlying route was already correctly gated) — a UX fix. Import now renders behind
+  a new `is_true_local` template flag (the same un-hardcoded `_is_local_request()`
+  value `can_delete_cloud` already used for "Delete from PixAI"); "Set launcher icon"
+  and the Maintenance tab's destructive buttons now key off the Panel's existing
+  `panel_is_local` (computed since 2026-07-22, previously wired only to the Users
+  tab) — destructive actions are filtered out of the `ACTIONS` payload server-side
+  before it ever reaches the client, with one explanatory note replacing the
+  now-empty "Changes files · asks first" row instead of silently going blank. All
+  three now match the Panel Users tab's own established precedent (hide a control the
+  caller can't use, backed by the real server-side gate) instead of a dead-end
+  confirm-then-403. Fail-first tested:
+  `tests/test_route_tiers.py::test_index_withholds_the_import_button_from_a_lan_session`
+  and `::test_panel_withholds_set_launcher_icon_and_destructive_buttons_from_lan`
+  (confirmed failing against pre-fix source — both controls present in a LAN
+  session's rendered HTML — green after), plus their localhost-still-sees-them
+  companions.
 
 ### Fixed (2026-07-24 doc/dead-code cleanup, `docs/AUDIT_2026-07-21.md`)
 
