@@ -358,6 +358,13 @@
       return 'Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
     if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
       return "PixAI's content filter blocked this generation — that's decided on PixAI's side, not in the Loom.";
+    // inferenceProfile (the Mode quality setting) is model-type-specific -- PixAI rejects
+    // an unsupported value outright ('unknown inferenceProfile "ultra" for model type
+    // "SDXL_MODEL"'). submit_generation() on the server now retries this automatically
+    // (drops the mode, resubmits on the model's default), so this is a backstop for
+    // whatever slips past that -- not the primary fix. Found live 2026-07-24.
+    if (/inferenceProfile/i.test(s))
+      return "That quality setting isn't available for this model — try Auto instead.";
     return s || 'generation failed';
   }
 

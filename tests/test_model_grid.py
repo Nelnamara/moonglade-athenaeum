@@ -233,6 +233,36 @@ def test_run_generate_saves_batch_individuals_not_the_grid(monkeypatch, tmp_path
     assert res["images"] == 2
 
 
+def test_run_generate_still_self_heals_after_delegating_to_submit_generation(monkeypatch, tmp_path):
+    """run_generate's own inferenceProfile try/except was consolidated into
+    submit_generation() 2026-07-24 (run_generate now just calls through it) -- this
+    proves that consolidation didn't lose the CLI's original retry-and-succeed
+    behavior: a --generate run with an unsupported Mode still completes instead of
+    raising, end to end through the real run_generate() entry point."""
+    seen_mids = _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
+    calls = []
+
+    def fake_gql(s, q, v=None):
+        params = v["parameters"]
+        calls.append(dict(params))
+        if "inferenceProfile" in params:
+            raise core.PixAIError(
+                'GraphQL error: [{"message": "unknown inferenceProfile \\"ultra\\" '
+                'for model type \\"SDXL_MODEL\\""}]')
+        return {"createGenerationTask": {"id": "T1"}}
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    args = SimpleNamespace(
+        out=str(tmp_path),
+        params_json='{"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}',
+        confirm=True, task_id="", token=None)
+    res = core.run_generate(args)
+    assert len(calls) == 2                       # rejected once, retried once
+    assert "inferenceProfile" not in calls[1]     # retry dropped it
+    assert seen_mids == ["A", "B"]
+    assert res["images"] == 2
+
+
 def test_run_edit_image_saves_batch_individuals_not_the_grid(monkeypatch, tmp_path):
     """Same fix, same bug, for --edit-image: a batchSize>1 edit used to save only the
     composite grid too."""
@@ -279,6 +309,66 @@ def test_submit_generation_raises(monkeypatch):
     monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {}})
     with pytest.raises(core.PixAIError):
         core.submit_generation(object(), {})
+
+
+def test_submit_generation_retries_on_inferenceprofile_rejection(monkeypatch):
+    """inferenceProfile (the Mode quality setting) is model-type-specific -- PixAI
+    rejects an unsupported value outright, with a raw GraphQL error. Found live
+    2026-07-24: the CLI's run_generate had always self-healed this with its own one-off
+    try/except, but submit_generation() -- the choke point the web /api/generate route
+    (and every other current/future caller) actually goes through -- had no such
+    protection, so a web user hitting an unsupported Mode just got the raw rejection.
+    This is the fail-first proof the retry now lives in submit_generation() itself, so
+    every caller gets it for free. Matches run_generate's pre-existing retry-once
+    behavior: drop inferenceProfile, resubmit on the model's default."""
+    calls = []
+
+    def fake_gql(s, q, v=None):
+        calls.append(dict(v["parameters"]))
+        if "inferenceProfile" in v["parameters"]:
+            raise core.PixAIError(
+                'GraphQL error: [{"message": "unknown inferenceProfile \\"ultra\\" '
+                'for model type \\"SDXL_MODEL\\""}]')
+        return {"createGenerationTask": {"id": "T10"}}
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    params = {"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}
+    assert core.submit_generation(object(), params) == "T10"
+    assert len(calls) == 2                              # rejected once, retried once
+    assert calls[0]["inferenceProfile"] == "ultra"       # first attempt: as chosen
+    assert "inferenceProfile" not in calls[1]            # retry: dropped, not just changed
+    assert "inferenceProfile" not in params              # popped in place (mutates the caller's dict)
+
+
+def test_submit_generation_does_not_retry_unrelated_errors(monkeypatch):
+    """The retry is scoped to the inferenceProfile rejection specifically -- a genuinely
+    different rejection (bad prompt, moderation, whatever) must propagate on the first
+    try, not silently eat inferenceProfile and retry for an unrelated reason."""
+    import pytest
+
+    def fake_gql(s, q, v=None):
+        raise core.PixAIError("GraphQL error: something else entirely")
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    with pytest.raises(core.PixAIError, match="something else entirely"):
+        core.submit_generation(object(), {"prompts": "x", "inferenceProfile": "ultra"})
+
+
+def test_submit_generation_no_retry_when_param_absent(monkeypatch):
+    """A rejection that happens to mention 'inferenceProfile' in its text but where the
+    submitted params never set the key at all must not loop forever -- the second half of
+    the retry's guard ("inferenceProfile" in params) is what stops that."""
+    import pytest
+    calls = []
+
+    def fake_gql(s, q, v=None):
+        calls.append(1)
+        raise core.PixAIError("GraphQL error: inferenceProfile is unsupported here")
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    with pytest.raises(core.PixAIError):
+        core.submit_generation(object(), {"prompts": "x"})   # no inferenceProfile key
+    assert len(calls) == 1                               # never retried
 
 
 def test_generation_status_phases(monkeypatch):

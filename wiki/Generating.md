@@ -38,13 +38,17 @@ URL (`pixai.art/model/<id>`) gives the *model* id, which generation rejects
 you the correct version id — prefer those.
 
 ### Modes are model-specific
-Lite/Standard suit older SD models; Pro/Ultra are for newer types. The drawer's Mode
-picker doesn't filter by model, so picking an unsupported combination shows an error on
-submit rather than falling back (a rejected submit still costs no credits) — pick
-**Auto** if you're not sure. The Loom's own per-shot draft generation reuses this same
-drawer submit path, so it has the same behavior — no auto-fallback there either; see
-[Troubleshooting](Troubleshooting#unknown-inferenceprofile-) if you hit this. (The CLI
-is different — see `--mode` below.)
+Lite/Standard suit older SD models; Pro/Ultra are for newer types. The Mode picker
+doesn't filter by model, so you can still pick an unsupported combination — pick
+**Auto** if you're not sure which your model takes. You don't have to get it right by
+hand, though: since 2026-07-24, an unsupported Mode no longer errors out. The shared
+submit path every generate/edit route goes through (the web Generate tab, and anything
+else submitting through it, including the Loom's own reference-image generation) now
+auto-falls-back to the model's default and resubmits once instead of failing — a
+rejected submit costs no credits either way, so the retry is free — matching the CLI's
+own long-standing behavior (see `--mode` below). If you ever see the raw error text
+itself instead of a friendly message, see
+[Troubleshooting](Troubleshooting#unknown-inferenceprofile-).
 
 ### LoRAs are add-ons, not base models
 A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via the
@@ -74,7 +78,7 @@ python pixai_gallery_backup.py --generate --task-id <id>
 | `--prompt` / `--negative` | — | the prompts |
 | `--model` | Tsubaki.2 | model **version** id |
 | `--lora VERSIONID:WEIGHT` | — | repeatable |
-| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` — unlike the web drawer/Loom, an unsupported mode here auto-falls-back to the model's default and retries once instead of erroring (a rejected submit costs no credits either way) |
+| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` — an unsupported mode auto-falls-back to the model's default and retries once instead of erroring (a rejected submit costs no credits either way); the web Generate tab does the same since 2026-07-24 |
 | `--priority` / `--high-priority` | `500` | 500 = standard (cheaper), 1000 = high |
 | `--no-prompt-helper` | off | use the prompt literally |
 | `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | |
