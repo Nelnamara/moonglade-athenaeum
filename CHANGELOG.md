@@ -486,6 +486,37 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   its own root-context z-index to 450 (Deep Focus's own intended value) — no DOM move needed.
   `loom/dist/master-storyboard.bundle.js` rebuilt to match. Regression-tested:
   `loom/test/loom-df-veil-stacking.test.js`.
+- **A rejected Mode (`inferenceProfile`) on the web Generate tab no longer surfaces PixAI's raw
+  GraphQL error.** Found live 2026-07-24. `inferenceProfile` is model-type-specific on PixAI's
+  side (e.g. an SDXL-family model rejects `pro`/`ultra` outright, `unknown inferenceProfile
+  "ultra" for model type "SDXL_MODEL"`) — the CLI's `--generate` had quietly self-healed this
+  since Mode shipped (drop the param, retry once on the model's default), but the shared
+  `submit_generation()` choke point every web route goes through (`/api/generate`, `/api/edit`,
+  `/api/loom/generate`) had no such protection, so a web user hitting an unsupported Mode just
+  got the raw rejection text. **Primary fix:** the retry now lives in `submit_generation()`
+  itself (`pixai_gallery_backup.py`), so every current and future caller gets it for free;
+  `run_generate` was simplified to call through it instead of duplicating the try/except (it
+  still keeps its own upfront `_check_read_only()` call ahead of `_apply_kaisuuken`'s free-card
+  network call — see that function's updated docstring for why). **Backstop:** `friendlyGenErr`
+  (`static/mg-generate-drawer.js` + `loom/src/loom-mutations.js`, kept in parity by their
+  existing test) now recognizes an `inferenceProfile` rejection and shows "That quality setting
+  isn't available for this model — try Auto instead." instead of raw GraphQL text, for whatever
+  the retry doesn't catch. **Separate gap closed in the same pass:** the Gallery Image tab's own
+  `renderResultInto` never called `friendlyGenErr` at all (unlike the Video tab's
+  `<mg-generate-drawer>`, which already did) — it now has its own local copy (a third
+  hand-maintained port, same reasoning as the drawer's) and calls it, so every error on that tab
+  reads as a message instead of raw JSON/GraphQL text. **Deliberately not built:** client-side
+  gating of the Mode `<select>` by the selected model's supported profiles — no response
+  anywhere (model-search, model-version) currently exposes that set, and building it would mean
+  inventing a new capability matrix to prevent an error the retry already recovers from
+  gracefully; the retry-and-succeed behavior is arguably better UX than a block (nothing to
+  configure, always current). Fail-first tested: `tests/test_model_grid.py::test_submit_generation_retries_on_inferenceprofile_rejection`
+  (plus two scope-guard siblings and an end-to-end `run_generate` regression test);
+  `loom/test/loom-mutations.test.js` and the extended
+  `loom/test/mg-generate-drawer-parity.test.js` (now checks all three `friendlyGenErr` copies,
+  not just two). `wiki/Generating.md` and `wiki/Troubleshooting.md` corrected — both had just
+  been updated hours earlier the same night to accurately describe the *pre-fix* gap, which
+  this fix immediately made stale again.
 
 ### Fixed (2026-07-24 doc/dead-code cleanup, `docs/AUDIT_2026-07-21.md`)
 
