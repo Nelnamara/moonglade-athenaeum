@@ -223,6 +223,40 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   frame/ref UI, the composed prompt — and silently wiped by the next prefill. Fail-first
   tested: `loom/test/loom-reference-picker-corruption.test.js`,
   `loom/test/loom-picker-frame-video-persistence.test.js`.
+- **Opening/Closing Frame could lose their own `@imageN` slot to a cast member — the THIRD
+  manifestation of the un-synced-numbering bug class the previous two entries fixed**
+  (owner live-test 2026-07-23: a shot with 2 cast members and both Opening Frame + Closing
+  Frame set (FLF mode) showed "OPENING FRAME @image1" / "CLOSING FRAME @image2" in both the
+  shot detail popover and the Generate drawer, while the composed prompt cited @image1/
+  @image3/@image4 for cast and the drawer's live Image References bank told yet a third
+  story — "Greg in the cast has usurped the image ref in the generator," in the owner's own
+  words). Root cause: `c.openFrame.tag`/`c.closeFrame.tag` are a SEPARATE, freely
+  owner-editable piece of state (a plain text `<input>` in `FrameSlot`, `master-storyboard.
+  jsx`) from a cast asset's own project-global tag — `shotImageRefs()`'s old sort ordered
+  everything by raw tag TEXT, so a cast tag that happened to tie with a frame's own stored
+  tag (both claiming e.g. "@image1") always won the disputed slot, because cast entries were
+  pushed into the sort array before frame entries by construction. The frame's own UI kept
+  statically showing the number it thought it had, while the real, live-computed number
+  (what the composed prompt and the drawer's bank actually used) silently disagreed. Fix:
+  Opening/Closing Frame now ALWAYS reserve the first slot(s) — `@image1`, and `@image2` when
+  Closing Frame applies (FLF only) — regardless of any raw `.tag` stored on the frame or any
+  cast/ref tag that collides with it; cast/refs fill in from `@image3` on. They're
+  structurally load-bearing for FLF/i2v generation (not flavor, like a cast portrait), and
+  the UI already presents them first, above "Other references & @tags." `shotText()`'s own
+  frame-description lines ("Opening frame @imageN: ...") now read the live `positionTag()`
+  too, instead of the frame's raw, independently-driftable `.tag` — and `FrameSlot`'s tag
+  field in both surfaces is now a read-only display of that same live number, not a second
+  independently-settable "@imageN" next to the shot's real numbering. Also closed a gap the
+  reservation scheme would otherwise have made easier to hit: PixAI's real caps (6 image
+  refs, 3 video refs on a reference-video generation) were never enforced anywhere in the
+  submit path — `shotImageRefs()` now truncates to 6 (frames always survive the cut, since
+  they sort first) and `shotPayload()` truncates `video_refs` to 3, mirroring the existing
+  6-image truncation `pixai_gallery.py`'s `bulkSendVideo()`/`Gen.addVideoRefs()` already
+  apply to the gallery's own bulk-send-to-video path. Follow-up to commits `2e714fd` and
+  `c7aaff2` above. Fail-first tested: `loom/test/loom-reference-picker-corruption.test.js`
+  (new `describe` blocks "frame/cast @imageN slot collision" and "PixAI's real caps"),
+  confirmed to fail pre-fix for the diagnosed reason (a cast tag tie beats the frame's own
+  claimed slot by push order; no cap truncation existed at all).
 - **Generate no longer locks until the task finishes — PixAI itself runs generations in
   parallel, so every gen panel now does too** (owner field-test 2026-07-23). The lock was
   two separate mechanisms, both fixed the same way: the gallery's `runTask()` (shared by
