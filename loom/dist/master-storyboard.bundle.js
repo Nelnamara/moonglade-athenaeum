@@ -84,6 +84,14 @@ var LoomBundle = (() => {
     if (existing) return { type: "replace", kind: existing.kind, id: existing.id };
     return { type: "append", tag: nextTag(items, "@image") };
   };
+  var shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || ""));
+  var pickVideoTarget = (entry, slot) => {
+    const items = shotVideoRefs(entry);
+    const existing = items[slot];
+    if (existing) return { type: "replace", id: existing.id };
+    const allVideoRefs = (entry.c.refs || []).filter((r) => r.kind === "video");
+    return { type: "append", tag: nextTag(allVideoRefs, "@video") };
+  };
   var shotText = (entry, p, imgSrc) => {
     const { c, code, ai } = entry;
     if (c.promptOverride) return effectivePrompt(c);
@@ -1206,31 +1214,55 @@ ${"=".repeat(48)}
         });
         el.addEventListener("mg-pick-request", (e) => {
           const { slot, bank, mode: reqMode } = e.detail;
-          if (bank !== "primary" || reqMode !== "r2v") {
+          if (bank === "primary" && reqMode === "r2v") {
+            openPick((mid, thumb, isVideo, duration, isNsfw) => {
+              e.detail.respond(mid, thumb, isNsfw);
+              const a = activeRef.current;
+              if (!a) return;
+              const proj = projectRef.current;
+              const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
+              const plan = pickTarget(a, proj, resolve, slot);
+              if (plan.type === "replace" && plan.kind === "cast") {
+                setAssets((arr) => arr.map((x) => x.id !== plan.id ? x : { ...x, mediaId: String(mid), thumbId: "", source: "" }));
+              } else if (plan.type === "replace" && plan.kind === "ref") {
+                const apply = (c) => ({ ...c, refs: c.refs.map((r) => r.id !== plan.id ? r : { ...r, mediaId: String(mid), thumbId: "", source: "" }) });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              } else if (plan.type === "replace" && plan.kind === "frame") {
+                const apply = (c) => ({ ...c, [plan.id]: { ...c[plan.id], mediaId: String(mid), thumbId: "", source: "" } });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              } else {
+                const newRef = { ...buildNewRef("image", uid()), tag: plan.tag, mediaId: String(mid) };
+                const apply = (c) => ({ ...c, refs: [...c.refs, newRef] });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              }
+            }, "image");
+          } else if (bank === "primary" && (reqMode === "i2v" || reqMode === "flf")) {
+            openPick((mid, thumb, isVideo, duration, isNsfw) => {
+              e.detail.respond(mid, thumb, isNsfw);
+              const a = activeRef.current;
+              if (!a) return;
+              const key = slot === 1 ? "closeFrame" : "openFrame";
+              const apply = (c) => ({ ...c, [key]: { ...c[key], mediaId: String(mid), thumbId: "", source: "" } });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            }, "image");
+          } else if (bank === "vid") {
+            openPick((mid, thumb, isVideo, duration, isNsfw) => {
+              e.detail.respond(mid, thumb, isNsfw);
+              const a = activeRef.current;
+              if (!a) return;
+              const plan = pickVideoTarget(a, slot);
+              if (plan.type === "replace") {
+                const apply = (c) => ({ ...c, refs: c.refs.map((r) => r.id !== plan.id ? r : { ...r, source: String(mid), thumbId: "" }) });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              } else {
+                const newRef = { ...buildNewRef("video", uid()), tag: plan.tag, source: String(mid) };
+                const apply = (c) => ({ ...c, refs: [...c.refs, newRef] });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              }
+            }, "video");
+          } else {
             openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
-            return;
           }
-          openPick((mid, thumb, isVideo, duration, isNsfw) => {
-            e.detail.respond(mid, thumb, isNsfw);
-            const a = activeRef.current;
-            if (!a) return;
-            const proj = projectRef.current;
-            const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
-            const plan = pickTarget(a, proj, resolve, slot);
-            if (plan.type === "replace" && plan.kind === "cast") {
-              setAssets((arr) => arr.map((x) => x.id !== plan.id ? x : { ...x, mediaId: String(mid), thumbId: "", source: "" }));
-            } else if (plan.type === "replace" && plan.kind === "ref") {
-              const apply = (c) => ({ ...c, refs: c.refs.map((r) => r.id !== plan.id ? r : { ...r, mediaId: String(mid), thumbId: "", source: "" }) });
-              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
-            } else if (plan.type === "replace" && plan.kind === "frame") {
-              const apply = (c) => ({ ...c, [plan.id]: { ...c[plan.id], mediaId: String(mid), thumbId: "", source: "" } });
-              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
-            } else {
-              const newRef = { ...buildNewRef("image", uid()), tag: plan.tag, mediaId: String(mid) };
-              const apply = (c) => ({ ...c, refs: [...c.refs, newRef] });
-              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
-            }
-          }, "image");
         });
         el.addEventListener("mg-submit", (e) => {
           const a = activeRef.current;

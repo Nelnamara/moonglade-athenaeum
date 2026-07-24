@@ -184,6 +184,30 @@ export const pickTarget = (entry, project, imgSrc, slot) => {
   return { type: "append", tag: nextTag(items, "@image") };
 };
 
+// ---------- r2v video-reference bank pick persistence (parallel to pickTarget() above) ---
+// The Multi-Reference drawer's SEPARATE video-reference bank (static/mg-generate-drawer.js's
+// _vidSlots, requested with bank:"vid") has the exact same "a pick only ever lands in the
+// drawer's own private slots" gap pickTarget() closes for the image bank -- but it can't
+// reuse shotImageRefs()/pickTarget() as-is: video refs carry their media id in c.refs' own
+// .source field as a numeric STRING (see shotPayload()'s `vids` computation below), never
+// .mediaId the way cast/frames/image-refs do, and there's no cast/frame equivalent to fold
+// in -- a video ref only ever comes from c.refs itself. Small enough to stay its own pair of
+// functions rather than bending shotImageRefs()'s shape to fit.
+export const shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || ""));
+
+export const pickVideoTarget = (entry, slot) => {
+  const items = shotVideoRefs(entry);
+  const existing = items[slot];
+  if (existing) return { type: "replace", id: existing.id };
+  // Tag uniqueness is scoped to EVERY video-kind ref on the card (matching addRef()'s own
+  // nextTag(card.refs.filter(kind), pre) convention in master-storyboard.jsx), not just the
+  // resolvable ones shotVideoRefs() above returns for slot alignment -- an owner-typed video
+  // ref with no source yet (Deep Focus's "file name or URL" field starts empty) still holds
+  // its tag, and a newly-appended ref must never collide with it.
+  const allVideoRefs = (entry.c.refs || []).filter((r) => r.kind === "video");
+  return { type: "append", tag: nextTag(allVideoRefs, "@video") };
+};
+
 export const shotText = (entry, p, imgSrc) => {
   const { c, code, ai } = entry;
   // Hard early-return, never merged with the composition below -- a promptOverride is the

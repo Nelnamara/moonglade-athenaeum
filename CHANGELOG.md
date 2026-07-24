@@ -108,7 +108,15 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   never disagree with the drawer's own bank about what a given `@imageN` means. Also fixed:
   picking a 3rd/4th reference now actually persists (`pickTarget()` + a durable
   `mg-pick-request` handler) instead of vanishing the moment any other field re-triggered
-  the drawer's prefill. Fail-first tested: `loom/test/loom-reference-picker-corruption.test.js`.
+  the drawer's prefill — and that same durability now covers the drawer's other two pick
+  paths, which had the identical gap: i2v/flf's Start/End Frame slots (write directly into
+  `c.openFrame`/`c.closeFrame`) and r2v's separate video-reference bank (new
+  `pickVideoTarget()` — video refs store their media id in `c.refs`' `.source`, not
+  `.mediaId`). Both were already correct at generation time (the drawer's own submit payload
+  reads its live in-memory slots directly) but invisible everywhere else — Deep Focus's own
+  frame/ref UI, the composed prompt — and silently wiped by the next prefill. Fail-first
+  tested: `loom/test/loom-reference-picker-corruption.test.js`,
+  `loom/test/loom-picker-frame-video-persistence.test.js`.
 - **Generate no longer locks until the task finishes — PixAI itself runs generations in
   parallel, so every gen panel now does too** (owner field-test 2026-07-23). The lock was
   two separate mechanisms, both fixed the same way: the gallery's `runTask()` (shared by
