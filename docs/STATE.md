@@ -613,11 +613,50 @@ waiting; the "together" grouping still applies to what's left below.
   A previous pass (and this file, until now) wrongly carried it as an unbuilt idea. It's a
   real section in the Folio of Honors today, currently showing only **skin** unlocks. Open
   (not a shape question — a build-more question): extend it to also cover **banner** and
-  **icon** unlocks (assets already exist per the owner), plus a secret easter egg that
-  unlocks full custom branding. Exact current render location in `pixai_gallery.py` /
-  `static/mg-notify.js` not yet re-confirmed against the post-Folio-of-Honors code — ask the
-  owner to point at it directly rather than re-deriving from git history next time this
-  comes up.
+  **icon** unlocks, plus the easter egg (see below). Exact current render location in
+  `pixai_gallery.py` / `static/mg-notify.js` not yet re-confirmed against the
+  post-Folio-of-Honors code — ask the owner to point at it directly rather than re-deriving
+  from git history next time this comes up.
+- **The reward system's real shape, per the owner (2026-07-23) — bigger than one banner.**
+  The original design intent was a **bundle**, not an isolated flag: a qualifying achievement
+  was meant to unlock a **banner + an icon/mark + a matching skin together**, and the reward
+  *type* was meant to track achievement **tier** — low-tier unlocks an icon, epic-tier
+  unlocks a skin, legendary-tier unlocks a banner. This tier→reward mapping was never fully
+  built; **Feats (the 11-item tier in the 57-roster) grew out of this same reward-design
+  thinking** — they're a byproduct of working out what each tier should give, not a
+  separately-invented category. `D-8` (audit board) undersold this as "build the unlock pool
+  or delete the promise" — it's actually "finish designing and building a tier-based reward
+  architecture that's partially there." The 57-vs-60 gap (below) was also seeded with this in
+  mind: room for ~3 more achievements was deliberately left to round out reward-tier coverage,
+  still waiting on the Design Pass.
+- **Owner's concrete mark (icon) decisions, 2026-07-23 — apply when the reward system is
+  built:**
+  - **Void Sentinel** — ships as the **default** icon (free, not achievement-gated).
+  - **Gem Tome** — owner dislikes it; **remove it** from the mark roster entirely.
+  - **Moonwell Eclipse** — unlocks together with the **Nightfallen** skin.
+  - **Vine Crescent** — unlocks together with the **Verdant Grove** skin.
+  - **Winged Crescent** — owner wants to **remake the art**; unlocks together with the
+    **Ember Court** skin once remade.
+  - Recurring, standing complaint (not new): **marks render too small** wherever they show in
+    the app (today: the header at 42px) — the owner has said so since the beginning. Treat as
+    a real sizing defect to fix alongside any mark-system work, not a taste question.
+- **The easter egg — CONFIRMED 2026-07-23: `under-the-hood` IS it, but its current trigger
+  logic is wrong and the owner wants it rethought.** Today it fires (unlocking nothing, just
+  a hidden feat) when ANY custom mark file exists in `branding/marks/` — i.e. the achievement
+  requires the folder to have started EMPTY and the user to have dropped in their own art. The
+  owner rejects this premise on two grounds: (1) it assumes a stranger randomly discovers an
+  empty branding folder and knows to drop an image in it — an unrealistic trigger for a real
+  easter egg; (2) more fundamentally, **the branding folder was never supposed to ship empty**
+  — the app should ship the owner's own default marks/banner by design, so "empty folder" as
+  a precondition doesn't even hold once defaults ship correctly. A prior session apparently
+  argued against shipping the owner's own art using the "this is a public, not single-user,
+  tool" reasoning ([[feedback_not_single_user]]) — the owner is explicit that this was a
+  **misapplication**: "not single-user" is about building real security/access strength for
+  real external users, not a reason to withhold the app's OWN default branding from everyone
+  who downloads it. **Not decided yet, needs its own design pass:** what the egg's real
+  trigger should be once defaults ship correctly (the current "empty folder" condition stops
+  making sense the moment there IS a default), and how the "unlocks full custom branding"
+  payoff should work when defaults are already unlocked for everyone.
 - **"Toast badge grows to its home marker" — CORRECTION 2026-07-23, this was a REAL
   regression, not an unfinished idea.** Owner: "this was actually live until the achievement
   revamp debacle... one of the lost facts." The archived note this file's prior wording was
