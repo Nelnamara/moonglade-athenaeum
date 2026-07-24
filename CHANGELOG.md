@@ -60,6 +60,23 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 
 ### Fixed
 
+- **Videos no longer corrupt on collect** (owner field-test 2026-07-23: two clips fine on
+  PixAI's side truncated mid-play locally — byte forensics traced it to two concurrent
+  `ffmpeg +faststart` remuxes interleaving writes into the SAME deterministic temp file,
+  because the live-mirror watcher and a `/api/task-status` done-poll both collected the
+  same finished task seconds apart). Three layers, each fail-first tested:
+  - `video_faststart()` uses a **unique temp name per invocation** (uuid suffix, real
+    extension kept last so ffmpeg still picks the muxer) — the load-bearing fix, and the
+    only one that also covers the separate `--watch-backup` process; the swallowed
+    remux-failure path now `vlog()`s instead of hiding a lost race.
+  - **Single-flight collect per task id** inside the gallery process: the live-mirror
+    watcher, `/api/task-status`, and `/api/import-task` share a per-task lock — the first
+    entrant runs the real `collect_generation`, a concurrent entrant waits and then
+    answers from the catalog without re-downloading.
+  - `download()` now **verifies bytes written against `Content-Length`** (when the body
+    is not content-encoded) and fails a short body through the existing retry/backoff
+    path instead of promoting a truncated `.part` — closes the adjacent mid-stream-cut
+    hole next to the B1 zero-byte guard (not the cause of this incident, but real).
 - **Four silent-failure paths now surface real errors instead of lying about success.**
   `/api/skin` and `/api/achievements?mark=1` used to answer 200 even when the disk write
   failed; they now report the failure and the actually-active value. `/api/loom/delete`
