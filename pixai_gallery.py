@@ -6641,8 +6641,28 @@ var Gen = (function(){
       .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
   }
   function debouncedCost(){ clearTimeout(costTimer); costTimer=setTimeout(refreshCost,250); }
+  // LOCAL PORT of loom/src/loom-mutations.js's friendlyGenErr(raw) -- same regex patterns,
+  // same intent as static/mg-generate-drawer.js's own local copy just below this same
+  // reasoning (see its duplication-risk comment). This page's Gen IIFE is ALSO a plain
+  // inline <script> generated straight into the page with no build step, so it can't
+  // import loom-mutations.js either -- a THIRD hand-maintained copy, same drift risk: if
+  // loom-mutations.js's friendlyGenErr ever gets new/changed regexes or wording, this one
+  // and the drawer's must both be updated by hand to match, or this tab's raw-error
+  // rendering silently drifts from the Video tab's (which already goes through the real
+  // one via <mg-generate-drawer>). A code-search for "friendlyGenErr" is the only guard
+  // against drift beyond the parity test covering this copy (loom/test/mg-generate-drawer-parity.test.js).
+  function friendlyGenErr(raw){
+    var s=String(raw||'');
+    if(/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
+      return 'Out of balance for this model \\u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
+    if(/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
+      return "PixAI's content filter blocked this generation \\u2014 that's decided on PixAI's side, not in the Loom.";
+    if(/inferenceProfile/i.test(s))
+      return "That quality setting isn't available for this model \\u2014 try Auto instead.";
+    return s||'generation failed';
+  }
   function renderResultInto(target, d, past){
-    if(d.error){ target.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
+    if(d.error){ target.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(friendlyGenErr(d.error))+'</span>'; return; }
     var ids=d.media_ids||[];
     var cost = d.paid_credit===0 ? 'free (card used)' : ((d.paid_credit||0).toLocaleString()+' credits');
     var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 '+past+' \\u2014 '+cost+'. Added to your gallery.</div>';
