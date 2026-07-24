@@ -825,10 +825,6 @@ waiting; the "together" grouping still applies to what's left below.
   nearly free today is *"flag near-duplicate generations"*, which the existing Pixeltable
   CLIP index can already answer with no new dependencies. Anatomy/artifact/NSFW detection is
   a research project rather than a backlog item, and should be named as one or dropped.
-- **File logging** has never entered any tracker, despite `CLAUDE.md` calling it "a separate,
-  still-open discussion" since `-v/--verbose` shipped. It is a loose thread, not a parked
-  decision: decide whether it is in scope, or drop it.
-
 ---
 
 ## The audit board

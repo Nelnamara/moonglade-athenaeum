@@ -38,7 +38,7 @@ gallery.
 | `reconcile_catalog_with_disk()` | Repoint each catalog row's filename/batch at the surviving on-disk file |
 | `delete_task_gql()` | Replay the `deleteGenerationTask` persisted **mutation** (POST, not the GET listing path). VOID mutation: returns `null` on success, raises on error. Single-attempt — no retry, so a flaky network can't double-fire a delete |
 | `run_delete_tasks()` | Guarded `--delete-task` driver: dry-run by default, `--apply` + typed `delete` confirm (or `--yes`), counts deleted/failed. Leaves local files + `catalog.db` untouched |
-| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout. No-op until enabled |
+| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout, and always forwarded to `pixai_logging`'s file logger regardless of `-v` |
 | `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error |
 | `account_info()` / `run_account_info()` | Read-only account dashboard (credits/membership/subscription) via `gql_adhoc`. **Never moves money** — no payment/subscription mutations are implemented, by design |
 | `run_generate()` | `--generate`: create images via `createGenerationTask` (ad-hoc POST), poll, download, catalog as `source='api'`. Preview unless `--confirm`. `--task-id` recovers an already-created task for free |
@@ -53,6 +53,20 @@ gallery.
 | `price_task()` | `GET /v2/task-price`: compute a generation's credit cost WITHOUT creating it (mirrors GraphQL `pricingTask`). Scalars → query params, nested blocks (`i2vPro`/`referenceVideo`/`chat`/`loraParameters`/…) → URL-encoded JSON. Returns `actualPrice` (int) or None. **READ-ONLY, spends nothing** — used in previews to show the real cost + card savings |
 | `suggest_prompt()` / `run_suggest_prompt()` | `--suggest-prompt <media_id\|file>`: image-to-prompt via `GET /v2/tag/suggest-prompt/{mediaId}` → `{output:[…]}` (a Danbooru-style tag list + natural-language description variants). Local files upload first (free). **FREE / read-only**, no `--confirm` |
 | `list_claims()` / `claim_reward()` / `run_claims()` | `--claims`: list claimable rewards (daily credits, agent stamina) via `GET /v2/claim` — **read-only**. `--claim <id\|all>`: claim ready rewards via `POST /v2/claim/{id}` — **gated behind `--confirm`**, previews otherwise, and never fires on a not-yet-claimable reward. Grants free credits/stamina to the owner's own account (no money moves) |
+
+### `pixai_logging.py`
+
+Shared logging baseline for both surfaces, `setup_logging(out_dir, verbose)` called early in
+each entry point. A `TimedRotatingFileHandler` writes `out_dir/logs/moonglade.log` (midnight
+rotation, 14-day retention) — **always on regardless of `-v`**, so a crash is on record even
+if nobody remembered the flag. The app's own `"moonglade"` logger and `"werkzeug"` are
+explicitly held at DEBUG/INFO so their records always reach the file; only the CONSOLE
+handler's level moves with `-v/--verbose` (DEBUG when passed, WARNING otherwise) — root
+itself stays at WARNING so third-party libraries with no explicit level (`requests`,
+`urllib3`, PIL, …) stay quiet. `sys.excepthook` is replaced to log any uncaught exception at
+CRITICAL before handing off to the previous hook unchanged (Ctrl+C excluded). `get_logger()`
+returns the shared logger; `log_path(out_dir)` is the file's path for a future Panel/CLI
+show-logs affordance (not built yet).
 
 ### `pixai_gallery.py`
 
