@@ -74,6 +74,21 @@ git tags. Full prose notes for tagged versions live on
   `imgModel` changed mid-fetch that wasn't a newer pick, which the counter already handled
   correctly by itself. Simplified to match the gallery's proven guard exactly.
 
+- **Two picker performance fixes**, after the owner reported scrolling "still slow and a
+  bit choppy" and called it "a step backward in function" following the pagination work
+  above — the first pass verified the feature worked, not that it worked well. (1) The
+  scroll listener did an unthrottled layout read (`scrollHeight`/`scrollTop`/
+  `clientHeight`) on every native scroll event, on a grid that now grows with every
+  load-more instead of staying capped at 24 cards the way the old flyout always was —
+  textbook scroll jank. Throttled to one check per animation frame via
+  `requestAnimationFrame`. (2) Opening the flyout fired two full searches at once, not
+  one: both the Gallery and the Loom mount a base AND a LoRA picker together on first
+  open (so tab-switching never re-fetches), but the hidden one searched anyway, wasting a
+  full request nobody asked for on every single open. `<mg-model-picker>` now defers its
+  own search when it starts hidden; each host reveals-and-searches the tab actually being
+  viewed via a new idempotent `ensureSearched()`. Live-verified: exactly one search on
+  open, one more the first time each tab is viewed, none on switching back.
+
 - **The model picker's squished thumbnails and dead scrolling, and picking a model no longer
   leaving the panel stuck open.** Owner live-tested the same-day picker-parity-round2 work and
   found it worse, not better. Root cause for the squish + no-scroll (one bug, not two):

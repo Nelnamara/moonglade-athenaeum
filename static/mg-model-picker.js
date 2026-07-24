@@ -277,9 +277,22 @@
       // (_loadingMore / !_hasMore), so this needs no separate debounce -- a fast scroll
       // firing the handler many times in a row just re-checks the same cheap arithmetic
       // until the guard lets exactly one fetch through.
+      // Owner report 2026-07-24: "still slow and a bit choppy". A native scroll event can
+      // fire many times per animation frame (especially with the DOM growing on every
+      // load-more -- more content, more expensive layout). scrollHeight/scrollTop/
+      // clientHeight are all LAYOUT reads -- doing that arithmetic unthrottled, on every
+      // single event, forces a synchronous layout recalculation each time, which is
+      // exactly what scroll jank is made of. requestAnimationFrame collapses any number
+      // of events within one frame down to a single check, right before the browser
+      // paints that frame anyway -- standard scroll-listener discipline, not a guess.
+      var scrollRaf = null;
       this._grid.addEventListener('scroll', function () {
-        var g = self._grid;
-        if (g.scrollHeight - g.scrollTop - g.clientHeight < 150) self._loadMore();
+        if (scrollRaf) return;
+        scrollRaf = requestAnimationFrame(function () {
+          scrollRaf = null;
+          var g = self._grid;
+          if (g.scrollHeight - g.scrollTop - g.clientHeight < 150) self._loadMore();
+        });
       });
       if (this._market) {
         this.querySelectorAll('.mg-mktsort button').forEach(function (b) {
@@ -301,7 +314,28 @@
           });
         });
       }
-      this._search(); // browse-on-open: empty query -> the API's popular list
+      // Owner report 2026-07-24: "still slow". Both the Gallery's ensurePickers() and the
+      // Loom's pickerMounted create+mount a kind="base" AND a kind="lora" instance
+      // TOGETHER on first flyout open (so switching tabs never re-fetches -- "each keeps
+      // its OWN last-searched results independently"), but the OTHER one starts hidden
+      // (style.display:none) -- the owner is looking at neither yet, usually the base
+      // model first. Searching it anyway on mount means every single flyout open fired
+      // TWO full searches competing for the same connection, for a tab nobody had asked
+      // to see. Defer: skip the automatic browse-on-open here if the element starts
+      // hidden, and let the host call ensureSearched() (below) the moment it actually
+      // reveals this instance -- see setKind()/the pickerKind effect on each host.
+      this._searched = false;
+      if (this.style.display !== 'none') { this._searched = true; this._search(); } // browse-on-open: empty query -> the API's popular list
+    }
+
+    // Called by the host right after it makes a previously-hidden instance visible for
+    // the first time (see the file header comment above). A no-op on every call after the
+    // first -- once searched, switching tabs back and forth must never re-fetch, matching
+    // the existing "each keeps its OWN last-searched results independently" contract.
+    ensureSearched() {
+      if (this._searched) return;
+      this._searched = true;
+      this._search();
     }
 
     // O13: Popular/Newest sort + the gallery's 6 LoRA category chips, same list as

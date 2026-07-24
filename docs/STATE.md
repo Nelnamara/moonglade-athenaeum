@@ -373,6 +373,30 @@ users.
     `compat` badge correctly. No bug found; still needs the owner's live confirmation it's
     now visibly working, since fixing pagination changes how much of the sorted list is
     ever on screen at once to judge it by.
+- **Two performance fixes, same day, after the owner reported scrolling "still slow and a
+  bit choppy" and called the picker "a step backward in function" post-pagination.** Both
+  are genuine performance bugs, not correctness bugs — the first round verified the
+  feature worked, not that it worked *well*:
+  - **The scroll listener did an unthrottled layout read on every native scroll event**
+    (`scrollHeight`/`scrollTop`/`clientHeight`), on a grid whose DOM now grows on every
+    load-more instead of staying capped at 24 cards forever like the old flyout did —
+    exactly the shape of real scroll jank. Throttled to one check per animation frame via
+    `requestAnimationFrame`, the standard fix for this class of problem.
+  - **Opening the flyout fired two full searches at once, not one.** Both the Gallery's
+    `ensurePickers()` and the Loom's `pickerMounted` create and mount a `kind="base"` AND a
+    `kind="lora"` picker together on first open (so switching tabs never re-fetches), but
+    the hidden one searched anyway — every open competed a real search against a wasted one
+    for a tab nobody had asked to see. `<mg-model-picker>` now defers its own
+    browse-on-open search when it starts hidden, and each host calls a new `ensureSearched()`
+    the moment it actually reveals that instance — idempotent, so tab-switching still never
+    re-fetches. Live-verified: exactly one search fires on open, one more the first time
+    each tab is actually viewed, none on switching back.
+  - The scroll-triggered load-more chain itself (native scroll event → throttled rAF →
+    fetch) could not be fully exercised end-to-end in this session's sandboxed browser
+    automation — synthetic `dispatchEvent('scroll')` didn't reliably reach the throttled
+    callback, a known simulation gap, not a sign of a bug (`_loadMore()` itself, called
+    directly, appends correctly every time). Needs the owner's real scrolling to confirm
+    the choppiness is actually gone.
 
 ## Achievements / The Folio of Honors
 

@@ -784,7 +784,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // selectCard() guards its identical fetch with a local selSeq/mySeq pair: a fast second
   // pick must not let the FIRST pick's now-stale response land after it.
   const imgModelSeqRef = useRef(0);
+  // Persist the two <mg-model-picker> DOM elements outside the ref-callback closures
+  // (bindPicker/bindLoraPicker below only run on mount/unmount) so the ensureSearched()
+  // effect further down can reach whichever one just became visible on a tab switch.
+  const basePickerElRef = useRef(null);
+  const loraPickerElRef = useRef(null);
   const bindPicker = useCallback((el) => {
+    basePickerElRef.current = el;
     if (el && !el._mgBound) {
       el._mgBound = true;
       el.addEventListener("mg-pick", (e) => {
@@ -877,6 +883,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // upsert-by-model_id on selected=true (covers both the initial pending entry and the
   // later resolved-version_id update, same entry re-dispatched), remove on selected=false.
   const bindLoraPicker = useCallback((el) => {
+    loraPickerElRef.current = el;
     if (el && !el._mgBound) {
       el._mgBound = true;
       el.addEventListener("mg-pick", (e) => {
@@ -890,6 +897,19 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       });
     }
   }, [setImgLoras]);
+  // Owner report 2026-07-24 ("still slow"): both pickers mount together on first open
+  // (pickerMounted, so switching tabs never re-fetches -- "each keeps its OWN
+  // last-searched results independently"), but mg-model-picker.js now defers its own
+  // browse-on-open search when it starts hidden (see that file's connectedCallback
+  // comment) -- something has to call ensureSearched() on whichever one just became
+  // visible, or the hidden tab would just never search at all, forever. ensureSearched()
+  // is a no-op after the first real call, so this firing on every pickerKind change costs
+  // nothing once both have searched once.
+  useEffect(() => {
+    if (!pickerMounted) return;
+    const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
+    if (vis && vis.ensureSearched) vis.ensureSearched();
+  }, [pickerMounted, pickerKind]);
   // D-12 increments 2-4: read-only cost badges for the Image/Edit/Reference tabs -- refs to
   // the <mg-cost-badge> custom elements (imperative setChecking/setPrice/clear API, the same
   // component the Gallery's Enhance sub-tab uses). Kept ALONGSIDE -- not instead of --

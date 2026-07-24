@@ -1582,6 +1582,23 @@ def test_toasts_anchored_top_right(tmp_path):
     assert "#mg-toasts{position:fixed;right:16px;top:64px" in notify_js   # top-right, clear of the header
 
 
+def test_flyout_open_does_not_search_the_hidden_tab(tmp_path):
+    """Owner report 2026-07-24 ("still slow"): ensurePickers() creates AND mounts both the
+    base and LoRA pickers together the moment the flyout first opens, so both used to fire
+    a full network search immediately -- including the one nobody had asked to see yet,
+    competing with the real search for the same connection. setKind() must call
+    ensureSearched() on whichever picker just became visible instead, so only ONE search
+    fires on open."""
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
+    assert "this._searched = false;" in picker_js
+    assert "if (this.style.display !== 'none') { this._searched = true; this._search(); }" in picker_js
+    assert "ensureSearched() {" in picker_js and "if (this._searched) return;" in picker_js
+
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(vis && vis.ensureSearched) vis.ensureSearched();" in html
+
+
 def test_generate_card_has_seed_field(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)

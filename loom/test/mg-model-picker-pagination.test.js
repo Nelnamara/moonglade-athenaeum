@@ -69,17 +69,39 @@ describe("Continuous scroll / load-more (owner report 2026-07-24)", () => {
     assert.match(src, /if \(mine !== self\._seq\) return;   \/\/ a fresh search superseded this continuation/);
   });
 
-  test("a scroll listener near the bottom of the grid triggers _loadMore(), with no separate debounce needed", () => {
+  test("a scroll listener near the bottom of the grid triggers _loadMore(), throttled to one check per animation frame", () => {
+    // Owner report 2026-07-24: "still slow and a bit choppy". The FIRST version of this
+    // listener ran its scrollHeight/scrollTop/clientHeight layout read on every single
+    // native scroll event, unthrottled -- with the DOM now growing on every load-more,
+    // that's a synchronous layout recalculation on an ever-larger tree, many times per
+    // frame during a fast scroll. requestAnimationFrame collapses any number of events
+    // within one frame down to a single check, right before the browser paints anyway.
+    assert.match(src, /var scrollRaf = null;/);
     assert.match(src,
-      /this\._grid\.addEventListener\('scroll', function \(\) \{\s*\n\s*var g = self\._grid;\s*\n\s*if \(g\.scrollHeight - g\.scrollTop - g\.clientHeight < 150\) self\._loadMore\(\);/,
-      "_loadMore()'s own _hasMore/_loadingMore guards make a separate scroll-event debounce " +
-      "unnecessary -- a fast scroll re-checking cheap arithmetic many times is fine, only " +
-      "one fetch is ever actually allowed through");
+      /this\._grid\.addEventListener\('scroll', function \(\) \{\s*\n\s*if \(scrollRaf\) return;\s*\n\s*scrollRaf = requestAnimationFrame\(function \(\) \{\s*\n\s*scrollRaf = null;\s*\n\s*var g = self\._grid;\s*\n\s*if \(g\.scrollHeight - g\.scrollTop - g\.clientHeight < 150\) self\._loadMore\(\);/,
+      "the layout read + _loadMore() check must be deferred to a single rAF callback, " +
+      "with a second scroll event during the same pending frame doing nothing at all " +
+      "(scrollRaf already set) rather than queuing a second frame");
   });
 
   test("a loading-more indicator toggles visibly during the fetch, not silently in the background", () => {
     assert.match(src, /'<div class="mg-loadmore" aria-hidden="true">loading more…<\/div>'/);
     assert.match(src, /if \(this\._loadmore\) this\._loadmore\.classList\.add\('on'\);/);
     assert.match(src, /mg-loadmore\.on\{display:block;\}/);
+  });
+
+  test("connectedCallback defers its own browse-on-open search when the element starts hidden", () => {
+    // Owner report 2026-07-24 ("still slow"): both the Gallery and the Loom mount a
+    // kind="base" AND a kind="lora" picker TOGETHER on first flyout open, with only one
+    // actually visible -- searching the hidden one anyway meant every open fired two full
+    // searches competing for the same connection, for a tab nobody had asked to see.
+    assert.match(src, /this\._searched = false;\s*\n\s*if \(this\.style\.display !== 'none'\) \{ this\._searched = true; this\._search\(\); \}/);
+  });
+
+  test("ensureSearched() is exposed for a host to call once it reveals a previously-hidden instance, and is a no-op after the first real call", () => {
+    assert.match(src, /ensureSearched\(\) \{\s*\n\s*if \(this\._searched\) return;\s*\n\s*this\._searched = true;\s*\n\s*this\._search\(\);\s*\n\s*\}/,
+      "must be idempotent -- a host calling this on every tab switch must never re-fetch " +
+      "once the picker has already searched, matching the existing 'each keeps its own " +
+      "last-searched results independently' contract");
   });
 });
