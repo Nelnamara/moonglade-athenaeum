@@ -1,6 +1,6 @@
 """Moonglade art curation workspace — the REFERENCE IMPLEMENTATION of the house
-Curation Standard (docs/CURATION_STANDARD.md). Clone this for any vote/selection
-artifact; never start a picker from a blank file.
+Curation Standard (docs/archive/CURATION_STANDARD_2026-07-17.md). Clone this for
+any vote/selection artifact; never start a picker from a blank file.
 
 Click-to-enlarge lightbox, Pick toggle (primary), optional star-rank, notes,
 picks tray, export, localStorage persistence, hard completeness assertion.
@@ -17,10 +17,24 @@ Everything else (front-end, lightbox, tray, export, JS) is the standard; leave i
 Then: smoke-test in a browser (pick/rank/lightbox/export) before publishing."""
 from pathlib import Path
 from PIL import Image, ImageDraw
-import base64, io, json, re
+import base64, io, json, os, re
 
-FOLDER = Path(r"C:\Users\gwilkins\Downloads\7.12")
-OUT = Path(r"C:\Users\gwilkins\AppData\Local\Temp\claude\C--Users-gwilkins-source-repos\c87b46f6-78e8-43cc-a311-6400596a37c6\scratchpad")
+# INPUT/OUTPUT are per-vote and machine-local -- this file is a template meant to be
+# cloned per curation task (see docstring above), not a script with working defaults.
+# Set both env vars before running:
+#   CURATION_INPUT_DIR = folder of this vote's candidate images (the thing being classified)
+#   CURATION_OUT_DIR   = scratch dir that already contains gems_sigils_paths.json (built by
+#                        a separate, earlier step that pulls existing vault reference images
+#                        for this vote) and where art_selection5.html will be written
+FOLDER = os.environ.get("CURATION_INPUT_DIR")
+OUT = os.environ.get("CURATION_OUT_DIR")
+if not FOLDER or not OUT:
+    raise SystemExit(
+        "curation_reference_builder.py needs local configuration before running: set the "
+        "CURATION_INPUT_DIR and CURATION_OUT_DIR environment variables (see comment above)."
+    )
+FOLDER = Path(FOLDER)
+OUT = Path(OUT)
 
 folder_imgs = sorted([f for f in FOLDER.iterdir()
                       if f.is_file() and f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")],

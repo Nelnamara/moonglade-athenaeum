@@ -4,11 +4,18 @@ legacy single store.json. The React app's window.storage API is unchanged; this
 tests the server backend underneath it."""
 import json
 
+from pixai_gallery import _account_key
 from tests.conftest import login_client
 
 
 def _client(tmp_path):
     return login_client(tmp_path)
+
+
+def _kv_dir(tmp_path, user="tester"):
+    """The account's own per-account Loom kv subdirectory -- keyed through the same
+    _account_key() the app uses (B14 residual), not the raw username."""
+    return tmp_path / "loom" / "kv" / _account_key(user)
 
 
 def test_set_get_roundtrip_and_isolation(tmp_path):
@@ -17,7 +24,7 @@ def test_set_get_roundtrip_and_isolation(tmp_path):
     cli.post("/api/loom/set", json={"key": "storyboard:v2:proj:B", "value": {"name": "Beta"}})
     assert cli.get("/api/loom/get?key=storyboard:v2:proj:A").get_json()["value"] == {"name": "Alpha"}
     # each key is its own file, in the account's own per-account dir (D-7) -> per-project isolation
-    assert len(list((tmp_path / "loom" / "kv" / "tester").glob("*.json"))) == 2
+    assert len(list(_kv_dir(tmp_path).glob("*.json"))) == 2
     # deleting one leaves the other intact (blast radius contained to one board)
     cli.post("/api/loom/delete", json={"key": "storyboard:v2:proj:A"})
     assert cli.get("/api/loom/get?key=storyboard:v2:proj:A").get_json()["value"] is None
@@ -43,7 +50,7 @@ def test_atomic_write_leaves_no_temp_in_kv_dir(tmp_path):
     cli = _client(tmp_path)
     cli.post("/api/loom/set", json={"key": "k", "value": "v"})
     # only the final file exists; the tmp+os.replace idiom leaks no .tmp-* into the dir
-    assert [p.name for p in (tmp_path / "loom" / "kv" / "tester").iterdir()] == ["k.json"]
+    assert [p.name for p in _kv_dir(tmp_path).iterdir()] == ["k.json"]
 
 
 def test_migrates_legacy_store_json_once(tmp_path):
@@ -88,6 +95,30 @@ def test_one_account_cannot_see_or_clobber_or_list_anothers_storyboards(tmp_path
         "bob's set overwrote alice's storyboard -- the store is not per-account")
 
 
+def test_storyboards_are_independent_for_accounts_differing_only_by_case(tmp_path):
+    """B14 residual: _loom_kv_dir() keyed the per-account SUBDIRECTORY with
+    quote(username, safe=""), the same case-PRESERVING pattern saved views/snippets
+    used -- "Nel" and "nel" quote to two different strings that name the SAME
+    directory on NTFS (case-insensitive-but-preserving), even though account
+    identity is case-SENSITIVE. FAILS before the fix on this filesystem: nel's
+    board read/write clobbers Nel's, exactly like the alice/bob test above."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    app = create_app(tmp_path)
+
+    upper = login_test_client(app, username="Nel", password="a-real-test-password-1")
+    upper.post("/api/loom/set", json={"key": "storyboard:v2:proj:A", "value": {"name": "Nel's Alpha"}})
+
+    lower = login_test_client(app, username="nel", password="a-real-test-password-2")
+    assert lower.get("/api/loom/get?key=storyboard:v2:proj:A").get_json()["value"] is None, (
+        "nel can read Nel's storyboard -- case-differing usernames collide on disk")
+
+    lower.post("/api/loom/set", json={"key": "storyboard:v2:proj:A", "value": {"name": "nel's own A"}})
+    assert lower.get("/api/loom/get?key=storyboard:v2:proj:A").get_json()["value"] == {"name": "nel's own A"}
+    assert upper.get("/api/loom/get?key=storyboard:v2:proj:A").get_json()["value"] == {"name": "Nel's Alpha"}, (
+        "nel's set overwrote Nel's storyboard -- case-collision on disk")
+
+
 def test_account_without_its_own_dir_still_sees_legacy_shared_boards(tmp_path):
     """Upgrade path: nothing disappears the moment the store goes per-account. An
     account with no dir of its own falls back to the old shared out_dir/loom/kv/
@@ -103,6 +134,6 @@ def test_account_without_its_own_dir_still_sees_legacy_shared_boards(tmp_path):
         "name": "Legacy board"}
 
     alice.post("/api/loom/set", json={"key": "storyboard:v2:proj:new", "value": 1})
-    assert not (kv / "alice" / "storyboard%3Av2%3Aproj%3Aold.json").exists(), (
+    assert not (_kv_dir(tmp_path, "alice") / "storyboard%3Av2%3Aproj%3Aold.json").exists(), (
         "alice's own dir must not gain a copy of a key she never wrote herself")
-    assert (kv / "alice" / "storyboard%3Av2%3Aproj%3Anew.json").exists()
+    assert (_kv_dir(tmp_path, "alice") / "storyboard%3Av2%3Aproj%3Anew.json").exists()

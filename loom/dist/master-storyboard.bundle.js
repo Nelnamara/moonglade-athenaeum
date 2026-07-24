@@ -40,19 +40,73 @@ var LoomBundle = (() => {
     }, 0);
   };
   var nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1);
+  var frameLinked = (a, b) => !!a && !!b && (!!a.mediaId && !!b.mediaId && a.mediaId === b.mediaId || !!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId);
+  var continuityLinked = (entries, entryId) => {
+    const idx = (entries || []).findIndex((x) => x.c.id === entryId);
+    if (idx <= 0) return false;
+    return frameLinked(entries[idx - 1].c.closeFrame, entries[idx].c.openFrame);
+  };
   var connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
   var flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}` })));
   var effectivePrompt = (c) => c.promptOverride ? c.promptOverrideText || "" : c.prompt || "";
-  var shotText = (entry, p) => {
+  var shotImageRefs = (entry, project, imgSrc) => {
+    const c = entry.c;
+    const tagNum = (t) => {
+      const m = /(\d+)/.exec(t || "");
+      return m ? +m[1] : 99;
+    };
+    const items = [];
+    (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id)).forEach((as) => {
+      const d = as.mediaId || imgSrc(as.thumbId, as.source);
+      if (d) items.push({ tag: as.tag, d, kind: "cast", id: as.id });
+    });
+    [["@image8", "openFrame", c.openFrame], ["@image9", "closeFrame", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, key, f]) => {
+      if (!f) return;
+      const d = f.mediaId || imgSrc(f.thumbId, f.source);
+      if (d) items.push({ tag: f.tag || fallbackTag, d, kind: "frame", id: key });
+    });
+    (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
+      const d = r.mediaId || imgSrc(r.thumbId, r.source);
+      if (d) items.push({ tag: r.tag, d, kind: "ref", id: r.id });
+    });
+    const kindRank = (it) => it.kind === "frame" ? 0 : 1;
+    const sortNum = (it) => it.kind === "frame" ? 0 : tagNum(it.tag);
+    items.sort((a, b) => kindRank(a) - kindRank(b) || sortNum(a) - sortNum(b));
+    return items.slice(0, 6);
+  };
+  var noImgSrc = () => null;
+  var positionTag = (entry, project, imgSrc, id) => {
+    const items = shotImageRefs(entry, project, imgSrc);
+    const idx = items.findIndex((it) => it.id === id);
+    return idx < 0 ? null : "@image" + (idx + 1);
+  };
+  var pickTarget = (entry, project, imgSrc, slot) => {
+    const items = shotImageRefs(entry, project, imgSrc);
+    const existing = items[slot];
+    if (existing) return { type: "replace", kind: existing.kind, id: existing.id };
+    return { type: "append", tag: nextTag(items, "@image") };
+  };
+  var shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || ""));
+  var pickVideoTarget = (entry, slot) => {
+    const items = shotVideoRefs(entry);
+    const existing = items[slot];
+    if (existing) return { type: "replace", id: existing.id };
+    const allVideoRefs = (entry.c.refs || []).filter((r) => r.kind === "video");
+    return { type: "append", tag: nextTag(allVideoRefs, "@video") };
+  };
+  var shotText = (entry, p, imgSrc) => {
     const { c, code, ai } = entry;
     if (c.promptOverride) return effectivePrompt(c);
+    const resolve = imgSrc || noImgSrc;
     const idx = flat(p).findIndex((x) => x.c.id === c.id);
     const prev = idx > 0 ? flat(p)[idx - 1] : null;
     const L = [`[${code} \u2014 "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
     if (c.connect === "extend" && prev) L.push(`Continue seamlessly from the previous clip ${prev.code} (upload it as @video1).`);
     if (c.connect === "flf") {
-      if (c.openFrame.desc || c.openFrame.tag) L.push(`Opening frame ${c.openFrame.tag || "(first image)"}: ${c.openFrame.desc || "\u2014"}`);
-      if (c.closeFrame.desc || c.closeFrame.tag) L.push(`Closing frame ${c.closeFrame.tag || "(last image)"}: ${c.closeFrame.desc || "\u2014"}`);
+      const openTag = positionTag(entry, p, resolve, "openFrame") || c.openFrame.tag;
+      const closeTag = positionTag(entry, p, resolve, "closeFrame") || c.closeFrame.tag;
+      if (c.openFrame.desc || openTag) L.push(`Opening frame ${openTag || "(first image)"}: ${c.openFrame.desc || "\u2014"}`);
+      if (c.closeFrame.desc || closeTag) L.push(`Closing frame ${closeTag || "(last image)"}: ${c.closeFrame.desc || "\u2014"}`);
     }
     L.push("", c.prompt || "(prompt tbd)");
     if (c.connect === "extend" || c.connect === "flf") L.push(CONTINUITY_PHRASE);
@@ -60,11 +114,17 @@ var LoomBundle = (() => {
     const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id));
     if (usedCast.length) {
       L.push("", "Keep consistent:");
-      usedCast.forEach((as) => L.push(`  ${as.name} \u2014 ${as.lock ? "maintain exact appearance from " : "reference "}${as.tag}`));
+      usedCast.forEach((as) => {
+        const tag = positionTag(entry, p, resolve, as.id) || as.tag;
+        L.push(`  ${as.name} \u2014 ${as.lock ? "maintain exact appearance from " : "reference "}${tag}`);
+      });
     }
     if (c.refs.length) {
       L.push("", "Other references:");
-      c.refs.forEach((r) => L.push(`  ${r.tag} \u2014 ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`));
+      c.refs.forEach((r) => {
+        const tag = positionTag(entry, p, resolve, r.id) || r.tag;
+        L.push(`  ${tag} \u2014 ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`);
+      });
     }
     if (c.camera) L.push("", `Camera: ${c.camera}`);
     if (c.lighting) L.push(`Lighting/Mood: ${c.lighting}`);
@@ -75,29 +135,11 @@ var LoomBundle = (() => {
   };
   var shotPayload = (entry, project, imgSrc) => {
     const c = entry.c;
-    const tagNum = (t) => {
-      const m = /(\d+)/.exec(t || "");
-      return m ? +m[1] : 99;
-    };
-    const imgs = [];
-    (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id)).forEach((as) => {
-      const d = as.mediaId || imgSrc(as.thumbId, as.source);
-      if (d) imgs.push({ tag: as.tag, d });
-    });
-    [["@image8", c.openFrame], ["@image9", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, f]) => {
-      if (!f) return;
-      const d = f.mediaId || imgSrc(f.thumbId, f.source);
-      if (d) imgs.push({ tag: f.tag || fallbackTag, d });
-    });
-    (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
-      const d = r.mediaId || imgSrc(r.thumbId, r.source);
-      if (d) imgs.push({ tag: r.tag, d });
-    });
-    const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source);
-    imgs.sort((a, b) => tagNum(a.tag) - tagNum(b.tag));
+    const imgs = shotImageRefs(entry, project, imgSrc);
+    const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source).slice(0, 3);
     return {
       mode: c.mode,
-      prompt: shotText(entry, project),
+      prompt: shotText(entry, project, imgSrc),
       images: imgs.map((x) => x.d),
       video_refs: vids,
       duration: c.duration,
@@ -156,6 +198,17 @@ var LoomBundle = (() => {
   });
   var setPromptOverride = (c, text) => ({ ...c, promptOverride: true, promptOverrideText: text });
   var clearPromptOverride = (c) => ({ ...c, promptOverride: false, promptOverrideText: "" });
+  var importedFootagePatch = (mediaId, duration) => {
+    const dur = Number(duration);
+    return {
+      status: "done",
+      resultMid: mediaId,
+      trimIn: 0,
+      trimOut: null,
+      imported: true,
+      ...dur > 0 ? { actualDur: dur } : {}
+    };
+  };
   var patchAct = (project, actId, patch) => ({
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch })
@@ -165,6 +218,11 @@ var LoomBundle = (() => {
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: [...a.cards, card] })
   });
+  var landInFirstAct = (project, card, newActId) => {
+    const first = project.acts[0];
+    const withAct = first ? project : appendAct(project, { id: newActId, name: nextActName(project), collapsed: false, cards: [] });
+    return appendCardToAct(withAct, first ? first.id : newActId, card);
+  };
   var buildDuplicateCard = (card, newCardId, newRefIds) => ({
     ...JSON.parse(JSON.stringify(card)),
     id: newCardId,
@@ -251,6 +309,8 @@ var LoomBundle = (() => {
       return "Out of balance for this model \u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
     if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
       return "PixAI's content filter blocked this generation \u2014 that's decided on PixAI's side, not in the Loom.";
+    if (/inferenceProfile/i.test(s))
+      return "That quality setting isn't available for this model \u2014 try Auto instead.";
     return s || "generation failed";
   }
   function classifyTaskStatus(d) {
@@ -310,11 +370,58 @@ ${"=".repeat(48)}
     const total = clips.reduce((s, c) => s + c.span, 0);
     return { clips, total };
   }
+  function loraIncompat(baseModelType, loraBaseType) {
+    const b = (baseModelType || "").toUpperCase();
+    const l = (loraBaseType || "").toUpperCase();
+    if (!b || !l) return false;
+    return b !== l;
+  }
   function resolveLoraPayload(loras) {
     return (loras || []).filter((l) => l.version_id).map((l) => ({ version_id: l.version_id, weight: l.weight }));
   }
   function anyLoraUnresolved(loras) {
     return (loras || []).some((l) => !l.version_id);
+  }
+  function snap8(n) {
+    return Math.max(64, Math.min(4096, Math.round((Number(n) || 0) / 8) * 8));
+  }
+  function resolveGenDims2({ aspectW, aspectH, size, customW, customH } = {}) {
+    const cw = Number(customW) || 0, ch = Number(customH) || 0;
+    if (cw > 0 && ch > 0) return { w: snap8(cw), h: snap8(ch), custom: true };
+    const rw = Number(aspectW) || 1, rh = Number(aspectH) || 1;
+    const sz = Number(size) || 1024;
+    const w = rw >= rh ? sz : sz * rw / rh;
+    const h = rw >= rh ? sz * rh / rw : sz;
+    return { w: snap8(w), h: snap8(h), custom: false };
+  }
+  function buildImgGenBody(imgModel, imgLoras, imgAdv, prompt) {
+    const a = imgAdv || {};
+    const dims = resolveGenDims2({
+      aspectW: a.aspectW,
+      aspectH: a.aspectH,
+      size: a.size,
+      customW: a.customW,
+      customH: a.customH
+    });
+    return {
+      model_id: imgModel && imgModel.model_id || "",
+      // picker-parity-round2 (problem 4): the CHOSEN version, when the owner picked one
+      // other than the latest via the version selector -- '' (absent) when they haven't,
+      // which /api/generate already treats as "resolve the newest" (unchanged fallback).
+      version_id: imgModel && imgModel.version_id || "",
+      prompt: prompt || "",
+      loras: resolveLoraPayload(imgLoras),
+      negative: a.negative || "",
+      width: dims.w,
+      height: dims.h,
+      mode: a.mode || "auto",
+      steps: Number(a.steps) || 25,
+      cfg: Number(a.cfg) || 7,
+      count: Number(a.count) || 1,
+      seed: String(a.seed || "").trim(),
+      high_priority: !!a.highPriority,
+      prompt_helper: !!a.promptHelper
+    };
   }
 
   // master-storyboard.jsx
@@ -687,6 +794,12 @@ ${"=".repeat(48)}
   }
   var V2_STYLES = `
 .lv-overlay{position:fixed;inset:0;z-index:400;background:var(--base);display:flex;flex-direction:column;}
+/* While Deep Focus is open, lift the WHOLE overlay's root-context z-index to .lv-df-veil's
+   own intended 450 (see the "AUDIT_2026-07-21.md" comment above the .lv-overlay mount) so
+   the body-level corner FABs -- #jobs-fab/#jobs-tray at 401/402 -- stop painting over Deep
+   Focus and its nested flyouts, which are otherwise contained inside .lv-overlay's own
+   stacking context and can never out-rank a root-level sibling on their own. */
+.lv-overlay.lv-overlay-df{z-index:450;}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
@@ -773,6 +886,16 @@ ${"=".repeat(48)}
 .lv-st.wip{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);}
 .lv-st.todo{color:var(--subtext);background:var(--base);}
 .lv-st.paused{color:var(--subtext);background:var(--base);border:1px dashed var(--subtext);}
+/* Continuity indicator (frameLinked/continuityLinked) -- reuses the .lv-st badge's own
+   font/padding/border-radius, just a distinct color (--cyan, not --green) so it never reads
+   as "shot generation status" and margin-left:0 so it sits with mode/duration on the left
+   instead of racing .lv-st's own margin-left:auto for the row's one right-aligned slot. */
+.lv-st.linked{margin-left:0;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 16%,transparent);}
+/* Imported-footage provenance badge -- coexists with the real status pill the same way
+   .linked does (margin-left:0, not competing for the row's one auto-margined slot).
+   Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
+   rather than inventing a new color. */
+.lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
 .lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
@@ -886,6 +1009,12 @@ ${"=".repeat(48)}
 .lv-drafttarget select.lv-sel{display:block;width:100%;flex:none;padding:7px 8px;font-size:11px;}
 .lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
+/* L536: Image tab field-parity additions -- a 2-up row (Size/Custom W\xD7H, Mode/Count) and a
+   labeled checkbox row, mirroring pixai_gallery.py's .gen-row/.gen-check at the same sizing. */
+.lv-row2{display:flex;gap:8px;margin-top:8px;}
+.lv-row2>div{flex:1;min-width:0;}
+.lv-ck{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:11px;margin-top:8px;cursor:pointer;}
+.lv-advnote{display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--overlay0);}
 /* Deep Focus: double-click a board card to open a maximized, distraction-free editor
    for just that shot (title/mode/duration/frames) without leaving the V2 overlay. */
 .lv-df-veil{position:fixed;inset:0;z-index:450;background:rgba(6,4,14,.72);display:flex;align-items:center;justify-content:center;padding:24px;}
@@ -904,9 +1033,12 @@ ${"=".repeat(48)}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
-.lv-loratoggle{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);
-  border-radius:5px;padding:3px 7px;cursor:pointer;margin:7px 0 5px;}
-.lv-loratoggle:hover{border-color:var(--accent);color:var(--accent);}
+/* picker-parity-round2 (2026-07-24): this used to be a show/hide toggle that expanded the
+   LoRA <mg-model-picker> INLINE into this ~280px rail column -- the owner's exact complaint
+   ("cramped mess... does not have a flyout like the gallery"). It now opens the SAME
+   .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
+   the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
+.lv-loratoggle{display:inline-block;margin:7px 0 5px;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
@@ -915,6 +1047,40 @@ ${"=".repeat(48)}
 .lv-lchip input{width:52px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
+/* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
+   <mg-model-picker> INLINE in this ~280px rail (cramped: results, a toggle button, a
+   SECOND search box, more results, all stacked). Now a trigger row (mirrors
+   pixai_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
+   -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
+   cramped-inline one here and a proper flyout there. */
+.lv-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:11.5px;text-align:left;}
+.lv-selrow:hover{border-color:var(--line2);}
+.lv-selthumb{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
+.lv-selname{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-selhint{flex:0 0 auto;font-size:10px;}
+.lv-caps{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.lv-cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);color:var(--ink2);}
+.lv-cap.method{color:var(--amber);border-color:var(--amber-d);}
+.lv-versel{margin-top:6px;}
+/* Floating overlay for the Model/LoRA picker -- centered modal, matching the Loom's own
+   established .sb-pick-ov/.lv-df-veil pattern (this file has no per-side "dock" concept for
+   the right rail the way the Gallery's #gen-drawer does, so a centered panel is the
+   idiomatic Loom equivalent of "floats as its own proper overlay panel", not an attempt to
+   pixel-clone the Gallery's specific side-docked mechanics). z-index 470: above
+   .lv-overlay/.lv-df-veil (400/450, this picker can be opened from within Deep Focus too)
+   and below .sb-seq/.sb-pick-ov (500, an unrelated picker-within-a-picker must still win). */
+.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:rgba(6,4,16,.76);display:none;align-items:center;justify-content:center;padding:20px;}
+.lv-mpick-veil.open{display:flex;}
+.lv-mpick-panel{background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:var(--shadow);width:460px;max-width:94vw;height:min(640px,86vh);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;}
+.lv-mpick-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex:none;}
+.lv-mpick-head .t{font-size:14px;font-weight:600;flex:1;}
+.lv-mpick-head .x{background:none;border:none;color:var(--ink2);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
+.lv-mpick-head .x:hover{color:var(--coral);}
+.lv-mpick-seg{display:flex;gap:6px;padding:10px 14px 0;flex:none;}
+.lv-mpick-seg button{flex:1;padding:6px 0;border-radius:7px;background:transparent;border:1px solid var(--line);color:var(--ink2);cursor:pointer;font-size:12px;}
+.lv-mpick-seg button.on{background:var(--panel2);color:var(--ink);border-color:var(--amber);font-weight:600;}
+.lv-mpick-body{padding:10px 14px 14px;display:flex;flex-direction:column;min-height:0;flex:1;}
+.lv-mpick-body mg-model-picker{flex:1;min-height:0;}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
@@ -1033,13 +1199,14 @@ ${"=".repeat(48)}
       )
     )));
   }
-  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, generateShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
     const [deepFocus, setDeepFocus] = useState(null);
     const [dfPalFor, setDfPalFor] = useState(null);
-    const [loraOpen, setLoraOpen] = useState(false);
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const [pickerKind, setPickerKind] = useState("base");
     const [leftTab, setLeftTab] = useState("cast");
     const [leftCollapsed, setLeftCollapsed] = useState(false);
     const [density, setDensity] = useState("detailed");
@@ -1096,12 +1263,75 @@ ${"=".repeat(48)}
       window.addEventListener("keydown", onKey);
       return () => window.removeEventListener("keydown", onKey);
     }, [deepFocus]);
+    useEffect(() => {
+      if (!pickerOpen) return;
+      const onKey = (ev) => {
+        if (ev.key === "Escape") setPickerOpen(false);
+      };
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [pickerOpen]);
+    const [pickerMounted, setPickerMounted] = useState(false);
+    useEffect(() => {
+      if (pickerOpen) setPickerMounted(true);
+    }, [pickerOpen]);
+    const imgModelSeqRef = useRef(0);
     const bindPicker = useCallback((el) => {
       if (el && !el._mgBound) {
         el._mgBound = true;
-        el.addEventListener("mg-pick", (e) => setImgModel({ model_id: e.detail.model_id, title: e.detail.title }));
+        el.addEventListener("mg-pick", (e) => {
+          const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
+          setImgModel(m);
+          setModelDefaults(null);
+          const mySeq = ++imgModelSeqRef.current;
+          fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
+            if (mySeq !== imgModelSeqRef.current) return;
+            const versions = d && d.versions || [], v = versions[0] || {};
+            setImgModel((cur) => cur && cur.model_id === m.model_id ? {
+              ...cur,
+              version_id: v.version_id || "",
+              model_type: v.model_type || "",
+              sampling_method: v.sampling_method || "",
+              capabilities: v.capabilities || [],
+              versions
+            } : cur);
+            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+            if (has) {
+              setImgAdv((cur) => ({
+                ...cur,
+                negative: v.negative_prompt || cur.negative,
+                steps: v.sampling_steps || cur.steps,
+                cfg: v.cfg_scale || cur.cfg
+              }));
+            }
+          }).catch(() => {
+          });
+        });
       }
-    }, [setImgModel]);
+    }, [setImgModel, setImgAdv, setModelDefaults]);
+    const pickVersion = useCallback((vid) => {
+      if (!imgModel || !imgModel.versions) return;
+      const v = imgModel.versions.find((x) => x.version_id === vid);
+      if (!v) return;
+      setImgModel((cur) => ({
+        ...cur,
+        version_id: v.version_id || "",
+        model_type: v.model_type || "",
+        sampling_method: v.sampling_method || "",
+        capabilities: v.capabilities || []
+      }));
+      const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+      setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+      if (has) {
+        setImgAdv((a) => ({
+          ...a,
+          negative: v.negative_prompt || a.negative,
+          steps: v.sampling_steps || a.steps,
+          cfg: v.cfg_scale || a.cfg
+        }));
+      }
+    }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
     const bindLoraPicker = useCallback((el) => {
       if (el && !el._mgBound) {
         el._mgBound = true;
@@ -1134,6 +1364,8 @@ ${"=".repeat(48)}
     const activeRef = useRef(null);
     const projectRef = useRef(project);
     projectRef.current = project;
+    const thumbsRef = useRef(thumbs);
+    thumbsRef.current = thumbs;
     const genDrawerRef = useRef(null);
     const promptDirtyRef = useRef(false);
     const genTargetRef = useRef(null);
@@ -1167,7 +1399,56 @@ ${"=".repeat(48)}
           a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
         });
         el.addEventListener("mg-pick-request", (e) => {
-          openPick((mid, thumb) => e.detail.respond(mid, thumb), e.detail.kind === "video" ? "video" : "image");
+          const { slot, bank, mode: reqMode } = e.detail;
+          if (bank === "primary" && reqMode === "r2v") {
+            openPick((mid, thumb, isVideo, duration, isNsfw) => {
+              e.detail.respond(mid, thumb, isNsfw);
+              const a = activeRef.current;
+              if (!a) return;
+              const proj = projectRef.current;
+              const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
+              const plan = pickTarget(a, proj, resolve, slot);
+              if (plan.type === "replace" && plan.kind === "cast") {
+                setAssets((arr) => arr.map((x) => x.id !== plan.id ? x : { ...x, mediaId: String(mid), thumbId: "", source: "" }));
+              } else if (plan.type === "replace" && plan.kind === "ref") {
+                const apply = (c) => ({ ...c, refs: c.refs.map((r) => r.id !== plan.id ? r : { ...r, mediaId: String(mid), thumbId: "", source: "" }) });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              } else if (plan.type === "replace" && plan.kind === "frame") {
+                const apply = (c) => ({ ...c, [plan.id]: { ...c[plan.id], mediaId: String(mid), thumbId: "", source: "" } });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              } else {
+                const newRef = { ...buildNewRef("image", uid()), tag: plan.tag, mediaId: String(mid) };
+                const apply = (c) => ({ ...c, refs: [...c.refs, newRef] });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              }
+            }, "image");
+          } else if (bank === "primary" && (reqMode === "i2v" || reqMode === "flf")) {
+            openPick((mid, thumb, isVideo, duration, isNsfw) => {
+              e.detail.respond(mid, thumb, isNsfw);
+              const a = activeRef.current;
+              if (!a) return;
+              const key = slot === 1 ? "closeFrame" : "openFrame";
+              const apply = (c) => ({ ...c, [key]: { ...c[key], mediaId: String(mid), thumbId: "", source: "" } });
+              a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+            }, "image");
+          } else if (bank === "vid") {
+            openPick((mid, thumb, isVideo, duration, isNsfw) => {
+              e.detail.respond(mid, thumb, isNsfw);
+              const a = activeRef.current;
+              if (!a) return;
+              const plan = pickVideoTarget(a, slot);
+              if (plan.type === "replace") {
+                const apply = (c) => ({ ...c, refs: c.refs.map((r) => r.id !== plan.id ? r : { ...r, source: String(mid), thumbId: "" }) });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              } else {
+                const newRef = { ...buildNewRef("video", uid()), tag: plan.tag, source: String(mid) };
+                const apply = (c) => ({ ...c, refs: [...c.refs, newRef] });
+                a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+              }
+            }, "video");
+          } else {
+            openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
+          }
         });
         el.addEventListener("mg-submit", (e) => {
           const a = activeRef.current;
@@ -1240,9 +1521,9 @@ ${"=".repeat(48)}
         badge.clear();
         return;
       }
-      const t = setTimeout(() => priceInto(imgCostRef, { model_id: imgModel.model_id, prompt }), 250);
+      const t = setTimeout(() => priceInto(imgCostRef, buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)), 250);
       return () => clearTimeout(t);
-    }, [imgModel, imgLoras, active.c.id, active.c.imgPrompt]);
+    }, [imgModel, imgLoras, imgAdv, active.c.id, active.c.imgPrompt]);
     useEffect(() => {
       const badge = editCostRef.current;
       if (!badge) return;
@@ -1356,6 +1637,7 @@ ${"=".repeat(48)}
         const gs = genState[e.c.id];
         const paused = gs && gs.phase === "paused";
         const st = paused ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
+        const linked = continuityLinked(entries, e.c.id);
         return /* @__PURE__ */ React.createElement(
           "div",
           {
@@ -1371,7 +1653,7 @@ ${"=".repeat(48)}
           })()),
           /* @__PURE__ */ React.createElement("div", { className: "lv-code" }, e.code),
           /* @__PURE__ */ React.createElement("div", { className: "lv-ctitle" }, e.c.title || "untitled"),
-          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), /* @__PURE__ */ React.createElement(
+          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), linked && /* @__PURE__ */ React.createElement("span", { className: "lv-st linked", title: "Opening frame matches the previous shot's closing frame \u2014 continuous across the cut" }, "linked"), e.c.imported && /* @__PURE__ */ React.createElement("span", { className: "lv-st imported", title: "Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo" }, "imported"), /* @__PURE__ */ React.createElement(
             "span",
             {
               className: "lv-st " + st,
@@ -1493,30 +1775,57 @@ ${"=".repeat(48)}
       } else if (tab === "Image") {
         const gi = genImgState[active.c.id] || {};
         const busyI = gi.phase === "submitting" || gi.phase === "running";
-        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Model ", imgModel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\xB7 ", imgModel.title) : null), /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindPicker, kind: "base" }), imgLoras.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "lv-loras" }, imgLoras.map((l) => /* @__PURE__ */ React.createElement("div", { key: l.model_id, className: "lv-lchip" + (l.failed ? " failed" : "") }, /* @__PURE__ */ React.createElement("span", { className: "lv-lnm", title: l.title }, l.title, !l.version_id ? l.failed ? " \u26A0" : " \u23F3" : ""), /* @__PURE__ */ React.createElement(
-          "input",
+        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Model"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-selrow", onClick: () => {
+          setPickerKind("base");
+          setPickerOpen(true);
+        } }, imgModel && imgModel.preview_url ? /* @__PURE__ */ React.createElement("img", { className: "lv-selthumb", src: imgModel.preview_url, alt: "" }) : null, /* @__PURE__ */ React.createElement("span", { className: "lv-selname" }, imgModel ? imgModel.title : "none \u2014 browse models"), /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-selhint" }, "\u2630 browse")), imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && /* @__PURE__ */ React.createElement("div", { className: "lv-caps" }, imgModel.sampling_method ? /* @__PURE__ */ React.createElement("span", { className: "lv-cap method" }, imgModel.sampling_method) : null, (imgModel.capabilities || []).map((c) => /* @__PURE__ */ React.createElement("span", { key: c, className: "lv-cap" }, c))), imgModel && imgModel.versions && imgModel.versions.length > 1 && /* @__PURE__ */ React.createElement(
+          "select",
           {
-            type: "number",
-            step: "0.05",
-            min: "0",
-            max: "2",
-            value: l.weight,
-            title: "Weight",
-            onChange: (ev) => {
-              const w = +ev.target.value || 0;
-              setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
-            }
-          }
-        ), /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            type: "button",
-            className: "lv-lrm",
-            title: "Remove",
-            onClick: () => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))
+            className: "lv-in lv-versel",
+            value: imgModel.version_id || "",
+            onChange: (ev) => pickVersion(ev.target.value),
+            title: "This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead",
+            "aria-label": "Model version"
           },
-          "\xD7"
-        )))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-loratoggle", onClick: () => setLoraOpen((v) => !v) }, loraOpen ? "\u2212 hide LoRA picker" : "+ add LoRA"), loraOpen && /* @__PURE__ */ React.createElement("mg-model-picker", { ref: bindLoraPicker, kind: "lora", multi: true }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
+          imgModel.versions.map((v) => /* @__PURE__ */ React.createElement("option", { key: v.version_id, value: v.version_id }, v.label || v.version_id))
+        ), imgLoras.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "lv-loras" }, imgLoras.map((l) => {
+          const incompat = loraIncompat(imgModel && imgModel.model_type, l.lora_base_type);
+          return /* @__PURE__ */ React.createElement("div", { key: l.model_id, className: "lv-lchip" + (l.failed || incompat ? " failed" : "") }, /* @__PURE__ */ React.createElement(
+            "span",
+            {
+              className: "lv-lnm",
+              title: incompat ? l.title + " \u2014 needs a different base architecture than the one selected; remove it or switch the base" : l.title
+            },
+            l.title,
+            !l.version_id ? l.failed ? " \u26A0" : " \u23F3" : incompat ? " \u26A0" : ""
+          ), /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "number",
+              step: "0.05",
+              min: "0",
+              max: "2",
+              value: l.weight,
+              title: "Weight",
+              onChange: (ev) => {
+                const w = +ev.target.value || 0;
+                setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
+              }
+            }
+          ), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "lv-lrm",
+              title: "Remove",
+              onClick: () => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))
+            },
+            "\xD7"
+          ));
+        })), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-chip lv-loratoggle", onClick: () => {
+          setPickerKind("lora");
+          setPickerOpen(true);
+        } }, "+ add LoRA"), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lv-ta",
@@ -1524,7 +1833,158 @@ ${"=".repeat(48)}
             placeholder: "describe the reference still (subject, pose, composition, light)\u2026",
             onChange: (ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))
           }
-        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), /* @__PURE__ */ React.createElement("mg-cost-badge", { ref: imgCostRef, hint: "Pick a model and write a prompt to see the cost.", "card-label": "a card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyI || anyLoraUnresolved(imgLoras), onClick: () => genImage(active) }, busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : "\u2726 Generate reference image"), gi.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gi.msg), gi.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gi.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "cast" ? " on" : ""), onClick: () => routeImg(routeTarget || active, "cast", active.c.id) }, "cast")), gi.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gi.routed, sel ? " \xB7 it now feeds this shot's video gen" : "")));
+        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), /* @__PURE__ */ React.createElement("details", null, /* @__PURE__ */ React.createElement("summary", { style: { cursor: "pointer", color: "var(--subtext)", fontSize: 11 } }, "Advanced"), /* @__PURE__ */ React.createElement(
+          "textarea",
+          {
+            className: "lv-ta",
+            style: { marginTop: 5 },
+            value: imgAdv.negative,
+            placeholder: "lowres, text, watermark\u2026",
+            onChange: (ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))
+          }
+        ), /* @__PURE__ */ React.createElement("div", { className: "lv-row2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "Steps"), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lv-in",
+            type: "number",
+            min: "1",
+            max: "150",
+            step: "1",
+            value: imgAdv.steps,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))
+          }
+        )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "CFG scale"), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lv-in",
+            type: "number",
+            min: "1",
+            max: "30",
+            step: "0.5",
+            value: imgAdv.cfg,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))
+          }
+        ))), modelDefaults && /* @__PURE__ */ React.createElement("div", { className: "lv-advnote" }, /* @__PURE__ */ React.createElement("span", null, "\u2713 using this model's tuned preset"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-mini2", style: { margin: 0 }, onClick: () => {
+          setImgAdv((a) => ({
+            ...a,
+            negative: modelDefaults.negative_prompt || a.negative,
+            steps: modelDefaults.sampling_steps || a.steps,
+            cfg: modelDefaults.cfg_scale || a.cfg
+          }));
+        } }, "\u21B6 reset"))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Aspect"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, [
+          [1, 1, "1:1"],
+          [3, 4, "3:4"],
+          [4, 3, "4:3"],
+          [2, 3, "2:3"],
+          [3, 2, "3:2"],
+          [9, 16, "9:16"],
+          [16, 9, "16:9"],
+          [3, 1, "3:1"]
+        ].map(([rw, rh, label]) => /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            key: label,
+            type: "button",
+            className: "lv-chip" + (imgAdv.aspectW === rw && imgAdv.aspectH === rh ? " on" : ""),
+            onClick: () => setImgAdv((a) => ({ ...a, aspectW: rw, aspectH: rh }))
+          },
+          label
+        ))), /* @__PURE__ */ React.createElement("div", { className: "lv-row2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Size \xB7 long edge"), /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            className: "lv-sel",
+            style: { width: "100%" },
+            value: imgAdv.size,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, size: +ev.target.value }))
+          },
+          /* @__PURE__ */ React.createElement("option", { value: "768" }, "S \xB7 768"),
+          /* @__PURE__ */ React.createElement("option", { value: "1024" }, "M \xB7 1024"),
+          /* @__PURE__ */ React.createElement("option", { value: "1536" }, "L \xB7 1536"),
+          /* @__PURE__ */ React.createElement("option", { value: "2048" }, "XL \xB7 2048")
+        )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Custom W\xD7H ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\xB7 overrides")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, alignItems: "center" } }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lv-in",
+            type: "number",
+            min: "64",
+            max: "4096",
+            step: "8",
+            placeholder: "W",
+            value: imgAdv.customW,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, customW: ev.target.value }))
+          }
+        ), /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\xD7"), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lv-in",
+            type: "number",
+            min: "64",
+            max: "4096",
+            step: "8",
+            placeholder: "H",
+            value: imgAdv.customH,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))
+          }
+        )))), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { fontSize: 11, marginTop: 5 } }, (() => {
+          const d = resolveGenDims(imgAdv);
+          return "\u2192 " + d.w + " \xD7 " + d.h + (d.custom ? " \xB7 custom" : " px");
+        })()), /* @__PURE__ */ React.createElement("div", { className: "lv-row2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Mode"), /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            className: "lv-sel",
+            style: { width: "100%" },
+            value: imgAdv.mode,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, mode: ev.target.value }))
+          },
+          /* @__PURE__ */ React.createElement("option", { value: "auto" }, "Auto"),
+          /* @__PURE__ */ React.createElement("option", { value: "lite" }, "Lite"),
+          /* @__PURE__ */ React.createElement("option", { value: "standard" }, "Standard"),
+          /* @__PURE__ */ React.createElement("option", { value: "pro" }, "Pro"),
+          /* @__PURE__ */ React.createElement("option", { value: "ultra" }, "Ultra")
+        )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Count"), /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            className: "lv-sel",
+            style: { width: "100%" },
+            value: imgAdv.count,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, count: +ev.target.value }))
+          },
+          /* @__PURE__ */ React.createElement("option", { value: "1" }, "1"),
+          /* @__PURE__ */ React.createElement("option", { value: "2" }, "2"),
+          /* @__PURE__ */ React.createElement("option", { value: "3" }, "3"),
+          /* @__PURE__ */ React.createElement("option", { value: "4" }, "4")
+        ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Seed ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\xB7 blank = random")), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lv-in",
+            type: "number",
+            placeholder: "random",
+            value: imgAdv.seed,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, seed: ev.target.value }))
+          }
+        ), /* @__PURE__ */ React.createElement("label", { className: "lv-ck", title: "This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it." }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "checkbox",
+            checked: imgAdv.highPriority,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, highPriority: ev.target.checked }))
+          }
+        ), " High priority \xB7 Turbo (faster)"), /* @__PURE__ */ React.createElement("label", { className: "lv-ck" }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "checkbox",
+            checked: imgAdv.promptHelper,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))
+          }
+        ), " Prompt helper"), /* @__PURE__ */ React.createElement("mg-cost-badge", { ref: imgCostRef, hint: "Pick a model and write a prompt to see the cost.", "card-label": "a card" }), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            className: "lv-go",
+            disabled: busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)),
+            onClick: () => genImage(active)
+          },
+          busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : "\u2726 Generate reference image"
+        ), gi.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gi.msg), gi.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gi.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "cast" ? " on" : ""), onClick: () => routeImg(routeTarget || active, "cast", active.c.id) }, "cast")), gi.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gi.routed, sel ? " \xB7 it now feeds this shot's video gen" : "")));
       } else if (tab === "Edit") {
         const ge = genEditState[active.c.id] || {};
         const busyE = ge.phase === "submitting" || ge.phase === "running";
@@ -1565,6 +2025,7 @@ ${"=".repeat(48)}
         {
           which: "open",
           frame: active.c.openFrame,
+          liveTag: positionTag(active, project, imgSrc, "openFrame"),
           discreet: active.c.discreet,
           framePrev: frameSrc,
           storeThumb,
@@ -1586,13 +2047,39 @@ ${"=".repeat(48)}
         {
           which: "close",
           frame: active.c.closeFrame,
+          liveTag: positionTag(active, project, imgSrc, "closeFrame"),
           discreet: active.c.discreet,
           framePrev: frameSrc,
           storeThumb,
           openPick,
           onPatch: (p) => patchFrame("closeFrame", p)
         }
-      )), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement("mg-generate-drawer", { ref: bindGenDrawer, style: { display: tab === "Video" ? "" : "none" } }), videoTrailer);
+      )), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement("mg-generate-drawer", { ref: bindGenDrawer, "data-loom-ctx": "", style: { display: tab === "Video" ? "" : "none" } }), videoTrailer, /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          className: "lv-mpick-veil" + (pickerOpen ? " open" : ""),
+          onClick: (ev) => {
+            if (ev.target === ev.currentTarget) setPickerOpen(false);
+          }
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-panel", role: "dialog", "aria-label": "Models and LoRAs" }, /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-head" }, /* @__PURE__ */ React.createElement("span", { className: "t" }, "Models & LoRAs"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "x", onClick: () => setPickerOpen(false), "aria-label": "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: pickerKind === "base" ? "on" : "", onClick: () => setPickerKind("base") }, "Models"), /* @__PURE__ */ React.createElement("button", { type: "button", className: pickerKind === "lora" ? "on" : "", onClick: () => setPickerKind("lora") }, "LoRAs")), /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-body" }, pickerMounted && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+          "mg-model-picker",
+          {
+            ref: bindPicker,
+            kind: "base",
+            style: { display: pickerKind === "base" ? "flex" : "none" }
+          }
+        ), /* @__PURE__ */ React.createElement(
+          "mg-model-picker",
+          {
+            ref: bindLoraPicker,
+            kind: "lora",
+            multi: true,
+            "base-type": imgModel && imgModel.model_type || "",
+            style: { display: pickerKind === "lora" ? "flex" : "none" }
+          }
+        ))))
+      ));
     }
     const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), /* @__PURE__ */ React.createElement("details", { className: "lv-look", open: !!(project.look || "").trim() }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F3A8} Project look", (project.look || "").trim() ? "" : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 a style line added to every shot")), /* @__PURE__ */ React.createElement(
       "textarea",
@@ -1628,7 +2115,7 @@ ${"=".repeat(48)}
             setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" }));
           }
         }
-      )) : /* @__PURE__ */ React.createElement("div", { className: "lv-assetprev" }, as.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement(
+      )) : /* @__PURE__ */ React.createElement("div", { className: "lv-assetprev", title: as.kind === "video" ? "Video asset \u2014 poster from your gallery" : void 0 }, as.kind === "video" && src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : as.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement(
         "input",
         {
           className: "lv-in",
@@ -1673,7 +2160,7 @@ ${"=".repeat(48)}
     })), !(project.assets || []).length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No cast yet \u2014 add one below."), /* @__PURE__ */ React.createElement("button", { className: "lv-addcast", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
       const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
       return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-    }), "image", true) }, "+ add from gallery"), /* @__PURE__ */ React.createElement(
+    }), "all", true) }, "+ add from gallery"), /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "lv-addcast",
@@ -1688,10 +2175,30 @@ ${"=".repeat(48)}
       const id = await storeThumb(file);
       setAssets((a) => [...a, { id: uid(), name: "", kind: "image", tag: nextTag(a, "@image"), thumbId: id, source: file.name, lock: false }]);
     };
-    const footageList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-footagehead" }, /* @__PURE__ */ React.createElement("span", { className: "lv-castrow-h" }, "Finished shots"), /* @__PURE__ */ React.createElement("button", { className: "lv-browsebtn", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
-      const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
-      return [...a, { id: uid(), name: "", kind: k, tag: nextTag(a, pre), thumbId: "", source: "", mediaId: mid, lock: false }];
-    }), "video", true) }, "\u2315 Browse library")), finished.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-footage" }, finished.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lv-fclip " + (e.c.id === selShot ? "sel" : ""), onClick: () => setSelShot(e.c.id) }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + e.c.resultMid + ".jpg", alt: "" }), /* @__PURE__ */ React.createElement("div", { className: "lv-fmeta" }, /* @__PURE__ */ React.createElement("b", null, e.code), /* @__PURE__ */ React.createElement("span", null, durOf2(e.c), "s"))))) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No rendered shots yet \u2014 generate one and it lands here."), /* @__PURE__ */ React.createElement(
+    const importPickedFootage = async (mid, duration) => {
+      let dur = parseFloat(duration);
+      if (!(dur > 0)) {
+        try {
+          const r = await fetch("/api/loom/video-duration?media_id=" + encodeURIComponent(mid));
+          const d = await r.json();
+          if (d && d.duration) dur = d.duration;
+        } catch {
+        }
+      }
+      setSelShot(importFootage(mid, dur));
+    };
+    const footageList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-footagehead" }, /* @__PURE__ */ React.createElement("span", { className: "lv-castrow-h" }, "Finished shots"), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "lv-browsebtn",
+        title: "Import an already-rendered video from your gallery straight onto the board as a real, placeable shot",
+        onClick: () => openPick((mid, thumb, isVideo, duration) => {
+          if (!isVideo) return;
+          importPickedFootage(mid, duration);
+        }, "video")
+      },
+      "\u2315 Browse library"
+    )), finished.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-footage" }, finished.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lv-fclip " + (e.c.id === selShot ? "sel" : ""), onClick: () => setSelShot(e.c.id) }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + e.c.resultMid + ".jpg", alt: "" }), /* @__PURE__ */ React.createElement("div", { className: "lv-fmeta" }, /* @__PURE__ */ React.createElement("b", null, e.code), e.c.imported && /* @__PURE__ */ React.createElement("span", { title: "Imported from your gallery, not rendered by this project" }, "\u21AF"), /* @__PURE__ */ React.createElement("span", null, durOf2(e.c), "s"))))) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No rendered shots yet \u2014 generate one and it lands here."), /* @__PURE__ */ React.createElement(
       "div",
       {
         className: "lv-dropzone" + (dzHover ? " hover" : ""),
@@ -1709,7 +2216,7 @@ ${"=".repeat(48)}
       },
       "\u21E9 drag an image here to add it as a cast reference"
     ));
-    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" + (deepFocus ? " lv-overlay-df" : "") }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
       "label",
       {
         className: "lv-draft" + (project.draft ? " on" : ""),
@@ -1861,6 +2368,7 @@ ${"=".repeat(48)}
         {
           which: "open",
           frame: c.openFrame,
+          liveTag: positionTag(live, project, imgSrc, "openFrame"),
           discreet: c.discreet,
           framePrev: frameSrc,
           storeThumb,
@@ -1872,6 +2380,7 @@ ${"=".repeat(48)}
         {
           which: "close",
           frame: c.closeFrame,
+          liveTag: positionTag(live, project, imgSrc, "closeFrame"),
           discreet: c.discreet,
           framePrev: frameSrc,
           storeThumb,
@@ -2154,6 +2663,11 @@ Your currently-open board is left untouched.`)) return;
       setProject((p) => appendCardToAct(p, aId, c));
       setOpen((o) => ({ ...o, [c.id]: true }));
     };
+    const importFootage = (mediaId, duration) => {
+      const c = newCard(importedFootagePatch(mediaId, duration));
+      setProject((p) => landInFirstAct(p, c, uid()));
+      return c.id;
+    };
     const dupCard = (aId, card) => {
       const clone = buildDuplicateCard(card, uid(), card.refs.map(() => uid()));
       setProject((p) => insertCardAfter(p, aId, card.id, clone));
@@ -2184,6 +2698,7 @@ Your currently-open board is left untouched.`)) return;
       setAssets,
       setCardStatus,
       addCard,
+      importFootage,
       dupCard,
       delCard,
       moveCard,
@@ -2203,6 +2718,22 @@ Your currently-open board is left untouched.`)) return;
     const [genImgState, setGenImgState] = useState({});
     const [imgModel, setImgModel] = useState(null);
     const [imgLoras, setImgLoras] = useState([]);
+    const [imgAdv, setImgAdv] = useState(() => ({
+      negative: "",
+      steps: 25,
+      cfg: 7,
+      aspectW: 1,
+      aspectH: 1,
+      size: 1024,
+      customW: "",
+      customH: "",
+      mode: "auto",
+      count: 1,
+      seed: "",
+      highPriority: false,
+      promptHelper: true
+    }));
+    const [modelDefaults, setModelDefaults] = useState(null);
     const [genEditState, setGenEditState] = useState({});
     const [genRefState, setGenRefState] = useState({});
     const [batching, setBatching] = useState(false);
@@ -2252,7 +2783,8 @@ Generate anyway?`);
       const c = entry.c;
       const p = shotPayload2(entry);
       if (!p.hasInput) {
-        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "attach a frame or cast image first" } }));
+        const msg = c.imported ? 'Imported footage \u2014 nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via "Use an existing video instead".' : "attach a frame or cast image first";
+        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
         return { ok: false, reason: "no-input" };
       }
       if (!opts.skipConfirm) {
@@ -2320,10 +2852,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
           setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...cls.duration ? { actualDur: cls.duration } : {} });
           setBatchOutcome(cardId, "done");
+          if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
         } else if (cls.phase === "failed") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
           setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
           setBatchOutcome(cardId, "failed");
+          if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
         } else if (elapsed > POLL_CEILING_MS) {
           pause();
         } else if (elapsed > POLL_STALE_AT_MS) {
@@ -2405,13 +2939,18 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter an image prompt" } }));
         return;
       }
-      if (!await confirmSpend({ model_id: imgModel.model_id, prompt }, `Generate a reference image for ${c.title || "this shot"}?`)) return;
+      if (anyLoraUnresolved(imgLoras)) {
+        setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "still waiting on a LoRA to resolve" } }));
+        return;
+      }
+      const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
+      if (!await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`)) return;
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
       try {
         const r = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model_id: imgModel.model_id, prompt, loras: resolveLoraPayload(imgLoras) })
+          body: JSON.stringify(body)
         });
         const d = await r.json();
         if (d.error || !d.task_id) {
@@ -2592,6 +3131,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setImgModel,
       imgLoras,
       setImgLoras,
+      imgAdv,
+      setImgAdv,
+      modelDefaults,
+      setModelDefaults,
       genEditState,
       setGenEditState,
       genRefState,
@@ -2734,6 +3277,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setAssets,
       setCardStatus,
       addCard,
+      importFootage,
       dupCard,
       delCard,
       moveCard,
@@ -2770,7 +3314,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         el.addEventListener("mg-pick", (e) => {
           const cb = pickCb;
           setPickCb(null);
-          if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration);
+          if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration, e.detail.is_nsfw);
         });
         el.addEventListener("mg-close", () => setPickCb(null));
       }
@@ -2784,13 +3328,16 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setImgModel,
       imgLoras,
       setImgLoras,
+      imgAdv,
+      setImgAdv,
+      modelDefaults,
+      setModelDefaults,
       genEditState,
       setGenEditState,
       genRefState,
       setGenRefState,
       batching,
       batchTally,
-      generateShot,
       pollShot,
       useExistingVideo,
       genImage,
@@ -2898,7 +3445,6 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         scale,
         selShot,
         setSelShot,
-        generateShot,
         useExistingVideo,
         genState,
         thumbs,
@@ -2906,6 +3452,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         storeThumb,
         setAct,
         addCard,
+        importFootage,
         dupCard,
         delCard,
         moveCard,
@@ -2918,6 +3465,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setImgModel,
         imgLoras,
         setImgLoras,
+        imgAdv,
+        setImgAdv,
+        modelDefaults,
+        setModelDefaults,
         genImage,
         routeImg,
         genEditState,
@@ -3229,7 +3780,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (e.target === e.currentTarget) onClose();
     } }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-box", style: { height: "auto", width: 520 } }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Import a collection"), /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: onClose, title: "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 12.5, color: "var(--ink2)", margin: "0 0 4px", lineHeight: 1.5 } }, "Pull a gallery collection in as reusable ", /* @__PURE__ */ React.createElement("b", null, "@image"), " references. Each keeps its PixAI media_id, so every one generates ", /* @__PURE__ */ React.createElement("b", null, "free"), " \u2014 no re-upload."), /* @__PURE__ */ React.createElement("div", { className: "sb-pick-filters" }, /* @__PURE__ */ React.createElement("select", { value: sel, onChange: (e) => setSel(e.target.value), style: { flex: 1, maxWidth: "none" } }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Choose a collection\u2026"), colls.map((c) => /* @__PURE__ */ React.createElement("option", { key: c, value: c }, c)))), sel && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: "var(--ink3)", margin: "6px 0 0" } }, total.toLocaleString(), " image", total === 1 ? "" : "s", total > CAP ? ` \u2014 importing the newest ${CAP}` : ""), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn amber sm", disabled: !sel, onClick: doImport }, "Import references"))));
   }
-  function FrameSlot({ which, frame, discreet, framePrev, onPatch, storeThumb, openPick, extraBtn }) {
+  function FrameSlot({ which, frame, liveTag, discreet, framePrev, onPatch, storeThumb, openPick, extraBtn }) {
     const img = framePrev(frame);
     return /* @__PURE__ */ React.createElement("div", { className: "sb-frame" }, /* @__PURE__ */ React.createElement("div", { className: "sb-framehead" }, /* @__PURE__ */ React.createElement("span", { className: "sb-lab" }, which === "open" ? "Opening frame" : "Closing frame"), openPick && /* @__PURE__ */ React.createElement(
       "button",
@@ -3239,7 +3790,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         onClick: () => openPick((mid) => onPatch({ mediaId: mid, thumbId: "", source: "" }))
       },
       "\u25A4"
-    ), /* @__PURE__ */ React.createElement("input", { className: "sb-tagin sb-mono", placeholder: "@image1", value: frame.tag, onChange: (e) => onPatch({ tag: e.target.value }) })), /* @__PURE__ */ React.createElement("label", { className: "sb-frameprev" + (discreet ? " discreet" : ""), title: "Attach image" }, img ? /* @__PURE__ */ React.createElement("img", { src: img, alt: which }) : "\uFF0B attach frame", /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("span", { className: "sb-tagin sb-mono", title: "This slot's live @imageN \u2014 computed from position, not editable" }, liveTag || "\u2014")), /* @__PURE__ */ React.createElement("label", { className: "sb-frameprev" + (discreet ? " discreet" : ""), title: "Attach image" }, img ? /* @__PURE__ */ React.createElement("img", { src: img, alt: which }) : "\uFF0B attach frame", /* @__PURE__ */ React.createElement(
       "input",
       {
         type: "file",

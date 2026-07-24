@@ -115,6 +115,112 @@ def test_is_lora_compatible_exact_equality_fails_open():
     assert core.is_lora_compatible(None, None) is True
 
 
+def test_list_model_versions_full_shape_and_labels(monkeypatch):
+    """Problem 4 (docs/AUDIT_2026-07-21.md's tracked O12/O13 remainder): exposes EVERY
+    published version -- not just resolve_version_meta's rows[0] -- through the SAME
+    per-row shape, plus a human `label` + `is_latest` for the picker UI."""
+    rows = [
+        {"id": "V3", "modelType": "SDXL_MODEL", "loraBaseModelType": None,
+         "createdAt": "2026-07-20T00:00:00Z",
+         "extra": {"negativePrompts": "nsfw", "samplingMethod": "Euler a",
+                   "samplingSteps": 28, "cfgScale": 5}},
+        {"id": "V2", "modelType": "SDXL_MODEL", "loraBaseModelType": None,
+         "createdAt": "2026-06-01T00:00:00Z", "extra": {}},
+        {"id": "V1", "modelType": "SDXL_MODEL", "loraBaseModelType": None,
+         "createdAt": "", "extra": {}},
+    ]
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: rows)
+    out = core.list_model_versions(object(), "M1")
+    assert [v["version_id"] for v in out] == ["V3", "V2", "V1"]     # server order preserved
+    assert out[0]["label"] == "Latest · 2026-07-20" and out[0]["is_latest"] is True
+    assert out[1]["label"] == "v2 · 2026-06-01" and out[1]["is_latest"] is False
+    assert out[2]["label"] == "v1" and out[2]["is_latest"] is False   # no createdAt -> no date
+    # full per-row meta, not just an id -- the whole point of exposing the list
+    assert out[0]["sampling_method"] == "Euler a" and out[0]["cfg_scale"] == 5
+    assert out[0]["negative_prompt"] == "nsfw"
+
+
+def test_list_model_versions_skips_rows_with_no_id(monkeypatch):
+    rows = [{"id": "", "modelType": "SDXL_MODEL"}, {"id": "V1", "modelType": "SDXL_MODEL"}]
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: rows)
+    out = core.list_model_versions(object(), "M1")
+    assert [v["version_id"] for v in out] == ["V1"]
+    assert out[0]["is_latest"] is False    # it was rows[1] by ORIGINAL position, not rows[0]
+
+
+def test_list_model_versions_empty_and_network_error(monkeypatch):
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])
+    assert core.list_model_versions(object(), "x") == []
+
+    def boom(*a, **k):
+        raise core.PixAIError("nope")
+    monkeypatch.setattr(core, "_rest_get", boom)
+    assert core.list_model_versions(object(), "x") == []
+
+
+def test_resolve_version_meta_and_list_model_versions_agree_on_rows0(monkeypatch):
+    """The two must never drift on what rows[0] means -- resolve_version_meta's fast path
+    and list_model_versions' first entry are the SAME row through the SAME mapping."""
+    rows = [{"id": "V2", "modelType": "MULTI_LORA", "loraBaseModelType": "SDXL_MODEL",
+             "extra": {"triggerWords": "trig"}},
+            {"id": "V1", "modelType": "MULTI_LORA", "loraBaseModelType": "SDXL_MODEL", "extra": {}}]
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: rows)
+    single = core.resolve_version_meta(object(), "M1")
+    listed = core.list_model_versions(object(), "M1")
+    assert listed[0]["version_id"] == single["version_id"] == "V2"
+    assert listed[0]["trigger_words"] == single["trigger_words"] == "trig"
+    assert listed[0]["model_type"] == single["model_type"]
+
+
+# ---- annotate_lora_compat (problem 3: architecture-aware LoRA sort/badge) -----------------
+# Mock rows use the CONFIRMED-live shape: `lora_base_model_type`, sourced from GraphQL's
+# latestVersion.loraBaseModelType (model_search_market_gql) -- e.g. real rows come back as
+# modelType:"MULTI_LORA", loraBaseModelType:"SD_V1_MODEL" -- NEVER `base_model` (PixAI's
+# content category, confirmed NOT architecture; see the function's own docstring).
+
+def test_annotate_lora_compat_sorts_compatible_first_and_tags_every_row():
+    rows = [
+        {"model_id": "1", "title": "Mismatch LoRA", "lora_base_model_type": "SD_V1_MODEL"},
+        {"model_id": "2", "title": "Match LoRA", "lora_base_model_type": "MMDIT26A_MODEL"},
+        {"model_id": "3", "title": "Unknown-arch LoRA", "lora_base_model_type": ""},
+        {"model_id": "4", "title": "Another match", "lora_base_model_type": "MMDIT26A_MODEL"},
+    ]
+    out = core.annotate_lora_compat(rows, "MMDIT26A_MODEL")
+    # SOFT sort: compatible + unknown float to the front (fail-open, same rule as
+    # is_lora_compatible), a CONFIRMED mismatch sinks to the back -- nothing is ever hidden,
+    # and each group keeps its original relative order (stable partition).
+    assert [r["model_id"] for r in out] == ["2", "3", "4", "1"]
+    assert {r["model_id"]: r["compat"] for r in out} == {"1": "no", "2": "yes", "3": "unknown", "4": "yes"}
+
+
+def test_annotate_lora_compat_case_insensitive_like_is_lora_compatible():
+    rows = [{"model_id": "1", "lora_base_model_type": "sdxl_model"}]
+    assert core.annotate_lora_compat(rows, "SDXL_MODEL")[0]["compat"] == "yes"
+
+
+def test_annotate_lora_compat_passthrough_when_no_base_selected():
+    """Browsing LoRAs before picking a base must be completely untouched -- no sort, no tag."""
+    rows = [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}]
+    out = core.annotate_lora_compat(rows, "")
+    assert out is rows and "compat" not in out[0]
+    assert core.annotate_lora_compat(rows, None) is rows
+
+
+def test_annotate_lora_compat_does_not_mutate_input_rows():
+    rows = [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}]
+    core.annotate_lora_compat(rows, "SDXL_MODEL")
+    assert "compat" not in rows[0]   # a fresh copy is returned -- the caller's own list/dicts are untouched
+
+
+def test_annotate_lora_compat_all_incompatible_still_returns_everything():
+    """A hard filter would empty the grid here -- the soft-sort contract must not drop rows,
+    only reorder + tag them, even when NOTHING matches."""
+    rows = [{"model_id": "1", "lora_base_model_type": "SD_V1_MODEL"},
+            {"model_id": "2", "lora_base_model_type": "SD3_MODEL"}]
+    out = core.annotate_lora_compat(rows, "MMDIT26A_MODEL")
+    assert len(out) == 2 and all(r["compat"] == "no" for r in out)
+
+
 def test_web_generate_pipeline(monkeypatch, tmp_path):
     # web_generate = submit -> poll -> task detail -> download/catalog; all reused parts
     # mocked so no network / no spend. Verifies it threads the pieces + returns media_ids.
@@ -171,6 +277,33 @@ def test_model_search_market_gql(monkeypatch):
     r2 = core.model_search_market_gql(object(), category="concept", usage="LORA")
     assert 'category:' not in captured["query"]          # 'concept' not whitelisted
     assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
+
+
+def test_model_search_market_gql_requests_and_surfaces_architecture_fields(monkeypatch):
+    """picker-parity-round2 (problem 3): the query gained latestVersion{modelType
+    loraBaseModelType} -- confirmed live against the owner's real account (real rows come
+    back e.g. modelType:"MULTI_LORA", loraBaseModelType:"SD_V1_MODEL") -- surfaced as
+    model_type/lora_base_model_type on every row, the SAME key names resolve_version_meta
+    already uses, so annotate_lora_compat doesn't care which search path produced a row."""
+    captured = {}
+
+    def fake_gql(session, query, vars=None):
+        captured["query"] = query
+        return {"generationModels": {"pageInfo": {"hasNextPage": False}, "edges": [
+            {"node": {"id": "9", "title": "Eris LoRA", "type": "MULTI_LORA", "isNsfw": False,
+                      "likedCount": 1, "latestVersion": {"id": "v9", "modelType": "MULTI_LORA",
+                                                          "loraBaseModelType": "SD_V1_MODEL"},
+                      "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""}},
+            {"node": {"id": "10", "title": "No version yet", "type": "MULTI_LORA", "isNsfw": False,
+                      "likedCount": 0, "latestVersion": {}, "media": {"urls": []},
+                      "tags": [], "author": {}, "createdAt": ""}},
+        ]}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    r = core.model_search_market_gql(object(), usage="LORA")
+    assert "modelType loraBaseModelType" in captured["query"]
+    assert r["results"][0]["model_type"] == "MULTI_LORA"
+    assert r["results"][0]["lora_base_model_type"] == "SD_V1_MODEL"
+    assert r["results"][1]["model_type"] == "" and r["results"][1]["lora_base_model_type"] == ""
 
 
 def test_task_image_media_prefers_batch_over_grid():
@@ -233,6 +366,36 @@ def test_run_generate_saves_batch_individuals_not_the_grid(monkeypatch, tmp_path
     assert res["images"] == 2
 
 
+def test_run_generate_still_self_heals_after_delegating_to_submit_generation(monkeypatch, tmp_path):
+    """run_generate's own inferenceProfile try/except was consolidated into
+    submit_generation() 2026-07-24 (run_generate now just calls through it) -- this
+    proves that consolidation didn't lose the CLI's original retry-and-succeed
+    behavior: a --generate run with an unsupported Mode still completes instead of
+    raising, end to end through the real run_generate() entry point."""
+    seen_mids = _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
+    calls = []
+
+    def fake_gql(s, q, v=None):
+        params = v["parameters"]
+        calls.append(dict(params))
+        if "inferenceProfile" in params:
+            raise core.PixAIError(
+                'GraphQL error: [{"message": "unknown inferenceProfile \\"ultra\\" '
+                'for model type \\"SDXL_MODEL\\""}]')
+        return {"createGenerationTask": {"id": "T1"}}
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    args = SimpleNamespace(
+        out=str(tmp_path),
+        params_json='{"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}',
+        confirm=True, task_id="", token=None)
+    res = core.run_generate(args)
+    assert len(calls) == 2                       # rejected once, retried once
+    assert "inferenceProfile" not in calls[1]     # retry dropped it
+    assert seen_mids == ["A", "B"]
+    assert res["images"] == 2
+
+
 def test_run_edit_image_saves_batch_individuals_not_the_grid(monkeypatch, tmp_path):
     """Same fix, same bug, for --edit-image: a batchSize>1 edit used to save only the
     composite grid too."""
@@ -281,6 +444,66 @@ def test_submit_generation_raises(monkeypatch):
         core.submit_generation(object(), {})
 
 
+def test_submit_generation_retries_on_inferenceprofile_rejection(monkeypatch):
+    """inferenceProfile (the Mode quality setting) is model-type-specific -- PixAI
+    rejects an unsupported value outright, with a raw GraphQL error. Found live
+    2026-07-24: the CLI's run_generate had always self-healed this with its own one-off
+    try/except, but submit_generation() -- the choke point the web /api/generate route
+    (and every other current/future caller) actually goes through -- had no such
+    protection, so a web user hitting an unsupported Mode just got the raw rejection.
+    This is the fail-first proof the retry now lives in submit_generation() itself, so
+    every caller gets it for free. Matches run_generate's pre-existing retry-once
+    behavior: drop inferenceProfile, resubmit on the model's default."""
+    calls = []
+
+    def fake_gql(s, q, v=None):
+        calls.append(dict(v["parameters"]))
+        if "inferenceProfile" in v["parameters"]:
+            raise core.PixAIError(
+                'GraphQL error: [{"message": "unknown inferenceProfile \\"ultra\\" '
+                'for model type \\"SDXL_MODEL\\""}]')
+        return {"createGenerationTask": {"id": "T10"}}
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    params = {"prompts": "x", "modelId": "v", "inferenceProfile": "ultra"}
+    assert core.submit_generation(object(), params) == "T10"
+    assert len(calls) == 2                              # rejected once, retried once
+    assert calls[0]["inferenceProfile"] == "ultra"       # first attempt: as chosen
+    assert "inferenceProfile" not in calls[1]            # retry: dropped, not just changed
+    assert "inferenceProfile" not in params              # popped in place (mutates the caller's dict)
+
+
+def test_submit_generation_does_not_retry_unrelated_errors(monkeypatch):
+    """The retry is scoped to the inferenceProfile rejection specifically -- a genuinely
+    different rejection (bad prompt, moderation, whatever) must propagate on the first
+    try, not silently eat inferenceProfile and retry for an unrelated reason."""
+    import pytest
+
+    def fake_gql(s, q, v=None):
+        raise core.PixAIError("GraphQL error: something else entirely")
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    with pytest.raises(core.PixAIError, match="something else entirely"):
+        core.submit_generation(object(), {"prompts": "x", "inferenceProfile": "ultra"})
+
+
+def test_submit_generation_no_retry_when_param_absent(monkeypatch):
+    """A rejection that happens to mention 'inferenceProfile' in its text but where the
+    submitted params never set the key at all must not loop forever -- the second half of
+    the retry's guard ("inferenceProfile" in params) is what stops that."""
+    import pytest
+    calls = []
+
+    def fake_gql(s, q, v=None):
+        calls.append(1)
+        raise core.PixAIError("GraphQL error: inferenceProfile is unsupported here")
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    with pytest.raises(core.PixAIError):
+        core.submit_generation(object(), {"prompts": "x"})   # no inferenceProfile key
+    assert len(calls) == 1                               # never retried
+
+
 def test_generation_status_phases(monkeypatch):
     for raw, phase in [("completed", "done"), ("succeeded", "done"), ("failed", "failed"),
                        ("cancelled", "failed"), ("running", "running"), ("pending", "running")]:
@@ -319,3 +542,38 @@ def test_submit_fixer_needs_a_box(monkeypatch):
     monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"id": "x"})
     with pytest.raises(core.PixAIError):
         core.submit_fixer(object(), "M", [])
+
+
+def test_run_generate_persists_paid_credit(monkeypatch, tmp_path):
+    """The catalog write is where paidCredit stops being throwaway poll output: a
+    --generate run must store the task's server-reported actual cost (getTaskById's
+    top-level paidCredit) on every row it catalogs -- it's a TASK-level value,
+    repeated on each of the task's media rows."""
+    _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda s, t: {"createdAt": "2026-07-23T00:00:00Z",
+                                      "outputs": _BATCH_OUTPUTS, "paidCredit": 2750})
+    args = SimpleNamespace(out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
+                           confirm=True, task_id="", token=None)
+    core.run_generate(args)
+    rows = pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    assert {r["media_id"]: r.get("paid_credit") for r in rows} == {"A": "2750", "B": "2750"}
+
+
+def test_collect_generation_persists_paid_credit_zero_not_blank(monkeypatch, tmp_path):
+    """collect_generation is the shared collect for the web async poll (/api/task-status)
+    and the --watch-backup live mirror. paidCredit 0 is a REAL value (a free card /
+    daily-free gen) and must be stored as '0' -- never collapsed into '' (unknown)."""
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda s, t: {"createdAt": "2026-07-23T00:00:00Z",
+                                      "outputs": {"mediaId": "M1", "seed": "9"},
+                                      "paidCredit": 0})
+    monkeypatch.setattr(core, "resolve_media",
+                        lambda s, m: ("https://cdn/" + m, {"width": 8, "height": 8}))
+    monkeypatch.setattr(core, "download",
+                        lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
+    monkeypatch.setattr(pixai_gallery, "make_thumbnail", lambda *a, **k: None)
+    got = core.collect_generation(object(), "T1", str(tmp_path))
+    assert got["media_ids"] == ["M1"]
+    rows = pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    assert rows[0].get("paid_credit") == "0"

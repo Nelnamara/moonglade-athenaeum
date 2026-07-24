@@ -15,7 +15,7 @@ pip install -r requirements.txt
 | `flask` | the local web gallery (`pixai_gallery.py`) |
 | `websockets` | `--watch` / `--watch-backup`, and the web gallery's auto-starting live-mirror thread |
 | `truststore` | optional — fixes HTTPS cert errors behind corporate proxies / AV |
-| `cryptography` | optional — only for the gallery's `--https` mode |
+| `cryptography` (**not** in `requirements.txt` — `pip install cryptography` separately) | optional — only for the gallery's `--https` mode |
 | `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos; required for The Loom's video export and last-frame extract |
 | `pytest`, `pytest-mock`, `pytest-cov` | dev only — running the test suite |
 

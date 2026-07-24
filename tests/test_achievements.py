@@ -129,14 +129,14 @@ def _client(tmp_path, rows):
 
 
 def test_ach_grid_stacks_its_sections_instead_of_tiling_them():
-    """Real regression, caught by the owner on the live D: install after the 2026-07-22
+    """Real regression, caught on a live install after the 2026-07-22
     redesign shipped: #ach-grid still carried the PRE-redesign '.ach-grid' class, whose CSS
     was `display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr))` -- correct
     for the OLD layout, where every direct child really was one ~216px .ach-card tile, but
     wrong for the new one, where every direct child is a full-width section (the carousel,
     the ladder row, each .hall-block). The auto-fill grid was auto-placing those full-width
     sections into narrow tiled columns instead of stacking them, producing a scrambled,
-    overlapping render -- invisible to every check this session ran BEFORE the owner looked
+    overlapping render -- invisible to every automated check that ran BEFORE a human looked
     at the real thing, because none of them checked cross-element geometry (innerText and
     getComputedStyle on individual elements were all individually correct)."""
     notify_js = (Path(__file__).resolve().parent.parent / "static" / "mg-notify.js").read_text(encoding="utf-8")

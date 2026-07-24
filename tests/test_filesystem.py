@@ -159,6 +159,21 @@ def test_import_local_skips_already_backed_up_pixai_files(tmp_path):
     assert len(rows) == 1 and rows[0]["source"] != "local"
 
 
+def test_import_local_skips_deleted_quarantine(tmp_path):
+    """B11 (audit 2026-07-21): purge_media_local() moves a purged image to _deleted/
+    AND clears its catalog row -- so an internal (no explicit path) --import-local
+    scan that doesn't skip _deleted/ finds the orphaned file, sees no existing row/
+    media_id for it, and resurrects it as a brand-new source='local' row. A purged
+    image must stay purged, not come back to life on the next --import-local."""
+    from pixai_gallery import DELETED_DIRNAME
+    qdir = tmp_path / DELETED_DIRNAME
+    qdir.mkdir(parents=True)
+    (qdir / "old_prompt_task1_999.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+    res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
+    assert res["imported"] == 0, "a file under _deleted/ was resurrected as a new local row"
+    assert _load_cat(tmp_path / "catalog.db") == []
+
+
 def test_import_local_external_copies_in(tmp_path):
     ext = tmp_path / "external"; ext.mkdir()
     (ext / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
@@ -217,6 +232,74 @@ def test_video_faststart_skips_already_faststart(tmp_path, monkeypatch):
     fs = tmp_path / "fs.mp4"; fs.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
     assert core.video_faststart(fs) is False
     assert core.video_faststart(tmp_path / "x.webm") is False   # non-mp4 ignored
+
+
+def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
+    """THE VIDEO-CORRUPTION BUG (owner field-test 2026-07-23): two collectors remux the
+    same clip seconds apart -- the gallery's live-mirror watcher and a /api/task-status
+    done-poll in one process, or the CLI's --watch-backup in another. video_faststart's
+    temp name used to be DETERMINISTIC (stem + '.__fstmp__' + ext), so both concurrent
+    ffmpeg runs wrote into the SAME temp file and the surviving full-length mp4 carried
+    the other run's stale bytes: it played, then stopped mid-way. The temp is now unique
+    per invocation, so whatever the overlap, the final file must be exactly ONE remux's
+    complete output -- never a mix.
+
+    The ffmpeg invocation is stubbed with a slow two-phase writer carrying a distinct
+    per-instance marker byte; events force the interleaving (instance 1 writes its
+    second half only after instance 2 finished) so a shared temp file deterministically
+    ends up half-and-half."""
+    import subprocess
+    import threading
+
+    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))       # NOT faststart -> both remux
+
+    HALF = 256
+    role_mu = threading.Lock()
+    state = {"n": 0}
+    both_open = threading.Barrier(2, timeout=10)   # both runs mid-flight before either writes
+    one_wrote_first_half = threading.Event()
+    two_finished = threading.Event()
+
+    def fake_ffmpeg(cmd, **kw):
+        out = cmd[-1]                                # ffmpeg's output path is the last arg
+        with role_mu:
+            state["n"] += 1
+            role = state["n"]                        # 1 = first invocation, 2 = second
+        marker = b"\x0a" if role == 1 else b"\x0b"
+        fh = open(out, "wb")
+        try:
+            both_open.wait()
+            if role == 1:
+                fh.write(marker * HALF); fh.flush()
+                one_wrote_first_half.set()
+                assert two_finished.wait(10)
+                fh.write(marker * HALF); fh.flush()  # lands AFTER 2's whole output
+            else:
+                assert one_wrote_first_half.wait(10)
+                fh.write(marker * HALF); fh.flush()
+                fh.write(marker * HALF); fh.flush()
+        finally:
+            fh.close()
+            if role == 2:
+                two_finished.set()
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_ffmpeg)
+
+    t1 = threading.Thread(target=core.video_faststart, args=(clip,))
+    t2 = threading.Thread(target=core.video_faststart, args=(clip,))
+    t1.start(); t2.start()
+    t1.join(15); t2.join(15)
+    assert not t1.is_alive() and not t2.is_alive()
+
+    final = clip.read_bytes()
+    assert final in (b"\x0a" * (2 * HALF), b"\x0b" * (2 * HALF)), (
+        "the surviving clip mixes bytes from two concurrent remuxes "
+        "(first byte {!r}, last byte {!r}, {} bytes)".format(
+            final[:1], final[-1:], len(final)))
+    assert not list(tmp_path.glob("*__fstmp__*")), "leftover remux temp files"
 
 
 def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
@@ -286,6 +369,40 @@ def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
     assert "already organized" in buf.getvalue()
 
 
+def test_organize_never_touches_deleted_quarantine(tmp_path):
+    """B11 (audit 2026-07-21), highest-severity of the five: cmd_organize's skip_dirs
+    named gallery/, _duplicates/, videos/, imported/ -- never _deleted/. It's the
+    only one of the five B11 walks that actually MOVES files, so a file quarantined
+    there (e.g. a stale remnant from an earlier purge-then-redownload cycle, still
+    sharing its media_id with the live, currently-cataloged copy) gets treated as a
+    normal organize candidate: same media_id -> same catalog row -> same target path
+    as the REAL file, so it collides with it in the move plan. Depending on rglob
+    ordering that collision either hard-deletes the _deleted/ copy outright (the
+    _same_bytes 'redundant' branch, no confirmation, no _duplicates/ safety net) or
+    replaces it into the organized tree in place of the live file. Either way the
+    _deleted/ file must never be touched at all -- this asserts exactly that,
+    regardless of which of the two on-disk copies the walk happens to visit first."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, DELETED_DIRNAME
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m9", "task_id": "T9",
+        "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T9_m9.png"}])
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "alpha_T9_m9.png").write_bytes(b"SAMEBYTES")   # the live, cataloged copy
+    qdir = tmp_path / DELETED_DIRNAME
+    qdir.mkdir()
+    (qdir / "old_m9.png").write_bytes(b"SAMEBYTES")                      # stale quarantine remnant
+
+    args = SimpleNamespace(out=str(tmp_path), name_length=60, name_sep="_", convert=None,
+                           dry_run=False, embed_metadata=False, jpeg_quality=92,
+                           jpeg_bg="white", keep_webp=False, progress=None)
+    core.cmd_organize(args, tmp_path, tmp_path / "images", db)
+
+    assert (qdir / "old_m9.png").exists(), (
+        "a file under _deleted/ was moved or deleted by cmd_organize -- quarantine is not immune")
+    assert (qdir / "old_m9.png").read_bytes() == b"SAMEBYTES"
+    assert (tmp_path / "2024-03" / "alpha_T9_m9.png").exists()           # the real file organized fine
+
+
 def test_undo_organize_reverts_moves(tmp_path):
     from pixai_gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
@@ -302,6 +419,63 @@ def test_undo_organize_reverts_moves(tmp_path):
     assert (tmp_path / "images" / "alpha_T1_m1.png").exists()             # back to original
     assert not (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
     assert not (tmp_path / "organize_manifest.csv").exists()              # manifest cleared
+
+
+def _organize_args(out):
+    return SimpleNamespace(out=str(out), name_length=60, name_sep="_", convert=None,
+                           dry_run=False, embed_metadata=False, jpeg_quality=92,
+                           jpeg_bg="white", keep_webp=False, progress=None)
+
+
+def test_organize_drops_byte_identical_duplicate(tmp_path):
+    """INVARIANT 5's byte-safe half: two on-disk copies of the SAME media_id (a stray
+    re-download, an old batches/ copy alongside a flat one, etc.) collapse onto the
+    same YYYY-MM destination. When they are byte-identical, cmd_organize must unlink
+    the redundant one and keep exactly one file -- this is the one line in the whole
+    command that unlink()s a real file on a path that runs live by default (no
+    --dry-run gate), so it must never fire on the wrong side of a comparison."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup1", "task_id": "T9",
+        "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
+    (tmp_path / "images").mkdir()
+    loc_a = tmp_path / "images" / "dup1.png"
+    loc_b = tmp_path / "images" / "extra_dup1.png"
+    loc_a.write_bytes(b"identical-bytes")
+    loc_b.write_bytes(b"identical-bytes")
+
+    core.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
+
+    dst = tmp_path / "2024-07" / "dup_T9_dup1.png"
+    assert dst.exists() and dst.read_bytes() == b"identical-bytes"
+    assert not loc_a.exists()          # both original locations consumed: one moved...
+    assert not loc_b.exists()          # ...the other recognized as a redundant dupe and unlinked
+    by = {r["media_id"]: r for r in load_catalog(db)}
+    assert by["dup1"]["filename"] == "dup_T9_dup1.png"
+
+
+def test_organize_keeps_differing_content_side_by_side(tmp_path):
+    """INVARIANT 5's other half: two on-disk copies of the SAME media_id that are NOT
+    byte-identical (a genuine conflict, not a redundant dupe) must both survive --
+    cmd_organize must never silently pick one and discard the other's real content."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup2", "task_id": "T8",
+        "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
+    (tmp_path / "images").mkdir()
+    loc_a = tmp_path / "images" / "dup2.png"
+    loc_b = tmp_path / "images" / "extra_dup2.png"
+    loc_a.write_bytes(b"content-A")
+    loc_b.write_bytes(b"totally-different-content-B")
+
+    core.cmd_organize(_organize_args(tmp_path), tmp_path, tmp_path / "images", db)
+
+    dst = tmp_path / "2024-07" / "dup_T8_dup2.png"
+    assert dst.exists()
+    survivors = [p for p in (loc_a, loc_b) if p.exists()]
+    assert len(survivors) == 1, "exactly one of the two original locations should remain untouched"
+    surviving_bytes = {dst.read_bytes(), survivors[0].read_bytes()}
+    assert surviving_bytes == {b"content-A", b"totally-different-content-B"}   # neither lost
 
 
 def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch):
@@ -373,6 +547,107 @@ def test_init_db_creates_table(tmp_path):
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     con.close()
     assert "catalog" in tables
+
+
+def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_path):
+    """Schema changes are a three-place contract (docs/architecture.md): CATALOG_FIELDS,
+    _CREATE_TABLE, and _MIGRATIONS must all agree. A fresh checkout's CREATE TABLE
+    already has every CATALOG_FIELDS column -- that half is exercised by every test in
+    this suite that pushes `{f: "" for f in CATALOG_FIELDS}` through save_catalog
+    (INSERT fails immediately if _CREATE_TABLE is missing one). Nothing exercises the
+    OTHER half: _MIGRATIONS is what actually reaches an EXISTING install's catalog.db
+    (run on every _connect()), so forgetting an ALTER TABLE entry for a newly added
+    field breaks upgraders silently while a fresh checkout's suite stays green.
+
+    This simulates exactly that existing install: a catalog.db holding ONLY the columns
+    present since the SQLite schema's very first commit (cc2aeb1, 2026-06-13, "replace
+    catalog.csv with SQLite (catalog.db)") -- the one moment a column could enter
+    _CREATE_TABLE with zero pre-existing databases around to migrate. Every
+    CATALOG_FIELDS entry added since then must arrive via _MIGRATIONS, or this
+    "existing" database never gains it, forever. (Checked against git log: every field
+    added after that commit -- batch, artwork_id/title/..., loras, negative_prompt/
+    clip_skip, is_video/poster_media_id/video_duration, source, deleted_remote,
+    collections, blurhash/nsfw_scores -- landed in CATALOG_FIELDS and _MIGRATIONS in the
+    SAME commit each time; no historical instance of the drift this test guards against
+    was found. The test is not vacuous regardless -- see the report for the mutation
+    check that proves it fails when a migration entry is missing.)"""
+    import sqlite3
+    from pixai_gallery import CATALOG_FIELDS, _connect
+
+    original_fields = [   # cc2aeb1's _CREATE_TABLE, verbatim -- none of these have ever
+        "task_id", "media_id", "filename", "url", "width", "height",   # needed a migration
+        "prompt_preview", "status", "created_at", "prompt_full", "natural_prompt",
+        "seed", "steps", "sampler", "cfg_scale", "model_id", "model_name", "rating",
+    ]
+    db = tmp_path / "ancient_catalog.db"
+    con = sqlite3.connect(str(db))
+    con.execute("CREATE TABLE catalog ({})".format(
+        ", ".join(("media_id TEXT PRIMARY KEY" if f == "media_id" else "{} TEXT".format(f))
+                  for f in original_fields)))
+    con.commit()
+    con.close()
+
+    _connect(db).close()   # the real upgrade path load_catalog/save_catalog always take
+
+    con = sqlite3.connect(str(db))
+    cols = {r[1] for r in con.execute("PRAGMA table_info(catalog)").fetchall()}
+    con.close()
+    missing = [f for f in CATALOG_FIELDS if f not in cols]
+    assert not missing, (
+        "field(s) {} are in CATALOG_FIELDS with no _MIGRATIONS entry that adds them -- "
+        "an existing install's catalog.db (predating that field) would never gain this "
+        "column".format(missing))
+
+
+def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
+    """paid_credit (added 2026-07-23) followed the three-place contract; this locks the
+    upgrade path for a real pre-paid_credit install: a catalog.db built from every
+    column EXCEPT paid_credit, holding a populated row, must gain the column via
+    _MIGRATIONS on a plain _connect() with the existing row's data intact -- and the
+    migrated db must round-trip a real credit value."""
+    import sqlite3
+    from pixai_gallery import _connect
+
+    assert "paid_credit" in CATALOG_FIELDS   # the contract half: the field exists at all
+    pre_fields = [f for f in CATALOG_FIELDS if f != "paid_credit"]
+    db = tmp_path / "pre_paid_credit.db"
+    con = sqlite3.connect(str(db))
+    con.execute("CREATE TABLE catalog ({})".format(
+        ", ".join(("media_id TEXT PRIMARY KEY" if f == "media_id" else "{} TEXT".format(f))
+                  for f in pre_fields)))
+    con.execute("INSERT INTO catalog (media_id, task_id, filename, rating) VALUES (?,?,?,?)",
+                ("m1", "t1", "keep.png", "5"))
+    con.commit()
+    con.close()
+
+    rows = load_catalog(db)          # load_catalog -> _connect() runs _MIGRATIONS
+    assert rows[0]["media_id"] == "m1" and rows[0]["filename"] == "keep.png"
+    assert rows[0]["rating"] == "5"                 # no data loss
+    assert rows[0]["paid_credit"] in ("", None)     # migrated in, blank default
+
+    row = dict(rows[0])
+    row["paid_credit"] = "2750"
+    save_catalog(db, [row])
+    got = load_catalog(db)[0]
+    assert got["paid_credit"] == "2750" and got["filename"] == "keep.png"
+    _connect(db).close()             # re-connect after the fact stays harmless (idempotent)
+
+
+def test_catalog_stats_totals_paid_credit_once_per_task(tmp_path, capsys):
+    """--catalog-stats spend total: paid_credit is a TASK-level cost repeated on each of
+    the task's media rows, so a 2-image batch must count once, not twice. '0' rows are
+    real free gens (a task in the tally, adding nothing); '' rows are untracked and must
+    not be counted as free."""
+    save_catalog(tmp_path / "catalog.db", [
+        _make_row(media_id="a1", task_id="t1", filename="a1.png", paid_credit="100"),
+        _make_row(media_id="a2", task_id="t1", filename="a2.png", paid_credit="100"),
+        _make_row(media_id="b1", task_id="t2", filename="b1.png", paid_credit="0"),
+        _make_row(media_id="c1", task_id="t3", filename="c1.png"),   # untracked ('')
+    ])
+    core.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
+    out = capsys.readouterr().out
+    assert "Credits tracked" in out
+    assert "100 spent across 2 tasks (1 free)" in out
 
 
 def test_save_and_load_roundtrip(tmp_path):

@@ -3,7 +3,8 @@
    your catalog" modal (search, collection/type/rating/sort filters, infinite scroll).
 
    Second shared web component of the Option-A cohesion migration (see
-   docs/SUITE_ARCHITECTURE_AUDIT.md), same conventions as mg-model-picker.js: plain global
+   docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md, archived), same conventions as
+   mg-model-picker.js: plain global
    via <script src>, no build step, reads the shared DESIGN_TOKENS_CSS. PickerCore already
    unified the browse/filter/paginate LOGIC between the gallery's vanilla Picker and the
    Loom's React GalleryPick; this element unifies the missing piece -- the RENDERING -- so
@@ -11,12 +12,22 @@
 
    Usage (mount-to-open / unmount-to-close, matching the Loom's existing pickCb pattern):
      <mg-gallery-picker default-type="image"></mg-gallery-picker>
+   default-type is image (the default) | video | all -- "all" browses both kinds and is
+   sent to the server as type=all (NOT '': the server maps an empty type to "image" for
+   the gallery Picker's back-compat, which is exactly how videos used to go missing).
    Optional boolean attributes (all OFF by default, so the first adopter's behavior is a
    byte-for-byte match of what it already had -- no surface added silently):
-     show-type          -- render the Image/Video/All type dropdown
-     show-source         -- render the Source (AI-generated / imported local) dropdown
-     show-upload         -- render an "Upload" button (POSTs to /api/upload, then picks it)
-     show-copy-prompt    -- render a "copy prompt on pick" checkbox (persisted to localStorage)
+     show-type          -- render the Image/Video/All type dropdown (the Loom's own mount
+                            uses this)
+     show-source        -- render the Source (AI-generated / imported local) dropdown
+     show-upload        -- render an "Upload" button (POSTs to /api/upload, then picks it)
+     show-copy-prompt   -- render a "copy prompt on pick" checkbox (persisted to localStorage)
+   show-source/show-upload/show-copy-prompt were removed 2026-07-24 as a dead-code sweep
+   (zero callers outside this file's own dev harness at the time) and RESTORED 2026-07-24,
+   same night, once the gallery's own #pick-modal migration (O13) became their first real
+   caller -- all three exist because the gallery's own picker had them and losing them on
+   migration would have been a regression, not a consolidation. Lesson: "zero callers
+   right now" is not the same claim as "will never have one" -- see docs/AUDIT_2026-07-21.md.
    Events (both bubble + compose, so a React host's DOM listener sees them):
      mg-pick  -- detail: {media_id, thumb, prompt, is_video}
      mg-close -- fired on Escape / backdrop click / the X button; the host is expected to
@@ -70,7 +81,15 @@
     'mg-gallery-picker .mg-pk-cell img{width:100%;height:100%;object-fit:cover;display:block;}',
     'mg-gallery-picker .mg-pk-vid{position:absolute;top:5px;right:5px;background:rgba(6,4,16,.72);color:var(--text,#d6d2e2);',
     ' font-size:9px;border-radius:4px;padding:1px 6px;}',
-    'mg-gallery-picker .mg-pk-empty{grid-column:1/-1;color:var(--subtext,#9a93ab);text-align:center;padding:34px;font-size:13px;}'
+    'mg-gallery-picker .mg-pk-empty{grid-column:1/-1;color:var(--subtext,#9a93ab);text-align:center;padding:34px;font-size:13px;}',
+    /* Privacy blur (audit 2026-07-21 S5): this component never carried the host page's
+       body.privacy-blur rule at all -- picking through <mg-gallery-picker> (the Loom's own
+       gallery picker) painted the whole catalog unblurred regardless of the toggle. body is
+       real light DOM (no shadow root here), so the host page's class reaches straight in,
+       same shape as .card/.pick-cell in pixai_gallery.py. */
+    'body.privacy-blur mg-gallery-picker .mg-pk-cell img{filter:blur(16px);transition:filter .12s;}',
+    'body.privacy-blur mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img{filter:blur(28px);}',
+    'body.privacy-blur mg-gallery-picker .mg-pk-cell:hover img{filter:none;}'
   ].join('');
 
   function injectStyle() {
@@ -90,8 +109,14 @@
       if (this._built) return;
       this._built = true;
 
+      // 'all' is a REAL filter value here, not '': /api/gallery-images maps an empty
+      // type to "image" (deliberate back-compat for the gallery's vanilla Picker --
+      // see picker-core.js's filter-seeding comment), so submitting '' from the
+      // combined option silently made the "Image + video" view images-only and left
+      // rendered videos unreachable from the Loom's left-rail picker (issue #3).
+      // The server resolves type=all to "both kinds" already.
       var dt = this.getAttribute('default-type');
-      this._type = dt === 'video' ? 'video' : dt === 'all' ? '' : 'image';
+      this._type = dt === 'video' ? 'video' : dt === 'all' ? 'all' : 'image';
       this._q = ''; this._collection = ''; this._rating = 0; this._sort = 'newest';
       this._showType = this.hasAttribute('show-type');
       this._showSource = this.hasAttribute('show-source');
@@ -106,6 +131,11 @@
       this._count = this.querySelector('.mg-pk-count');
       this._collEl = this.querySelector('[data-f="collection"]');
       this._typeEl = this.querySelector('[data-f="type"]');
+      // Sync the DISPLAYED value with the resolved default: without this the select
+      // always shows its first option ("Image + video") whatever the active filter is,
+      // so a video-first mount lies about what it's showing, and the next _readFilters()
+      // re-reads the wrong displayed value and silently drops the real filter.
+      if (this._typeEl) this._typeEl.value = this._type;
       this._sourceEl = this.querySelector('[data-f="source"]');
       this._ratingEl = this.querySelector('[data-f="rating"]');
       this._sortEl = this.querySelector('[data-f="sort"]');
@@ -170,7 +200,7 @@
     _skeleton() {
       var opt = function (v, label) { return '<option value="' + esc(v) + '">' + esc(label) + '</option>'; };
       var typeSel = this._showType
-        ? '<select data-f="type"><option value="">Image + video</option>' +
+        ? '<select data-f="type"><option value="all">Image + video</option>' +
           '<option value="image">Images</option><option value="video">Videos</option></select>' : '';
       var sourceSel = this._showSource
         ? '<select data-f="source">' + opt('', 'Any source') + opt('api', 'Generated (AI)') +
@@ -239,6 +269,7 @@
         var c = document.createElement('div');
         c.className = 'mg-pk-cell';
         c.title = m.prompt || m.media_id;
+        if (m.is_nsfw === '1') c.setAttribute('data-nsfw', '1');
         c.innerHTML = '<img loading="lazy" decoding="async" src="' + esc(m.thumb) + '" alt="">' +
           (m.is_video === '1' ? '<span class="mg-pk-vid">▶</span>' : '');
         c.addEventListener('click', function () { self._pick(m); });
@@ -255,7 +286,7 @@
       }
       this.dispatchEvent(new CustomEvent('mg-pick', { bubbles: true, composed: true,
         detail: { media_id: m.media_id, thumb: m.thumb, prompt: m.prompt || '',
-                  is_video: m.is_video === '1', duration: m.duration || '' } }));
+                  is_video: m.is_video === '1', duration: m.duration || '', is_nsfw: m.is_nsfw === '1' } }));
     }
 
     _upload() {

@@ -105,6 +105,8 @@ ROUTE_TIERS = {
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
     ("api_import_local", "POST"): LOCALHOST,         # writes files into the backup + shells thumbnails
     ("api_users_add", "POST"): LOCALHOST,           # mints a new persistent login (2026-07-22)
+    ("api_trash_delete_forever", "POST"): LOCALHOST,  # irreversible local file deletion (2026-07-24)
+    ("api_trash_empty", "POST"): LOCALHOST,           # irreversible local file deletion (2026-07-24)
 
     # -- LOGIN: any authorized session ---------------------------------------
     ("index", "GET"): LOGIN,
@@ -147,6 +149,12 @@ ROUTE_TIERS = {
     ("export_zip", "POST"): LOGIN,
     ("export_csv_download", "GET"): LOGIN,
 
+    # trash / quarantine panel (2026-07-24) -- restore is LOGIN (recovering
+    # something is not the same trust question as destroying it forever); see
+    # api_trash_delete_forever/api_trash_empty above in the LOCALHOST section.
+    ("api_trash_list", "GET"): LOGIN,
+    ("api_trash_restore", "POST"): LOGIN,
+
     # credit-spending generation surface -- the five routes the hand-maintained
     # lists in test_web_auth.py never covered.
     ("api_generate", "POST"): LOGIN,
@@ -188,6 +196,7 @@ ROUTE_TIERS = {
     ("loom_set", "POST"): LOGIN,
     ("loom_delete", "POST"): LOGIN,
     ("loom_handoff", "POST"): LOGIN,
+    ("loom_video_duration", "GET"): LOGIN,
     ("api_loom_export", "POST"): LOGIN,
     ("api_loom_export_bundle", "POST"): LOGIN,
     ("api_loom_export_cancel", "POST"): LOGIN,
@@ -217,16 +226,12 @@ ROUTE_TIERS = {
     # LAN-self-succeeds / LAN-other-refused pair that actually covers it.
     ("api_users_remove", "POST"): LOGIN,
 
-    # FINDING (2026-07-19, unresolved at the time this file was written):
-    # api_server_stop / api_server_restart both say "Localhost-only." in their
-    # docstrings and neither one calls _is_local_request(). They are declared
-    # LOGIN here because LOGIN is what the code actually enforces today, and a
-    # test that ships red is a test that gets deleted. This is the same
-    # docstring-says-localhost / code-says-nothing shape the route-gating audit
-    # already found three times (api_panel_cancel, api_panel_schedule POST,
-    # api_setup_save_key). If the owner decides these should be loopback-only,
-    # add the check to the handlers and move these two lines up to the
-    # LOCALHOST block -- this file will then prove it.
+    # RESOLVED (owner decision 2026-07-19, see CHANGELOG): api_server_stop /
+    # api_server_restart stay in the broader "any logged-in LAN session" tier
+    # on purpose, not LOCALHOST. Their docstrings were updated to say "Login
+    # required" to match, closing the docstring-says-localhost /
+    # code-says-nothing gap the route-gating audit had flagged. LOGIN here is
+    # the intended, current design, not a stand-in for an unresolved decision.
     ("api_server_stop", "POST"): LOGIN,
     ("api_server_restart", "POST"): LOGIN,
 }
@@ -480,8 +485,8 @@ def test_every_registered_route_declares_a_tier(app):
 
 def test_no_route_is_reachable_without_a_session(app, armed):
     """Every LOGIN and LOCALHOST route, probed with no cookie at all, from a LAN
-    address and again from loopback -- localhost has not been a trusted tier
-    since the 2026-07-19 owner directive, so both must refuse identically."""
+    address and again from loopback -- localhost is not a trusted tier, so both
+    must refuse identically."""
     cli = app.test_client()
     failures = []
     for (endpoint, method), rule in sorted(_registered_pairs(app).items()):
@@ -703,3 +708,93 @@ def test_panel_shows_the_real_path_to_localhost(app, tmp_path):
     html = cli.get("/panel").get_data(as_text=True)   # loopback REMOTE_ADDR by default
     assert str(tmp_path) in html, (
         "the owner's own /panel no longer shows the real library path")
+
+
+# ---------------------------------------------------------------------------
+# 7. Control-level disclosure: three owner-only CONTROLS must not just error, they
+# must not even RENDER for a LOGIN-tier LAN session (docs/AUDIT_2026-07-21.md P3 and
+# the reachability-lens finding under section 5 -- "which LOCALHOST-gated controls are
+# rendered to every LOGIN session?"). Before this fix, all three rendered normally for
+# any authorized session and only 403'd server-side after a browser confirm dialog --
+# never a security hole (every target route already carried its own correct
+# `_is_local_request()` check), but a dead-end UX wart. FIXED 2026-07-24: the owner's
+# explicit call was to gate visibility on the real check, not just relabel the gap.
+# ---------------------------------------------------------------------------
+
+def test_index_withholds_the_import_button_from_a_lan_session(app):
+    """The header's "^ Import" button used to render for ANY logged-in session, local
+    or LAN, because its visibility only checked the blanket `is_local` flag (hardcoded
+    True for every authorized request reaching index() -- see that route's comment).
+    Its real target, /api/import-local, is actually LOCALHOST-tier (it writes files
+    onto the server's own machine) -- so a LAN session saw a working-looking Import
+    button that always 403'd on click. The button is now nested behind `is_true_local`,
+    the real _is_local_request() result -- the same value `can_delete_cloud` ("Delete
+    from PixAI") already used."""
+    cli = _login(app)
+    html = cli.get("/", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    assert 'onclick="ImportUI.open()"' not in html, (
+        "a LAN session's rendered index page still contains the Import button, which "
+        "posts to the LOCALHOST-only /api/import-local and would 403 on click")
+    # Sibling LOGIN-tier owner controls must still render for LAN -- this fixes ONE
+    # control's visibility, not a blanket lockout of the whole owner section.
+    assert "Gen.open()" in html and 'href="/loom"' in html
+
+
+def test_index_shows_the_import_button_to_localhost(app):
+    """The companion to the test above: the owner sitting at the server must still see
+    a working Import button. Without this test, a future 'just always hide it' change
+    would pass the LAN test while quietly breaking the one caller who can actually use
+    it."""
+    cli = _login(app)
+    html = cli.get("/").get_data(as_text=True)   # loopback REMOTE_ADDR by default
+    assert 'onclick="ImportUI.open()"' in html, (
+        "the owner's own index page no longer shows the Import button")
+
+
+def test_panel_withholds_set_launcher_icon_and_destructive_buttons_from_lan(app):
+    """"Set launcher icon" and every destructive Maintenance action (Organize, Dedup,
+    Rebuild thumbnails, ...) used to render for any LOGIN-tier session -- their real
+    targets (/api/branding/shortcut, and /api/panel/run's `spec["destructive"]` branch)
+    are correctly LOCALHOST-gated server-side, but nothing hid the buttons themselves,
+    so a LAN session saw working-looking controls that 403'd after a browser confirm
+    dialog. Both now key off `panel_is_local`, the same flag the Users tab's Add/Remove
+    UI already used (2026-07-22)."""
+    cli = _login(app)
+    html = cli.get("/panel", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    assert 'onclick="setLauncher()"' not in html, (
+        "a LAN session's rendered /panel still contains the Set launcher icon button, "
+        "which posts to the LOCALHOST-only /api/branding/shortcut and would 403")
+    actions_json = html.split("var ACTIONS = ", 1)[1].split(";", 1)[0]
+    for destructive in ("organize", "undo-organize", "dedup-apply", "dedup-delete",
+                       "restore-orphans", "rebuild-thumbs"):
+        assert '"action": "{}"'.format(destructive) not in actions_json, (
+            "a LAN session's Maintenance ACTIONS payload still includes the "
+            "destructive action {!r}, which posts to the LOCALHOST-only "
+            "/api/panel/run and would 403 after a confirm dialog".format(destructive))
+    # Safe actions are UNCHANGED: this fix is scoped to destructive-button visibility,
+    # not a blanket Maintenance-tab lockout -- a LAN account may still run any of them
+    # (see test_panel_status_is_not_blanket_localhost_gated above for the sibling
+    # principle on the polling side).
+    assert '"action": "sync"' in actions_json
+    # The scheduler dropdown's own source (ALL_ACTIONS) is deliberately untouched by
+    # this fix: loadSchedule() already excludes every destructive action from the
+    # dropdown for everyone, local or LAN, so there was never anything to hide there.
+    all_actions_json = html.split("var ALL_ACTIONS = ", 1)[1].split(";", 1)[0]
+    assert '"action": "organize"' in all_actions_json
+
+
+def test_panel_shows_set_launcher_icon_and_destructive_buttons_to_localhost(app):
+    """The companion to the test above: the owner sitting at the server must still see
+    a working Set-launcher-icon button and every destructive Maintenance action.
+    Without this test, a future 'just always hide it' change would pass the LAN test
+    above while quietly breaking the one caller who can actually use these."""
+    cli = _login(app)
+    html = cli.get("/panel").get_data(as_text=True)   # loopback REMOTE_ADDR by default
+    assert 'onclick="setLauncher()"' in html, (
+        "the owner's own /panel no longer shows the Set launcher icon button")
+    actions_json = html.split("var ACTIONS = ", 1)[1].split(";", 1)[0]
+    for destructive in ("organize", "undo-organize", "dedup-apply", "dedup-delete",
+                       "restore-orphans", "rebuild-thumbs"):
+        assert '"action": "{}"'.format(destructive) in actions_json, (
+            "the owner's own Maintenance ACTIONS payload is missing the destructive "
+            "action {!r}".format(destructive))

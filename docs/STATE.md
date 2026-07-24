@@ -28,16 +28,17 @@ Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owne
 generations, serves a local searchable web gallery, generates images and videos through
 PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
 the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
-is **v2.2.0** (2026-07-21 — four security fixes: `/logout`'s global revoke moved behind POST +
-CSRF, `/api/panel/status` stopped handing maintenance stdout to LAN accounts, the service worker
-stopped caching a followed login redirect, and saved views became per-account; plus the last two
-video models, a prompt field in Deep Focus, and the cost displays consolidated onto
-`<mg-cost-badge>`). **`loom-v2` has since pulled ahead again** (post-release audit fixes S1–S3/
-B1/B2/B4, the account-eviction gate, the Folio of Honors redesign + its layout fix, and a
-2026-07-22 sweep through the rest of the audit board's high-severity list — see
-`docs/AUDIT_2026-07-21.md` for what's still open, `CHANGELOG.md [Unreleased]` for what shipped)
-— check `git rev-list --count origin/master..origin/loom-v2` for the live count rather than
-trusting a number here. Each release is a `--no-ff` merge of `loom-v2` → `master`, tagged and published as
+is **v2.3.0** (2026-07-23 — the Folio of Honors redesign, LoRA support + cost badges across
+the Loom's Image/Edit/Reference tabs, per-account splits for the last three shared-file
+stores (Toolbox presets, prompt snippets, Loom storyboards), the account-eviction gate, a
+2026-07-22 sweep through the rest of the audit board's high-severity list, and two further
+security fixes — Cache Storage purge on sign-out, and a host-path redaction re-spin covering
+37 sites — both adversarially reviewed before shipping; full detail in `CHANGELOG.md`'s
+`[2.3.0]` block). `loom-v2` and `master` are in sync as of that release — check
+`git rev-list --count origin/master..origin/loom-v2` for the live count rather than trusting
+a number here, since new work may already have landed on `loom-v2` since. See
+`docs/AUDIT_2026-07-21.md` for what's still open. Each release is a `--no-ff` merge of
+`loom-v2` → `master`, tagged and published as
 a GitHub Release. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
 tree, the `v2` toggle, and the `CardView`/`CardEditor` components) was retired 2026-07-17; `/loom`
 opens straight into the V2 shell with no layout switch. The repo is public and has real external
@@ -174,9 +175,9 @@ users.
   (`_renderError`) now recognizes a content-moderation rejection the same way the Loom's own
   poll path already did — a local, verbatim port of `friendlyGenErr` (the drawer can't import
   `loom-mutations.js`, an ES module, and must stay a build-free `<script>`), wired into the two
-  call sites that carry a genuine raw server string (submit failure, poll task failure). Fixes
-  the Loom's own Video-tab mount for free (shared component) and will cover the gallery's own
-  Video tab once it adopts `<mg-generate-drawer>` (still pending).
+  call sites that carry a genuine raw server string (submit failure, poll task failure). Covers
+  both mounts of the shared component — the Loom's own Video tab and, since the gallery's
+  Option-A migration (`2b20806`), the gallery's Video tab too.
 - **Timeline drawer's video preview was too small and left-justified** instead of centered —
   `.sb-shotprev`/`.sb-shotprev-wrap` max-width 340px→460px with `margin:auto` centering, the
   preview zone/drawer's "full" height grown proportionally (280px→362px / 360px→442px) so the
@@ -224,6 +225,11 @@ users.
   load, so a mid-render tab close no longer strands the shot or orphans its clip.
 - Frame handoff is trim-aware — it extracts the previous shot's frame at its `trimOut`, not the
   untrimmed clip's real last frame.
+- A board card shows a small "linked" badge when its opening frame already matches the previous
+  shot's closing frame (`continuityLinked`, wired to the pure `frameLinked` check), next to the
+  mode/duration tags. Silent/positive-only — there is no "not linked" warning state, since most
+  shots are deliberately disconnected from their neighbor. **Owner has not yet visually confirmed
+  this — built 2026-07-23, treat the exact placement/behavior as a first cut pending a look.**
 - Multiple named storyboards persist at `storyboard:v2:proj:<id>` with an active pointer, via the
   `ProjectSwitcher` in the top strip.
 - The state layer is four composed hooks — `useProjectStore`, `useShotMutations`,
@@ -239,8 +245,11 @@ users.
   `--amber`→`--accent`), so switching skin in the gallery header re-colors the Loom. Every
   skin reaches both surfaces.
 - `<mg-model-picker>` and `<mg-gallery-picker>` are live framework-neutral custom elements in
-  `static/`, with standalone harnesses; the Loom mounts both via ref-callback bridges
-  (c24837c).
+  `static/`, with standalone harnesses. **Both surfaces mount both components now** (O12/O13,
+  2026-07-24): the Loom via ref-callback bridges (c24837c), the gallery's own Generate tab
+  (`#model-flyout` → two `<mg-model-picker>` instances) and its own image picker
+  (`#pick-modal` → `<mg-gallery-picker>`) via the same mount/unmount pattern, replacing the
+  old hand-rolled duplicates outright rather than adding a third copy alongside them.
 - Loom projects persist as one atomically-written file per key under `out_dir/loom/kv`, with
   the legacy `store.json` auto-migrated in on first touch (1710f04).
 - **Project export is a two-tier "Export ▾" menu** off `ProjectSwitcher` (the `ExportMenu`
@@ -523,8 +532,17 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   generation (the Loom board's per-shot/"Generate all" path, distinct from the Video Deep
   Focus tab above), and `loom/src/loom-core.js`'s aggregate summary behind the cost-to-finish
   pill.
-- Gallery adoption of `<mg-model-picker>` (replacing the working `#model-flyout`) is a later,
-  live-QA'd step.
+- **`<mg-cost-badge>`'s `compact` attribute and `mg-cost` event have no production consumer
+  yet — by design, not as dead code.** Both are declared public API of a deliberately
+  host-agnostic component (see the file's own header comment): `compact` was built for the
+  not-yet-wired cost-to-finish pill above, and `mg-cost` is precisely the DOM-level signal
+  that would carry a price update across the no-build-global (`static/*.js`) <-> esbuild-module
+  (`loom/*.jsx`) wall the Option-A consolidation stopped at. Do NOT delete either as unused —
+  a future pass wiring the cost-to-finish pill / the D-12 architecture consolidation needs
+  exactly this surface. (Audit O14/L479, confirmed still true 2026-07-24.)
+- Gallery adoption of `<mg-model-picker>`/`<mg-gallery-picker>` (replacing `#model-flyout`/
+  `#pick-modal`) shipped 2026-07-24 (O12/O13) — live-QA'd against a real running server. See
+  the Web components note above and `CHANGELOG.md`'s `[Unreleased]` for the full detail.
 
 ### Control Panel / web parity
 
@@ -599,22 +617,197 @@ waiting; the "together" grouping still applies to what's left below.
 
 ## Open owner calls
 
-- **Epic-tier frame art** undecided. The owner wants epic to read "deep-purple WoW epic /
-  tier-gear," leaning Nelnamara's Dreamwalker feathers + Balance-Druid Moonfire flair, without
-  out-shouting legendary-gold or feat-ruby. Enabling it is a one-key change: the framed map in
-  `_mkMoment` takes `epic:1` once art exists.
-- **"Earned rewards" as its own display** — shape TBD.
-- **"Toast badge grows to its home marker"** needs the owner to finish articulating it before
-  it is buildable.
-- **Real SFX for the unlock toast** need owner-supplied sound. The loader ships and fails soft,
-  but no `branding/sfx/` folder exists on the served tree, so the synth chime is the only sound
-  that ever plays. Sources scouted: Kenney / Sonniss GDC / freesound / OpenGameArt (CC0), or
-  Stable Audio Open via Pinokio; the owner has 1–2 WoW sounds.
-- **Toast tier colors vs. shipped badge art.** Whether to realign the code's toast tier-glow
-  colors and rarity pill to the shipped badges' tier scheme. The recommended scheme (rarity
-  carried on gem + glow, ring reinforces; legendary warmed toward amber) was never
-  owner-confirmed; the code still runs the original (common = steel-blue `#9fbad6`, with
-  `--gunmetal #8a93a2` / `--ruby #e0355e`).
+- **Epic-tier frame art — deferred to the Design Pass.** The owner is now on the fence about
+  the whole premise: considering REMOVING the ornate per-tile frames from Legendary/Feat
+  rather than adding a matching Epic one (2026-07-23). Not the "deep-purple WoW epic /
+  tier-gear" direction previously banked — that's shelved pending this bigger question.
+- **"Earned rewards" display — CORRECTION 2026-07-23, this is already LIVE, not TBD.**
+  A previous pass (and this file, until now) wrongly carried it as an unbuilt idea. It's a
+  real section in the Folio of Honors today, currently showing only **skin** unlocks. Open
+  (not a shape question — a build-more question): extend it to also cover **banner** and
+  **icon** unlocks, plus the easter egg (see below). Exact current render location in
+  `pixai_gallery.py` / `static/mg-notify.js` not yet re-confirmed against the
+  post-Folio-of-Honors code — ask the owner to point at it directly rather than re-deriving
+  from git history next time this comes up.
+- **The reward system's real shape, per the owner (2026-07-23) — bigger than one banner.**
+  The original design intent was a **bundle**, not an isolated flag: a qualifying achievement
+  was meant to unlock a **banner + an icon/mark + a matching skin together**, and the reward
+  *type* was meant to track achievement **tier** — low-tier unlocks an icon, epic-tier
+  unlocks a skin, legendary-tier unlocks a banner. This tier→reward mapping was never fully
+  built; **Feats (the 11-item tier in the 57-roster) grew out of this same reward-design
+  thinking** — they're a byproduct of working out what each tier should give, not a
+  separately-invented category. `D-8` (audit board) undersold this as "build the unlock pool
+  or delete the promise" — it's actually "finish designing and building a tier-based reward
+  architecture that's partially there." The 57-vs-60 gap (below) was also seeded with this in
+  mind: room for ~3 more achievements was deliberately left to round out reward-tier coverage,
+  still waiting on the Design Pass.
+- **Owner's concrete mark (icon) decisions, 2026-07-23 — apply when the reward system is
+  built:**
+  - **Void Sentinel** — ships as the **default** icon (free, not achievement-gated).
+  - **Gem Tome** — owner dislikes it; **remove it** from the mark roster entirely.
+  - **Moonwell Eclipse** — unlocks together with the **Nightfallen** skin.
+  - **Vine Crescent** — unlocks together with the **Verdant Grove** skin.
+  - **Winged Crescent** — owner wants to **remake the art**; unlocks together with the
+    **Ember Court** skin once remade.
+  - Recurring, standing complaint (not new): **marks render too small** wherever they show in
+    the app (today: the header at 42px) — the owner has said so since the beginning. Treat as
+    a real sizing defect to fix alongside any mark-system work, not a taste question.
+- **Reward-tier schema proposal — scoped 2026-07-24 on branch `reward-bundle-scoping`
+  (shape only, not built, not populated — filling it in is the owner's creative call).**
+  `docs/achievements_roster_57.json`'s `roster.achievements[]` already carries a prestige
+  `tier` field (`common`/`rare`/`epic`/`legendary`/`feat`) plus two ad hoc, already-populated
+  reward fields — `skin` (a skin id string, non-empty on 3 of 57) and `banner_reward` (bool,
+  true on exactly 1 of 57) — so no new TIER field is needed; what's missing is a REWARD field
+  distinct from prestige tier. Proposed addition, same shape on every achievement object:
+  **`reward_kind`** (`none` / `icon` / `skin` / `banner` — deliberately not named
+  `reward_tier` as D-8's own phrasing suggests, to avoid colliding with the existing `tier`
+  field; related concepts, not the same one) plus **`reward_id`** (a string bundle/asset
+  pointer, e.g. `"nightfallen"`, empty when `reward_kind` is `none`). Two achievements sharing
+  one `reward_id` (say, a low-tier one and an epic one) is what expresses "these unlock
+  together as one themed bundle" without forcing every bundle piece onto a single
+  achievement. Optionally, a new top-level `roster.bundles[]` catalog (sibling to
+  `buckets`/`tracks`) gives each theme one place to name its actual mark id / skin id / banner
+  asset — today that mapping exists only as prose in this file. **Two reconciliation notes for
+  whoever builds this:** (1) `pixai_gallery.py`'s `ACHIEVEMENTS` list (`:781`) is a
+  hand-transcribed runtime copy of the JSON roster, not loaded from the JSON at runtime (same
+  pattern as the `LADDER_TRACKS` comment at `:1526-1530`) — any new field lands in both places
+  by hand, whenever it's actually populated; (2) the existing `skin`/`banner_reward` values on
+  `hoardsmith`/`reel-director`/`menagerie`/`the-great-library` predate the bundle design and
+  each carry only one piece (a skin id, or a bare flag with no specific banner named) — they
+  need reconciling into the new fields, not just left alongside them.
+- **Reward-bundle decision ledger + gap list — scoped 2026-07-24.** Every mark/banner/skin
+  pairing decided so far, compiled from D-8 (`docs/AUDIT_2026-07-21.md`) and the mark-decisions
+  bullet above, cross-checked against the live code rather than re-derived from scratch:
+
+  | Bundle theme | Mark | Skin | Banner | Status |
+  |---|---|---|---|---|
+  | *(default)* | Void Sentinel | — | — | ships free/ungated |
+  | *(removed)* | ~~Gem Tome~~ | — | — | owner: delete from the mark roster |
+  | Nightfallen | Moonwell Eclipse | Nightfallen (currently **free** — see below) | #100 | picked |
+  | Verdant Grove | Vine Crescent | Verdant Grove | *(none picked yet)* | picked, no banner yet |
+  | Ember Court | Winged Crescent (**art not remade yet**) | Embercourt | *(none picked yet)* | picked, blocked on art |
+  | Moonlit Silver | *(none picked yet)* | Moonlit Silver | task `2030243024291694139` | picked, no mark yet |
+
+  Plus the standalone default: **banner #62 is the current live default** (`banner.png`,
+  already shipped, not tied to any achievement).
+
+  **Open tension found while compiling, not recorded in any prior doc:** `nightfallen` and
+  `moonglade` are the two skins flagged `"free": True` in `SKINS` (`pixai_gallery.py:1512-1523`)
+  — Nightfallen is not achievement-gated at all today. The Moonwell-Eclipse-unlocks-with-
+  Nightfallen decision doesn't say whether Nightfallen should become gated too, or stay free
+  while only its matching mark is the gated half of that bundle. Needs an explicit owner call.
+
+  **Observation, not a decision:** the app's only 3 skin-gated achievements today are all
+  epic-tier ladder rungs, and their skin ids already match 3 of the 4 bundle themes above —
+  `hoardsmith`→`moonlit` (Moonlit Silver), `reel-director`→`ember` (Embercourt),
+  `menagerie`→`verdant` (Verdant Grove). If the owner wants to reuse rather than reassign,
+  those three are natural anchors for those three bundles' skin half; only Nightfallen has no
+  existing achievement anchor at all.
+
+  **Gap count — how many of the 57 still need a reward assignment:**
+
+  | Bucket | Total | Carry *any* existing reward marker | Gap |
+  |---|---:|---:|---:|
+  | ladder | 29 | 4 — `hoardsmith`/`reel-director`/`menagerie` (a bare skin id each); `the-great-library` (the banner flag, no specific banner named) | 25 |
+  | milestone | 9 | 0 | 9 |
+  | mastery | 8 | 0 | 8 |
+  | feat | 11 | 0 (2 carry unrelated hardcoded rewards outside this system entirely — `under-the-hood` unlocks custom branding, `triggered` unlocks the roast-toggle — see below) | 11 |
+
+  None of the 4 "marked" achievements has a complete `reward_kind` + `reward_id` under the new
+  bundle model — a bare skin id or a bare boolean isn't a bundle pointer to a specific mark or
+  banner. So the honest count is **0 of 57 fully assigned under the new design, 4 partially
+  (and in need of reconciling, not just extending), 53 blank**.
+
+  **Structural constraint worth knowing before assigning:** not every ladder reaches every
+  prestige tier — `vault`/`gallery`/`sweep`/`vigil` cap at 2 rungs each (never reach
+  `legendary`; `vault`/`gallery` never touch `common` either), so a strict per-track "climb to
+  legendary, get the banner" rule can't produce a banner for those four tracks without adding a
+  rung. Milestones (9 achievements, `common`/`rare` tiers only) and Masteries (8, `rare`/`epic`
+  only) never reach `legendary` at all, so a uniform `tier`→`reward_kind` rule can't produce a
+  banner outside the ladder bucket either. Also open: the owner's own phrasing named
+  `low→icon / epic→skin / legendary→banner` — whether `rare` counts as "low" alongside
+  `common`, or wants its own `reward_kind`, isn't stated anywhere yet.
+
+  **Ready to wire up once tiers are assigned (not built):** `compute_achievements()`
+  (`pixai_gallery.py:1759-1817`) is where `earned_skins` gets built and `banner_reward` passed
+  through today — there is no equivalent mark/bundle logic yet. `SKINS` (`:1512-1524`) is the
+  only existing reward-asset catalog; there is no parallel `MARKS` list gating icons to
+  achievements — the marks system (`list_marks`/`load_branding`, `:1562-1620`) is purely a
+  machine-local file-drop, unconditional for anyone regardless of achievement state. `docs/ART.md`
+  §2 row 18 confirms the banner slot itself is singular today (`branding/banner.png`, one file,
+  no pool) — building "banner defaults vs. unlock pool" is new infrastructure, not just a data
+  mapping. Client-side, the reward line renders at `static/mg-notify.js:519-520` (`card()`, the
+  Folio's grid tiles) and `:863-865` (`_mkMoment()`, the unlock toast's reward ribbon) — both
+  read `skin`/`banner_reward` directly today and would need a third `reward_kind==='icon'`
+  branch alongside once marks are wired to achievements.
+- **The easter egg — CONFIRMED 2026-07-23: `under-the-hood` IS it, but its current trigger
+  logic is wrong and the owner wants it rethought.** Today it fires (unlocking nothing, just
+  a hidden feat) when ANY custom mark file exists in `branding/marks/` — i.e. the achievement
+  requires the folder to have started EMPTY and the user to have dropped in their own art. The
+  owner rejects this premise on two grounds: (1) it assumes a stranger randomly discovers an
+  empty branding folder and knows to drop an image in it — an unrealistic trigger for a real
+  easter egg; (2) more fundamentally, **the branding folder was never supposed to ship empty**
+  — the app should ship the owner's own default marks/banner by design, so "empty folder" as
+  a precondition doesn't even hold once defaults ship correctly. A prior session apparently
+  argued against shipping the owner's own art using the "this is a public, not single-user,
+  tool" reasoning ([[feedback_not_single_user]]) — the owner is explicit that this was a
+  **misapplication**: "not single-user" is about building real security/access strength for
+  real external users, not a reason to withhold the app's OWN default branding from everyone
+  who downloads it. **Not decided yet, needs its own design pass:** what the egg's real
+  trigger should be once defaults ship correctly (the current "empty folder" condition stops
+  making sense the moment there IS a default), and how the "unlocks full custom branding"
+  payoff should work when defaults are already unlocked for everyone.
+  **Three trigger-redesign options, scoped 2026-07-24 (not picked — needs the owner's go):**
+  1. **Non-default mark, not just any mark.** Keep the existing `list_marks()`-based detection
+     (`sweep_telemetry()`, `pixai_gallery.py:2048-2058`) but compare against a known
+     shipped-default id set instead of "count ≥ 1" — fire only when a mark id absent from that
+     set appears. Smallest change (still file-drop detection, still literally "you dropped in
+     your own mark"), but needs the shipped defaults to be identifiable in code (today
+     `marks.json` carries no "is this a shipped default" flag) — and it only answers the
+     owner's objection (2) (the empty-folder precondition), not objection (1): a stranger still
+     has to already know the file-drop mechanic exists before they can trigger it at all.
+  2. **Visiting an internals-only surface for the first time.** The name fits an admin/
+     engine-room page more literally than a file-drop — e.g. a first visit to `/panel` (if it
+     turns out not to be prominently linked from the main nav) or a raw diagnostics view. Easy
+     to detect (a page-view event), no shipped-defaults bookkeeping needed. Risk: the Control
+     Panel is core to running the app day to day (syncs, jobs), so it may not read as "hidden"
+     enough to feel like a real find — needs checking how discoverable it already is before
+     this reads as an egg rather than a normal feature tour.
+  3. **A genuine hidden technical action** — a devtools-console-only hook (a `window.___`
+     function a curious user finds by reading the page's JS, in the spirit of the classic
+     "you opened the console" web easter egg), an undocumented CLI flag, or a direct hit on an
+     unlinked API route/query param. Closest to the name and the roast text ("you opened a
+     door you had no business finding") and fully decoupled from the branding-defaults problem
+     — no precondition about what ships in `branding/` at all. `api_ach_event()`
+     (`pixai_gallery.py:10780-10792`) already whitelists named front-end event beacons
+     (`konami`/`docs`/`narrator`) into `telem_flag()` calls — a console hook could reuse that
+     exact mechanism with one new event name, so this is less new infrastructure than it first
+     sounds. Tradeoff: several sub-choices (console hook vs. CLI flag vs. URL param), each with
+     a different discoverability profile, need picking.
+
+  All three leave the **payoff** open too (this file's own prior wording, still true): marks
+  already work for anyone regardless of achievement state today — there is no code gate an
+  earned `under-the-hood` currently switches on — so whichever trigger is picked, the reward
+  stays celebratory (badge, roast, the file-map pictogram art) unless the owner also wants a
+  real functional gate added, which is a separate decision.
+- **"Toast badge grows to its home marker" — CORRECTION 2026-07-23, this was a REAL
+  regression, not an unfinished idea.** Owner: "this was actually live until the achievement
+  revamp debacle... one of the lost facts." The archived note this file's prior wording was
+  sourced from ("owner articulating the idea separately, AWAITING") predates that — it must
+  have been built and shipped sometime after, then lost when the Hall got reworked. A
+  `c877919`→`0a8da3a` Trophy Hall reformat (2026-07-14/15, reverted) is confirmed real and
+  touched the adjacent "Rewards Earned" bar, but a quick pass did not turn up the specific
+  grow-to-marker animation code in that commit or the later `a47ec41` Figma-ported Folio of
+  Honors ship — needs either owner git-archaeology guidance or a fresh re-description, not
+  further guessing.
+- **Real SFX for the unlock toast — deferred to the Design Pass.** The loader ships and
+  fails soft, but no `branding/sfx/` folder exists on the served tree, so the synth chime is
+  the only sound that ever plays. Sources scouted: Kenney / Sonniss GDC / freesound /
+  OpenGameArt (CC0), or Stable Audio Open via Pinokio; the owner has 1–2 WoW sounds.
+- **Toast tier colors vs. shipped badge art — owner says resolved 2026-07-23, specifics to
+  land in the Design Pass.** Which direction (realign the code's toast/rarity-pill colors to
+  the shipped badges' tier scheme, or keep the code's original common/gunmetal/ruby scheme)
+  wasn't restated when he called it resolved — confirm before touching the CSS.
 - **Gallery search-bar redesign** is unstarted and deliberately blocked on the owner's
   layout-notes pass. Banked design: a LEFT Filters drawer mirroring the right Generate drawer.
   Sketch only after that pass.
@@ -632,10 +825,6 @@ waiting; the "together" grouping still applies to what's left below.
   nearly free today is *"flag near-duplicate generations"*, which the existing Pixeltable
   CLIP index can already answer with no new dependencies. Anatomy/artifact/NSFW detection is
   a research project rather than a backlog item, and should be named as one or dropped.
-- **File logging** has never entered any tracker, despite `CLAUDE.md` calling it "a separate,
-  still-open discussion" since `-v/--verbose` shipped. It is a loose thread, not a parked
-  decision: decide whether it is in scope, or drop it.
-
 ---
 
 ## The audit board
@@ -661,6 +850,14 @@ fact", so roughly twenty items became contractually invisible until this audit w
   sorted Canva dump, Live Nel Cutouts, Nelnamara Fine Images, Banners, `logos_cut`, Stickers,
   App icon candidates, Forge, plus `make_anim_webp.bat` / `make_green_source.bat` /
   `_assemble_webp.py`). The served `D:\...\branding\` set stays live and separate.
+- **Watch for stale duplicate checkouts elsewhere on this machine.** The 2026-07-17 doc
+  consolidation that created this section originally carried a fourth bullet here flagging a
+  stale duplicate `branding/` folder under `Desktop\pixai-gallery-backup-master` — dropped in
+  that pass and never restored (found + re-verified 2026-07-24; that specific folder is
+  confirmed gone now, so it isn't repeated as a live fact). The standing rule it existed to
+  state still holds: if another copy of this repo or its assets turns up anywhere on disk,
+  don't assume it's safe to ignore or silently delete — flag it to the owner and confirm which
+  copy is actually live before touching either, same caution as the D:/C: drift above.
 
 ---
 
@@ -725,9 +922,11 @@ fact", so roughly twenty items became contractually invisible until this audit w
   power user + community member" persona bucket held live, unactioned feature requests that went
   invisible when the file was archived — the same failure the audit-board reconciliation already
   fixed once (see "The audit board" above), recurring in a section that reconciliation never
-  reached. Checked against the current code 2026-07-22; still genuinely open: **credit ledger**
-  (`paidCredit` is fetched per-task but never written to the catalog — no spend charts, no
-  cost-per-model); **remix from the lightbox** (load an image's full recipe — prompt/negative/
+  reached. Checked against the current code 2026-07-22; still genuinely open: **credit ledger — the
+  VIEW half only** (the data half shipped 2026-07-23 on branch `paid-credit-persist`: the
+  `paid_credit` catalog column is written at every capture site and recoverable for old rows
+  via `--backfill-full-meta --with-credit`; spend charts / cost-per-model views remain
+  unbuilt); **remix from the lightbox** (load an image's full recipe — prompt/negative/
   model/LoRAs/size/seed — back into the Generate drawer; no matching code found under any name);
   **model/LoRA favorites + recents in the picker**, originally scoped local-only ("server-stored
   like Snippets") — the owner's 2026-07-22 ask wants these sourced from the user's real PixAI
@@ -835,7 +1034,7 @@ surface: no visual build from prose alone.
 | [ledger](https://claude.ai/code/artifact/d1ee39a1-db65-487b-a6ef-067ea6d1392d) | Per-achievement mascot + badge assignment | Live |
 | [Chibi Library · assign uses](https://claude.ai/code/artifact/1998636d-9043-41e8-900d-797c67fd04f2) | Chibi browser + use assignment | Live |
 | [Cohesion Map](https://claude.ai/code/artifact/4229e98c-4ac3-4e86-820a-72a57465c066) | Top-down app map | Live |
-| [Moonglade Banners — defaults & unlocks](https://claude.ai/code/artifact/7919cec3-aec7-41d0-8efc-8fb2d0f4cdb5) | Banner picks for the banner-unlock reward, which isn't built yet (D-8) | Live |
+| [Moonglade Banners — defaults & unlocks](https://claude.ai/code/artifact/7919cec3-aec7-41d0-8efc-8fb2d0f4cdb5) | The 194-candidate banner board with the judging panel's pre-scores (top: #100 and #82 at 19/20) — NOT final picks: the owner's Default/Unlock tags saved only to the voting browser's localStorage (`mg_banner_board_v1`), never exported back. Re-open in the voting browser and Export to recover them, or re-tag. Feeds D-8 | Live |
 | [Moonglade Model Deck](https://claude.ai/code/artifact/9f16f42d-2541-4dd9-935a-0f9d0f39c7c4) | Model research deck | Mirror — `docs/archive/MODEL_DECK_2026-07-11.md` is truth |
 
 **Parked**

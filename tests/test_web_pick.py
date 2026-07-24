@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+from pixai_gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
 
 from tests.conftest import login_client, login_existing_client
 
@@ -92,6 +92,219 @@ def test_gallery_images_type_filter_and_paging(tmp_path):
     # type=all: everything
     da = cli.get("/api/gallery-images?type=all").get_json()
     assert da["total"] == 6 and "9" in [m["media_id"] for m in da["images"]]
+
+
+def test_gallery_images_empty_type_stays_images_only(tmp_path):
+    """An EXPLICIT empty type (?type=) means images-only, same as absent -- load-bearing
+    back-compat in both directions (issue #3's root): the gallery's vanilla Picker sends
+    type='' and must never start surfacing videos (picker-core.js seeds '' for exactly
+    that reason), which is why <mg-gallery-picker>'s combined "Image + video" option has
+    to submit the server's real both-kinds value, type=all, instead of ''. If this
+    mapping ever flips to "both", the Loom picker won't break -- the gallery Picker
+    will."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00"),
+        _row(media_id="9", filename="v_9.mp4", is_video="1",
+             created_at="2025-02-01T00:00:00"),
+    ])
+    d = cli.get("/api/gallery-images?type=").get_json()
+    assert d["total"] == 1 and [m["media_id"] for m in d["images"]] == ["1"]
+
+
+def test_gallery_images_includes_is_nsfw_for_privacy_blur(tmp_path):
+    """Audit 2026-07-21, S5 (the remaining half): /api/similar already projects is_nsfw
+    (fixed 2026-07-23) but /api/gallery-images -- the route the gallery Picker,
+    <mg-gallery-picker>, and the Generate drawer's reference slots all actually call --
+    did not, so Privacy Blur's stronger NSFW rule (.card[data-nsfw="1"] img) never saw
+    an NSFW thumbnail on any of those three surfaces."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", is_nsfw="1", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", is_nsfw="", created_at="2025-01-02T00:00:00"),
+    ])
+    d = cli.get("/api/gallery-images").get_json()
+    by_id = {m["media_id"]: m for m in d["images"]}
+    assert by_id["1"]["is_nsfw"] == "1"
+    assert by_id["2"]["is_nsfw"] == ""
+
+
+def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces(tmp_path):
+    """Audit 2026-07-21, S5 (the client half): with is_nsfw now on the wire (test above),
+    every surface rendering /api/gallery-images results needs to set data-nsfw on the card
+    it builds, and body.privacy-blur needs a rule that actually blurs it -- neither existed
+    for the gallery Picker, the Edit tab's single reference slot (#gen-ref-slot),
+    <mg-gallery-picker> (.mg-pk-cell), or the Generate drawer's reference slots (.mgd-slot,
+    all three renderers) before this pass. Source-checks since none of these are build-step
+    components with an in-repo DOM test harness.
+
+    O13 (Phase 2) update: the gallery's own Picker no longer builds its own .pick-cell grid
+    at all -- it mounts the shared <mg-gallery-picker>, whose OWN is_nsfw/data-nsfw/privacy-
+    blur handling is covered by the picker_js assertions below (that coverage now applies to
+    the gallery too, not just the Loom). Picker.open's mg-pick bridge converts the
+    component's boolean is_nsfw back to the app-wide '1'/'' STRING convention at the
+    boundary, since Gen.renderGenRef's #gen-ref-slot setter (checked below) still does a
+    strict === '1' comparison -- this is the one place left in pixai_gallery.py that needs
+    is_nsfw to reach it as a real value, not just be forwarded blindly."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(f) f(d.media_id, d.thumb, d.prompt||'', d.is_nsfw?'1':'');" in html, (
+        "Picker.open's mg-pick bridge must convert the component's boolean is_nsfw back to "
+        "'1'/'' -- passing the raw boolean through would silently break the strict ===  '1' "
+        "check in Gen.renderGenRef's #gen-ref-slot setter below")
+    assert "Picker.open(function(mid, thumb, prompt, is_nsfw){ d.respond(mid, thumb, is_nsfw); }" in html
+    assert 'genRef={media_id:mid, thumb:thumb, is_nsfw:is_nsfw}' in html          # #gen-ref-slot
+    assert 'body.privacy-blur #gen-ref-slot[data-nsfw="1"] img' in html
+    # The old #pick-modal grid (and its dead privacy-blur branch) must be functionally
+    # gone -- checked as the real CSS rule / DOM class assignment, not a bare substring,
+    # since explanatory comments in the CSS legitimately still mention the old name.
+    assert '.pick-cell{' not in html and "className='pick-cell'" not in html, (
+        "the old #pick-modal grid should be fully gone -- <mg-gallery-picker>'s own "
+        ".mg-pk-cell covers this now (see picker_js below)")
+
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-gallery-picker.js").read_text(encoding="utf-8")
+    assert "if (m.is_nsfw === '1') c.setAttribute('data-nsfw', '1');" in picker_js
+    assert "is_nsfw: m.is_nsfw === '1'" in picker_js
+    assert 'body.privacy-blur mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img' in picker_js
+
+    drawer_js = (Path(__file__).resolve().parents[1] / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
+    assert drawer_js.count("box.setAttribute('data-nsfw', '1');") == 3   # _renderSlots, _renderEndSlot, _renderVidSlots
+    assert "respond: function (media_id, thumb, is_nsfw)" in drawer_js
+    assert 'body.privacy-blur mg-generate-drawer .mgd-slot[data-nsfw="1"] img' in drawer_js
+
+    loom_jsx = (Path(__file__).resolve().parents[1] / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
+    assert "cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration, e.detail.is_nsfw);" in loom_jsx
+    assert 'openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw)' in loom_jsx
+
+    loom_bundle = (Path(__file__).resolve().parents[1] / "loom" / "dist" / "master-storyboard.bundle.js").read_text(encoding="utf-8")
+    assert "is_nsfw" in loom_bundle or "isNsfw" in loom_bundle   # esbuild output stays in sync with the .jsx source
+
+
+def test_gallery_picker_is_the_shared_mg_gallery_picker_component(tmp_path):
+    """O13 (Phase 2): the gallery's own image picker is <mg-gallery-picker> now -- the same
+    component the Loom mounts -- instead of the old hand-rolled #pick-modal grid. Pins the
+    script include and the mount/bridge shape, and asserts the old markup/grid/upload/filter
+    IDs are gone, the same 'new surface present + old one gone' shape as
+    test_gallery_video_tab_is_the_shared_drawer_component (the Video tab's own Option-A
+    migration) -- so this swap can't silently regress back to the old hand-rolled form."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "/static/mg-gallery-picker.js" in html                    # component script on the gallery
+    assert "document.createElement('mg-gallery-picker')" in html     # mounted by Picker.open(), not static markup
+    assert "el.setAttribute('show-source', '');" in html             # gallery-parity attrs actually requested
+    assert "el.setAttribute('show-upload', '');" in html
+    assert "el.setAttribute('show-copy-prompt', '');" in html
+    assert "el.addEventListener('mg-pick'" in html
+    assert "el.addEventListener('mg-close'" in html
+    # the old hand-rolled picker markup/grid/upload/filter chrome is gone
+    for old_id in ('id="pick-modal"', 'id="pick-scrim"', 'id="pick-grid"', 'id="pick-q"',
+                   'id="pick-up"', 'id="pick-file"', 'id="pick-more"', 'id="pick-copy"',
+                   'id="pick-collection"', 'id="pick-source"', 'id="pick-rating"', 'id="pick-sort"'):
+        assert old_id not in html, "old #pick-modal markup survived the O13 migration: " + old_id
+    assert "Picker.onFilter" not in html and "Picker.onScroll" not in html and "Picker.toggleCopy" not in html
+
+
+def test_gallery_model_flyout_is_the_shared_mg_model_picker_component(tmp_path):
+    """O12 (Phase 2): #model-flyout's own hand-rolled search/grid/hover-preview/market UI is
+    two <mg-model-picker> instances now (kind="base" and kind="lora" multi market), lazily
+    mounted into #gen-picker-host on first open -- not the old #gen-grid/#gen-q/.gen-card
+    rendering. Same 'new surface present + old one gone' shape as the O13 test above."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "/static/mg-model-picker.js" in html
+    assert 'id="gen-picker-host"' in html
+    assert "document.createElement('mg-model-picker')" in html
+    assert "basePickerEl.setAttribute('kind','base');" in html
+    assert "loraPickerEl.setAttribute('kind','lora');" in html
+    assert "loraPickerEl.setAttribute('multi','');" in html
+    assert "loraPickerEl.setAttribute('market','');" in html   # O13's sort/category parity for LoRAs
+    assert "addEventListener('mg-pick', function(e){ onBasePick(e.detail); });" in html
+    assert "addEventListener('mg-pick', function(e){ onLoraPick(e.detail.model, e.detail.selected); });" in html
+    # the old hand-rolled grid/search/market chrome is gone
+    for old_id in ('id="gen-grid"', 'id="gen-empty"', 'id="gen-q"', 'id="mkt-sort"',
+                   'id="mkt-cats"', 'id="mkt-popular"', 'id="mkt-newest"'):
+        assert old_id not in html, "old #model-flyout grid markup survived the O12 migration: " + old_id
+    assert "function selectCard(" not in html and "function toggleLora(" not in html
+    assert "function search(){" not in html and "function render(rows" not in html
+
+
+def test_model_flyout_grid_fills_the_panel_instead_of_a_fixed_320px_cap(tmp_path):
+    """picker-parity-round2 (problem 1): the owner's live screenshot showed only ~2 rows of
+    cards then a large dead area filling the rest of #model-flyout's real height. Root cause
+    was TWO independent height constraints fighting each other: .gen-body was an
+    overflow:auto scroll container AND <mg-model-picker>'s own .mg-grid had a fixed
+    max-height:320px (see mg-model-picker.js's own tests for that half of the fix) -- so on
+    any flyout taller than ~380px, .gen-body's real extra height just sat there empty below
+    the capped grid. Fix: hand the real height down to the GRID so IT is the one scrolling
+    region, scoped to #model-flyout only (the main Generate form's own .gen-body is a plain
+    tall scrolling form and must stay untouched)."""
+    cli = _authed_client(tmp_path, [])
+    html = cli.get("/").get_data(as_text=True)
+    assert "#model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;min-height:0;}" in html
+    assert "#model-flyout #gen-picker-host{flex:1;min-height:0;display:flex;flex-direction:column;}" in html
+    assert "#model-flyout mg-model-picker{flex:1;min-height:0;}" in html
+    # #gen-drawer's own .gen-body (the main form) must be UNTOUCHED -- only ONE overflow:auto
+    # rule for the base .gen-body class, not overridden away by this fix.
+    assert html.count(".gen-body{padding:12px 14px;overflow-y:auto;flex:1;}") == 1
+
+
+def test_model_flyout_surfaces_version_picker_and_capabilities(tmp_path):
+    """picker-parity-round2 (problems 4/5): resolve_version_meta() already fetches a
+    model's OTHER releases + the author's own sampling_method/capabilities -- this was being
+    resolved and thrown away. #gen-version/#gen-caps surface both; base-type wiring feeds
+    the resolved architecture into the LoRA picker for problem 3's compat sort/badge."""
+    cli = _authed_client(tmp_path, [])
+    html = cli.get("/").get_data(as_text=True)
+    assert 'id="gen-version"' in html and 'onchange="Gen.pickVersion(this.value)"' in html
+    assert 'id="gen-caps"' in html
+    assert 'id="gen-modeldefaults-label"' in html   # sampling_method note target
+    assert "pickVersion:pickVersion" in html         # exposed on the Gen public object
+    # every base pick re-resolves via ?all=1 (the version LIST, not just the latest)...
+    assert "fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id)+'&all=1')" in html
+    # ...and feeds the resolved architecture straight into the LoRA picker (problem 3)
+    assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
+
+
+def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_path, monkeypatch):
+    """picker-parity-round2 (problem 3): LoRA search needs real per-row architecture data
+    (modelType/loraBaseModelType) on EVERY search, not just category/Newest browsing -- REST
+    has no such field to request (confirmed by inspecting its full response shape -- see
+    pixai_gallery_backup.py's model_search_rest), so kind=lora now always routes through
+    model_search_market_gql (GraphQL), regardless of category/sort. Base-model search
+    (kind=base) is UNCHANGED -- REST by default, GraphQL only for category/Newest."""
+    calls = {"rest": 0, "gql": 0}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "model_search_rest",
+                        lambda *a, **k: calls.__setitem__("rest", calls["rest"] + 1) or {"results": [], "has_more": False})
+    monkeypatch.setattr(core, "model_search_market_gql",
+                        lambda *a, **k: calls.__setitem__("gql", calls["gql"] + 1) or {"results": [], "has_more": False})
+    cli = _authed_client(tmp_path, [])
+    # plain keyword LoRA search, no category, no sort=newest -- would have hit REST before this pass
+    r = cli.get("/api/model-search?kind=lora&q=eris")
+    assert r.status_code == 200
+    assert calls == {"rest": 0, "gql": 1}
+    # base-model search under the SAME conditions is unaffected -- still REST by default
+    cli.get("/api/model-search?kind=base&q=eris")
+    assert calls == {"rest": 1, "gql": 1}
+
+
+def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatch):
+    """base_type= (the caller's already-resolved selected base model_type) threads into
+    annotate_lora_compat for kind=lora only -- a base-model search has nothing to
+    compat-sort against, so it ignores the param entirely even if sent."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "model_search_market_gql",
+                        lambda *a, **k: {"results": [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}],
+                                          "has_more": False})
+    monkeypatch.setattr(core, "model_search_rest",
+                        lambda *a, **k: {"results": [{"model_id": "9"}], "has_more": False})
+    cli = _authed_client(tmp_path, [])
+    d = cli.get("/api/model-search?kind=lora&base_type=SDXL_MODEL").get_json()
+    assert d["results"][0]["compat"] == "yes"
+    # no base_type -> untouched (no compat key added at all)
+    d2 = cli.get("/api/model-search?kind=lora").get_json()
+    assert "compat" not in d2["results"][0]
+    # base kind ignores base_type entirely (nothing to compat-sort a base model against)
+    d3 = cli.get("/api/model-search?kind=base&base_type=SDXL_MODEL").get_json()
+    assert "compat" not in d3["results"][0]
 
 
 def test_collections_endpoint(tmp_path):
@@ -290,9 +503,10 @@ def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch):
     saved = cli.post("/api/snippets",
                      json={"snippets": ["masterpiece, 4k", "", "  ", "night"]}).get_json()
     assert saved == {"snippets": ["masterpiece, 4k", "night"]}   # blanks dropped
-    # Per-account storage (D-7): the file lives under prompt_snippets/<user>.json now,
-    # not the old flat prompt_snippets.json every account used to share.
-    assert (tmp_path / "prompt_snippets" / "tester.json").exists()
+    # Per-account storage (D-7): the file lives under prompt_snippets/<key>.json now,
+    # not the old flat prompt_snippets.json every account used to share. Keyed via
+    # _account_key (B14 residual), not the raw username.
+    assert (tmp_path / "prompt_snippets" / (_account_key("tester") + ".json")).exists()
     assert cli.get("/api/snippets").get_json() == {"snippets": ["masterpiece, 4k", "night"]}
 
 
@@ -323,17 +537,51 @@ def test_one_account_cannot_see_or_clobber_anothers_snippets(tmp_path):
         "bob's save wiped alice's snippets -- the store is not per-account")
 
 
+def test_snippets_are_independent_for_accounts_differing_only_by_case(tmp_path):
+    """B14 residual: _snips_path() keyed its per-account file with quote(username,
+    safe=""), which is case-PRESERVING -- "Nel" and "nel" quote to two different
+    strings that name the SAME file on NTFS (case-insensitive-but-preserving), even
+    though account identity is case-SENSITIVE (same alice/bob split as above, just
+    unlucky enough to collide on disk). FAILS before the fix on this filesystem:
+    nel's snippets read/save clobbers Nel's."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    app = create_app(tmp_path)
+
+    upper = login_test_client(app, username="Nel", password="a-real-test-password-1")
+    upper.post("/api/snippets", json={"snippets": ["Nel-only"]})
+
+    lower = login_test_client(app, username="nel", password="a-real-test-password-2")
+    assert lower.get("/api/snippets").get_json()["snippets"] == [], (
+        "nel can see Nel's snippets -- case-differing usernames collide on disk")
+
+    lower.post("/api/snippets", json={"snippets": ["nel-only"]})
+    assert lower.get("/api/snippets").get_json()["snippets"] == ["nel-only"]
+    assert upper.get("/api/snippets").get_json()["snippets"] == ["Nel-only"], (
+        "nel's save overwrote Nel's snippets -- case-collision on disk")
+
+
 def test_gallery_model_preview_hover_is_debounced_not_instant(tmp_path):
-    """Same D-11 fix as the Loom's mg-model-picker.js: a raw mouseenter re-triggered an
-    instant, freshly-repositioned popup on every card the mouse passed over while
-    scanning the grid. This is fundamentally a feel/timing bug (real verification is
-    manual, in a browser) -- this only guards against reverting to the raw wiring."""
+    """D-11 fix, originally landed as the gallery's OWN scheduleShowPreview/cancelPreview
+    (a raw mouseenter re-triggered an instant, freshly-repositioned popup on every card the
+    mouse passed over while scanning the grid). O12 (Phase 2) moved the whole search-grid
+    -- including this debounce -- into the shared <mg-model-picker> component, so the
+    gallery gets the fix by LOADING that component now, not by hand-rolling its own copy.
+    This is fundamentally a feel/timing bug (real verification is manual, in a browser) --
+    this only guards against a future edit reverting to raw, un-debounced wiring, wherever
+    that wiring now lives."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
-    assert "c.onmouseenter=function(){ scheduleShowPreview(m, c); };" in html
-    assert "c.onmouseleave=cancelPreview;" in html
-    assert "function scheduleShowPreview(m, anchor){" in html
-    assert "function cancelPreview(){ clearTimeout(previewTimer); hidePreview(); }" in html
+    assert "/static/mg-model-picker.js" in html   # the gallery's own grid IS this component now
+    # The old hand-rolled copy must be gone, not just superseded -- two independently-
+    # debounced implementations is exactly the kind of drift this migration exists to end.
+    assert "function scheduleShowPreview(" not in html
+    assert "function cancelPreview(" not in html
+
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
+    assert "c.addEventListener('mouseenter', function () { self._schedulePreview(m, c); });" in picker_js
+    assert "_schedulePreview(m, anchor) {" in picker_js
+    assert "_cancelPreview() {" in picker_js
 
 
 def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path):
@@ -348,7 +596,8 @@ def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path
     assert cli.get("/api/snippets").get_json() == {"snippets": ["from-before"]}
 
     cli.post("/api/snippets", json={"snippets": ["from-before", "new-one"]})
-    own = json.loads((tmp_path / "prompt_snippets" / "tester.json").read_text(encoding="utf-8"))
+    own = json.loads((tmp_path / "prompt_snippets" / (_account_key("tester") + ".json"))
+                     .read_text(encoding="utf-8"))
     assert own == ["from-before", "new-one"]
     assert json.loads((tmp_path / "prompt_snippets.json").read_text(encoding="utf-8")) == ["from-before"]
 
@@ -475,6 +724,104 @@ def test_loom_handoff_needs_local_clip(tmp_path, monkeypatch):
     assert "not downloaded" in d["error"]
 
 
+def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch):
+    """B17 (audit 2026-07-21): the fallback resolver's bare '*<mid>.*' glob had no
+    quarantine exclusion -- a file under _deleted/ (a local purge) was a valid hit,
+    so a purged clip could be extracted and uploaded to seed the next (paid) shot.
+    No catalog row for this media_id, so the fast path can't shortcut past the
+    fallback -- this exercises exactly the buggy branch."""
+    import pixai_gallery as g
+    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir.mkdir()
+    (qdir / "shot_V9.mp4").write_bytes(b"fake")
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    calls = []
+    monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
+
+    cli = _authed_client(tmp_path, [])
+    d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
+
+    assert calls == [], "extracted a frame from a file quarantined under _deleted/"
+    assert "not downloaded" in d["error"]
+
+
+def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch):
+    """B17 (audit 2026-07-21): the fallback glob had no media_id_of(p) == mid check,
+    so a SHORTER media_id could match as a substring of a longer, UNRELATED one's
+    filename -- e.g. a request for 'V9' resolving to a clip whose real id is '9V9'."""
+    import pixai_gallery as g
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "other_9V9.mp4").write_bytes(b"fake")   # real media_id is "9V9"
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    calls = []
+    monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
+
+    cli = _authed_client(tmp_path, [])
+    d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
+
+    assert calls == [], "matched a DIFFERENT media_id's file via a substring collision"
+    assert "not downloaded" in d["error"]
+
+
+def test_loom_video_duration_probes_local_file(tmp_path, monkeypatch):
+    """Footage-import fallback: when the catalog's own video_duration column is blank
+    (older row, or a request-duration that was never captured), the Footage tab probes
+    the real local file via ffprobe instead of leaving an imported clip's length wrong."""
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "shot_V9.mp4").write_bytes(b"fake")
+    monkeypatch.setattr(core, "probe_video_duration", lambda p: 7.25)
+
+    cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+                                  is_video="1", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/loom/video-duration?media_id=V9").get_json()
+    assert d == {"duration": 7.25}
+
+
+def test_loom_video_duration_requires_media_id(tmp_path):
+    cli = _authed_client(tmp_path, [])
+    r = cli.get("/api/loom/video-duration")
+    assert r.status_code == 400
+    assert r.get_json()["duration"] is None
+
+
+def test_loom_video_duration_missing_file_is_a_soft_miss_not_a_500(tmp_path):
+    """No catalog row and no file on disk -- a legitimate miss (e.g. a media_id from
+    another machine's catalog), not a server error; the client falls back to its own
+    default duration rather than being told to retry."""
+    cli = _authed_client(tmp_path, [])
+    r = cli.get("/api/loom/video-duration?media_id=nope")
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["duration"] is None
+    assert "not found" in d["error"]
+
+
+def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
+    """Same B17 quarantine contract as /api/loom/handoff (shared resolver,
+    _find_local_video_file): a file sitting under _deleted/ must not be probed as if
+    it were a live survivor."""
+    import pixai_gallery as g
+    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir.mkdir()
+    (qdir / "shot_V9.mp4").write_bytes(b"fake")
+    calls = []
+    monkeypatch.setattr(core, "probe_video_duration", lambda p: calls.append(p) or 9.0)
+
+    cli = _authed_client(tmp_path, [])
+    d = cli.get("/api/loom/video-duration?media_id=V9").get_json()
+    assert calls == [], "probed a file quarantined under _deleted/"
+    assert d["duration"] is None
+
+
+def test_loom_video_duration_requires_login(tmp_path):
+    cli = _client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+                                   is_video="1", created_at="2025-01-01T00:00:00")])
+    r = cli.get("/api/loom/video-duration?media_id=V9")
+    assert r.status_code == 401
+
+
 def test_gen_reference_image_passthrough():
     """Capture #14 (task 2030052367400863154): 'use as reference' = plain img2img,
     a top-level mediaId + strength on a standard submit."""
@@ -554,6 +901,35 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
         "bob's save wiped alice's presets -- the store is not per-account")
 
 
+def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, monkeypatch):
+    """B14 residual: toolbox_presets was the most recently split store, and it copied
+    _view_presets_path's exact quote(username, safe="") keying -- inheriting the same
+    case-collision bug. FAILS before the fix on this filesystem: nel's presets
+    read/save clobbers Nel's."""
+    from pixai_gallery import create_app
+    from tests.conftest import login_test_client
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "upper-scene",
+                       "chat": {"prompts": "UPPER PROMPT", "modelId": "1"}}})
+    app = create_app(tmp_path)
+
+    upper = login_test_client(app, username="Nel", password="a-real-test-password-1")
+    upper.post("/api/presets", json={"task_id": "111"})
+
+    lower = login_test_client(app, username="nel", password="a-real-test-password-2")
+    assert lower.get("/api/presets").get_json()["presets"] == {}, (
+        "nel can see Nel's presets -- case-differing usernames collide on disk")
+
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
+        "parameters": {"sceneId": "lower-scene",
+                       "chat": {"prompts": "LOWER PROMPT", "modelId": "2"}}})
+    lower.post("/api/presets", json={"task_id": "222"})
+    assert set(lower.get("/api/presets").get_json()["presets"]) == {"lower-scene"}
+    assert set(upper.get("/api/presets").get_json()["presets"]) == {"upper-scene"}, (
+        "nel's save wiped Nel's presets -- case-collision on disk")
+
+
 def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path, monkeypatch):
     """Upgrade path: nothing disappears the moment the store goes per-account. An
     account with no file of its own falls back to the old shared toolbox_presets.json
@@ -572,7 +948,8 @@ def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path,
     assert set(cli.get("/api/presets").get_json()["presets"]) == {"from-before"}
 
     cli.post("/api/presets", json={"task_id": "333"})
-    own = json.loads((tmp_path / "toolbox_presets" / "tester.json").read_text(encoding="utf-8"))
+    own = json.loads((tmp_path / "toolbox_presets" / (_account_key("tester") + ".json"))
+                     .read_text(encoding="utf-8"))
     assert set(own) == {"from-before", "new-scene"}
     legacy = json.loads((tmp_path / "toolbox_presets.json").read_text(encoding="utf-8"))
     assert set(legacy) == {"from-before"}
@@ -787,16 +1164,22 @@ def test_unauthenticated_lan_request_to_index_is_redirected_to_login(tmp_path):
 
 def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
     """A LAN request carrying a valid login session is authorized exactly like the
-    local owner -- the same Generate/Loom/Panel controls, no read-only banner. There
-    is only ONE access tier once you're behind the front door (a logged-in session --
-    see index()'s `is_local=True` comment for why that template flag is now a
-    hardcoded constant rather than a live check). Both views below are captured
-    AFTER logging in: an unauthenticated LOCAL request no longer gets the full owner
-    UI either (owner directive 2026-07-19 removed the loopback bypass), so the only
-    real distinction left to prove is authenticated-vs-not, never the request's
-    address -- see test_unauthenticated_lan_request_to_index_is_redirected_to_login
-    for that side of the boundary. Community + browse surfaces (Contests / My Art)
-    render either way, as before."""
+    local owner for the LOGIN-tier controls this test actually checks -- Generate/Loom,
+    no read-only banner. There is only ONE access tier for THOSE once you're behind the
+    front door (a logged-in session -- see index()'s `is_local=True` comment for why
+    that template flag is now a hardcoded constant rather than a live check). Both
+    views below are captured AFTER logging in: an unauthenticated LOCAL request no
+    longer gets the full owner UI either (the loopback bypass is gone), so the only
+    real distinction left to prove for LOGIN-tier controls is authenticated-vs-not,
+    never the request's address -- see
+    test_unauthenticated_lan_request_to_index_is_redirected_to_login for that side of
+    the boundary. Community + browse surfaces (Contests / My Art) render either way,
+    as before. NOT claimed identical here, deliberately: the header also renders a
+    LOCALHOST-tier "^ Import" button, gated on the real `is_true_local` check rather
+    than this shared LOGIN-tier flag -- see
+    tests/test_route_tiers.py::test_index_withholds_the_import_button_from_a_lan_session
+    for that control's own local-vs-LAN pair (docs/AUDIT_2026-07-21.md P3/S5-3,
+    FIXED 2026-07-24)."""
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -1071,8 +1454,34 @@ def test_portrait_mobile_pass(tmp_path):
     # so a broken/missing mobile override could ship invisibly. The tablet media query
     # right after this one is a stable end marker for the slice.
     mobile_block = html.split("@media (max-width: 480px)")[1].split("@media (min-width: 681px)")[0]
-    assert "#gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left, #gen-drawer.dock-right { width: 100%" in mobile_block, \
+    assert "#gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left { width: 100%" in mobile_block, \
         "the mobile full-width drawer rule is missing from inside the 480px breakpoint"  # full-width sheet
+
+
+def test_dead_css_selectors_removed_in_broader_sweep():
+    """O9's broader mechanical sweep (audit 2026-07-21): after the two NAMED dead rules
+    (.vp-chip/.gen-ce) were deleted in a prior pass, this extracts every class selector out of
+    pixai_gallery.py's inline <style> blocks and checks each for a real producer (a template
+    element, or a classList.add/className site in the inline JS). Two more turned up with zero
+    producers anywhere in the repo:
+      - .dock-right on #gen-drawer -- Gen.setDock(d) only ever toggles 'dock-'+x for x in
+        ['left','top','bottom']; picking "right" (the default -- #gen-drawer starts with no
+        class attribute at all, and the "Dock right" button's onclick is setDock('right'))
+        REMOVES all three instead of ever adding a 'dock-right' class, so that compound
+        selector never matched a real element.
+      - #model-preview .mp-tags (+ its `span` rule) -- showPreview() builds mp-meta/mp-nm/
+        mp-sub/mp-badges/mp-desc into #model-preview's innerHTML but never emits an .mp-tags
+        element; nothing else in the repo references it either.
+    Removing them is a no-op for real rendering: the bare #gen-drawer / #model-flyout selectors
+    already at the front of those same comma-lists match unconditionally, so the mobile
+    full-width-drawer / centered-flyout behavior (checked by test_portrait_mobile_pass above)
+    is unaffected. Their LIVE siblings (dock-left/top/bottom, the rest of .mp-*) must survive."""
+    src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
+    assert "dock-right" not in src
+    assert "mp-tags" not in src
+    for still_alive in ("dock-left", "dock-top", "dock-bottom",
+                        "mp-nm", "mp-sub", "mp-desc", "mp-badges"):
+        assert still_alive in src, "a LIVE sibling selector was removed: " + still_alive
 
 
 def test_video_v40_full_cost_warning():
@@ -1092,12 +1501,23 @@ def test_video_v40_full_cost_warning():
 
 
 def test_cost_badge_ships_with_every_price_surface(tmp_path):
-    """Every surface that renders a live cost is a <mg-cost-badge> now, and every page carrying
-    one MUST also load static/mg-cost-badge.js. A custom element whose definition never loads is
-    an inert <div>: setChecking()/setPrice() throw, the cost line freezes on its idle hint, and
-    the Go button beside it still spends. That failure is silent and it is on the spend path, so
-    the pairing gets a test rather than a convention -- the same reasoning that put the drawer's
-    own script tag under test above."""
+    """Every <mg-cost-badge> element MUST ship on a page that also loads
+    static/mg-cost-badge.js. A custom element whose definition never loads is an inert
+    <div>: setChecking()/setPrice() throw, the cost line freezes on its idle hint, and
+    the Go button beside it still spends. That failure is silent and it is on the spend
+    path, so the pairing gets a test rather than a convention -- the same reasoning that
+    put the drawer's own script tag under test above.
+
+    Scope: this checks the <mg-cost-badge>/script pairing, not "every surface that
+    renders a live cost" -- the Loom has two OTHER live-cost surfaces that are
+    genuinely not badges, so this test's mechanism (a custom-element/script pairing
+    check) has nothing to pair for them: the "Generate all" aggregate estimate
+    (the .lv-cost-pill button, master-storyboard.jsx) and the per-shot spend-gate
+    confirm() dialogs (the fail-closed cost gate ahead of a submit). Both print cost as
+    plain text/JS strings with no custom element to upgrade, so a missing script tag
+    can't silently break them the way it breaks a badge (audit: tests-that-dont-bite,
+    doc-lie, 2026-07-21 -- the docstring used to claim "every surface", which this
+    test's own assertions never covered)."""
     import pixai_gallery as pg
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
@@ -1134,17 +1554,26 @@ def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
     that never explained itself (audit: fail-open, 2026-07-21). Fixed: the lookup's
     failure path is distinguished from success (entry.failed), Go is gated on every
     added LoRA having actually resolved, and generate() refuses to submit even if
-    something got the disabled button clicked anyway."""
+    something got the disabled button clicked anyway.
+
+    O12 (Phase 2): the LoRA pick/resolve lifecycle itself (the fetch that sets
+    entry.failed) moved into <mg-model-picker>'s own _toggleMulti() -- the gallery's
+    onLoraPick() only consumes the ALREADY-resolved-or-failed entry the component hands
+    it. So the failed-tracking assertions now check mg-model-picker.js; everything that
+    still lives in pixai_gallery.py (the Go-button gate, generate()'s submit-time guard,
+    anyLoraUnresolved() itself) is unchanged and still checked against the gallery page."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     # The silent-drop shape must be gone: a bare `.catch(function(){ renderLoras(); });`
     # right after the model-version fetch, with no failed-state tracking at all.
     assert ".catch(function(){ renderLoras(); });" not in html
-    assert "entry.failed=true" in html
-    assert "entry.failed=!entry.version_id" in html
     assert "function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }" in html
     assert "anyIncompat() || anyLoraUnresolved()" in html          # Go button gate
     assert "if(anyLoraUnresolved()){ el('gen-lora-note').scrollIntoView" in html   # submit-time guard
+
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
+    assert "entry.failed = true;" in picker_js
+    assert "entry.failed = !entry.version_id;" in picker_js
 
 
 def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch):
@@ -1204,6 +1633,76 @@ def test_import_task_by_id(tmp_path, monkeypatch):
     assert "tid" not in called                                             # no re-collect
     html = cli.get("/panel").get_data(as_text=True)
     assert 'id="import-tid"' in html and "importTask()" in html            # the panel card + wiring
+
+
+def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatch):
+    """THE BUG (docs/AUDIT_2026-07-21.md, owner-2026-07-23, task 2037215124834251576):
+    a generation finishes on PixAI's side but our own /api/task-status never gets a
+    chance to run for it -- the polling browser tab closed, or a transient exception
+    left it at 'running' by api_task_status()'s own deliberate design -- so the job
+    sits at 'running' in jobs.jsonl forever. The owner's real recovery for exactly this
+    is a manual task-id import through THIS route -- but the import only ever wrote a
+    brand-new 'import-<suffix>' job and never touched the ORIGINAL orphaned job_id
+    (which, for a web-submitted generate job, IS the numeric task id), so the Activity
+    card kept spinning on the orphan forever even after the real media had landed.
+    Recovering the same task id an orphan is keyed on must close that original entry."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = login_existing_client(cli)
+    tid = "2037215124834251576"
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+
+    d = cli.post("/api/import-task", json={"task_id": tid}).get_json()
+    assert d["ok"] and d["saved"] == 1
+
+    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    assert by_id[tid]["status"] == "done", "the original orphaned entry was never closed"
+    assert by_id[tid]["media_ids"] == ["m1"]
+    # the recovery's own new job_id still exists too -- this closes the orphan
+    # IN ADDITION TO, not instead of, the import's own activity entry.
+    assert any(j.get("type") == "import" for j in by_id.values())
+
+
+def test_import_task_closes_orphan_on_the_already_cataloged_path_too(tmp_path):
+    """Same bug, the OTHER success branch: if the task's media is already in the
+    catalog (the "behind the milk" short-circuit -- e.g. the live-mirror watcher
+    collected it moments before the owner clicked Recover), the original orphaned job
+    entry must still get closed. Without this, a recovery landing on the
+    already-cataloged branch does nothing for the stuck Activity card at all."""
+    tid = "999"
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    save_catalog(tmp_path / "catalog.db", [_row(media_id="ex1", filename="e.png", task_id=tid,
+                                                created_at="2025-01-02T00:00:00")])
+    cli = login_client(tmp_path)
+
+    d = cli.post("/api/import-task", json={"task_id": tid}).get_json()
+    assert d.get("already") is True
+
+    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    assert by_id[tid]["status"] == "done", "the already-cataloged path left the orphan spinning"
+
+
+def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch):
+    """If the owner already dismissed the orphaned entry by hand, a later recovery must
+    not resurrect it with a new event -- dismiss is an explicit user action and stays
+    respected, same as every other job in the log."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = login_existing_client(cli)
+    tid = "2222"
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    core.append_job_event(tmp_path, tid, dismissed=True)
+
+    cli.post("/api/import-task", json={"task_id": tid})
+
+    from pixai_gallery_backup import _reconstruct_jobs
+    jobs_by_id, _order, _n = _reconstruct_jobs(tmp_path)
+    assert jobs_by_id[tid]["status"] == "running"       # untouched
+    assert jobs_by_id[tid]["dismissed"] is True
 
 
 def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
@@ -1506,3 +2005,22 @@ def test_import_collection_choice_does_not_persist_between_imports(tmp_path):
     html = cli.get("/").get_data(as_text=True)
     assert "if(cs)cs.value=''" in html and "if(cn)cn.value=''" in html, (
         "reset() leaves the collection selection or the typed new-collection name behind")
+
+
+def test_fix_tab_has_a_spend_confirm_since_it_cannot_be_priced(tmp_path):
+    """Audit 2026-07-21, unfiled-workflow-findings: the Fix sub-tab (hand/face box-fixer)
+    fires /api/fix with zero warning of any kind -- no price badge (POST /v2/task/fixer
+    is a different endpoint from the createGenerationTask family /v2/task-price mirrors,
+    confirmed in private/GENERATOR_SURFACE.md's parameter schema, so it genuinely cannot
+    be priced the way every other spend surface here is) and, before this fix, no
+    window.confirm() either -- the only credit-spending action in the app with neither."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    start = html.index("function fix(){")
+    end = html.index("function openEdit(mid){", start)   # the next function, whole fix() in between
+    fix_fn = html[start:end]
+    assert "window.confirm(" in fix_fn, "fix() submits with no spend confirmation at all"
+    # the confirm must gate the actual submit, not just exist somewhere nearby
+    assert fix_fn.index("window.confirm(") < fix_fn.index("runTask('/api/fix'"), (
+        "the confirm exists but doesn't actually gate the runTask('/api/fix') call")

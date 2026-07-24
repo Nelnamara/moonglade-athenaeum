@@ -25,4 +25,4 @@ New here? Start with **[Setup](Setup)** — it takes one API key and about a min
 
 ---
 
-> **Personal-use tool.** Built to preserve and organize *your own* PixAI work — cheaper priority by default, claims your own daily free credits/stamina and auto-applies your free cards, destructive actions touch only your account. Unofficial; not affiliated with PixAI.
+> **Runs against your own PixAI account.** Built to preserve and organize *your own* PixAI work — cheaper priority by default, claims your own daily free credits/stamina and auto-applies your free cards, destructive actions touch only your account. This is a public, multi-account-capable tool (see [Trust & Safety](Trust-and-Safety) for the login/access model) — "your own account" describes what each session can touch, not who can run it. Unofficial; not affiliated with PixAI.

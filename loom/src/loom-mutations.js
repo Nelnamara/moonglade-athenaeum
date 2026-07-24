@@ -53,6 +53,27 @@ export const patchCardById = (project, cardId, patch) => ({
 export const setPromptOverride = (c, text) => ({ ...c, promptOverride: true, promptOverrideText: text });
 export const clearPromptOverride = (c) => ({ ...c, promptOverride: false, promptOverrideText: "" });
 
+// The patch an already-rendered gallery video applies on top of a fresh blank card
+// (newCard(), master-storyboard.jsx -- the one place a shot's other default fields are
+// decided; deliberately NOT duplicated here) to become a REAL, placeable Finished-Shots
+// entry instead of an empty one: pre-done, its resultMid already the picked media, no
+// generation needed. `imported:true` is provenance -- no PixAI task backs this resultMid,
+// unlike every other done card -- so re-roll/cost/debugging logic can tell the two apart
+// (see generateShot's !hasInput branch in master-storyboard.jsx: an imported card has no
+// cast/frames/refs, so hasInput is false by construction and a re-roll attempt safely
+// no-ops with an explanatory message instead of silently discarding the footage or
+// spending credits). `duration` comes from the SAME picker field useExistingVideo already
+// trusts (catalog `video_duration`, or the /api/loom/video-duration probe fallback) --
+// only written as actualDur when it resolves to a real positive number, so a blank/zero
+// duration leaves newCard's own default (8s) standing rather than writing a lying zero.
+export const importedFootagePatch = (mediaId, duration) => {
+  const dur = Number(duration);
+  return {
+    status: "done", resultMid: mediaId, trimIn: 0, trimOut: null, imported: true,
+    ...(dur > 0 ? { actualDur: dur } : {}),
+  };
+};
+
 export const patchAct = (project, actId, patch) => ({
   ...project,
   acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch }),
@@ -64,6 +85,20 @@ export const appendCardToAct = (project, actId, card) => ({
   ...project,
   acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: [...a.cards, card] }),
 });
+
+// Land `card` in the project's FIRST act, creating one (named via nextActName, same
+// as addAct's own convention) if the project doesn't have one yet -- so importing a
+// gallery video as footage always has somewhere honest to go without inventing new
+// "which act" UI. The owner repositions it afterward through that card's own existing
+// "move to..." dropdown (moveCardToAct), exactly like any other shot. `newActId` is
+// caller-supplied (id generation is a side effect that stays out of this pure layer,
+// same contract as buildDuplicateCard's newCardId/newRefIds).
+export const landInFirstAct = (project, card, newActId) => {
+  const first = project.acts[0];
+  const withAct = first ? project
+    : appendAct(project, { id: newActId, name: nextActName(project), collapsed: false, cards: [] });
+  return appendCardToAct(withAct, first ? first.id : newActId, card);
+};
 
 // Build the shape of a duplicated card (deep clone, fresh ids, reset render
 // state) -- everything dupCard() did except id generation, which the caller
@@ -183,6 +218,13 @@ export function friendlyGenErr(raw) {
     return "Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
   if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
     return "PixAI's content filter blocked this generation — that's decided on PixAI's side, not in the Loom.";
+  // inferenceProfile (the Mode quality setting) is model-type-specific -- PixAI rejects
+  // an unsupported value outright ('unknown inferenceProfile "ultra" for model type
+  // "SDXL_MODEL"'). submit_generation() on the server now retries this automatically
+  // (drops the mode, resubmits on the model's default), so this is a backstop for
+  // whatever slips past that -- not the primary fix. Found live 2026-07-24.
+  if (/inferenceProfile/i.test(s))
+    return "That quality setting isn't available for this model — try Auto instead.";
   return s || "generation failed";
 }
 
@@ -270,4 +312,56 @@ export function resolveLoraPayload(loras) {
 
 export function anyLoraUnresolved(loras) {
   return (loras || []).some((l) => !l.version_id);
+}
+
+// ---------- Image-tab generation dimensions + submit/price body (L536) ----------
+// Ported from pixai_gallery.py's Gen.d8(): round to the nearest multiple of 8 and clamp to
+// PixAI's real [64,4096] bounds -- the server's own _dim only floors to /8 and never clamps,
+// so a client that skips this could ask for a size the server accepts but PixAI's own site
+// never would.
+export function snap8(n) {
+  return Math.max(64, Math.min(4096, Math.round((Number(n) || 0) / 8) * 8));
+}
+
+// Ported from pixai_gallery.py's Gen.dims(), minus the DOM reads: custom W×H (both > 0)
+// wins; otherwise an aspect-ratio pair scaled so the long edge equals `size`. Same shape,
+// now unit-tested here instead of only ever exercised by hand in a browser.
+export function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}) {
+  const cw = Number(customW) || 0, ch = Number(customH) || 0;
+  if (cw > 0 && ch > 0) return { w: snap8(cw), h: snap8(ch), custom: true };
+  const rw = Number(aspectW) || 1, rh = Number(aspectH) || 1;
+  const sz = Number(size) || 1024;
+  const w = rw >= rh ? sz : (sz * rw / rh);
+  const h = rw >= rh ? (sz * rh / rw) : sz;
+  return { w: snap8(w), h: snap8(h), custom: false };
+}
+
+// The Image tab's full /api/generate (and /api/price preview) body -- ONE shape shared by
+// the debounced cost badge and the real submit, so the badge can never show a price for
+// different settings than what actually submits (see master-storyboard.jsx's imgCostRef
+// effect and genImage()). `imgAdv` is the Advanced-section state L536 added for full
+// PixAI field parity with pixai_gallery.py's own Generate tab -- this is the JS mirror of
+// that tab's payload(), same field names/defaults, minus the DOM reads.
+export function buildImgGenBody(imgModel, imgLoras, imgAdv, prompt) {
+  const a = imgAdv || {};
+  const dims = resolveGenDims({ aspectW: a.aspectW, aspectH: a.aspectH, size: a.size,
+                                customW: a.customW, customH: a.customH });
+  return {
+    model_id: (imgModel && imgModel.model_id) || "",
+    // picker-parity-round2 (problem 4): the CHOSEN version, when the owner picked one
+    // other than the latest via the version selector -- '' (absent) when they haven't,
+    // which /api/generate already treats as "resolve the newest" (unchanged fallback).
+    version_id: (imgModel && imgModel.version_id) || "",
+    prompt: prompt || "",
+    loras: resolveLoraPayload(imgLoras),
+    negative: a.negative || "",
+    width: dims.w, height: dims.h,
+    mode: a.mode || "auto",
+    steps: Number(a.steps) || 25,
+    cfg: Number(a.cfg) || 7,
+    count: Number(a.count) || 1,
+    seed: String(a.seed || "").trim(),
+    high_priority: !!a.highPriority,
+    prompt_helper: !!a.promptHelper,
+  };
 }

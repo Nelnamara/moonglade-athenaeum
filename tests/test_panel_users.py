@@ -2,8 +2,8 @@
 browser instead of the CLI (see pixai_gallery.py's panel()/api_users_add()/
 api_users_remove(), and pixai_gallery_backup.py's list_web_users/
 add_or_update_web_user/remove_web_user). Companion to tests/test_web_auth.py's
-bootstrap-form tests -- this file covers the OTHER half of "NO CLI first login
-bullshit": managing accounts once you're already past the front door.
+bootstrap-form tests -- this file covers the OTHER half of browser-first account
+management: managing accounts once you're already past the front door.
 """
 import re
 
@@ -210,7 +210,7 @@ def test_remove_user_refuses_a_lan_session_removing_someone_else(tmp_path):
 def test_remove_user_allows_a_lan_session_removing_itself(tmp_path):
     """Self-removal is the deliberate carve-out: it can only harm the caller, so
     it stays reachable from a LAN session even though removing anyone else does
-    not -- the owner's explicit choice when this fix was scoped, 2026-07-22."""
+    not -- a deliberate scoping choice for this fix."""
     core.add_or_update_web_user("other", "pw-other-account")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
     csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))

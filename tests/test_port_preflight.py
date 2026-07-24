@@ -18,6 +18,7 @@ port_owner() is that probe moved somewhere it cannot be bypassed.
 """
 import socket
 import threading
+import time
 
 import pytest
 
@@ -31,6 +32,32 @@ def _free_port():
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+def _port_owner_settled(host, port, attempts=6, timeout=1.0, backoff=0.25):
+    """port_owner(), retried with backoff, for probing a server thread that was just
+    started.
+
+    make_server() binds and listens before its thread is even started, so the TCP
+    connect always succeeds immediately -- but answering the HTTP request needs the
+    new thread to actually get scheduled, accept, and run it through Flask. That is
+    normally sub-millisecond, but port_owner()'s probe has a fixed default timeout
+    (0.4s), and under full-suite load (dozens of other tests' threads competing for
+    the GIL/scheduler right around suite start) it can occasionally lose that race:
+    urlopen times out, has no .headers to read, and port_owner falls through to
+    "other" even though the server is healthy and would have answered a moment later.
+    This flaked exactly one full-suite run and passed in isolation every other time --
+    a scheduling race, not a real defect in port_owner. Retrying (rather than just
+    raising the single timeout) matches what a real caller should do too: a slow-to-
+    answer port is not evidence it is "other", only that the first probe was too
+    early."""
+    last = ""
+    for i in range(attempts):
+        last = port_owner(host, port, timeout=timeout)
+        if last == "moonglade":
+            return last
+        time.sleep(backoff * (i + 1))
+    return last
 
 
 def test_free_port_reports_no_owner():
@@ -90,10 +117,10 @@ def test_a_live_gallery_is_recognised_as_ours_even_though_it_401s(tmp_path):
         cli = app.test_client()
         assert cli.get("/api/ping").status_code == 401
 
-        assert port_owner("127.0.0.1", port) == "moonglade"
+        assert _port_owner_settled("127.0.0.1", port) == "moonglade"
         # 0.0.0.0 means "all interfaces", which we probe via loopback -- a server
         # bound this way must not read as free just because the bind address differs.
-        assert port_owner("0.0.0.0", port) == "moonglade"
+        assert _port_owner_settled("0.0.0.0", port) == "moonglade"
     finally:
         srv.shutdown()
         srv.server_close()
@@ -120,7 +147,7 @@ def test_wildcard_bind_addresses_probe_loopback(host, tmp_path):
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
     try:
-        assert port_owner(host, port) == "moonglade"
+        assert _port_owner_settled(host, port) == "moonglade"
     finally:
         srv.shutdown()
         srv.server_close()

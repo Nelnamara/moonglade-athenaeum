@@ -1,6 +1,6 @@
-"""Session-based web-gallery login auth: the auth pass that gates every
-network-originated (non-localhost) request behind a login (see
-pixai_gallery.py's _is_authorized_request() and /login /logout, and
+"""Session-based web-gallery login auth: the auth pass that gates EVERY request
+behind a login, including from the server's own machine -- there is no
+localhost bypass (see pixai_gallery.py's _is_authorized_request() and /login /logout, and
 pixai_gallery_backup.py's get_or_create_secret_key/add_or_update_web_user/
 remove_web_user/verify_web_user/list_web_users).
 
@@ -189,9 +189,8 @@ def test_login_page_renders_form_with_csrf(tmp_path):
 
 def test_login_page_shows_bootstrap_form_locally_until_an_account_exists(tmp_path):
     """With zero AUTH_USERS configured (the fresh-clone default), a LOCAL request to
-    /login gets a real, functional account-creation form (owner directive
-    2026-07-19: "NO CLI first login bullshit... its why I built a fucking login
-    screen in figma" -- design at static/_mockup_login_panel.html) -- never a
+    /login gets a real, functional account-creation form -- first-run setup happens
+    in the browser, never the CLI -- so it must never be a
     banner pointing at --add-web-user. The bootstrap form (with its extra confirm
     field) disappears -- and the ordinary two-field sign-in form takes its place --
     the moment a real account exists."""
@@ -282,9 +281,9 @@ def test_bootstrap_form_creates_account_and_logs_in_immediately(tmp_path):
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
 
 
-def test_bootstrap_form_validates_like_the_mock(tmp_path):
-    """Mirror static/_mockup_login_panel.html's client-side validation, now enforced
-    server-side: empty username, too-short password, mismatched confirm."""
+def test_bootstrap_form_validates_username_and_password_rules(tmp_path):
+    """The bootstrap form's validation rules are enforced server-side, not just in
+    the client: empty username, too-short password, mismatched confirm."""
     cli = _client(tmp_path).test_client()
     html = cli.get("/login").get_data(as_text=True)
     csrf = _csrf(html)
@@ -478,8 +477,8 @@ def test_login_csrf_mismatch_rejected(tmp_path):
 
 
 def test_incidental_get_does_not_invalidate_pending_csrf_token(tmp_path):
-    """Real regression, reported directly by the owner: "CANT CREATE ACCOUNT --
-    Stuck on Session Expired" even after clearing cookies and restarting the
+    """Real regression: first-run account creation stuck on "Your session
+    expired" no matter what -- even after clearing cookies and restarting the
     server. Root cause: the front door (_enforce_front_door()) redirects EVERY
     unauthenticated request to /login?next=<path> -- including background
     requests a browser fires the instant the page loads (favicon.ico, sw.js,
@@ -706,8 +705,8 @@ def test_logout_clears_session(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_local_request_without_session_is_now_denied_too(tmp_path):
-    """Owner directive 2026-07-19: "I would expect to require login via any path with
-    this new setup whether localhost hostname or IP." Local (127.0.0.1) is NO LONGER
+    """Login is required via every path, localhost hostname or IP included.
+    Local (127.0.0.1) is NO LONGER
     trusted by default -- this is the direct behavioral flip of the old
     _is_local_request() bypass this test used to assert (see
     test_nonlocal_request_without_session_is_denied for the LAN-side twin of this
@@ -951,7 +950,7 @@ def test_previously_ungated_html_post_route_now_redirects_to_login(tmp_path, pat
 
 @pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_JSON_GET + _PREVIOUSLY_UNGATED_HTML_GET)
 def test_previously_ungated_get_route_now_denied_from_localhost_too(tmp_path, path):
-    """Owner directive 2026-07-19 retired the loopback bypass entirely -- localhost is
+    """The loopback bypass is retired entirely -- localhost is
     NOT special anymore, so every one of these previously-fully-ungated routes must
     deny an anonymous LOCAL request (default test-client REMOTE_ADDR=127.0.0.1)
     exactly the same as the LAN-address versions above

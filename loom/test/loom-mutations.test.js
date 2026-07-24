@@ -10,6 +10,8 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved,
+  landInFirstAct, importedFootagePatch,
+  snap8, resolveGenDims, buildImgGenBody,
 } from "../src/loom-mutations.js";
 import { flat, shotText, actLetter } from "../src/loom-core.js";
 
@@ -165,6 +167,51 @@ describe("appendCardToAct / insertCardAfter", () => {
     const p = makeProject([makeAct("a1", [makeCard({ id: "c1" }), makeCard({ id: "c2" }), makeCard({ id: "c3" })])]);
     const out = insertCardAfter(p, "a1", "c1", makeCard({ id: "cNew" }));
     assert.deepEqual(out.acts[0].cards.map((c) => c.id), ["c1", "cNew", "c2", "c3"]);
+  });
+});
+
+describe("landInFirstAct", () => {
+  test("appends the card to the project's first act, leaving other acts untouched", () => {
+    const p = makeProject([
+      makeAct("a1", [makeCard({ id: "c1" })]),
+      makeAct("a2", [makeCard({ id: "c2" })]),
+    ]);
+    const card = makeCard({ id: "imported1", status: "done", resultMid: "M1" });
+    const out = landInFirstAct(p, card, "unused-act-id");
+    assert.deepEqual(out.acts[0].cards.map((c) => c.id), ["c1", "imported1"]);
+    assert.deepEqual(out.acts[1].cards.map((c) => c.id), ["c2"]);   // second act untouched
+    assert.equal(p.acts[0].cards.length, 1, "original project must not be mutated");
+  });
+  test("creates a first act (via nextActName) when the project has none yet", () => {
+    const p = makeProject([]);
+    const card = makeCard({ id: "imported1", status: "done", resultMid: "M1" });
+    const out = landInFirstAct(p, card, "new-act-id");
+    assert.equal(out.acts.length, 1);
+    assert.equal(out.acts[0].id, "new-act-id");
+    assert.equal(out.acts[0].name, "Act 1");
+    assert.deepEqual(out.acts[0].cards.map((c) => c.id), ["imported1"]);
+  });
+});
+
+describe("importedFootagePatch", () => {
+  test("marks the patch done + imported, with the picked media as resultMid and a full reset trim", () => {
+    const patch = importedFootagePatch("MEDIA123", "12.5");
+    assert.equal(patch.status, "done");
+    assert.equal(patch.resultMid, "MEDIA123");
+    assert.equal(patch.imported, true);
+    assert.equal(patch.trimIn, 0);
+    assert.equal(patch.trimOut, null);
+    assert.equal(patch.actualDur, 12.5);
+  });
+  test("omits actualDur (leaving newCard's own default duration standing) when the duration is blank, zero, or negative", () => {
+    assert.equal("actualDur" in importedFootagePatch("M1", ""), false);
+    assert.equal("actualDur" in importedFootagePatch("M1", undefined), false);
+    assert.equal("actualDur" in importedFootagePatch("M1", "0"), false);
+    assert.equal("actualDur" in importedFootagePatch("M1", "-3"), false);
+    assert.equal("actualDur" in importedFootagePatch("M1", "not-a-number"), false);
+  });
+  test("accepts a real (already-parsed) number, not just a string", () => {
+    assert.equal(importedFootagePatch("M1", 9).actualDur, 9);
   });
 });
 
@@ -328,6 +375,15 @@ describe("friendlyGenErr", () => {
   test("recognizes content-moderation errors", () => {
     assert.match(friendlyGenErr("content policy violation"), /content filter/);
   });
+  test("recognizes an unsupported quality-mode (inferenceProfile) rejection", () => {
+    // Real shape of the raw GraphQL error PixAI returns when the chosen Mode isn't
+    // supported by the selected model type (found live 2026-07-24). The server-side
+    // retry (submit_generation()) now recovers from this automatically -- this message
+    // is only the backstop for whatever slips past that.
+    assert.match(
+      friendlyGenErr('GraphQL error: unknown inferenceProfile "ultra" for model type "SDXL_MODEL"'),
+      /quality setting/);
+  });
   test("falls back to the raw string, or a default for empty input", () => {
     assert.equal(friendlyGenErr("weird one-off error"), "weird one-off error");
     assert.equal(friendlyGenErr(""), "generation failed");
@@ -466,5 +522,98 @@ describe("resolveLoraPayload / anyLoraUnresolved (D-11)", () => {
     assert.equal(anyLoraUnresolved([{ version_id: "v1" }, { version_id: "" }]), true);
     assert.equal(anyLoraUnresolved([{ version_id: "", failed: true }]), true);
     assert.equal(anyLoraUnresolved([]), false);
+  });
+});
+
+describe("snap8 (L536, ported from pixai_gallery.py's Gen.d8())", () => {
+  test("rounds to the nearest multiple of 8", () => {
+    assert.equal(snap8(1000), 1000);
+    assert.equal(snap8(1001), 1000);   // rounds down, unambiguous
+    assert.equal(snap8(1007), 1008);   // rounds up, unambiguous
+  });
+  test("clamps to PixAI's real [64, 4096] bounds", () => {
+    assert.equal(snap8(10), 64);
+    assert.equal(snap8(0), 64);
+    assert.equal(snap8(-50), 64);
+    assert.equal(snap8(9000), 4096);
+  });
+  test("non-numeric input does not throw and clamps to the floor", () => {
+    assert.equal(snap8(undefined), 64);
+    assert.equal(snap8(NaN), 64);
+  });
+});
+
+describe("resolveGenDims (L536, ported from pixai_gallery.py's Gen.dims())", () => {
+  test("square aspect at a preset size", () => {
+    assert.deepEqual(resolveGenDims({ aspectW: 1, aspectH: 1, size: 1024 }),
+      { w: 1024, h: 1024, custom: false });
+  });
+  test("wide aspect scales the SHORT edge down from the long-edge size", () => {
+    // 16:9 at size 1024 -> long edge (w) = 1024, h = 1024*9/16 = 576
+    assert.deepEqual(resolveGenDims({ aspectW: 16, aspectH: 9, size: 1024 }),
+      { w: 1024, h: 576, custom: false });
+  });
+  test("tall aspect scales the SHORT edge (w) down instead", () => {
+    // 9:16 at size 1024 -> long edge (h) = 1024, w = 1024*9/16 = 576
+    assert.deepEqual(resolveGenDims({ aspectW: 9, aspectH: 16, size: 1024 }),
+      { w: 576, h: 1024, custom: false });
+  });
+  test("custom W×H (both > 0) overrides the aspect/size entirely", () => {
+    assert.deepEqual(resolveGenDims({ aspectW: 1, aspectH: 1, size: 768, customW: 1200, customH: 896 }),
+      { w: 1200, h: 896, custom: true });
+  });
+  test("only ONE of custom W/H set does not count as custom -- falls back to aspect+size", () => {
+    const d = resolveGenDims({ aspectW: 1, aspectH: 1, size: 768, customW: 1200, customH: "" });
+    assert.equal(d.custom, false);
+    assert.equal(d.w, 768);
+  });
+  test("missing/zero inputs default the same way the gallery's own dims() does (1:1 @ 1024)", () => {
+    assert.deepEqual(resolveGenDims({}), { w: 1024, h: 1024, custom: false });
+    assert.deepEqual(resolveGenDims(), { w: 1024, h: 1024, custom: false });
+  });
+  test("results are snapped to a multiple of 8", () => {
+    const d = resolveGenDims({ aspectW: 3, aspectH: 2, size: 1000 });   // 1000*2/3 = 666.67
+    assert.equal(d.h % 8, 0);
+  });
+});
+
+describe("buildImgGenBody (L536)", () => {
+  test("assembles the full /api/generate-shaped body from model + loras + advanced state", () => {
+    const imgModel = { model_id: "M1", title: "Base", version_id: "V-CHOSEN" };
+    const imgLoras = [{ model_id: "L1", version_id: "V1", weight: 0.8 },
+                      { model_id: "L2", version_id: "", weight: 0.5 }];   // still pending -> filtered
+    const imgAdv = { negative: "lowres", steps: 30, cfg: 6, aspectW: 16, aspectH: 9, size: 1536,
+                     customW: "", customH: "", mode: "pro", count: 2, seed: "42",
+                     highPriority: true, promptHelper: false };
+    const body = buildImgGenBody(imgModel, imgLoras, imgAdv, "a moonlit forest");
+    assert.equal(body.model_id, "M1");
+    // problem 4: a specifically-chosen (non-latest) version rides along so /api/generate
+    // can honor it instead of always silently re-resolving the newest.
+    assert.equal(body.version_id, "V-CHOSEN");
+    assert.equal(body.prompt, "a moonlit forest");
+    assert.deepEqual(body.loras, [{ version_id: "V1", weight: 0.8 }]);   // unresolved one dropped
+    assert.equal(body.negative, "lowres");
+    assert.equal(body.mode, "pro");
+    assert.equal(body.steps, 30);
+    assert.equal(body.cfg, 6);
+    assert.equal(body.count, 2);
+    assert.equal(body.seed, "42");
+    assert.equal(body.high_priority, true);
+    assert.equal(body.prompt_helper, false);
+    // 16:9 @ 1536 long edge -> w=1536, h=1536*9/16=864
+    assert.equal(body.width, 1536);
+    assert.equal(body.height, 864);
+  });
+  test("sane defaults when imgModel is null and imgAdv is empty (matches the gallery's own defaults)", () => {
+    const body = buildImgGenBody(null, [], {}, "");
+    assert.equal(body.model_id, "");
+    assert.equal(body.version_id, "");
+    assert.equal(body.mode, "auto");
+    assert.equal(body.steps, 25);
+    assert.equal(body.cfg, 7);
+    assert.equal(body.width, 1024);
+    assert.equal(body.height, 1024);
+    assert.equal(body.high_priority, false);
+    assert.equal(body.prompt_helper, false);
   });
 });

@@ -79,6 +79,11 @@ CATALOG_FIELDS = [
     # BlurHash string for instant gallery placeholders, and PixAI's per-category NSFW
     # classifier scores as a JSON blob {porn,sexy,hentai,neutral,drawings}.
     "blurhash", "nsfw_scores",
+    # Server-reported ACTUAL credit cost of the row's task (captured at poll/collect/
+    # full-meta time). TASK-level: repeated on each of the task's media rows, so spend
+    # totals must count once per task_id. '0' is a real value (free card / daily-free
+    # gen); '' means never captured -- never conflate the two.
+    "paid_credit",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -126,7 +131,8 @@ CREATE TABLE IF NOT EXISTS catalog (
     deleted_remote  TEXT DEFAULT '',
     collections     TEXT DEFAULT '',
     blurhash        TEXT DEFAULT '',
-    nsfw_scores     TEXT DEFAULT ''
+    nsfw_scores     TEXT DEFAULT '',
+    paid_credit     TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -185,6 +191,7 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN collections TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN blurhash TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN nsfw_scores TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN paid_credit TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -377,6 +384,157 @@ def _like_pattern(term):
     return re.sub(r"(?<!\\)%{2,}", "%", "%" + t + "%")
 
 
+# ---------------------------------------------------------------------------
+# Search field operators: key:value tokens inside the search box
+# ---------------------------------------------------------------------------
+# alias -> (kind, column). Kinds:
+#   text       substring, case-insensitive, * / ? wildcards via _like_pattern
+#   prompt     like a free-text term (prompt_full OR prompt_preview) but explicit,
+#              which matters for quoted phrases: prompt:"night elf"
+#   num        key:N exact, or key:>N / key:<N / key:>=N / key:<=N; a blank column
+#              value never matches a comparison (except rating -- see below)
+#   exact      whole-value equality (ids and seeds; substring matching ids is the
+#              exact chance-collision failure the long-digit gate below exists for)
+#   bool       1/true/yes/on -> col='1'; 0/false/no/off -> anything else
+#   date       created_at prefix (2026 / 2026-07 / 2026-07-04) or a </>/<=/>=
+#              prefix-compare (created:<2026-07 = strictly before July)
+#   collection exact-token match in the comma-joined list, same as the dropdown
+#   source     the dropdown's semantics (online = blank-or-online, deleted =
+#              deleted_remote flag), else substring on the source column
+#
+# Deliberately NOT operators (one line each):
+#   url             expiring PixAI CDN link -- nothing sane to filter on
+#   prompt_preview/ covered by free text and prompt:
+#     prompt_full
+#   poster_media_id internal video->poster linkage; media: finds either row
+#   blurhash        opaque placeholder hash, not human-meaningful
+#   nsfw_scores     JSON blob; nsfw: covers the sane ask
+#   deleted_remote  already surfaced as source:deleted (mirrors the dropdown)
+#
+# Injection safety: every user value is a bound SQL parameter. The only strings
+# interpolated into SQL are column names and comparison operators, and both come
+# exclusively from these hardcoded maps -- never from user input. Pinned by
+# tests/test_search_operators.py's hostile-value test.
+_SEARCH_OPS = {
+    "prompt":   ("prompt", None),
+    "negative": ("text", "negative_prompt"), "negative_prompt": ("text", "negative_prompt"),
+    "model":    ("text", "model_name"),      "model_name": ("text", "model_name"),
+    "lora":     ("text", "loras"),           "loras": ("text", "loras"),
+    "tag":      ("text", "art_tags"),        "tags": ("text", "art_tags"),
+    "art_tags": ("text", "art_tags"),
+    "title":    ("text", "title"),
+    "sampler":  ("text", "sampler"),
+    "filename": ("text", "filename"),
+    "batch":    ("text", "batch"),
+    "status":   ("text", "status"),
+    "natural":  ("text", "natural_prompt"),  "natural_prompt": ("text", "natural_prompt"),
+    "width":    ("num", "width"),
+    "height":   ("num", "height"),
+    "rating":   ("num", "rating"),
+    "steps":    ("num", "steps"),
+    "cfg":      ("num", "cfg_scale"),        "cfg_scale": ("num", "cfg_scale"),
+    "clip_skip": ("num", "clip_skip"),
+    "aes":      ("num", "aes_score"),        "aes_score": ("num", "aes_score"),
+    "likes":    ("num", "liked_count"),      "liked_count": ("num", "liked_count"),
+    "comments": ("num", "comment_count"),    "comment_count": ("num", "comment_count"),
+    "duration": ("num", "video_duration"),   "video_duration": ("num", "video_duration"),
+    "seed":     ("exact", "seed"),
+    "task":     ("exact", "task_id"),        "task_id": ("exact", "task_id"),
+    "media":    ("exact", "media_id"),       "media_id": ("exact", "media_id"),
+    "artwork":  ("exact", "artwork_id"),     "artwork_id": ("exact", "artwork_id"),
+    "model_id": ("exact", "model_id"),
+    "video":    ("bool", "is_video"),        "is_video": ("bool", "is_video"),
+    "published": ("bool", "is_published"),   "is_published": ("bool", "is_published"),
+    "nsfw":     ("bool", "is_nsfw"),         "is_nsfw": ("bool", "is_nsfw"),
+    "created":  ("date", "created_at"),      "created_at": ("date", "created_at"),
+    "date":     ("date", "created_at"),
+    "collection": ("collection", "collections"),
+    "collections": ("collection", "collections"),
+    "source":   ("source", "source"),
+}
+
+# Tokens: quoted runs group (model:"Ether Real" / "night elf" are ONE token each);
+# everything else splits on whitespace exactly like q.split() always did.
+_SEARCH_TOKEN_RE = re.compile(r'[^\s"]*"[^"]*"[^\s"]*|\S+')
+_SEARCH_KEY_RE   = re.compile(r"[A-Za-z_]+")
+_SEARCH_NUM_RE   = re.compile(r"^(>=|<=|>|<)?(-?\d+(?:\.\d+)?)$")
+_SEARCH_DATE_RE  = re.compile(r"^(>=|<=|>|<)?(\d{4}(?:-\d{2}(?:-\d{2})?)?)$")
+_SEARCH_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_SEARCH_FALSY  = frozenset({"0", "false", "no", "off"})
+
+
+def _unquote(s):
+    """Strip one pair of surrounding double quotes, if present."""
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        return s[1:-1]
+    return s
+
+
+def _operator_clause(key, value):
+    """Compile one key:value search token into (sql_clause, params), or None when
+    the token isn't a valid operator and should be searched as plain prompt text
+    instead (unknown key, empty value, malformed number/date, unrecognized bool)
+    -- the way search engines degrade, so a stray colon never errors or surprises."""
+    spec = _SEARCH_OPS.get(key.lower())
+    if not spec or value == "":
+        return None
+    kind, col = spec
+    if kind == "text":
+        return ("LOWER(COALESCE({},'')) LIKE ? ESCAPE '\\'".format(col),
+                [_like_pattern(value)])
+    if kind == "prompt":
+        like = _like_pattern(value)
+        return ("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
+                "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')",
+                [like, like])
+    if kind == "exact":
+        return ("{} = ?".format(col), [value])
+    if kind == "num":
+        m = _SEARCH_NUM_RE.match(value)
+        if not m:
+            return None
+        op = m.group(1) or "="
+        num = float(m.group(2))
+        if col == "rating":
+            # unrated ('') counts as 0 -- identical to the Min-rating dropdown
+            return ("CAST(COALESCE(NULLIF(rating,''),'0') AS REAL) {} ?".format(op),
+                    [num])
+        return ("(COALESCE({0},'') != '' AND CAST({0} AS REAL) {1} ?)".format(col, op),
+                [num])
+    if kind == "bool":
+        v = value.lower()
+        if v in _SEARCH_TRUTHY:
+            return ("{} = '1'".format(col), [])
+        if v in _SEARCH_FALSY:
+            return ("COALESCE({},'') != '1'".format(col), [])
+        return None
+    if kind == "date":
+        m = _SEARCH_DATE_RE.match(value)
+        if not m:
+            return None
+        op = m.group(1) or "="
+        prefix = m.group(2)
+        # prefix-compare: created:>2026-07 excludes July itself, created:>=2026-07
+        # includes it -- comparing the row's SAME-LENGTH prefix keeps that intuitive
+        # (a raw string compare against full timestamps would drag July into '>')
+        return ("SUBSTR(created_at,1,?) {} ?".format(op), [len(prefix), prefix])
+    if kind == "collection":
+        # exact-token in the comma-joined list, mirroring the Collection dropdown
+        return ("(',' || COALESCE(collections,'') || ',') LIKE ?",
+                ["%," + value + ",%"])
+    if kind == "source":
+        v = value.lower()
+        if v == "online":
+            return ("COALESCE(source,'') IN ('', 'online')", [])
+        if v in ("api", "local"):
+            return ("source = ?", [v])
+        if v == "deleted":
+            return ("deleted_remote = '1'", [])
+        return ("LOWER(COALESCE(source,'')) LIKE ? ESCAPE '\\'",
+                [_like_pattern(value)])
+    return None
+
+
 def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
                  published_only=False, art_tag="", lora="", media_type="", source="",
                  collection=""):
@@ -410,14 +568,29 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         clauses.append("LOWER(COALESCE(loras,'')) LIKE ?")
         params.append("%" + lora.strip().lower() + "%")
     if q:
-        # Whitespace-separated terms are ANDed; each may use * / ? wildcards over prompt
-        # text. A term that looks like a WHOLE task/media id (all digits, long enough
-        # that a short numeric prompt word can't collide -- PixAI ids run ~18-19 digits)
-        # also matches that id EXACTLY, so pasting an id from PixAI's site (or
-        # --dump-params output) finds the row. Short numeric terms stay prompt-only:
-        # a substring match on ids made a term like "88" match ~14% of the whole
-        # catalog by id chance alone, swamping any real prompt hits (found 2026-07-16).
-        for term in q.split():
+        # Whitespace-separated tokens are ANDed. A token can be a FIELD OPERATOR
+        # (key:value -- see _SEARCH_OPS/_operator_clause above; quoted values group,
+        # so model:"Ether Real" is one token); anything else is free text, whose
+        # behavior is UNCHANGED from before operators existed (pinned at the SQL
+        # level by tests/test_search_operators.py): each term may use * / ?
+        # wildcards over prompt text, and a term that looks like a WHOLE task/media
+        # id (all digits, long enough that a short numeric prompt word can't
+        # collide -- PixAI ids run ~18-19 digits) also matches that id EXACTLY, so
+        # pasting an id from PixAI's site (or --dump-params output) finds the row.
+        # Short numeric terms stay prompt-only: a substring match on ids made a
+        # term like "88" match ~14% of the whole catalog by id chance alone,
+        # swamping any real prompt hits (found 2026-07-16).
+        for tok in _SEARCH_TOKEN_RE.findall(q):
+            op_clause = None
+            if ":" in tok and not tok.startswith(":"):
+                key, _, raw = tok.partition(":")
+                if _SEARCH_KEY_RE.fullmatch(key):
+                    op_clause = _operator_clause(key, _unquote(raw))
+            if op_clause:
+                clauses.append(op_clause[0])
+                params += op_clause[1]
+                continue
+            term = _unquote(tok)
             if term.isdigit() and len(term) >= 8:
                 clauses.append("(task_id = ? OR media_id = ?)")
                 params += [term, term]
@@ -2173,6 +2346,11 @@ def collection_health(out_dir, db_path):
         # catalog rows that claim a file but whose media_id isn't on disk
         cat_rows = con.execute(
             "SELECT media_id, filename FROM catalog WHERE filename != ''").fetchall()
+        # every media_id the catalog knows about at all (regardless of filename) --
+        # the same "already cataloged" definition run_import_local() uses, so the
+        # health count and what --import-local/Import would actually do stay in sync
+        catalog_ids = {mid for (mid,) in con.execute(
+            "SELECT media_id FROM catalog WHERE media_id != ''").fetchall()}
     finally:
         con.close()
 
@@ -2213,6 +2391,12 @@ def collection_health(out_dir, db_path):
         if (not mid or mid not in on_disk_ids)
         and (fn or "").replace("\\", "/") not in on_disk_rels)
 
+    # Integrity job (audit 2026-07-21, Curator #9): on-disk media with NO catalog
+    # row at all -- the mirror image of `missing` above. Scoped exactly like
+    # on_disk_ids is scoped throughout this function (images only; gallery/
+    # _duplicates/_deleted/branding already excluded from the disk walk).
+    uncataloged = on_disk_ids - catalog_ids
+
     return {
         "total_files": total_files,
         "total_bytes": total_bytes,
@@ -2227,6 +2411,7 @@ def collection_health(out_dir, db_path):
         "full_meta_pct": round(100 * with_full / with_image) if with_image else 0,
         "rated": rated,
         "missing": missing,
+        "uncataloged": len(uncataloged),
         "by_month": [(m, c) for (m, c) in by_month],
         "top_models": [(m, c) for (m, c) in top_models],
         "published": published,
@@ -2240,16 +2425,22 @@ def collection_health(out_dir, db_path):
 def duplicate_groups(out_dir, limit=300):
     """Class-A duplicates for the gallery review browser: media_ids whose file
     exists in more than one folder bucket. Cheap (no hashing). Returns a list of
-    {media_id, keeper(rel), copies:[{rel,bucket,size}]} sorted keeper-first."""
+    {media_id, keeper(rel), copies:[{rel,bucket,size}]} sorted keeper-first.
+
+    Excludes gallery/, _duplicates/, AND _deleted/ (B11, audit 2026-07-21) -- a
+    locally-purged image must not be reported back as a live duplicate of its own
+    quarantined self."""
     from collections import defaultdict
     gallery_dir = out_dir / "gallery"
     quarantine_dir = out_dir / "_duplicates"
+    deleted_dir = out_dir / DELETED_DIRNAME
     prio = {"batches": 0, "month": 1, "images": 2, "other": 3}
     locs = defaultdict(list)
     for p in out_dir.rglob("*"):
         if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
             continue
-        if p.name.endswith(".part") or _is_under(p, gallery_dir) or _is_under(p, quarantine_dir):
+        if (p.name.endswith(".part") or _is_under(p, gallery_dir)
+                or _is_under(p, quarantine_dir) or _is_under(p, deleted_dir)):
             continue
         rel = p.relative_to(out_dir)
         top = str(rel).replace("\\", "/").split("/")[0]
@@ -2293,8 +2484,8 @@ def _is_under(path, parent):
         return False
 
 
-def find_files_for_media_id(out_dir, media_id, include_gallery=False):
-    """All on-disk image files whose media_id matches, anywhere under out_dir.
+def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None):
+    """All on-disk files whose media_id matches, anywhere under out_dir.
 
     Single source of truth for media-id -> file resolution, shared by resume
     (`already_downloaded`), the gallery (`find_image_file`), and the duplicate
@@ -2305,15 +2496,23 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False):
     The exact `media_id_of(p) == mid` check prevents substring collisions (a
     longer id ending in these digits). Skips `.part`, zero-byte files, gallery
     thumbnails (unless include_gallery=True), and quarantined files under
-    _duplicates/ (so a quarantined copy never counts as a live "survivor" and
-    resume treats it as not-present). Returns a list of Paths.
+    _duplicates/ or _deleted/ (so a quarantined copy never counts as a live
+    "survivor" and resume treats it as not-present). Returns a list of Paths.
+
+    `exts` defaults to `_IMAGE_EXTS` (this function's historical, still image-only
+    default -- e.g. tests/test_loom_export_bundle.py pins that video media resolves
+    via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
+    (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
+    in pixai_gallery_backup.py -- so the SAME exact-match + quarantine-exclusion
+    contract applies to videos, not just images.
     """
     mid = str(media_id)
+    match_exts = _IMAGE_EXTS if exts is None else exts
     gallery_dir = out_dir / "gallery"
     quarantine_dirs = (out_dir / "_duplicates", out_dir / DELETED_DIRNAME)
     matches = []
     for p in out_dir.rglob("*{}.*".format(mid)):
-        if p.suffix.lower() not in _IMAGE_EXTS:
+        if p.suffix.lower() not in match_exts:
             continue
         if p.name.endswith(".part"):
             continue
@@ -2362,10 +2561,59 @@ def find_image_file(out_dir, media_id, filename):
 DELETED_DIRNAME = "_deleted"
 
 
+def _trash_meta_path(out_dir, media_id):
+    """Sidecar path for a quarantined item's snapshotted catalog row (see
+    _snapshot_before_purge). Lives beside the quarantined file itself, keyed by
+    media_id rather than filename so it's a one-line lookup from either direction."""
+    return Path(out_dir) / DELETED_DIRNAME / "{}.json".format(media_id)
+
+
+def _read_trash_meta(out_dir, media_id):
+    """The snapshotted row for a quarantined media_id, or None if it predates this
+    feature (2026-07-24) or the write failed at purge time. Never raises -- a
+    missing/corrupt sidecar just means the trash panel falls back to bare
+    filename/mtime, not an error."""
+    p = _trash_meta_path(out_dir, media_id)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _snapshot_before_purge(db_path, out_dir, media_id):
+    """Write out_dir/_deleted/<media_id>.json with the row's own fields (rating,
+    collections, prompt, task_id, ...) BEFORE delete_from_catalog() removes it for
+    good. docs/AUDIT_2026-07-21.md's scoping note on the restore-panel row: "ratings/
+    collections on old purges are gone (no manifest existed -- a purge-time snapshot
+    for future deletes is part of the build)" -- this is that snapshot. The trash
+    panel's restore path reads it back to reinsert a FULL row instead of a bare
+    media_id/filename stub; its list path reads it for a real deleted_at instead of
+    guessing from file mtime. Best-effort: a write failure must never block the
+    purge itself, same fail-soft contract as the file-move/thumb-unlink around it."""
+    import time
+    row = get_row(db_path, media_id)
+    if not row:
+        return
+    snap = dict(row)
+    snap["_deleted_at"] = time.time()
+    try:
+        _trash_meta_path(out_dir, media_id).write_text(
+            json.dumps(snap), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantine=True):
     """Remove a media's catalog row + (regenerable) thumbnail, and either move its
     file to out_dir/_deleted/ (default, recoverable) or hard-delete it. Returns the
-    new quarantine location (Path) when moved, else None."""
+    new quarantine location (Path) when moved, else None.
+
+    When quarantining, also snapshots the about-to-be-deleted catalog row to a JSON
+    sidecar (see _snapshot_before_purge) so a later restore can recover more than a
+    bare filename. Skipped in hard-delete mode (quarantine=False): nothing is left
+    to restore, so there's nothing worth snapshotting."""
     out_dir = Path(out_dir)
     img = find_image_file(out_dir, media_id, filename)
     moved = None
@@ -2376,6 +2624,7 @@ def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantin
             dest = qdir / img.name
             if dest.exists():                       # don't clobber an earlier delete
                 dest = qdir / "{}_{}{}".format(img.stem, media_id, img.suffix)
+            _snapshot_before_purge(db_path, out_dir, media_id)
             try:
                 img.replace(dest)                   # atomic move on the same volume
                 moved = dest
@@ -2445,6 +2694,275 @@ def make_video_thumbnail(video_path, thumb_path):
                 os.unlink(tmp)
             except OSError:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Trash / quarantine panel -- list, restore, permanently delete
+# ---------------------------------------------------------------------------
+# docs/AUDIT_2026-07-21.md's restore-panel row, scoped 2026-07-23: _deleted/ has ~12k
+# files with no restore UI even though the delete confirm promises "recoverable".
+# These are directory-scan helpers, deliberately NOT catalog queries -- the whole
+# point of purge_media_local is that the catalog row is already gone by the time a
+# file lands here, so there is nothing in catalog.db left to query.
+
+def _find_quarantined_file(out_dir, media_id):
+    """The actual media file (never a .json sidecar) in _deleted/ for media_id, or
+    None. media_id_of() on a bare "<media_id>.json" sidecar resolves to the same
+    media_id as the real file (its stem IS the media_id), so this explicitly
+    restricts the extension to real media -- a naive media_id_of() match alone would
+    pick either file depending on directory order."""
+    import pixai_gallery_backup as core
+    qdir = Path(out_dir) / DELETED_DIRNAME
+    if not qdir.exists():
+        return None
+    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    for p in qdir.glob("*"):
+        if p.is_file() and p.suffix.lower() in media_exts and media_id_of(p) == media_id:
+            return p
+    return None
+
+
+def list_quarantined(out_dir, page=1, page_size=60):
+    """Directory-scan listing of out_dir/_deleted/, newest-deleted-first, paginated.
+
+    Not backed by the catalog (see module note above). Sidecar '<media_id>.json'
+    files (written by purge_media_local since 2026-07-24) supply an exact deleted_at
+    plus prompt/rating/collections/etc; older quarantined files -- or any sidecar
+    write that failed -- fall back to the file's own mtime.
+
+    mtime is only ever a FALLBACK, never the primary sort key when a sidecar
+    exists -- found live-verifying this feature: purge_media_local moves a file
+    into _deleted/ with img.replace(dest), a same-volume rename, and a rename does
+    NOT update a file's mtime on Windows/NTFS (mtime tracks content writes, not
+    moves). So a quarantined file's mtime is really "when it was originally
+    downloaded", not "when it was deleted" -- sorting a batch of freshly-purged
+    items (which DO have an accurate sidecar) by mtime alone silently reordered
+    them by download date instead, which a synthetic multi-item live check caught
+    immediately (an older-downloaded, just-deleted image sorted BELOW a
+    newer-downloaded one deleted earlier the same session).
+
+    All sidecars are read up front to build that sort key -- NOT deferred to just
+    the current page the way thumbnail generation is (see _ensure_trash_thumbs) --
+    but this stays cheap: sidecars only exist for files purged since 2026-07-24, a
+    small and slowly-growing set, never the ~12k-file legacy backlog they're
+    scanned alongside (which has no sidecars to read at all, by definition -- nothing
+    wrote one before this feature existed). Only os.scandir() + stat() (metadata
+    only, no content read) touches every file in the backlog; JSON parsing is
+    bounded by however many sidecars actually exist. Returns (items, total, total_bytes)."""
+    import pixai_gallery_backup as core
+    qdir = Path(out_dir) / DELETED_DIRNAME
+    if not qdir.exists():
+        return [], 0, 0
+
+    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    entries = []
+    meta_by_id = {}
+    with os.scandir(qdir) as it:
+        for e in it:
+            if not e.is_file():
+                continue
+            if e.name.lower().endswith(".json"):
+                mid = Path(e.name).stem
+                meta = _read_trash_meta(out_dir, mid)
+                if meta:
+                    meta_by_id[mid] = meta
+                continue
+            if Path(e.name).suffix.lower() not in media_exts:
+                continue
+            try:
+                st = e.stat()
+            except OSError:
+                continue
+            entries.append((e.name, st.st_size, st.st_mtime))
+
+    total = len(entries)
+    total_bytes = sum(s for _, s, _ in entries)
+
+    def _sort_key(entry):
+        name, _size, mtime = entry
+        meta = meta_by_id.get(media_id_of(name))
+        return (meta or {}).get("_deleted_at") or mtime
+
+    entries.sort(key=_sort_key, reverse=True)
+    page = max(1, page)
+    page_size = max(1, min(page_size, 200))
+    start = (page - 1) * page_size
+    page_entries = entries[start:start + page_size]
+
+    items = []
+    for name, size, mtime in page_entries:
+        media_id = media_id_of(name)
+        is_video = Path(name).suffix.lower() in core._VIDEO_EXTS
+        meta = meta_by_id.get(media_id)
+        deleted_at = (meta or {}).get("_deleted_at") or mtime
+        prompt = ((meta or {}).get("prompt_full") or (meta or {}).get("prompt_preview") or "")
+        items.append({
+            "media_id": media_id, "filename": name, "size": size,
+            "deleted_at": deleted_at, "is_video": "1" if is_video else "",
+            "prompt": prompt[:2000], "has_meta": bool(meta),
+        })
+    return items, total, total_bytes
+
+
+def _ensure_trash_thumbs(out_dir, thumb_dir, items, workers=6):
+    """Generate thumbnails for exactly the quarantined items on ONE page -- reuses
+    make_thumbnail()/make_video_thumbnail() (the same two functions build_thumbnails()
+    calls for the live catalog), not new image-resize logic. Can't reuse
+    build_thumbnails() itself: its file resolution (find_image_file /
+    find_files_for_media_id) deliberately EXCLUDES _deleted/ -- a quarantined file
+    must never resolve as a live survivor (INVARIANT 6) -- so it would never find
+    anything sitting in the trash to begin with. Threaded like build_thumbnails() for
+    the same reason it is: a page that happens to be video-heavy would otherwise pay
+    each ffmpeg extract's cost serially, and this runs synchronously inside a
+    request. purge_media_local already frees each media_id's thumb_dir slot when it
+    quarantines the file, so writing back into that SAME slot means the existing,
+    unmodified /thumbs/<media_id>.jpg route serves the result -- no new serving
+    route needed."""
+    qdir = Path(out_dir) / DELETED_DIRNAME
+    work = []
+    for it in items:
+        thumb_path = Path(thumb_dir) / "{}.jpg".format(it["media_id"])
+        if thumb_path.exists():
+            continue
+        work.append((qdir / it["filename"], thumb_path, it["is_video"] == "1"))
+    if not work:
+        return
+
+    def _one(item):
+        src, thumb_path, is_vid = item
+        if not src.exists():
+            return False
+        return (make_video_thumbnail(src, thumb_path) if is_vid
+                else make_thumbnail(src, thumb_path))
+
+    if len(work) > 1 and workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for fut in as_completed([ex.submit(_one, it) for it in work]):
+                try:
+                    fut.result()
+                except Exception:
+                    pass
+    else:
+        for it in work:
+            _one(it)
+
+
+def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
+    """Move a quarantined file back out of _deleted/ and reinsert its catalog row.
+
+    Restores to out_dir/images/<filename> -- purge_media_local only ever remembered
+    the bare filename (see its own docstring), never the original month/batch
+    subfolder, so this is the same flat default location a fresh download or
+    --import-local would use; find_image_file()/find_files_for_media_id() already
+    search the whole tree, so the gallery works identically regardless of which
+    subfolder a file lives under.
+
+    If a purge-time sidecar exists (every purge since 2026-07-24), the FULL row --
+    rating, collections, prompt, task_id, everything -- comes back. Older quarantined
+    files (or a sidecar write that failed) get a minimal row: just media_id/filename,
+    so the file is visible in the gallery again even though its history is genuinely
+    gone (there was never a manifest before this feature -- see
+    docs/AUDIT_2026-07-21.md's scoping note on this row). A live re-fetch of the
+    task via getTaskById (mentioned as possible in that same note) is deliberately
+    NOT attempted here: it would turn a local file-move into a network call with its
+    own failure modes, for metadata that's "nice to have" on a handful of pre-feature
+    orphans, not "needed to make the file visible again".
+
+    Returns {"ok": True, "media_id":, "filename":} or {"ok": False, "error":}."""
+    out_dir = Path(out_dir)
+    src = _find_quarantined_file(out_dir, media_id)
+    if not src:
+        return {"ok": False, "error": "not found in trash"}
+
+    images_dir = out_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    dest = images_dir / src.name
+    if dest.exists():                             # a same-named live file already exists
+        dest = images_dir / "{}_{}{}".format(src.stem, media_id, src.suffix)
+    try:
+        src.replace(dest)
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+
+    meta = _read_trash_meta(out_dir, media_id)
+    row = {f: (meta.get(f, "") if meta else "") for f in CATALOG_FIELDS}
+    row["media_id"] = media_id
+    row["filename"] = dest.name
+    save_catalog(db_path, [row])
+
+    meta_path = _trash_meta_path(out_dir, media_id)
+    if meta_path.exists():
+        try:
+            meta_path.unlink()
+        except OSError:
+            pass
+    return {"ok": True, "media_id": media_id, "filename": dest.name}
+
+
+def delete_quarantined_forever(out_dir, thumb_dir, media_id):
+    """Permanently unlink a quarantined file + its sidecar meta + any thumbnail the
+    trash panel generated for it while it sat in _deleted/. Irreversible -- the
+    caller (api_trash_delete_forever) is LOCALHOST + confirm=true for exactly this
+    reason. Returns True if a media file was actually removed."""
+    out_dir = Path(out_dir)
+    src = _find_quarantined_file(out_dir, media_id)
+    removed = False
+    if src:
+        try:
+            src.unlink()
+            removed = True
+        except OSError:
+            pass
+    meta_path = _trash_meta_path(out_dir, media_id)
+    if meta_path.exists():
+        try:
+            meta_path.unlink()
+        except OSError:
+            pass
+    tp = Path(thumb_dir) / "{}.jpg".format(media_id)
+    if tp.exists():
+        try:
+            tp.unlink()
+        except OSError:
+            pass
+    return removed
+
+
+def empty_trash(out_dir, thumb_dir):
+    """Permanently wipe EVERY file in out_dir/_deleted/ -- the nuclear option behind
+    LOCALHOST + confirm=true + the client's own typed-DELETE prompt
+    (api_trash_empty()). Same per-item cleanup as delete_quarantined_forever(), just
+    walked once instead of media_id-by-media_id. Returns the number of MEDIA files
+    removed (sidecars don't count toward the number shown to the owner)."""
+    qdir = Path(out_dir) / DELETED_DIRNAME
+    if not qdir.exists():
+        return 0
+    import pixai_gallery_backup as core
+    media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
+    removed = 0
+    for p in list(qdir.glob("*")):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in media_exts:      # sidecar .json (or stray junk)
+            try:
+                p.unlink()
+            except OSError:
+                pass
+            continue
+        mid = media_id_of(p)
+        tp = Path(thumb_dir) / "{}.jpg".format(mid)
+        if tp.exists():
+            try:
+                tp.unlink()
+            except OSError:
+                pass
+        try:
+            p.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 def probe_has_audio(path, timeout=15):
@@ -2714,11 +3232,13 @@ body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
    UNDER the modal/celebration tier that must keep covering them -- .sb-seq / .sb-pick-ov and the
    frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 / .m2-conf (520/521).
    Loom-only: this block ships only in _LOOM_SHELL, so the gallery's own #jobs-fab keeps 234.
-   !important for the same mg-notify.js cascade-timing reason as the bottom rule above. Known
-   residual (z-only can't fix it): Deep Focus's .lv-df-veil (450) and the nested 600 preview
-   flyouts render INSIDE .lv-overlay, so from the root they're part of the single 400 atom and
-   these corner FABs paint over them -- cosmetic only; the real fix hoists those overlays to
-   .sb-root level (owner-visible refactor, deferred). */
+   !important for the same mg-notify.js cascade-timing reason as the bottom rule above.
+   FIXED 2026-07-24 (was a known residual): Deep Focus's .lv-df-veil (450) and its nested
+   flyouts render INSIDE .lv-overlay, so from the root they were part of the single 400 atom
+   and these corner FABs painted over them. A DOM hoist wasn't needed after all --
+   master-storyboard.jsx now toggles a `.lv-overlay-df` class onto .lv-overlay itself while
+   Deep Focus is open (z-index 450, matching the veil's own intended value), which lifts the
+   whole atom back above these FABs in the root context for as long as Deep Focus stays open. */
 #jobs-fab  { z-index: 401 !important; }
 #jobs-tray { z-index: 402 !important; }
 
@@ -2854,6 +3374,33 @@ def _schedule_server_exit(code):
         time.sleep(0.4)
         os._exit(code)
     threading.Thread(target=_die, daemon=True).start()
+
+
+def _account_key(username):
+    """Filesystem-safe, case-COLLISION-safe key for `username` -- the ONE shared
+    helper every per-account store (saved views, prompt snippets, Loom storyboards,
+    toolbox presets) keys its own file/directory with (B14 residual).
+
+    Account identity in this app is case-SENSITIVE: pixai_gallery_backup.py's
+    _find_web_user compares the raw username with `==`, and username_problem()
+    rejects only empty/too-long/control-char names -- nothing about case. So "Nel"
+    and "nel" are two distinct AUTH_USERS rows. But every one of these stores
+    originally keyed its per-account file with quote(username, safe=""), which is
+    itself case-PRESERVING: quote("Nel") == "Nel" and quote("nel") == "nel" are two
+    different STRINGS naming the SAME file on NTFS, which is case-insensitive but
+    case-preserving. That silently merged two distinct accounts onto one shared
+    file/directory -- reproduced end to end (a save from one account was visible
+    to, and overwritable by, the other) for saved views originally, then inherited
+    by every store that copied the same quote() keying pattern since.
+
+    A short hex digest of the exact (case-sensitive) username sidesteps NTFS's
+    case-folding entirely: "Nel" and "nel" hash to two different digests, so they
+    always land on two different files -- on every filesystem, not just Windows.
+    Deliberately not reversible from the key alone -- nothing on disk needs a
+    human-readable username back; the account already owns its display name in
+    config.json's AUTH_USERS."""
+    import hashlib
+    return hashlib.sha256(str(username).encode("utf-8")).hexdigest()[:16]
 
 
 def create_app(out_dir: Path):
@@ -3227,9 +3774,84 @@ def create_app(out_dir: Path):
     # drop. Each generation is downloaded + cataloged the INSTANT it completes -- this
     # is what makes --update a fallback instead of the only way gens land locally.
     # Read-only listening + free downloads (no credits spent). Always-on by design.
+    #
+    # Staleness watchdog (2026-07-23): a real incident showed `connected` reading
+    # True with no error for ~21 minutes while the socket had actually gone silent
+    # -- no exception, no close frame, nothing to trip the reconnect logic below on
+    # its own. core._watch_events_async now times out waiting on each individual
+    # frame (core._WS_STALE_TIMEOUT, currently 4 minutes -- see that constant's own
+    # comment for how the number was chosen) and raises core.WatchStaleError, which
+    # lands in this loop's `except` below exactly like any other dropped connection
+    # and gets reconnected the same way -- no separate thread, no polling, no new
+    # control flow, just a bound on how long `await ws.recv()` is allowed to block.
     _watch_lock = threading.Lock()
     _watch_status = {"connected": False, "last_event_at": None, "mirrored": 0,
-                      "events_seen": 0, "last_error": None, "started_at": None}
+                      "events_seen": 0, "last_error": None, "started_at": None,
+                      # New fields (additive -- see api_watch_status()): how many times
+                      # the staleness watchdog below has had to force a reconnect, and
+                      # when the most recent one happened. Existing readers of this dict
+                      # (the Panel's watch-status UI, tests) only read the fields they
+                      # already know about, so this is safe to add without touching them.
+                      "stale_reconnects": 0, "last_stale_reconnect_at": None}
+
+    # ---- Single-flight collect (per task id, in-process) -------------------------
+    # THREE uncoordinated collectors live in this process: the always-on live-mirror
+    # watcher below, /api/task-status's done-poll, and /api/import-task (whose
+    # already-catalogued precheck narrows the window but cannot close it). Two of them
+    # landing on the same just-finished task seconds apart used to run
+    # core.collect_generation twice concurrently: download() skipped the second copy,
+    # but both passes then ran video_faststart on the same clip, and the two
+    # concurrent ffmpeg remuxes corrupted it (see video_faststart's docstring). Now
+    # the first entrant per task id runs the real collect while any later entrant
+    # waits, then answers from the catalog instead of re-downloading. In-process only
+    # by design: the CLI's --watch-backup is a separate process, which is exactly why
+    # video_faststart's unique temp name is the load-bearing cross-process guard --
+    # this layer just stops the gallery process from double-collecting at all.
+    _collect_mu = threading.Lock()          # guards the in-flight map itself
+    _collect_inflight = {}                  # task_id -> {"lock", "waiters", "done"}
+
+    def _collected_from_catalog(tid):
+        """A finished collect's outcome, re-read from the catalog, in
+        collect_generation's return shape (saved=0: THIS caller downloaded nothing)."""
+        con = _connect(db_path)
+        try:
+            rows = con.execute("SELECT media_id, is_video FROM catalog WHERE task_id=?",
+                               (str(tid),)).fetchall()
+        finally:
+            con.close()
+        if not rows:
+            return None
+        return {"media_ids": [r[0] for r in rows], "saved": 0,
+                "is_video": any(str(r[1] or "") == "1" for r in rows)}
+
+    def _collect_single_flight(core, session, tid):
+        """core.collect_generation, but never twice concurrently for the same task id."""
+        tid = str(tid)
+        with _collect_mu:
+            ent = _collect_inflight.get(tid)
+            if ent is None:
+                ent = _collect_inflight[tid] = {"lock": threading.Lock(),
+                                                "waiters": 0, "done": False}
+            ent["waiters"] += 1
+        try:
+            with ent["lock"]:
+                if ent["done"]:
+                    # A concurrent collect for this task finished while we waited --
+                    # its media is downloaded + catalogued, so report that instead of
+                    # re-downloading (and, for a video, re-remuxing). If it somehow
+                    # catalogued nothing (every download failed), fall through and
+                    # retry for real.
+                    got = _collected_from_catalog(tid)
+                    if got is not None:
+                        return got
+                got = core.collect_generation(session, tid, str(out_dir))
+                ent["done"] = True
+                return got
+        finally:
+            with _collect_mu:
+                ent["waiters"] -= 1
+                if ent["waiters"] <= 0:
+                    _collect_inflight.pop(tid, None)   # keep the map from growing forever
 
     def _watch_mirror(tid):
         """Download + catalog one finished task off the watcher's event loop (own
@@ -3237,12 +3859,17 @@ def create_app(out_dir: Path):
         import pixai_gallery_backup as core
         try:
             session = core._make_session(None)
-            core.collect_generation(session, tid, str(out_dir))
+            _collect_single_flight(core, session, tid)
             with _watch_lock:
                 _watch_status["mirrored"] += 1
         except Exception as e:
             with _watch_lock:
                 _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+
+    # The closures above are unreachable from outside create_app; the test suite
+    # drives the watcher-mirror path through this seam (conftest disables the real
+    # watcher thread via MOONGLADE_DISABLE_WATCH).
+    app.extensions["mg_watch_mirror"] = _watch_mirror
 
     def _reconcile_job(tid, ws_status):
         """Resolve OUR Activity/job log for a task straight from a live event, so a
@@ -3260,12 +3887,21 @@ def create_app(out_dir: Path):
         except Exception:                          # noqa: BLE001 -- reconciling must not kill the watcher
             pass
 
-    def _reconcile_orphan_jobs():
-        """One-shot on watcher start: ask PixAI the real status of any job still marked
-        'running' and resolve stale ones (read-only; no spend). Catches jobs orphaned when
-        the app closed or a Generate card was dismissed before its poll resolved -- e.g. a
-        task that failed while nobody was watching. Session is built lazily so a log with
-        no running generate jobs costs nothing."""
+    def _reconcile_orphan_jobs(min_age=0):
+        """Ask PixAI the real status of any job still marked 'running' and resolve stale
+        ones (read-only; no spend). Catches jobs orphaned when the app closed or a
+        Generate card was dismissed before its poll resolved -- e.g. a task that failed
+        while nobody was watching. Session is built lazily so a log with no qualifying
+        running generate jobs costs nothing.
+
+        `min_age` defaults to 0 -- check EVERYTHING immediately -- for the one-shot call
+        at watcher startup (_watch_loop, below): anything still 'running' from a prior
+        server session deserves an immediate look. api_jobs() below calls this on every
+        poll with min_age=core.JOBS_ORPHAN_SWEEP_AGE instead, so a job only just
+        submitted (still being actively polled by its own Generate card) is never asked
+        about at all -- see resolve_orphan_jobs()'s and JOBS_ORPHAN_SWEEP_AGE's own
+        docstrings for why 0 there would be wrong (re-checks a live video gen on every
+        poll) and why --poll-timeout's 300s would ALSO be wrong (false-flags one)."""
         import pixai_gallery_backup as core
         box = {"s": None}
         def _status(tid):
@@ -3279,7 +3915,7 @@ def create_app(out_dir: Path):
             # with the documented string, so nothing caught the caller disagreeing.
             return core.generation_status(box["s"], tid)["phase"]
         try:
-            core.resolve_orphan_jobs(out_dir, _status)
+            core.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
         except Exception:                          # noqa: BLE001
             pass
 
@@ -3325,6 +3961,20 @@ def create_app(out_dir: Path):
 
                 asyncio.run(core._watch_events_async(auth, on_event, None))
                 backoff = 5   # a clean disconnect resets the backoff
+            except core.WatchStaleError as e:
+                # core._watch_events_async's own recv() timeout fired: the socket
+                # reported no error and `connected` was already True, but nothing --
+                # not even a keepalive ping -- arrived for core._WS_STALE_TIMEOUT
+                # seconds. This is the exact failure this watchdog exists for (see
+                # the module docstring above): a connection that LOOKS healthy on
+                # every existing signal while silently seeing nothing. Recorded in
+                # its own counter/timestamp, distinct from `last_error`'s generic
+                # reconnect noise, so this specific failure mode stays visible in
+                # /api/watch/status instead of looking like an ordinary drop.
+                with _watch_lock:
+                    _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+                    _watch_status["stale_reconnects"] += 1
+                    _watch_status["last_stale_reconnect_at"] = _time.time()
             except Exception as e:
                 with _watch_lock:
                     _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
@@ -3562,8 +4212,8 @@ __DESIGN_TOKENS__
 
     /* DRAWER + LIGHTBOX: full-width sheet, reachable centered model flyout, stacked selects,
        lightbox arrows off the image, touch-sized controls. */
-    #gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left, #gen-drawer.dock-right { width: 100%; max-width: 100vw; }
-    #model-flyout, #gen-drawer.dock-left #model-flyout, #gen-drawer.dock-right #model-flyout,
+    #gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left { width: 100%; max-width: 100vw; }
+    #model-flyout, #gen-drawer.dock-left #model-flyout,
     #gen-drawer.dock-top #model-flyout, #gen-drawer.dock-bottom #model-flyout {
       position: fixed; top: 50%; left: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%);
       width: 94vw; max-width: 94vw; max-height: 82vh;
@@ -3579,9 +4229,9 @@ __DESIGN_TOKENS__
     #lb-caption { max-width: 100%; order: 3; flex-basis: 100%; font-size: 11px; }
     .lb-actions .btn { min-height: 40px; padding: 8px 12px; }
 
-    /* FILTERS as a bottom sheet (owner: "fills a ton of the screen" / "bottom slider is
-       the way on an iphone"). Reuses the existing toggleFilters() + .open class unchanged --
-       only what .open MEANS visually changes, from an inline expand to a slide-up sheet. */
+    /* FILTERS as a bottom sheet: on a phone the inline expand swallows most of the
+       viewport, so small screens get a slide-up sheet instead. Reuses the existing
+       toggleFilters() + .open class unchanged -- only what .open MEANS visually changes. */
     .filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 220;
       max-height: 78vh; overflow-y: auto; background: var(--mantle); border-top: 1px solid var(--surface1);
       border-radius: 16px 16px 0 0; box-shadow: 0 -14px 40px rgba(0,0,0,.5);
@@ -3615,14 +4265,19 @@ __DESIGN_TOKENS__
   .btn-danger:hover { opacity: 0.9; background: var(--red); box-shadow: 0 3px 10px -3px rgba(243,139,168,.5); }
   .btn-primary { background: linear-gradient(180deg, #c4a6f0 0%, var(--lavender) 100%); color: var(--base); border-color: var(--lavender); font-weight: 600; }
   .btn-primary:hover { background: linear-gradient(180deg, #c4a6f0 0%, var(--lavender) 100%); box-shadow: 0 0 0 1px rgba(182,146,230,.5), 0 4px 14px -4px rgba(182,146,230,.7); }
-  /* All dropdowns share the button look: dark, rounded, custom lavender-grey caret. */
-  .filters select, #preset-select, select.p-sel { -webkit-appearance: none; appearance: none;
+  /* All dropdowns share the button look: dark, rounded, custom lavender-grey caret.
+     .pick-filters select (the gallery-picker modal's collection/source/rating/sort
+     dropdowns) had NO styling at all until it joined this list -- the other half of the
+     same native-select-styling-split audit row that gave .gen-sel's <select>s their arrow
+     back, just above; there was never a comment anywhere suggesting either gap was
+     deliberate. */
+  .filters select, #preset-select, select.p-sel, .pick-filters select { -webkit-appearance: none; appearance: none;
     background-color: var(--surface0);
     background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="10" height="6"%3E%3Cpath d="M0 0l5 6 5-6z" fill="%239a93ab"/%3E%3C/svg%3E');
     background-repeat: no-repeat; background-position: right 10px center;
     border: 1px solid var(--surface1); border-radius: 7px; color: var(--text);
     padding: 6px 28px 6px 12px; font-size: 13px; cursor: pointer; font-family: inherit; }
-  .filters select:hover, #preset-select:hover, select.p-sel:hover { border-color: var(--lavender); }
+  .filters select:hover, #preset-select:hover, select.p-sel:hover, .pick-filters select:hover { border-color: var(--lavender); }
 
   /* Active-filter chips */
   .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px 0; align-items: center; }
@@ -3670,6 +4325,20 @@ __DESIGN_TOKENS__
 
   /* Grid */
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 200px), 1fr)); gap: 12px; padding: 16px 20px; }
+  /* Clearance for the persistent Activity chip (#jobs-fab, static/mg-notify.js): it's
+     position:fixed at left:14px;bottom:14px, and JobsCard.applyState() shows it via .show
+     whenever the tray is CLOSED -- which is the default (mg_jobs_open unset), so on every
+     ordinary page load it sits on top of the grid's bottom-left corner with no clearance at
+     all, permanently eating clicks for whatever card scrolls under it -- not just while a
+     job is actually running (audit row: "the dead zone is permanent, not intermittent").
+     No page-side rule ever gave the grid room for it (unlike the Loom shell just above,
+     which budgets the same 56px-ish FAB footprint + breathing room for its OWN #eb-help-btn
+     via #root .lv-gen{padding-bottom:64px}). This is the last `.grid` rule in the sheet
+     (deliberately -- see the mobile/portrait overrides above it), so it applies at every
+     breakpoint without touching their own padding/gap values. The FAB keeps showing (that
+     part is an intentional persistent entry point, not the bug); the grid just stops
+     rendering content underneath it. */
+  .grid { padding-bottom: 64px; }
   .card { background: var(--mantle); border-radius: 8px; overflow: hidden; border: 2px solid transparent; transition: border-color .15s; position: relative; cursor: pointer; }
   .card:hover { border-color: var(--surface1); }
   .card.selected { border-color: var(--purple-bright); box-shadow: 0 0 0 1px var(--purple-bright); }
@@ -3703,10 +4372,16 @@ __DESIGN_TOKENS__
   .card .meta .date  { font-size: 10px; color: var(--overlay0); }
   /* Privacy blur (opt-in toggle): blur every thumbnail until hover. Useful on
      LAN / mobile / over-the-shoulder. NSFW-flagged cards (data-nsfw="1") blur
-     more heavily when the flag is known. */
-  body.privacy-blur .card img { filter: blur(16px); transition: filter .12s; }
-  body.privacy-blur .card[data-nsfw="1"] img { filter: blur(28px); }
-  body.privacy-blur .card:hover img { filter: none; }
+     more heavily when the flag is known. Audit 2026-07-21 S5 originally added a
+     .pick-cell branch here for the old #pick-modal's own grid; O13 (Phase 2) replaced
+     that grid with <mg-gallery-picker>, which carries its OWN privacy-blur rule for
+     .mg-pk-cell (mg-gallery-picker.js's injected <style>) -- so .pick-cell would only
+     ever match a class this page no longer produces. Dropped rather than left as a
+     rule matching nothing; #gen-ref-slot (the Generate tab's own reference-image slot,
+     unrelated to the picker grid) still needs its branch here. */
+  body.privacy-blur .card img, body.privacy-blur #gen-ref-slot img { filter: blur(16px); transition: filter .12s; }
+  body.privacy-blur .card[data-nsfw="1"] img, body.privacy-blur #gen-ref-slot[data-nsfw="1"] img { filter: blur(28px); }
+  body.privacy-blur .card:hover img, body.privacy-blur #gen-ref-slot:hover img { filter: none; }
   .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
   /* --accent, not --lavender: the two are the same colour in the default skin, so this
      read as correct, but a skin that retints --accent (nightfallen: #a678f0 vs a
@@ -4017,12 +4692,24 @@ document.addEventListener('DOMContentLoaded', function() {
        _is_authorized_request() -- a logged-in session ONLY, no localhost bypass
        (see /login and that function's docstring). Hide them for anyone else and
        show a small read-only note instead of dead buttons. Browse/curate +
-       community stay available to everyone. #}
+       community stay available to everyone.
+       Import needs MORE than that: /api/import-local (below) is actually
+       LOCALHOST-tier, because it writes files onto the server's own machine, so
+       it re-checks _is_local_request() itself. The button is therefore nested
+       behind its own `is_true_local` check -- the real, un-hardcoded
+       _is_local_request() result computed in index() below, the same value
+       `can_delete_cloud` already uses for "Delete from PixAI" -- instead of the
+       blanket `is_local` flag every other button in this block uses. FIXED
+       2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3, previously a documented but
+       un-fixed gap): a signed-in, non-local LAN session no longer sees a
+       working-looking Import button that always 403'd on click. #}
     {% if is_local %}
     <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
     <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
     <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
+    {% if is_true_local %}
     <button type="button" class="btn" onclick="ImportUI.open()" title="Import local files (images, a folder, or a .zip) into your library">&#8593; Import</button>
+    {% endif %}
     <a class="btn b-loom" href="/loom" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
     {% endif %}
     <button type="button" class="btn b-ach" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
@@ -4087,8 +4774,8 @@ document.addEventListener('DOMContentLoaded', function() {
 <div class="filters">
   <div class="f-grow">
     <label>Search prompt / task or media id</label><br>
-    <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard, or an id…"
-           title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf. Also matches task id / media id.">
+    <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard, an id, or model:tsubaki…"
+           title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf. Also matches task id / media id. Field operators: model: lora: tag: title: sampler: negative: batch: status: filename: collection: source: seed: task: media: — plus numbers (rating:>=3, width:>1000, aes:>6, likes:>0, steps: cfg: duration:), created:2026-07 dates, and video:/published:/nsfw: 1 or 0. Quote spaces: model:&quot;Ether Real&quot;.">
   </div>
   <div>
     <label>Media</label><br>
@@ -4113,6 +4800,9 @@ document.addEventListener('DOMContentLoaded', function() {
     <button type="button" class="btn" style="margin-top:6px;font-size:12px;padding:5px 10px;"
       data-coll="{{ collection }}" onclick="downloadCollection(this.dataset.coll)"
       title="Download every item in this collection as a ZIP (optional convert/embed)">&#8681; Download collection</button>
+    <button type="button" class="btn" style="margin-top:6px;font-size:12px;padding:5px 10px;"
+      data-coll="{{ collection }}" onclick="contactSheetCollection(this.dataset.coll)"
+      title="Open a printable contact sheet for every item in this collection">&#128424; Contact sheet</button>
     {% endif %}
   </div>
   <div>
@@ -4314,6 +5004,8 @@ document.addEventListener('DOMContentLoaded', function() {
     <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
     <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
             title="Saved views"><option value="">Saved views…</option></select>
+    <button class="btn" onclick="deletePreset()" title="Delete the selected saved view"
+            style="padding:6px 10px;">&#10005;</button>
     <button class="btn" onclick="savePreset()" title="Save current filters as a named view">Save view</button>
   </div>
 </div>
@@ -4460,8 +5152,27 @@ function savePreset() {
   fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name: n, query: location.search || '?'}) })
     .then(function(r){ return r.json(); }).then(function(d) {
+      // Used to silently no-op on a server rejection (e.g. a >4096-char query string) --
+      // the prompt() just closed and nothing else ever happened. Same fix shape as Snips.persist().
       if (d && d.presets) { viewPresets = d.presets; renderPresets(); }
-    }).catch(function(){});
+      else if (window.Toast) Toast.show({kind:'err', title:'View not saved', msg:(d&&d.error)||'The server rejected the save.'});
+    }).catch(function(){ if (window.Toast) Toast.show({kind:'err', title:'View not saved', msg:'Network error.'}); });
+}
+function deletePreset() {
+  // The server has always supported POST {delete: name} (/api/view-presets), but no UI ever
+  // called it -- a saved view could be created but never removed. This is the missing
+  // control, wired to the select's own current value (the "select's reserved delete
+  // affordance" the server route's docstring already anticipated).
+  var s = document.getElementById('preset-select');
+  var n = s && s.value;
+  if (!n) return;
+  if (!confirm('Delete the saved view "' + n + '"?')) return;
+  fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({delete: n}) })
+    .then(function(r){ return r.json(); }).then(function(d) {
+      if (d && d.presets) { viewPresets = d.presets; renderPresets(); }
+      else if (window.Toast) Toast.show({kind:'err', title:'Delete failed', msg:(d&&d.error)||'The server rejected the delete.'});
+    }).catch(function(){ if (window.Toast) Toast.show({kind:'err', title:'Delete failed', msg:'Network error.'}); });
 }
 function loadPreset(n) {
   if (!n) return;
@@ -4624,6 +5335,13 @@ function downloadCollection(name) {
   _exportColl = name;
   document.getElementById('export-n').textContent = 'collection “' + name + '”';
   document.getElementById('export-modal').classList.add('open');
+}
+function contactSheetCollection(name) {
+  // Whole COLLECTION's ZIP-download twin (downloadCollection above): open the print-ready
+  // contact sheet for every item in the collection, same as bulkContactSheet() does for a
+  // curated selection (ids=) but with collection= -- the server resolves full membership.
+  if (!name) return;
+  window.open('/contact-sheet?collection=' + encodeURIComponent(name), '_blank');
 }
 function doExportDownload() {
   var fmt = document.getElementById('export-fmt').value;
@@ -5048,27 +5766,9 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-seg button.on{background:var(--lavender);color:var(--base);border-color:var(--lavender);font-weight:600;}
   .gen-search{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;margin-bottom:10px;}
   .gen-search:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
-  .mkt-sort{display:flex;gap:6px;margin-bottom:8px;}
-  .mkt-sort button{flex:1;padding:5px 0;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
-  .mkt-sort button.on{background:var(--surface1);color:var(--text);border-color:var(--accent-soft);font-weight:600;}
-  .mkt-cats{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}
-  .mkt-cats button{padding:3px 10px;font-size:10.5px;border-radius:11px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
-  .mkt-cats button.on{background:var(--accent);color:var(--base);border-color:var(--accent);font-weight:600;}
-  .gen-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .12s;}
-  .gen-card{border-radius:12px;overflow:hidden;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;position:relative;}
-  .gen-card:hover{border-color:var(--overlay0);}
-  .gen-card.sel{border:2px solid var(--lavender);box-shadow:0 0 0 2px rgba(182,146,230,.25);}
-  .gen-card .cov{aspect-ratio:1;width:100%;object-fit:cover;display:block;background:var(--surface1);}
-  .gen-card .cov.blur{filter:blur(15px);}
-  .gen-card .meta{padding:5px 7px;}
-  .gen-card .nm{font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .gen-card .sub{display:flex;align-items:center;gap:7px;margin-top:2px;font-size:10px;}
-  .gen-card .ty{color:var(--emerald);}
-  .gen-card .lk{color:var(--subtext);}
-  .gen-card .uses{color:var(--lavender);margin-left:auto;}
-  .gen-card .chk{position:absolute;top:4px;right:4px;color:var(--lavender);background:var(--mantle);border-radius:50%;font-size:12px;width:18px;height:18px;display:none;align-items:center;justify-content:center;border:1px solid var(--lavender);}
-  .gen-card.sel .chk{display:flex;}
-  .gen-empty{color:var(--subtext);font-size:12px;padding:22px 4px;text-align:center;}
+  /* O12: .mkt-sort/.mkt-cats/.gen-grid/.gen-card/.gen-empty are gone -- the flyout's search/
+     grid/hover-preview/market UI is <mg-model-picker> now (static/mg-model-picker.js), which
+     injects its own .mg-mktsort/.mg-mktcats/.mg-grid/.mg-card/.mg-empty via its own <style>. */
   .gen-form{border-top:1px dashed var(--surface1);margin-top:12px;padding-top:10px;}
   .gen-lbl{color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;}
   .gen-ta{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 9px;font-size:13px;font-family:inherit;resize:vertical;}
@@ -5078,7 +5778,18 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-aspects button{padding:4px 9px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
   .gen-aspects button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
   .gen-row{display:flex;gap:8px;}
-  .gen-sel{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12.5px;}
+  .gen-sel{width:100%;background-color:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12.5px;}
+  .gen-sel:hover{border-color:var(--lavender);}
+  /* Same custom-arrow treatment as .filters select/#preset-select/select.p-sel (native
+     select styling split, audit row: three selectors got appearance:none + the lavender
+     caret, .gen-sel's <select>s and the Picker's own selects never did -- no rationale
+     anywhere for the split, just an oversight, so made consistent here instead of documented
+     as intentional. `select.gen-sel`, not bare `.gen-sel`: the class is shared with several
+     plain text/number <input>s in the same drawer (gen-seed, gen-cw/ch, imp-newcoll) that
+     must NOT grow a dropdown arrow or the wider right padding a caret needs. */
+  select.gen-sel{-webkit-appearance:none;appearance:none;cursor:pointer;
+    background-image:url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="10" height="6"%3E%3Cpath d="M0 0l5 6 5-6z" fill="%239a93ab"/%3E%3C/svg%3E');
+    background-repeat:no-repeat;background-position:right 8px center;padding-right:24px;}
   .gen-check{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:12px;margin-top:8px;cursor:pointer;}
   /* The two lines that used .gen-cost (Generate + Edit) are <mg-cost-badge> now, which brings
      its own box -- padding/radius/border/font were lifted from this rule verbatim when the
@@ -5088,16 +5799,17 @@ document.addEventListener('DOMContentLoaded', function(){
      stale copies of the cost styling are the exact drift the consolidation exists to end. */
   .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
   .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
-  .gen-ce{min-height:66px;white-space:pre-wrap;overflow-y:auto;max-height:180px;}
-  .gen-ce:empty::before{content:attr(data-placeholder);color:var(--overlay0);pointer-events:none;}
-  .gen-ce:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
-  .vp-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:5px;padding:1px 6px 1px 2px;font-size:11.5px;color:var(--lavender);margin:0 2px;vertical-align:-3px;cursor:default;user-select:none;}
-  .vp-chip img{width:16px;height:16px;border-radius:3px;object-fit:cover;}
   .gen-moon{display:inline-block;width:15px;height:15px;border-radius:50%;background:var(--lavender);position:relative;overflow:hidden;vertical-align:-3px;margin-right:7px;box-shadow:0 0 9px rgba(182,146,230,.75);}
   .gen-moon::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--mantle);animation:gen-eclipse 2.6s ease-in-out infinite;}
   @keyframes gen-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}
   .gen-result{margin-top:12px;} .gen-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
   .gen-result a{color:var(--accent-soft);font-size:12px;text-decoration:none;}
+  /* Concurrent generations (2026-07-23): each submission gets its OWN line inside the
+     result strip instead of one shared div that a later submission's status update would
+     overwrite. A hairline separator between entries is the only visual change from before
+     when only one submission is ever in flight. */
+  .gen-result-line{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
+  .gen-result-line:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none;}
   #enh-list{max-height:230px;overflow-y:auto;margin-top:2px;}
   .enh-item{display:block;width:100%;text-align:left;padding:6px 9px;margin-bottom:4px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.3;}
   .enh-item:hover{border-color:var(--overlay0);}
@@ -5136,6 +5848,15 @@ document.addEventListener('DOMContentLoaded', function(){
   #gen-selrow:hover{border-color:var(--overlay0);}
   #gen-selthumb{width:30px;height:30px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
   #gen-selrow .hint{margin-left:auto;color:var(--overlay0);font-size:11px;flex:0 0 auto;}
+  /* picker-parity-round2 (2026-07-24, problem 4/5): resolve_version_meta() already fetches
+     a version's OTHER releases + the author's own sampling_method/capabilities -- this was
+     being resolved and thrown away. #gen-selmeta surfaces both: a real version picker
+     (PixAI's own model/LoRA cards have one; ours had none) and read-only capability tags. */
+  #gen-selmeta{display:none;flex-direction:column;gap:6px;margin-top:6px;}
+  #gen-selmeta.show{display:flex;}
+  #gen-version{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);font-size:11.5px;padding:5px 7px;}
+  #gen-caps{display:flex;flex-wrap:wrap;gap:5px;}
+  #gen-caps .cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);}
   #model-flyout{position:absolute;top:0;right:100%;height:100%;width:372px;max-width:92vw;background:var(--mantle);border:1px solid var(--surface1);border-right:none;display:none;flex-direction:column;box-shadow:-14px 0 34px rgba(0,0,0,.4);}
   #model-flyout.open{display:flex;}
   #model-flyout .x{margin-left:auto;}
@@ -5143,12 +5864,21 @@ document.addEventListener('DOMContentLoaded', function(){
   /* Top/bottom docks are thin full-width bars -- an edge-popped flyout gets clipped.
      Render the model browser as a centered overlay instead so it's never obscured. */
   #gen-drawer.dock-top #model-flyout,#gen-drawer.dock-bottom #model-flyout{position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);width:540px;max-width:92vw;height:auto;max-height:82vh;border:1px solid var(--surface1);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);}
-  #pick-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
-  #pick-scrim.open{display:block;}
-  #pick-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
-  .pick-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
-  .pick-filters select{background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:5px 8px;font-size:12px;}
-  #pick-modal.open{display:flex;}
+  /* picker-parity-round2 (2026-07-24): owner's live test found the flyout showing only ~2
+     rows of cards then a large dead area filling the rest of the panel -- .gen-body was
+     BOTH the outer overflow:auto scroll container AND <mg-model-picker>'s own .mg-grid had
+     an independent fixed max-height:320px (see mg-model-picker.js), so on any flyout taller
+     than ~380px .gen-body's real extra height just sat there empty below the capped grid.
+     Fix: hand the real height all the way down so the GRID is the one scrolling region,
+     matching every other picker in the app. Scoped to #model-flyout only -- #gen-drawer's
+     own .gen-body (the main Generate form, a plain tall scrolling form) is untouched. */
+  #model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;min-height:0;}
+  #model-flyout #gen-picker-host{flex:1;min-height:0;display:flex;flex-direction:column;}
+  #model-flyout mg-model-picker{flex:1;min-height:0;}
+  /* O13: #pick-scrim/#pick-modal/.pick-filters and their CSS are gone -- <mg-gallery-picker>
+     (static/mg-gallery-picker.js) brings its own complete self-contained overlay/box/filter
+     chrome, injected client-side. #similar-modal below is UNRELATED (Similar.js, not Picker)
+     and still uses the shared .pick-head/.pick-empty rules further down, kept as-is. */
   #similar-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
   #similar-scrim.open{display:block;}
   #similar-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
@@ -5162,21 +5892,11 @@ document.addEventListener('DOMContentLoaded', function(){
   .pick-head{display:flex;align-items:center;margin-bottom:10px;}
   .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
   .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
-  /* FIXED row height -- the bulletproof image-grid pattern. No aspect-ratio, no
-     percentage heights, so cells can't collapse to slivers or blow out tall. */
-  #pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));grid-auto-rows:120px;gap:8px;overflow-y:auto;transition:opacity .12s;flex:1;min-height:120px;align-content:start;}
-  .pick-cell{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--surface0);}
-  .pick-cell:hover{border-color:var(--lavender);}
-  /* aspect-ratio on the IMG (not the cell) -- mirrors the main gallery grid. Putting it
-     on the cell + height:100% on the img is a percentage-height-against-indefinite-height
-     trap: the img blows out to its intrinsic height and cells overlap into a torn smear. */
-  .pick-cell{grid-row:span 1;}
-  .pick-cell img{width:100%;height:100%;object-fit:cover;display:block;background:var(--surface0);}
+  /* .pick-head/.pick-empty above are shared with #similar-modal (Similar.js) and stay live.
+     #pick-grid/.pick-cell/#pick-up/#pick-more below were exclusively the old #pick-modal's
+     own grid/upload/load-more chrome -- gone with it (O13); <mg-gallery-picker> has its own
+     .mg-pk-grid/.mg-pk-cell/.mg-pk-upload (infinite-scroll, no separate load-more button). */
   .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
-  #pick-up{flex:0 0 auto;height:33px;padding:0 12px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;}
-  #pick-up:hover{border-color:var(--overlay0);}
-  #pick-more{margin-top:10px;padding:8px 0;width:100%;flex:0 0 auto;font-size:12.5px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;}
-  #pick-more:hover{border-color:var(--lavender);color:var(--lavender);}
   #model-preview{position:fixed;z-index:220;width:300px;max-width:80vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);display:none;overflow:hidden;pointer-events:none;}
   #model-preview.open{display:block;}
   #model-preview img{width:100%;max-height:340px;object-fit:cover;display:block;background:var(--surface1);}
@@ -5186,8 +5906,6 @@ document.addEventListener('DOMContentLoaded', function(){
   #model-preview .mp-sub{display:flex;gap:8px;font-size:11px;margin-top:3px;color:var(--subtext);}
   #model-preview .mp-sub .ty{color:var(--emerald);}
   #model-preview .mp-desc{font-size:11px;color:var(--subtext);margin-top:5px;line-height:1.45;max-height:88px;overflow:hidden;}
-  #model-preview .mp-tags{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px;}
-  #model-preview .mp-tags span{font-size:10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:4px;padding:1px 6px;color:var(--subtext);}
   #model-preview .mp-badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
   #model-preview .mp-badges .bdg{font-size:10px;font-weight:600;letter-spacing:.02em;border-radius:5px;padding:1px 7px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);text-transform:uppercase;}
   #model-preview .mp-badges .bdg.base{color:#c9b8ff;border-color:#4a3f78;}
@@ -5219,6 +5937,11 @@ document.addEventListener('DOMContentLoaded', function(){
       <span id="gen-selname">none &mdash; browse models</span>
       <span class="hint">&#9666; browse</span>
     </button>
+    <div id="gen-selmeta">
+      <select id="gen-version" onclick="event.stopPropagation()" onchange="Gen.pickVersion(this.value)"
+              title="This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead" aria-label="Model version"></select>
+      <div id="gen-caps"></div>
+    </div>
     <div class="gen-lbl">LoRAs</div>
     <div id="gen-loras"></div>
     <div id="gen-lora-note"></div>
@@ -5251,7 +5974,7 @@ document.addEventListener('DOMContentLoaded', function(){
           </label>
         </div>
         <div id="gen-modeldefaults" style="display:none;justify-content:space-between;align-items:center;margin-top:6px;">
-          <span style="font-size:10.5px;color:var(--overlay0);">&#10003; using this model's tuned preset</span>
+          <span id="gen-modeldefaults-label" style="font-size:10.5px;color:var(--overlay0);">&#10003; using this model's tuned preset</span>
           <button type="button" class="snip-btn" onclick="Gen.resetModelDefaults()">&#8630; reset</button>
         </div>
       </details>
@@ -5397,60 +6120,15 @@ document.addEventListener('DOMContentLoaded', function(){
         <button id="gen-k-base" class="on" onclick="Gen.setKind('base')">Models</button>
         <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
       </div>
-      <input class="gen-search" id="gen-q" placeholder="Search models&hellip;" autocomplete="off">
-      <div class="mkt-sort" id="mkt-sort" style="display:none;">
-        <button id="mkt-popular" class="on" onclick="Gen.setSort('popular')" title="PixAI&#39;s most-used order">Popular</button>
-        <button id="mkt-newest" onclick="Gen.setSort('newest')" title="Newest uploads first">Newest</button>
-      </div>
-      <div class="mkt-cats" id="mkt-cats" style="display:none;">
-        <button class="on" data-cat="" onclick="Gen.setCat('')">All</button>
-        <button data-cat="character" onclick="Gen.setCat('character')">Character</button>
-        <button data-cat="style" onclick="Gen.setCat('style')">Style</button>
-        <button data-cat="pose" onclick="Gen.setCat('pose')">Pose</button>
-        <button data-cat="clothing" onclick="Gen.setCat('clothing')">Clothing</button>
-        <button data-cat="background" onclick="Gen.setCat('background')">Background</button>
-        <button data-cat="detail" onclick="Gen.setCat('detail')">Detail</button>
-      </div>
-      <div class="gen-grid" id="gen-grid"></div>
-      <div class="gen-empty" id="gen-empty" style="display:none;"></div>
+      <!-- O12: the search box, grid, hover preview, and (for LoRAs) the market sort/category
+           strip all live inside the two <mg-model-picker> elements Gen.ensurePickers() mounts
+           here lazily on first open -- see the Picker/Gen bridge in the script below. -->
+      <div id="gen-picker-host"></div>
     </div>
   </div>
 </aside>
-<div id="pick-scrim" onclick="Picker.close()"></div>
-<div id="pick-modal" aria-hidden="true" aria-label="Pick from your gallery">
-  <div class="pick-head"><span class="t">&#9648; Select from your gallery</span>
-    <button class="x" onclick="Picker.close()" aria-label="Close">&times;</button></div>
-  <div style="display:flex;gap:6px;">
-    <input class="gen-search" id="pick-q" style="flex:1;" placeholder="Search your images&hellip;" autocomplete="off">
-    <button type="button" id="pick-up" onclick="Picker.upload()" title="Upload a local file (free)">&#8679; Upload</button>
-    <input type="file" id="pick-file" accept="image/*" style="display:none;" onchange="Picker.onFile()">
-  </div>
-  <div class="pick-filters">
-    <select id="pick-collection" onchange="Picker.onFilter()">
-      <option value="">All collections</option>
-      {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-    </select>
-    <select id="pick-source" onchange="Picker.onFilter()">
-      <option value="">Any source</option>
-      <option value="api">Generated (AI)</option>
-      <option value="local">Imported local</option>
-    </select>
-    <select id="pick-rating" onchange="Picker.onFilter()">
-      <option value="0">Any rating</option>
-      <option value="1">&#9733;+</option><option value="2">&#9733;&#9733;+</option>
-      <option value="3">&#9733;&#9733;&#9733;+</option><option value="4">&#9733;&#9733;&#9733;&#9733;+</option>
-      <option value="5">&#9733;&#9733;&#9733;&#9733;&#9733;</option>
-    </select>
-    <select id="pick-sort" onchange="Picker.onFilter()">
-      <option value="newest">Newest first</option>
-      <option value="oldest">Oldest first</option>
-    </select>
-  </div>
-  <label class="gen-check" style="margin:0 0 8px;"><input type="checkbox" id="pick-copy" onchange="Picker.toggleCopy()"> Copy the image&rsquo;s prompt to the clipboard when picking</label>
-  <div id="pick-grid" onscroll="Picker.onScroll()"></div>
-  <div class="pick-empty" id="pick-empty" style="display:none;"></div>
-  <button type="button" id="pick-more" onclick="Picker.more()" style="display:none;">Load more</button>
-</div>
+<!-- O13: the gallery's picker is <mg-gallery-picker> now (mounted/unmounted by the
+     Picker IIFE below on open()/close()) -- no static markup needed here anymore. -->
 <div id="similar-scrim" onclick="Similar.close()"></div>
 <div id="similar-modal" aria-hidden="true" aria-label="Visually similar images">
   <div class="pick-head"><span class="t">✧ Visually similar</span>
@@ -5568,6 +6246,11 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
 </style>
 <script src="/static/picker-core.js"></script>
+<!-- O12/O13 (Phase 2): the Generate tab's model/LoRA flyout and the gallery's own picker are
+     the shared <mg-model-picker>/<mg-gallery-picker> components now (same two the Loom's
+     _LOOM_SHELL already loads) -- see Gen's model-flyout bridge and the Picker IIFE below. -->
+<script src="/static/mg-model-picker.js"></script>
+<script src="/static/mg-gallery-picker.js"></script>
 <!-- <mg-cost-badge> is the one renderer for "this costs N credits / a free card covers it"
      (static/mg-cost-badge.js). Loaded FIRST because it is a hard dependency of three things on
      this page: the Generate and Edit tabs' own cost lines below, and <mg-generate-drawer>'s
@@ -5576,11 +6259,11 @@ document.addEventListener('DOMContentLoaded', function(){
      spends -- a silent failure on the spend path, which is why the pairing has a test
      (test_web_pick.py::test_cost_badge_ships_with_every_price_surface) and not just a habit. -->
 <script src="/static/mg-cost-badge.js"></script>
-<!-- The shared <mg-generate-drawer> now mounts in the gallery's Video tab too (not just the
-     Loom, which loads it in _LOOM_SHELL). It's picker-agnostic -- no mg-model-picker /
-     mg-gallery-picker dependency -- so this one script plus the badge above is all the gallery
-     mount needs; the host wires its mg-pick-request to the gallery Picker in the inline JS
-     below. -->
+<!-- The shared <mg-generate-drawer> mounts in the gallery's Video tab too (not just the Loom,
+     which loads it in _LOOM_SHELL). It remains picker-agnostic itself -- no mg-model-picker /
+     mg-gallery-picker dependency of its OWN -- those two are loaded above for the Generate
+     tab's model-flyout and Picker, unrelated to the drawer; the drawer's own mg-pick-request
+     is wired to the gallery Picker in the inline JS below, same as always. -->
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
@@ -5683,81 +6366,45 @@ var YourArt = (function(){
       g.appendChild(c);
     });
     el('art-foot').innerHTML = d.views_synced ? 'Live view counts, fetched fresh. Likes/comments from your last <code>--sync-artworks</code>.'
-      : 'Ranked by likes (live views load on the localhost server). Run <code>--sync-artworks</code> to refresh stats.';
+      : 'Ranked by likes (live views load lazily, from any signed-in device). Run <code>--sync-artworks</code> to refresh stats.';
   }
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
   return { open:open, close:close };
 })();
+// O13 (Phase 2): the gallery's own picker is the shared <mg-gallery-picker> web component
+// now, mount-to-open / unmount-to-close -- same pattern the Loom's openPick/bindGalleryPicker
+// already uses (master-storyboard.jsx). PickerCore/rendering/filters/infinite-scroll all live
+// INSIDE the component (static/mg-gallery-picker.js) now; this IIFE is just the bridge that
+// keeps Picker's own public contract -- open(callback, opts), close() -- unchanged, so its 4
+// existing call sites (refPick, the edit-ref "+ ref" slot, the edit-source Pick button, the
+// mg-pick-request listener) needed zero changes. show-source/show-upload/show-copy-prompt
+// (all three were the gallery's own #pick-modal features -- see mg-gallery-picker.js's header)
+// keep this a byte-for-byte feature match for the surface it replaces, not a downgrade.
 var Picker = (function(){
-  // Browse/filter/page/infinite-scroll logic lives in PickerCore now (shared with the
-  // Loom's GalleryPick); this IIFE is a thin DOM-binding shim over it -- same ids, same
-  // CSS, same 3 call sites, same behavior as before the refactor.
-  var cb=null, core=null, forcedType='';   // forcedType: a caller-forced media filter for one open session (e.g. 'video')
-  function el(id){return document.getElementById(id);}
-  function readFilters(){
-    var v=function(id){ var e=el(id); return e?e.value:''; };
-    return {collection:v('pick-collection'), source:v('pick-source'), rating_min:v('pick-rating'), sort:v('pick-sort')};
-  }
-  function markLoading(){ el('pick-grid').style.opacity='.5'; var mb=el('pick-more'); if(mb) mb.style.display='none'; }
-  function ensureCore(){
-    if(core) return core;
-    // type stays '' -- /api/gallery-images already treats '' the same as an absent
-    // param (defaults to "image"), so this is byte-identical to the pre-refactor
-    // behavior (images only) with no explicit type filter in this UI.
-    core = PickerCore.create({
-      onResults: function(imgs, meta){
-        var grid=el('pick-grid'), empty=el('pick-empty'), moreBtn=el('pick-more');
-        grid.style.opacity='1';
-        if(!meta.append) grid.innerHTML='';
-        if(!imgs.length && !meta.append){ empty.textContent='No images found.'; empty.style.display='block'; if(moreBtn) moreBtn.style.display='none'; return; }
-        empty.style.display='none';
-        imgs.forEach(function(m){ var c=document.createElement('div'); c.className='pick-cell'; c.title=m.prompt||m.media_id;
-          c.innerHTML='<img loading="lazy" decoding="async" src="'+m.thumb+'" alt="">';
-          c.onclick=function(){ pick(m); }; grid.appendChild(c); });
-        if(moreBtn) moreBtn.style.display = meta.hasMore ? '' : 'none';
-        // If the loaded tiles don't fill the grid there's no scrollbar to drive infinite
-        // scroll -- pull one more page so it overflows (core caps this so a tall window
-        // can't runaway-load; the Load-more button covers the rest).
-        core.maybeFillPage(grid);
-      },
-      onError: function(){ el('pick-grid').style.opacity='1'; }
+  var cb=null, el=null;
+  function open(callback, opts){
+    close();   // idempotent: a stray double-open replaces rather than stacks two overlays
+    cb=callback;
+    el=document.createElement('mg-gallery-picker');
+    el.setAttribute('default-type', (opts&&opts.type==='video')?'video':'image');
+    el.setAttribute('show-source', '');
+    el.setAttribute('show-upload', '');
+    el.setAttribute('show-copy-prompt', '');
+    el.addEventListener('mg-pick', function(e){
+      var f=cb, d=e.detail; close();
+      // is_nsfw: the component's mg-pick detail is a real boolean (its own internal
+      // is_nsfw === '1' -> boolean conversion); every caller downstream of Picker.open
+      // (Gen.renderGenRef's data-nsfw setter, in particular) still does the app-wide
+      // '1'/'' STRING check, so convert back at the boundary rather than silently
+      // breaking Privacy Blur on a picked reference image.
+      if(f) f(d.media_id, d.thumb, d.prompt||'', d.is_nsfw?'1':'');
     });
-    return core;
+    el.addEventListener('mg-close', function(){ close(); });
+    document.body.appendChild(el);
   }
-  function open(callback, opts){ cb=callback; forcedType=(opts&&opts.type)||'';
-    el('pick-scrim').classList.add('open'); el('pick-modal').classList.add('open');
-    el('pick-q').value=''; markLoading();
-    ensureCore().setFilters(Object.assign({q:''}, readFilters(), {type:forcedType}));
-    setTimeout(function(){el('pick-q').focus();},120);
-    try{ el('pick-copy').checked = localStorage.getItem('pick-copyprompt')==='1'; }catch(e){} }
-  function close(){ el('pick-scrim').classList.remove('open'); el('pick-modal').classList.remove('open'); cb=null; forcedType=''; }
-  function onInput(){ ensureCore().setQuery(el('pick-q').value.trim()); }
-  function onFilter(){ markLoading(); ensureCore().setFilters(Object.assign(readFilters(), {type:forcedType})); }
-  function pick(m, thumb){
-    try{ if(el('pick-copy').checked && m.prompt && navigator.clipboard) navigator.clipboard.writeText(m.prompt); }catch(e){}
-    var f=cb; close(); if(f) f(m.media_id, thumb||m.thumb, m.prompt||'');
-  }
-  function more_(){ ensureCore().loadMore(); }
-  function onScroll(){ ensureCore().onScroll(el('pick-grid'), 320); }
-  function toggleCopy(){ try{ localStorage.setItem('pick-copyprompt', el('pick-copy').checked?'1':'0'); }catch(e){} }
-  function upload(){ el('pick-file').click(); }
-  function onFile(){
-    var f=el('pick-file').files[0]; if(!f) return;
-    var empty=el('pick-empty'); empty.textContent='Uploading '+f.name+'\\u2026'; empty.style.display='block';
-    var fd=new FormData(); fd.append('file', f);
-    fetch('/api/upload',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
-      el('pick-file').value='';
-      if(d.error||!d.media_id){ empty.textContent='\\u26a0 Upload failed: '+(d.error||'no media id'); return; }
-      empty.style.display='none';
-      pick({media_id:d.media_id, prompt:''}, URL.createObjectURL(f));
-    }).catch(function(){ el('pick-file').value=''; empty.textContent='\\u26a0 Upload failed (network).'; });
-  }
-  return {open:open, close:close, onInput:onInput, onFilter:onFilter, onScroll:onScroll, more:more_, toggleCopy:toggleCopy, upload:upload, onFile:onFile};
+  function close(){ if(el){ el.remove(); el=null; } cb=null; }
+  return {open:open, close:close};
 })();
-document.addEventListener('DOMContentLoaded', function(){
-  var pq=document.getElementById('pick-q'); if(pq) pq.addEventListener('input', Picker.onInput);
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') Picker.close(); });
-});
 /* ---- Account balance chip (credits + free cards) in the header ---- */
 var Acct = (function(){
   function chip(){ return document.getElementById('acct-chip'); }
@@ -5870,7 +6517,18 @@ var Snips = (function(){
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function load(){ return (list!==null?Promise.resolve():fetch('/api/snippets').then(function(r){return r.json();})
       .then(function(d){ list=d.snippets||[]; }).catch(function(){ list=[]; })); }
-  function persist(){ fetch('/api/snippets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snippets:list})}); }
+  function persist(){
+    // Was fully fire-and-forget: the server answers 200 with an {error:...} body on a write
+    // failure (see /api/snippets' except OSError branch), and nothing here ever looked at
+    // the response -- a save/delete could silently not stick and the UI would still show it
+    // as saved until the next reload wiped it back out. Surface a failure the same way
+    // Acct.claim() already does (window.Toast), and only there -- a clean save stays silent
+    // exactly as before.
+    fetch('/api/snippets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snippets:list})})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(!d || d.error){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:(d&&d.error)||'The server rejected the save.'}); } })
+      .catch(function(){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:'Network error.'}); });
+  }
   function open(anchor, tgt){ target=tgt; load().then(function(){ render(); place(anchor); }); }
   function hide(){ var m=menu(); if(m) m.style.display='none'; }
   function place(a){ var m=menu(), r=a.getBoundingClientRect();
@@ -5899,8 +6557,7 @@ var Snips = (function(){
   return {open:open, saveCurrent:saveCurrent, insert:insert, del:del};
 })();
 var Gen = (function(){
-  var kind='base', q='', selected=null, timer=null, seq=0, costSeq=0, costTimer=null, previewTimer=null;
-  var sortMode='popular', catFilter='';   // Model-Market: 'popular'(REST) | 'newest'(GraphQL); category chip
+  var kind='base', selected=null, costSeq=0, costTimer=null;
   var workflows=null, enhTimer=null;
   var fixTag_='face', fixBoxes=[], fixStart=null;
   function el(id){return document.getElementById(id);}
@@ -5915,10 +6572,42 @@ var Gen = (function(){
     var f=el('model-flyout'); if(f){ f.classList.remove('open'); f.setAttribute('aria-hidden','true'); }
     hidePreview();
   }
+  // O12 (Phase 2): the flyout's own grid/search/market UI is the shared <mg-model-picker>
+  // now -- two instances, lazily created on first open (matching the old "only fetch on
+  // first open" behavior, `if(!el('gen-grid').children.length) search();`, instead of
+  // paying for both an always-mounted base AND LoRA fetch on every page load): kind="base"
+  // for Models, kind="lora" multi market for LoRAs (market = the O13 sort/category
+  // extension, opt-in so the Loom's own kind="lora" multi mount -- no market attribute --
+  // stays byte-for-byte unaffected). setKind() now just toggles which one is visible;
+  // each keeps its OWN last-searched results independently, so switching Models<->LoRAs
+  // and back no longer re-fetches either side (a small improvement over the old
+  // shared-grid behavior, not just parity with it).
+  var basePickerEl=null, loraPickerEl=null;
+  function ensurePickers(){
+    if(basePickerEl) return;
+    var host=el('gen-picker-host'); if(!host) return;
+    basePickerEl=document.createElement('mg-model-picker');
+    basePickerEl.setAttribute('kind','base');
+    basePickerEl.addEventListener('mg-pick', function(e){ onBasePick(e.detail); });
+    host.appendChild(basePickerEl);
+    loraPickerEl=document.createElement('mg-model-picker');
+    loraPickerEl.setAttribute('kind','lora');
+    loraPickerEl.setAttribute('multi','');
+    loraPickerEl.setAttribute('market','');
+    loraPickerEl.style.display='none';
+    loraPickerEl.addEventListener('mg-pick', function(e){ onLoraPick(e.detail.model, e.detail.selected); });
+    host.appendChild(loraPickerEl);
+  }
   function toggleFlyout(){
     var f=el('model-flyout'), on=!f.classList.contains('open');
     f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
-    if(on){ if(!el('gen-grid').children.length) search(); setTimeout(function(){el('gen-q').focus();},120); }
+    if(on){
+      ensurePickers();
+      setTimeout(function(){
+        var vis=(kind==='lora')?loraPickerEl:basePickerEl, q=vis&&vis.querySelector('.mg-q');
+        if(q) q.focus();
+      },120);
+    }
     else hidePreview();
   }
   function setDock(d){
@@ -5932,33 +6621,9 @@ var Gen = (function(){
     if(k===kind) return; kind=k;
     el('gen-k-base').classList.toggle('on',k==='base');
     el('gen-k-lora').classList.toggle('on',k==='lora');
-    el('gen-q').placeholder = (k==='lora'?'Search LoRAs':'Search models')+'\\u2026';
-    // Category chips + Newest sort are a LoRA taxonomy (PixAI categories are 100% LoRAs, and
-    // new base-model uploads are rare) -> only meaningful on the LoRAs tab. Base models stay on
-    // the rich Popular/REST path; reset market state when leaving LoRAs.
-    var market=(k==='lora');
-    el('mkt-cats').style.display = market ? '' : 'none';
-    el('mkt-sort').style.display = market ? '' : 'none';
-    if(!market){ catFilter=''; sortMode='popular';
-      document.querySelectorAll('#mkt-cats button').forEach(function(b){ b.classList.toggle('on',(b.getAttribute('data-cat')||'')===''); });
-      el('mkt-popular').classList.add('on'); el('mkt-newest').classList.remove('on'); }
-    search();
-  }
-  function onInput(){ q=el('gen-q').value.trim(); clearTimeout(timer); timer=setTimeout(search,280); }
-  function setSort(s){ s=(s==='newest')?'newest':'popular'; if(s===sortMode) return; sortMode=s;
-    el('mkt-popular').classList.toggle('on',s==='popular'); el('mkt-newest').classList.toggle('on',s==='newest');
-    search(); }
-  function setCat(c){ if(c===catFilter) return; catFilter=c||'';
-    document.querySelectorAll('#mkt-cats button').forEach(function(b){ b.classList.toggle('on', (b.getAttribute('data-cat')||'')===catFilter); });
-    search(); }
-  function search(){
-    var mine=++seq, grid=el('gen-grid'); grid.style.opacity='.45';
-    var u='/api/model-search?kind='+kind+'&size=24&q='+encodeURIComponent(q)
-      +'&sort='+sortMode+'&category='+encodeURIComponent(catFilter);
-    fetch(u)
-      .then(function(r){return r.json();})
-      .then(function(d){ if(mine!==seq)return; render(d.results||[], d.error); grid.style.opacity='1'; })
-      .catch(function(){ if(mine!==seq)return; render([], 'network error'); grid.style.opacity='1'; });
+    ensurePickers();
+    if(basePickerEl) basePickerEl.style.display = (k==='base') ? '' : 'none';
+    if(loraPickerEl) loraPickerEl.style.display = (k==='lora') ? '' : 'none';
   }
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function fmt(n){ return (n||0).toLocaleString(); }
@@ -5973,34 +6638,6 @@ var Gen = (function(){
     if(t.indexOf('SD_V1')>=0)return 'SD1.5'; if(t.indexOf('SD3')>=0)return 'SD3';
     if(t.indexOf('Z_IMAGE')>=0)return 'Z-Image'; if(t.indexOf('CHAT')>=0)return 'Chat';
     return (t.split('_')[0]||'model').toLowerCase(); }
-  function render(rows, err){
-    var grid=el('gen-grid'), empty=el('gen-empty'); grid.innerHTML='';
-    if(err){ empty.textContent='\\u26a0 '+err; empty.style.display='block'; return; }
-    if(!rows.length){
-      // Newest+Models is legitimately sparse (new uploads are almost all LoRAs), so say so
-      // instead of the generic 'no results' which reads as broken.
-      empty.textContent=(sortMode==='newest' && kind==='base')
-        ? 'Few base models are uploaded recently \\u2014 new content is mostly LoRAs. Try the LoRAs tab, or switch to Popular.'
-        : 'No results \\u2014 try another search.';
-      empty.style.display='block'; return; }
-    empty.style.display='none';
-    rows.forEach(function(m){
-      var c=document.createElement('div'); c.className='gen-card';
-      if(kind==='lora' ? loras.some(function(l){return l.model_id===m.model_id;})
-                       : (selected && selected.model_id===m.model_id)) c.classList.add('sel');
-      var cov = m.preview_url ? '<img class="cov'+(m.should_blur?' blur':'')+'" loading="lazy" src="'+esc(m.preview_url)+'" alt="">' : '<div class="cov"></div>';
-      var uses = m.ref_count ? '<span class="uses" title="'+fmt(m.ref_count)+' generations \\u2014 PixAI\\u2019s own most-used ranking">\\u25c8 '+fmtCompact(m.ref_count)+'</span>' : '';
-      c.innerHTML = cov + '<span class="chk">\\u2713</span><div class="meta"><div class="nm" title="'+esc(m.title)+'">'+esc(m.title)+'</div><div class="sub"><span class="ty">'+tyShort(m.type)+'</span><span class="lk">\\u2665 '+fmt(m.liked_count)+'</span>'+uses+'</div></div>';
-      c.onclick=function(){ selectCard(m, c); };
-      // Debounced (D-11): a raw mouseenter re-triggered an instant, un-animated,
-      // freshly-repositioned popup on EVERY card the mouse passed over while scanning
-      // a grid -- which is what "browsing" is. A short hover-intent delay means only a
-      // genuine pause-to-look opens it; a fast scan across several cards never does.
-      c.onmouseenter=function(){ scheduleShowPreview(m, c); };
-      c.onmouseleave=cancelPreview;
-      grid.appendChild(c);
-    });
-  }
   function baseLabel(cat){ // "uploaded-sdxl" -> "SDXL", "flux-1" -> "Flux 1"
     cat=(cat||'').replace(/^uploaded-/,'').replace(/[-_]+/g,' ').trim();
     if(!cat) return '';
@@ -6029,11 +6666,10 @@ var Gen = (function(){
     placePreview(p, anchor);
   }
   function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
-  function scheduleShowPreview(m, anchor){
-    clearTimeout(previewTimer);
-    previewTimer=setTimeout(function(){ showPreview(m, anchor); }, 130);
-  }
-  function cancelPreview(){ clearTimeout(previewTimer); hidePreview(); }
+  // scheduleShowPreview/cancelPreview (the search-grid card hover-intent debounce) moved
+  // into <mg-model-picker> itself (O12) -- it owns its own cards now. hidePreview/
+  // showPreview/placePreview stay: previewSelected (the #gen-selrow summary-button hover)
+  // and showRefPreview (the reference-image slot hover) are unrelated to the picker grid.
   function placePreview(p, anchor){
     var r=anchor.getBoundingClientRect(), w=300, gap=14, x;
     var dr=el('gen-drawer'), leftish = dr && dr.classList.contains('dock-left');
@@ -6052,23 +6688,21 @@ var Gen = (function(){
   }
   function previewSelected(ev){ if(selected) showPreview(selected, ev.currentTarget); }
   var loras=[];
-  function toggleLora(m, c){
-    var i=-1; loras.forEach(function(l,j){ if(l.model_id===m.model_id) i=j; });
-    if(i>=0){ loras.splice(i,1); c.classList.remove('sel'); renderLoras(); refreshLoraNotes(); debouncedCost(); return; }
-    if(loras.length>=6) return;
-    var entry={model_id:m.model_id, title:m.title, preview_url:m.preview_url, version_id:'',
-               weight:0.7, lora_base_type:'', trigger_words:'', failed:false};
-    loras.push(entry); c.classList.add('sel'); renderLoras(); updateGoState();
-    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
-      .then(function(r){return r.json();})
-      .then(function(d){ entry.version_id=d.version_id||''; entry.lora_base_type=d.lora_base_model_type||'';
-        entry.trigger_words=d.trigger_words||'';
-        // An empty version_id here is ALSO a failure, not a quiet no-op -- a LoRA that
-        // never resolves must not be able to vanish from the submit silently (see failed
-        // below): it used to just sit there forever wearing the "still loading" hourglass.
-        entry.failed=!entry.version_id;
-        renderLoras(); refreshLoraNotes(); debouncedCost(); })
-      .catch(function(){ entry.failed=true; renderLoras(); refreshLoraNotes(); });
+  // O12 (Phase 2): <mg-model-picker kind="lora" multi>'s own _toggleMulti() now owns the
+  // pending/resolve/fail lifecycle (same shape as the old toggleLora() -- see the
+  // component's own header comment) -- this just upserts the Gallery's own `loras` array
+  // by model_id, mirroring the Loom's identical bindLoraPicker bridge. Note: the old cap
+  // (`if(loras.length>=6) return;`) is DELIBERATELY not reproduced here -- the component
+  // already optimistically highlights a picked card in ITS OWN grid before this listener
+  // ever runs, so silently refusing to add it here would leave the picker showing a card
+  // as selected that never actually made it into `loras` (visually picked, silently not
+  // submitted) -- confusing in a strictly worse way than no cap at all. The Loom's own
+  // identical mount has run uncapped since D-11 with no reported issue.
+  function onLoraPick(model, sel){
+    var i=-1; loras.forEach(function(l,j){ if(l.model_id===model.model_id) i=j; });
+    if(!sel){ if(i>=0) loras.splice(i,1); }
+    else { if(i<0) loras.push(model); else loras[i]=model; }
+    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
   }
   // --- LoRA<->base compatibility gate + trigger-word offers ------------------
   // A LoRA runs on a base ONLY if its loraBaseModelType == the base's modelType (exact enum
@@ -6137,60 +6771,136 @@ var Gen = (function(){
   }
   function loraWeight(i, v){ if(!loras[i]) return;
     v=parseFloat(v); loras[i].weight=(isNaN(v)?0.7:Math.max(0,Math.min(2,v))); debouncedCost(); }
-  function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes();
-    if(kind==='lora') search(); debouncedCost(); }
+  // Note (O12): removing a LoRA via its chip's own x no longer re-searches the picker grid
+  // (there IS no search() anymore -- see the ensurePickers block above). The LoRA picker's
+  // OWN card for the removed entry can stay visually highlighted until the user interacts
+  // with that exact card again (clicking it re-toggles it off, correctly, through
+  // onLoraPick) -- a minor, cosmetic-only staleness, not a functional gap: `loras` (and
+  // therefore payload()) is always correct immediately, regardless of the grid's own
+  // highlight state. Flagged as a precise, known, low-severity remainder rather than
+  // silently left unexplained.
+  function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes(); debouncedCost(); }
   function openLoraBrowser(){
     var f=el('model-flyout');
     if(!f.classList.contains('open')) toggleFlyout();
     setKind('lora');
   }
-  var selSeq=0;   // guards selectCard's async version fetch against a stale-response race
-  function selectCard(m, c){
-    if(kind==='lora'){ toggleLora(m, c); return; }
-    document.querySelectorAll('.gen-card.sel').forEach(function(x){x.classList.remove('sel');});
-    c.classList.add('sel'); selected=Object.assign({}, m); var mySeq=++selSeq;
+  var selSeq=0;   // guards onBasePick's async version fetch against a stale-response race
+  // O12 (Phase 2): replaces the old selectCard(m, c) -- <mg-model-picker kind="base">'s
+  // mg-pick fires with the raw /api/model-search row (detail: m), and the component
+  // already owns highlighting the picked card in its own grid, so this only has to do
+  // what selectCard did AFTER that: resolve the real version + metadata and refresh
+  // every downstream surface (LoRA compat notes, model-defaults prefill, cost).
+  function onBasePick(m){
+    selected=Object.assign({}, m); var mySeq=++selSeq;
     var th=el('gen-selthumb');
     if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
     el('gen-selname').textContent=m.title+' \\u2026';
-    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id))
+    // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
+    // ONE request either way (same endpoint), but now returns every published release
+    // (versions[0] is the same "latest" resolve_version_meta always gave) so the version
+    // picker + sampling_method + capabilities the app was resolving and throwing away can
+    // finally be shown, not just negative/steps/cfg (which were already wired -- see
+    // applyModelDefaults below).
+    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id)+'&all=1')
       .then(function(r){return r.json();})
       .then(function(d){ if(mySeq!==selSeq) return;   // a newer pick superseded this fetch
-        selected.version_id=d.version_id||''; selected.model_type=d.model_type||'';
-        selected.negative_prompt=d.negative_prompt||''; selected.sampling_steps=d.sampling_steps||null;
-        selected.cfg_scale=d.cfg_scale||null;
-        el('gen-selname').textContent=m.title+(d.version_id?'':' (no version!)');
+        var versions=(d&&d.versions)||[], v=versions[0]||{};
+        selected.versions=versions;
+        applyVersion(v);
+        el('gen-selname').textContent=m.title+(v.version_id?'':' (no version!)');
+        renderVersions(versions, v.version_id);
         refreshLoraNotes();   // re-check any attached LoRAs against the new base + set go-state
         applyModelDefaults();
         refreshCost(); })
       .catch(function(){ if(mySeq===selSeq) el('gen-selname').textContent=m.title; });
   }
+  // Copy one resolved version's meta (list_model_versions row shape) onto `selected` --
+  // shared by onBasePick's initial (latest) resolve and pickVersion's switch, so the two
+  // can never disagree about which fields a "version" carries.
+  function applyVersion(v){
+    selected.version_id=v.version_id||''; selected.model_type=v.model_type||'';
+    selected.negative_prompt=v.negative_prompt||''; selected.sampling_steps=v.sampling_steps||null;
+    selected.cfg_scale=v.cfg_scale||null; selected.sampling_method=v.sampling_method||'';
+    selected.capabilities=v.capabilities||[];
+    if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');
+  }
+  // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
+  // always silently took the newest release and discarded the rest. #gen-version lists every
+  // one (core.list_model_versions, via ?all=1 above); switching re-applies that version's OWN
+  // meta (a different release can carry a different tuned preset, in principle a different
+  // model_type) through the exact same applyVersion() onBasePick uses, then re-runs the same
+  // downstream refresh -- no extra network call, the data's already in hand.
+  function pickVersion(vid){
+    if(!selected||!selected.versions) return;
+    var v=selected.versions.filter(function(x){ return x.version_id===vid; })[0];
+    if(!v) return;
+    applyVersion(v);
+    el('gen-selname').textContent=selected.title+(v.version_id?'':' (no version!)');
+    renderCaps(v.capabilities);
+    refreshLoraNotes();
+    applyModelDefaults();
+    refreshCost();
+  }
+  function renderVersions(versions, currentId){
+    var wrap=el('gen-selmeta'), sel=el('gen-version');
+    if(!wrap||!sel) return;
+    if(!versions.length){ wrap.classList.remove('show'); sel.innerHTML=''; renderCaps([]); return; }
+    sel.innerHTML=versions.map(function(v){
+      return '<option value="'+esc(v.version_id)+'"'+(v.version_id===currentId?' selected':'')+'>'+esc(v.label||v.version_id)+'</option>';
+    }).join('');
+    var cur=versions.filter(function(v){ return v.version_id===currentId; })[0]||versions[0];
+    renderCaps(cur.capabilities);
+    wrap.classList.add('show');
+  }
+  // problem 5: `extra.capabilities` (PixAI's own descriptive tags -- "high-resolution",
+  // "pose-accuracy", ...) was resolved by resolve_version_meta and never shown anywhere.
+  // Read-only badges -- these are not a submit param, just what PixAI's own info card says
+  // the model is good at.
+  function renderCaps(caps){
+    var box=el('gen-caps'); if(!box) return;
+    box.innerHTML=(caps||[]).map(function(c){ return '<span class="cap">'+esc(c)+'</span>'; }).join('');
+  }
   // Prefill negative/steps/cfg from the model author's own tuned preset (resolve_version_meta
   // already fetches these; the drawer just never used them). Only for fields the model actually
   // has data for -- a model with no tuned preset leaves whatever's already in the fields alone.
+  // problem 5: sampling_method is READ-ONLY informational text here, not a new submit field --
+  // the create mutation is never called with an explicit samplingMethod anywhere in this app
+  // (PixAI picks its own default sampler; only Mode/inferenceProfile is user-facing), and
+  // unlike inferenceProfile (which has a confirmed server-rejection retry path,
+  // submit_generation()) there is no confirmed-safe way to force an arbitrary sampler per
+  // model without risking a silent submit rejection this pass has no safety net for. Showing
+  // it is still real, honest progress -- the owner can now actually SEE what preset a model's
+  // author tuned, which was the concrete complaint ("it's all in their info cards already").
   function applyModelDefaults(){
-    var note=el('gen-modeldefaults'); if(!note) return;
-    var s=selected||{}, has=s.negative_prompt||s.sampling_steps||s.cfg_scale;
+    var note=el('gen-modeldefaults'), lbl=el('gen-modeldefaults-label'); if(!note) return;
+    var s=selected||{}, has=s.negative_prompt||s.sampling_steps||s.cfg_scale||s.sampling_method;
     note.style.display = has ? 'flex' : 'none';
+    if(lbl) lbl.textContent = s.sampling_method
+      ? ('\\u2713 using this model\\'s tuned preset (' + s.sampling_method + ')')
+      : '\\u2713 using this model\\'s tuned preset';
     if(!has) return;
     if(s.negative_prompt) el('gen-neg').value=s.negative_prompt;
     if(s.sampling_steps) el('gen-steps').value=s.sampling_steps;
     if(s.cfg_scale) el('gen-cfg').value=s.cfg_scale;
   }
   function resetModelDefaults(){ applyModelDefaults(); }
-  var genRef=null;   // {media_id, thumb} -- the img2img reference, or null
+  var genRef=null;   // {media_id, thumb, is_nsfw} -- the img2img reference, or null
   function refPick(){
     if(genRef){ genRef=null; renderGenRef(); debouncedCost(); return; }   // click filled slot = clear
-    Picker.open(function(mid, thumb){ genRef={media_id:mid, thumb:thumb}; renderGenRef(); debouncedCost(); });
+    Picker.open(function(mid, thumb, prompt, is_nsfw){ genRef={media_id:mid, thumb:thumb, is_nsfw:is_nsfw}; renderGenRef(); debouncedCost(); });
   }
   function renderGenRef(){
     var s=el('gen-ref-slot'), c=el('gen-ref-ctl'); if(!s) return;
     if(genRef){
+      if(genRef.is_nsfw==='1') s.setAttribute('data-nsfw','1'); else s.removeAttribute('data-nsfw');
       s.innerHTML='<img src="'+genRef.thumb+'" style="width:100%;height:100%;object-fit:cover;">'
         +'<span style="position:absolute;top:1px;right:1px;background:rgba(21,19,28,.85);color:var(--subtext);border-radius:50%;width:15px;height:15px;font-size:10px;line-height:15px;text-align:center;">&times;</span>';
       s.style.borderStyle='solid'; s.title='Click to remove the reference';
       c.style.display='';
       s.onmouseenter=function(){ showRefPreview(genRef.media_id, s); }; s.onmouseleave=hidePreview;
     } else {
+      s.removeAttribute('data-nsfw');
       s.innerHTML='+ ref'; s.style.borderStyle='dashed'; s.title='Pick a reference image from your gallery';
       s.onmouseenter=null; s.onmouseleave=null; c.style.display='none';
     }
@@ -6236,33 +6946,66 @@ var Gen = (function(){
       .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
   }
   function debouncedCost(){ clearTimeout(costTimer); costTimer=setTimeout(refreshCost,250); }
-  function renderResult(res, d, past){
-    res.style.display='block';
-    if(d.error){ res.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(d.error)+'</span>'; return; }
+  // LOCAL PORT of loom/src/loom-mutations.js's friendlyGenErr(raw) -- same regex patterns,
+  // same intent as static/mg-generate-drawer.js's own local copy just below this same
+  // reasoning (see its duplication-risk comment). This page's Gen IIFE is ALSO a plain
+  // inline <script> generated straight into the page with no build step, so it can't
+  // import loom-mutations.js either -- a THIRD hand-maintained copy, same drift risk: if
+  // loom-mutations.js's friendlyGenErr ever gets new/changed regexes or wording, this one
+  // and the drawer's must both be updated by hand to match, or this tab's raw-error
+  // rendering silently drifts from the Video tab's (which already goes through the real
+  // one via <mg-generate-drawer>). A code-search for "friendlyGenErr" is the only guard
+  // against drift beyond the parity test covering this copy (loom/test/mg-generate-drawer-parity.test.js).
+  function friendlyGenErr(raw){
+    var s=String(raw||'');
+    if(/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
+      return 'Out of balance for this model \\u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
+    if(/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
+      return "PixAI's content filter blocked this generation \\u2014 that's decided on PixAI's side, not in the Loom.";
+    if(/inferenceProfile/i.test(s))
+      return "That quality setting isn't available for this model \\u2014 try Auto instead.";
+    return s||'generation failed';
+  }
+  function renderResultInto(target, d, past){
+    if(d.error){ target.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(friendlyGenErr(d.error))+'</span>'; return; }
     var ids=d.media_ids||[];
     var cost = d.paid_credit===0 ? 'free (card used)' : ((d.paid_credit||0).toLocaleString()+' credits');
     var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 '+past+' \\u2014 '+cost+'. Added to your gallery.</div>';
     ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
     if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');Gen.setMode(\\'edit\\');return false;">Edit this result \\u2192</a>'; }
-    res.innerHTML=html;
+    target.innerHTML=html;
   }
+  // Concurrent generations (owner-approved 2026-07-23): PixAI itself runs tasks in
+  // parallel, so the Go button used to lock for no real reason -- every OTHER tab reused
+  // this one runTask(), so fixing it here fixes Generate/Edit/Enhance/Fix together. Each
+  // call now gets its OWN line appended into the result strip (never overwriting a sibling
+  // submission's still-live status/result), and the button frees up the moment the SERVER
+  // ANSWERS the submit -- accepted or rejected -- not when the task finishes rendering.
+  // Jobs already polls each task_id independently (its own de-dupe map is keyed by id), so
+  // nothing about the polling itself needed to change -- only who owns the button and
+  // where a submission's own status gets rendered.
   function runTask(url, p, res, opts){
     opts=opts||{};
-    res.style.display='block'; res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
+    res.style.display='block';
+    var line=document.createElement('div'); line.className='gen-result-line';
+    line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
+    res.appendChild(line);
     if(opts.btn){ opts.btn.disabled=true; opts.btn.textContent=opts.busy; }
-    function done(){ if(opts.btn){ opts.btn.disabled=false; opts.btn.textContent=opts.idle; } }
+    function unlock(){ if(opts.btn){ opts.btn.disabled=false; opts.btn.textContent=opts.idle; } }
     fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
       .then(function(r){return r.json();})
       .then(function(d){
-        if(d.error || !d.task_id){ done(); renderResult(res, {error:d.error||'submit failed'}); return; }
-        res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
+        unlock();   // the server answered -- free the button for the NEXT submission
+        if(d.error || !d.task_id){ renderResultInto(line, {error:d.error||'submit failed'}); return; }
+        line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
         // Jobs owns the polling, so the task (and its result) survive closing the drawer.
+        // The callback below only ever touches THIS submission's own `line`.
         Jobs.track(d.task_id, opts.past||'Task', function(phase, data){
-          if(phase==='done'){ done(); renderResult(res, data, opts.past); Acct.refresh(); }
-          else if(phase==='failed'){ done(); renderResult(res, {error:data.error||('task '+(data.status||'failed'))}); }
-          else { res.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Rendering under the eclipse\\u2026 (task '+String(d.task_id).slice(-6)+')</span>'; }
+          if(phase==='done'){ renderResultInto(line, data, opts.past); Acct.refresh(); }
+          else if(phase==='failed'){ renderResultInto(line, {error:data.error||('task '+(data.status||'failed'))}); }
+          else { line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Rendering under the eclipse\\u2026 (task '+String(d.task_id).slice(-6)+')</span>'; }
         });
-      }).catch(function(){ done(); renderResult(res, {error:'network error'}); });
+      }).catch(function(){ unlock(); renderResultInto(line, {error:'network error'}); });
   }
   function generate(){
     var p=payload();
@@ -6438,7 +7181,20 @@ var Gen = (function(){
   }
   function fix(){
     var src=editSrc(); if(!src){ el('edit-src').focus(); return; }
-    if(!fixBoxes.length){ el('fix-result').style.display='block'; el('fix-result').innerHTML='<span style="color:var(--subtext);font-size:12px;">Drag a box over a hand or face first.</span>'; return; }
+    if(!fixBoxes.length){
+      var fr=el('fix-result'); fr.style.display='block';
+      var w=document.createElement('div'); w.className='gen-result-line';
+      w.innerHTML='<span style="color:var(--subtext);font-size:12px;">Drag a box over a hand or face first.</span>';
+      fr.appendChild(w);   // append, not overwrite -- a fix task already in flight keeps its own line
+      return;
+    }
+    // No price check exists for this action (audit 2026-07-21, unfiled-workflow-findings):
+    // /v2/task/fixer is a separate endpoint from the createGenerationTask family /v2/task-price
+    // mirrors, so it cannot be priced the way every other spend surface in this app is -- a
+    // client-side badge would just always show nothing. Until PixAI's own API can price a fixer
+    // task, a plain confirm is this app's established fail-closed guardrail for exactly that
+    // situation (the same shape the Loom's Deep Focus tabs already use for their own confirmSpend).
+    if(!window.confirm('Fix hand/face regions? This spends PixAI credits -- no cost preview is available for this action yet.')) return;
     var img=el('fix-img'); var scale = (img.naturalWidth && img.clientWidth) ? (img.naturalWidth/img.clientWidth) : 1;
     var boxes=fixBoxes.map(function(b){ return {x:Math.round(b.x*scale),y:Math.round(b.y*scale),width:Math.round(b.w*scale),height:Math.round(b.h*scale),tag:b.tag}; });
     runTask('/api/fix', {source:src, boxes:boxes}, el('fix-result'),
@@ -6506,7 +7262,7 @@ var Gen = (function(){
     drawer.prefill({ mode: refs.length>1?'r2v':'i2v',
                      images: refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; }) });
   }
-  return {open:open, close:close, setKind:setKind, onInput:onInput, search:search,
+  return {open:open, close:close, setKind:setKind,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
           selectEnhance:selectEnhance, runEnhance:runEnhance,
@@ -6515,13 +7271,13 @@ var Gen = (function(){
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
-          insertTriggers:insertTriggers, setSort:setSort, setCat:setCat,
+          insertTriggers:insertTriggers,
           // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
           // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
           // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
           // gone -- the component owns all of that now.
           setEditSub:setEditSub, setEditModel:setEditModel, addVideoRefs:addVideoRefs,
-          resetModelDefaults:resetModelDefaults,
+          resetModelDefaults:resetModelDefaults, pickVersion:pickVersion,
           get selected(){return selected;}};
 })();
 // Gallery mount wiring for <mg-generate-drawer>: the component is picker-agnostic and fires
@@ -6532,7 +7288,7 @@ var Gen = (function(){
 // file). One document-level listener; the drawer is the only source of this event.
 document.addEventListener('mg-pick-request', function(e){
   var d=e.detail; if(!d||typeof d.respond!=='function') return;
-  Picker.open(function(mid, thumb){ d.respond(mid, thumb); }, d.kind==='video'?{type:'video'}:null);
+  Picker.open(function(mid, thumb, prompt, is_nsfw){ d.respond(mid, thumb, is_nsfw); }, d.kind==='video'?{type:'video'}:null);
 });
 // mg-submit / mg-result: the drawer polls and renders ITS OWN result inline (self-contained,
 // same as the Loom's mount) -- these two listeners are not for that. They are the two things
@@ -6655,6 +7411,9 @@ var Similar = (function(){
         c.className='card'; c.setAttribute('data-mid', it.media_id);
         c.setAttribute('data-prompt', it.prompt||'');
         if(it.is_video==='1') c.setAttribute('data-video','1');
+        // Mirrors the server template's own is_nsfw-gated data-nsfw attribute (see the main
+        // grid's card markup) -- without it, Privacy Blur never touches an NSFW lookalike here.
+        if(it.is_nsfw==='1') c.setAttribute('data-nsfw','1');
         c.innerHTML='<a class="cover" href="/image/'+encodeURIComponent(it.media_id)+'"></a>'
           +'<img class="loaded" src="'+it.thumb+'" loading="lazy" decoding="async" alt="">'
           +(it.is_video==='1'?'<div class="vbadge" title="Video">\\u25b6</div>':'')
@@ -6675,11 +7434,19 @@ function bulkSendVideo(){
     refs.push({mid:mid, thumb:'/thumbs/'+mid+'.jpg'});
   });
   if(!refs.length) return;
-  Gen.addVideoRefs(refs.slice(0,9));
+  // Gen.addVideoRefs() itself caps at 6 (the multi-ref drawer's real limit, see its own
+  // comment) -- this used to slice(0,9), a stale number left over from before that cap
+  // dropped 9->6 in the full-parity split. addVideoRefs's cap was always the authoritative
+  // one, so nothing over-sent either way, but nobody was ever TOLD their extra picks got
+  // dropped -- fixed here, not by raising the cap.
+  if(refs.length>6 && window.Toast) Toast.show({kind:'err', title:'Only 6 images used',
+    msg:'The video drawer takes up to 6 reference images — '+(refs.length-6)+' of your '+refs.length+' were left out.'});
+  Gen.addVideoRefs(refs);
   clearAll();   // sent to the video drawer -- clear the gallery selection (we stay on the page)
 }
 document.addEventListener('DOMContentLoaded', function(){
-  var q=document.getElementById('gen-q'); if(q) q.addEventListener('input', Gen.onInput);
+  // O12: the flyout's search input lives inside <mg-model-picker> now (its own .mg-q),
+  // wired internally by the component -- no external #gen-q to bind here anymore.
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
   try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
   Acct.refresh();
@@ -7001,8 +7768,7 @@ function savePrompt() {
 
     LOGIN_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 {# Splash background: three tinted radial washes, a procedurally-generated star
-   field, and a vignette. Ported from static/_mockup_login_panel.html's
-   SplashBackground(). The stars are an SVG feTurbulence filter, not an image
+   field, and a vignette. The stars are an SVG feTurbulence filter, not an image
    asset -- so this renders identically on a fresh clone with no branding art
    dropped in, and costs no request. #}
 <div class="login-splash" aria-hidden="true">
@@ -7103,13 +7869,11 @@ function savePrompt() {
 </script>
 <style>
   /* ---- Login screen -------------------------------------------------------
-     Ported value-for-value from static/_mockup_login_panel.html (the locked
-     design source). An earlier pass reproduced the mock's COMPONENTS -- card,
-     inputs, button -- but not its LAYOUT, and the result read as a different
-     page: no banner, no splash, a left-aligned inline logo instead of a
-     centered stack, and placeholder-only inputs where the mock has real
-     uppercase field labels. Owner: "It looks nothing like the design... but
-     has the basics." Every value below is the mock's own. */
+     The composition is the design, not just the components: banner + splash
+     behind a centered stack, with real uppercase field labels rather than
+     placeholder-only inputs. Treat the values below as one tuned set --
+     changing them piecemeal is how this page once drifted into reading as a
+     different page entirely. */
   .login-splash { position: fixed; inset: 0; background: var(--base); overflow: hidden; z-index: 0; }
   .splash-wash { position: absolute; inset: 0;
     background:
@@ -7226,6 +7990,7 @@ function savePrompt() {
     {{ stat('Duplicates', '{:,}'.format(h.dup_redundant), 'warn' if h.dup_redundant else '') }}
     {{ stat('Reclaimable', h.dup_bytes_h, 'warn' if h.dup_bytes else '') }}
     {{ stat('Missing files', '{:,}'.format(h.missing), 'bad' if h.missing else '') }}
+    {{ stat('Uncataloged', '{:,}'.format(h.uncataloged), 'warn' if h.uncataloged else '') }}
   </div>
 
   <h2 style="margin:28px 0 10px;font-size:16px;">Images by month</h2>
@@ -7298,10 +8063,11 @@ function savePrompt() {
     {% endfor %}
   </div>
 
-  {% if h.dup_redundant or h.missing %}
+  {% if h.dup_redundant or h.missing or h.uncataloged %}
   <div style="margin-top:24px;padding:12px 16px;background:var(--mantle);border-radius:8px;font-size:13px;color:var(--subtext);">
     {% if h.dup_redundant %}<div>· {{ '{:,}'.format(h.dup_redundant) }} duplicate copies ({{ h.dup_bytes_h }}). Run <code>--dedup</code> to quarantine.</div>{% endif %}
     {% if h.missing %}<div>· {{ '{:,}'.format(h.missing) }} catalog rows reference a file that's missing on disk. Re-run a download to refetch.</div>{% endif %}
+    {% if h.uncataloged %}<div>· {{ '{:,}'.format(h.uncataloged) }} file(s) on disk aren't in the catalog. Use the <a href="{{ url_for('index') }}" style="color:var(--lavender);">↑ Import</a> button on the gallery, or run <code>--import-local</code>, to catalog them.</div>{% endif %}
   </div>
   {% endif %}
   {% if h.dup_redundant %}
@@ -7399,6 +8165,34 @@ function savePrompt() {
   .u-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;color:var(--text);}
   .u-row .btn{flex:none;}
   .u-you{font-size:11px;color:var(--accent);margin-left:8px;}
+  /* Trash panel (2026-07-24) -- a floating overlay opened from the button below,
+     same pattern as the Folio of Honors/Contests/YourArt modals (#ach-modal /
+     #contest-modal / #art-modal), NOT a page embedded in this Panel's own layout.
+     .ach-modal/.ach-panel/.ach-x/.ach-htitle/.ach-hsub are that shared base modal
+     chrome, normally injected by static/mg-notify.js -- copied here rather than
+     loaded via <script src>, same reasoning + same precedent as the .p-tabs/.htab
+     copy above (mg-notify.js also wires up the Jobs tray/Achievement modals this
+     page doesn't otherwise use). Do not restyle these independently of that source. */
+  .ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}
+  .ach-modal.open{display:flex;}
+  .ach-panel{position:relative;width:760px;max-width:96vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:16px;box-shadow:0 30px 90px rgba(0,0,0,.6);padding:24px 26px 28px;}
+  .ach-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--subtext);font-size:26px;line-height:1;cursor:pointer;}
+  .ach-x:hover{color:var(--text);}
+  .ach-htitle{font-size:21px;font-weight:700;color:var(--text);letter-spacing:.01em;}
+  .ach-hsub{font-size:12px;color:var(--subtext);margin-top:3px;}
+  /* Trash-specific: the grid/toolbar/cells, all new -- no shared-chrome equivalent exists yet. */
+  .tr-panel{width:920px;max-width:96vw;height:82vh;display:flex;flex-direction:column;}
+  .tr-toolbar{display:flex;align-items:center;gap:10px;margin:14px 0 10px;flex-wrap:wrap;}
+  .tr-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));grid-auto-rows:min-content;gap:10px;align-content:start;padding:2px;}
+  .tr-cell{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;}
+  .tr-cell:hover{border-color:var(--lavender);}
+  .tr-cell.sel{outline:2px solid var(--accent);}
+  .tr-cell img{width:100%;height:120px;object-fit:cover;display:block;background:var(--surface1);}
+  .tr-cell .tr-check{position:absolute;top:6px;left:6px;width:17px;height:17px;accent-color:var(--accent);}
+  .tr-cell .tr-vid{position:absolute;top:6px;right:6px;background:rgba(6,4,16,.72);color:var(--text);font-size:9px;border-radius:4px;padding:1px 6px;}
+  .tr-cell .tr-cap{padding:5px 7px;font-size:10.5px;color:var(--subtext);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .tr-empty{text-align:center;padding:34px;color:var(--subtext);font-size:13px;}
+  .tr-foot{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:11px;color:var(--overlay0);}
 </style>
 <header>
   <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
@@ -7427,11 +8221,22 @@ function savePrompt() {
   </div>
 
   <div class="p-sec">
+    <h2>&#128465; Trash</h2>
+    <div class="p-note" style="margin-top:0;">Deleted images and videos are quarantined in <code>_deleted/</code>, not destroyed &mdash; recoverable here until you permanently remove them.</div>
+    <div style="margin-top:10px;">
+      <button type="button" class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="Trash.open()"><span class="t">&#128465; Open trash&hellip;</span></button>
+    </div>
+  </div>
+
+  <div class="p-sec">
     <h2>Maintenance</h2>
     <div style="font-size:12px;color:var(--overlay0);margin-bottom:8px;">Safe &middot; read-only or reversible</div>
     <div class="jobrow" id="jobs-safe"></div>
     <div style="font-size:12px;color:var(--overlay0);margin:16px 0 8px;">Changes files &middot; asks first</div>
     <div class="jobrow" id="jobs-danger"></div>
+    {% if not panel_is_local %}
+    <div class="p-note" style="margin-top:0;">Destructive actions (Organize, Dedup, Rebuild thumbnails, and the rest) are restricted to the machine running the gallery &mdash; sign in there to use them.</div>
+    {% endif %}
     <details class="jobs-adv" style="margin-top:16px;">
       <summary style="font-size:12px;color:var(--overlay0);cursor:pointer;user-select:none;">Advanced &middot; sync variants the one-click Sync doesn't cover</summary>
       <div style="font-size:11.5px;color:var(--overlay0);margin:8px 0;line-height:1.5;">These re-walk the full account rather than the incremental default. Slower, all read/append (never delete).</div>
@@ -7491,13 +8296,15 @@ function savePrompt() {
 
   <div class="p-sec">
     <h2>&#127912; Branding</h2>
-    <div class="p-note">The <b>banner mark</b> &mdash; the icon beside the title &mdash; and its animation. <b>Set launcher icon</b> writes a Desktop shortcut whose icon is the selected mark (a .pyw can't carry its own icon; the shortcut can). The favicon stays the Gem Tome.</div>
+    <div class="p-note">The <b>banner mark</b> &mdash; the icon beside the title &mdash; and its animation. {% if panel_is_local %}<b>Set launcher icon</b> writes a Desktop shortcut whose icon is the selected mark (a .pyw can't carry its own icon; the shortcut can).{% else %}<b>Set launcher icon</b> is restricted to the machine running the gallery &mdash; sign in there to use it.{% endif %} The favicon stays the Gem Tome.</div>
     <div id="brand-marks" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;"></div>
     <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
       <div><div class="p-fl">Animation</div>
         <select id="brand-anim" class="p-sel"></select></div>
       <button class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="saveBrand()"><span class="t">Save</span></button>
+      {% if panel_is_local %}
       <button class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="setLauncher()" title="Creates/updates the Desktop 'Moonglade Athenaeum' shortcut; its icon becomes the selected mark"><span class="t">&#128279; Set launcher icon</span></button>
+      {% endif %}
       <span id="brand-status" style="font-size:12.5px;color:var(--subtext);"></span>
     </div>
   </div>
@@ -7562,6 +8369,36 @@ function savePrompt() {
   </div>
   </div>
 </div>
+<!-- Trash panel: a FLOATING OVERLAY (sibling of .panel above, not nested inside it),
+     opened by the "Open trash..." button in the Trash card above via Trash.open().
+     Same #ach-modal/.ach-panel chrome pattern as the gallery's Folio of
+     Honors/Contests/YourArt modals -- see the CSS comment near .ach-modal above. -->
+<div id="trash-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Trash.close()">
+  <div class="ach-panel tr-panel" role="dialog" aria-label="Trash">
+    <button type="button" class="ach-x" onclick="Trash.close()" aria-label="Close">&times;</button>
+    <div class="ach-htitle">&#128465; Trash</div>
+    <div class="ach-hsub" id="tr-sub">Loading&hellip;</div>
+    <div class="tr-toolbar">
+      <label class="p-check"><input type="checkbox" id="tr-selall" onchange="Trash.toggleAll(this.checked)"> Select all loaded</label>
+      <span style="flex:1"></span>
+      <button type="button" class="btn" onclick="Trash.restoreSelected()">&#8634; Restore selected</button>
+      {% if panel_is_local %}
+      <button type="button" class="btn btn-danger" onclick="Trash.deleteSelected()">Delete forever</button>
+      {% endif %}
+    </div>
+    <div id="tr-grid" class="tr-grid" onscroll="Trash.onScroll()"></div>
+    <div class="tr-empty" id="tr-empty" style="display:none;">Nothing in the trash.</div>
+    <div class="tr-foot">
+      <span id="tr-status"></span>
+      <span style="flex:1"></span>
+      {% if panel_is_local %}
+      <button type="button" class="btn btn-danger" onclick="Trash.emptyAll()">Empty trash&hellip;</button>
+      {% else %}
+      <span style="font-size:11px;color:var(--overlay0);">Delete-forever &amp; Empty trash need the machine running the gallery &mdash; restore is available here.</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
 <div id="srv-overlay">
   <div class="srv-box"><div class="srv-spin" id="srv-spin"></div>
     <div class="srv-msg" id="srv-msg">Working&hellip;</div>
@@ -7581,6 +8418,181 @@ var ACTIONS = {{ actions_json|safe }};       // Maintenance buttons -- panel_vis
 var ALL_ACTIONS = {{ all_actions_json|safe }};  // scheduler dropdown -- includes background-only jobs
 var CSRF = "{{ csrf }}";   // same session-based token every other mutating form in this app uses
 function el(i){return document.getElementById(i);}
+// --- Trash panel: floating overlay opened from the "Open trash..." button above,
+// same #ach-modal/.ach-panel pattern as the gallery's Folio of Honors/Contests/
+// YourArt modals (see the CSS comment near .ach-modal). Self-contained (no
+// dependency on mg-notify.js's Ach object, which this page doesn't load) --------
+var Trash = (function(){
+  var page = 1, limit = 60, total = 0, loading = false, exhausted = false;
+  var selected = {};
+  function open(){
+    el('trash-modal').classList.add('open');
+    el('trash-modal').setAttribute('aria-hidden', 'false');
+    reset();
+    load();
+  }
+  function close(){
+    el('trash-modal').classList.remove('open');
+    el('trash-modal').setAttribute('aria-hidden', 'true');
+  }
+  function reset(){
+    page = 1; total = 0; loading = false; exhausted = false; selected = {};
+    el('tr-grid').innerHTML = '';
+    el('tr-empty').style.display = 'none';
+    el('tr-selall').checked = false;
+    el('tr-status').textContent = '';
+    el('tr-sub').textContent = 'Loading…';
+  }
+  function describeTotal(){
+    el('tr-sub').textContent = total.toLocaleString() + ' item' + (total === 1 ? '' : 's') + ' in the trash';
+  }
+  function load(){
+    if (loading || exhausted) return;
+    loading = true;
+    fetch('/api/trash/list?page=' + page + '&limit=' + limit)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        loading = false;
+        total = d.total || 0;
+        var got = (d.items || []).length;
+        (d.items || []).forEach(renderCell);
+        exhausted = got === 0 || (page * limit) >= total;
+        page += 1;
+        describeTotal();
+        el('tr-empty').style.display = (total === 0) ? 'block' : 'none';
+        maybeFillPage();
+      })
+      .catch(function(){
+        loading = false;
+        el('tr-sub').innerHTML = '<span class="st-failed">could not load the trash</span>';
+      });
+  }
+  function maybeFillPage(){
+    // If the loaded cells don't yet overflow the grid, there's no scrollbar to
+    // drive onScroll()'s infinite-scroll -- pull one more page, same fix as the
+    // gallery Picker's own maybeFillPage (picker-core.js).
+    var g = el('tr-grid');
+    if (!exhausted && !loading && g.scrollHeight <= g.clientHeight + 4) load();
+  }
+  function onScroll(){
+    var g = el('tr-grid');
+    if (g.scrollTop + g.clientHeight > g.scrollHeight - 300) load();
+  }
+  function humanSize(n){
+    n = +n || 0;
+    if (n >= 1073741824) return (n / 1073741824).toFixed(1) + ' GB';
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+    if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+    return n + ' B';
+  }
+  function humanDate(ts){
+    if (!ts) return '';
+    try { return new Date(ts * 1000).toLocaleDateString(); } catch (e) { return ''; }
+  }
+  function renderCell(it){
+    if (el('tr-grid').querySelector('[data-mid="' + it.media_id + '"]')) return;   // already rendered
+    var c = document.createElement('div');
+    c.className = 'tr-cell';
+    c.dataset.mid = it.media_id;
+    c.title = it.prompt || it.filename;
+    c.innerHTML =
+      '<input type="checkbox" class="tr-check">' +
+      '<img loading="lazy" decoding="async" src="' + it.thumb + '" alt="">' +
+      (it.is_video === '1' ? '<span class="tr-vid">&#9654;</span>' : '') +
+      '<div class="tr-cap">' + escH2(it.filename) + '<br>' + humanSize(it.size) + ' · ' + humanDate(it.deleted_at) + '</div>';
+    var cb = c.querySelector('.tr-check');
+    cb.addEventListener('click', function(e){ e.stopPropagation(); toggle(it.media_id, cb.checked, c); });
+    c.addEventListener('click', function(){ cb.checked = !cb.checked; toggle(it.media_id, cb.checked, c); });
+    el('tr-grid').appendChild(c);
+  }
+  function toggle(mid, on, cellEl){
+    if (on) selected[mid] = true; else delete selected[mid];
+    (cellEl || el('tr-grid').querySelector('[data-mid="' + mid + '"]')).classList.toggle('sel', !!on);
+    updateSelStatus();
+  }
+  function toggleAll(on){
+    el('tr-grid').querySelectorAll('.tr-cell').forEach(function(c){
+      var mid = c.dataset.mid, cb = c.querySelector('.tr-check');
+      cb.checked = on; c.classList.toggle('sel', on);
+      if (on) selected[mid] = true; else delete selected[mid];
+    });
+    updateSelStatus();
+  }
+  function updateSelStatus(){
+    var n = Object.keys(selected).length;
+    el('tr-status').textContent = n ? (n + ' selected') : '';
+  }
+  function removeCells(ids){
+    ids.forEach(function(mid){
+      var c = el('tr-grid').querySelector('[data-mid="' + mid + '"]');
+      if (c) c.remove();
+      delete selected[mid];
+    });
+    total = Math.max(0, total - ids.length);
+    describeTotal();
+    updateSelStatus();
+    if (!el('tr-grid').children.length) el('tr-empty').style.display = 'block';
+    maybeFillPage();
+  }
+  function restoreSelected(){
+    var ids = Object.keys(selected);
+    if (!ids.length) { alert('Select one or more items first (check the boxes, or "Select all loaded").'); return; }
+    el('tr-status').innerHTML = '<span class="st-running">Restoring&hellip;</span>';
+    fetch('/api/trash/restore', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({media_ids: ids})})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var restored = d.restored || [], errs = d.errors || [];
+        removeCells(restored);
+        var msg = restored.length + ' restored';
+        if (errs.length) msg += ', ' + errs.length + ' failed';
+        el('tr-status').innerHTML = '<span class="' + (errs.length ? 'st-warn' : 'st-done') + '">' + msg + '</span>';
+      })
+      .catch(function(){ el('tr-status').innerHTML = '<span class="st-failed">network error</span>'; });
+  }
+  function deleteSelected(){
+    var ids = Object.keys(selected);
+    if (!ids.length) { alert('Select one or more items first (check the boxes, or "Select all loaded").'); return; }
+    if (!confirm('Permanently delete ' + ids.length + ' item(s)? This cannot be undone.')) return;
+    var typed = prompt('This permanently deletes ' + ids.length + ' file(s) from disk. Type DELETE to confirm:');
+    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+    el('tr-status').innerHTML = '<span class="st-running">Deleting&hellip;</span>';
+    fetch('/api/trash/delete-forever', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({media_ids: ids, confirm: true})})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        removeCells(ids);
+        el('tr-status').innerHTML = '<span class="st-done">' + (d.deleted || 0) + ' permanently deleted</span>';
+      })
+      .catch(function(){ el('tr-status').innerHTML = '<span class="st-failed">network error</span>'; });
+  }
+  function emptyAll(){
+    if (!total) { alert('The trash is already empty.'); return; }
+    if (!confirm('Permanently delete ALL ' + total.toLocaleString() + ' item(s) in the trash? This cannot be undone.')) return;
+    var typed = prompt('This empties the ENTIRE trash (' + total.toLocaleString() + ' files) permanently. Type DELETE to confirm:');
+    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+    el('tr-status').innerHTML = '<span class="st-running">Emptying trash&hellip;</span>';
+    fetch('/api/trash/empty', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({confirm: true})})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        reset();
+        total = 0;
+        describeTotal();
+        el('tr-empty').style.display = 'block';
+        el('tr-status').innerHTML = '<span class="st-done">emptied (' + (d.deleted || 0) + ' files removed)</span>';
+      })
+      .catch(function(){ el('tr-status').innerHTML = '<span class="st-failed">network error</span>'; });
+  }
+  return {open: open, close: close, onScroll: onScroll, toggleAll: toggleAll,
+          restoreSelected: restoreSelected, deleteSelected: deleteSelected, emptyAll: emptyAll};
+})();
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') {
+    var m = el('trash-modal');
+    if (m && m.classList.contains('open')) Trash.close();
+  }
+});
 // --- Panel tab bar (Maintenance / Users) -----------------------------------
 function setPanelTab(tab){
   document.querySelectorAll('#panel-tabs .htab').forEach(function(b){
@@ -7822,6 +8834,11 @@ function loadWatchStatus(){
       var bits=['\\u25c9 connected'];
       if(d.last_event_at) bits.push('last event '+_timeAgo(d.last_event_at));
       bits.push((d.mirrored||0)+' mirrored this session');
+      // Only shown once it has actually happened -- most sessions never trip the
+      // staleness watchdog, and an always-visible "0 stale reconnects" would just
+      // be noise on the one status line the Panel gives this feature.
+      if(d.stale_reconnects) bits.push(d.stale_reconnects+' stale reconnect'+(d.stale_reconnects===1?'':'s')+
+        (d.last_stale_reconnect_at ? ' (last '+_timeAgo(d.last_stale_reconnect_at)+')' : ''));
       st.textContent=bits.join(' \\u00b7 ');
     } else {
       dot.style.background = d.last_error ? 'var(--red)' : 'var(--overlay0)';
@@ -8003,7 +9020,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         redirect -- confirmed against the installed Flask/Werkzeug via a throwaway
         reproduction. The CR/LF variants don't even get that far: redirect() raises an
         unhandled ValueError ("Header values must not contain newline characters") instead,
-        turning a real login into a 500. Adversarial-review regression -- see
+        turning a real login into a 500. Regression -- see
         tests/test_web_auth.py's safe-next tests."""
         _UNSAFE_NEXT_CHARS = ("\\", "\t", "\r", "\n")
         if (url and url.startswith("/") and not url.startswith("//")
@@ -8015,9 +9032,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Populate a freshly-authenticated session for `username` -- the ONE place
         that decides what "you are now logged in" means, shared by BOTH a normal
         /login credential POST and the local-only first-account bootstrap POST
-        below (factored out per owner directive 2026-07-19's web-based bootstrap
-        flow, so the two paths can never drift apart on what a session looks
-        like)."""
+        below (factored out so the two paths can never drift apart on what a
+        session looks like)."""
         import pixai_gallery_backup as core
         session.clear()
         session["user"] = username
@@ -8027,16 +9043,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
-        """Session-based login gate for every non-localhost request (see
-        _is_authorized_request() above). GET renders the form; POST verifies the
+        """Session-based login gate -- for EVERY request, including from the server's
+        own machine; there is no localhost bypass (see _is_authorized_request()
+        above). GET renders the form; POST verifies the
         CSRF token, then credentials, then signs in. Any failure (rate-limited,
         bad CSRF, bad credentials) re-renders the SAME form with one generic
         "invalid username or password" message -- never which field was wrong --
         and a freshly rotated CSRF token.
 
-        Local-only first-account bootstrap (owner directive 2026-07-19: "NO CLI
-        first login bullshit... its why I built a fucking login screen in
-        figma" -- the design is static/_mockup_login_panel.html): while NO
+        Local-only first-account bootstrap (first-run setup happens in the
+        browser, never the CLI): while NO
         accounts exist yet, a request from the machine the server itself runs on
         (_is_local_request()) gets this SAME form doubling as an account-creation
         form (a hidden mode=create field) instead of a banner pointing at
@@ -8051,7 +9067,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         The lockout check and the CSRF check run FIRST, ahead of that
         wants_create/bootstrap_mode gate, exactly like an ordinary credential
         POST -- a mode=create POST is not a different, lesser-checked request
-        shape (adversarial-review fix, 2026-07-19: the gate used to sit ahead of
+        shape (regression fix: the gate used to sit ahead of
         both, so a mode=create POST from an already-lockout-triggering IP sailed
         through with neither the lockout message nor any CSRF requirement,
         confirmed reproducible). Reordering does NOT weaken the bootstrap
@@ -8368,9 +9384,32 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/panel")
     def panel():
-        # actions -> Maintenance buttons (panel_visible only). all_actions -> the
-        # scheduler dropdown, which needs the background-only jobs too (that's their
-        # only home now that they're not buttons).
+        # panel_is_local is computed FIRST because it now drives several things below,
+        # not just the Users tab it started as (2026-07-22): which PANEL_ACTIONS become
+        # Maintenance buttons at all, whether "Set launcher icon" renders in the
+        # Branding section, panel_out_dir's redaction, and the Users tab's Add/Remove UI.
+        # FIXED 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): a LAN session used to see
+        # every destructive Maintenance button (Organize, Dedup, Rebuild thumbnails, ...)
+        # and "Set launcher icon" render normally, then hit a confirm-dialog-then-403
+        # dead end on click -- api_panel_run/api_branding_shortcut were always correctly
+        # gated server-side (never a security hole), but the owner's call was to gate
+        # visibility on the real check too instead of leaving that a known UX gap.
+        # Hiding controls a caller can't use avoids the dead end; the server enforces
+        # the same boundary regardless of what this flag renders, so getting this wrong
+        # is a UX regression, not a security one.
+        panel_is_local = _is_local_request()
+        # actions -> Maintenance buttons: panel_visible ones, and (as of this fix)
+        # destructive ones ONLY when panel_is_local -- a LAN session's Maintenance tab
+        # now simply never receives Organize/Dedup/Rebuild-thumbnails/etc. in its
+        # ACTIONS payload, so renderJobs() has nothing to render into #jobs-danger and
+        # needed no change of its own; PANEL_HTML shows one explanatory note in that
+        # now-empty row instead (see the `{% if not panel_is_local %}` beside
+        # #jobs-danger). all_actions -> the scheduler dropdown, deliberately NOT
+        # filtered by locality: it needs the background-only jobs too (that's their
+        # only home now that they're not buttons), and loadSchedule() already excludes
+        # every destructive action from that dropdown for everyone, local or LAN --
+        # scheduling a destructive job was never a feature, so there's nothing more to
+        # hide there.
         all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"],
                         "advanced": v.get("advanced", False),
                         "int_param": v.get("int_param", False),
@@ -8378,7 +9417,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         "int_range": v.get("int_range")}
                        for k, v in PANEL_ACTIONS.items()]
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
-                  if v.get("panel_visible", True)]
+                  if v.get("panel_visible", True) and (panel_is_local or not v["destructive"])]
         import pixai_gallery_backup as core
         # Reuse whatever csrf token this session already carries (set at login
         # time by _establish_session) -- only mint one here if it's somehow
@@ -8395,14 +9434,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # question than the one below. A server install path is a different kind of
         # fact -- it identifies the owner's machine, not a fellow account -- and the
         # front door never signed up to expose it past the loopback boundary.
-        panel_out_dir = str(out_dir) if _is_local_request() else "(local to the server)"
-        # panel_is_local drives the Users tab's UI: as of 2026-07-22, adding an account
-        # or removing someone ELSE's is LOCALHOST-only (api_users_add/_remove) -- a LAN
-        # session can still remove its OWN row. Hiding the controls it can't use avoids
-        # a confirm-dialog-then-403 dead end; the server enforces the same boundary
-        # regardless of what this flag renders, so getting this wrong is a UX
-        # regression, not a security one.
-        panel_is_local = _is_local_request()
+        panel_out_dir = str(out_dir) if panel_is_local else "(local to the server)"
         return render_template_string(
             PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
             all_actions_json=json.dumps(all_actions),
@@ -8445,8 +9477,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         Refuses a duplicate username outright rather than silently resetting a
         stranger's password (that's still what add_or_update_web_user itself
         does, and stays available for the owner via --add-web-user for exactly
-        that recovery case) -- mirrors static/_mockup_login_panel.html's Add
-        User validation.
+        that recovery case).
 
         The exists-check and the write happen in ONE call to
         core.add_web_user_if_new() (a single _accounts_lock acquisition), not a
@@ -8455,8 +9486,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         concurrent requests claiming the same brand-new username could both pass
         the "doesn't exist yet" check before either write landed, and the second
         write would silently reset the first request's just-created password.
-        Adversarial-review hardening, 2026-07-19 (same root cause as
-        /api/users/remove's last-account race, see that route's docstring)."""
+        (Same root-cause family as /api/users/remove's last-account race -- see
+        that route's docstring.)"""
         if not _is_local_request():
             return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
@@ -8616,6 +9647,37 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
+    def _close_orphan_if_resolved(tid, media_ids, is_video):
+        """A task-id recovery (below) just independently confirmed real media for `tid`.
+        If `tid` ALSO has its own job entry that's still non-terminal -- the orphan case:
+        api_task_status()'s own done/failed write never ran for it (its polling browser
+        tab stopped, or a transient exception left it at 'running' per that route's
+        deliberate design), so it's been spinning in the Activity card forever even
+        though the generation finished -- close THAT original entry too, not just the
+        new 'import-<suffix>' job api_import_task logs for the recovery action itself.
+        Otherwise the Activity card keeps showing a phantom stuck spinner permanently
+        disconnected from reality, even after the real media has landed.
+
+        Writes the EXACT event shape api_task_status()'s own done branch writes
+        (status='done', media_ids, is_video) so a reader of jobs.jsonl can't tell "task-
+        status resolved it" from "a manual recovery resolved it" -- same file, same
+        fields, same convention.
+
+        Reads the RAW reconstructed log (core._reconstruct_jobs), not read_jobs()'s
+        filtered view, so a very old orphan -- one read_jobs() would already be hiding
+        past JOBS_MAX_AGE -- still gets closed rather than silently left at 'running' in
+        the log forever. Skips a job the owner already dismissed (respects that explicit
+        action instead of resurrecting it with a new event). Fails soft: the recovery
+        itself must succeed even if this bookkeeping doesn't."""
+        try:
+            import pixai_gallery_backup as _core
+            jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
+            orig = jobs_by_id.get(tid)
+            if orig and not orig.get("dismissed") and orig.get("status") not in _core._JOBS_TERMINAL:
+                _log_job(tid, status="done", media_ids=media_ids, is_video=is_video)
+        except Exception:                          # noqa: BLE001 -- bookkeeping must not break recovery
+            pass
+
     @app.route("/api/import-task", methods=["POST"])
     def api_import_task():
         """Pull ONE generation/edit task's media into the gallery by its task id -- recovers
@@ -8636,20 +9698,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # just report it's here + hand back its media so the UI can jump straight to it.
         con = _connect(db_path)
         try:
-            pre = [r[0] for r in con.execute(
-                "SELECT media_id FROM catalog WHERE task_id=?", (tid,)).fetchall()]
+            pre_rows = con.execute(
+                "SELECT media_id, is_video FROM catalog WHERE task_id=?", (tid,)).fetchall()
         finally:
             con.close()
-        if pre:
+        if pre_rows:
+            pre = [r[0] for r in pre_rows]
+            _close_orphan_if_resolved(tid, pre, bool(pre_rows[0][1]))
             return jsonify({"ok": True, "already": True, "saved": 0, "media_ids": pre})
         job_id = "import-" + tid[-8:]
         _log_job(job_id, status="running", type="import", label="Import task " + tid)
         try:
             core, session = _gen_session()
-            res = core.collect_generation(session, tid, str(out_dir))
+            res = _collect_single_flight(core, session, tid)
             n, mids = int(res.get("saved") or 0), (res.get("media_ids") or [])
             _log_job(job_id, status="done", media_ids=mids,
                      label="Imported {} media from task {}".format(n, tid))
+            if mids:
+                _close_orphan_if_resolved(tid, mids, bool(res.get("is_video")))
             return jsonify({"ok": True, "saved": n, "media_ids": mids,
                             "is_video": bool(res.get("is_video"))})
         except Exception as e:
@@ -8897,17 +9963,25 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # wizard; that conjunct hid it from them. That viewer can no longer reach this line.
         # `is_local` below (the header template's flag for showing the owner-only
         # Generate/Loom/Panel controls vs. the read-only note) is hardcoded True for the
-        # identical reason -- same call site, same guarantee. `can_delete_cloud` is a
-        # DIFFERENT, narrower flag: it drives whether the "Delete from PixAI" bulk-action
-        # button renders at all. That button posts to /delete-tasks-bulk, which is gated
-        # to the stricter _is_local_request() (irreversible cloud deletion, same trust
-        # tier as /api/branding/shortcut) -- a real, un-hardcoded check, so a logged-in
-        # LAN session sees "Delete locally" but not "Delete from PixAI".
+        # identical reason -- same call site, same guarantee: those three are genuinely
+        # LOGIN-tier, matching their own route gating.
+        # `is_true_local` is the REAL, un-hardcoded _is_local_request() result. It now
+        # gates the Import button's own visibility (see the head-nav comment above it),
+        # FIXED 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): a signed-in, non-local
+        # LAN session used to see a working-looking Import button that always 403'd,
+        # because /api/import-local re-checks the stricter _is_local_request() itself
+        # while the button's old visibility only checked the blanket is_local flag.
+        # `can_delete_cloud` reuses this SAME value for a different control -- whether
+        # the "Delete from PixAI" bulk-action button renders at all. That button posts
+        # to /delete-tasks-bulk, which is gated to the same stricter _is_local_request()
+        # (irreversible cloud deletion, same trust tier as /api/branding/shortcut), so a
+        # logged-in LAN session sees "Delete locally" but not "Delete from PixAI".
         import pixai_gallery_backup as _core
         _fresh_cfg = _core._load_config()
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
         catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
-        can_delete_cloud = _is_local_request()
+        is_true_local = _is_local_request()
+        can_delete_cloud = is_true_local
         # The header's Sign out control is a POST form now (see INDEX_HTML), so this
         # page has to carry the session's csrf token the same way /login's form and
         # the Panel do. setdefault, never a fresh mint: _establish_session already set
@@ -8923,7 +9997,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             collection=collection, collections=collections,
             rows=page_rows, total=total, page=page, stats=stats,
             needs_key=needs_key, catalog_empty=catalog_empty,
-            build_stamp=build_stamp, is_local=True, can_delete_cloud=can_delete_cloud,
+            build_stamp=build_stamp, is_local=True, is_true_local=is_true_local,
+            can_delete_cloud=can_delete_cloud,
             logged_in_user=session.get("user"), csrf=session["csrf"],
             total_pages=total_pages, page_range=_page_range(page, total_pages),
             q=q, model_filter=model_filter, batch_filter=batch_filter,
@@ -9126,6 +10201,98 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _log_job(job_id, status="failed", error="could not start delete thread: " + _redact_host_paths(str(e))[:160])
             return _back(delerr="could not start bulk delete -- try again")
         return _back(bulkdel="started", n=total)
+
+    # -------------------------------------------------------------------
+    # Trash / quarantine panel -- the floating panel opened from the Control
+    # Panel (NOT a routed page of its own). See docs/AUDIT_2026-07-21.md's
+    # restore-panel row for the decided design (floating overlay, directory
+    # scan, restore=LOGIN, delete-forever/empty=LOCALHOST+typed confirm).
+    # -------------------------------------------------------------------
+
+    @app.route("/api/trash/list")
+    def api_trash_list():
+        """List out_dir/_deleted/ for the Control Panel's Trash panel -- a directory
+        scan, not a catalog query (purge_media_local's whole point is that the
+        catalog row is already gone by the time a file lands here). Paginated
+        (?page=&limit=) so a ~12k-file quarantine never costs more than one page's
+        worth of thumbnail work per request -- see list_quarantined()'s and
+        _ensure_trash_thumbs()'s docstrings. Thumbnails are generated on demand for
+        exactly the page returned and then served by the EXISTING /thumbs/<media_id>.jpg
+        route (no new serving route needed -- see _ensure_trash_thumbs()). LOGIN tier:
+        seeing what's recoverable is the same trust level as browsing the live
+        gallery, not a destructive action."""
+        try:
+            page = max(1, int(request.args.get("page") or 1))
+            limit = max(1, min(int(request.args.get("limit") or 60), 200))
+        except ValueError:
+            page, limit = 1, 60
+        items, total, total_bytes = list_quarantined(out_dir, page=page, page_size=limit)
+        _ensure_trash_thumbs(out_dir, thumb_dir, items)
+        for it in items:
+            it["thumb"] = "/thumbs/{}.jpg".format(it["media_id"])
+        return jsonify({"items": items, "total": total, "total_bytes": total_bytes,
+                        "page": page, "limit": limit})
+
+    @app.route("/api/trash/restore", methods=["POST"])
+    def api_trash_restore():
+        """Restore one or more quarantined files back into the library. LOGIN tier --
+        recovering something you (or anyone signed in) deleted is not the same trust
+        question as permanently destroying it. Matches the decided design in
+        docs/AUDIT_2026-07-21.md: restore=LOGIN, delete-forever/empty=LOCALHOST."""
+        body = request.get_json(silent=True) or {}
+        media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+        restored, errors = [], []
+        for mid in media_ids:
+            res = restore_quarantined_media(out_dir, thumb_dir, db_path, mid)
+            if res.get("ok"):
+                restored.append(mid)
+            else:
+                errors.append({"media_id": mid, "error": res.get("error", "unknown error")})
+        if restored:
+            telem_bump("trash_restored", len(restored), out_dir=out_dir)
+        return jsonify({"restored": restored, "errors": errors})
+
+    @app.route("/api/trash/delete-forever", methods=["POST"])
+    def api_trash_delete_forever():
+        """Permanently destroy one or more SELECTED quarantined files -- no more
+        recovery after this. LOCALHOST-only (the owner physically at the machine),
+        same trust tier as /delete-tasks-bulk and the Panel's other destructive
+        actions, and requires confirm=true in the body on top of that -- the same
+        belt-and-suspenders shape api_panel_run already uses for its destructive
+        actions. The client's own typed "DELETE" prompt (Trash.deleteSelected() in
+        the Panel template, mirroring confirmBulkDeleteCloud()'s existing pattern) is
+        what actually stands between a misclick and data loss; confirm=true here just
+        proves the client meant to send the request at all, it is not itself the
+        security boundary -- the LOCALHOST check is."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        if not body.get("confirm"):
+            return jsonify({"error": "confirm required"}), 400
+        media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+        n = sum(1 for mid in media_ids
+               if delete_quarantined_forever(out_dir, thumb_dir, mid))
+        telem_bump("trash_purged_forever", n, out_dir=out_dir)
+        return jsonify({"deleted": n})
+
+    @app.route("/api/trash/empty", methods=["POST"])
+    def api_trash_empty():
+        """Empty the ENTIRE trash -- every file under out_dir/_deleted/, not just a
+        selection. Same LOCALHOST + confirm=true contract as
+        api_trash_delete_forever() (see its docstring); the client demands the same
+        typed "DELETE" word first (Trash.emptyAll())."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        if not body.get("confirm"):
+            return jsonify({"error": "confirm required"}), 400
+        n = empty_trash(out_dir, thumb_dir)
+        telem_bump("trash_purged_forever", n, out_dir=out_dir)
+        return jsonify({"deleted": n})
 
     @app.route("/rate/<media_id>", methods=["POST"])
     def rate(media_id):
@@ -9344,6 +10511,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         tmp = tempfile.mkdtemp(prefix="mg_export_") if transforming else None
         mem = io.BytesIO()
         n = 0
+        # convert_image()/embed_metadata() never raise -- they report failure via a
+        # returned/discarded status NOTE and quietly hand back the untouched original. That
+        # note used to be thrown away (convert's into `_note`, embed's not even captured),
+        # so "export as JPEG + embed prompt" could silently ship untouched originals with
+        # zero signal anywhere. This is a plain form POST -> file-download response (see
+        # doExportDownload() in the page's own JS): there's no fetch/JSON leg for a status
+        # message to ride, so the only channel that survives the download is a small report
+        # INSIDE the zip itself, added only when something actually needed reporting.
+        warnings = []
         try:
             with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
                 seen_names = set()
@@ -9361,27 +10537,43 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         try:
                             shutil.copy2(p, work)
                             if fmt != "original":
-                                work, _note = core.convert_image(work, fmt, keep_original=False)
+                                work, note = core.convert_image(work, fmt, keep_original=False)
+                                if note not in ("ok", "already"):
+                                    warnings.append("{}: convert to {} -> {} (shipped as-is)"
+                                                     .format(p.name, fmt, note))
                             if embed:
-                                core.embed_metadata(work, {
+                                enote = core.embed_metadata(work, {
                                     "prompt": row.get("prompt_full") or row.get("prompt") or "",
                                     "media_id": mid, "task_id": row.get("task_id") or "",
                                     "model": row.get("model") or "", "seed": row.get("seed") or "",
                                     "date": row.get("created_at") or ""})
+                                if enote != "ok":
+                                    warnings.append("{}: embed prompt -> {} (not embedded)"
+                                                     .format(p.name, enote))
                             src = work
-                        except Exception:
+                        except Exception as e:
                             src = p        # any transform failure -> ship the original untouched
+                            warnings.append("{}: transform failed ({}) -- shipped the original"
+                                             .format(p.name, _redact_host_paths(str(e))[:120]))
                     name = src.name
                     if name in seen_names:
                         name = "{}_{}".format(mid, src.name)
                     seen_names.add(name)
                     z.write(src, arcname=name)
                     n += 1
+                if warnings:
+                    report = ("Some files in this export did not convert and/or embed the prompt "
+                               "as requested -- they were shipped as their original file instead:\n\n"
+                               + "\n".join(warnings) + "\n")
+                    z.writestr("_export_warnings.txt", report)
             if not n:
                 return "No matching images found.", 404
             mem.seek(0)
-            return send_file(mem, mimetype="application/zip", as_attachment=True,
+            resp = send_file(mem, mimetype="application/zip", as_attachment=True,
                              download_name="pixai_selection_{}.zip".format(n))
+            if warnings:
+                resp.headers["X-Export-Warnings"] = str(len(warnings))
+            return resp
         finally:
             if tmp:
                 shutil.rmtree(tmp, ignore_errors=True)   # bytes are already in `mem`
@@ -9397,13 +10589,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # the keyboard (see CHANGELOG.md's "Real session-based web login" entry).
     # _is_local_request() itself now backs only the one deliberately-narrower
     # exception (/api/branding/shortcut, which shells out to the SERVER machine's
-    # own PowerShell/COM) -- see that route's docstring. This comment previously
-    # claimed every generation endpoint was local-only, which stopped being true
-    # once the LAN-auth pass landed; fixed per an adversarial-review finding that
-    # it would otherwise mislead the next reader (2026-07-19).
+    # own PowerShell/COM) -- see that route's docstring.
     #
-    # FAILS CLOSED on a missing/empty remote_addr (adversarial-review fix,
-    # 2026-07-19): a prior version treated "" as local, which is safe under
+    # FAILS CLOSED on a missing/empty remote_addr: a prior version treated
+    # "" as local, which is safe under
     # THIS app's actual deployment (app.run() -> Werkzeug's dev server always
     # populates remote_addr from the real TCP peer, never blank/None -- a plain
     # HTTP client cannot spoof it), but is a fail-OPEN default in a function
@@ -9418,9 +10607,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def _is_authorized_request():
         """THE canonical authorization gate for every network-originated request:
         true ONLY for a request carrying a valid logged-in session (see /login
-        below). Deliberately has NO localhost/loopback bypass -- owner directive
-        2026-07-19: "I would expect to require login via any path with this new
-        setup whether localhost hostname or IP." A fresh install creates its
+        below). Deliberately has NO localhost/loopback bypass -- login is
+        required on every path, localhost hostname or IP included; no request
+        address is a trusted tier. A fresh install creates its
         first account either via `python pixai_gallery_backup.py --add-web-user`
         or, while no accounts exist yet, through /login's own local-only
         bootstrap_mode form -- see login()'s docstring below for the real,
@@ -9604,17 +10793,32 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_model_search():
         """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key. Login required
         (any session, local or LAN).
-        ?q=&kind=base|lora&size=N&offset=N&category=&sort=popular|newest.
+        ?q=&kind=base|lora&size=N&offset=N&category=&sort=popular|newest&base_type=.
 
-        Two data sources by design: the REST /search (default) has RICH rows (description /
-        refCount / official badge) but silently ignores market filters; the GraphQL
-        `generationModels` connection actually honors category + a Newest sort but has leaner
-        rows. So we use GraphQL ONLY when a category or Newest is requested, REST otherwise --
-        the card renders both (leaner rows just hide the missing fields)."""
+        Three data sources by design: REST /search (base models' default) has RICH rows
+        (description / refCount / official badge) but silently ignores market filters AND
+        has no per-row architecture field; the GraphQL `generationModels` connection honors
+        category + a Newest sort AND (picker-parity-round2, 2026-07-24) carries
+        modelType/loraBaseModelType per row too. LoRA search (kind=lora) ALWAYS uses GraphQL
+        now, regardless of category/sort -- architecture-aware compat sort/badging
+        (base_type=) needs that per-row data on every LoRA search, not just the
+        category/Newest subset, and REST's oRPC endpoint has no equivalent field to request
+        it from (confirmed by inspecting its full response shape -- see
+        docs/AUDIT_2026-07-21.md). Base-model search is UNCHANGED (REST by default, GraphQL
+        only for category/Newest) -- architecture filtering is a LoRA-picker concept only,
+        base models don't get compat-sorted against anything.
+
+        base_type=<model_type>: the CALLER's already-resolved selected base model's own
+        model_type (the Gallery/Loom already resolve this today for the post-selection
+        is_lora_compatible() gate -- this just reuses it). When present on a kind=lora
+        request, results are soft-sorted (compatible-or-unknown first, confirmed-mismatch
+        last) and each row gets a `compat` tag -- see annotate_lora_compat(). Absent/kind=base
+        -> results pass through unmodified, exactly as before this param existed."""
         q = (request.args.get("q") or "").strip()
         usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
         category = (request.args.get("category") or "").strip().lower()
         sort = (request.args.get("sort") or "").strip().lower()
+        base_type = (request.args.get("base_type") or "").strip()
         try:
             size = max(1, min(int(request.args.get("size") or 24), 50))
             offset = max(0, int(request.args.get("offset") or 0))
@@ -9622,12 +10826,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             size, offset = 24, 0
         try:
             core, session = _gen_session()
-            use_market = category in core.MARKET_CATEGORIES or sort == "newest"
+            use_market = usage == "LORA" or category in core.MARKET_CATEGORIES or sort == "newest"
             if use_market:
-                return jsonify(core.model_search_market_gql(
-                    session, keyword=q, category=category, sort=sort, usage=usage, limit=size))
-            return jsonify(core.model_search_rest(session, keyword=q, usage=usage,
-                                                  size=size, offset=offset))
+                payload = core.model_search_market_gql(
+                    session, keyword=q, category=category, sort=sort, usage=usage, limit=size)
+            else:
+                payload = core.model_search_rest(session, keyword=q, usage=usage,
+                                                  size=size, offset=offset)
+            if usage == "LORA" and base_type:
+                payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
+            return jsonify(payload)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "results": []}), 200
 
@@ -9636,12 +10844,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Resolve a model_id (from the grid) to its generatable version id + the version
         metadata the picker needs: model_type (for LoRA↔base compat), lora_base_model_type,
         trigger_words (to offer inserting into the prompt), and the author's tuned preset.
-        Login required; read-only, one API call."""
+        Login required; read-only, one API call.
+
+        ?all=1 (picker-parity-round2, 2026-07-24): return EVERY published version instead of
+        just the resolved latest -- {versions:[...]}, same per-row shape plus `label`/
+        `is_latest` -- so the picker can offer a real choice (see
+        core.list_model_versions). Default (no ?all) is UNCHANGED: the single resolved-latest
+        shape every existing caller already expects."""
         mid = (request.args.get("model_id") or "").strip()
         if not mid:
             return jsonify({"error": "model_id required", "version_id": ""}), 400
         try:
             core, session = _gen_session()
+            if (request.args.get("all") or "").strip() in ("1", "true"):
+                return jsonify({"versions": core.list_model_versions(session, mid)})
             return jsonify(core.resolve_version_meta(session, mid))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
@@ -9680,7 +10896,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if not mid:
                 continue
             isv = str(r.get("is_video") or "") == "1"
+            # is_nsfw rides along so every consumer of this route (the gallery Picker,
+            # <mg-gallery-picker>, and the Generate drawer's reference slots) can set
+            # data-nsfw the same way the Jinja template and /api/similar already do.
+            # Audit 2026-07-21 S5: this was the one remaining projection gap -- without
+            # it, Privacy Blur (body.privacy-blur .card[data-nsfw="1"] img) never saw an
+            # NSFW thumbnail on any of these three surfaces.
+            isnsfw = str(r.get("is_nsfw") or "") == "1"
             out.append({"media_id": str(mid), "is_video": "1" if isv else "",
+                        "is_nsfw": "1" if isnsfw else "",
                         "thumb": "/thumbs/{}.jpg".format(mid),
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000],
                         "duration": (r.get("video_duration") or "") if isv else ""})
@@ -9715,7 +10939,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if not r:
                 continue        # the sidecar index can drift from later catalog deletes
             isv = str(r.get("is_video") or "") == "1"
+            # is_nsfw rides along so the client's hand-cloned .card (Similar.open() below --
+            # this modal builds its own DOM instead of reusing the server-rendered template at
+            # the top of the page, unlike every other card-producing surface) can set
+            # data-nsfw the same way the Jinja template does. Without it, Privacy Blur
+            # (body.privacy-blur .card[data-nsfw="1"] img) never sees an NSFW lookalike here
+            # at all, and it never gets blurred -- fixed alongside the client half below.
+            isnsfw = str(r.get("is_nsfw") or "") == "1"
             out.append({"media_id": str(mid), "is_video": "1" if isv else "",
+                        "is_nsfw": "1" if isnsfw else "",
                         "thumb": "/thumbs/{}.jpg".format(mid), "score": round(float(score), 3),
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000]})
         return jsonify({"images": out, "total": len(out), "query": str(media_id)})
@@ -10033,10 +11265,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return d
 
     def _snips_path(user):
-        from urllib.parse import quote
-        # Same quote(safe="") idiom as _view_presets_path/_loom_kv_path: a username can
-        # never escape the directory or collide via a path separator.
-        return _snips_dir() / (quote(str(user), safe="") + ".json")
+        # _account_key (B14 residual): a case-safe key, so "Nel" and "nel" don't
+        # collapse onto one file the way a bare quote(username) did on NTFS.
+        return _snips_dir() / (_account_key(user) + ".json")
 
     def _legacy_snips_path():
         return out_dir / "prompt_snippets.json"
@@ -10171,6 +11402,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             pass
         metrics = achievement_metrics(db_path)
         metrics.update(telemetry_metrics(out_dir))
+        persist_error = None
         with _ach_lock:
             state = load_ach_state(out_dir)
             result = compute_achievements(metrics, state.get("seen"),
@@ -10187,7 +11419,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 state["earned_at"] = ea
                 if newly:
                     state["seen"] = sorted(set(state.get("seen") or []) | set(newly))
-                save_ach_state(out_dir, state)
+                # save_ach_state()'s bool return used to be discarded here, so a disk-write
+                # failure still answered 200 with no hint that "seen"/earned_at never made it
+                # to disk -- the newly-earned toast would then re-fire on the next load since
+                # the server forgot it already showed it. The achievements DATA below is still
+                # correct either way (computed fresh from the catalog every call, not from the
+                # state file), so this stays a soft error alongside a normal response rather
+                # than failing the whole request.
+                if not save_ach_state(out_dir, state):
+                    persist_error = "could not save achievement progress (disk write failed)"
             earned_at = state.get("earned_at") or {}
         feats_revealed = any(
             a["earned"] for a in result["achievements"] if a["tier"] == "feat")
@@ -10216,6 +11456,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         result["skin"] = state.get("skin", "moonglade")
         result["earned_at"] = earned_at   # {id: iso-date}; only earned ids -> no hidden-feat leak
         result["metrics"] = metrics
+        if persist_error:
+            result["error"] = persist_error
         return jsonify(result)
 
     @app.route("/api/skin", methods=["POST"])
@@ -10235,7 +11477,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             state = load_ach_state(out_dir)
             changed = state.get("skin") != skin
             state["skin"] = skin
-            save_ach_state(out_dir, state)
+            saved = save_ach_state(out_dir, state)
+        if not saved:
+            # save_ach_state() is "best-effort; swallows write errors" by design (its own
+            # docstring) -- but that return value used to be dropped on the floor here, so a
+            # disk-write failure still answered 200 {"skin": skin} as if it had stuck. Report
+            # what's ACTUALLY active (a fresh read, not the requested value) instead of lying.
+            return jsonify({"error": "could not save skin (disk write failed)",
+                            "skin": load_ach_state(out_dir)["skin"]}), 200
         if changed:                       # Interior Decorator: an explicit re-dress
             telem_bump("skin_changed_runs", out_dir=out_dir)
         return jsonify({"skin": skin})
@@ -10499,8 +11748,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return d
 
     def _presets_path(user):
-        from urllib.parse import quote
-        return _toolbox_dir() / (quote(str(user), safe="") + ".json")
+        # _account_key (B14 residual): same case-safe key as every other per-account
+        # store -- toolbox_presets copied _view_presets_path's exact quote(username)
+        # pattern (and its collision) when it was split, most recently of the four.
+        return _toolbox_dir() / (_account_key(user) + ".json")
 
     def _legacy_presets_path():
         return out_dir / "toolbox_presets.json"
@@ -10642,11 +11893,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return d
 
     def _view_presets_path(user):
-        from urllib.parse import quote
-        # quote(safe="") so a username can never escape the directory or collide: every
-        # path separator, dot and space becomes a percent-escape. Same technique as the
-        # Loom's kv store (_loom_kv_path).
-        return _view_presets_dir() / (quote(str(user), safe="") + ".json")
+        # _account_key -- a case-safe key (B14 residual): the original quote(username,
+        # safe="") here was case-PRESERVING, so "Nel" and "nel" quoted to two different
+        # strings that named the SAME file on NTFS (case-insensitive-but-preserving),
+        # even though account identity itself is case-sensitive. See _account_key's
+        # own docstring for the full story; every per-account store shares this one
+        # helper now instead of each re-deriving its own quote()-based key.
+        return _view_presets_dir() / (_account_key(user) + ".json")
 
     def _legacy_view_presets_path():
         return out_dir / "view_presets.json"
@@ -10692,8 +11945,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         the same kind of thing as the install-wide skin choice. They lived in
         localStorage before this, one private set per browser; the client pushes a legacy
         set up through POST {merge} once, existing names winning ties. POST {name, query}
-        saves one; POST {delete: name} removes one (no UI for it yet -- the verb exists so
-        the select's reserved delete affordance has something to call).
+        saves one; POST {delete: name} removes one, wired to a "Delete" button next to the
+        saved-view select (see deletePreset() in the page script).
 
         The account comes from the SESSION and is never accepted from the request body:
         a client that could name its own key could read and overwrite anyone's set, which
@@ -10825,15 +12078,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
             args = _gen_args_from_payload(body)
-            # Authoritative model resolution: if the drawer sent the base model_id, re-resolve
-            # the CURRENT version server-side and IGNORE the client's cached version_id (which
-            # can be stale/raced). This is what stops gens landing as "Unknown model" + missing
-            # the feed. Falls back to the client version_id when no model_id was sent.
+            # Authoritative model resolution: if the drawer sent the base model_id, resolve
+            # its REAL version list server-side and never trust the client's version_id blind.
+            # picker-parity-round2 (2026-07-24): the client's version_id is now honored IF it
+            # names one of model_id's own real versions (the version picker lets the owner
+            # choose a specific release, not just the latest) -- otherwise (absent, stale from
+            # a fast model switch, or belonging to a DIFFERENT model_id entirely) this falls
+            # back to the newest version, exactly like before this existed. Either way the
+            # client's raw version_id is NEVER submitted un-validated, which is what originally
+            # stopped gens landing as "Unknown model" + missing the feed. Falls back to the
+            # client version_id as-is only when no model_id was sent at all (back-compat).
             _mid = str(body.get("model_id") or "").strip()
             if _mid:
-                _vid = (core.resolve_version_meta(session, _mid) or {}).get("version_id") or ""
-                if _vid:
-                    args.model = _vid
+                _client_vid = str(body.get("version_id") or "").strip()
+                _versions = core.list_model_versions(session, _mid)
+                _chosen = next((v for v in _versions if v.get("version_id") == _client_vid),
+                               None) if _client_vid else None
+                if _chosen:
+                    args.model = _chosen["version_id"]
+                elif _versions:
+                    args.model = _versions[0]["version_id"]
             if not args.model:
                 return jsonify({"error": "pick a model first"}), 400
             if not args.prompt:
@@ -10951,8 +12215,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return _legacy_loom_kv_dir() / (quote(str(key), safe="") + ".json")
 
     def _loom_kv_dir(user):
-        from urllib.parse import quote
-        d = out_dir / "loom" / "kv" / quote(str(user), safe="")
+        # _account_key (B14 residual): a case-safe key for the per-account SUBDIRECTORY
+        # -- same fix as _view_presets_path/_snips_path/_presets_path. The KEY portion
+        # of a board's filename (_loom_kv_path below) is a separate concern (per-board
+        # name collisions within one account's own dir, not account identity) and still
+        # uses quote() unchanged.
+        d = out_dir / "loom" / "kv" / _account_key(user)
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -11175,9 +12443,37 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 # ever changes.
                 try:
                     _loom_kv_path(user, k).unlink()
-                except OSError:
-                    pass
+                except FileNotFoundError:
+                    pass    # already gone -- deleting a nonexistent key is still a success
+                except OSError as e:
+                    # A real failure (locked file, read-only mount, permissions) used to fall
+                    # into the same bare `except OSError: pass` as "already gone" above, so
+                    # {"ok": true} came back even though the file is still sitting there --
+                    # matches loom_set's own OSError handling just above in this file.
+                    return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:120]}), 500
         return jsonify({"ok": True})
+
+    def _find_local_video_file(mid):
+        """Resolve a catalog media_id to its local video file on disk: try the catalog's
+        stored filename first, then fall back to the shared media-id matcher (SAME exact
+        media_id_of(p) == mid check and _duplicates/_deleted quarantine exclusion as every
+        other matcher in this file -- B17, audit 2026-07-21: a bare glob fallback used to
+        have neither, so a quarantined file was a valid hit and a shorter media_id could
+        match as a substring of a longer, unrelated one's filename). find_files_for_media_id
+        defaults to images, hence the explicit exts=vid_exts. Returns a Path or None.
+
+        Shared by /api/loom/handoff (frame extraction) and /api/loom/video-duration
+        (footage-import fallback probe) -- both need the exact same file before they can
+        hand it to ffmpeg/ffprobe; one resolver, not two independently-drifting copies."""
+        vid_exts = (".mp4", ".webm", ".mov", ".mkv")
+        row = get_row(db_path, mid) or {}
+        fn = row.get("filename") or ""
+        if fn:
+            cand = out_dir / fn
+            if cand.is_file() and cand.suffix.lower() in vid_exts:
+                return cand
+        fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
+        return fallback[0] if fallback else None
 
     @app.route("/api/loom/handoff", methods=["POST"])
     def loom_handoff():
@@ -11200,21 +12496,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             trim_out = None
         try:
             core, session = _gen_session()
-            vid_exts = (".mp4", ".webm", ".mov", ".mkv")
-            vid = None
-            # videos aren't in find_files_for_media_id (image-only) -- resolve via the
-            # catalog's stored filename, then fall back to a video-aware disk scan.
-            row = get_row(db_path, mid) or {}
-            fn = row.get("filename") or ""
-            if fn:
-                cand = out_dir / fn
-                if cand.is_file() and cand.suffix.lower() in vid_exts:
-                    vid = cand
-            if vid is None:
-                for p in out_dir.rglob("*{}.*".format(mid)):
-                    if p.suffix.lower() in vid_exts and p.is_file() and p.stat().st_size:
-                        vid = p
-                        break
+            vid = _find_local_video_file(mid)
             if vid is None:
                 return jsonify({"error": "clip not downloaded yet -- generate/collect it first"}), 200
             fdir = out_dir / "loom" / "_frames"
@@ -11227,6 +12509,32 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"frame_media_id": str(frame_mid), "duration": dur})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/loom/video-duration")
+    def loom_video_duration():
+        """Real duration (seconds) of an already-catalogued video, via ffprobe on the local
+        file -- fallback for the Footage tab's import-as-footage picker (loom/master-
+        storyboard.jsx's importPickedFootage) when the catalog's own video_duration column
+        is blank (rows predating that column, or whose request-duration was never captured
+        -- see CATALOG_FIELDS/video_duration). Shares _find_local_video_file and
+        probe_video_duration with /api/loom/handoff (the latter also powers the Edit Bay's
+        reel) -- same resolver, same probing utility, nothing new invented. Read-only,
+        local-file-only -- no PixAI session needed. Login required, matching every other
+        /api/loom/* route."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        mid = (request.args.get("media_id") or "").strip()
+        if not mid:
+            return jsonify({"error": "media_id required", "duration": None}), 400
+        try:
+            vid = _find_local_video_file(mid)
+            if vid is None:
+                return jsonify({"error": "video file not found locally", "duration": None}), 200
+            import pixai_gallery_backup as core
+            return jsonify({"duration": core.probe_video_duration(str(vid))})
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
 
     @app.route("/api/loom/generate", methods=["POST"])
     def loom_generate():
@@ -11600,7 +12908,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             st = core.generation_status(session, tid)
             if st["phase"] == "done":
-                got = core.collect_generation(session, tid, str(out_dir))
+                got = _collect_single_flight(core, session, tid)
                 # authoritative done event -- written server-side so the Jobs card gets the
                 # outcome even if the browser tab that submitted it has since closed.
                 _log_job(tid, status="done", media_ids=got["media_ids"],
@@ -11629,14 +12937,33 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # for a task that likely succeeded. Leave the job at its last-known state (it ages
             # out, or the live-mirror watcher collects the real result). Only a genuine
             # st["phase"] == "failed" above logs a terminal failure.
-            return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
+            #
+            # The RESPONSE used to say phase:'failed' too, which defeated the whole point of
+            # the paragraph above: static/mg-notify.js's Jobs.poll() treats phase==='failed'
+            # as terminal and stops polling right there (it only reschedules on anything
+            # else), so even with the job log correctly left alone, THIS live poll would
+            # still brick the card with a false failure. Report it as non-terminal instead --
+            # poll() falls into its 'running' branch on anything but 'done'/'failed' and just
+            # tries again in 3s, up to its own 6h ceiling either way (audit fail-open fix).
+            return jsonify({"phase": "running",
+                            "status": "checking… ({})".format(_redact_host_paths(str(e))[:160])}), 200
 
     @app.route("/api/jobs")
     def api_jobs():
         """Reconstructed job list for the Jobs card (newest-first) -- the paper trail that
-        survives a reload. The card polls this. Login required, like the creation suite."""
+        survives a reload. The card polls this. Login required, like the creation suite.
+
+        Also runs the ongoing orphan-reconciliation sweep (_reconcile_orphan_jobs,
+        min_age=JOBS_ORPHAN_SWEEP_AGE) before reading -- the same "runs opportunistically
+        off an existing poll" shape as maybe_compact_jobs just below it. This is what
+        catches a job that gets orphaned WHILE the server keeps running (the watcher's own
+        sweep only fires once, at startup) -- e.g. the browser tab polling
+        /api/task-status was closed, or the live-mirror watcher missed the WS event, and
+        the task finished on PixAI's side with nothing here ever the wiser. Fails soft
+        (see _reconcile_orphan_jobs); a reconciliation problem must never break the card."""
         import pixai_gallery_backup as core
         try:
+            _reconcile_orphan_jobs(min_age=core.JOBS_ORPHAN_SWEEP_AGE)
             jobs = core.read_jobs(out_dir)
             core.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
         except Exception:
@@ -11797,11 +13124,19 @@ def main():
                     help="don't build catalog thumbnails on startup (fast boot; missing "
                          "ones show 'no preview'). Per-generation thumbs are still made.")
     ap.add_argument("--open-browser", action="store_true",
-                    help="open the gallery in your default browser once the server is up "
-                         "(used by the double-click 'Serve Gallery' launcher)")
+                    help="open the gallery in your default browser ~1.5s after the server "
+                         "starts (manual convenience for a terminal launch; the double-click "
+                         "'Serve Gallery' launcher does NOT pass this -- it polls the server "
+                         "until it actually answers and opens the browser itself)")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="show INFO-level log lines (request activity, startup steps) on the "
+                         "console too -- the log FILE under out_dir/logs/ always captures them "
+                         "regardless of this flag")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
+    import pixai_logging
+    pixai_logging.setup_logging(out_dir, verbose=args.verbose)
     # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
     # to start here used to be the ONLY thing a brand-new user saw: a console exit, before
     # the web app's own first-run wizard (paste a key, run the first sync) ever had a

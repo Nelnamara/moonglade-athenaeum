@@ -12,8 +12,10 @@ loom/                     The Loom's JS surface: esbuild bundle + its own `node 
 
 The CLI engine and the MCP server both import `pixai_gallery.py` for catalog access — so
 catalog logic lives in exactly one place. The two surfaces are the CLI and the web gallery:
-the Loom, Control Panel, achievements, collections, and contact sheet are browser-only, and
-`--watch` / `--claims` are CLI-only.
+the Loom, Control Panel, achievements, collections, and contact sheet are browser-only.
+`--watch` and `--claims` have web equivalents too, not CLI-only surfaces: the gallery runs
+its own always-on live-mirror watcher (Control Panel → **Live Mirror** status dot, backed by
+`/api/watch/status`) and a header **claim** button (`/api/claim`) for daily rewards.
 
 ## How it talks to PixAI — and why setup is just one key
 
@@ -63,6 +65,12 @@ pixai_backup/
 ├─ catalog.db         the source of truth
 └─ raw_tasks.jsonl    raw task data
 ```
+
+**Not shown above — the Pixeltable semantic-search index lives OUTSIDE `pixai_backup/`.**
+It's a sidecar CLIP index over `catalog.db` (keyed by `media_id`), but Pixeltable stores
+its own embedded-Postgres data at its default home, `~/.pixeltable`
+(`%USERPROFILE%\.pixeltable` on Windows) — not under `out_dir`, so it's machine-local and
+not part of an `out_dir` backup; a fresh machine rebuilds it rather than restoring it.
 
 ## Invariants (don't break)
 1. **`media_id` is the last `_`-chunk of the filename stem.**

@@ -26,7 +26,10 @@ generations cost 0). Its controls map onto the same PixAI parameters:
 | **High priority** | `priority` | off (500, cheaper) by default; on = 1000 (faster, more credits) |
 
 Submit and the result drops straight into your catalog, tagged `source='api'`, and
-appears in the gallery.
+appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
+generations in parallel, so you can queue up several in a row (Generate, Edit, Enhance,
+Fix, and the Video tab all work this way) and each one tracks and reports its own result
+independently.
 
 ### The model-vs-version-id gotcha
 `createGenerationTask` needs a model's **version id**, not its model id. A model page
@@ -35,11 +38,17 @@ URL (`pixai.art/model/<id>`) gives the *model* id, which generation rejects
 you the correct version id — prefer those.
 
 ### Modes are model-specific
-Lite/Standard suit older SD models; Pro/Ultra are for newer types. The drawer's Mode
-picker doesn't filter by model, so picking an unsupported combination shows an error on
-submit rather than falling back (a rejected submit still costs no credits) — pick
-**Auto** if you're not sure. The CLI's `--mode` (below) does auto-fall-back and retry
-once on an unsupported mode.
+Lite/Standard suit older SD models; Pro/Ultra are for newer types. The Mode picker
+doesn't filter by model, so you can still pick an unsupported combination — pick
+**Auto** if you're not sure which your model takes. You don't have to get it right by
+hand, though: since 2026-07-24, an unsupported Mode no longer errors out. The shared
+submit path every generate/edit route goes through (the web Generate tab, and anything
+else submitting through it, including the Loom's own reference-image generation) now
+auto-falls-back to the model's default and resubmits once instead of failing — a
+rejected submit costs no credits either way, so the retry is free — matching the CLI's
+own long-standing behavior (see `--mode` below). If you ever see the raw error text
+itself instead of a friendly message, see
+[Troubleshooting](Troubleshooting#unknown-inferenceprofile-).
 
 ### LoRAs are add-ons, not base models
 A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via the
@@ -69,12 +78,14 @@ python pixai_gallery_backup.py --generate --task-id <id>
 | `--prompt` / `--negative` | — | the prompts |
 | `--model` | Tsubaki.2 | model **version** id |
 | `--lora VERSIONID:WEIGHT` | — | repeatable |
-| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` |
+| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` — an unsupported mode auto-falls-back to the model's default and retries once instead of erroring (a rejected submit costs no credits either way); the web Generate tab does the same since 2026-07-24 |
 | `--priority` / `--high-priority` | `500` | 500 = standard (cheaper), 1000 = high |
 | `--no-prompt-helper` | off | use the prompt literally |
 | `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | |
 | `--confirm` | off | **required** to spend credits |
 | `--task-id` | — | fetch/catalog an existing task instead of creating one |
+| `--poll-timeout` | `300` | seconds to wait for a submitted task to finish before giving up (every create path) |
+| `--params-json` | — | raw parameters object, submitted as-is — **overrides every other generation flag** (every create path) |
 
 Generated images are tagged `source='api'` — filter to them in the gallery via
 **Source → Generated**.
@@ -86,12 +97,13 @@ Generated images are tagged `source='api'` — filter to them in the gallery via
 Turn any catalog image into a short clip (image-to-video). Same preview/confirm safety —
 but **video is expensive** (a V4.0 5-second clip is ~27,500 credits, ~50–100× an image),
 so the preview shouts the cost, and the actual charge is read back from the server
-(`paidCredit`) after it runs. Clips download into `videos/` and catalog as `is_video`.
+(`paidCredit`) after it runs and stored in the catalog (`paid_credit`). Clips download
+into `videos/` and catalog as `is_video`.
 
 **Web:** the Generate drawer's **Video** tab — pick a source image, set model / duration
-(5/10/15s; 15 is V4.0-only) / mode (Basic cheaper, Professional), optional audio, optional
-end frame for first/last-frame interpolation, then submit (the cost + free-card check show
-first).
+(5/6/10/15s; 15 is V4.0-only, see below) / mode (Basic cheaper, Professional), optional
+audio, optional end frame for first/last-frame interpolation, then submit (the cost +
+free-card check show first).
 
 ```bash
 # preview (free): prints the exact request + the ~credit cost
@@ -102,6 +114,48 @@ python pixai_gallery_backup.py --generate-video --image <media_id> --prompt "...
 # recover a finished clip for free:
 python pixai_gallery_backup.py --generate-video --task-id <id>
 ```
+
+### Video models and shot-mode gating
+
+Seven video engines are selectable (newest first), and they are **not interchangeable** —
+each has its own duration cap, free-card eligibility, and which of the Loom's four
+[Shot modes](The-Loom#shot-modes) (I2V / FLF / R2V / V2V) it actually supports. The web
+drawer's duration picker offers exactly four values — **5, 6, 10, and 15 seconds** — and
+enforces the current model's cap (see below); an out-of-range value (e.g. inherited from
+an older Loom project) snaps to the nearest one. The CLI's `--duration` is a plain
+integer with no enforced choices — pass any of the four to match the drawer's behavior.
+
+| Model (`--video-model`) | Max duration | Free card ever? | Shot modes available |
+|---|---|---|---|
+| V4.0 Preview (`v4.0`) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
+| V4.0 Lite Preview (`v4.0.1`, default) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
+| V3.2 (`v3.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
+| V3.0 Lite (`v3.0.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
+| V3.0 (High Consistency) (`v3.0`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
+| V3.0 Flash (`v3.0.1`) | 10s | **No — never covered** | First Frame only |
+| V2.7 (High Dynamics) (`v2.7`) | 10s | **No — never covered** | First Frame only |
+
+Notes:
+- **Multi-Reference (R2V) only works on the V4.0 pair.** First+Last (FLF) also works on
+  the three V3.0-generation models. V3.0 Flash and V2.7 only ever offer First Frame
+  (I2V) — the drawer hides the mode buttons a model can't do rather than letting you
+  submit a combination PixAI would reject.
+- **Free cards are V4.0-specific.** V3.0 Flash and V2.7 always cost real credits — the
+  drawer's cost badge correctly reads "no card" for them; that's expected, not a bug.
+- **15s is exclusive to the V4.0 pair.** Every other model caps at 10s, and the web
+  drawer disables + hides the 15s option entirely once you pick a capped model (rather
+  than letting you choose it and fail at submit); the CLI has no equivalent guard, so a
+  hand-typed `--duration 15` on a non-V4.0 model is on you to avoid.
+
+### Video tuning flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--tail <media_id>` | — | last-frame image → first/last-frame (FLF) interpolation between `--image` and this |
+| `--camera-movement` | unset | `horizontal`/`pan`/`roll`/`tilt`/`vertical-pan`/`zoom`; unset omits it (camera direction can also just go in the prompt) |
+| `--audio` / `--audio-language` | off / `english` | generate audio with the clip; the language only matters with `--audio` |
+| `--video-prompt-helper` | off | let PixAI expand your video prompt (off by default — the **opposite** of image gen, where the helper is on unless `--no-prompt-helper`) |
+| `--video-channel` | `private` | `private` = the site's "Enhanced" channel (Plus/Premium); `normal` otherwise |
 
 ## Edit an image with words (`--edit-image`)
 
@@ -118,6 +172,41 @@ python pixai_gallery_backup.py --edit-image --edit-src <media_id> --prompt "make
 # edit a LOCAL image (uploads it, then edits) — spends credits:
 python pixai_gallery_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt "..." --confirm
 ```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--edit-model` | Edit Pro | edit model id (e.g. Reference Pro's id for reference-style edits) |
+| `--edit-resolution` | `1K` | output resolution (`1K`/`2K`/…) |
+| `--edit-aspect` | `3:4` | output aspect ratio |
+| `--edit-quality` | `medium` | quality tier |
+
+The four are clamped to what the chosen model really supports before submit — e.g.
+Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values are
+corrected (and shown in the preview) rather than rejected.
+
+## Enhance an image (`--enhance`) — one-click PixAI workflows
+
+Run one of PixAI's own preset enhance tools on an image: a **panelplugin workflow**
+(`--workflow-id` — face fix, upscale, background removal, and similar one-click tools) or an
+**art filter** (`--filter-id`). Source is a catalog `media_id` or a local file (auto-uploaded on
+`--confirm`). Preview-only until `--confirm`, same as every other spend-capable command here.
+
+**Web:** the Generate drawer's **Edit ▸ Enhance** sub-tab lists PixAI's own curated workflow
+shelf and a search box over the rest of its ComfyUI catalog — that's the easiest way to find a
+real `--workflow-id`/`--filter-id` without guessing. `--dump-params` off a real enhance task
+(recovered via `--task-id`) also prints the exact ids and shape it used.
+
+```bash
+# preview a panelplugin workflow (e.g. an upscale) on a catalog image:
+python pixai_gallery_backup.py --enhance --src <media_id> --workflow-id <id>
+# apply an art filter, with strength, spending credits:
+python pixai_gallery_backup.py --enhance --src <media_id> --filter-id filter-v1-m2 --strength 0.77 --confirm
+```
+
+> **No cost preview.** Unlike every other spend-capable command in this file, `--enhance` has
+> no `--price`-style estimate before `--confirm` — PixAI's own cost-preview endpoint doesn't
+> cover this task family. Preview mode (no `--confirm`) still shows you exactly what would be
+> submitted, so you can sanity-check the workflow/filter id and source image first.
 
 ## Multi-reference video (`--reference-video`)
 
@@ -163,6 +252,17 @@ python pixai_gallery_backup.py --suggest-prompt 739411069833281443    # a catalo
 python pixai_gallery_backup.py --suggest-prompt "C:\pics\ref.png"     # a local file (uploads first)
 ```
 
+> **Images only.** This calls PixAI's own image-to-prompt endpoint, which reads back tags
+> from a still image — it has no video support, and a video `media_id` returns a clear refusal
+> rather than a suggestion (`--suggest-prompt` checks locally before ever reaching the
+> network). (The web gallery's own Suggest Prompt button only ever appears on image detail
+> pages for exactly this reason.) Point it at an image, not a clip.
+>
+> The exact catalog `media_id` above is just an example from this repo's own history and
+> won't exist in your catalog — swap in any image `media_id` from your own catalog. The
+> endpoint is image-only, full stop; it isn't age-limited (an earlier version of this note
+> guessed otherwise and was wrong).
+
 Copy a suggestion straight into `--generate --prompt "…"` to riff on an image's style.
 
 ## Free cards (`--cards`) — auto-applied
@@ -197,6 +297,15 @@ Just generate on a model you have a card for — the match is automatic:
 Overrides: **`--no-card`** forces paying credits even when a card matches; **`--kaisuuken-id <id>`**
 forces a specific card. Cards closest to expiry are used first.
 
+## Contests (`--contests`)
+
+```bash
+python pixai_gallery_backup.py --contests                 # live contests (read-only)
+python pixai_gallery_backup.py --contests --all-contests  # include ended ones too
+```
+
+Lists PixAI's contests — name, dates, entry tag — so you can aim a generation at one.
+The web gallery has the same list under **Contests** in the header. Read-only either way.
 
 ---
 

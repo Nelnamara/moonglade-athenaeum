@@ -148,9 +148,10 @@ shipped bug.
 > method) lives in `private/RE_NOTES.md`** — git-ignored, not public. Read it there when
 > you need it.
 
-## Verbose logging (`-v` / `--verbose`)
+## Logging (`-v` / `--verbose`, and the persistent file log)
 
-- `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. No-op until enabled; turn it on with the `-v` / `--verbose` flag. NOT a full logging framework — file logging is a separate, still-open discussion.
+- `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. Console output is a no-op until enabled with `-v` / `--verbose`.
+- `pixai_logging.py` is the persistent baseline: a rotating file at `out_dir/logs/moonglade.log`, always on regardless of `-v` (only the console mirror is verbose-gated). See `docs/architecture.md`'s module reference for the full design.
 
 ## Recapture procedure (when PixAI changes their frontend)
 

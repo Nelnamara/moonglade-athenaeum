@@ -44,6 +44,14 @@
     // scope or drop this independently of those other two features.
     '.ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}',
     '.ach-modal.open{display:flex;}',
+    // The 2026-07-21 host-neutral font fix (see the #jobs-fab/#jobs-tray/#mg-toasts comment
+    // below) only covered those three roots -- it missed the achievement celebration (.ach-m2,
+    // below) and this Folio of Honors subtree (#ach-modal, the achievement-specific id, NOT
+    // the shared `.ach-modal` class above -- scoping it to the id avoids also restyling
+    // #contest-modal/#art-modal, which reuse that same base chrome class but are not part of
+    // this fix). Same bug, same fix: state font-family explicitly instead of inheriting it,
+    // since the gallery's BASE_HTML body sets it but _LOOM_SHELL's body does not.
+    '#ach-modal{font-family:system-ui,sans-serif;}',
     '.ach-panel{position:relative;width:760px;max-width:96vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:16px;box-shadow:0 30px 90px rgba(0,0,0,.6);padding:24px 26px 28px;}',
     '.ach-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--subtext);font-size:26px;line-height:1;cursor:pointer;}',
     '.ach-x:hover{color:var(--text);}',
@@ -59,21 +67,19 @@
     // minmax(216px,1fr)) for the pre-redesign flat card layout, where every direct child
     // really was one ~216px tile -- left unchanged by mistake when the redesign landed,
     // which auto-placed every new full-width section into narrow tiled columns instead of
-    // stacking them, the actual cause of the overlapping/scrambled render the owner hit.)
+    // stacking them -- the actual cause of the overlapping/scrambled render this fixes.)
     '.ach-grid{display:flex;flex-direction:column;margin-top:18px;}',
     '.ach-nar{width:34px;height:34px;border-radius:50%;object-fit:cover;object-position:60% 30%;cursor:pointer;border:1px solid var(--surface1);vertical-align:middle;margin-left:9px;transition:transform .12s,border-color .12s;}',
     '.ach-nar:hover{transform:scale(1.12);border-color:var(--lavender);}',
     '.ach-unleash{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--ruby);margin-left:12px;cursor:pointer;user-select:none;border:1px solid var(--ruby-deep);border-radius:999px;padding:3px 10px;background:rgba(224,53,94,.08);}',
     '.ach-unleash input{accent-color:var(--ruby);}',
-    // ---- The Folio of Honors (Trophy Hall redesign, 2026-07-22) -- design source: the
-    // owner's Figma Make export, built from the legendary/feat frame slice values handed
-    // off earlier the same night. Tier-triad colors (--tc/--tcl/--tcd) below are the SAME
-    // hex values as .ach-m2's toast triads (see above) confirmed byte-for-byte identical --
-    // one set defined here too rather than sharing across scopes, since .ach-m2's are
-    // deliberately scoped and this keeps that scoping intact. Everything else uses the
-    // app's real design tokens (var(--lavender) etc.), NOT the mockup's fixed hex, so the
-    // Hall keeps retinting per active skin like the rest of the app -- the mockup itself
-    // had no skin system to be aware of.
+    // ---- The Folio of Honors (Trophy Hall redesign, 2026-07-22). Tier-triad colors
+    // (--tc/--tcl/--tcd) below are the SAME hex values as .ach-m2's toast triads (see
+    // above), confirmed byte-for-byte identical -- one set defined here too rather than
+    // sharing across scopes, since .ach-m2's are deliberately scoped and this keeps that
+    // scoping intact. Everything else uses the app's real design tokens (var(--lavender)
+    // etc.), never fixed hex, so the Hall keeps retinting per active skin like the rest
+    // of the app.
     '.ach-hall.open{align-items:center;padding:3vh 3vw;}',
     '.ach-hall .ach-panel{width:96vw;max-width:1320px;height:94vh;max-height:860px;padding:0;display:flex;flex-direction:column;overflow:hidden;background:linear-gradient(160deg,var(--mantle) 0%,var(--base) 100%);transform-origin:top right;animation:hall-in .28s cubic-bezier(.16,.84,.34,1.06);}',
     '@keyframes hall-in{from{opacity:0;transform:scale(.93) translateY(-12px);}to{opacity:1;transform:none;}}',
@@ -83,8 +89,8 @@
     '.hall-title{font-size:19px;font-weight:700;color:var(--text);display:flex;align-items:center;white-space:nowrap;}',
     // the narrator avatar doubles as the Folio's header mascot -- restyled with a glow ring
     // to match the new look, but still the SAME clickable poke-the-narrator Easter egg
-    // (Ach.poke() -> the Triggered feat); the mockup has no way to know about that, so this
-    // keeps the real feature rather than swapping in an inert decorative image.
+    // (Ach.poke() -> the Triggered feat), deliberately kept live rather than swapped for
+    // an inert decorative image.
     '.ach-hall .ach-nar{width:36px;height:36px;border:2px solid rgba(182,146,230,.85);box-shadow:0 0 0 2px rgba(120,60,200,.45),0 0 9px rgba(182,146,230,.7),0 0 20px rgba(120,60,200,.3);}',
     '.hall-score{font-size:12.5px;color:var(--subtext);white-space:nowrap;}',
     '.hall-score b{color:var(--lavender);font-variant-numeric:tabular-nums;}',
@@ -277,7 +283,10 @@
     '.ach-bannerflag{font-size:10px;color:var(--gold);margin-top:4px;}',
     // ---- toast v2 (the LOCKED design, artifact 335ef4e7) -- z-index raised 430->520 (see
     // top-of-file comment) so it always renders above the Loom's own full-screen overlays.
-    '.ach-m2{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;}',
+    // font-family stated explicitly for the same reason as #ach-modal above and
+    // #jobs-fab/#jobs-tray/#mg-toasts below -- this is the achievement celebration's own root,
+    // and without it the toast inherits nothing on /loom (_LOOM_SHELL's body sets no font).
+    '.ach-m2{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;font-family:system-ui,sans-serif;}',
     '.ach-m2.go{opacity:1;}',
     '.ach-m2.out{opacity:0;transition:opacity .5s;}',
     '.ach-m2 .tstage{width:min(680px,94vw);}',
@@ -395,6 +404,22 @@
     '.jt-thumb{flex:none;} .jt-thumb img{width:30px;height:30px;border-radius:5px;object-fit:cover;display:block;}',
     '.jt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 2px;flex:none;line-height:1;}',
     '.jt-x:hover{color:var(--red);}',
+    '.jt-item{cursor:pointer;}',
+    // ---- job detail popover: a small secondary card, not a modal -- owner field-report
+    // 2026-07-23 (two stuck generations, no way to recover their task id without server
+    // access). Fixed position so it escapes #jobs-tray's own overflow:auto/hidden and can
+    // float beside it; positioned by _place() against the clicked row's own rect, same
+    // technique as mg-model-picker.js's floating preview card.
+    '#jt-detail{position:fixed;z-index:236;width:264px;background:var(--mantle);border:1px solid var(--surface1);border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.5);padding:10px 12px;font-family:system-ui,sans-serif;font-size:12px;color:var(--text);display:none;}',
+    '#jt-detail.open{display:block;}',
+    '#jt-detail .jd-row{display:flex;align-items:center;gap:8px;padding:4px 0;}',
+    '#jt-detail .jd-row+.jd-row{border-top:1px solid var(--surface0);}',
+    '#jt-detail .jd-k{color:var(--overlay0);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;flex:none;width:78px;}',
+    '#jt-detail .jd-v{flex:1;min-width:0;color:var(--text);word-break:break-all;}',
+    '#jt-detail .jd-id{font-variant-numeric:tabular-nums;font-size:11px;}',
+    '#jt-detail .jd-copy{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:13px;padding:2px 4px;flex:none;line-height:1;border-radius:5px;}',
+    '#jt-detail .jd-copy:hover{color:var(--lavender);background:var(--surface0);}',
+    '#jt-detail .jd-copy.copied{color:var(--emerald);}',
     // ---- Toasts: small, corner-stacked, reusable (job notices; achievements adopt the same
     // frame for the >3-unlock summary case). z-index raised 420->510 (see top-of-file comment).
     '#mg-toasts{position:fixed;right:16px;top:64px;z-index:510;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:system-ui,sans-serif;}',
@@ -1051,6 +1076,7 @@
   // ================================================================================
   var JobsCard = (function(){
     var last={}, seeded=false, timer=null, LSK='mg_jobs_open';
+    var jobsById={}, detailJobId=null, detailAnchor=null, detailTick=null;
     function el(i){ return document.getElementById(i); }
     function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
     function isOpen(){ try{ return localStorage.getItem(LSK)==='1'; }catch(e){ return false; } }
@@ -1061,13 +1087,50 @@
     }
     function setOpen(v){ try{ localStorage.setItem(LSK, v?'1':'0'); }catch(e){} applyState(); }
     function open(){ setOpen(true); refresh(); }
-    function close(){ setOpen(false); }
+    function close(){ setOpen(false); closeDetail(); }
     function ago(ts){
       var s=Math.max(0, Math.floor(Date.now()/1000 - (ts||0)));
       if(s<60) return 'just now';
       if(s<3600) return Math.floor(s/60)+'m ago';
       if(s<86400) return Math.floor(s/3600)+'h ago';
       return Math.floor(s/86400)+'d ago';
+    }
+    // ---- job detail popover formatters (owner field-report 2026-07-23: two stuck
+    // generations, no way to recover their task id without server access). row(j)'s own
+    // ago(j.ts) is a relative "3m ago" -- these are its two companions: a real clock time
+    // ("Time Sent") and an elapsed duration ("Time Spent"), both pure and hand-formatted
+    // (no toLocaleString) so they render identically regardless of the browser's ICU/locale
+    // data and stay trivially unit-testable.
+    var MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function pad2(n){ return (n<10?'0':'')+n; }
+    function fmtClock(ts){
+      if(!ts) return '—';
+      var d=new Date(ts*1000);
+      var h=d.getHours(), ap=h>=12?'PM':'AM', h12=h%12||12;
+      return MONTHS[d.getMonth()]+' '+d.getDate()+', '+h12+':'+pad2(d.getMinutes())+' '+ap;
+    }
+    // A DURATION, not an "X ago" -- deliberately its own function rather than reusing ago()'s
+    // bucketing, which drops everything below its chosen unit (ago() would render a 92-minute
+    // job as merely "1h ago"). This keeps two units of precision throughout so "time spent"
+    // reads as an honest duration (e.g. "1h 32m"), not a vague bucket.
+    function fmtDuration(s){
+      s=Math.max(0, Math.floor(s||0));
+      if(s<60) return s+'s';
+      if(s<3600) return Math.floor(s/60)+'m '+(s%60)+'s';
+      if(s<86400) return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+      return Math.floor(s/86400)+'d '+Math.floor((s%86400)/3600)+'h';
+    }
+    // Copy-to-clipboard: fully guarded (per spec) -- navigator.clipboard is absent on
+    // non-HTTPS/non-localhost origins and on some older embedded webviews, and the promise
+    // itself can reject (permission denied). Either must degrade to a silent no-op, never a
+    // thrown error, unlike this app's other copy buttons (pixai_gallery.py's copyPrompt/
+    // copyCmd), which call navigator.clipboard.writeText direct and unguarded.
+    function copyText(s){
+      try{
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(s).catch(function(){});
+        }
+      }catch(e){}
     }
     // Where a job came from, in words. `j.type` is an internal enum -- 'cli', 'panel',
     // 'generate', 'delete', 'import' -- and this line used to render it raw under
@@ -1082,28 +1145,121 @@
       // files failed after retries -- distinct from both a clean 'done' and a hard
       // 'failed'. Must be terminal/dismissable like the other two, or it's stuck
       // looking permanently in-progress with no way to clear it.
-      var st=j.status||'running', fin=(st==='done'||st==='failed'||st==='done_with_errors');
+      //
+      // stale: the server's own orphan-reconciliation sweep (resolve_orphan_jobs,
+      // /api/jobs) found a job stuck 'running' past its age threshold AND couldn't reach
+      // PixAI to find out its real state -- distinct from done_with_errors (that's a
+      // completed run with partial failures) and from a plain failed. NOT in the
+      // backend's terminal set (a later sweep can still resolve it for real, or a
+      // task-id recovery closes it), but shown + dismissable like one so it never just
+      // looks like an ordinary still-in-progress spinner forever.
+      var st=j.status||'running';
+      var fin=(st==='done'||st==='failed'||st==='done_with_errors'||st==='stale');
       var ic = st==='done'
              ? '<span class="jt-ok jt-glyph">✓</span><img class="jt-nel" src="/branding/mascots/trk_done.png" onerror="this.remove()">'
              : st==='done_with_errors'
              ? '<span class="jt-warn jt-glyph">⚠</span><img class="jt-nel" src="/branding/mascots/trk_done.png" onerror="this.remove()">'
              : st==='failed'
              ? '<span class="jt-err jt-glyph">⚠</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
+             : st==='stale'
+             ? '<span class="jt-warn jt-glyph">?</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
              : '<span class="jt-spin"><img class="jt-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span>';
       var mid=(j.media_ids||[])[0]||'';
       var thumb=(st==='done'&&mid)?'<a class="jt-thumb" href="/image/'+encodeURIComponent(mid)+'"><img src="/thumbs/'+encodeURIComponent(mid)+'.jpg" alt=""></a>':'';
       var bar='';
       if(st==='running' && j.total){ var pct=Math.min(100, Math.round((j.done||0)/j.total*100)); bar='<div class="jt-bar"><i style="width:'+pct+'%"></i></div>'; }
-      var errmsg=((st==='failed'||st==='done_with_errors')&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
+      var errmsg=((st==='failed'||st==='done_with_errors'||st==='stale')&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
       var sub='<div class="jt-sub"><span class="jt-kind">'+esc(kindLabel(j.type))+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
       var x=fin?'<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">×</button>':'';
-      var cls=st==='failed'?' st-failed':(st==='done_with_errors'?' st-warn':'');
-      return '<div class="jt-item'+cls+'"><div class="jt-ic">'+ic+'</div>'
+      var cls=st==='failed'?' st-failed':((st==='done_with_errors'||st==='stale')?' st-warn':'');
+      // data-job + tabindex/role: the row itself opens the detail popover (task id, time
+      // sent, time spent) on click or Enter/Space -- see the tray's click/keydown listeners
+      // below. Guarded there so clicking the thumbnail link or the dismiss button still does
+      // ONLY that, not both.
+      return '<div class="jt-item'+cls+'" data-job="'+esc(j.job_id)+'" tabindex="0" role="button" aria-haspopup="true"><div class="jt-ic">'+ic+'</div>'
            +'<div class="jt-main"><div class="jt-lab">'+esc(j.label||'Generation')+'</div>'+sub+bar+errmsg+'</div>'
            +thumb+x+'</div>';
     }
+    // ================================================================================
+    // Job detail popover -- owner field-report 2026-07-23: two stuck generations, no way
+    // to get their task id (the one thing the existing "Import task" recovery flow needs)
+    // without server access. A small secondary card, not a modal: task id (+ one-click
+    // copy), a real clock "Time Sent", and "Time Spent" (elapsed, live while running).
+    // `started_at` comes from the backend collapse fix in pixai_gallery_backup.py's
+    // _reconstruct_jobs -- falls back to `ts` for any job logged before that fix shipped,
+    // so an old log line degrades to "0s" rather than throwing on a missing field.
+    // ================================================================================
+    function detailEl(){
+      var d=el('jt-detail');
+      if(!d){
+        d=document.createElement('div');
+        d.id='jt-detail'; d.setAttribute('aria-hidden','true');
+        document.body.appendChild(d);
+      }
+      return d;
+    }
+    function detailHtml(j){
+      var tid=j.job_id||'';
+      var startedAt=j.started_at||j.ts||0;
+      var running=(j.status||'running')==='running';
+      var spentSecs=(running?(Date.now()/1000):(j.ts||startedAt))-startedAt;
+      return '<div class="jd-row"><span class="jd-k">Task ID</span>'
+           +'<span class="jd-v jd-id">'+esc(tid)+'</span>'
+           +'<button class="jd-copy" data-copy="'+esc(tid)+'" title="Copy task ID">copy</button></div>'
+           +'<div class="jd-row"><span class="jd-k">Time Sent</span><span class="jd-v">'+esc(fmtClock(startedAt))+'</span></div>'
+           +'<div class="jd-row"><span class="jd-k">Time Spent</span><span class="jd-v" data-spent="1">'+esc(fmtDuration(spentSecs))+(running?' so far':'')+'</span></div>';
+    }
+    function renderDetail(j){
+      var d=detailEl();
+      d.innerHTML=detailHtml(j);
+    }
+    // Anchors the popover beside the row that opened it -- same "prefer the side with room,
+    // clamp to the viewport" technique as mg-model-picker.js's own floating preview card
+    // (_place()), reused rather than reinvented.
+    function placeDetail(anchorEl){
+      var d=detailEl(), r=anchorEl.getBoundingClientRect(), w=264, gap=10, x;
+      x=r.right+gap;
+      if(x+w>window.innerWidth-8) x=Math.max(8, r.left-w-gap);
+      var y=Math.max(8, Math.min(r.top, window.innerHeight-140));
+      d.style.left=x+'px'; d.style.top=y+'px';
+    }
+    function stopTick(){ if(detailTick){ clearInterval(detailTick); detailTick=null; } }
+    function openDetail(jid, anchorEl){
+      var j=jobsById[jid]; if(!j) return;
+      detailJobId=jid; detailAnchor=anchorEl;
+      var d=detailEl();
+      renderDetail(j);
+      placeDetail(anchorEl);
+      d.classList.add('open'); d.setAttribute('aria-hidden','false');
+      stopTick();
+      // Live "time spent" while the job is still running -- ticks the popover only, not a
+      // full card refresh (JobsCard's own poll already handles catching a state change).
+      if((j.status||'running')==='running'){
+        detailTick=setInterval(function(){
+          var cur=jobsById[detailJobId];
+          if(!cur){ closeDetail(); return; }
+          var v=d.querySelector('[data-spent]');
+          if(v) v.textContent=fmtDuration(Date.now()/1000-(cur.started_at||cur.ts||0))+' so far';
+        }, 1000);
+      }
+    }
+    function closeDetail(){
+      stopTick();
+      detailJobId=null; detailAnchor=null;
+      var d=el('jt-detail');
+      if(d){ d.classList.remove('open'); d.setAttribute('aria-hidden','true'); }
+    }
+    function toggleDetail(jid, anchorEl){
+      if(detailJobId===jid){ closeDetail(); return; }
+      openDetail(jid, anchorEl);
+    }
     function render(jobs){
       var t=el('jobs-tray'); if(!t) return;
+      jobsById={}; jobs.forEach(function(j){ jobsById[j.job_id]=j; });
+      if(detailJobId){                        // keep an open popover's own numbers live
+        if(jobsById[detailJobId]) renderDetail(jobsById[detailJobId]);
+        else closeDetail();                   // the job it was showing is gone (dismissed/aged out)
+      }
       var running=0; jobs.forEach(function(j){ if((j.status||'running')==='running') running++; });
       var head='<div class="jt-head"><span class="jt-title">◉ Activity'
         +(jobs.length?' <span class="jt-count">'+jobs.length+'</span>':'')+'</span>'
@@ -1170,12 +1326,45 @@
     document.addEventListener('DOMContentLoaded', function(){
       applyState();
       var t=el('jobs-tray');
-      if(t){ t.addEventListener('click', function(e){
-        var x=e.target.closest?e.target.closest('.jt-x[data-job]'):null;
-        if(x){ dismiss(x.getAttribute('data-job')); return; }
-        var h=e.target.closest?e.target.closest('.jt-hbtn[data-act]'):null;
-        if(h){ var a=h.getAttribute('data-act'); if(a==='clear') clearFinished(); else if(a==='close') close(); }
-      }); }
+      if(t){
+        t.addEventListener('click', function(e){
+          var x=e.target.closest?e.target.closest('.jt-x[data-job]'):null;
+          if(x){ dismiss(x.getAttribute('data-job')); return; }
+          var h=e.target.closest?e.target.closest('.jt-hbtn[data-act]'):null;
+          if(h){ var a=h.getAttribute('data-act'); if(a==='clear') clearFinished(); else if(a==='close') close(); return; }
+          if(e.target.closest && e.target.closest('.jt-thumb')) return;   // let the link navigate
+          var row=e.target.closest?e.target.closest('.jt-item[data-job]'):null;
+          if(row) toggleDetail(row.getAttribute('data-job'), row);
+        });
+        // Enter/Space opens the detail popover for a keyboard-focused row -- matches the
+        // tabindex="0" role="button" row() now sets.
+        t.addEventListener('keydown', function(e){
+          if(e.key!=='Enter' && e.key!==' ') return;
+          var row=e.target.closest?e.target.closest('.jt-item[data-job]'):null;
+          if(!row) return;
+          e.preventDefault();
+          toggleDetail(row.getAttribute('data-job'), row);
+        });
+      }
+      // The popover itself lives OUTSIDE #jobs-tray (a fixed sibling, like #mg-toasts), so
+      // its own clicks (the copy button) and "click anywhere else closes it" both need a
+      // document-level listener -- clicking inside jobs-tray is exempted so a row click
+      // above can open/switch the popover without this immediately closing what it just
+      // opened (row clicks are also "inside" from this listener's point of view).
+      document.addEventListener('click', function(e){
+        if(!detailJobId) return;
+        var cp=e.target.closest?e.target.closest('.jd-copy[data-copy]'):null;
+        if(cp){
+          copyText(cp.getAttribute('data-copy'));
+          cp.textContent='copied!'; cp.classList.add('copied');
+          setTimeout(function(){ cp.textContent='copy'; cp.classList.remove('copied'); }, 1200);
+          return;
+        }
+        var insideDetail=e.target.closest && e.target.closest('#jt-detail');
+        var insideTray=e.target.closest && e.target.closest('#jobs-tray');
+        if(!insideDetail && !insideTray) closeDetail();
+      });
+      document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeDetail(); });
       refresh().then(schedule);
     });
     return {open:open, close:close, refresh:refresh, dismiss:dismiss, clearFinished:clearFinished};

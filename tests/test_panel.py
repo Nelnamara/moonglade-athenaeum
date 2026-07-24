@@ -501,7 +501,14 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
 
     class FakeProc:
         def __init__(self, argv):
-            open(argv[-1], "wb").write(b"OUTPUT")          # argv[-1] = out path
+            # Guard on argv[0] -- subprocess.Popen is patched globally, and
+            # create_app() (called right below) also shells out to
+            # `git rev-parse --short HEAD` (_build_stamp). For THAT call
+            # argv[-1] is the literal string "HEAD", so writing to it
+            # unconditionally dropped a stray 6-byte file named HEAD into the
+            # repo root on every run of this test (docs/AUDIT_2026-07-21.md O10).
+            if argv and argv[0] == "ffmpeg":
+                open(argv[-1], "wb").write(b"OUTPUT")          # argv[-1] = out path
             self.stderr = io.StringIO("frame=1 time=00:00:01.00 bitrate=x\n")
         def wait(self):
             return 0
@@ -585,7 +592,12 @@ def _mock_export_ffmpeg(monkeypatch):
     class FakeProc:
         def __init__(self, argv):
             captured.append(argv)
-            open(argv[-1], "wb").write(b"OUTPUT")
+            # Same guard as the other FakeProc in this file -- see its comment.
+            # Any create_app() call after this monkeypatch shells `git rev-parse
+            # --short HEAD` through the same patched Popen; without the guard
+            # argv[-1] == "HEAD" gets a stray file written to it in the repo root.
+            if argv and argv[0] == "ffmpeg":
+                open(argv[-1], "wb").write(b"OUTPUT")
             self.stderr = io.StringIO("frame=1 time=00:00:01.00 bitrate=x\n")
         def wait(self):
             return 0
