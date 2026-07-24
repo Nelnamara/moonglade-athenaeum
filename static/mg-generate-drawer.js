@@ -151,6 +151,12 @@
     'mg-generate-drawer .mgd-result{margin-top:12px;display:none;}',
     'mg-generate-drawer .mgd-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}',
     'mg-generate-drawer .mgd-result a{color:var(--accent-soft,#4fc99a);font-size:12px;text-decoration:none;}',
+    // Concurrent generations (2026-07-23): each submission gets its own line inside
+    // .mgd-result instead of one shared innerHTML a later submission would overwrite.
+    // A hairline separator between entries is the only visual change when just one
+    // submission is ever in flight (the common case).
+    'mg-generate-drawer .mgd-result-line{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1,#3a3460);}',
+    'mg-generate-drawer .mgd-result-line:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none;}',
     'mg-generate-drawer .mgd-moon{display:inline-block;width:15px;height:15px;border-radius:50%;background:var(--lavender,#b692e6);position:relative;overflow:hidden;vertical-align:-3px;margin-right:7px;box-shadow:0 0 9px rgba(182,146,230,.75);}',
     'mg-generate-drawer .mgd-moon::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--mantle,#131024);animation:mgd-eclipse 2.6s ease-in-out infinite;}',
     '@keyframes mgd-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}',
@@ -448,7 +454,11 @@
     disconnectedCallback() {
       clearTimeout(this._costTimer);
       clearTimeout(this._chipTimer);
-      clearTimeout(this._pollTimer);
+      // Concurrent generations: each in-flight submission owns its own poll timeout (see
+      // _poll below), tracked in this Set instead of the old single this._pollTimer --
+      // sweep every one of them, not just the most recent submission's.
+      (this._pollTimers || []).forEach(function (t) { clearTimeout(t); });
+      this._pollTimers = null;
     }
 
     // ---- mode + the primary (image) slot bank -------------------------------------
@@ -881,28 +891,46 @@
     }
 
     // ---- submit -> poll -> result (the gallery runTask flow, self-contained) ----
+    // Concurrent generations (owner-approved 2026-07-23): PixAI itself runs tasks in
+    // parallel, so this drawer no longer locks Generate for the whole render. Each call
+    // gets its OWN line appended into .mgd-result (never overwriting a sibling
+    // submission's still-live status/result) and its OWN poll loop, tracked in
+    // this._pollTimers (a Set of every outstanding timeout, not the old single
+    // this._pollTimer a second submission used to clobber via clearTimeout). The Go
+    // button frees up the moment the SERVER ANSWERS the submit -- accepted or rejected --
+    // not when the task finishes rendering; setBusy() (below) is the host's own,
+    // independent per-shot lock and is unaffected by this.
+    _newResultLine() {
+      this._result.style.display = 'block';
+      var line = document.createElement('div');
+      line.className = 'mgd-result-line';
+      this._result.appendChild(line);
+      return line;
+    }
+
     _generate() {
-      var self = this, res = this._result, p = this.payload();
+      var self = this, p = this.payload();
       if (!this._hasAnyRef(p)) {
-        res.style.display = 'block';
-        res.innerHTML = '<span style="color:var(--red,#f38ba8);font-size:12px;">' +
+        var warn = this._newResultLine();
+        warn.innerHTML = '<span style="color:var(--red,#f38ba8);font-size:12px;">' +
           (this._mode === 'r2v' ? 'Pick at least one reference first.' : 'Pick a source image first.') + '</span>';
         return;
       }
-      res.style.display = 'block';
-      res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Submitting…</span>';
+      var line = this._newResultLine();
+      line.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Submitting…</span>';
       this._rendering = true;
       this._go.disabled = true; this._go.textContent = 'Rendering…';
-      function done() { self._rendering = false; self._go.disabled = false; self._go.textContent = 'Generate video'; }
+      function unlock() { self._rendering = false; self._go.disabled = false; self._go.textContent = 'Generate video'; }
       fetch('/api/loom/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) })
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (d.error || !d.task_id) { done(); self._renderError(friendlyGenErr(d.error || 'submit failed')); return; }
+          unlock();   // the server answered -- free the button for the NEXT submission
+          if (d.error || !d.task_id) { self._renderErrorInto(line, friendlyGenErr(d.error || 'submit failed')); return; }
           self.dispatchEvent(new CustomEvent('mg-submit', { bubbles: true, composed: true, detail: { task_id: d.task_id, payload: p } }));
-          res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Queued — running…</span>';
-          self._poll(d.task_id, done);
+          line.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Queued — running…</span>';
+          self._poll(d.task_id, line);
         })
-        .catch(function () { done(); self._renderError('network error'); });
+        .catch(function () { unlock(); self._renderErrorInto(line, 'network error'); });
     }
 
     // These three thresholds mirror the Loom's own pollShot tiers exactly
@@ -914,89 +942,100 @@
     // old GIVE_UP_MS called done()+_renderError() at 20min, indistinguishable from a real
     // server failure (the owner's own motivating case was a late-surfacing content-moderation
     // rejection, not a timeout). Now elapsed time only slows the poll cadence and escalates
-    // the message; only a real d.phase==='failed' response still calls _renderError(). At the
-    // 6h ceiling this tab stops scheduling calls for this task (protects against polling a
+    // the message; only a real d.phase==='failed' response still calls _renderErrorInto(). At
+    // the 6h ceiling this tab stops scheduling calls for this task (protects against polling a
     // permanently-wedged or deleted task forever) but that is NOT the old giveUp() either --
-    // see _pause below.
-    _poll(taskId, done) {
-      var self = this, res = this._result, startedAt = Date.now();
+    // see pause below. `line` is this submission's own result-strip element (see
+    // _newResultLine) -- every render/dispatch below is scoped to it, never to the whole
+    // .mgd-result strip, so a sibling submission's line is untouched.
+    _poll(taskId, line) {
+      var self = this, startedAt = Date.now();
       var SLOW_AT = 20 * 60 * 1000, SLOW_MS = 20 * 1000;
       var STALE_AT = 90 * 60 * 1000, STALE_MS = 3 * 60 * 1000;
       var CEILING = 6 * 60 * 60 * 1000;
-      clearTimeout(this._pollTimer);
+      if (!this._pollTimers) this._pollTimers = [];
+      var pollTimers = this._pollTimers, timer = null;
+      // schedule() replaces the old single-instance-field assignment this used to be --
+      // each call is pushed onto the shared array (swept wholesale by disconnectedCallback)
+      // instead of overwriting one field, so this task's poll loop can never silently kill
+      // a DIFFERENT task's still-pending timeout (or vice versa).
+      function schedule(fn, ms) {
+        var idx = pollTimers.indexOf(timer);
+        if (idx >= 0) pollTimers.splice(idx, 1);   // the timer that just fired is spent -- stop tracking it
+        timer = setTimeout(fn, ms);
+        pollTimers.push(timer);
+      }
       function label(ms) { return ms < 3600000 ? (Math.round(ms / 60000) + 'm') : ((Math.round(ms / 360000) / 10) + 'h'); }
-      // Ceiling reached: stop polling THIS session. done() DOES fire here (unlike the
-      // slow/stale downgrades below) so the Go button frees up rather than staying disabled
-      // indefinitely against a task this tab has stopped actively tracking -- but there is NO
-      // _renderError() and NO 'failed' framing. pendingTaskId on the card (written by the
-      // host's onVideoSubmit at submit time) is untouched by this -- a reload's resume effect,
-      // or clicking the card's own "paused" status badge, gives it a fresh poll budget rather
-      // than abandoning it.
+      // Ceiling reached: stop polling THIS session. NOT a giveUp() -- there is NO
+      // _renderErrorInto() and NO 'failed' framing. pendingTaskId on the card (written by
+      // the host's onVideoSubmit at submit time) is untouched by this -- a reload's resume
+      // effect, or clicking the card's own "paused" status badge, gives it a fresh poll
+      // budget rather than abandoning it.
       var pause = function () {
-        done();
-        res.innerHTML = '<span style="color:var(--subtext,#9a93ab);font-size:12px;">Paused auto-checking after ' + label(CEILING) +
+        line.innerHTML = '<span style="color:var(--subtext,#9a93ab);font-size:12px;">Paused auto-checking after ' + label(CEILING) +
           ' with no result — check pixai.art, or reopen this shot to check again (task ' + esc(String(taskId).slice(-6)) + ')</span>';
         self.dispatchEvent(new CustomEvent('mg-paused', { bubbles: true, composed: true, detail: { task_id: taskId } }));
       };
-      this._pollTimer = setTimeout(function tick() {
+      schedule(function tick() {
         fetch('/api/task-status?task_id=' + encodeURIComponent(taskId))
           .then(function (r) { return r.json(); })
           .then(function (d) {
             if (!self.isConnected) return;
             var elapsed = Date.now() - startedAt;
             if (d.phase === 'done') {
-              done();
-              self._renderResult(d);
+              self._renderResultInto(line, d);
               self.dispatchEvent(new CustomEvent('mg-result', {
                 bubbles: true, composed: true,
                 detail: { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit }
               }));
             } else if (d.phase === 'failed') {
-              done();
-              self._renderError(friendlyGenErr(d.error || ('task ' + (d.status || 'failed'))));
+              self._renderErrorInto(line, friendlyGenErr(d.error || ('task ' + (d.status || 'failed'))));
             } else if (elapsed > CEILING) {
               pause();
             } else if (elapsed > STALE_AT) {
-              res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--amber,#f9d38c);font-size:12px;">Still going after ' + label(elapsed) +
+              line.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--amber,#f9d38c);font-size:12px;">Still going after ' + label(elapsed) +
                 ' — unusual. Check pixai.art, or keep waiting (task ' + esc(String(taskId).slice(-6)) + ')</span>';
               self.dispatchEvent(new CustomEvent('mg-slow', { bubbles: true, composed: true, detail: { tier: 'stale', elapsed: elapsed, task_id: taskId } }));
-              self._pollTimer = setTimeout(tick, STALE_MS);
+              schedule(tick, STALE_MS);
             } else if (elapsed > SLOW_AT) {
-              res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--amber,#f9d38c);font-size:12px;">Taking longer than expected (' + label(elapsed) +
+              line.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--amber,#f9d38c);font-size:12px;">Taking longer than expected (' + label(elapsed) +
                 ', task ' + esc(String(taskId).slice(-6)) + ')</span>';
               self.dispatchEvent(new CustomEvent('mg-slow', { bubbles: true, composed: true, detail: { tier: 'slow', elapsed: elapsed, task_id: taskId } }));
-              self._pollTimer = setTimeout(tick, SLOW_MS);
+              schedule(tick, SLOW_MS);
             } else {
-              res.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Rendering under the eclipse… (task ' + esc(String(taskId).slice(-6)) + ')</span>';
-              self._pollTimer = setTimeout(tick, 2000);
+              line.innerHTML = '<span class="mgd-moon"></span><span style="color:var(--subtext,#9a93ab);font-size:12px;">Rendering under the eclipse… (task ' + esc(String(taskId).slice(-6)) + ')</span>';
+              schedule(tick, 2000);
             }
           })
           .catch(function () {
             if (!self.isConnected) return;
             var elapsed = Date.now() - startedAt;
             if (elapsed > CEILING) { pause(); return; }
-            self._pollTimer = setTimeout(tick, elapsed > STALE_AT ? STALE_MS : elapsed > SLOW_AT ? SLOW_MS : 2000);
+            schedule(tick, elapsed > STALE_AT ? STALE_MS : elapsed > SLOW_AT ? SLOW_MS : 2000);
           });
       }, 2000);
     }
 
-    _renderError(msg) {
-      var res = this._result;
-      res.style.display = 'block';
-      res.innerHTML = '<span style="color:var(--red,#f38ba8);font-size:12px;">' + esc(msg) + '</span>';
+    _renderErrorInto(line, msg) {
+      line.innerHTML = '<span style="color:var(--red,#f38ba8);font-size:12px;">' + esc(msg) + '</span>';
       this.dispatchEvent(new CustomEvent('mg-error', { bubbles: true, composed: true, detail: { error: msg } }));
     }
 
-    _renderResult(d) {
-      var res = this._result;
-      res.style.display = 'block';
+    _renderResultInto(line, d) {
       var ids = d.media_ids || [];
       var cost = d.paid_credit === 0 ? 'free (card used)' : ((d.paid_credit || 0).toLocaleString() + ' credits');
       var html = '<div style="color:var(--emerald,#4fc99a);font-size:12px;margin-bottom:6px;">✓ Rendered — ' + cost + '. Added to your gallery.</div>';
       ids.forEach(function (mid) {
         html += '<a href="/image/' + esc(mid) + '"><img src="/thumbs/' + esc(mid) + '.jpg" alt="result" loading="lazy"></a>';
       });
-      res.innerHTML = html;
+      line.innerHTML = html;
+    }
+
+    // Convenience wrapper for one-off errors that are NOT part of a tracked submission's
+    // own line (e.g. _uploadAudio below, which runs before any /api/loom/generate call
+    // exists) -- opens a fresh line and renders into it, same as every other error render.
+    _renderError(msg) {
+      this._renderErrorInto(this._newResultLine(), msg);
     }
 
     // ---- floating ref preview (own element; no host singleton coupling) ----
