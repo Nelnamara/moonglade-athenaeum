@@ -31,6 +31,20 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
 
 ### Added
 
+- **`paid_credit` is persisted — what every generation actually cost is now catalog data**
+  (2026-07-23; data layer only, no UI/charts yet). New catalog column `paid_credit` (the
+  server-reported actual credit cost of the row's task; `'0'` = free via card/daily,
+  `''` = never captured; task-level, repeated on each of the task's media rows), added via
+  the three-place schema contract so existing databases auto-upgrade losslessly. Stored at
+  every site that sees the value: `--generate` / `--edit-image` / video runs, the web
+  suite's collect path (`/api/task-status` → `collect_generation`, which also covers the
+  `--watch-backup` live mirror and `--task-id` recovery), `--sync-videos`, and the
+  `--full-meta` / `--backfill-full-meta` task-detail mapping. **Historical recovery works:**
+  the task-detail record returns the cost for old tasks too, so new
+  `--backfill-full-meta --with-credit` (the `--with-loras` pattern) fills the column for
+  rows cataloged before cost tracking existed. Read-only surfacing: the MCP `get_image`
+  detail JSON gains the field, and `--catalog-stats` prints a spend total (counted once
+  per task, never per batch image).
 - **Every CLI flag is now documented, and `--help` is complete.** The 30 tuning/maintenance
   flags that existed with no documentation anywhere (edit tuning, video tuning,
   `--params-json`/`--poll-timeout`, format conversion, download shaping, catalog repair,

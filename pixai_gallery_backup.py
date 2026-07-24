@@ -1534,8 +1534,17 @@ def page_variables(page_size, before=None):
 _FULL_META_FIELDS = (
     "prompt_full", "natural_prompt", "seed", "steps",
     "sampler", "cfg_scale", "model_id", "model_name", "loras",
-    "negative_prompt", "clip_skip",
+    "negative_prompt", "clip_skip", "paid_credit",
 )
+
+
+def _paid_credit_str(task):
+    """Catalog-string form of a task dict's server-reported `paidCredit` (the ACTUAL
+    credit cost, known once the task ran). '' when the field is absent/null (unknown)
+    -- never coerce that to '0', because '0' is a real, meaningful value (a free card
+    or daily-free gen). Task-level: callers stamp it on each of the task's media rows."""
+    v = (task or {}).get("paidCredit")
+    return "" if v is None else str(v)
 
 
 def task_detail_gql(session, task_id):
@@ -2017,6 +2026,10 @@ def extract_full_meta(task):
         "loras":          "",  # filled in by caller via resolve_loras()
         "negative_prompt": neg,
         "clip_skip":      str(clip) if clip != "" else "",
+        # getTaskById returns paidCredit top-level even for historical tasks (verified
+        # against a real captured task, 2026-07-04) -- so full-meta/backfill passes
+        # recover spend history, not just fresh generations.
+        "paid_credit":    _paid_credit_str(task),
     }
 
 
@@ -3301,6 +3314,7 @@ def run_sync_videos(args):
                     "status": "completed",
                     "is_video": "1",
                     "poster_media_id": o.get("poster_media_id", ""),
+                    "paid_credit": _paid_credit_str(task),   # actual cost, task-level
                     "video_duration": str(shared.get("duration") or ""),
                 })
                 _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
@@ -4348,6 +4362,7 @@ def run_generate(args):
             "model_id": _pick("model_id", "modelId"),
             "model_name": fm.get("model_name", ""),
             "loras": fm.get("loras", ""),
+            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or params.get("width") or ""),
             "height": str((info or {}).get("height") or params.get("height") or ""),
         })
@@ -4406,6 +4421,7 @@ def _download_video_task(session, result, task_id, out, args, params):
             "negative_prompt": sent.get("negativePrompts", ""),
             "seed": str(o.get("seed") or ""),
             "poster_media_id": o.get("poster_media_id", ""),
+            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "video_duration": str(shared.get("duration") or sent.get("duration") or ""),
             "model_id": str(sent.get("model") or ""),
             "width": str(detail.get("width") or ""),
@@ -4489,7 +4505,9 @@ def _task_detail_query(session, task_id):
     would be a real behavior change -- not done here."""
     if TASK_DETAIL_HASH:
         return task_detail_gql(session, task_id)
-    q = "query($id: ID!) { task(id: $id) { id status createdAt parameters outputs } }"
+    # paidCredit rides along so the fallback path stores the actual cost too (the
+    # field is proven safe ad-hoc -- _GEN_STATUS already selects it on every poll).
+    q = "query($id: ID!) { task(id: $id) { id status createdAt parameters outputs paidCredit } }"
     return (gql_adhoc(session, q, {"id": str(task_id)}) or {}).get("task")
 
 
@@ -4523,6 +4541,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
             "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
             "model_name": model_name,
+            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
@@ -4992,6 +5011,7 @@ def run_edit_image(args):
             "prompt_full": prompt_used, "prompt_preview": (prompt_used or "")[:100],
             "model_id": str(chat.get("modelId") or fm.get("model_id") or ""),
             "model_name": fm.get("model_name", "") or "Edit",
+            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
@@ -5974,11 +5994,27 @@ def run_catalog_stats(args):
             pending += 1
         if _prog and (i % 1000 == 0 or i + 1 == n):
             _prog(i + 1, n)
+    # paid_credit is a TASK-level cost stamped on each of the task's media rows --
+    # tally once per task_id (a 4-image batch is ONE spend), never per row. Rows
+    # with '' never tracked a cost and stay out of the tally entirely.
+    task_cost = {}
+    for row in rows:
+        pc = (row.get("paid_credit") or "").strip()
+        tid = row.get("task_id") or row.get("media_id")
+        if pc and tid not in task_cost:
+            try:
+                task_cost[tid] = int(float(pc))
+            except ValueError:
+                pass
     print("Catalog: {}".format(db_path))
     print("Total image entries : {}".format(total))
     print("  downloaded files  : {}".format(downloaded))
     print("  resolved, pending : {}".format(pending))
     print("  no URL (missing)  : {}".format(missing))
+    if task_cost:
+        print("Credits tracked     : {:,} spent across {:,} tasks ({:,} free)".format(
+            sum(task_cost.values()), len(task_cost),
+            sum(1 for v in task_cost.values() if v == 0)))
     disk_count, disk_bytes, thumb_count = _count_backup_images(out)
     if disk_count:
         print("Image files on disk : {}  ({})".format(disk_count, _format_size(disk_bytes)))
@@ -6080,21 +6116,29 @@ def run_backfill_full_meta(args):
 
     rows = load_catalog(db_path)
     with_loras = getattr(args, "with_loras", False)
+    with_credit = getattr(args, "with_credit", False)
 
     # Work per unique task_id (one API call covers all media in that task).
     # --with-loras also re-processes rows that have full meta but a blank `loras`
     # column (e.g. backfilled before LoRA tracking existed). It re-fetches their
     # getTaskById to extract parameters.lora.
+    # --with-credit is the same pattern for `paid_credit` (added 2026-07-23):
+    # getTaskById returns paidCredit for historical tasks, so rows cataloged before
+    # cost tracking existed can recover their real spend. Opt-in, like --with-loras,
+    # because it re-fetches every not-yet-costed task (long run on a big catalog).
     def _needs(r):
         if not r.get("prompt_full"):
             return True
         if with_loras and r.get("task_id") and not r.get("loras"):
             return True
+        if with_credit and r.get("task_id") and not r.get("paid_credit"):
+            return True
         return False
     needs_fill = [r for r in rows if _needs(r)]
     task_ids = list(dict.fromkeys(r["task_id"] for r in needs_fill if r.get("task_id")))
-    print("Found {:,} rows to fill across {:,} unique tasks{}.".format(
-        len(needs_fill), len(task_ids), " (incl. LoRAs)" if with_loras else ""))
+    print("Found {:,} rows to fill across {:,} unique tasks{}{}.".format(
+        len(needs_fill), len(task_ids), " (incl. LoRAs)" if with_loras else "",
+        " (incl. credit costs)" if with_credit else ""))
     if not task_ids:
         print("Nothing to backfill.")
         return
@@ -6861,6 +6905,10 @@ def main():
     ap.add_argument("--with-loras", action="store_true",
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no LoRA data yet (populates the loras column for older images; long run)")
+    ap.add_argument("--with-credit", action="store_true",
+                    help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
+                         "no recorded credit cost yet (recovers the paid_credit column for older "
+                         "generations from the task record; long run)")
     ap.add_argument("--export-csv", action="store_true",
                     help="export catalog.db to catalog.csv for interop/backup, then exit")
     ap.add_argument("--sync-artworks", action="store_true",
