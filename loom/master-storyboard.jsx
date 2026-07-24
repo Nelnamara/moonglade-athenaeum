@@ -549,11 +549,12 @@ const V2_STYLES = `
 .lv-loracap{margin-left:8px;font-size:10.5px;color:var(--subtext);}
 .lv-loracap.over{color:var(--coral);font-weight:600;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
-.lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
+.lv-lchip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
 .lv-lchip .lv-lnm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lv-lchip.failed .lv-lnm{color:var(--coral);}
 .lv-lchip input{width:52px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
+.lv-lorver{flex:1 1 100%;margin-top:1px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
 /* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
@@ -1584,6 +1585,27 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                       setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
                   <button type="button" className="lv-lrm" title="Remove"
                     onClick={() => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))}>×</button>
+                  {/* Per-LoRA version selection: only when this LoRA actually has more than one
+                      published release (l.versions, resolved alongside version_id itself by
+                      mg-model-picker.js's ?all=1 fetch -- see bindLoraPicker above). Mirrors
+                      the base model's own #gen-version/.lv-versel switcher exactly, just
+                      applied to this one chip's entry instead of the single imgModel. No new
+                      network call -- the full version list is already on the entry. */}
+                  {l.versions && l.versions.length > 1 && (
+                    <select className="lv-lorver" value={l.version_id || ""}
+                      title="This LoRA's published releases — PixAI defaults to the latest; pick another to use it instead"
+                      onChange={(ev) => {
+                        const vid = ev.target.value;
+                        const v = l.versions.find((x) => x.version_id === vid);
+                        if (!v) return;
+                        setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id
+                          ? { ...x, version_id: v.version_id || "", lora_base_type: v.lora_base_model_type || "",
+                              trigger_words: v.trigger_words || "", failed: !v.version_id }
+                          : x));
+                      }}>
+                      {l.versions.map((v) => <option key={v.version_id} value={v.version_id}>{v.label || v.version_id}</option>)}
+                    </select>
+                  )}
                 </div>
                 );
               })}

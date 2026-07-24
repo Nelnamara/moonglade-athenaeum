@@ -30,6 +30,14 @@ git tags. Full prose notes for tagged versions live on
   dropped during the O12 migration rather than reproduced. The comparison is a shared pure
   function (`overLoraCap`, `loom/src/loom-mutations.js`) so both surfaces stay in sync by
   construction rather than by two independently-maintained copies.
+- **Per-LoRA version selection, on both the gallery and the Loom.** Mirrors the base model's
+  own version switcher: resolving a LoRA now fetches `/api/model-version?...&all=1` instead
+  of the plain single fetch, so the entry carries every published release, not just the
+  silently-assumed latest. A version `<select>` appears on a chip only when that LoRA
+  actually has more than one release, and switching applies the chosen version's own
+  `version_id`/`lora_base_type`/`trigger_words` with no new network call. The fetch change
+  lives in the shared `mg-model-picker.js`, so both surfaces got the real data for free; only
+  the per-chip UI was written twice.
 
 ### Fixed
 

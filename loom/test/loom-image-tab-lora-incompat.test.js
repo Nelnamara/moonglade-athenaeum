@@ -66,3 +66,19 @@ describe("Image tab real per-account LoRA cap (mirrors the gallery's overLoraCap
     assert.match(src, /loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,/);
   });
 });
+
+describe("Per-LoRA version selection (mirrors the base model's #gen-version/.lv-versel)", () => {
+  test("a version <select> renders per-chip only when the LoRA has more than one release", () => {
+    assert.match(src, /\{l\.versions && l\.versions\.length > 1 && \(/,
+      "the common single-version case must render nothing extra, same as the base model's " +
+      "own #gen-version wrapper");
+    assert.match(src, /<select className="lv-lorver" value=\{l\.version_id \|\| ""\}/);
+  });
+
+  test("picking a different version applies its OWN version_id/lora_base_type/trigger_words, no new fetch", () => {
+    assert.match(src,
+      /setImgLoras\(\(cur\) => cur\.map\(\(x\) => x\.model_id === l\.model_id\s*\n\s*\? \{ \.\.\.x, version_id: v\.version_id \|\| "", lora_base_type: v\.lora_base_model_type \|\| "",/,
+      "switching versions must update the SAME entry in imgLoras by model_id, using the " +
+      "version's own fields -- the full version list already rode the entry from pick time");
+  });
+});

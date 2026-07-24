@@ -22,10 +22,14 @@
    byte-for-byte the same behavior as before, zero regression risk to the Gallery's mount,
    which doesn't use this component at all yet. In multi mode:
      - clicking a card TOGGLES membership (add/remove) instead of replacing a single value.
-     - each picked LoRA is resolved via /api/model-version (same as the Gallery's own
-       toggleLora()) to fill version_id/lora_base_type/trigger_words; the failure/pending
-       cases are handled the same way too (an unresolved LoRA is marked `failed`, never
-       silently dropped -- see the Gallery's fail-open fix, audit 2026-07-21).
+     - each picked LoRA is resolved via /api/model-version?all=1 (same endpoint the Gallery's
+       own toggleLora() and the base-model picker's ?all=1 fetch both use) to fill
+       version_id/lora_base_type/trigger_words from the first (latest) release, PLUS a full
+       `versions` array on the entry so a host can offer a per-chip version selector (added
+       2026-07-24 -- previously a plain fetch with no `all` param, silently discarding every
+       release but the latest). The failure/pending cases are handled the same way as before
+       (an unresolved LoRA is marked `failed`, never silently dropped -- see the Gallery's
+       fail-open fix, audit 2026-07-21).
      - mg-pick's detail becomes { model, selected } (selected=true on add/resolve-update,
        false on remove) instead of the raw row -- a deliberate shape difference gated on
        the new opt-in attribute, not a change to the existing single-value contract.
@@ -398,12 +402,18 @@
       this.dispatchEvent(new CustomEvent('mg-pick', {
         bubbles: true, composed: true, detail: { model: entry, selected: true }
       }));
-      fetch('/api/model-version?model_id=' + encodeURIComponent(m.model_id))
+      // &all=1 (per-LoRA version selection): every published release, not just the
+      // silently-assumed latest -- entry.versions rides along so a host can offer a
+      // per-chip selector, the same split as the base model's #gen-version/.lv-versel
+      // (this component renders the CARDS, the host renders the picked-item chip UI).
+      fetch('/api/model-version?model_id=' + encodeURIComponent(m.model_id) + '&all=1')
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          entry.version_id = d.version_id || '';
-          entry.lora_base_type = d.lora_base_model_type || '';
-          entry.trigger_words = d.trigger_words || '';
+          var versions = (d && d.versions) || [], v = versions[0] || {};
+          entry.version_id = v.version_id || '';
+          entry.lora_base_type = v.lora_base_model_type || '';
+          entry.trigger_words = v.trigger_words || '';
+          entry.versions = versions;
           entry.failed = !entry.version_id;
           self.dispatchEvent(new CustomEvent('mg-pick', {
             bubbles: true, composed: true, detail: { model: entry, selected: true }
