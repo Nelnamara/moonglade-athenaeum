@@ -416,6 +416,71 @@ class TestDownloadNeverWritesAZeroByteFile:
         assert not list(tmp_path.glob("*.part")), "a stray .part file was left behind"
 
 
+class TestDownloadVerifiesContentLength:
+    """The mid-stream cousin of the zero-byte guard above (owner field-test 2026-07-23,
+    'Videos corrupt on collect'): a connection cut MID-body can end the chunk stream
+    cleanly, so download() wrote fewer bytes than the server's Content-Length promised
+    and still promoted the .part -- a permanent truncated file, invisible to resume
+    forever after. A short body must now fail the attempt through the same
+    retry/backoff path as any other network error. Only enforced when the body is not
+    content-encoded: requests decompresses gzip/br inside iter_content, so the header
+    counts different bytes than we write."""
+
+    @staticmethod
+    def _resp(mocker, headers, chunks):
+        resp = mocker.MagicMock()
+        resp.status_code = 200
+        resp.headers = headers
+        resp.raise_for_status.return_value = None
+        resp.iter_content.return_value = iter(chunks)
+        resp.__enter__ = mocker.Mock(return_value=resp)
+        resp.__exit__ = mocker.Mock(return_value=False)
+        return resp
+
+    def test_short_body_is_never_promoted_and_rides_the_retry_path(
+            self, mock_session, mocker, tmp_path):
+        mocker.patch("time.sleep")                  # retry backoff -- don't really wait
+        vid = {"Content-Type": "video/mp4", "Content-Length": "1000"}
+        short = self._resp(mocker, vid, [b"x" * 400])   # cut mid-body, stream ends cleanly
+        good = self._resp(mocker, vid, [b"y" * 1000])
+        mock_session.get.side_effect = [short, good]
+
+        status, path = core.download(mock_session, "http://x/vid", tmp_path / "stem",
+                                     retries=1)
+
+        assert status == "ok"
+        assert path is not None and path.read_bytes() == b"y" * 1000, (
+            "a short body was promoted instead of retried")
+        assert not list(tmp_path.glob("*.part"))
+        assert mock_session.get.call_count == 2     # attempt 1 failed short, attempt 2 won
+
+    def test_short_body_with_retries_exhausted_is_a_fail_not_a_file(
+            self, mock_session, mocker, tmp_path):
+        short = self._resp(mocker, {"Content-Type": "video/mp4", "Content-Length": "1000"},
+                           [b"x" * 400])
+        mock_session.get.return_value = short
+
+        status, path = core.download(mock_session, "http://x/vid", tmp_path / "stem",
+                                     retries=0)
+
+        assert status == "fail" and path is None
+        assert not list(tmp_path.glob("stem*")), (
+            "a truncated body left a permanent file on disk")
+
+    def test_content_encoded_body_is_exempt_from_the_check(
+            self, mock_session, mocker, tmp_path):
+        # gzip: iter_content yields DECOMPRESSED bytes, so 400 written vs 1000 promised
+        # is normal, not truncation -- must not false-fail the download.
+        resp = self._resp(mocker, {"Content-Type": "image/webp", "Content-Length": "1000",
+                                   "Content-Encoding": "gzip"}, [b"z" * 400])
+        mock_session.get.return_value = resp
+
+        status, path = core.download(mock_session, "http://x/img", tmp_path / "stem",
+                                     retries=0)
+
+        assert status == "ok" and path is not None and path.stat().st_size == 400
+
+
 def test_update_mode_stops_early(tmp_path, mocker):
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
