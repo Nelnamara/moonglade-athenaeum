@@ -66,6 +66,12 @@ pixai_backup/
 └─ raw_tasks.jsonl    raw task data
 ```
 
+**Not shown above — the Pixeltable semantic-search index lives OUTSIDE `pixai_backup/`.**
+It's a sidecar CLIP index over `catalog.db` (keyed by `media_id`), but Pixeltable stores
+its own embedded-Postgres data at its default home, `~/.pixeltable`
+(`%USERPROFILE%\.pixeltable` on Windows) — not under `out_dir`, so it's machine-local and
+not part of an `out_dir` backup; a fresh machine rebuilds it rather than restoring it.
+
 ## Invariants (don't break)
 1. **`media_id` is the last `_`-chunk of the filename stem.**
 2. **Resume is keyed on media id, checked before any network call.**

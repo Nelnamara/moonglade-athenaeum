@@ -2674,7 +2674,7 @@ export default function App() {
   const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
     imgLoras, setImgLoras, genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
-    generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+    pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate }
     = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
   // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
