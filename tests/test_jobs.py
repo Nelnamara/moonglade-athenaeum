@@ -12,7 +12,7 @@ import time
 import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import login_client, login_test_client
 
 
 def _row(**kw):
@@ -417,3 +417,58 @@ def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeyp
     cli.get("/api/task-status?task_id=556")
     job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["556"]
     assert job["status"] == "running", "a transient blip wrote a sticky false failure"
+
+
+def test_collect_is_single_flight_across_watcher_and_poll(tmp_path, monkeypatch):
+    """The in-process half of the video-corruption fix (owner field-test 2026-07-23):
+    the always-on live-mirror watcher and a /api/task-status done-poll both collect the
+    same task seconds apart. They must coalesce into ONE collect_generation -- the
+    second entrant waits, then answers from the catalog instead of re-downloading
+    (the double collect is what lined up two concurrent video_faststart remuxes on the
+    same clip in the first place). The watcher-mirror closure is driven through the
+    app.extensions seam create_app exposes for exactly this."""
+    import threading
+    from pixai_gallery import create_app
+
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    app = create_app(tmp_path)
+    cli = login_test_client(app)
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "completed", "phase": "done",
+                                        "paid_credit": 0})
+
+    mu = threading.Lock()
+    stats = {"cur": 0, "max": 0, "calls": 0}
+    entered = threading.Event()
+
+    def slow_collect(session, tid, out, **kw):
+        with mu:
+            stats["cur"] += 1
+            stats["calls"] += 1
+            stats["max"] = max(stats["max"], stats["cur"])
+        entered.set()
+        time.sleep(0.4)                    # hold the collect open so the poll overlaps it
+        save_catalog(tmp_path / "catalog.db", [
+            _row(task_id="909", media_id="M9", is_video="1",
+                 filename="videos/x_909_M9.mp4", created_at="2025-01-02T00:00:00")])
+        with mu:
+            stats["cur"] -= 1
+        return {"media_ids": ["M9"], "saved": 1, "is_video": True, "duration": 2.0}
+
+    monkeypatch.setattr(core, "collect_generation", slow_collect)
+
+    t = threading.Thread(target=app.extensions["mg_watch_mirror"], args=("909",))
+    t.start()
+    assert entered.wait(5), "the watcher-mirror path never reached collect_generation"
+    r = cli.get("/api/task-status?task_id=909")     # arrives while the collect is in flight
+    t.join(10)
+    assert not t.is_alive()
+
+    body = r.get_json()
+    assert body["phase"] == "done" and body["media_ids"] == ["M9"]
+    assert body.get("is_video") is True             # catalog re-read keeps the video flag
+    assert stats["calls"] == 1, "the same task was collected twice"
+    assert stats["max"] == 1, "two collects for one task ran concurrently"
