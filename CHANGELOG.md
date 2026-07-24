@@ -132,6 +132,24 @@ Overnight audit sweep against `docs/AUDIT_2026-07-21.md`'s remaining safe/small 
   `loom/test/loom-mutations.test.js`), rewritten/extended source-presence coverage in
   `loom/test/loom-picker-video-import.test.js`, and `tests/test_web_pick.py` for the new
   server route.
+- **`/health` now surfaces an "Uncataloged" count — on-disk media with no catalog row at
+  all** (audit Tier 6, Curator #9 — the integrity job, confirmed the cheapest backlog item:
+  `collection_health` already walked the disk into `on_disk_ids`; the only gap was a
+  matching unconditional `catalog_ids` set, since the existing catalog query filtered to
+  `filename != ''`). `uncataloged = on_disk_ids - catalog_ids`, mirroring the existing
+  `missing` stat's opposite direction, and deliberately reuses `on_disk_ids`'s existing scope
+  (images only; `gallery/`, `_duplicates/`, `_deleted/`, `branding/` already excluded) rather
+  than widening it. Renders as a new stat tile next to "Missing files", plus — only when
+  nonzero — a note pointing at the library's existing local-file importer (the gallery's
+  "↑ Import" button / `--import-local`) instead of a bare, actionable-less number; no new
+  reconciliation machinery was built. `catalog_ids` is intentionally the *unconditional*
+  media-id set (every row, regardless of filename) so the count matches what `--import-local`
+  itself would actually do — it already treats a blank-filename row's media_id as "already
+  cataloged" via the same `existing_mids` check. Fail-first tested:
+  `tests/test_gallery_filters.py::test_collection_health_uncataloged_is_disk_minus_catalog`,
+  whose fixture is sized so the correct answer, the reverse direction, the union, and the
+  intersection all land on different counts (verified against a reversed-direction mutant and
+  a union mutant, both caught).
 
 ### Security
 
