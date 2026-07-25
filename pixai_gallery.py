@@ -13294,8 +13294,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 # so the tracker and the CLI could say no more than "cancelled", which
                 # reads as though HE cancelled a job that in fact never started.
                 reason = (st.get("reason") or "").strip()
-                detail = "{} ({})".format(st.get("status") or "failed", reason) if reason \
-                    else (st.get("status") or "failed")
+                detail = core.describe_failure(st.get("status"), reason,
+                                               started=bool(st.get("started")))
                 _log_job(tid, status="failed", error=detail)
                 return jsonify({"phase": "failed", "status": st["status"],
                                 "reason": reason, "error": detail})

@@ -942,3 +942,60 @@ def test_a_free_card_generation_records_zero_not_missing(tmp_path, monkeypatch):
     cli.get("/api/task-status?task_id=4243")
     job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["4243"]
     assert job.get("paid_credit") == 0, "free generation lost its explicit 0: {!r}".format(job)
+
+
+# ---- "it just says 'fails'": make a failure message say something usable ----
+
+def test_failed_with_no_reason_explains_itself_instead_of_saying_failed(tmp_path, monkeypatch):
+    """Owner report 2026-07-25, three hand-fix attempts: the tracker showed status `failed`
+    and error `failed`, which is the whole message. PixAI's own status string for a failed
+    generation genuinely IS just "failed" and `outputs` came back empty -- so forwarding
+    their string faithfully (which we already do) still leaves the user with one useless
+    word. When they tell us nothing, say something ourselves: it ran, it failed, and the
+    credits come back."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "9101", "type": "generate", "label": "Fixed"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "failed", "phase": "failed",
+                                        "paid_credit": 8000, "started": True, "reason": ""})
+
+    body = cli.get("/api/task-status?task_id=9101").get_json()
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["9101"]
+    msg = str(job.get("error") or "")
+    assert msg.strip().lower() != "failed", "still just the bare word: {!r}".format(msg)
+    assert "refund" in msg.lower(), "must say the credits come back: {!r}".format(msg)
+    assert "refund" in str(body).lower()
+
+
+def test_failed_before_it_ever_started_says_so_rather_than_blaming_the_render(tmp_path, monkeypatch):
+    """The other failure mode, and it needs the opposite message: a task PixAI never
+    dispatched did not 'fail to render' -- it was never picked up. Telling someone their
+    render failed when no worker ever took it sends them debugging their prompt."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "9102", "type": "generate", "label": "Enhanced"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "cancelled", "phase": "failed",
+                                        "paid_credit": 1200, "started": False,
+                                        "reason": "waiting timeout"})
+
+    cli.get("/api/task-status?task_id=9102")
+    msg = str({j["job_id"]: j for j in core.read_jobs(tmp_path)}["9102"].get("error") or "")
+    assert "waiting timeout" in msg, "PixAI's own reason must still lead: {!r}".format(msg)
+    assert "never started" in msg.lower(), "must distinguish never-dispatched: {!r}".format(msg)
+
+
+def test_a_reason_from_pixai_is_never_buried_under_our_own_words(tmp_path, monkeypatch):
+    """When PixAI DOES explain itself, their explanation is the useful part and must not be
+    replaced by our generic copy."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "9103", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "failed", "phase": "failed",
+                                        "paid_credit": 0, "started": True,
+                                        "reason": "content policy"})
+    cli.get("/api/task-status?task_id=9103")
+    msg = str({j["job_id"]: j for j in core.read_jobs(tmp_path)}["9103"].get("error") or "")
+    assert "content policy" in msg
