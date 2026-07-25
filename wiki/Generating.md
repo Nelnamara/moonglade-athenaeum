@@ -204,22 +204,45 @@ corrected (and shown in the preview) rather than rejected.
 
 ## Art filters — free, in your browser
 
-PixAI's seven **art filters** (M1–M7) are not generations. Each one is two or three gradient
-overlays with a blend mode and an opacity, plus an optional brightness/contrast/saturation trim,
-and the recipes come from a public config endpoint that PixAI's own site reads and composites in
-the browser — which is why their Filters tab has no Generate button and never quotes a price.
+**Art filters** are not generations. Each one is two or three gradient overlays with a blend mode
+and an opacity, plus an optional brightness/contrast/saturation trim. PixAI's seven come from a
+public config endpoint that their own site reads and composites in the browser — which is why
+their Filters tab has no Generate button and never quotes a price.
 
-Moonglade does the same thing locally. Open the Generate drawer → **Edit** → **Enhance** →
-**Open filters**: the source image sits on the left at size, the seven swatches and the
-strength/angle controls on the right. Picking a filter costs **nothing** and makes **no network
-request at all** — it works with the connection down. **Save to library** bakes the result to
-full resolution and files it under `imported/` with a thumbnail and a catalog row, the same way
-importing any local file does. Nothing is uploaded to PixAI.
+Moonglade does the same thing locally, and adds five of its own. Open the Generate drawer →
+**Edit** → **Enhance** → **Open filters**:
+
+| Set | Filters |
+|---|---|
+| **Moonglade** | Moonglade · Nightfallen · Moonlit Silver · Embercourt · Verdant Grove |
+| **PixAI** | M1 – M7 |
+
+The five Moonglade filters are derived from the app's five **skins**, each built from that skin's
+own accent and lead colours, so a filtered image reads as the app rather than as a generic wash —
+and they stay matched to the skins they came from, because a retinted skin fails the test that
+pins them to it. They are also **exact-only**: every blend mode they use has a real CSS and canvas
+equivalent, so the saved PNG is the preview, pixel for pixel.
+
+The panel is a comparison. The **original** sits on the left, the **filtered preview** beside it,
+and the swatch rail with the strength and angle sliders on the right — judging a filter means
+seeing both at once, not toggling one image back and forth. Picking a filter costs **nothing** and
+makes **no network request at all**; it works with the connection down.
+
+Four actions sit under the rail:
+
+- **No filter** — clear the preview back to the original.
+- **Save to library** — bake the result at full resolution into `imported/`, with a thumbnail and
+  a catalog row, exactly as importing any local file does. Nothing is uploaded to PixAI.
+- **Send to image gen** — upload the filtered image to PixAI (free, the same handshake as
+  **↑ Import**) and load it straight into the Edit tab as the source, so you can generate *from*
+  the filtered version. The upload spends nothing; only the generation you then run costs.
+- **Publish** — not built yet, and shown disabled with that reason.
 
 Two of the eight blend modes PixAI uses are Photoshop's whole-colour *Darker Color* / *Lighter
 Color*, which have no CSS or canvas equivalent; they are rendered with `darken` / `lighten`
-(per-channel min/max), so those two can differ slightly from PixAI's own render where a
-gradient crosses the image's hue. The other six are exact.
+(per-channel min/max), so PixAI's M1, M2, M5 and M6 can differ slightly from PixAI's own render
+where a gradient crosses the image's hue. Every other filter — including all five Moonglade ones
+— is exact.
 
 There is no CLI flag for this — it's a browser-side composite, and the old credit-spending
 `--enhance --filter-id` submit was removed rather than kept as a worse way to get the same

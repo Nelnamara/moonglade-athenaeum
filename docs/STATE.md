@@ -362,24 +362,42 @@ users.
   Pro" via `EDIT_MODELS` while Seed/Steps/Sampler/CFG stay empty — a chat task records none of
   them, and an em-dash is the honest answer. Naming applies to new output only.
 
-- **The Generate drawer's Edit ▸ Enhance sub-tab is the art-filters surface, and it is free and
-  offline.** PixAI's seven art filters are gradient-overlay recipes served from a public,
-  unauthenticated config endpoint (`GET https://api.pixai.art/config/imageArtFilters`) that their
-  own web client composites in the browser — no Generate button, no price. `static/mg-art-filters.js`
-  bakes all seven in as data (verified against the live endpoint 2026-07-25) and applies them
-  client-side: CSS `mix-blend-mode` overlays for the live preview, one canvas gradient fill per
-  layer for the export, both pinned to the same gradient geometry so they agree. Picking a filter
-  makes **zero** network requests (measured). `Save to library` bakes the composite at full
-  resolution and posts it to the existing `/api/import-local`, so it lands in `imported/` with a
-  thumbnail and a `source='local'` row like any other local file. The working surface is
-  `#filters-flyout`, a top-level fixed panel — image left, swatches and controls right — placed by
-  `Gen.placeFilters()` on the `_place()` rule (side with room, then clamp); it sits beside the
-  drawer in the left/right docks and centres over it in the top/bottom docks, where the drawer is
-  a full-width bar. Six of the eight blend modes map exactly to CSS/canvas; `darker-color` and
-  `lighter-color` are Photoshop whole-colour comparisons with no CSS equivalent and are
-  approximated by `darken`/`lighten`, flagged `exact:false` in `BLEND_MODE_MAP` with the reason.
-  The paid path (`build_filter_parameters`, `--filter-id`, `--enhance`, `run_enhance`) is gone: it
-  charged credits and waited on a worker queue for a handful of gradient fills.
+- **The Generate drawer's Edit ▸ Enhance sub-tab is the art-filters surface — twelve filters,
+  free and offline, and the panel is a side-by-side comparison.** Art filters are gradient-overlay
+  recipes composited in the browser: no Generate button, no price. `static/mg-art-filters.js`
+  holds **two sets**. `FILTERS` is PixAI's seven, baked verbatim from their public unauthenticated
+  config endpoint (`GET https://api.pixai.art/config/imageArtFilters`, verified 2026-07-25) and
+  kept verbatim so refreshing it stays a paste. `MOONGLADE_FILTERS` is **ours** — Moonglade,
+  Nightfallen, Moonlit Silver, Embercourt, Verdant Grove — derived from the five skin palettes,
+  each recipe built from its skin's accent and lead colours and tagged with the `skin` it came
+  from; `tests/..` pins every stop colour to a real token of that skin's CSS block, so a retint
+  that leaves its filter behind fails by name. Ours use **only** the six exactly-mapping blend
+  modes and carry **no** `image_parameters`, so their export is their preview and what shipped is
+  what was approved as swatches. `get()`/`list()` walk both; `groups()` returns
+  `[{source,label,ids}]`, ours first, and drives the rail's two headed sections.
+
+  Rendering is client-side either way: CSS `mix-blend-mode` overlays for the live preview, one
+  canvas gradient fill per layer for the export, both pinned to the same gradient geometry so they
+  agree. Picking a filter makes **zero** network requests (measured). The working surface is
+  `#filters-flyout`, a top-level fixed panel placed by `Gen.placeFilters()` on the `_place()` rule
+  (side with room, then clamp) — beside the drawer in the left/right docks, centred over it
+  otherwise, and centred too whenever the side room is under `AF_MIN_SIDE` (1050px), which is set
+  by the width at which both pictures are still worth judging rather than by what merely fits.
+  Its three columns are **original | filtered preview | swatch rail**, `align-items:stretch` with
+  `flex:1` frames so the pictures are matted and centred instead of stranded above a void, and the
+  original is a **second `<img>`** — sharing one would filter both and leave nothing to compare.
+  Actions: `No filter`, `Save to library` (bakes at full resolution, posts to `/api/import-local`,
+  lands in `imported/` with a thumbnail and a `source='local'` row), `Send to image gen`
+  (`Gen.filterSend()` — composite → `/api/upload`, the free S3 handshake → `media_id` → Edit
+  source; spends nothing, the generation you then run is the priced step), and `Publish`, disabled
+  until Epic C.
+
+  Six of the eight blend modes map exactly to CSS/canvas; `darker-color` and `lighter-color` are
+  Photoshop whole-colour comparisons with no CSS equivalent, approximated by `darken`/`lighten`
+  and flagged `exact:false` in `BLEND_MODE_MAP` with the reason — which is why PixAI's M1/M2/M5/M6
+  can differ slightly from their own render and none of ours can. The paid path
+  (`build_filter_parameters`, `--filter-id`, `--enhance`, `run_enhance`) is gone: it charged
+  credits and waited on a worker queue for a handful of gradient fills.
 - PixAI's one-click **panelplugin workflows** cannot run here at all, and the surface for them is
   deleted. PixAI never assigns a worker to a panelplugin task submitted with an API key — it
   accepts it, queues it, charges it, then cancels it at ~60 minutes with `outputs.reason`

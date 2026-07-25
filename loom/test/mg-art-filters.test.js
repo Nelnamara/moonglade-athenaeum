@@ -64,7 +64,8 @@ describe("recipe data integrity (baked from PixAI's public imageArtFilters confi
       "filter-v1-m1", "filter-v1-m2", "filter-v1-m3", "filter-v1-m4",
       "filter-v1-m5", "filter-v1-m6", "filter-v1-m7",
     ]);
-    assert.deepEqual(AF.list(), AF.FILTERS.map((f) => f.id));
+    // list() spans BOTH sets now -- ours lead. See the Moonglade describe below.
+    assert.deepEqual(AF.list().slice(-7), AF.FILTERS.map((f) => f.id));
   });
 
   test("the baked data names where it came from, so a refresh is a copy-paste", () => {
@@ -110,6 +111,125 @@ describe("recipe data integrity (baked from PixAI's public imageArtFilters confi
         assert.equal(typeof v, "number", f.id + "." + k);
         assert.ok(v > -1 && v < 1, f.id + "." + k + " looks like a multiplier, not an offset");
       });
+    });
+  });
+});
+
+// The five skins these are derived from, and where their palettes live. The default
+// ("moonglade") is the `:root` block of DESIGN_TOKENS_CSS; the other four are
+// `html[data-skin="..."]` overrides after it. Read straight out of the app so a retinted
+// skin fails the cross-check below instead of quietly drifting from its filter.
+const APP_PY = readFileSync(path.join(__dirname, "../../pixai_gallery.py"), "utf8");
+
+function skinPalette(skin) {
+  const start = skin === "moonglade"
+    ? APP_PY.indexOf("DESIGN_TOKENS_CSS")
+    : APP_PY.indexOf('html[data-skin="' + skin + '"]');
+  assert.ok(start > -1, "no palette block in pixai_gallery.py for skin: " + skin);
+  // To the end of that rule only -- `:root {` for the default, the `}` of the override
+  // otherwise -- so one skin's colours can never satisfy another skin's filter.
+  const open = APP_PY.indexOf("{", start);
+  const body = APP_PY.slice(open + 1, APP_PY.indexOf("}", open));
+  return new Set((body.match(/#[0-9a-fA-F]{6}\b/g) || []).map((h) => h.toLowerCase()));
+}
+
+describe("the Moonglade set (ours, derived from the skins)", () => {
+  const MOON_IDS = ["mg-moonglade", "mg-nightfallen", "mg-moonlit", "mg-ember", "mg-verdant"];
+
+  test("all 5 are present in order, and lead list() ahead of PixAI's", () => {
+    assert.deepEqual(AF.MOONGLADE_FILTERS.map((f) => f.id), MOON_IDS);
+    assert.deepEqual(AF.list(), MOON_IDS.concat(AF.FILTERS.map((f) => f.id)));
+    assert.equal(new Set(AF.list()).size, AF.list().length, "duplicate filter id");
+  });
+
+  test("the two sets stay separate arrays -- FILTERS must remain a paste of the endpoint", () => {
+    // The whole refresh story for FILTERS is "copy the endpoint's `filters` array over it".
+    // One hand-written recipe in there and that stops being true, silently.
+    const pixaiIds = new Set(AF.FILTERS.map((f) => f.id));
+    MOON_IDS.forEach((id) => assert.ok(!pixaiIds.has(id), id + " leaked into FILTERS"));
+    AF.FILTERS.forEach((f) => assert.match(f.id, /^filter-v1-m\d+$/));
+    assert.equal(AF.FILTERS.length, 7);
+  });
+
+  test("groups() names both sets, ours first, and hands back ids rather than recipes", () => {
+    const g = AF.groups();
+    assert.deepEqual(g.map((x) => x.source), ["moonglade", "pixai"]);
+    assert.deepEqual(g.map((x) => x.label), ["Moonglade", "PixAI"]);
+    assert.deepEqual(g[0].ids, MOON_IDS);
+    assert.deepEqual(g[1].ids, AF.FILTERS.map((f) => f.id));
+    g[0].ids.push("mg-tamper");                       // a caller mutating what it got back...
+    assert.deepEqual(AF.groups()[0].ids, MOON_IDS);   // ...must not reach the baked data
+  });
+
+  test("every layer carries a mode, an opacity in [0,1], and at least two stops", () => {
+    AF.MOONGLADE_FILTERS.forEach((f) => {
+      assert.ok(Array.isArray(f.filters) && f.filters.length >= 1, f.id + " has no layers");
+      f.filters.forEach((L) => {
+        assert.equal(typeof L.blendMode, "string", f.id + "/" + L.name + " blendMode");
+        assert.ok(L.blendOpacity >= 0 && L.blendOpacity <= 1,
+          f.id + "/" + L.name + " blendOpacity out of range: " + L.blendOpacity);
+        assert.ok(L.stops.length >= 2, f.id + "/" + L.name + " needs >=2 stops for a gradient");
+        L.stops.forEach((s) => {
+          assert.match(s.color, /^#[0-9a-fA-F]{6}$/, f.id + "/" + L.name + ": " + s.color);
+          assert.ok(s.position >= 0 && s.position <= 1, f.id + "/" + L.name + " stop position");
+        });
+      });
+    });
+  });
+
+  test("ours use ONLY blend modes that map exactly -- preview and export are the same pixels", () => {
+    // This is the promise the set was designed around, and the reason it does not reach for
+    // darker-color/lighter-color the way PixAI's m1/m2/m5/m6 do: those two are Photoshop
+    // whole-colour comparisons that CSS/canvas can only approximate, so a filter built on
+    // them renders one way on screen and another in the saved PNG. Ours must never.
+    AF.MOONGLADE_FILTERS.forEach((f) => f.filters.forEach((L) => {
+      const e = AF.BLEND_MODE_MAP[L.blendMode];
+      assert.ok(e, f.id + "/" + L.name + " uses an unmapped mode: " + L.blendMode);
+      assert.equal(e.exact, true,
+        f.id + "/" + L.name + " uses " + L.blendMode + ", which is APPROXIMATE. The " +
+        "Moonglade set is exact-only so its export matches its preview.");
+    }));
+  });
+
+  test("no image_parameters: what shipped is the recipe that was approved as swatches", () => {
+    // The five were signed off from gradient-only swatches. A brightness/contrast trim added
+    // afterwards would ship a filter nobody reviewed, and it would not be visible in a swatch.
+    AF.MOONGLADE_FILTERS.forEach((f) => {
+      assert.equal(f.image_parameters, undefined, f.id + " grew image_parameters");
+      assert.equal(AF.imageAdjustCss(f.id), "", f.id + " emits an image adjustment");
+    });
+  });
+
+  test("every recipe normalizes with nothing dropped", () => {
+    AF.MOONGLADE_FILTERS.forEach((f) => {
+      const n = AF.normalizeLayers(f.id);
+      assert.deepEqual(n.warnings, [], f.id + " loses a layer or a stop");
+      assert.equal(n.layers.length, f.filters.length, f.id + " layer count");
+      n.layers.forEach((L) => assert.match(AF.gradientCss(L), /^linear-gradient\(180deg, #/));
+    });
+  });
+
+  test("each names a real skin, one filter per skin, no skin twice", () => {
+    const skins = AF.MOONGLADE_FILTERS.map((f) => f.skin);
+    assert.deepEqual(skins, ["moonglade", "nightfallen", "moonlit", "ember", "verdant"]);
+    assert.equal(new Set(skins).size, skins.length);
+    AF.MOONGLADE_FILTERS.forEach((f) => {
+      assert.ok(f.note && f.note.length > 10, f.id + " needs a one-line description");
+    });
+  });
+
+  test("every colour is a real token of the skin the filter claims to come from", () => {
+    // The cross-file pin. These are DERIVED, not invented: if a skin gets retinted in
+    // pixai_gallery.py and its filter is left behind, the set stops being a matched set and
+    // this fails by name instead of drifting quietly.
+    AF.MOONGLADE_FILTERS.forEach((f) => {
+      const palette = skinPalette(f.skin);
+      f.filters.forEach((L) => L.stops.forEach((s) => {
+        assert.ok(palette.has(s.color.toLowerCase()),
+          f.id + "/" + L.name + ": " + s.color + " is not a token of the \"" + f.skin +
+          "\" skin. Either it was hand-picked (it should not be) or that skin was " +
+          "retinted and this filter needs to move with it.");
+      }));
     });
   });
 });
@@ -316,8 +436,8 @@ describe("swatch layers", () => {
     assert.equal(s[1].css, "soft-light");
   });
 
-  test("every one of the 7 filters produces a drawable swatch", () => {
-    AF.FILTERS.forEach((f) => {
+  test("every filter in BOTH sets produces a drawable swatch", () => {
+    AF.FILTERS.concat(AF.MOONGLADE_FILTERS).forEach((f) => {
       const s = AF.swatchLayers(f.id);
       assert.ok(s.length >= 1, f.id + " has no swatch layers");
       s.forEach((L) => assert.match(AF.gradientCss(L), /^linear-gradient\(/));

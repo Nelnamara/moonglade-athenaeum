@@ -459,9 +459,11 @@ def _open_filters_flyout(page):
     page.dispatch_event("#edit-src", "input")                   # -> Gen.setEditSource('100')
     page.click("#af-open")                                      # -> Gen.toggleFilters()
     page.wait_for_selector("#filters-flyout.open", state="attached")
-    page.wait_for_function("() => document.querySelectorAll('#af-swatches .af-tile').length === 7")
-    page.wait_for_function("() => { const i = document.getElementById('af-img');"
-                           " return i.complete && i.naturalWidth > 0; }")
+    # 12 tiles in two headed groups: the Moonglade five lead, PixAI's seven follow.
+    page.wait_for_function("() => document.querySelectorAll('#af-swatches .af-tile').length === 12")
+    page.wait_for_function("() => document.querySelectorAll('#af-swatches .af-grp').length === 2")
+    page.wait_for_function("() => ['af-img','af-orig'].every(id => { const i ="
+                           " document.getElementById(id); return i.complete && i.naturalWidth > 0; })")
     _settle(page)
     page.click('.af-tile[data-af="filter-v1-m4"]')              # a filter with image_parameters
     page.wait_for_function("() => document.querySelectorAll("
@@ -472,17 +474,40 @@ def _open_filters_flyout(page):
 _FILTERS_LAYOUT_JS = """() => {
   const f = document.getElementById('filters-flyout');
   const img = document.getElementById('af-img');
+  const og = document.getElementById('af-orig');
   const stage = document.getElementById('af-stage');
   const sw = document.getElementById('af-swatches');
+  const frame = img.closest('.af-frame'), oframe = og.closest('.af-frame');
   const r = el => el.getBoundingClientRect().toJSON();
-  const fr = r(f), ir = r(img), sr = r(stage), wr = r(sw);
+  const fr = r(f), ir = r(img), sr = r(stage), wr = r(sw), or = r(og), fmr = r(frame);
+  const ofr = r(oframe);
   return {
-    flyout: fr, image: ir, stage: sr, swatches: wr,
+    flyout: fr, image: ir, stage: sr, swatches: wr, original: or,
+    // The comparison: original LEFT of the preview, on the same row.
+    originalLeftOfPreview: or.right <= ir.left,
+    originalShareTopBand: Math.abs(or.top - ir.top) < 80,
+    originalWidth: or.width,
+    // ...and genuinely UNFILTERED. applyPreview() puts a CSS `filter` on its target <img> and
+    // stacks overlay divs in the stage; if either reached the original there would be two
+    // filtered pictures side by side and nothing to compare against. Read from the computed
+    // style, not the inline one, so a stylesheet rule cannot sneak one in either.
+    originalFilter: getComputedStyle(og).filter,
+    originalOverlays: og.parentElement.querySelectorAll('[data-mgaf-layer]').length,
     innerWidth: window.innerWidth, innerHeight: window.innerHeight,
-    // side by side == the controls start to the RIGHT of the image and share its top band.
-    // A wrapped layout fails the first half; a swapped one would fail it too.
+    // side by side == the controls start to the RIGHT of the picture and share the top band of
+    // the COLUMN. A wrapped layout fails the first half; a swapped one would fail it too.
+    // Measured against the frame, not the image: the frames stretch to the row's height and
+    // centre their picture inside, so a landscape source sits a couple of hundred px below
+    // the rail's top while being perfectly in-row. Comparing image tops would fail on
+    // matting, which is a layout SUCCESS.
     controlsRightOfImage: wr.left >= ir.right,
-    controlsShareTopBand: Math.abs(wr.top - ir.top) < 80,
+    controlsShareTopBand: Math.abs(wr.top - fmr.top) < 80,
+    frame: fmr, originalFrame: ofr,
+    // ALL THREE on one row -- the actual claim. Checking any PAIR is not enough: with an
+    // `auto` basis the original wraps to its own line while the preview and the rail still
+    // fit together on the next one, so a preview-vs-rail comparison reads a broken panel as
+    // intact. Measured: rail top 571, preview frame top 571, original stranded above.
+    oneRow: Math.abs(wr.top - fmr.top) < 80 && Math.abs(ofr.top - fmr.top) < 80,
     // the stage is MgArtFilters' overlay host: its box must be the image's box exactly, or
     // the gradient layers (inset:0) paint over letterbox bars the image is not using.
     stageMatchesImage: Math.abs(sr.width - ir.width) < 1 && Math.abs(sr.height - ir.height) < 1,
@@ -494,25 +519,33 @@ _FILTERS_LAYOUT_JS = """() => {
 }"""
 
 # The pre-fix CSS, restored as a later-in-cascade !important override. `flex: 1 1 auto` was
-# what shipped first: from an `auto` basis the left column's base size is the IMAGE's
+# what shipped first: from an `auto` basis an image column's base size is the IMAGE's
 # max-content width (900px for a normal generation, since `max-width:100%` cannot resolve
-# against a container the image is itself sizing), the two columns' hypothetical sizes exceed
-# the panel, and flex-wrap breaks the line -- stacking the controls under the image at every
-# panel width. NEVER committed to any CSS.
+# against a container the image is itself sizing), the columns' hypothetical sizes exceed the
+# panel, and flex-wrap breaks the line -- dropping the rail under the pictures at every panel
+# width. Worse now than when it was first found: there are TWO image columns to overflow.
+# NEVER committed to any CSS.
 _REVERT_FILTERS_FLEX_CSS = """
-#filters-flyout .af-left { flex: 1 1 auto !important; min-width: 260px !important; }
+#filters-flyout .af-col { flex: 1 1 auto !important; min-width: 260px !important; }
 """
 
 
 def test_art_filters_flyout_is_side_by_side_with_the_image_left(logged_in_page):
-    """The filters panel exists so a filter can be JUDGED, which needs the image at size next
-    to the swatches -- not above them. That is a layout fact no HTML-string assertion can see.
+    """The filters panel exists so a filter can be JUDGED, which needs both pictures at size
+    on one row -- original, preview, then the swatches. That is a layout fact no HTML-string
+    assertion can see, and neither is the one that matters most here: that the LEFT picture is
+    genuinely unfiltered. Sharing one <img> between the two columns, or letting the stage's
+    overlays reach the original, yields two filtered pictures and no comparison at all, while
+    every markup assertion still passes.
 
-    Measured as shipped at 1280x900, right dock, Edit tab (a 600px `.wide` drawer):
-      panel        647px wide beside the drawer, image 373x249, swatches at x=+391
-      pre-fix      the same 647px panel, image 604x403, swatches WRAPPED below it
-    The pre-fix number is why `flex: 1 1 0` is load-bearing rather than a style preference:
-    the image was wider than the space the controls needed, at every panel width.
+    Measured at 1280x900, right dock, Edit tab (a 600px `.wide` drawer): 647px of room beside
+    the drawer is below AF_MIN_SIDE, so placeFilters() takes its centred branch -- the same
+    fallback #model-flyout documents for the top/bottom docks -- and the panel clamps to the
+    viewport with both columns comfortably over 200px.
+
+    The pre-fix `flex: 1 1 auto` (phase 2 below) is why an explicit basis is load-bearing
+    rather than a style preference: from an `auto` basis each image column is as wide as the
+    image's intrinsic width, so the rail wrapped below the pictures at every panel width.
 
     Also asserts the two things that would make a side-by-side panel useless anyway: that the
     overlay stage is exactly the image's box (so the gradients don't spill onto letterbox
@@ -532,9 +565,25 @@ def test_art_filters_flyout_is_side_by_side_with_the_image_left(logged_in_page):
         "the swatches start at x={:.1f} but the image ends at x={:.1f} -- the controls have "
         "WRAPPED under the image instead of sitting beside it".format(
             m["swatches"]["left"], m["image"]["right"]))
+    assert m["originalLeftOfPreview"] and m["originalShareTopBand"], (
+        "the original is at x={:.1f}..{:.1f} y={:.1f} and the preview at x={:.1f} y={:.1f} -- "
+        "they are not a side-by-side pair".format(
+            m["original"]["left"], m["original"]["right"], m["original"]["top"],
+            m["image"]["left"], m["image"]["top"]))
+    assert m["originalWidth"] > 200, (
+        "the original is only {:.1f}px wide -- too small to compare against".format(
+            m["originalWidth"]))
+    # The load-bearing property of the whole relayout: the left picture is UNTOUCHED.
+    assert m["originalFilter"] == "none" and m["originalOverlays"] == 0, (
+        "the original is being filtered too (filter={!r}, {} overlay layers) -- there is "
+        "nothing left to compare the preview against".format(
+            m["originalFilter"], m["originalOverlays"]))
+    assert m["oneRow"], (
+        "original/preview/rail tops are {:.1f}/{:.1f}/{:.1f} -- the three columns are not on "
+        "one row".format(m["originalFrame"]["top"], m["frame"]["top"], m["swatches"]["top"]))
     assert m["controlsShareTopBand"], (
-        "the swatches' top is {:.1f}px from the image's -- they are not on the same row".format(
-            abs(m["swatches"]["top"] - m["image"]["top"])))
+        "the swatches' top is {:.1f}px from the picture frame's -- they are not on the same "
+        "row".format(abs(m["swatches"]["top"] - m["frame"]["top"])))
     assert m["stageMatchesImage"], (
         "the overlay stage is {:.1f}x{:.1f} but the image is {:.1f}x{:.1f} -- the gradient "
         "layers (inset:0) would paint outside the picture".format(
@@ -555,10 +604,17 @@ def test_art_filters_flyout_is_side_by_side_with_the_image_left(logged_in_page):
     page.add_style_tag(content=_REVERT_FILTERS_FLEX_CSS)
     _settle(page)
     reverted = page.evaluate(_FILTERS_LAYOUT_JS)
-    assert not reverted["controlsRightOfImage"], (
-        "`flex: 1 1 auto` was re-applied and the controls did NOT wrap (swatches x={:.1f}, "
-        "image right={:.1f}) -- the side-by-side assertion above is vacuous".format(
-            reverted["swatches"]["left"], reverted["image"]["right"]))
+    # The symptom is that the row BREAKS, which is why this checks the top band rather than
+    # the horizontal order: an `auto` basis sizes each column to the image's intrinsic width
+    # (measured: a 902px frame in a 1180px panel), so the columns wrap onto their own lines --
+    # and a picture narrower than its blown-out column can still leave the rail to its right
+    # while sitting hundreds of px below it. Comparing x alone read that as "fine".
+    assert not reverted["oneRow"], (
+        "`flex: 1 1 auto` was re-applied and the panel did NOT break (original frame top "
+        "{:.1f}, preview frame top {:.1f}, rail top {:.1f}, column {:.1f}px wide) -- the "
+        "in-row assertion above is vacuous".format(
+            reverted["originalFrame"]["top"], reverted["frame"]["top"],
+            reverted["swatches"]["top"], reverted["frame"]["width"]))
 
 
 def test_art_filters_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logged_in_page):
@@ -909,3 +965,4 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     assert seen["gallery"] == seen["loom"], (
         "the shared Activity tray renders the queued state DIFFERENTLY on the two hosts:\n"
         "  gallery: {!r}\n  loom:    {!r}".format(seen["gallery"], seen["loom"]))
+
