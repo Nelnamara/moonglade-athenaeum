@@ -13254,6 +13254,69 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return jsonify({"project": project, "thumbs": data.get("thumbs") or {},
                         "media_added": len(rows)})
 
+    # ---- queue-vs-render phase, recorded for the Activity tray -----------------------
+    # Maps a task id to the `started` value already written to the job log for it. The tray
+    # (static/mg-notify.js) renders from /api/jobs, never from api_task_status()'s response,
+    # so `started` has to be written DOWN to reach it -- and writing it here is what makes
+    # the signal identical on both hosts, because the gallery's Jobs.poll(), the Loom's
+    # pollShot/pollTaskWithCeiling and mg-generate-drawer.js's own poll all hit this one
+    # route and none of them has to know the field exists.
+    #
+    # De-duped rather than written per poll for two concrete reasons: four pollers ask every
+    # 3s per job, so a task PixAI sits on for its whole ~60-minute reap window would add
+    # 1,200+ lines to jobs.jsonl; and each write refreshes that job's `ts`, which is the
+    # clock JOBS_ORPHAN_SWEEP_AGE is measured against -- a heartbeat every 3s would mean the
+    # ongoing orphan-reconciliation sweep never sees a job age in at all. At most two lines
+    # per job survive this (queued, then started), and the entry is dropped the moment the
+    # job reaches a terminal phase so the map stays bounded by tasks IN FLIGHT, not by uptime.
+    _gen_phase_seen = {}
+    _gen_phase_lock = threading.Lock()
+
+    def _queue_estimate(core, session, tid):
+        """PixAI's own queue-wait estimate for the model THIS task was submitted with, in
+        seconds, or None. Two read-only calls (the task's stored submit parameters, then
+        /v2/task/wait-time -- see core.queue_wait_estimate); fails soft, because an estimate
+        must never turn a status poll into an error."""
+        try:
+            params = (core._task_detail_query(session, tid) or {}).get("parameters") or {}
+            if not isinstance(params, dict):
+                return None
+            return core.queue_wait_estimate(session, params.get("priority"),
+                                            params.get("modelId"))
+        except Exception:                          # noqa: BLE001 -- a nicety, never fatal
+            return None
+
+    def _note_gen_phase(core, session, tid, started):
+        """Write a generate job's queued/rendering phase to the job log, once per change.
+
+        On the FIRST sighting of a job PixAI has accepted but not started, also record its
+        queue estimate. Fetched here rather than per poll: a generation a worker picks up
+        before its first poll costs zero extra calls, and one that really is queued costs
+        two, once. The number is stored as the estimate PixAI gave when the job was seen
+        queued and is rendered that way -- nothing recomputes it as the wait grows, and it
+        is never presented as a countdown.
+
+        Those two calls ride ONE poll of an already-queued job, which is why they are done
+        inline rather than off-thread: the poll interval is 3s and this route already makes an
+        un-timed PixAI call of its own on every single poll, so a second pair on one poll of
+        one job is not the thing worth adding a thread for.
+        """
+        with _gen_phase_lock:
+            if _gen_phase_seen.get(tid) == started:
+                return
+            first = tid not in _gen_phase_seen
+            _gen_phase_seen[tid] = started
+        fields = {"status": "running", "started": started}
+        if first and not started:
+            eta = _queue_estimate(core, session, tid)
+            if eta is not None:
+                fields["eta_seconds"] = eta
+        _log_job(tid, **fields)
+
+    def _forget_gen_phase(tid):
+        with _gen_phase_lock:
+            _gen_phase_seen.pop(tid, None)
+
     @app.route("/api/task-status")
     def api_task_status():
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
@@ -13271,6 +13334,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             st = core.generation_status(session, tid)
             if st["phase"] == "done":
+                _forget_gen_phase(tid)
                 got = _collect_single_flight(core, session, tid)
                 # authoritative done event -- written server-side so the Jobs card gets the
                 # outcome even if the browser tab that submitted it has since closed.
@@ -13288,6 +13352,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                 "duration": got.get("duration"),
                                 "paid_credit": st["paid_credit"]})
             if st["phase"] == "failed":
+                _forget_gen_phase(tid)
                 # Carry PixAI's OWN reason (outputs.reason, e.g. "waiting timeout") into
                 # both the job log and the response. This branch already fired correctly
                 # for the owner's five reaped enhances -- it just logged the bare status,
@@ -13302,8 +13367,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # `started` distinguishes "queued, no worker has taken it" from real work --
             # both are phase=running over the wire, and without it a task PixAI never
             # dispatches is an indefinite spinner for the ~60 min until it is reaped.
+            # Recorded in the job log as well as returned, because the Activity tray reads
+            # the log (see _note_gen_phase); the response alone only reaches whoever polled.
+            started = bool(st.get("started"))
+            _note_gen_phase(core, session, tid, started)
             return jsonify({"phase": "running", "status": st["status"],
-                            "started": bool(st.get("started"))})
+                            "started": started})
         except _core.EmptyOutputsError as e:
             # TERMINAL, unlike the transient case below: PixAI already told us the
             # task reached 'done', and collect then found its outputs empty. The task

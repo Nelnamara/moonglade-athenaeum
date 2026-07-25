@@ -6239,6 +6239,52 @@ def price_task(session, params):
     return int(ap) if ap is not None else None
 
 
+def queue_wait_estimate(session, priority, model_version_id):
+    """PixAI's own queue-wait estimate for a (priority, model) pair, in whole seconds, or
+    None. GET /v2/task/wait-time -- the number their site puts beside Generate ("Est. wait
+    ~9 seconds"). READ-ONLY: creates nothing, prices nothing, spends nothing.
+
+    The parameter shape was probed, not guessed, because the route gives up nothing on its
+    own: with no parameters it 400s `expected number, received NaN` on path ["priority"];
+    with a priority alone it 400s "modelVersionId or generationModelId must be provided";
+    `generationModelId` then 404s "Generation model not found" for the very id our submits
+    carry in their `modelId` field, while `modelVersionId` with that same id answers 200. So
+    as far as this route is concerned, a submit's `modelId` IS a model version id. `priority`
+    is a validated enum rather than a free number -- 1 comes back "invalid priority" -- and
+    the two values this app ever submits (500 normal, 1000 --high-priority) both answer.
+
+    Response: {waitDurationSeconds, displayBucket, displaySeconds, displayMinutes}.
+    Measured 2026-07-25: Tsubaki.2 v1 at priority 500 -> 25.4s and at 1000 -> 4.4s;
+    Reference Pro at 500 -> 50.1s; the same pair re-asked minutes later -> 26.7s. So it is
+    per-model AND per-priority, and it tracks real queue depth.
+
+    This is a QUEUE-DEPTH estimate for a submission -- NOT a per-task ETA, and emphatically
+    not progress. PixAI exposes no progress on a task at all (probed against a live control:
+    none of progress/percent/percentage/step/steps/currentStep/eta/estimatedTime/
+    queuePosition/position/waitTime exist on the task object). A caller must present this as
+    the estimate it is, never as a countdown that ticks down.
+    """
+    if not model_version_id:
+        return None                      # the route 400s without one; don't spend the call
+    try:
+        pri = int(priority)
+    except (TypeError, ValueError):
+        pri = 500                        # this app's own submit default (see build params)
+    try:
+        data = _rest_get(session, "/task/wait-time",
+                         params={"priority": pri,
+                                 "modelVersionId": str(model_version_id)}) or {}
+    except (PixAIError, ValueError):
+        return None                      # an estimate is a nicety; never raise for it
+    secs = data.get("waitDurationSeconds")
+    if secs is None:
+        secs = data.get("displaySeconds")
+    try:
+        return max(0, int(round(float(secs))))
+    except (TypeError, ValueError):
+        return None
+
+
 def suggest_prompt(session, media_id):
     """Reverse a prompt out of an image (PixAI's "Image to prompt"): GET
     /v2/tag/suggest-prompt/{mediaId} -> a list of suggested prompt strings (a Danbooru-

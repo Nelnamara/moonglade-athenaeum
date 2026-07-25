@@ -75,6 +75,7 @@ document order) with no browser, and
 that. It is a strictly weaker instrument -- it proves the winner, not the pixels -- and
 is not a reason to skip adding a rendering test here.
 """
+import base64
 import json
 import threading
 
@@ -646,3 +647,124 @@ def test_saved_skin_is_applied_before_the_body_exists(logged_in_page):
     assert later["bodyExists"] is True, (
         "a post-load skin change was recorded with body absent -- the pre-paint assertion "
         "above cannot distinguish pre- from post-paint and is vacuous")
+# ---------------------------------------------------------------------------
+# 6. The Activity tray's QUEUED state, rendered -- and rendered IDENTICALLY on both hosts
+# ---------------------------------------------------------------------------
+# Owner complaint 2026-07-25: a plain generation "goes right to generated and spins until
+# done. That's it." A task PixAI has accepted but never dispatched sits at a non-terminal
+# status for ~60 minutes and used to draw the same spinning mascot as real work.
+#
+# Asserted the only way that can see it: read the mascot's COMPUTED animationName. Asserting
+# the CSS text (`.jt-spin.jt-queued .jt-nel{animation:none}`) proves nothing about whether
+# the class reaches the element or wins the cascade -- and the Loom overrides #jobs-tray CSS
+# in its own <style>, which is precisely the shape of edit that could break one host and not
+# the other (the tray's font-family already drifted that way once, 2026-07-21).
+#
+# _freeze_motion is deliberately NOT used here: it nulls every animation on the page, which
+# would make "animationName is none" trivially true and this whole test vacuous.
+_TRAY_QUEUED_JS = """() => {
+  const item = document.querySelector('#jobs-tray .jt-item');
+  const spin = item.querySelector('.jt-spin');
+  const nel = spin.querySelector('.jt-nel');
+  const ring = spin.querySelector('.gen-ring');
+  const pill = item.querySelector('.jt-phase');
+  const eta = item.querySelector('.jt-eta');
+  return {
+    hasQueuedClass: spin.classList.contains('jt-queued'),
+    mascotAnimation: getComputedStyle(nel).animationName,
+    ringAnimation: getComputedStyle(ring).animationName,
+    pillText: pill ? pill.textContent.trim() : null,
+    pillTransform: pill ? getComputedStyle(pill).textTransform : null,
+    pillColor: pill ? getComputedStyle(pill).color : null,
+    etaText: eta ? eta.textContent.trim() : null,
+    // The row must still be a visible, laid-out row -- not collapsed to nothing by the
+    // extra chips wrapping badly in the tray's 366px.
+    rowWidth: Math.round(item.getBoundingClientRect().width),
+    iconVisible: getComputedStyle(nel).display !== 'none',
+  };
+}"""
+
+# One queued job, stubbed at /api/jobs rather than written into the harness server's own
+# jobs.jsonl: the log's collapse/ageing behaviour has thorough coverage in
+# tests/test_jobs.py, and what needs a browser is only how the tray DRAWS this record.
+_QUEUED_JOB = {"jobs": [{
+    "job_id": "2037594262049550370", "type": "generate", "label": "Generated",
+    "status": "running", "started": False, "eta_seconds": 27,
+    "ts": 0, "started_at": 0,
+}]}
+
+
+# row() writes `<img class="jt-nel" ... onerror="this.remove()">`, so on a throwaway catalog
+# with no branding/ directory the mascot DELETES ITSELF and there is no element left to read
+# an animationName off (this test's first run died exactly there). A real install has the
+# file; served here as a 1x1 transparent PNG so the measured DOM matches a real one.
+_PIXEL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4zwAAAgIBAG4/xUwAAAAASUVORK5CYII=")
+
+
+def _open_tray_with_queued_job(page, path):
+    page.route("**/api/jobs", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(_QUEUED_JOB)))
+    page.route("**/branding/gen_nel.png", lambda route: route.fulfill(
+        status=200, content_type="image/png", body=_PIXEL_PNG))
+    page.goto(path, wait_until="domcontentloaded")
+    # The fab is what a user clicks; JobsCard.applyState() reveals it on DOMContentLoaded.
+    page.wait_for_selector("#jobs-fab.show")
+    page.click("#jobs-fab")
+    page.wait_for_selector("#jobs-tray.open #jobs-tray .jt-item, #jobs-tray.open .jt-item")
+    _settle(page)
+
+
+def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
+    """The gallery and the Loom load ONE static/mg-notify.js, so the queued state must be
+    measurably identical on both -- that is the claim, and this measures it rather than
+    inferring it from the file being shared.
+
+    Measured as shipped at 1280x900, on `/` and on `/loom?bundle=1` alike: the icon carries
+    `jt-queued`, the mascot's and ring's computed animationName are both `none` (a rendering
+    job reads `gen-spin`), the phase pill reads "queued" uppercased, and the estimate chip
+    reads "est. 27s wait".
+    """
+    seen = {}
+    for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
+        page = logged_in_page(**DESKTOP)
+        _open_tray_with_queued_job(page, path)
+        m = page.evaluate(_TRAY_QUEUED_JS)
+        seen[host] = m
+
+        assert m["hasQueuedClass"], (
+            "{}: the queued row's icon has no jt-queued modifier".format(host))
+        assert m["mascotAnimation"] == "none", (
+            "{}: the mascot is still animating ({!r}) on a job PixAI has not started -- "
+            "motion is what reads as work in progress".format(host, m["mascotAnimation"]))
+        assert m["ringAnimation"] == "none", (
+            "{}: the progress ring is still spinning ({!r})".format(
+                host, m["ringAnimation"]))
+        assert m["pillText"] == "queued", (
+            "{}: phase pill reads {!r}".format(host, m["pillText"]))
+        assert m["pillTransform"] == "uppercase", (
+            "{}: the phase pill is not styled as a state label ({!r})".format(
+                host, m["pillTransform"]))
+        assert m["etaText"] == "est. 27s wait", (
+            "{}: estimate chip reads {!r}".format(host, m["etaText"]))
+        assert m["iconVisible"] and m["rowWidth"] > 200, (
+            "{}: the queued row did not lay out ({!r})".format(host, m))
+
+        # --- phase 2, per host: prove the measurement discriminates. Dropping the modifier
+        # is the pre-fix state exactly (one spinner for queued and rendering alike); if the
+        # animation stays `none` without it, the assertions above are vacuous.
+        page.evaluate("() => document.querySelector('#jobs-tray .jt-spin')"
+                      ".classList.remove('jt-queued')")
+        _settle(page)
+        reverted = page.evaluate(_TRAY_QUEUED_JS)
+        assert reverted["mascotAnimation"] == "gen-spin", (
+            "{}: removing jt-queued left the mascot's animationName at {!r} -- the "
+            "'none' assertion above proves nothing".format(
+                host, reverted["mascotAnimation"]))
+        assert reverted["ringAnimation"] == "gen-spin", (
+            "{}: removing jt-queued left the ring at {!r}".format(
+                host, reverted["ringAnimation"]))
+
+    assert seen["gallery"] == seen["loom"], (
+        "the shared Activity tray renders the queued state DIFFERENTLY on the two hosts:\n"
+        "  gallery: {!r}\n  loom:    {!r}".format(seen["gallery"], seen["loom"]))

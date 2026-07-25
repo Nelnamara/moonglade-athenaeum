@@ -17,6 +17,33 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **A running generation now says which phase it is in, in both Activity trays.** A plain
+  generation used to go straight to one spinner and stay there until it finished, so the
+  stretch where PixAI has *accepted* the task but assigned no worker to it — which can be the
+  entire ~60 minutes before an undispatched task is reaped — looked identical to real
+  rendering. The tray now separates the two: a job PixAI has not started reads **QUEUED**,
+  with the same mascot icon but its animation stopped (motion is exactly what reads as "work
+  is happening"), and flips to the ordinary spinner the moment a worker picks it up. This is
+  the immediate version of a signal that already existed only after a 30-minute delay, where
+  the orphan sweep escalates the same job to `stale`.
+  Beside the queued label, **the queue wait PixAI itself predicted** — the number their own
+  site shows next to Generate — read from `GET /v2/task/wait-time` (`priority` +
+  `modelVersionId`; a submit's `modelId` is a model *version* id as far as that route is
+  concerned) and recorded once, when the job is first seen queued. The detail popover spells
+  it out as `Est. wait · 27s (PixAI, when queued)`, directly under the live **Time Spent** it
+  is meant to be read against: an estimate of 27s beside 6m elapsed is the whole diagnosis.
+  Deliberately **not** shipped: any percentage or progress bar for a PixAI generation, and any
+  countdown. PixAI publishes no progress on a task at all — probed against a live control,
+  none of `progress`/`percent`/`step`/`eta`/`queuePosition` exist — so the estimate is worded
+  as a *wait*, is never recomputed as the wait grows, and disappears the instant the job
+  starts rendering rather than becoming an implied render ETA nobody has data for.
+  Both trays get this from one place: the phase is written to `out_dir/jobs.jsonl` by
+  `/api/task-status`, which the gallery's poller, both of the Loom's, and the shared Generate
+  drawer's all already call — so the signal is identical on `/` and `/loom` by construction,
+  and it survives closing the tab that submitted. Written once per phase *change*, not once
+  per poll: four pollers ask every 3s, and a per-poll write would add 1,200+ lines to the log
+  for a single queued job and refresh its timestamp so often the orphan sweep could never see
+  it age in. A generation a worker takes before its first poll costs no extra API calls at all.
 - **A rendering-assertion harness: tests that the CSS *works*, not that it *exists*.**
   `tests/test_render_harness.py` drives a real chromium (playwright) against the real Flask
   app on a real ephemeral port — a live server, because a Flask test client never renders —

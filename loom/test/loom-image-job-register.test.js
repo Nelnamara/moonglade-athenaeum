@@ -112,6 +112,65 @@ describe("every Loom image submit path registers its generation in the shared Jo
   });
 });
 
+// ---------------------------------------------------------------------------
+// The tests above name genImage and runGen explicitly, which is right for the bug they
+// cover -- and useless against the NEXT submit path someone adds. That is not hypothetical:
+// the Image/Edit/Reference tabs shipped without registering at all, and the trays were
+// silently, correctly empty for months.
+//
+// So: derive the list of submit paths FROM THE SOURCE and require every one of them to
+// register. A block is a submit path if it either checks `!d.task_id` (it POSTed its own
+// generation) or writes `pendingTaskId: <resp>.task_id` (it adopted one the shared drawer
+// submitted). A new path that does neither is not a submit path; one that does either and
+// forgets Jobs.register() fails here.
+// ---------------------------------------------------------------------------
+const IS_SUBMIT = /!d\.task_id|pendingTaskId: (?:d|detail)\.task_id/;
+
+/** Split the file at its top-level `  const NAME = ` declarations -> [name, body] pairs. */
+function declaredBlocks() {
+  const parts = src.split(/^  const (\w+) = /m);
+  const out = [];
+  for (let i = 1; i < parts.length; i += 2) out.push([parts[i], parts[i + 1]]);
+  return out;
+}
+
+describe("no NEW Loom submit path can quietly skip the shared Job Tracker", () => {
+  const submitPaths = declaredBlocks().filter(([, body]) => IS_SUBMIT.test(body));
+
+  test("the enumeration finds the submit paths at all (it must not pass vacuously)", () => {
+    // If a refactor changes how these are declared, this splitter would find nothing and
+    // every assertion below would pass by describing an empty set.
+    const names = submitPaths.map(([n]) => n);
+    assert.ok(submitPaths.length >= 4,
+      "found only " + submitPaths.length + " submit paths (" + names.join(", ") + ") -- the " +
+      "block splitter no longer matches how this file declares its functions, so this whole " +
+      "guard is inert");
+    for (const expected of ["generateShot", "genImage", "runGen", "onVideoSubmit"]) {
+      assert.ok(names.includes(expected),
+        "expected " + expected + " to be recognised as a submit path; found: " + names.join(", "));
+    }
+  });
+
+  test("every submit path the source declares registers its generation", () => {
+    for (const [name, body] of submitPaths) {
+      assert.match(body, GUARDED_REGISTER,
+        name + " takes a task id from a submit and never calls Jobs.register() -- its " +
+        "generations would be missing from BOTH Activity trays (the gallery's and the " +
+        "Loom's), exactly like the Image/Edit/Reference tabs were until 2026-07-24");
+    }
+  });
+
+  test("and every register call in the file belongs to one of them", () => {
+    // The other direction, so the count stays honest: a register stranded outside a submit
+    // path would put a row in the tray with no submit behind it.
+    const total = (src.match(/window\.Jobs\.register\(/g) || []).length;
+    assert.equal(total, submitPaths.length,
+      "the file has " + total + " Jobs.register() calls for " + submitPaths.length +
+      " submit paths -- either a path registers twice (a duplicate tray row) or a register " +
+      "sits somewhere that never submitted anything");
+  });
+});
+
 describe("the tray labels distinguish the three image paths and name the shot", () => {
   // .jt-lab is `white-space:nowrap;overflow:hidden;text-overflow:ellipsis` inside a 366px
   // tray (static/mg-notify.js), so a long shot title truncates the TAIL -- whatever has to
