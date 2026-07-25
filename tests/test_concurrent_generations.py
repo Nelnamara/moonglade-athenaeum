@@ -92,10 +92,10 @@ def test_fix_tab_no_boxes_warning_appends_instead_of_overwriting(tmp_path):
 
 
 def test_fix_spend_confirm_still_gates_each_submission(tmp_path):
-    """No-regression: the Fix tab's window.confirm is the app's fail-closed guardrail for
-    the one spend surface /api/price cannot price (see Gen.fix's own comment). Concurrency
-    must never bypass a spend gate -- the confirm still runs before every
-    runTask('/api/fix') submission."""
+    """No-regression: a Fix can never be covered by a free card, so its window.confirm is a
+    real spend gate and not a duplicate of the cost badge beside it (see Gen.fix's own
+    comment). Concurrency must never bypass a spend gate -- the confirm still runs before
+    every runTask('/api/fix') submission."""
     html = _authed_client(tmp_path).get("/").get_data(as_text=True)
     i = html.index("function fix()")
     fix_fn = html[i: html.index("function openEdit(", i)]
