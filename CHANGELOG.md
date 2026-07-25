@@ -96,6 +96,43 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Activity tracker's "lost" generations: FIRST CONFIRMED ROOT CAUSE, diagnosed from the
+  owner's own production `jobs.jsonl` + catalog.** No data was ever lost, and no job was ever
+  stuck — the tracker was permanently **under-reporting**. Two writers can mark a generation
+  job terminal, and only one of them recorded which media the task produced:
+  `/api/task-status`'s done branch logs `done` **with** `media_ids` (that's what puts the
+  thumbnail in the tray), while the live-mirror watcher's `_reconcile_job`, firing off the
+  same WebSocket push, logs a **bare** `done`. Meanwhile the watcher's own `_watch_mirror`
+  *did* download and catalog the media — `_collect_single_flight` handed it back
+  `{media_ids, saved, is_video}` — and threw that return value away, only bumping a counter.
+  Observed on two back-to-back generations: while the browser was still collecting gen #1
+  (several full-size downloads), the push event for gen #2 arrived and the reconciler won the
+  race, so gen #2's job went terminal carrying no `media_ids`. Its four images are on disk and
+  in `catalog.db`; its Activity card was blank **forever**, because `static/mg-notify.js`'s
+  `row()` builds its thumbnail from `(j.media_ids||[])[0]`. Nothing could ever repair it: the
+  orphan-reconciliation sweep only re-checks jobs stuck at `running`, and this job was already
+  `done`. Fixed by having `_watch_mirror` log what it actually collected, in the exact event
+  shape `/api/task-status` writes (`status='done'`, `media_ids`, `is_video` — deliberately not
+  `duration`, which task-status only returns over HTTP and never logs), so whichever path wins
+  the race the media ids land. Verified against `_reconstruct_jobs`: a later event **merges**
+  over the current one (`cur.update(rec)`) rather than replacing it, and a terminal event can
+  follow another terminal event, so the fix is correct in **both** orderings — a `media_ids`
+  event after a bare `done` fills it in, and a bare `done` after a `media_ids` event cannot
+  blank it (the bare event carries no `media_ids` key to clobber with). Purely additive:
+  `_reconcile_job`'s bare-`done` write is untouched, since that's what correctly resolves a
+  job whose submitting tab has closed. Three deliberate abstentions, each tested — an empty
+  `media_ids` writes nothing (an empty list would blank a good entry), a task with no job
+  entry of its own writes nothing (same "never invent a row for a website generation"
+  contract `_reconcile_job` keeps), and a job that already carries `media_ids` writes nothing
+  (one event per generation, not two). A collect that *raises* still writes no terminal
+  `failed`, matching `api_task_status`'s catch-all reasoning and for a stronger reason here:
+  this path's "done" arrives on the WS push rather than from the same status query the detail
+  read answers from, so empty outputs moments later is as plausibly a lagging read as a
+  genuinely empty task — and a false `failed` would overwrite a perfectly good
+  `done`+`media_ids` in the merge. Fail-first tested through the existing
+  `app.extensions["mg_watch_mirror"]` seam (`tests/test_jobs.py`, 6 new tests, 3 confirmed
+  failing on the pre-fix source), including one that pins the owner's real logged sequence.
+
 - **A real Loom-only bug in the base-model version-resolve guard**, found by the owner
   testing the identical model on both surfaces: the gallery showed a version dropdown, the
   Loom didn't. The Loom's resolve-fetch updater carried a redundant `model_id` re-check on

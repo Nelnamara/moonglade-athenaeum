@@ -3853,18 +3853,94 @@ def create_app(out_dir: Path):
                 if ent["waiters"] <= 0:
                     _collect_inflight.pop(tid, None)   # keep the map from growing forever
 
+    def _log_mirrored_media(tid, got):
+        """Record WHAT the watcher just collected against the job we already track, in the
+        EXACT event shape /api/task-status's done branch writes (status='done', media_ids,
+        is_video) -- so a reader of jobs.jsonl can't tell which collector produced it.
+
+        The bug this closes (owner's production jobs.jsonl, 2026-07-24, two back-to-back
+        generations): TWO writers can mark a generation terminal, and only one of them used
+        to say what the task produced. /api/task-status's done branch logs media_ids;
+        _reconcile_job, firing off the same WebSocket event, logs a BARE done. While the
+        browser was still collecting gen #1 (several full-size downloads), the push event
+        for gen #2 arrived and _reconcile_job won the race -- so gen #2's job went terminal
+        carrying no media_ids, and nothing ever revisited it (the orphan sweep only
+        re-checks jobs stuck at 'running'; this one was already 'done'). Its four images
+        were downloaded and catalogued perfectly -- no data was lost -- but the Activity
+        card rendered blank forever, because static/mg-notify.js builds its thumbnail from
+        `(j.media_ids||[])[0]`. _watch_mirror had the answer in hand the whole time
+        (_collect_single_flight returns {media_ids, saved, is_video}) and discarded it.
+        Now whichever writer wins the race, the media ids get recorded.
+
+        `duration` is deliberately NOT logged even though collect_generation returns one
+        for videos: /api/task-status only puts it in its HTTP response, never in the job
+        log, and the two writers must stay indistinguishable in the log.
+
+        Three deliberate abstentions:
+          * EMPTY media_ids writes nothing at all -- an empty list is indistinguishable
+            from a real result to the tray, and would blank an entry another writer had
+            already filled in correctly. Recording nothing beats recording nothing-shaped.
+          * a task with NO job entry of its own writes nothing -- the same contract
+            _reconcile_job keeps ("never invents one for a task generated on the website"),
+            or every pixai.art generation would sprout a new Activity row here.
+          * a job that ALREADY carries media_ids writes nothing -- there's nothing to add,
+            and that's the common non-racing case (the browser poll got there first), so
+            skipping keeps one event per generation instead of two.
+
+        Unlike _close_orphan_if_resolved this does NOT require the job to be non-terminal:
+        a job already sitting at a bare 'done' is precisely the case being fixed. Reads the
+        raw reconstructed log for the same reason that helper does (an entry read_jobs()
+        would already be hiding past JOBS_MAX_AGE still gets its media recorded), and skips
+        a dismissed job rather than resurrecting it with a new event. Fails soft, and
+        cannot raise into _watch_mirror's daemon thread: mirroring must never break,
+        or lose its 'mirrored' count, because logging did."""
+        try:
+            import pixai_gallery_backup as _core
+            mids = (got or {}).get("media_ids") or []
+            if not mids:
+                return
+            jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
+            j = jobs_by_id.get(str(tid))
+            if not j or j.get("dismissed") or (j.get("media_ids") or []):
+                return
+            _log_job(str(tid), status="done", media_ids=mids,
+                     is_video=got.get("is_video", False))
+        except Exception:                          # noqa: BLE001 -- logging must not break mirroring
+            pass
+
     def _watch_mirror(tid):
         """Download + catalog one finished task off the watcher's event loop (own
-        session per call, matching the CLI's --watch-backup pattern)."""
+        session per call, matching the CLI's --watch-backup pattern), then record what it
+        collected in the job log -- see _log_mirrored_media for why throwing that answer
+        away left a raced generation's Activity card permanently blank.
+
+        Deliberately does NOT write a terminal 'failed' when the collect raises, matching
+        the reasoning in api_task_status's catch-all `except` (a false terminal failure
+        bricks the card for a generation that actually succeeded) -- and the case for
+        abstaining is STRONGER here than there. api_task_status treats EmptyOutputsError as
+        terminal because it asked PixAI for the task's status itself and got 'done' from
+        the same read-your-writes surface the detail query then answered from: two
+        consistent reads. This path's 'done' arrives on a different channel entirely (the
+        WS push), so an empty-outputs read moments later is just as plausibly the detail
+        query lagging the push as a genuinely empty task -- and writing 'failed' off it
+        would overwrite a perfectly good done+media_ids event in read_jobs()'s
+        last-event-wins merge. The authoritative failure writers stay /api/task-status and
+        the orphan sweep; a mirror problem is recorded where it belongs, in
+        _watch_status['last_error'] (surfaced by /api/watch/status and the Panel)."""
         import pixai_gallery_backup as core
         try:
             session = core._make_session(None)
-            _collect_single_flight(core, session, tid)
+            got = _collect_single_flight(core, session, tid)
             with _watch_lock:
                 _watch_status["mirrored"] += 1
         except Exception as e:
             with _watch_lock:
                 _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+            return
+        # Outside the except above ON PURPOSE: _log_mirrored_media swallows its own
+        # failures, and keeping it out of that handler makes it structurally impossible for
+        # a logging problem to be reported as a mirror error on the watch-status line.
+        _log_mirrored_media(tid, got)
 
     # The closures above are unreachable from outside create_app; the test suite
     # drives the watcher-mirror path through this seam (conftest disables the real
