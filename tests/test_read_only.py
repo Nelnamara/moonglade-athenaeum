@@ -5,7 +5,7 @@ even when --confirm/--apply/--yes are passed, since those flags are exactly what
 first run wants to be safe to use without reading the source first.
 
 This file covers the four WEB choke points -- submit_generation, submit_fixer,
-delete_task_gql, claim_reward -- that the web app's generate/edit/enhance/fix/delete/claim
+delete_task_gql, claim_reward -- that the web app's generate/edit/fix/delete/claim
 routes all funnel through. The CLI's five generation entry points (run_generate,
 run_generate_video, run_reference_video, run_enhance, run_edit_image) build their OWN
 gql_adhoc call instead of calling through these choke points and, until 2026-07-21, none of

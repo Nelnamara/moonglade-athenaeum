@@ -289,12 +289,14 @@ users.
   gets a `cli-<uuid>` job id (mirroring `panel-`/`bulkdel-`), logged fail-soft so a logging hiccup
   can never break the actual command. A panel-spawned subprocess still logs exactly once (no
   duplicate entry) via the existing `MOONGLADE_PROGRESS=1` path.
-- The Generate drawer's Edit ▸ Enhance sub-tab promotes ten one-click PixAI workflows
-  (upscale / upscale 2×2 / upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art
-  / sketch-colorize / relight-sun / relight-backlight), each firing `Gen.enhance(<workflow_id>)`
-  → `/api/enhance`, priced-and-confirmed before it spends. A search box below browses the rest
-  of PixAI's ComfyUI catalog into `#enh-list`. The Fix sub-tab is a separate box-coordinate
-  hand/face fixer (`/api/fix` → `submit_fixer`).
+- The Generate drawer's Edit ▸ Enhance sub-tab is explanatory copy only. PixAI never assigns
+  a worker to a panelplugin task submitted with an API key — it accepts it, queues it, charges
+  it, then cancels it at ~60 minutes with `outputs.reason` "waiting timeout" and refunds (their
+  own official preset ids included, while their web client runs the same workflow in 1-3s), so
+  the ten one-click cards, the ComfyUI catalog search, `/api/enhance`, `/api/workflows`,
+  `build_panelplugin_parameters`, `workflow_catalog` and `--workflow-id` were all deleted
+  2026-07-24. The pane now says where those tools do run and points at Fix. The Fix sub-tab is
+  a separate box-coordinate hand/face fixer (`/api/fix` → `submit_fixer`) and works.
 
 ## Achievements / The Folio of Honors
 
@@ -427,9 +429,9 @@ gates every route; the public surface is exactly four things — `/login`, `/log
 (a compile-time constant the browser fetches unprompted from the login page). There is **no
 localhost bypass**: login is required from `127.0.0.1` exactly as from a LAN address.
 
-Spend-capable routes are **LOGIN**, not localhost — `/api/generate`, `/api/edit`,
-`/api/enhance`, `/api/fix` and `/api/loom/generate` are all reachable by any signed-in
-session, which is deliberate (the tablet generates). LOCALHOST is reserved for writes to the
+Spend-capable routes are **LOGIN**, not localhost — `/api/generate`, `/api/edit`, `/api/fix`
+and `/api/loom/generate` are all reachable by any signed-in session, which is deliberate (the
+tablet generates). LOCALHOST is reserved for writes to the
 server's own disk, credential writes, and irreversible cloud deletion. `tests/test_route_tiers.py`
 is the authority.
 
@@ -522,10 +524,9 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   by that feature's own explicit design).
 - `<mg-cost-badge>` now covers the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`,
   shared by the gallery Video tab and the Loom's Video tab), `pixai_gallery.py`'s Generate
-  and Edit tabs, the Gallery's Enhance sub-tab (`enhance-cost`, reshaped select-then-run —
-  its old `window.confirm()` is gone, the badge is the only warning), and the Loom's Image/
-  Edit/Reference Deep Focus tabs (D-12, 2026-07-22) — each of those three kept its existing
-  `confirmSpend`/`window.confirm()` gate alongside the new badge, deliberately: that dialog
+  and Edit tabs, and the Loom's Image/Edit/Reference Deep Focus tabs (D-12, 2026-07-22) —
+  each of those three Loom tabs kept its existing `confirmSpend`/`window.confirm()` gate
+  alongside the new badge, deliberately: that dialog
   is this project's original fail-closed guardrail, built after those exact tabs used to lie
   about cost, so the badge there is an added preview, not a replacement. Still no badge:
   `generateShot`'s own `priceShot` + `window.confirm` gate for shot-level/batch video

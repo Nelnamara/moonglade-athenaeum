@@ -5,11 +5,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 // D-12 increments 2-4: the Image tab already had a working submit path (confirmSpend's
-// window.confirm) but no live preview of the cost before you click Go -- same gap the
-// Gallery's Enhance sub-tab had (increment 1, already shipped). Fixed the same way: a
+// window.confirm) but no live preview of the cost before you click Go. Fixed with a
 // <mg-cost-badge> per tab, kept live via a debounced read-only /api/price check.
 //
-// UNLIKE the Gallery's Enhance tab, these three tabs' window.confirm is NOT removed --
+// These three tabs' window.confirm is NOT removed alongside it --
 // confirmSpend was built as this project's fail-closed guardrail after these exact tabs
 // "used to lie" about cost (see confirmSpend's own comment in master-storyboard.jsx), so
 // the badge here is an ADDED preview, not a replacement for the submit-time gate. Every

@@ -255,8 +255,8 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 
 The Flask gallery (`pixai_gallery.py`) is a full creation suite, not just a browser.
 Spend-capable routes are **LOGIN**-tier, not localhost: `/api/generate`, `/api/edit`,
-`/api/enhance`, `/api/fix` and `/api/loom/generate` are reachable by any signed-in session,
-because generating from the tablet is the point. **LOCALHOST** (`_is_local_request`) is
+`/api/fix` and `/api/loom/generate` are reachable by any signed-in session, because
+generating from the tablet is the point. **LOCALHOST** (`_is_local_request`) is
 reserved for a different category — writes to the server's own filesystem, credential writes,
 and irreversible cloud deletion. `tests/test_route_tiers.py` declares every route's tier and
 asserts it against a live request, so it is the authority when prose and code disagree.
@@ -264,8 +264,9 @@ asserts it against a live request, so it is the authority when prose and code di
 - **Generate drawer** (header ✦, dockable, persisted position): three tabs — *Generate*
   (base model + LoRA chips with weights, model/LoRA flyout with a hover preview card, live
   cost + free-card check), *Edit* (sub-tabs Edit | Enhance | Fix over a shared source —
-  instruct-edit, the enhance-workflow catalog, hand/face fixer), *Video* (I2V / FLF / R2V
-  modes, gallery Picker slots with @image badges, contenteditable prompt with @image chips,
+  instruct-edit, an Enhance pane explaining that PixAI's one-click workflow tools run only on
+  their own site, hand/face fixer), *Video* (I2V / FLF / R2V modes, gallery Picker slots with
+  @image badges, contenteditable prompt with @image chips,
   model picker, audio toggle, live cost + card count).
 - **Picker** (`/api/gallery-images` + `/api/upload`): whole-catalog infinite scroll,
   search, Collection/Source/Rating/Sort filters, upload → media_id.
@@ -275,7 +276,7 @@ asserts it against a live request, so it is the authority when prose and code di
   Send-to-Video.
 - **The Loom** (`/loom`): the storyboard surface — current shape lives in `docs/STATE.md`;
   usage manual is `docs/LOOM.md`.
-- **Async engine**: submit (`/api/generate|edit|enhance|fix|loom/generate`) → poll
+- **Async engine**: submit (`/api/generate|edit|fix|loom/generate`) → poll
   (`/api/task-status`) → auto-download + catalog (`source='api'`). Free cards auto-apply
   on every create path. `/api/task-status`'s 'running' branch deliberately never writes to
   `jobs.jsonl` (only its `done`/`failed` branches do), so a job's log entry can be

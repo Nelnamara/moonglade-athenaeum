@@ -657,8 +657,8 @@ def _check_read_only(action):
     --confirm/--apply/--yes rather than just changing their default.
 
     Nine call sites, not four: submit_generation, submit_fixer, delete_task_gql and
-    claim_reward are the choke points the WEB app's generate/edit/enhance/fix/delete/
-    claim routes all funnel through -- but the CLI's run_generate, run_generate_video,
+    claim_reward are the choke points the WEB app's generate/edit/fix/delete/claim
+    routes all funnel through -- but the CLI's run_generate, run_generate_video,
     run_reference_video, run_enhance and run_edit_image each build their OWN gql_adhoc
     call instead of calling through a choke point, and until 2026-07-21 none of them
     called this. Found by audit: with READ_ONLY=True and --confirm, all five reached
@@ -1993,23 +1993,6 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             "lora_base_model_type": lv.get("loraBaseModelType") or "",
         })
     return {"results": out, "has_more": bool((data.get("pageInfo") or {}).get("hasNextPage"))}
-
-
-def workflow_catalog(session, first=80):
-    """List PixAI enhance/panelplugin WORKFLOWS via the `workflows` GraphQL connection ->
-    [{id, name, type, cover_media_id}]. `id` is the numeric workflowId that
-    build_panelplugin_parameters wants. Covers upscale / remove-background / line-art /
-    sketch-colorizer / inpaint / outpaint / style converters / etc. Read-only."""
-    q = "query($n:Int){ workflows(first:$n){ edges { node { id name type coverMediaId } } } }"
-    d = gql_adhoc(session, q, {"n": int(first)}) or {}
-    out = []
-    for e in (d.get("workflows") or {}).get("edges") or []:
-        n = e.get("node") or {}
-        if not n.get("id"):
-            continue
-        out.append({"id": str(n["id"]), "name": n.get("name") or "",
-                    "type": n.get("type") or "", "cover_media_id": str(n.get("coverMediaId") or "")})
-    return out
 
 
 def _empty_version_meta():
@@ -4155,37 +4138,16 @@ def extract_last_frame(video_path, out_png, at_seconds=None):
         return None
 
 
-def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
-                                 strength=None, extra_inputs=None, priority=1000,
-                                 is_private=False, kaisuuken_id=""):
-    """Enhance via a PixAI panelplugin WORKFLOW (face-fix / bg-remove / handfix / lineart …).
-    VERIFIED shape (2026-07-02): model 'pixai-panelplugin', `inputs.image = {type:'media',
-    media_id}` (+ optional strength / per-plugin args). A workflow is addressed by either a
-    numeric `workflowId` (VERIFIED path) OR a `workflowName` like 'mymusise/hand-fix' (mined
-    from the app; unverified until fired -- a rejected submit costs no credits). Produces an
-    image output. Builder spends nothing."""
-    inputs = {"image": {"type": "media", "media_id": str(media_id)}}
-    if strength is not None:
-        inputs["strength"] = float(strength)
-    if extra_inputs:
-        inputs.update(extra_inputs)
-    params = {
-        "priority": int(priority),
-        "model": "pixai-panelplugin",
-        "inputs": inputs,
-        "isPrivate": bool(is_private),
-        "enablePreview": True,
-        "hidePrompts": False,
-    }
-    if workflow_name:
-        params["workflowName"] = str(workflow_name)
-    elif workflow_id:
-        params["workflowId"] = str(workflow_id)
-    else:
-        raise PixAIError("panelplugin needs a workflow_id or workflow_name")
-    if kaisuuken_id:
-        params["kaisuukenId"] = str(kaisuuken_id)
-    return params
+# build_panelplugin_parameters() is gone. The submit shape was right -- it was captured from a
+# real task -- but PixAI never assigns a worker to a panelplugin task when the client
+# authenticated with an API key. It accepts the submit, queues it, charges for it, then cancels
+# it at roughly 60 minutes with outputs.reason "waiting timeout" and refunds. Measured
+# 2026-07-24 and isolated by elimination: their own official preset workflow ids behave
+# identically while their web client runs the same workflow in 1-3 seconds, and a taskKind=chat
+# fixer submit from this app dispatched in one second minutes earlier. No workflow id, input key
+# or payload change reaches a runner, so the builder, the workflow catalog, --workflow-id and the
+# web routes that used them were removed rather than kept as a way to spend an hour queuing
+# nothing. Guarded by tests/test_enhance.py.
 
 
 def build_filter_parameters(media_id, filter_id, *, strength=0.77, is_private=False,
@@ -5063,32 +5025,31 @@ def run_reference_video(args):
 
 
 def run_enhance(args):
-    """Apply a PixAI enhance plugin (panelplugin workflow -- face fix / upscale / bg-remove)
-    or an art filter to an image. --src is a catalog media_id OR a local file (auto-uploaded
-    on --confirm). Provide --workflow-id (panelplugin) or --filter-id (art filter); get ids
-    via --dump-params off a real enhance task. Preview-only unless --confirm. Image output."""
+    """Apply a PixAI art filter to an image. --src is a catalog media_id OR a local file
+    (auto-uploaded on --confirm). Provide --filter-id; get ids via --dump-params off a real
+    filter task. Preview-only unless --confirm. Image output.
+
+    The panelplugin-workflow half of this command (--workflow-id: upscale / bg-remove /
+    line-art / relight) is gone -- see build_filter_parameters' neighbouring note for the
+    measurement that showed PixAI never runs one for an API-key client."""
     out = Path(args.out)
     existing = (getattr(args, "task_id", "") or "").strip()
     src = (getattr(args, "src", "") or "").strip()
-    workflow_id = (getattr(args, "workflow_id", "") or "").strip()
     filter_id = (getattr(args, "filter_id", "") or "").strip()
     override = getattr(args, "params_json", "") or ""
     strength = getattr(args, "strength", None)
     kaisuuken = getattr(args, "kaisuuken_id", "") or ""
 
     if not existing and not override and not src:
-        raise PixAIError("--enhance needs --src <media_id|file>, plus --workflow-id or --filter-id.")
-    if not existing and not override and not (workflow_id or filter_id):
-        raise PixAIError("--enhance needs --workflow-id <id> (a panelplugin, e.g. face fix / "
-                         "upscale) or --filter-id <id> (art filter). Get ids via --dump-params.")
+        raise PixAIError("--enhance needs --src <media_id|file>, plus --filter-id.")
+    if not existing and not override and not filter_id:
+        raise PixAIError("--enhance needs --filter-id <id> (an art filter, e.g. filter-v1-m2). "
+                         "Get ids via --dump-params.")
 
     def _build(media_id):
-        if filter_id:
-            return build_filter_parameters(
-                media_id, filter_id,
-                strength=(strength if strength is not None else 0.77), kaisuuken_id=kaisuuken)
-        return build_panelplugin_parameters(media_id, workflow_id, strength=strength,
-                                            kaisuuken_id=kaisuuken)
+        return build_filter_parameters(
+            media_id, filter_id,
+            strength=(strength if strength is not None else 0.77), kaisuuken_id=kaisuuken)
 
     if not existing and not getattr(args, "confirm", False):
         print("=== PixAI createGenerationTask -- ENHANCE (PREVIEW, no credits spent) ===")
@@ -7281,18 +7242,16 @@ def main():
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
     gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
                      help="reference audio (repeatable; cite as @audio1, ...)")
-    # --- enhance (panelplugin workflow OR art filter) ---
+    # --- enhance (art filter) ---
     gen.add_argument("--enhance", dest="enhance", action="store_true",
-                     help="enhance an image: --workflow-id (panelplugin -- face fix / upscale / "
-                          "bg-remove) or --filter-id (art filter) on --src. Preview until --confirm")
+                     help="enhance an image: --filter-id (art filter) on --src. "
+                          "Preview until --confirm")
     gen.add_argument("--src", dest="src", default="", metavar="MEDIA_ID|FILE",
                      help="source image for --enhance (catalog media_id or local file, auto-uploaded)")
-    gen.add_argument("--workflow-id", dest="workflow_id", default="", metavar="ID",
-                     help="panelplugin workflow id for --enhance (get via --dump-params off an enhance task)")
     gen.add_argument("--filter-id", dest="filter_id", default="", metavar="ID",
                      help="art-filter id for --enhance (pixai-image-filter, e.g. filter-v1-m2)")
     gen.add_argument("--strength", dest="strength", type=float, default=None,
-                     help="enhance/filter strength (e.g. 0.5 for plugins, 0.77 for filters)")
+                     help="filter strength (e.g. 0.77)")
     # --- instruct editing + media upload (the "Edit this image" surface) ---
     gen.add_argument("--edit-image", dest="edit_image", action="store_true",
                      help="instruct-edit an image via PixAI: describe the change in --prompt "

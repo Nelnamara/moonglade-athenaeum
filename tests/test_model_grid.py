@@ -421,17 +421,6 @@ def test_task_detail_query_adhoc_fallback(monkeypatch):
     assert core._task_detail_query(object(), "T8") == {"id": "T8", "via": "persisted"}
 
 
-def test_workflow_catalog(monkeypatch):
-    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"workflows": {"edges": [
-        {"node": {"id": "1794855217667308480", "name": "Image Upscale",
-                  "type": "UPSCALE", "coverMediaId": "9"}},
-        {"node": {"id": "", "name": "no-id skipped"}},
-    ]}})
-    out = core.workflow_catalog(object())
-    assert len(out) == 1 and out[0]["id"] == "1794855217667308480"
-    assert out[0]["name"] == "Image Upscale" and out[0]["cover_media_id"] == "9"
-
-
 def test_submit_generation(monkeypatch):
     monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {"id": "T9"}})
     assert core.submit_generation(object(), {"x": 1}) == "T9"

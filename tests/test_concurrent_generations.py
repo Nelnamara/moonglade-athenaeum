@@ -104,12 +104,11 @@ def test_fix_spend_confirm_still_gates_each_submission(tmp_path):
         "the Fix spend confirm no longer gates the submission")
 
 
-def test_generate_edit_enhance_all_still_route_through_the_shared_runtask(tmp_path):
-    """No-regression: Generate/Edit/Enhance must still submit through the one shared
-    runTask() the fixes above cover -- if any of them grew its own bespoke submit path,
-    it would silently lose the concurrency fix (and the spend-gate guarantees) above."""
+def test_generate_edit_fix_all_still_route_through_the_shared_runtask(tmp_path):
+    """No-regression: every submitting surface in the drawer must still go through the one
+    shared runTask() the fixes above cover -- if any of them grew its own bespoke submit
+    path, it would silently lose the concurrency fix (and the spend-gate guarantees) above."""
     html = _authed_client(tmp_path).get("/").get_data(as_text=True)
     assert "runTask('/api/generate'" in html
     assert "runTask('/api/edit'" in html
-    assert "runTask('/api/enhance'" in html
     assert "runTask('/api/fix'" in html
