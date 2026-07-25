@@ -315,6 +315,19 @@ users.
   `build_panelplugin_parameters`, `workflow_catalog` and `--workflow-id` were all deleted
   2026-07-24. The pane now says where those tools do run and points at Fix. The Fix sub-tab is
   a separate box-coordinate hand/face fixer (`/api/fix` → `submit_fixer`) and works.
+- **The Fix sub-tab is priced, named and labelled like the rest of the suite** (2026-07-25).
+  A Fix submits as `{mediaId, boxes}` over `POST /v2/task/fixer`, but PixAI turns that into a
+  `taskKind=chat` generation carrying a `chat.fixer` block — which `/v2/task-price` prices
+  (measured flat 8,000, invariant to box count, canvas size and priority; without the chat
+  block the same call returns the 1,200 base floor). So the tab carries an `<mg-cost-badge>`
+  fed by `/api/price` `mode:'fix'` → `build_fixer_price_parameters`, with the number fetched
+  rather than hardcoded, `no_card` forced on (there is no `kaisuukenId` field on
+  `/v2/task/fixer`, so no free card can ever cover a Fix), and the `window.confirm()` kept as
+  a genuine spend gate that quotes the badge. Output naming and metadata match: a Fix is named
+  `<source-prompt>_fix-face_<task>_<media>` from the SOURCE image rather than from the fixed
+  template prompt PixAI writes into every fixer task, and its Model resolves to "Reference
+  Pro" via `EDIT_MODELS` while Seed/Steps/Sampler/CFG stay empty — a chat task records none of
+  them, and an em-dash is the honest answer. Naming applies to new output only.
 - **The LoRA picker now shows and enforces the account's real per-generation LoRA cap, on
   both the gallery and the Loom** (2026-07-24). `membership.privilege.{lora,freeUserLora}` —
   real data PixAI's own account API already returns — is fetched by `account_info()`
