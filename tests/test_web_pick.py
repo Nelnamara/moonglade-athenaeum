@@ -1586,6 +1586,65 @@ def test_art_filters_send_uploads_for_free_and_never_touches_the_local_import(tm
     assert "setEditSource(String(d.media_id))" in body
 
 
+def test_filter_actions_close_the_panel_without_re_opening_it(tmp_path):
+    """`toggleFilters()` is a TOGGLE, and both filter actions run across an await.
+
+    Nothing disables the panel's own close paths while a request is in flight -- only the
+    pressed button is disabled -- so the header's x, `#gen-scrim` and the unconditional
+    global `Escape -> Gen.close()` all stay live. Calling the toggle blind on resolve
+    therefore RE-OPENS a panel the user already dismissed, and `placeFilters()` then measures
+    a drawer that has slid away (`transform:translateX(100%)`), landing the panel over the
+    gallery with nothing behind it -- the exact state `Gen.close()` exists to prevent.
+
+    So the resolve handlers must go through `closeFiltersIfOpen()`, which checks `.open`
+    first, and must never call `toggleFilters()` directly.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "function closeFiltersIfOpen(" in html
+    guard = html[html.index("function closeFiltersIfOpen("):]
+    guard = guard[:guard.index("function afActing(")]
+    assert "classList.contains('open')" in guard, (
+        "closeFiltersIfOpen must check the panel is open before toggling it")
+
+    for fn in ("function filterSave(", "function filterSend("):
+        body = html[html.index(fn):]
+        body = body[:body.index("\n  function ", 10)] if "\n  function " in body[10:] else body
+        body = body[:body.index("window.addEventListener('resize', placeFilters)")] \
+            if "window.addEventListener('resize', placeFilters)" in body else body
+        assert "toggleFilters()" not in body, (
+            fn + " calls the toggle directly -- it re-opens a panel closed mid-request")
+
+
+def test_filter_actions_capture_the_filter_before_the_await(tmp_path):
+    """`afId` is module state and the tiles and **No filter** stay clickable during a
+    request, so it can change or be cleared before the resolve handler runs.
+
+    `AF.get()` answers an unknown id with `null` -- deliberately, so an unmapped filter is
+    never silently rendered as something else -- which makes `AF.get(afId).name` a TypeError
+    thrown inside a `.then` SUCCESS handler. The sibling rejection handler on the same
+    `.then` cannot catch its own success handler's throw, so every side effect still lands
+    and the only trace is an unhandled rejection in the console: the panel closes, the source
+    switches, and no toast ever appears.
+
+    Both actions must therefore resolve the filter ONCE, before the await, via afActing().
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "function afActing(" in html
+    for fn in ("function filterSave(", "function filterSend("):
+        body = html[html.index(fn):]
+        body = body[:body.index("window.addEventListener('resize', placeFilters)")] \
+            if "window.addEventListener('resize', placeFilters)" in body else body[:4000]
+        assert "afActing()" in body, fn + " does not capture the acting filter"
+        # The capture has to happen BEFORE the network call, not inside the handler.
+        assert body.index("afActing()") < body.index("AF.toBlob("), fn
+        assert "AF.get(afId)" not in body, (
+            fn + " still reads afId after the await -- AF.get() can return null there")
+
+
 def test_edit_model_id_and_quality_omit():
     """The Edit-model registry maps picker keys to the right model ids, and
     build_chat_edit_parameters omits 'quality' when empty (Reference Pro has no quality)."""

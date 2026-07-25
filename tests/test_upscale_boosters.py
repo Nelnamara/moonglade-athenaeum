@@ -267,17 +267,61 @@ def test_web_both_methods_at_once_is_a_note_not_a_traceback(monkeypatch, tmp_pat
     assert d["cost"] is None and "mutually exclusive" in (d.get("note") or "")
 
 
-def test_drawer_renders_the_upscale_controls(tmp_path):
+def test_drawer_offers_hires_as_a_booster_and_not_the_enlarge_method(tmp_path):
+    """PixAI runs Upscale/Hires from the IMAGE VIEW, on a picture that already exists. The
+    only upscale that belongs in the generation panel is their `Enhance Details (HiRes)`
+    BOOSTER, beside Face Fix and Quality Tag.
+
+    So the drawer keeps the Hires controls (ratio + denoising) as that chip's disclosure and
+    must NOT offer the ESRGAN `enlarge` method at all: there is no source image here, which
+    is exactly why the old three-way segment showed a ratio cap and an output size derived
+    from the size the generation was about to be rather than from a real picture.
+    """
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = login_client(tmp_path).get("/").get_data(as_text=True)
-    for probe in ('id="gen-up-seg"', 'id="gen-up-ratio"', 'id="gen-up-dims"',
-                  'id="gen-up-model"', 'id="gen-up-denoise"', 'id="gen-facefix"',
-                  'id="gen-qtag"'):
+    for probe in ('id="gen-hires"', 'id="gen-up-ratio"', 'id="gen-up-dims"',
+                  'id="gen-up-denoise"', 'id="gen-facefix"', 'id="gen-qtag"'):
         assert probe in html, probe
-    # every measured upscaler name is offered, mixed underscores/spaces/plus intact
-    for name in core.ENLARGE_MODELS:
-        assert name in html, name
+    # The enlarge method and its dropdown left the drawer with the segment.
+    for gone in ('id="gen-up-seg"', 'id="gen-up-model"', 'id="gu-enlarge"', 'id="gu-off"',
+                 "Gen.setUpscale("):
+        assert gone not in html, gone + " is still in the generation panel"
+
+
+def test_upscale_constants_reach_the_client_from_core(tmp_path):
+    """The upscaler names and the pixel ceilings are handed to the page from core, so the
+    image-view panel needs no second hand port of max_upscale_ratio and no retyped model
+    list. PixAI matches the names literally -- mixed underscores, spaces and plus signs --
+    so a template typo is a rejected submit, not a cosmetic slip."""
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = login_client(tmp_path)
+    for path in ("/", "/image/1"):
+        html = cli.get(path).get_data(as_text=True)
+        assert "__UPSCALE_CONST__" not in html, path + " left the raw marker on the page"
+        blob = html.split("window.MG_UPSCALE=", 1)
+        assert len(blob) == 2, path + " never received window.MG_UPSCALE"
+        payload = json.loads(blob[1].split(";</script>", 1)[0])
+        assert payload["enlargeModels"] == list(core.ENLARGE_MODELS)
+        assert payload["defaultEnlargeModel"] == core.DEFAULT_ENLARGE_MODEL
+        assert payload["ceiling"] == core.UPSCALE_PIXEL_CEILING
+        for name in core.ENLARGE_MODELS:
+            assert name in html, name
+
+
+def test_the_other_base_html_pages_do_not_leak_the_marker(tmp_path):
+    """__UPSCALE_CONST__ is substituted into INDEX_HTML and DETAIL_HTML only. Four more
+    templates derive from the same BASE_HTML, and a marker placed there instead would render
+    as literal text on every one of them."""
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = login_client(tmp_path)
+    for path in ("/health", "/panel", "/dupes"):
+        r = cli.get(path)
+        if r.status_code != 200:
+            continue
+        assert "__UPSCALE_CONST__" not in r.get_data(as_text=True), path
 
 
 def test_drawer_ratio_cap_agrees_with_the_python_one(tmp_path):
@@ -291,7 +335,7 @@ def test_drawer_ratio_cap_agrees_with_the_python_one(tmp_path):
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = login_client(tmp_path).get("/").get_data(as_text=True)
-    block = "var upCeil=" + html.split("var upCeil=", 1)[1].split("function setUpscale", 1)[0]
+    block = "var upCeil=" + html.split("var upCeil=", 1)[1].split("function syncUpscale", 1)[0]
     sizes = [(768, 1280), (1400, 784), (512, 512), (1024, 1024), (2048, 2048), (1536, 640)]
     harness = "console.log(JSON.stringify([{}].map(function(d){{ return [upMax(d[0],d[1],'enlarge'), upMax(d[0],d[1],'upscale'), upDims(d[0],d[1],1.4)]; }})));".format(
         ",".join("[{},{}]".format(w, h) for w, h in sizes))
