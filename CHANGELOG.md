@@ -278,6 +278,18 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Loom's per-shot preview plays sound now, but only when it is really playing.** The
+  scrub player on each shot card was hard-muted like the reel was, so the one place you frame
+  a trim or a split — the place where hearing the shot matters most — was silent. It now has a
+  sound toggle beside the ⏪/⏩ controls, and the rule is deliberately narrower than the reel's:
+  audio plays only while the shot is *actually playing*, never while scrubbing. That is not
+  caution, it is the only workable rule here — this preview seeks on hover, so a hover-scrub is
+  the playhead being thrown around and sounds like noise rather than like the shot, and a board
+  holds many cards, so a pointer crossing it would fire audio from every card it passed. Sound
+  therefore defaults off and is gated on `soundOn && playing`, applied imperatively through the
+  ref because React does not reliably reflect a `muted` prop onto a `<video>`.
+
+
 - **Fix outputs were all named from the same boilerplate, and a folder of them was
   unbrowsable.** A fixer task's `prompts` is a fixed template PixAI writes itself, so every
   hand/face repair landed as

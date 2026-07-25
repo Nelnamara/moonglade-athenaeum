@@ -3582,6 +3582,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const [dur, setDur] = useState(0);
     const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
     const [playing, setPlaying] = useState(false);
+    const [soundOn, setSoundOn] = useState(false);
     const [cropping, setCropping] = useState(false);
     const rangeRef = useRef(range);
     rangeRef.current = range;
@@ -3591,6 +3592,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     useEffect(() => {
       setRange({ in: trimIn || 0, out: trimOut });
     }, [trimIn, trimOut]);
+    useEffect(() => {
+      const v = vidRef.current;
+      if (v) v.muted = !(soundOn && playing);
+    }, [soundOn, playing]);
     const effOut = (range.out == null ? dur : range.out) || dur;
     const pct = (s) => dur ? Math.max(0, Math.min(100, s / dur * 100)) : 0;
     const fT = (s) => (s || 0).toFixed(1) + "s";
@@ -3733,7 +3738,16 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       cropping && /* @__PURE__ */ React.createElement("div", { className: "sb-crop-layer", onPointerDown: cropStart }, "drag to crop"),
       !cropping && /* @__PURE__ */ React.createElement("button", { className: "sb-shotprev-play", onClick: togglePlay, title: playing ? "Pause" : "Play" }, playing ? "\u23F8" : "\u25B6"),
       !cropping && /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-hint" }, "hover to scrub")
-    ), /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-ctrls" }, /* @__PURE__ */ React.createElement("button", { onClick: () => seek(-0.25), title: "Rewind (step back)" }, "\u23EA"), /* @__PURE__ */ React.createElement("button", { onClick: () => seek(0.25), title: "Fast-forward (step ahead)" }, "\u23E9"), onSplit && /* @__PURE__ */ React.createElement("button", { onClick: doSplit, title: "Split this shot in two at the playhead" }, "\u2702 Split"), onCrop && /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-ctrls" }, /* @__PURE__ */ React.createElement("button", { onClick: () => seek(-0.25), title: "Rewind (step back)" }, "\u23EA"), /* @__PURE__ */ React.createElement("button", { onClick: () => seek(0.25), title: "Fast-forward (step ahead)" }, "\u23E9"), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: soundOn ? "on" : "",
+        onClick: () => setSoundOn((v) => !v),
+        "aria-pressed": soundOn,
+        title: soundOn ? "Sound on while playing (scrubbing stays silent)" : "Play this shot with sound"
+      },
+      soundOn ? "\u{1F50A}" : "\u{1F507}"
+    ), onSplit && /* @__PURE__ */ React.createElement("button", { onClick: doSplit, title: "Split this shot in two at the playhead" }, "\u2702 Split"), onCrop && /* @__PURE__ */ React.createElement(
       "button",
       {
         className: cropping ? "on" : "",
