@@ -1080,13 +1080,15 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
     existed, still exactly what every pre-existing test pins:
 
     - A `status_fn` call that comes back genuinely still 'running' for an aged-in job
-      writes a lightweight 'running' heartbeat, refreshing that job's `ts`. Nothing else
-      does this for a web-submitted generate job (api_task_status()'s own 'running' branch
-      never writes to the log at all), so without it, once a job crosses min_age it would
-      get re-asked on literally every subsequent /api/jobs poll for as long as it keeps
-      genuinely running -- a real video generation easily outlives 30 minutes. The
-      heartbeat resets the min_age clock, so a still-genuinely-running job is only
-      re-checked once per min_age, not once per poll.
+      writes a lightweight 'running' heartbeat, refreshing that job's `ts`. This is the
+      only RECURRING writer for a web-submitted generate job: api_task_status()'s own
+      'running' branch writes at most twice per job (once when it first sees it queued,
+      once when a worker starts it -- the queue/render phase the Activity tray renders),
+      deliberately de-duped so it can never become a per-poll heartbeat. So without this,
+      once a job crosses min_age it would get re-asked on literally every subsequent
+      /api/jobs poll for as long as it keeps genuinely running -- a real video generation
+      easily outlives 30 minutes. The heartbeat resets the min_age clock, so a
+      still-genuinely-running job is only re-checked once per min_age, not once per poll.
     - A `status_fn` call that RAISES for an aged-in job is recorded as 'stale' -- a
       distinct, visible, non-terminal status meaning "still stuck, and we couldn't reach
       PixAI to find out why" -- instead of silently left untouched. Un-gated (min_age=0),
