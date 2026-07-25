@@ -17,6 +17,32 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **A rendering-assertion harness: tests that the CSS *works*, not that it *exists*.**
+  `tests/test_render_harness.py` drives a real chromium (playwright) against the real Flask
+  app on a real ephemeral port — a live server, because a Flask test client never renders —
+  logging in through the real `/login` form with a real scrypt-hashed account, and measures
+  the resulting layout, stacking and computed style. This closes the bug class
+  `docs/AUDIT_2026-07-21.md`'s **T5-CSS** row identified: a green suite that cannot see a
+  layout defect, because nothing in it renders. Four guards, each a regression guard for a
+  defect that reached the owner instead of CI, each stated with the value it was measured at:
+  the model picker's grid fills its flyout panel (13.0px of panel chrome below it as shipped,
+  442.4px before the fix — threshold 24px); `#model-flyout` is fully inside the viewport when
+  open; Deep Focus's `.lv-df-veil` beats `#jobs-fab`/`#jobs-tray`, asserted as the effective
+  stacking outcome via `elementFromPoint` where the two overlap rather than as a z-index
+  number (which read 450 > 401 correctly the whole time the bug was live); and all five skins
+  re-tint a real rendered component, applied pre-paint before `<body>` is parsed. Every guard
+  runs a second phase that restores the pre-fix state in-page and asserts the same metric
+  flips, so no threshold here is vacuous. Two measurement rules are deliberate and
+  documented, because the earlier probe was burned by both: transitions/animations are frozen
+  before any geometry read (an interpolated mid-transition value produced a false diff), and
+  nothing sleeps — every phase waits on its real post-condition (a rendered `.mg-card`, an
+  open `.lv-df-veil`, mg-notify's own localStorage write). Skips cleanly with no playwright
+  and no browser binary, via `pytest.importorskip` plus a `render` marker registered in
+  `pytest.ini`, so a bare machine and the current CI workflow (which installs no playwright)
+  both stay green. Runtime ~13s for the whole module; the browser and server are
+  session-scoped so the cost is paid once. The `<=480px` portrait case is committed as an
+  `xfail(strict=False)` naming the in-flight fix for it, so it flips to XPASS on its own when
+  that lands and starts failing again if it ever regresses.
 - **The LoRA picker shows and enforces the account's real per-generation LoRA cap, on both
   the gallery and the Loom.** PixAI's own account API already returns it
   (`membership.privilege.lora`, falling back to `freeUserLora`) and this app already fetched
