@@ -307,14 +307,32 @@ users.
   and unknown must not brand every in-flight job stale. The reaper's caller passes the whole
   status dict, not `["phase"]` — sending the bare string makes the detection dead code in
   production, guarded end-to-end through `/api/jobs`.
-- The Generate drawer's Edit ▸ Enhance sub-tab is explanatory copy only. PixAI never assigns
-  a worker to a panelplugin task submitted with an API key — it accepts it, queues it, charges
-  it, then cancels it at ~60 minutes with `outputs.reason` "waiting timeout" and refunds (their
-  own official preset ids included, while their web client runs the same workflow in 1-3s), so
-  the ten one-click cards, the ComfyUI catalog search, `/api/enhance`, `/api/workflows`,
-  `build_panelplugin_parameters`, `workflow_catalog` and `--workflow-id` were all deleted
-  2026-07-24. The pane now says where those tools do run and points at Fix. The Fix sub-tab is
-  a separate box-coordinate hand/face fixer (`/api/fix` → `submit_fixer`) and works.
+- **The Generate drawer's Edit ▸ Enhance sub-tab is the art-filters surface, and it is free and
+  offline.** PixAI's seven art filters are gradient-overlay recipes served from a public,
+  unauthenticated config endpoint (`GET https://api.pixai.art/config/imageArtFilters`) that their
+  own web client composites in the browser — no Generate button, no price. `static/mg-art-filters.js`
+  bakes all seven in as data (verified against the live endpoint 2026-07-25) and applies them
+  client-side: CSS `mix-blend-mode` overlays for the live preview, one canvas gradient fill per
+  layer for the export, both pinned to the same gradient geometry so they agree. Picking a filter
+  makes **zero** network requests (measured). `Save to library` bakes the composite at full
+  resolution and posts it to the existing `/api/import-local`, so it lands in `imported/` with a
+  thumbnail and a `source='local'` row like any other local file. The working surface is
+  `#filters-flyout`, a top-level fixed panel — image left, swatches and controls right — placed by
+  `Gen.placeFilters()` on the `_place()` rule (side with room, then clamp); it sits beside the
+  drawer in the left/right docks and centres over it in the top/bottom docks, where the drawer is
+  a full-width bar. Six of the eight blend modes map exactly to CSS/canvas; `darker-color` and
+  `lighter-color` are Photoshop whole-colour comparisons with no CSS equivalent and are
+  approximated by `darken`/`lighten`, flagged `exact:false` in `BLEND_MODE_MAP` with the reason.
+  The paid path (`build_filter_parameters`, `--filter-id`, `--enhance`, `run_enhance`) is gone: it
+  charged credits and waited on a worker queue for a handful of gradient fills.
+- PixAI's one-click **panelplugin workflows** cannot run here at all, and the surface for them is
+  deleted. PixAI never assigns a worker to a panelplugin task submitted with an API key — it
+  accepts it, queues it, charges it, then cancels it at ~60 minutes with `outputs.reason`
+  "waiting timeout" and refunds (their own official preset ids included, while their web client
+  runs the same workflow in 1-3s), so the ten one-click cards, the ComfyUI catalog search,
+  `/api/enhance`, `/api/workflows`, `build_panelplugin_parameters`, `workflow_catalog` and
+  `--workflow-id` were all deleted 2026-07-24. The Enhance pane says so and points at Fix. The
+  Fix sub-tab is a separate box-coordinate hand/face fixer (`/api/fix` → `submit_fixer`) and works.
 - **The LoRA picker now shows and enforces the account's real per-generation LoRA cap, on
   both the gallery and the Loom** (2026-07-24). `membership.privilege.{lora,freeUserLora}` —
   real data PixAI's own account API already returns — is fetched by `account_info()`
@@ -431,12 +449,6 @@ users.
   so the slider shows the live max plus `1400×784 → 1952×1096` while dragging, pinned to the
   Python by a Node parity test. CLI: `--enlarge`/`--enlarge-model`/`--upscale`/
   `--upscale-denoise`/`--upscale-denoise-steps`/`--face-fix`/`--quality-tag`.
-- The Generate drawer's Edit ▸ Enhance sub-tab promotes ten one-click PixAI workflows
-  (upscale / upscale 2×2 / upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art
-  / sketch-colorize / relight-sun / relight-backlight), each firing `Gen.enhance(<workflow_id>)`
-  → `/api/enhance`, priced-and-confirmed before it spends. A search box below browses the rest
-  of PixAI's ComfyUI catalog into `#enh-list`. The Fix sub-tab is a separate box-coordinate
-  hand/face fixer (`/api/fix` → `submit_fixer`).
 
 ## Achievements / The Folio of Honors
 
@@ -547,7 +559,7 @@ on record so far, from a read-only code check (no changes made):
   generation, submitting a hand/face fix, deleting a task, claiming a reward — from the CLI or
   the web app, and regardless of `--confirm`/`--apply`/`--yes`. The four choke points
   (`submit_generation`, `submit_fixer`, `delete_task_gql`, `claim_reward`) are the only places
-  every generate/edit/enhance/fix/delete/claim path funnels through, CLI and web alike, so
+  every generate/edit/fix/delete/claim path funnels through, CLI and web alike, so
   gating there covers both surfaces from one place. Scoped to the PixAI account specifically —
   `--organize`/`--dedup` are untouched (already dry-run-by-default, never network). Documented
   for users on the wiki's **Trust & Safety** page.
