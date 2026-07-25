@@ -5457,11 +5457,17 @@ def run_fix_models(args):
 # this only reports your credit balance / plan. It never moves money. Buying
 # credits or changing your subscription is deliberately NOT implemented -- do that
 # in the browser.
+# `roles` (2026-07-24) is the account's own role list -- the owner's carries BETA_TO_INVITE,
+# the flag behind PixAI's early-access programs (the Tsubaki.3 / DiT.3 invite). One extra leaf
+# field on the query the header chip, --account and /api/account already run: no extra call,
+# no spend. Only the field NAME was probed, not its exact shape, so every consumer must
+# normalize rather than assume a list (see /api/account).
 _ACCOUNT_QUERY = """
 query {
   me {
     id
     quotaAmount
+    roles
     tasks { totalCount }
     followerCount
     followingCount
