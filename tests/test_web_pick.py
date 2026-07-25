@@ -1136,6 +1136,70 @@ def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch):
     assert "<host-path>" in body
 
 
+def test_redaction_is_case_insensitive_because_windows_paths_are(tmp_path, monkeypatch):
+    """`_redact_host_paths` matched with `str.replace`, which is case-SENSITIVE, while the
+    paths it is redacting live on a case-INSENSITIVE filesystem. A third-party library or a
+    normalized OS string can hand back the same directory in a different case (Users vs
+    users, drive letter either way), and the exact-case check silently misses it, shipping the real
+    host path and the OS username to a LAN caller while the guard reports success.
+
+    Bite: revert the matching to `path in out` / `out.replace(path, ...)` and this fails."""
+    out_dir = tmp_path / "Jane Smith" / "pixai_backup"
+    out_dir.mkdir(parents=True)
+    save_catalog(out_dir / "catalog.db", [_row(media_id="1", filename="a_1.png",
+                                          created_at="2025-01-01T00:00:00")])
+    cli = login_client(out_dir)
+
+    # the SAME directory, spelled in a different case -- what a normalizing library returns
+    shouty = str(out_dir).upper()
+
+    def boom(*a, **k):
+        raise RuntimeError("could not read {}\\config.json: permission denied".format(shouty))
+    monkeypatch.setattr(core, "_make_session", boom)
+
+    body = cli.post("/api/price", json={"model_id": "1", "prompt": "x"}).get_data(as_text=True)
+    assert "JANE SMITH" not in body, "upper-cased host path leaked verbatim: " + body[:300]
+    assert "<host-path>" in body
+
+
+def test_redaction_catches_a_slash_flipped_windows_path(tmp_path, monkeypatch):
+    """Same failure mode, second real variant: plenty of libraries hand back a Windows path
+    with forward slashes (`C:/Users/...`). That is the same directory and must redact too --
+    an exact-substring match against the backslash spelling never sees it."""
+    out_dir = tmp_path / "Jane Smith" / "pixai_backup"
+    out_dir.mkdir(parents=True)
+    save_catalog(out_dir / "catalog.db", [_row(media_id="1", filename="a_1.png",
+                                          created_at="2025-01-01T00:00:00")])
+    cli = login_client(out_dir)
+    flipped = str(out_dir).replace("\\", "/")
+
+    def boom(*a, **k):
+        raise RuntimeError("could not read {}/config.json: denied".format(flipped))
+    monkeypatch.setattr(core, "_make_session", boom)
+
+    body = cli.post("/api/price", json={"model_id": "1", "prompt": "x"}).get_data(as_text=True)
+    assert "Jane Smith" not in body, "slash-flipped host path leaked: " + body[:300]
+    assert "<host-path>" in body
+
+
+def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch):
+    """The degenerate-candidate guard must survive the case-insensitive rewrite: an ordinary
+    message containing no host path at all comes back untouched. This is the regression the
+    length floor and the resolve() both exist for -- a looser matcher is exactly how that
+    class of bug returns."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def boom(*a, **k):
+        raise RuntimeError("upstream said: retry in 0.5s (attempt 2 of 3)")
+    monkeypatch.setattr(core, "list_contests", boom)
+
+    body = cli.get("/api/contests").get_data(as_text=True)
+    assert "<host-path>" not in body, "redacted an ordinary message: " + body[:300]
+    assert "retry in 0.5s" in body
+
+
 def test_catalog_counts(tmp_path):
     import pixai_gallery as g
     g.save_catalog(tmp_path / "catalog.db", [
