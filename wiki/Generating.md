@@ -202,29 +202,36 @@ The four are clamped to what the chosen model really supports before submit — 
 Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values are
 corrected (and shown in the preview) rather than rejected.
 
-## Enhance an image (`--enhance`) — art filters
+## Art filters — free, in your browser
 
-Apply one of PixAI's **art filters** to an image (`--filter-id`). Source is a catalog
-`media_id` or a local file (auto-uploaded on `--confirm`). Preview-only until `--confirm`, same
-as every other spend-capable command here. `--dump-params` off a real filter task (recovered
-via `--task-id`) prints the exact ids and shape it used.
+PixAI's seven **art filters** (M1–M7) are not generations. Each one is two or three gradient
+overlays with a blend mode and an opacity, plus an optional brightness/contrast/saturation trim,
+and the recipes come from a public config endpoint that PixAI's own site reads and composites in
+the browser — which is why their Filters tab has no Generate button and never quotes a price.
 
-```bash
-# apply an art filter, with strength, spending credits:
-python pixai_gallery_backup.py --enhance --src <media_id> --filter-id filter-v1-m2 --strength 0.77 --confirm
-```
+Moonglade does the same thing locally. Open the Generate drawer → **Edit** → **Enhance** →
+**Open filters**: the source image sits on the left at size, the seven swatches and the
+strength/angle controls on the right. Picking a filter costs **nothing** and makes **no network
+request at all** — it works with the connection down. **Save to library** bakes the result to
+full resolution and files it under `imported/` with a thumbnail and a catalog row, the same way
+importing any local file does. Nothing is uploaded to PixAI.
+
+Two of the eight blend modes PixAI uses are Photoshop's whole-colour *Darker Color* / *Lighter
+Color*, which have no CSS or canvas equivalent; they are rendered with `darken` / `lighten`
+(per-channel min/max), so those two can differ slightly from PixAI's own render where a
+gradient crosses the image's hue. The other six are exact.
+
+There is no CLI flag for this — it's a browser-side composite, and the old credit-spending
+`--enhance --filter-id` submit was removed rather than kept as a worse way to get the same
+pixels.
 
 > **PixAI's one-click *workflow* tools are not available here.** Their tiled upscale,
 > background removal, line-art and relight presets run only on pixai.art itself: a task
 > submitted with an API key is accepted and queued, then cancelled about an hour later without
 > ever being started. There is no `--workflow-id`, and the web drawer's **Enhance** sub-tab
 > says the same thing. For hands and faces, use the **Fixer** instead — it goes through a
-> different endpoint and works.
-
-> **No cost preview.** Unlike every other spend-capable command in this file, `--enhance` has
-> no `--price`-style estimate before `--confirm` — PixAI's own cost-preview endpoint doesn't
-> cover this task family. Preview mode (no `--confirm`) still shows you exactly what would be
-> submitted, so you can sanity-check the filter id and source image first.
+> different endpoint and works. Plain **Upscale** and **Hires** do work: they're ordinary
+> generation settings on the Generate tab, not workflows.
 
 ## Multi-reference video (`--reference-video`)
 
@@ -348,6 +355,9 @@ what *is* restricted to the server's own machine.
   it submits: unlike everything else in the drawer, a fix can't be covered by a free card, so
   it always spends. Fixed images are filed under the name of the image they repaired plus a
   `fix-face` / `fix-hand` marker, so a repair sits next to its original in the folder.
+
+  sub-tabs over one source image. The third sub-tab, **Enhance**, is the free local **art
+  filters** panel (see above), and says which PixAI tools still only run on their own site.
 - **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
   the prompt turns into a chip; model + duration + audio; live cost shows **FREE + how many

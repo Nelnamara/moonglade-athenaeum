@@ -83,6 +83,59 @@ git tags. Full prose notes for tagged versions live on
   per poll: four pollers ask every 3s, and a per-poll write would add 1,200+ lines to the log
   for a single queued job and refresh its timestamp so often the orphan sweep could never see
   it age in. A generation a worker takes before its first poll costs no extra API calls at all.
+
+- **PixAI's seven art filters, applied in your browser: free, offline, no generation.** They were
+  never inference. Each filter is two or three linear-gradient overlays with a blend mode and an
+  opacity, plus an optional brightness/contrast/saturation trim, and the recipes come from a
+  **public, unauthenticated** config endpoint (`GET https://api.pixai.art/config/imageArtFilters`,
+  200 with no key) that PixAI's own web client reads and composites client-side — which is why
+  their Filters tab shows source and result side by side with no Generate button and no price on
+  it. `static/mg-art-filters.js` bakes all seven in **as data** (re-fetched and compared
+  field-by-field on 2026-07-25 — identical) so the feature works with the connection down, and
+  applies them with no network access of its own: CSS `mix-blend-mode` overlay divs for the live
+  preview (zero pixel work — the image stays the image), one canvas gradient fill per layer for
+  the export, both pinned to the same gradient geometry so an exported PNG matches the preview it
+  came from. Measured in a real browser: picking a filter, dragging strength, dragging angle and
+  clearing make **0** requests between them.
+
+  The surface is the Generate drawer's **Edit ▸ Enhance** sub-tab, which now opens a floating
+  side-by-side panel instead of holding explanatory copy: **image large on the left** so a filter
+  can actually be judged, swatches (each tile built from that filter's own gradients — the payload
+  carries no swatch art) plus strength/angle/reset/save on the right. It is placed by the drawer's
+  existing overlay idiom — `mg-model-picker`'s `_place()` rule, "prefer the side with room, then
+  clamp to the viewport" — sized to the room that exists rather than a fixed width, because at
+  1280×720 a 600px-wide Edit drawer leaves 647px beside it and demanding more would centre the
+  panel on top of the drawer it is meant to sit next to. Where nothing can fit beside the drawer
+  (the top/bottom docks, where it is a full-width bar) it centres over it, exactly as
+  `#model-flyout` already documents for those docks. **Save to library** bakes the composite at
+  full resolution and posts it to the existing `/api/import-local`, so it lands in `imported/`
+  with a thumbnail and a `source='local'` catalog row like any other local file — nothing is
+  uploaded to PixAI, and no credits are involved at any point.
+
+  Six of the eight blend modes PixAI uses map exactly to CSS/canvas. `plus-lighter` is a rename
+  only (canvas spells the same additive operator `lighter`). **`darker-color` and `lighter-color`
+  are approximations and are labelled as such**, not presented as exact: Photoshop's *Darker/
+  Lighter Color* compare whole colours and keep one of the two, while CSS `darken`/`lighten` take
+  the per-channel min/max and can emit a third colour present in neither input, so those two
+  layers can differ from PixAI's own render where a gradient crosses the image's hue. There is no
+  CSS or canvas mode with the whole-colour behaviour. An unmapped mode (a ninth PixAI might add)
+  returns `null` and gets its layer **dropped with a warning shown in the panel** rather than
+  coerced to `normal`, which would paint a flat gradient and look like a working filter.
+
+- **Two rendering-harness guards for that panel, both proved against their own pre-fix state.**
+  The side-by-side layout is a fact no HTML-substring assertion can see, and it was wrong first:
+  with `flex: 1 1 auto` on the left column its base size is the *image's* intrinsic width (900px
+  for a normal generation, since `max-width:100%` cannot resolve against a container the image is
+  itself sizing), so flex-wrap broke the line and stacked the controls under the image at every
+  panel width — measured, a 604px image in a 647px panel. `flex: 1 1 0` renders the same image at
+  373px beside the controls. The guard asserts the controls sit to the right of the image and
+  share its top band, that the overlay stage is exactly the image's box (or the `inset:0` gradient
+  layers paint over letterbox bars), that the browser really *accepted* the mapped blend modes
+  instead of silently computing `normal`, and that `image_parameters` reach the `<img>` as signed
+  offsets from 1 — then re-applies the pre-fix flex basis in-page and asserts the layout flips.
+  A second guard pins viewport containment at 375×812, where the panel must fall through to its
+  centred branch, including that the document gains no horizontal scroll.
+
 - **A rendering-assertion harness: tests that the CSS *works*, not that it *exists*.**
   `tests/test_render_harness.py` drives a real chromium (playwright) against the real Flask
   app on a real ephemeral port — a live server, because a Flask test client never renders —
@@ -540,9 +593,21 @@ git tags. Full prose notes for tagged versions live on
   `mode=enhance` branch, `build_panelplugin_parameters()`, `workflow_catalog()`, and the
   `--workflow-id` CLI flag. **The Enhance sub-tab itself stays**, now holding a short
   explanation that those tools only run on pixai.art and a pointer to the **Fix** sub-tab,
-  which goes through a different endpoint and does work here. `--enhance --filter-id` (art
-  filters) is unchanged. A regression guard asserts no reachable path can build a panelplugin
-  submit again.
+  which goes through a different endpoint and does work here. A regression guard asserts no
+  reachable path can build a panelplugin submit again. (The art-filter half of `--enhance` went
+  too — see the next entry.)
+
+- **The paid art-filter submit path — `build_filter_parameters()`, `--filter-id`, `--src`,
+  `--strength`, `--enhance` and `run_enhance()`.** That path worked, and was still the wrong
+  thing to do: it sent a `pixai-image-filter` generation to `createGenerationTask`, charging
+  credits and waiting on a worker queue to perform two or three gradient fills. PixAI's own web
+  client does not do that — it reads the recipes from a public config endpoint and composites
+  them in the browser — and now neither do we (see Added). With the panelplugin half already
+  gone, `--enhance` had no builder left at all, so the command and its three companion flags were
+  removed rather than kept as an entry point to nothing; `tests/test_enhance.py` drives the real
+  parser to prove the CLI no longer accepts any of them. Also gone: `TestRunEnhanceReadOnly`,
+  whose subject no longer exists (a READ_ONLY guard on a deleted runner would pin a husk — the
+  parser guard is the property that actually keeps the spend path closed).
 
 - **Upscale and the Generate-tab boosters, on the generation path that actually works.**
   PixAI's "Confirm Upscale" dialog offers two methods as radio buttons, and each radio's
