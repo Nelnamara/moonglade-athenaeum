@@ -1917,6 +1917,13 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
             "ref_count": int(m.get("refCount") or 0),
             "author_id": str(m.get("authorId") or ""),
             "cover_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
+            # GraphQL-only per-viewer state absent here -> False, the mirror of
+            # model_search_market_gql's "REST-only rich fields absent here -> empty so the
+            # card hides them". This endpoint carries no bookmarked/liked equivalent at all,
+            # so False means "this path can't tell you", NOT "confirmed not bookmarked" --
+            # exactly like `official: False` on a GraphQL row. Present-and-falsy (rather than
+            # missing) so a consumer can read the key off either path's rows.
+            "bookmarked": False, "liked": False,
         })
     return {"results": out, "has_more": bool(data.get("hasMore"))}
 
@@ -1964,6 +1971,15 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     REST's oRPC search -- actually carries this per-row. Surfaced as `model_type` /
     `lora_base_model_type`, the SAME key names model_search_rest's sibling
     resolve_version_meta() already uses, so callers don't care which path produced a row.
+
+    `bookmarked` + `liked` (2026-07-24) are VIEWER-SCOPED booleans GenerationModel carries on
+    every connection that returns one -- probed live: bookmarked:true on 50/50 rows of the
+    owner's own bookmark connection, false on 3/3 plain market rows. Genuinely free (two more
+    leaf fields on a request the picker already makes, no extra round trip). REST's oRPC
+    /search has NO equivalent, so model_search_rest defaults both to False and callers must
+    read False as "this path can't tell you" rather than "confirmed not bookmarked" -- the
+    same convention as `official` in the other direction. Nothing renders them yet; the picker
+    tab that consumes them is separate, later work.
 
     after=<cursor> (owner report 2026-07-24: the picker "scrolls a few rows and stops"):
     forward Relay-cursor paging -- standard `edges`/`pageInfo` connection shape, the same
@@ -2023,7 +2039,8 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         var_decl += ",$a:String"
         variables["a"] = after
     q = ("query(" + var_decl + "){ generationModels(" + ", ".join(args) + "){ "
-         "pageInfo{ hasNextPage endCursor } edges { node { id title type isNsfw likedCount "
+         "pageInfo{ hasNextPage endCursor } edges { node { id title type isNsfw "
+         "likedCount bookmarked liked "
          "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
          "tags { name } author { displayName } createdAt } } } }")
     data = (gql_adhoc(session, q, variables) or {}).get("generationModels") or {}
@@ -2058,6 +2075,10 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             # else in this file (never None, so a naive .strip()/comparison never explodes).
             "model_type": lv.get("modelType") or "",
             "lora_base_model_type": lv.get("loraBaseModelType") or "",
+            # Per-viewer state (GraphQL-only). Always a real bool -- a node that omits the
+            # field yields False, never None, same never-None rule as the two fields above.
+            "bookmarked": bool(n.get("bookmarked")),
+            "liked": bool(n.get("liked")),
         })
     page_info = data.get("pageInfo") or {}
     has_more = bool(page_info.get("hasNextPage"))
