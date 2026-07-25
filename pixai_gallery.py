@@ -6271,13 +6271,15 @@ document.addEventListener('DOMContentLoaded', function(){
       <div id="edit-sub-enhance" style="display:none;">
         <div class="gen-lbl" style="margin-top:0;">One-click tools</div>
         <div class="enh-note">
-          PixAI's one-click refinement workflows &mdash; tiled upscale, background removal,
-          line art, relight &mdash; only run on <b>pixai.art</b> itself. Submitted with an API
+          PixAI's one-click ComfyUI workflows &mdash; background removal, line art, sketch
+          colouring, relight &mdash; only run on <b>pixai.art</b> itself. Submitted with an API
           key they queue and are cancelled unstarted about an hour later, so this app can't
           offer them.
           <br><br>
-          For hands and faces, use <b>Fix</b> above: it goes through a different PixAI
-          endpoint and works here.
+          What <i>does</i> work here: <b>Upscale</b> and <b>Hires</b> live on the
+          <b>Generate</b> tab's Upscale row (they are ordinary generation settings, not
+          workflows), and for hands or faces use <b>Fix</b> above &mdash; it goes through a
+          different PixAI endpoint and works.
         </div>
       </div>
       <div id="edit-sub-fix" style="display:none;">
