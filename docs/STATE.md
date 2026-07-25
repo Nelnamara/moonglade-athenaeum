@@ -419,6 +419,25 @@ users.
     directly, appends correctly every time). Needs the owner's real scrolling to confirm
     the choppiness is actually gone.
 
+- **Upscale and the Generate-tab boosters are ordinary generation parameters**, built by
+  `_gen_parameters` on the same t2i/i2i submit every image gen already uses. PixAI's two
+  upscale methods are mutually exclusive and their radio values are the parameter names:
+  *Upscale* = `enlarge` + `enlargeModel` (one of five upscaler networks), *Hires* = `upscale`
+  + `upscaleDenoisingStrength`/`Steps`/`Sampler`. Boosters are `enableADetailer` (Face Fix)
+  and `qualityTag` (Quality Tag). Every key is emitted **only when asked for**, so a submit
+  that does not opt in is byte-identical to before. The ratio ceiling is **computed**
+  (`max_upscale_ratio`, from a per-method output-pixel ceiling) because the same method
+  allows a different maximum on a different source size; the drawer carries a hand port of it
+  so the slider shows the live max plus `1400×784 → 1952×1096` while dragging, pinned to the
+  Python by a Node parity test. CLI: `--enlarge`/`--enlarge-model`/`--upscale`/
+  `--upscale-denoise`/`--upscale-denoise-steps`/`--face-fix`/`--quality-tag`.
+- The Generate drawer's Edit ▸ Enhance sub-tab promotes ten one-click PixAI workflows
+  (upscale / upscale 2×2 / upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art
+  / sketch-colorize / relight-sun / relight-backlight), each firing `Gen.enhance(<workflow_id>)`
+  → `/api/enhance`, priced-and-confirmed before it spends. A search box below browses the rest
+  of PixAI's ComfyUI catalog into `#enh-list`. The Fix sub-tab is a separate box-coordinate
+  hand/face fixer (`/api/fix` → `submit_fixer`).
+
 ## Achievements / The Folio of Honors
 
 - **Renamed from "Trophy Hall" 2026-07-22** (owner's pick off the shortlist). Same

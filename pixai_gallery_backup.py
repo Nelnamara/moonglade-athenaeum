@@ -3962,6 +3962,80 @@ def _lora_params(raw):
     return lora_map, lora_list
 
 
+# --- Upscale + boosters (ordinary t2i/i2i generation parameters) --------------
+# PixAI's "Confirm Upscale" dialog offers TWO methods as radio buttons, and each radio's
+# `value` attribute IS the parameter name the submit carries:
+#   enlarge -> `enlarge` (ratio) + `enlargeModel` (which upscaler network runs)
+#   upscale -> `upscale` (ratio) + upscaleDenoisingStrength/Steps/Sampler ("Hires": the
+#              image is re-diffused at the larger size, which is why it has denoising
+#              controls and no upscaler dropdown, and why it costs roughly 3x as much)
+# They are the same family of params as width/height -- NOT a separate plugin surface --
+# so they ride the generation submit we already make.
+ENLARGE_MODELS = ("ESRGAN_4x", "R-ESRGAN 4x+", "R-ESRGAN 4x+ Anime6B", "SwinIR_4x",
+                  "Lollypop")
+DEFAULT_ENLARGE_MODEL = "R-ESRGAN 4x+ Anime6B"      # PixAI's own default selection
+DEFAULT_QUALITY_TAG = "Masterpiece"                 # their "Quality Tag" booster's prefix
+# Captured from a completed Hires job; their dialog hints strength works best 0.4-0.6.
+DEFAULT_UPSCALE_DENOISING_STRENGTH = 0.6
+DEFAULT_UPSCALE_DENOISING_STEPS = 26
+UPSCALE_RATIO_STEP = 0.1                            # both sliders step in tenths
+# A ratio slider's MAXIMUM is not a constant -- it moves with the source dimensions,
+# because what is actually capped is the OUTPUT pixel count. Measured maxima: a 1400x784
+# source allowed 1.9 in enlarge mode (-> 2656x1488) and 1.4 in Hires (-> 1952x1096),
+# while a 768x1280 source allowed 1.5 in Hires (-> 1152x1920). Each measurement brackets
+# the ceiling between "the largest allowed output area" and "the next 0.1 step's area":
+#   enlarge  >= 2656*1488 = 3,952,128  and  < 2800*1568 = 4,390,400
+#   Hires    >= 1152*1920 = 2,211,840  and  < 2096*1176 = 2,464,896  (both samples merged)
+# The values below sit inside those windows and reproduce all three measurements exactly.
+# INFERRED FROM TWO SOURCE SIZES, NOT DOCUMENTED: a source whose own bracket falls outside
+# these windows could be one 0.1 step off, so treat a PixAI rejection here as new data
+# rather than a bug in the arithmetic.
+UPSCALE_PIXEL_CEILING = {"enlarge": 2048 * 2048, "upscale": 2048 * 1152}
+# Every enlargeModel is a 4x network, and no measurement has ever shown a slider past it,
+# so 4.0 is the backstop for a source small enough that the area ceiling never bites.
+UPSCALE_RATIO_HARD_MAX = 4.0
+
+
+def upscale_output_dims(width, height, ratio):
+    """Output size an upscale ratio produces: scaled, then floored to the multiple of 8
+    every SD pipeline needs (the same snap _gen_parameters applies to width/height).
+    This is what their dialog prints under the slider -- 1400x784 at Hires 1.4 reads
+    '1952x1096', not 1960x1096, because the floor happens after the float multiply."""
+    r = float(ratio or 1)
+    return (max(64, int((int(width) * r) // 8) * 8),
+            max(64, int((int(height) * r) // 8) * 8))
+
+
+def max_upscale_ratio(width, height, mode="enlarge"):
+    """Largest ratio `mode` allows for a source of this size, in the slider's own 0.1
+    steps -- derived from UPSCALE_PIXEL_CEILING, never hardcoded, because the same
+    dialog shows different maxima for different source sizes. Walks the steps down from
+    the hard backstop so the answer honours the multiple-of-8 snap the real output uses.
+    Returns 1.0 (= no upscale possible) for a source already at the ceiling."""
+    ceiling = UPSCALE_PIXEL_CEILING.get(str(mode))
+    if ceiling is None:
+        raise PixAIError("unknown upscale mode {!r} -- expected one of {}".format(
+            mode, ", ".join(sorted(UPSCALE_PIXEL_CEILING))))
+    steps = int(round((UPSCALE_RATIO_HARD_MAX - 1.0) / UPSCALE_RATIO_STEP))
+    for i in range(steps, 0, -1):
+        r = round(1.0 + i * UPSCALE_RATIO_STEP, 1)
+        w, h = upscale_output_dims(width, height, r)
+        if w * h <= ceiling:
+            return r
+    return 1.0
+
+
+def _upscale_ratio(raw):
+    """Normalize a requested ratio to the slider's 0.1 step, or None when the caller did
+    not really ask for an upscale. 1.0 (and anything below) IS "no upscale" -- emitting
+    enlarge/upscale at 1.0 would still change the priced shape for no visible gain."""
+    try:
+        r = round(float(raw), 1)
+    except (TypeError, ValueError):
+        return None
+    return r if r > 1.0 else None
+
+
 def _gen_parameters(args):
     if getattr(args, "params_json", ""):
         return json.loads(args.params_json)
@@ -4020,6 +4094,57 @@ def _gen_parameters(args):
         except (TypeError, ValueError):
             stg = 0.55
         params["strength"] = max(0.05, min(1.0, stg))
+    # Upscale + boosters. EVERY key here is emitted only when the caller actually asked
+    # for it: these are absent from a plain submit, and an always-present default would
+    # silently change what every existing call site generates (and what it costs).
+    enlarge = _upscale_ratio(getattr(args, "enlarge", None))
+    upscale = _upscale_ratio(getattr(args, "upscale", None))
+    if enlarge and upscale:
+        # Kept short on purpose: the web route clips a builder refusal to 140 characters
+        # for the cost badge's note, so the actionable half must come first.
+        raise PixAIError("enlarge and upscale are mutually exclusive -- they are PixAI's "
+                         "two upscale methods ('Upscale' and 'Hires'), so pick one")
+    # Clamping can land on 1.0 for a source already at the output ceiling; that is "no
+    # upscale is possible at this size", so the block is dropped rather than submitting a
+    # 1.0 ratio that changes the priced shape and produces nothing.
+    if enlarge:
+        enlarge = min(enlarge, max_upscale_ratio(params["width"], params["height"],
+                                                 "enlarge"))
+    elif upscale:
+        upscale = min(upscale, max_upscale_ratio(params["width"], params["height"],
+                                                 "upscale"))
+    if enlarge and enlarge > 1.0:
+        params["enlarge"] = enlarge
+        # An unknown upscaler name would be rejected by PixAI, so fall back to their own
+        # default rather than losing the whole submit over a typo.
+        model = str(getattr(args, "enlarge_model", "") or "").strip()
+        params["enlargeModel"] = model if model in ENLARGE_MODELS else DEFAULT_ENLARGE_MODEL
+    elif upscale and upscale > 1.0:
+        params["upscale"] = upscale
+        dstr = getattr(args, "upscale_denoising_strength", None)
+        dstr = DEFAULT_UPSCALE_DENOISING_STRENGTH if dstr is None else dstr
+        dsteps = getattr(args, "upscale_denoising_steps", None)
+        dsteps = DEFAULT_UPSCALE_DENOISING_STEPS if dsteps is None else dsteps
+        try:
+            dstr = float(dstr)
+        except (TypeError, ValueError):
+            dstr = DEFAULT_UPSCALE_DENOISING_STRENGTH
+        try:
+            dsteps = int(dsteps)
+        except (TypeError, ValueError):
+            dsteps = DEFAULT_UPSCALE_DENOISING_STEPS
+        # Bounds read off the live dialog's own controls: strength 0.01-0.99 step 0.01,
+        # steps 1-50 step 1.
+        params["upscaleDenoisingStrength"] = round(max(0.01, min(0.99, dstr)), 2)
+        params["upscaleDenoisingSteps"] = max(1, min(50, dsteps))
+        # Empty string is what a completed Hires job carried -- Hires has no sampler
+        # dropdown of its own, so this hands the choice back to the base generation.
+        params["upscaleSampler"] = str(getattr(args, "upscale_sampler", "") or "")
+    if getattr(args, "face_fix", False):
+        params["enableADetailer"] = True             # their "Face Fix" booster
+    qtag = str(getattr(args, "quality_tag", "") or "").strip()
+    if qtag:
+        params["qualityTag"] = {"prefix": qtag}      # their "Quality Tag" booster
     if getattr(args, "kaisuuken_id", ""):
         params["kaisuukenId"] = str(args.kaisuuken_id)   # spend a free card instead of credits
     return params
@@ -6047,6 +6172,12 @@ _PRICE_SCALARS = frozenset((
 _PRICE_NESTED = frozenset((
     "controlNets", "ipAdapter", "animateDiff", "workflow", "i2vPro", "referenceVideo",
     "t2i2v", "inputs", "chat", "inpaint", "loraParameters"))
+# The upscale keys above are why the cost badge tracks an upscale at all -- the two methods
+# differ by roughly 3x at their maximum ratio. Deliberately NOT listed: enlargeModel,
+# upscaleSampler and qualityTag. They are real submit params, but they are not in this
+# endpoint's input schema and none of them changes the price (the cost is the same whichever
+# upscaler network runs), and an off-schema query param risks a 400 that would make
+# price_task fail soft and blank the badge. Add one only with a measurement showing it priced.
 
 
 def price_task(session, params):
@@ -7394,6 +7525,40 @@ def main():
                      help="add a LoRA by its version id and weight, e.g. "
                           "--lora 1686550608832816741:0.7 (repeatable). Find version ids "
                           "with --list-models")
+    # Upscale + boosters. Flags are named after the PARAMETERS (what --dump-params shows),
+    # with PixAI's own dialog label quoted in the help -- their two radio buttons read
+    # "Upscale" (= the `enlarge` param) and "Hires" (= the `upscale` param), so naming the
+    # flags after the labels instead would have made --upscale mean enlarge.
+    gen.add_argument("--enlarge", type=float, default=None, metavar="RATIO",
+                     help="enlarge the finished image with an upscaler network (PixAI's "
+                          "'Upscale' method), in 0.1 steps from 1.1. Clamped to the largest "
+                          "ratio the output-size ceiling allows for this --width/--height. "
+                          "Mutually exclusive with --upscale")
+    gen.add_argument("--enlarge-model", dest="enlarge_model", default="",
+                     choices=list(ENLARGE_MODELS),
+                     help="which upscaler network --enlarge runs (default: {})".format(
+                         DEFAULT_ENLARGE_MODEL))
+    gen.add_argument("--upscale", type=float, default=None, metavar="RATIO",
+                     help="re-diffuse the image at a larger size (PixAI's 'Hires' method), "
+                          "in 0.1 steps from 1.1. Sharper than --enlarge and roughly 3x the "
+                          "credits; allows a smaller maximum ratio. Mutually exclusive with "
+                          "--enlarge")
+    gen.add_argument("--upscale-denoise", dest="upscale_denoising_strength", type=float,
+                     default=None, metavar="STRENGTH",
+                     help="--upscale denoising strength, 0.01-0.99 (default {}; PixAI's own "
+                          "hint is 0.4-0.6 -- higher redraws more)".format(
+                              DEFAULT_UPSCALE_DENOISING_STRENGTH))
+    gen.add_argument("--upscale-denoise-steps", dest="upscale_denoising_steps", type=int,
+                     default=None, metavar="N",
+                     help="--upscale denoising steps, 1-50 (default {})".format(
+                         DEFAULT_UPSCALE_DENOISING_STEPS))
+    gen.add_argument("--face-fix", dest="face_fix", action="store_true",
+                     help="run PixAI's face restorer over the result (enableADetailer -- "
+                          "the generator's 'Face Fix' booster)")
+    gen.add_argument("--quality-tag", dest="quality_tag", nargs="?",
+                     const=DEFAULT_QUALITY_TAG, default="", metavar="PREFIX",
+                     help="prepend a quality booster to the prompt (the generator's "
+                          "'Quality Tag'). Bare flag uses '{}'".format(DEFAULT_QUALITY_TAG))
     gen.add_argument("--task-id", default="",
                      help="with --generate, fetch + catalog an ALREADY-created task by id "
                           "(no new credits). Recovers a stranded generation that --update "

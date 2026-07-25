@@ -82,6 +82,12 @@ python pixai_gallery_backup.py --generate --task-id <id>
 | `--priority` / `--high-priority` | `500` | 500 = standard (cheaper), 1000 = high |
 | `--no-prompt-helper` | off | use the prompt literally |
 | `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | |
+| `--enlarge RATIO` | off | upscale the finished image with an upscaler network (PixAI's **Upscale** method). 0.1 steps, clamped to the biggest ratio your `--width`/`--height` allows |
+| `--enlarge-model NAME` | `R-ESRGAN 4x+ Anime6B` | which upscaler `--enlarge` runs: `ESRGAN_4x`, `R-ESRGAN 4x+`, `R-ESRGAN 4x+ Anime6B`, `SwinIR_4x`, `Lollypop` |
+| `--upscale RATIO` | off | re-render at the larger size (PixAI's **Hires** method) — adds detail rather than just resolution, allows a smaller maximum ratio, costs roughly 3× `--enlarge`. Mutually exclusive with it |
+| `--upscale-denoise` / `--upscale-denoise-steps` | `0.6` / `26` | Hires denoising (strength 0.01–0.99, steps 1–50). PixAI's own hint: strength works better between 0.4 and 0.6 |
+| `--face-fix` | off | run PixAI's face restorer over the result (their **Face Fix** booster) |
+| `--quality-tag [PREFIX]` | off | prepend a quality booster to the prompt (their **Quality Tag**; bare flag uses `Masterpiece`) |
 | `--confirm` | off | **required** to spend credits |
 | `--task-id` | — | fetch/catalog an existing task instead of creating one |
 | `--poll-timeout` | `300` | seconds to wait for a submitted task to finish before giving up (every create path) |
@@ -89,6 +95,18 @@ python pixai_gallery_backup.py --generate --task-id <id>
 
 Generated images are tagged `source='api'` — filter to them in the gallery via
 **Source → Generated**.
+
+> **The two upscale methods, and why the flag names look backwards.** PixAI's own dialog
+> labels them *Upscale* and *Hires*, but the parameters those two buttons actually send are
+> named `enlarge` and `upscale` — so the flags are named after the parameters (what
+> `--dump-params` shows you) rather than the buttons. *Upscale*/`--enlarge` runs an upscaler
+> network over the finished picture; *Hires*/`--upscale` re-renders it larger and can invent
+> new detail. **The maximum ratio is not fixed** — it falls out of an output-size ceiling, so
+> the same method offers a bigger ratio on a small image than on a large one (a 1400×784
+> image tops out at 1.9× with `--enlarge` but 1.4× with `--upscale`). Ask for more and it is
+> clamped down to what your size allows; ask on an image that is already at the ceiling and
+> the upscale is dropped rather than submitted as a pointless 1×. The web Generate drawer
+> shows the live maximum and the resulting size (`1400×784 → 1952×1096`) as you drag.
 
 ---
 
