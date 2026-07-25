@@ -226,7 +226,8 @@ python pixai_gallery_backup.py --reference-video --ref-image <id1> --ref-image <
 
 | Flag | Meaning |
 |---|---|
-| `--ref-image` / `--ref-video` / `--ref-audio` | a reference (media_id or local file), **repeatable** — `@image1`, `@image2`, … |
+| `--ref-image` / `--ref-video` | a reference (media_id **or** a local file, uploaded for you), **repeatable** — `@image1`, `@image2`, … |
+| `--ref-audio` | a reference — **media_id only**, *not* a local file, **repeatable**. PixAI's uploader takes images and videos only, so there's nothing to upload a bare audio file as. To use audio from your own machine, put it into a video (even just a still image with the audio track) and pass that with `--ref-video`. |
 | `--prompt` | cite refs by `@imageN` / `@videoN` / `@audioN` |
 | `--duration` / `--video-mode` / `--audio` | as with `--generate-video` (15s uses 3 V4.0 cards) |
 | `--confirm` | **required** to submit |

@@ -142,6 +142,20 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **A local `--ref-video` file was uploaded to PixAI as an `IMAGE`, and a local `--ref-audio`
+  file was silently mislabelled the same way.** `_resolve_refs()` resolved all three
+  reference kinds through one call that let `upload_media`'s `media_type` default to
+  `"IMAGE"`, so only the `--ref-image` case was ever right. Settled by probing the live
+  schema (read-only, nothing executed): **`MediaType` is a real GraphQL enum with exactly
+  two members, `IMAGE` and `VIDEO`** — there is **no `AUDIO`**. So local videos now register
+  as `VIDEO`, and a local *audio* file is **refused with a message naming the workaround**
+  (wrap it in a video, pass `--ref-video`) rather than uploaded under a type that cannot be
+  correct — a junk media_id and a baffling downstream failure is worse than a clear refusal.
+  An existing media_id passes through untouched on every kind, which is what the web UI
+  sends, so the web reference-video path was never affected. Also corrects the private RE
+  notes, which documented `type:"IMAGE"`/`provider:"S3"` as strings: that is the *variable*
+  JSON form (GraphQL coerces a JSON string to an enum), and both are enums inline.
+
 - **The Loom's Image / Edit / Reference tabs never registered their generations in the
   Activity tracker at all — a second, separately-discovered cause of "lost" generations,
   found in the owner's 2026-07-24 Loom field test.** He generated from the Image tab and got
