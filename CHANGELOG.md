@@ -139,6 +139,15 @@ git tags. Full prose notes for tagged versions live on
   Net: opening the flyout and picking a base model costs one search instead of two, and
   browsing LoRAs afterwards costs one instead of two.
 
+- **The base-model version dropdown no longer appears when there is only one version to
+  pick.** `renderVersions()` rendered the `<select>` unconditionally, so the majority of
+  picks (most models publish exactly one release) got a dropdown that could not do anything.
+  The gate already existed in two other places in this codebase and is reused rather than
+  reinvented — the Gallery's own per-LoRA chips and the Loom's `.lv-versel` both condition on
+  `versions.length > 1`. The row itself still opens for the capability badges alone, since
+  those are independent of the version count, and submit still reads `selected.version_id`
+  rather than the control's value, so hiding it cannot change what gets generated.
+
 ## [2.4.0] - 2026-07-24 — Concurrent generations, real trash recovery, and a nasty video-corruption bug fixed
 
 A trash/quarantine restore panel, field-operator search (`model:`, `rating:>=3`, …),
