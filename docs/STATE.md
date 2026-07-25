@@ -288,6 +288,12 @@ users.
   gets a `cli-<uuid>` job id (mirroring `panel-`/`bulkdel-`), logged fail-soft so a logging hiccup
   can never break the actual command. A panel-spawned subprocess still logs exactly once (no
   duplicate entry) via the existing `MOONGLADE_PROGRESS=1` path.
+  Every WEB generation surface registers too: the gallery's Generate/Edit/Fix/Enhance tabs, the
+  shared Generate drawer, and all four of the Loom's own submit paths (per-shot video plus the
+  Image / Edit / Reference tabs, which had never registered at all until 2026-07-24). Each uses
+  `Jobs.register()` — registration without a second poll loop — because every one of them already
+  owns a private poller that polls `/api/task-status`, the route that writes the authoritative
+  terminal event.
 - The Generate drawer's Edit ▸ Enhance sub-tab promotes ten one-click PixAI workflows
   (upscale / upscale 2×2 / upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art
   / sketch-colorize / relight-sun / relight-backlight), each firing `Gen.enhance(<workflow_id>)`
