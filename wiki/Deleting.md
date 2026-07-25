@@ -24,6 +24,14 @@ in the gallery:
 > selecting one image deletes its whole batch on PixAI. Gated behind a confirm dialog +
 > typing `DELETE`. Only the *local* part is recoverable via `_deleted/`.
 
+**The confirm dialog shows you the batch.** Because one selected image takes its whole task
+with it, the dialog leads with the real total — *"7 files across 2 tasks will be deleted from
+your PixAI account and from your backup. You picked 3; the other 4 come with their batches."*
+— and then shows every one of those files as a thumbnail, grouped by task, with the ones you
+actually selected outlined in gold. Anything you imported locally (no PixAI task) is listed
+separately as a local-only removal, so the count adds up. Nothing is sent until you press
+**Continue…** and type `DELETE`.
+
 ## Reconcile — clean up what you deleted on the website
 
 Deleting a task on PixAI doesn't touch your local backup (by design). To find and

@@ -2560,6 +2560,13 @@ def find_image_file(out_dir, media_id, filename):
 # destroying them (the catalog row is still removed, so the gallery stays clean).
 DELETED_DIRNAME = "_deleted"
 
+# How many tasks /api/delete-preview describes image-by-image before it stops and just
+# counts the rest. A DISPLAY bound only -- the totals it returns are always exact for
+# the whole selection. 24 tasks is up to ~100 thumbnails, which is already more than
+# anyone reads in a confirm dialog; selecting a thousand images would otherwise build a
+# megabyte of JSON and a thumbnail wall the modal cannot scroll through.
+DELETE_PREVIEW_TASK_CAP = 24
+
 
 def _trash_meta_path(out_dir, media_id):
     """Sidecar path for a quarantined item's snapshotted catalog row (see
@@ -4836,8 +4843,23 @@ document.addEventListener('DOMContentLoaded', function() {
     <button type="button" class="btn b-art" onclick="YourArt.open()" title="How your published art is doing &mdash; views, likes, comments">&#128200; My Art</button>
     {% if is_local %}
     <a class="btn b-panel" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
-    {% else %}
-    <span class="lan-note" title="Creation &amp; maintenance tools live on the owner's machine, or need you to sign in.">&#128065; read-only LAN view</span>
+    {% endif %}
+    {# The LAN indicator, in the slot the old (unreachable) "read-only LAN view" note
+       used to occupy. It branches on `is_true_local`, NOT `is_local`: `is_local` is
+       hardcoded True at index()'s render call, so anything hung off its `{% else %}`
+       could never render -- and the note that used to live there was wrong anyway,
+       since a signed-in LAN session is not read-only (it browses, generates, and
+       drives the Loom and the Panel exactly like the owner at the keyboard).
+       What genuinely differs is the LOCALHOST tier: Import, "Delete from PixAI",
+       "Set launcher icon" and the file-moving Panel jobs are hidden for a remote
+       caller (see the head-nav comment above, and _is_local_request()). Nothing on
+       the page said so, so the same owner in the same browser saw a different set of
+       buttons depending only on whether the address bar said `localhost` or the
+       machine's LAN IP -- which reads as the app being broken, not as a tier. This
+       is a LABEL for a decision the tier helpers already made: it introduces no new
+       notion of trust, and every route keeps its own gate. #}
+    {% if not is_true_local %}
+    <span class="lan-note" id="lan-chip" title="You reached this gallery across the network, so the controls restricted to the machine running it are hidden: &#8593; Import, Delete from PixAI, Set launcher icon, and the destructive Panel jobs (Organize, Dedup, Rebuild thumbnails). Everything else — browsing, Generate, The Loom, the Panel — works normally here. Open the gallery on that machine's own localhost address to get the rest.">&#127760; LAN session &middot; local-only tools hidden</span>
     {% endif %}
     <a class="btn b-health" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
     {% if logged_in_user %}
@@ -5666,22 +5688,111 @@ function confirmBulkDelete() {
   };
   document.getElementById('del-modal-form').action = '#';
 }
-function confirmBulkDeleteCloud() {
-  var ids = [...selGet()];
-  if (!ids.length) return;
-  if (!confirm('Delete ' + ids.length + ' selected image(s) from your PixAI account AND locally?\\n\\n'
-    + '⚠ This deletes the whole TASK for each selection (all images in a batch), '
-    + 'from the cloud AND your backup. It is IRREVERSIBLE.')) return;
-  var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
-  if (typed !== 'DELETE') { alert('Cancelled.'); return; }
-  var f = document.createElement('form');
-  f.method = 'post'; f.action = '/delete-tasks-bulk';
-  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
-  add('back', location.href);
-  ids.forEach(function(mid){ add('media_ids', mid); });
-  localStorage.removeItem('gallery_sel');
-  document.body.appendChild(f); f.submit();
-}
+/* ---- "Delete from PixAI": show the blast radius, then the typed gate ------------
+   Deleting on PixAI is TASK-level: selecting one image of a batch deletes the whole
+   batch, cloud AND local. This flow used to say that in prose and stop there, so the
+   one irreversible action in the app was also the only one whose real scope the user
+   could not see -- the siblings about to go were never counted, named or shown.
+   /api/delete-preview resolves the selection through the SAME helper
+   /delete-tasks-bulk itself uses, and this dialog renders what it came back with.
+   The typed DELETE prompt behind Continue is unchanged: this makes a consequence
+   visible, it does not replace a guard. */
+var CloudDel = (function(){
+  var ids = [], busy = false;
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function n(v, one, many){ return v + ' ' + (v === 1 ? one : many); }
+  function close(){ document.getElementById('cloud-del-modal').classList.remove('open'); }
+  function strip(items){
+    var s = '<div class="cd-strip">';
+    items.forEach(function(m){
+      s += '<div class="cd-thumb' + (m.selected ? ' on' : '') + '" title="' + esc(m.media_id)
+         + (m.selected ? ' (you selected this)' : ' (comes with the batch)') + '">'
+         + (m.thumb ? '<img src="/thumbs/' + encodeURIComponent(m.thumb) + '.jpg" alt="" loading="lazy">'
+                    : '<span class="cd-noimg">' + esc(m.media_id) + '</span>')
+         + (m.is_video ? '<span class="cd-vid">&#9654;</span>' : '') + '</div>';
+    });
+    return s + '</div>';
+  }
+  function open(sel, d){
+    ids = sel;
+    var t = d.totals, body = '';
+    // Two genuinely different sentences, not one with holes punched in it: a selection
+    // of nothing but local imports deletes NOTHING on PixAI, and saying "across 0
+    // tasks will be deleted from your PixAI account" about it would be a lie.
+    var head = t.tasks === 0
+      ? '<b>' + n(t.media, 'file', 'files') + '</b> will be removed from your backup. None of them is '
+        + 'on PixAI (local imports), so nothing is deleted from your account.'
+      : '<b>' + n(t.media, 'file', 'files') + '</b> across <b>' + n(t.tasks, 'task', 'tasks')
+        + '</b> will be deleted from your PixAI account <b>and</b> from your backup.';
+    if (t.tasks > 0 && t.unselected > 0) {
+      head += ' You picked ' + n(t.selected, 'file', 'files') + '; the other '
+            + (t.unselected === 1 ? '1 comes with its batch.'
+                                  : t.unselected + ' come with their batches.');
+    }
+    // Don't let the headline count imply an import is going to be deleted from PixAI:
+    // it has no task there at all, and only its local copy moves.
+    if (t.tasks > 0 && t.local_only > 0) {
+      head += t.local_only === 1
+        ? ' One is a local import with no PixAI task &mdash; that one only leaves your backup.'
+        : ' ' + t.local_only + ' are local imports with no PixAI task &mdash; those only leave '
+          + 'your backup.';
+    }
+    document.getElementById('cd-summary').innerHTML = head;
+    d.tasks.forEach(function(tk){
+      body += '<div class="cd-task"><div class="cd-tlbl">whole batch'
+            + '<span class="cd-tid">task ' + esc(tk.task_id) + '</span>'
+            + '<span>' + n(tk.media.length, 'file', 'files') + '</span></div>'
+            + strip(tk.media) + '</div>';
+    });
+    if (d.local_only.length) {
+      body += '<div class="cd-task"><div class="cd-tlbl">no PixAI task &middot; removed locally only'
+            + '<span>' + n(t.local_only, 'file', 'files') + '</span></div>'
+            + strip(d.local_only) + '</div>';
+    }
+    if (d.truncated) {
+      body += '<div class="cd-more">Not every batch is shown above &mdash; the counts in the '
+            + 'first line cover the whole selection.</div>';
+    }
+    document.getElementById('cd-tasks').innerHTML = body;
+    document.getElementById('cloud-del-modal').classList.add('open');
+  }
+  // Fail-soft: an unreachable preview (server restarting, offline tab) must not turn the
+  // button into a dead click NOR silently drop the warning -- fall back to the prose-only
+  // confirm this dialog replaced, and say that the detail is missing rather than implying
+  // the selection is all that goes.
+  function blind(sel){
+    ids = sel;
+    if (!confirm('Delete ' + sel.length + ' selected file(s) from your PixAI account AND locally?\\n\\n'
+      + 'The preview of exactly what that takes could not be loaded, so: this deletes the whole '
+      + 'TASK behind each selection (every image in the batch, including ones you did not '
+      + 'select), from the cloud AND your backup. It is IRREVERSIBLE.')) return;
+    proceed();
+  }
+  function proceed(){
+    close();
+    var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
+    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+    var f = document.createElement('form');
+    f.method = 'post'; f.action = '/delete-tasks-bulk';
+    function add(k, v){ var i=document.createElement('input'); i.type='hidden'; i.name=k; i.value=v; f.appendChild(i); }
+    add('back', location.href);
+    ids.forEach(function(mid){ add('media_ids', mid); });
+    localStorage.removeItem('gallery_sel');
+    document.body.appendChild(f); f.submit();
+  }
+  function ask(){
+    var sel = [...selGet()];
+    if (!sel.length || busy) return;
+    busy = true;
+    fetch('/api/delete-preview', {method:'POST', headers:{'Content-Type':'application/json'},
+                                  body: JSON.stringify({media_ids: sel})})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){ busy = false; if (d && d.totals) { open(sel, d); } else { blind(sel); } })
+      .catch(function(){ busy = false; blind(sel); });
+  }
+  return {ask:ask, close:close, proceed:proceed};
+})();
+function confirmBulkDeleteCloud() { CloudDel.ask(); }
 
 /* ---- Lightbox + keyboard navigation ---- */
 var lbCards = [], lbIdx = -1, lbTimer = null, lbZoom = false;
@@ -6382,6 +6493,25 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="ct-foot" id="art-foot"></div>
   </div>
 </div>
+{# "Delete from PixAI" -- the blast-radius dialog. Same .modal-bg/.modal chrome as
+   #del-modal ("Delete locally") on purpose: these two buttons sit beside each other in
+   the Actions menu and the more dangerous of the pair should not look like a different
+   feature. It replaces only the FIRST of the flow's two prompts (the prose confirm()
+   that described the batch rule but never showed it); the typed DELETE prompt behind
+   Continue is untouched, and so is /delete-tasks-bulk's localhost gate. #}
+<div class="modal-bg" id="cloud-del-modal" onclick="if(event.target===this)CloudDel.close()">
+  <div class="modal cd-modal" role="dialog" aria-label="Delete from PixAI">
+    <h2>Delete from PixAI</h2>
+    <p id="cd-summary"></p>
+    <div id="cd-tasks" class="cd-tasks"></div>
+    <p class="cd-foot">Irreversible on PixAI. The local copies move to
+      <b>_deleted/</b> and can be put back from the Control Panel&rsquo;s Trash panel.</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="CloudDel.close()">Cancel</button>
+      <button class="btn btn-danger" onclick="CloudDel.proceed()">Continue&hellip;</button>
+    </div>
+  </div>
+</div>
 <style>
   .art-tot{display:flex;gap:22px;margin:16px 0 4px;}
   .art-tot .cell{display:flex;flex-direction:column;}
@@ -6439,6 +6569,26 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest .ts-head{display:flex;justify-content:space-between;gap:14px;color:var(--overlay0);font-size:10px;padding:3px 8px;text-transform:uppercase;letter-spacing:.05em;}
   #tag-suggest button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:6px 9px;border-radius:5px;cursor:pointer;}
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
+  /* "Delete from PixAI" blast radius. Wider than the shared .modal's 400px because the
+     point is the thumbnails; the strip scrolls inside min(46vh, 380px) so a many-task
+     selection can never push Cancel/Continue off the bottom of the screen -- measured at
+     1280x900 (566px tall modal) and 375x812 (625px, actions still above the fold). */
+  .cd-modal{max-width:640px;}
+  .cd-tasks{max-height:min(46vh,380px);overflow-y:auto;margin-bottom:16px;display:flex;flex-direction:column;gap:10px;}
+  .cd-task{background:var(--surface0);border:1px solid var(--surface1);border-radius:9px;padding:8px 9px;}
+  .cd-tlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);margin-bottom:6px;display:flex;gap:7px;align-items:baseline;}
+  .cd-tlbl .cd-tid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:none;letter-spacing:0;color:var(--subtext);}
+  .cd-strip{display:flex;flex-wrap:wrap;gap:6px;}
+  .cd-thumb{position:relative;width:58px;height:58px;border-radius:6px;overflow:hidden;background:var(--surface1);border:1px solid var(--surface1);flex:0 0 auto;}
+  /* The selected ones are outlined, not the doomed ones: EVERYTHING here is doomed, and
+     the only thing the user cannot already infer is which of these they actually picked. */
+  .cd-thumb.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold);}
+  .cd-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+  .cd-thumb .cd-noimg{display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-size:9px;color:var(--overlay0);padding:2px;text-align:center;word-break:break-all;}
+  .cd-thumb .cd-vid{position:absolute;bottom:2px;right:3px;font-size:9px;color:var(--text);text-shadow:0 1px 3px #000;}
+  .cd-more,.cd-foot{font-size:11.5px;color:var(--overlay0);}
+  .cd-more{font-style:italic;}
+  .modal p.cd-foot{margin-bottom:16px;}
 </style>
 <script src="/static/picker-core.js"></script>
 <!-- O12/O13 (Phase 2): the Generate tab's model/LoRA flyout and the gallery's own picker are
@@ -10284,10 +10434,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # unauthenticated LAN viewer could land here and see the "paste your API key" setup
         # wizard; that conjunct hid it from them. That viewer can no longer reach this line.
         # `is_local` below (the header template's flag for showing the owner-only
-        # Generate/Loom/Panel controls vs. the read-only note) is hardcoded True for the
-        # identical reason -- same call site, same guarantee: those three are genuinely
-        # LOGIN-tier, matching their own route gating.
-        # `is_true_local` is the REAL, un-hardcoded _is_local_request() result. It now
+        # Generate/Loom/Panel controls) is hardcoded True for the identical reason --
+        # same call site, same guarantee: those three are genuinely LOGIN-tier,
+        # matching their own route gating. The name is a misnomer and the dead
+        # `{% else %}` note it used to carry ("read-only LAN view") is gone: a
+        # signed-in LAN session is not read-only, and the header now says what really
+        # differs about it off `is_true_local` (see the #lan-chip comment there).
+        # `is_true_local` is the REAL, un-hardcoded _is_local_request() result. It
         # gates the Import button's own visibility (see the head-nav comment above it),
         # FIXED 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): a signed-in, non-local
         # LAN session used to see a working-looking Import button that always 403'd,
@@ -10298,6 +10451,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # to /delete-tasks-bulk, which is gated to the same stricter _is_local_request()
         # (irreversible cloud deletion, same trust tier as /api/branding/shortcut), so a
         # logged-in LAN session sees "Delete locally" but not "Delete from PixAI".
+        # The header's #lan-chip is the third reader of the same value, and the only one
+        # that renders on the FALSE side: it names the controls the two above withhold,
+        # so a remote session sees a reason instead of a hole.
         import pixai_gallery_backup as _core
         _fresh_cfg = _core._load_config()
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
@@ -10419,6 +10575,141 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         (recoverable) rather than destroying it."""
         purge_media_local(out_dir, thumb_dir, db_path, media_id, filename)
 
+    def _resolve_delete_targets(con, media_ids):
+        """The shared selection -> (task ids, local-only rows) resolution behind BOTH
+        /api/delete-preview and delete_tasks_bulk. Shared rather than copied so the
+        preview cannot drift from the action it previews: a dialog that lists a different
+        blast radius than the delete then takes is worse than showing nothing at all.
+
+        Returns (sel_rows, task_ids, local_only) where task_ids is sorted+deduped (one
+        cloud delete per task no matter how many of its images were selected) and
+        local_only holds the rows with no task id at all -- imports, which have nothing
+        on PixAI to delete and are purged locally only."""
+        sel_rows = [con.execute(
+            "SELECT media_id, task_id, filename FROM catalog WHERE media_id=?", (m,)
+        ).fetchone() for m in media_ids]
+        sel_rows = [dict(r) for r in sel_rows if r]
+        task_ids = sorted({(r.get("task_id") or "").strip()
+                           for r in sel_rows if (r.get("task_id") or "").strip()})
+        local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
+        return sel_rows, task_ids, local_only
+
+    # sqlite's default host-parameter ceiling is 999, and this is well inside it while
+    # still cutting a big selection to a handful of passes.
+    _TASK_CHUNK = 400
+
+    def _members_of_tasks(con, task_ids):
+        """{task_id: [row, ...]} for every media in the given tasks, in ONE chunked pass
+        instead of a query per task.
+
+        `catalog` indexes media_id (its PRIMARY KEY), created_at, model_name, rating and
+        batch -- there is NO index on task_id, so each `WHERE task_id=?` is a full table
+        scan. Measured on a 36,000-row catalog: 24 such queries cost 216ms, 100 cost
+        1.04s and 800 cost 8.6s, all of it inside the request /api/delete-preview's
+        dialog is waiting on; the same 800 tasks fetched with chunked `IN` cost 38ms.
+        Rows come back grouped and sorted here rather than relying on the query's order,
+        because one statement now returns several tasks interleaved."""
+        out = {}
+        for i in range(0, len(task_ids), _TASK_CHUNK):
+            chunk = task_ids[i:i + _TASK_CHUNK]
+            rows = con.execute(
+                "SELECT media_id, task_id, is_video, poster_media_id FROM catalog "
+                "WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
+            for r in rows:
+                out.setdefault(r["task_id"], []).append(r)
+        for members in out.values():
+            members.sort(key=lambda r: r["media_id"])
+        return out
+
+    def _preview_entry(row, selected_ids):
+        """One /api/delete-preview media entry: what it is, whether the user actually
+        picked it, and the media_id whose thumbnail exists on disk -- or None for
+        `thumb`, so the client renders an id chip instead of a broken image. Videos fall
+        back to their still-frame poster's thumb exactly as the gallery grid does (older
+        sync runs never generated the video's own)."""
+        mid = row["media_id"]
+        thumb = None
+        if (thumb_dir / "{}.jpg".format(mid)).exists():
+            thumb = mid
+        elif row["is_video"] == "1" and row["poster_media_id"]:
+            poster = row["poster_media_id"]
+            if (thumb_dir / "{}.jpg".format(poster)).exists():
+                thumb = poster
+        return {"media_id": mid, "is_video": row["is_video"] == "1",
+                "selected": mid in selected_ids, "thumb": thumb}
+
+    @app.route("/api/delete-preview", methods=["POST"])
+    def api_delete_preview():
+        """What "Delete from PixAI" would actually take, listed image by image, before
+        anything fires. Read-only: a few catalog reads, no network, no PixAI call.
+
+        Deleting on PixAI is TASK-level -- selecting one image of a batch deletes the
+        whole batch, cloud AND local. The confirm dialog said that in prose but never
+        showed WHICH siblings, so the single irreversible action in this app was also
+        the only one whose real scope the user could not see before committing to it.
+        This resolves the selection through _resolve_delete_targets (the same helper
+        delete_tasks_bulk uses, deliberately) and then expands each task to its full
+        catalog membership.
+
+        LOCALHOST, mirroring the action it previews rather than the data it reads. The
+        catalog rows themselves are ordinary LOGIN-tier browsing material (a LAN
+        session can already list a whole batch via ?batch=<task_id>), so this is not
+        about hiding them -- it is that the preview exists only as step one of a
+        LOCALHOST flow whose button a LAN session cannot even see, and a preview
+        reachable at a lower tier than its action is a gap waiting to be mistaken for
+        an entry point. Weakens nothing: /delete-tasks-bulk still re-checks for itself.
+
+        Truncation is DISPLAY-only (DELETE_PREVIEW_TASK_CAP): `totals` always describes
+        the entire selection, because the totals are what the user reads to decide."""
+        if not _is_local_request():
+            return jsonify({"error": "deleting from PixAI is localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
+        # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
+        # just because a caller sent the same one twice.
+        media_ids = list(dict.fromkeys(
+            str(m) for m in (body.get("media_ids") or []) if str(m).strip()))
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+
+        con = _connect(db_path)
+        try:
+            sel_rows, task_ids, local_only = _resolve_delete_targets(con, media_ids)
+            selected = {r["media_id"] for r in sel_rows}
+            members_by_task = _members_of_tasks(con, task_ids)
+            tasks, total_media = [], 0
+            for tid in task_ids:
+                members = members_by_task.get(tid, [])
+                total_media += len(members)
+                if len(tasks) >= DELETE_PREVIEW_TASK_CAP:
+                    continue          # keep counting, stop describing
+                tasks.append({"task_id": tid,
+                              "media": [_preview_entry(m, selected) for m in members]})
+            # Imports have no task, so nothing about them is task-level -- but they ARE
+            # part of what the button removes, and the dialog has to show them or its
+            # file count won't add up. Capped on the same DISPLAY budget as the tasks.
+            shown_local = [con.execute(
+                "SELECT media_id, is_video, poster_media_id FROM catalog WHERE media_id=?",
+                (r["media_id"],)).fetchone()
+                for r in local_only[:DELETE_PREVIEW_TASK_CAP]]
+            local_entries = [_preview_entry(m, selected) for m in shown_local if m]
+        finally:
+            con.close()
+
+        return jsonify({
+            "tasks": tasks,
+            "local_only": local_entries,
+            "truncated": (len(task_ids) > len(tasks)
+                          or len(local_only) > len(local_entries)),
+            "totals": {
+                "selected": len(sel_rows),
+                "tasks": len(task_ids),
+                "media": total_media + len(local_only),
+                "unselected": total_media + len(local_only) - len(sel_rows),
+                "local_only": len(local_only),
+            },
+        })
+
     @app.route("/delete-tasks-bulk", methods=["POST"])
     def delete_tasks_bulk():
         """Delete the selected images' TASKS from PixAI (irreversible) AND purge
@@ -10451,15 +10742,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
         con = _connect(db_path)
         try:
-            sel_rows = [con.execute(
-                "SELECT media_id, task_id, filename FROM catalog WHERE media_id=?", (m,)
-            ).fetchone() for m in sel]
+            # Same helper /api/delete-preview calls, on purpose: whatever the confirm
+            # dialog showed the user has to be what this route then acts on.
+            sel_rows, task_ids, local_only = _resolve_delete_targets(con, sel)
         finally:
             con.close()
-        sel_rows = [dict(r) for r in sel_rows if r]
-        task_ids = sorted({(r.get("task_id") or "").strip()
-                           for r in sel_rows if (r.get("task_id") or "").strip()})
-        local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
         total = len(task_ids) + len(local_only)
         if not total:
             return redirect(back)

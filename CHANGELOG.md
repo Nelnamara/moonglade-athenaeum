@@ -17,6 +17,45 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The gallery header says when you're browsing it from another device.** Several controls
+  are deliberately restricted to the machine running the server — **↑ Import**, **Delete from
+  PixAI**, **Set launcher icon**, the destructive Panel jobs — and since 2026-07-24 they are
+  not even drawn for a remote session, which fixed a dead-end click and created a silent one
+  in its place: the same owner, same account, same browser sees a different set of buttons
+  depending only on whether the address bar says `localhost` or the machine's LAN IP, and a
+  full day went by browsing via the LAN IP with the app simply looking broken. The head-nav
+  now renders a quiet dashed **🌐 LAN session · local-only tools hidden** chip in that case,
+  whose tooltip names every withheld control and says to open the gallery on the serving
+  machine's own localhost address to get them back. It branches on `is_true_local`, the real
+  `_is_local_request()` result that the Import button and `can_delete_cloud` already read —
+  no second notion of trust, no gate touched, and every route still re-checks for itself. It
+  takes the slot of an unreachable "read-only LAN view" note hung off `is_local` (hardcoded
+  `True` at index()'s render call), which was also wrong on the facts: a signed-in LAN
+  session is not read-only, it browses, generates, and drives the Loom and the Panel exactly
+  like the owner at the keyboard. Pinned by a fail-first pair in
+  `tests/test_route_tiers.py`, both halves proven to fail for their own reason.
+- **"Delete from PixAI" now shows what it will take before you type `DELETE`.** Cloud
+  deletion is **task-level** — selecting one image of a batch deletes the whole batch, from
+  PixAI and from the backup — and the dialog said so in prose while never showing *which*
+  siblings, so the one irreversible action in the app was also the only one whose real scope
+  could not be seen before committing to it. A new read-only `POST /api/delete-preview`
+  (LOCALHOST, catalog-only, no network) resolves the selection and `#cloud-del-modal`
+  renders the answer: a headline count (*"7 files across 2 tasks … you picked 3; the other 4
+  come with their batches"*), then every one of those files as a thumbnail grouped by task,
+  the ones actually selected outlined, videos marked, and local imports listed separately as
+  removals with no PixAI side. Selections spanning more tasks than the strip can show are
+  truncated for **display only** — the counts always describe the whole selection
+  (`DELETE_PREVIEW_TASK_CAP`) — and a preview that can't be loaded falls back to the
+  prose-only confirm rather than a dead click. The typed `DELETE` gate and the localhost
+  restriction are untouched: this makes a consequence visible, it does not replace a guard.
+  The preview and `/delete-tasks-bulk` now share one selection-resolution helper, so the
+  dialog cannot describe a different blast radius than the delete then acts on. Task
+  membership is fetched in chunked `IN` passes, not one query per task: `catalog` has no
+  index on `task_id`, so each `WHERE task_id=?` is a full table scan — measured on a
+  36,000-row catalog, 24 of them cost 216ms and 800 cost 8.6s (the batched version: 38ms),
+  all of it inside the request the dialog waits on. Guarded by a test that counts
+  statements rather than milliseconds.
+
 - **A rendering-assertion harness: tests that the CSS *works*, not that it *exists*.**
   `tests/test_render_harness.py` drives a real chromium (playwright) against the real Flask
   app on a real ephemeral port — a live server, because a Flask test client never renders —
@@ -400,6 +439,20 @@ git tags. Full prose notes for tagged versions live on
   identifier the JSX actually calls, so the next silent omission of this kind fails in CI
   instead of only in the bundle. The gallery's nav link still points at `/loom` (the Babel
   path); switching it was deliberately left alone.
+
+- **`docs/STATE.md` still described the deleted Enhance tools as live.** One bullet in the
+  Gallery section listed the ten one-click workflow cards, `Gen.enhance(<workflow_id>)` →
+  `/api/enhance` "priced-and-confirmed before it spends", and the ComfyUI catalog search into
+  `#enh-list` — contradicting the bullet fifteen lines above it, in the same file, that
+  correctly records all of that as removed on 2026-07-24. Deleted, per STATE.md's own rule
+  (a fact that stops being true is deleted, not annotated); the surviving bullet already
+  carries the true version, including that the sub-tab remains as explanatory copy and that
+  Fix is the one that works. The `<mg-cost-badge>` consumer list in the same file was
+  re-checked against the code at the same time and is accurate: the drawer's `.mgd-cost`, the
+  gallery's `gen-cost` and `edit-cost`, and the Loom's three Deep Focus refs are the live
+  mounts (`enhance-cost` went with the surface), and both "still no badge" claims —
+  `generateShot`'s `priceShot` + `window.confirm`, and `loom-core.js`'s aggregate
+  cost-to-finish — still hold.
 
 ### Removed
 
