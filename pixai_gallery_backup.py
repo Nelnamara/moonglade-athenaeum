@@ -1112,6 +1112,7 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
                 append_job_event(out_dir, jid, status="stale",
                                  error="couldn't reach PixAI to verify this job's real status")
             continue
+        started = None
         if isinstance(phase, dict):
             # Tolerate a caller handing us generation_status()'s whole
             # {status, phase, paid_credit} dict rather than the phase string. A real
@@ -1120,11 +1121,29 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
             # `except Exception` above swallows errors by design, so a contract
             # violation here is INVISIBLE rather than loud. Accepting both shapes is
             # what actually makes that failure mode impossible.
+            started = phase.get("started")
             phase = phase.get("phase")
         if phase in _JOBS_TERMINAL:
             append_job_event(out_dir, jid, status=phase,
                              error=("task " + phase if phase == "failed" else None))
             resolved += 1
+        elif started is False:
+            # A task PixAI accepted, queued, and never assigned a worker. It stays
+            # NON-TERMINAL for ~60 minutes before being reaped, so the branch above never
+            # fires and the heartbeat below would keep the card spinning as though work
+            # were happening -- which is exactly how five of the owner's generations died
+            # unnoticed between 2026-07-21 and 07-24 (all `cancelled`, all
+            # outputs.reason="waiting timeout", none ever dispatched).
+            #
+            # `stale` is reused rather than inventing a state: it already renders a warning
+            # glyph + message in the tracker, and it is deliberately NOT in _JOBS_TERMINAL,
+            # so if PixAI does eventually start the task a later done/failed still wins.
+            # Tested `started is False`, never `not started`: a caller that omits the field
+            # reports None, and "unknown" must not brand every in-flight job stale.
+            append_job_event(out_dir, jid, status="stale",
+                             error="PixAI accepted this job but has not started it -- no "
+                                   "worker has picked it up. Unstarted tasks are cancelled "
+                                   "and refunded at about 60 minutes.")
         elif min_age:
             append_job_event(out_dir, jid, status="running")   # refresh ts; see docstring
     return resolved
@@ -3927,7 +3946,13 @@ def run_import_local(args):
 
 _GEN_MUTATION = ("mutation createGenerationTask($parameters: JSONObject!) {"
                  " createGenerationTask(parameters: $parameters) { id } }")
-_GEN_STATUS = "query($id: ID!) { task(id: $id) { id status paidCredit } }"
+_GEN_STATUS = ("query($id: ID!) { task(id: $id) "
+               "{ id status paidCredit startedAt outputs } }")
+# startedAt + outputs are load-bearing, not decoration: `startedAt` is the ONLY way to
+# tell a task PixAI queued-but-never-dispatched from one that is genuinely running (both
+# sit at a non-terminal status), and `outputs.reason` carries PixAI's own explanation for
+# a cancellation (e.g. "waiting timeout"). Without them this poller could only ever see
+# `status`, which is how five of the owner's generations died silently across four days.
 DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
 
 
@@ -4521,23 +4546,60 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
     edit submit paths so their poll behaviour can't drift."""
     deadline = time.time() + timeout
     paid_credit = None
+    started_at, last_status = None, ""
     while time.time() < deadline:
         task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
         status = str(task.get("status", "")).lower()
+        last_status = status or last_status
+        started_at = task.get("startedAt") or started_at
         if task.get("paidCredit") is not None:
             paid_credit = task.get("paidCredit")     # server-authoritative actual cost
-        vlog("{} poll: {}".format(label, status or "(unknown)"))
+        vlog("{} poll: {}{}".format(label, status or "(unknown)",
+                                    "" if started_at else " (not started yet)"))
         if status in ("completed", "succeeded", "success", "done"):
             if paid_credit is not None:
                 print("  actual cost: {:,} credits".format(int(paid_credit)))
             return paid_credit
         if status in ("failed", "error", "cancelled", "canceled"):
-            raise PixAIError("{} ended with status: {}".format(fail_noun, status))
+            raise PixAIError("{} ended with status: {}{}".format(
+                fail_noun, status, _pixai_reason_suffix(task)))
         time.sleep(interval)
+    if _never_dispatched(last_status, started_at):
+        raise PixAIError(
+            "{} was accepted by PixAI but NEVER started. After {}s it is still queued "
+            "with no start time, so no worker ever picked it up -- waiting longer will "
+            "not help, and --task-id recovery has nothing to fetch. PixAI reaps an "
+            "unstarted task at about 60 minutes and issues a refund then, so the credits "
+            "should come back on their own; check your credit history if they don't. "
+            "(task {})".format(fail_noun, timeout, task_id))
     raise PixAIError(
         "stopped waiting after {}s, but the task is STILL RUNNING on PixAI (task {}). "
         "Nothing is lost: recover it free once it finishes with --task-id {} "
         "(or it arrives in your next --update).".format(timeout, task_id, task_id))
+
+
+def _pixai_reason_suffix(task):
+    """PixAI's own explanation for a terminal status, from `outputs.reason` (e.g.
+    "waiting timeout"). Surfaced because a bare "cancelled" reads as though the USER
+    cancelled something -- the owner saw exactly that five times and had no way to know
+    PixAI had timed the task out of its own queue."""
+    outs = task.get("outputs") if isinstance(task, dict) else None
+    reason = outs.get("reason") if isinstance(outs, dict) else None
+    return " (PixAI's reason: {})".format(reason) if reason else ""
+
+
+def _never_dispatched(status, started_at):
+    """True when PixAI accepted a task, queued it, and never assigned it a worker.
+
+    Keys on `startedAt` being absent AND a POSITIVE observation of a pre-run status. Two
+    deliberate exclusions, both of which would otherwise produce a confident lie:
+      - `running` without a `startedAt` has obviously started, so it stays on the
+        reassuring "still running, recover it free" timeout path.
+      - an EMPTY status means we never actually observed the task (e.g. a zero/expired
+        timeout that never entered the poll loop). "Not observed" is not "not dispatched",
+        so that also stays on the reassuring path -- claiming a task is dead because we
+        never looked at it is the same class of error as the message this fix removes."""
+    return not started_at and str(status or "").lower() in ("waiting", "pending", "queued")
 
 
 def _maybe_dump_params(args, result):
@@ -4965,14 +5027,28 @@ _GEN_FAIL = ("failed", "error", "cancelled", "canceled", "rejected")
 
 
 def generation_status(session, task_id):
-    """One status check for a task -> {status, phase, paid_credit}. `phase` normalizes the
-    raw status into 'running' | 'done' | 'failed' for the async poller. Read-only."""
+    """One status check for a task -> {status, phase, paid_credit, started, reason}.
+    `phase` normalizes the raw status into 'running' | 'done' | 'failed' for the async
+    poller. Read-only.
+
+    `started` and `reason` exist because 'what' without 'why' is how five of the owner's
+    generations died unnoticed over four days (2026-07-21..24):
+      - `started` is False until PixAI actually assigns a worker. A task it accepted,
+        queued and never dispatched sits at a NON-TERMINAL status for ~60 minutes before
+        being reaped, so on status alone it is indistinguishable from real work and shows
+        as an indefinite spinner. This is the only field that tells them apart.
+      - `reason` is PixAI's own explanation from `outputs.reason` (e.g. "waiting
+        timeout"). Without it a caller can only report "cancelled", which reads as though
+        the USER cancelled something they never started.
+    Callers that only want the original three keys are unaffected -- those are unchanged."""
     d = gql_adhoc(session, _GEN_STATUS, {"id": str(task_id)}) or {}
     t = d.get("task") or {}
     raw = (t.get("status") or "").lower()
     phase = ("done" if raw in _GEN_DONE else
              "failed" if raw in _GEN_FAIL else "running")
-    return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit")}
+    outs = t.get("outputs") if isinstance(t.get("outputs"), dict) else {}
+    return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit"),
+            "started": bool(t.get("startedAt")), "reason": (outs or {}).get("reason") or ""}
 
 
 def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_"):

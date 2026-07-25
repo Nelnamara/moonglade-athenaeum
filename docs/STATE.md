@@ -294,12 +294,31 @@ users.
   `Jobs.register()` — registration without a second poll loop — because every one of them already
   owns a private poller that polls `/api/task-status`, the route that writes the authoritative
   terminal event.
-- The Generate drawer's Edit ▸ Enhance sub-tab promotes ten one-click PixAI workflows
-  (upscale / upscale 2×2 / upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art
-  / sketch-colorize / relight-sun / relight-backlight), each firing `Gen.enhance(<workflow_id>)`
-  → `/api/enhance`, priced-and-confirmed before it spends. A search box below browses the rest
-  of PixAI's ComfyUI catalog into `#enh-list`. The Fix sub-tab is a separate box-coordinate
-  hand/face fixer (`/api/fix` → `submit_fixer`).
+- **A job PixAI accepts but never starts is detected and surfaced, not left spinning.**
+  `generation_status()` returns `started` (false until PixAI actually assigns a worker) and
+  `reason` (PixAI's own explanation, e.g. `"waiting timeout"`) alongside its original
+  `{status, phase, paid_credit}`; both come from `startedAt` and `outputs` on `_GEN_STATUS`.
+  An undispatched task is non-terminal for ~60 minutes, so status alone cannot tell it from
+  real work. On that: the CLI poller reports a never-dispatched task honestly instead of
+  claiming it is "STILL RUNNING", a terminal `cancelled` carries PixAI's reason, and the orphan
+  reaper marks such a job **`stale`** — a non-terminal status the tracker already renders with
+  a warning glyph, so a task that does eventually start can still resolve to done. The check is
+  `started is False`, never `not started`: a status source that omits the field means *unknown*,
+  and unknown must not brand every in-flight job stale. The reaper's caller passes the whole
+  status dict, not `["phase"]` — sending the bare string makes the detection dead code in
+  production, guarded end-to-end through `/api/jobs`.
+- **The Generate drawer's Edit ▸ Enhance sub-tab does not work and cannot be made to work as
+  built.** Its ten one-click cards and the ComfyUI catalog search below them all submit
+  `model: pixai-panelplugin` via `/api/enhance`, and **PixAI never assigns a worker to a
+  panelplugin task submitted with an API key** — it accepts it, queues it, charges 1200, then
+  cancels it at ~60 minutes with `outputs.reason: "waiting timeout"` and refunds. Every
+  Enhance run in the app's history has died this way; none has ever produced an image. Not a
+  payload problem: the same shape, with PixAI's own official preset id, still never dispatches,
+  while their web client runs it in 1–3s. Awaiting the trim; the replacement plan, the measured
+  parameter spec for what genuinely does work instead (upscale/boosters as plain generation
+  params, art filters locally for free), and the full evidence are in
+  `docs/AUDIT_2026-07-21.md`. The Fix sub-tab beside it is unaffected and works — it is a
+  box-coordinate hand/face fixer (`/api/fix` → `submit_fixer`, `taskKind=chat`).
 - **The LoRA picker now shows and enforces the account's real per-generation LoRA cap, on
   both the gallery and the Loom** (2026-07-24). `membership.privilege.{lora,freeUserLora}` —
   real data PixAI's own account API already returns — is fetched by `account_info()`

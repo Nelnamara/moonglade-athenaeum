@@ -757,3 +757,149 @@ def test_mirror_logging_failure_cannot_break_mirroring(tmp_path, monkeypatch):
     st = cli.get("/api/watch/status").get_json()
     assert st["mirrored"] == 1
     assert not st["last_error"], "a logging problem was reported as a mirror failure"
+
+
+# ---- generation_status must carry WHY, not just WHAT (silent-death bug, 2026-07-24) ----
+
+def test_generation_status_surfaces_pixai_cancel_reason(monkeypatch):
+    """PixAI reaps a task it never dispatched with outputs={"reason": "waiting timeout"}.
+    generation_status returned only the bare status, so every caller -- the web poller,
+    the job log, the tracker card -- could say no more than "cancelled", which reads as
+    though the OWNER cancelled it. He hit this five times across four days and the reason
+    string never once reached him."""
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
+        "status": "cancelled", "startedAt": None,
+        "outputs": {"reason": "waiting timeout"}, "paidCredit": 1200}})
+    st = core.generation_status(object(), "2037594262049550370")
+    assert st["phase"] == "failed"
+    assert st.get("reason") == "waiting timeout", \
+        "PixAI's own reason must survive into the status dict: {!r}".format(st)
+
+
+def test_generation_status_reports_whether_the_task_ever_started(monkeypatch):
+    """`started` is the only thing separating "queued, no worker ever took it" from
+    "genuinely working". Both sit at a non-terminal status, so without this a tracker can
+    only show an indefinite spinner -- which is exactly how an hour of nothing looked."""
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
+        "status": "waiting", "startedAt": None}})
+    assert core.generation_status(object(), "t1")["started"] is False
+
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
+        "status": "running", "startedAt": "2026-07-25T05:00:00.000Z"}})
+    assert core.generation_status(object(), "t2")["started"] is True
+
+
+def test_generation_status_keeps_its_existing_keys(monkeypatch):
+    """resolve_orphan_jobs and /api/task-status both read this dict positionally by key;
+    adding fields must not drop the three they already depend on."""
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
+        "status": "completed", "paidCredit": 42}})
+    st = core.generation_status(object(), "t3")
+    assert st["status"] == "completed" and st["phase"] == "done" and st["paid_credit"] == 42
+
+
+def test_reaped_task_logs_pixai_reason_not_a_bare_cancelled(tmp_path, monkeypatch):
+    """When PixAI reaps a task it never dispatched, /api/task-status DOES mark it failed --
+    but it logged the bare status, so the tracker card and the CLI both said only
+    'cancelled'. The owner read that as "something cancelled my job" and had no way to
+    learn PixAI had timed it out of its own queue. Log and return the reason."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "2037594262049550370", "type": "generate",
+                                "label": "Enhanced"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "cancelled", "phase": "failed",
+                                        "paid_credit": 1200, "started": False,
+                                        "reason": "waiting timeout"})
+
+    r = cli.get("/api/task-status?task_id=2037594262049550370")
+    body = r.get_json()
+    assert body["phase"] == "failed"
+    assert "waiting timeout" in str(body), \
+        "reason absent from the response: {!r}".format(body)
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["2037594262049550370"]
+    assert "waiting timeout" in str(job.get("error") or ""), \
+        "reason absent from the job log: {!r}".format(job)
+
+
+def test_running_response_says_whether_a_worker_ever_picked_it_up(tmp_path, monkeypatch):
+    """A queued-but-undispatched task is non-terminal for ~60 minutes and looks identical
+    to real work over the wire, so the tracker could only show an endless spinner. Pass
+    `started` through so the card can say "queued" instead of implying progress."""
+    cli = _authed_client(tmp_path)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "waiting", "phase": "running",
+                                        "paid_credit": None, "started": False, "reason": ""})
+    body = cli.get("/api/task-status?task_id=999").get_json()
+    assert body["phase"] == "running"
+    assert body.get("started") is False, "no way to tell queued from working: {!r}".format(body)
+
+
+def test_reaper_marks_a_never_started_job_stale_with_an_explanation(tmp_path):
+    """The visible half of the silent-death fix. A task PixAI accepted but never dispatched
+    stays NON-TERMINAL for ~60 minutes, so the reaper's terminal check never fires and the
+    card spins with no hint anything is wrong -- which is precisely how five of the owner's
+    enhances died unnoticed. `stale` is reused deliberately: it already renders a warning
+    glyph + message in the tracker, and it is NOT in _JOBS_TERMINAL, so if PixAI does
+    eventually start the task a later done/failed still wins."""
+    core.append_job_event(tmp_path, "2037594262049550370", status="running",
+                          type="generate", label="Enhanced")
+
+    def _status(tid):
+        return {"status": "waiting", "phase": "running", "paid_credit": 1200,
+                "started": False, "reason": ""}
+
+    core.resolve_orphan_jobs(tmp_path, _status, min_age=0, now=time.time() + 9999)
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["2037594262049550370"]
+    assert job["status"] == "stale", "never-started job left spinning: {!r}".format(job)
+    assert "not started" in str(job.get("error") or "").lower(), \
+        "stale marker must explain why: {!r}".format(job)
+
+
+def test_reaper_leaves_a_genuinely_started_job_running(tmp_path):
+    """A long video generation legitimately runs for many minutes. `started` True must keep
+    it on the running heartbeat, not brand it stale."""
+    core.append_job_event(tmp_path, "888", status="running", type="generate")
+    core.resolve_orphan_jobs(
+        tmp_path, lambda tid: {"status": "processing", "phase": "running", "started": True},
+        min_age=0, now=time.time() + 9999)
+    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["888"]["status"] == "running"
+
+
+def test_reaper_ignores_a_status_fn_that_never_reports_started(tmp_path):
+    """Back-compat, and the reason the check is `started is False` and not `not started`:
+    a caller (or an older job log) that omits the field must NOT have every in-flight job
+    branded stale. Absent means unknown, and unknown is not a failure."""
+    core.append_job_event(tmp_path, "889", status="running", type="generate")
+    core.resolve_orphan_jobs(
+        tmp_path, lambda tid: {"status": "processing", "phase": "running"},
+        min_age=0, now=time.time() + 9999)
+    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["889"]["status"] == "running"
+
+
+def test_api_jobs_endpoint_marks_a_never_started_orphan_stale(tmp_path, monkeypatch):
+    """END-TO-END, and the guard that catches the wiring this fix nearly shipped broken.
+
+    resolve_orphan_jobs can only see `started` if its status_fn hands over the whole
+    generation_status dict. The real caller in create_app returned
+    `generation_status(...)["phase"]` -- a bare string -- so the never-started branch was
+    DEAD CODE in production while every unit test around it passed, because they call the
+    library function directly with their own stub. That is the same caller/contract
+    mismatch that once made this reaper resolve nothing at all, in mirror image.
+
+    Drives the real GET /api/jobs against a task PixAI accepted and never dispatched."""
+    cli = _authed_client(tmp_path)
+    old_ts = time.time() - core.JOBS_ORPHAN_SWEEP_AGE - 100
+    core.append_job_event(tmp_path, "2037625229523385030", status="running",
+                          type="generate", label="Enhanced", ts=old_ts)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "waiting", "phase": "running",
+                                        "paid_credit": 1200, "started": False, "reason": ""})
+
+    by_id = {j["job_id"]: j for j in cli.get("/api/jobs").get_json()["jobs"]}
+    job = by_id["2037625229523385030"]
+    assert job["status"] == "stale", \
+        "never-started orphan still spinning through the real endpoint: {!r}".format(job)
+    assert "not started" in str(job.get("error") or "").lower()

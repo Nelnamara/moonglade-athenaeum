@@ -3983,13 +3983,24 @@ def create_app(out_dir: Path):
         def _status(tid):
             if box["s"] is None:
                 box["s"] = core._make_session(None)
-            # ["phase"], not the whole dict: resolve_orphan_jobs compares this return
-            # against ("done","failed"), and generation_status returns
-            # {status, phase, paid_credit}. Passing the dict straight through meant the
-            # comparison never matched, so the reaper resolved NOTHING -- it just
-            # returned 0 forever while looking healthy. The unit tests stubbed status_fn
-            # with the documented string, so nothing caught the caller disagreeing.
-            return core.generation_status(box["s"], tid)["phase"]
+            # The WHOLE dict, deliberately -- and this line has now been wrong in both
+            # directions, so read before changing it.
+            #
+            # Originally the dict was passed through while resolve_orphan_jobs compared
+            # the return against ("done","failed"): the comparison never matched, the
+            # reaper resolved NOTHING, and it returned 0 forever while looking healthy.
+            # The fix at the time was to send `["phase"]` instead. The reaper has since
+            # been taught to accept BOTH shapes, and it now needs more than the phase: it
+            # reads `started` to spot a task PixAI accepted but never dispatched (which
+            # stays non-terminal for ~60min and otherwise spins silently). Sending the
+            # bare string again would make that branch dead code in production while
+            # every unit test around it still passed, because those call the library
+            # function directly with their own stub.
+            #
+            # Guarded end-to-end by tests/test_jobs.py's
+            # test_api_jobs_endpoint_marks_a_never_started_orphan_stale, which drives the
+            # real endpoint rather than the library function.
+            return core.generation_status(box["s"], tid)
         try:
             core.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
         except Exception:                          # noqa: BLE001
@@ -13162,9 +13173,22 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                 "duration": got.get("duration"),
                                 "paid_credit": st["paid_credit"]})
             if st["phase"] == "failed":
-                _log_job(tid, status="failed", error=(st.get("status") or "failed"))
-                return jsonify({"phase": "failed", "status": st["status"]})
-            return jsonify({"phase": "running", "status": st["status"]})
+                # Carry PixAI's OWN reason (outputs.reason, e.g. "waiting timeout") into
+                # both the job log and the response. This branch already fired correctly
+                # for the owner's five reaped enhances -- it just logged the bare status,
+                # so the tracker and the CLI could say no more than "cancelled", which
+                # reads as though HE cancelled a job that in fact never started.
+                reason = (st.get("reason") or "").strip()
+                detail = "{} ({})".format(st.get("status") or "failed", reason) if reason \
+                    else (st.get("status") or "failed")
+                _log_job(tid, status="failed", error=detail)
+                return jsonify({"phase": "failed", "status": st["status"],
+                                "reason": reason, "error": detail})
+            # `started` distinguishes "queued, no worker has taken it" from real work --
+            # both are phase=running over the wire, and without it a task PixAI never
+            # dispatches is an indefinite spinner for the ~60 min until it is reaped.
+            return jsonify({"phase": "running", "status": st["status"],
+                            "started": bool(st.get("started"))})
         except _core.EmptyOutputsError as e:
             # TERMINAL, unlike the transient case below: PixAI already told us the
             # task reached 'done', and collect then found its outputs empty. The task
