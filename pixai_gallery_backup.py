@@ -1310,6 +1310,51 @@ def build_stem_name(prompt_preview, task_id, media_id, max_len, sep="_"):
     return sep.join(parts)
 
 
+# The two region kinds POST /v2/task/fixer accepts, in the order a filename spells them out
+# (so "hand then face" and "face then hand" produce the same marker).
+_FIX_TAGS = ("face", "hand")
+
+
+def fixer_block(task):
+    """`parameters.chat.fixer` when this getTaskById task is a hand/face Fix, else None.
+
+    PixAI turns a POST /v2/task/fixer submit into an ordinary taskKind=chat generation, so a
+    Fix comes back looking exactly like an instruct Edit apart from this one sub-block -- it
+    is the only thing that identifies the task family after the fact."""
+    chat = ((task or {}).get("parameters") or {}).get("chat")
+    fx = chat.get("fixer") if isinstance(chat, dict) else None
+    return fx if isinstance(fx, dict) else None
+
+
+def fix_marker(boxes):
+    """'fix-face' / 'fix-hand' / 'fix-face-hand' for a Fix output's filename, read off the
+    tags its boxes carried. An untagged box degrades to a plain 'fix' rather than guessing
+    which region kind it was. Hyphens stay literal so the marker reads as ONE token beside
+    the separator-joined parts around it."""
+    tags = {str((b or {}).get("tag") or "").lower()
+            for b in (boxes or []) if isinstance(b, dict)}
+    return "-".join(["fix"] + [t for t in _FIX_TAGS if t in tags])
+
+
+def build_fix_stem_name(source_label, boxes, task_id, media_id, max_len, sep="_"):
+    """`<source-slug>_fix-face_<task_id>_<media_id>` -- the filename stem for a Fix output.
+
+    build_stem_name cannot serve this family: a fixer task's `prompts` is a FIXED template
+    PixAI writes itself ("Image 2 shows the areas in Image 1 that need fixing..."), so every
+    Fix output it ever named got the same meaningless 60-character slug and a folder of them
+    was unbrowsable. The readable half comes from the SOURCE image instead, and the marker
+    says which kind of region was repaired.
+
+    Two ordering rules, both load-bearing: the source slug leads, so a Fix sorts directly
+    beside the image it repaired (same slug, and the source's own name continues with a
+    digit while this one continues with 'f'); and media_id stays LAST, so invariant 7's
+    shared `_<media_id>` matcher -- resume, already_downloaded, organize -- still finds it.
+    The length cap applies to the slug only, so the marker can never be truncated away."""
+    slug = slug_from_prompt(source_label, max_len, sep)
+    parts = [p for p in (slug, fix_marker(boxes), str(task_id or "task"), str(media_id)) if p]
+    return sep.join(parts)
+
+
 def already_downloaded(root, media_id):
     """Return an existing image file for this media_id anywhere under root,
     regardless of its prompt prefix, task id, or which subfolder it's in.
@@ -2345,6 +2390,18 @@ def extract_full_meta(task):
     neg = (params.get("negativePrompts") or detail.get("negativePrompts")
            or extra.get("negativePrompts") or params.get("negativePrompt") or "")
     clip = detail.get("clipSkip", params.get("clipSkip", ""))
+    # A taskKind=chat task -- an instruct Edit, or a hand/face Fix -- keeps its model inside
+    # the `chat` block, and build_chat_edit_parameters sets NO top-level modelId at all, so
+    # without this fallback a chat task's Model rendered as an em-dash on the detail page.
+    # NOTHING ELSE about a chat task is recoverable here, deliberately: it has no seed, no
+    # sampler, no steps and no cfg scale (outputs.detailParameters is absent entirely), and
+    # those stay empty rather than borrowing a plausible-looking number the task never had.
+    chat = params.get("chat") if isinstance(params.get("chat"), dict) else {}
+    model_id = str(params.get("modelId") or chat.get("modelId") or "")
+    # PixAI's two CHAT models are the ones this app already names (EDIT_MODELS), so the label
+    # resolves locally: a Fix's Model reads "Reference Pro" rather than a 19-digit id, with no
+    # extra network round trip. Callers that also run model_name_gql still overwrite it.
+    chat_label = (edit_model_by_id(model_id) or {}).get("label", "") if chat else ""
     return {
         "prompt_full":    params.get("prompts", ""),
         "natural_prompt": extra.get("naturalPrompts", ""),
@@ -2352,8 +2409,8 @@ def extract_full_meta(task):
         "steps":          str(detail.get("steps") or ""),
         "sampler":        detail.get("sampler", ""),
         "cfg_scale":      str(detail.get("cfg_scale") or ""),
-        "model_id":       str(params.get("modelId") or ""),
-        "model_name":     "",  # filled in by caller after model_name_gql
+        "model_id":       model_id,
+        "model_name":     chat_label,  # otherwise filled in by caller after model_name_gql
         "loras":          "",  # filled in by caller via resolve_loras()
         "negative_prompt": neg,
         "clip_skip":      str(clip) if clip != "" else "",
@@ -4488,6 +4545,14 @@ EDIT_MODELS = {
 }
 DEFAULT_EDIT_MODEL = "edit-pro"
 
+# The model PixAI runs a hand/face Fix on -- the same CHAT model the Edit card calls
+# Reference Pro. A Fix submit (POST /v2/task/fixer, just {mediaId, boxes}) never names a
+# model, so this is how the Fix paths that DO need one -- pricing the request, and labelling
+# the collected output's Model instead of leaving an em-dash -- get it without a second
+# hardcoded copy of the id. Reference Pro is known-flaky; a Fix's intermittent failures are
+# that model, not this app.
+FIXER_MODEL_ID = EDIT_MODELS["reference-pro"]["model_id"]
+
 
 def edit_model_id(key):
     """model_id for an Edit-card model key ('edit-pro'/'reference-pro'); '' if unknown."""
@@ -5067,6 +5132,28 @@ def _task_detail_query(session, task_id):
     return (gql_adhoc(session, q, {"id": str(task_id)}) or {}).get("task")
 
 
+def _fix_source_label(task, out):
+    """The readable half of a Fix output's filename: the prompt of the SOURCE image the Fix
+    ran on, looked up in this backup's own catalog by media_id, falling back to that
+    media_id when the source isn't ours (a fresh upload) and to '' when the task names no
+    source at all. Naming a Fix after the image it repaired is what makes a folder of them
+    browsable, and it lands the two files next to each other in a sorted listing.
+
+    Fails soft: an unreadable catalog costs the name its readable half, never the download."""
+    params = (task or {}).get("parameters") or {}
+    chat = params.get("chat") if isinstance(params.get("chat"), dict) else {}
+    src = str(chat.get("mediaId") or params.get("mediaId") or "")
+    if not src:
+        return ""
+    try:
+        row = next((r for r in load_catalog(Path(out) / "catalog.db")
+                    if r.get("media_id") == src), None)
+    except Exception:                      # noqa: BLE001 -- a naming nicety, never a blocker
+        row = None
+    label = ((row or {}).get("prompt_preview") or (row or {}).get("prompt_full") or "").strip()
+    return label or src
+
+
 def _download_image_task(session, result, task_id, out, args, prompt="", model_name=""):
     """Download + catalog the image output(s) of a completed task. Saves the individual batch
     images (not the composite grid) via _task_image_media, storing each image's own seed.
@@ -5078,14 +5165,28 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     thumb_dir = out / "gallery" / "thumbs"
     img_dir = out / "images"
     db_path = out / "catalog.db"
+    # A hand/face Fix is the one task family whose `prompts` is PixAI's own fixed template,
+    # so build_stem_name would give every Fix ever collected the same unreadable name --
+    # build_fix_stem_name names it from the source image + a fix-face/fix-hand marker
+    # instead. Detected here rather than at the call sites so recovering a Fix by --task-id
+    # names it the same way the web collect does. NEW OUTPUT ONLY: nothing renames a file
+    # already on disk.
+    fx = fixer_block(result)
+    fix_label = _fix_source_label(result, out) if fx is not None else ""
+    fm = extract_full_meta(result)
     rows, saved = [], []
     for mid, seed in media:
         url, info = resolve_media(session, mid)
         if not url:
             print("  no url for media", mid)
             continue
-        stem = img_dir / build_stem_name(prompt, task_id, mid, getattr(args, "name_length", 60),
-                                         getattr(args, "name_sep", "_"))
+        name_len = getattr(args, "name_length", 60)
+        name_sep = getattr(args, "name_sep", "_")
+        if fx is not None:
+            stem = img_dir / build_fix_stem_name(fix_label, fx.get("boxes"), task_id, mid,
+                                                 name_len, name_sep)
+        else:
+            stem = img_dir / build_stem_name(prompt, task_id, mid, name_len, name_sep)
         status, path = download(session, url, stem)
         if status not in ("ok", "skip") or not path:
             continue
@@ -5096,7 +5197,13 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "url": url, "source": "api", "status": "completed",
             "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
             "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
-            "model_name": model_name,
+            # The task's own model, which this row never carried -- a Fix's detail page
+            # showed an em-dash for Model even though the task names one. An explicit
+            # model_name from the caller still wins. seed/steps/sampler/cfg_scale stay
+            # whatever the task actually had (nothing, for a chat task): an em-dash is the
+            # honest answer where a number was never recorded.
+            "model_id": fm.get("model_id", ""),
+            "model_name": model_name or fm.get("model_name", ""),
             "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
@@ -5152,11 +5259,14 @@ def submit_generation(session, params):
     return str(task_id)
 
 
-def submit_fixer(session, media_id, boxes):
-    """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
-    generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
-    'hand' | 'face' (<=20). Builds a mask from the boxes and repairs those regions. Raises."""
-    _check_read_only("submit a hand/face fix (spends credits)")
+def clean_fix_boxes(boxes):
+    """Filter + normalize hand/face Fix boxes into what POST /v2/task/fixer accepts: tag
+    'hand'|'face' (lowercased), non-negative integer origin, positive size, at most 20.
+    Anything else is dropped, so a stale or malformed client box can't reach the server.
+
+    Shared by submit_fixer and build_fixer_price_parameters deliberately: the shape that
+    gets PRICED has to be the shape that gets SUBMITTED, or the cost badge would quote a
+    request PixAI never receives."""
     clean = []
     for b in (boxes or []):
         tag = str((b or {}).get("tag") or "").lower()
@@ -5169,10 +5279,41 @@ def submit_fixer(session, media_id, boxes):
             continue
         if w > 0 and h > 0:
             clean.append({"x": x, "y": y, "width": w, "height": h, "tag": tag})
+    return clean[:20]
+
+
+def build_fixer_price_parameters(media_id, boxes, *, model_id=None):
+    """createGenerationTask-shaped `parameters` for a hand/face Fix, built ONLY to hand to
+    price_task(). NOTHING submits these -- a Fix is submitted by submit_fixer, which never
+    sees them.
+
+    A Fix goes out as a REST body of just {mediaId, boxes}, and that body is not priceable.
+    What PixAI's server builds from it is a taskKind=chat generation carrying a `chat.fixer`
+    block, and GET /v2/task-price DOES price that: measured 2026-07-25 it answers a flat
+    8000 for a Fix, invariant to box count (1 / 3 / 10), canvas size and priority. Drop the
+    chat block from the same call and it falls back to the 1200 base floor -- the block, not
+    the scalars, is what carries the cost, which is why this synthesizes one instead of
+    passing the REST body through. Nothing here is invented: no width/height, no priority,
+    no prompt, because the measurement showed none of them move the number."""
+    clean = clean_fix_boxes(boxes)
+    if not clean:
+        raise PixAIError("fixer needs at least one hand/face box")
+    mid = str(media_id)
+    model = str(model_id or FIXER_MODEL_ID)
+    return {"mediaId": mid, "modelId": model,
+            "chat": {"fixer": {"boxes": clean}, "mediaId": mid, "modelId": model}}
+
+
+def submit_fixer(session, media_id, boxes):
+    """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
+    generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
+    'hand' | 'face' (<=20). Builds a mask from the boxes and repairs those regions. Raises."""
+    _check_read_only("submit a hand/face fix (spends credits)")
+    clean = clean_fix_boxes(boxes)
     if not clean:
         raise PixAIError("fixer needs at least one hand/face box")
     data = _rest_post(session, "/task/fixer",
-                      {"mediaId": str(media_id), "boxes": clean[:20]}) or {}
+                      {"mediaId": str(media_id), "boxes": clean}) or {}
     tid = data.get("id")
     if not tid:
         raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
