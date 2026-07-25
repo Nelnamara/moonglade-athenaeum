@@ -2968,9 +2968,13 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       const startedAt = Date.now();
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
         const cls = classifyTaskStatus(d);
-        if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-        else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        else again(4e3);
+        if (cls.phase === "done") {
+          setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+          if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
+        } else if (cls.phase === "failed") {
+          setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+          if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
+        } else again(4e3);
       }).catch(() => again(5e3));
       const again = (ms) => {
         if (Date.now() - startedAt > POLL_CEILING_MS) {
@@ -3014,6 +3018,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
           return;
         }
+        if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, "Image \xB7 " + entry.code + " \xB7 " + (c.title || "untitled"));
         setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating\u2026" } }));
         pollImg(c.id, d.task_id);
       } catch {
@@ -3031,7 +3036,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
       setGenImgState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
     };
-    const runGen = async (setState, cardId, endpoint, body, priceBody, label) => {
+    const runGen = async (setState, cardId, endpoint, body, priceBody, label, jobLabel) => {
       if (priceBody && !await confirmSpend(priceBody, label)) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
@@ -3042,6 +3047,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
           return;
         }
+        if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, jobLabel);
         setState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Generating\u2026" } }));
         poll(d.task_id);
       } catch {
@@ -3078,7 +3084,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         "/api/edit",
         editBody,
         { mode: "edit", ...editBody },
-        `Edit the open frame of ${c.title || "this shot"}?`
+        `Edit the open frame of ${c.title || "this shot"}?`,
+        "Edit \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
       );
     };
     const genRef = (entry) => {
@@ -3100,7 +3107,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         "/api/edit",
         refBody,
         { mode: "edit", ...refBody },
-        `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`
+        `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`,
+        // The reference COUNT is the one fact this path is about (and the one its own confirm
+        // already surfaces), so it rides in the row rather than being lost to "Reference".
+        "Reference \xD7" + refs.length + " \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
       );
     };
     const batchGenerate = async (entries) => {
