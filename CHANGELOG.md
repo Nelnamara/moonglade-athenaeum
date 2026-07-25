@@ -422,6 +422,37 @@ git tags. Full prose notes for tagged versions live on
   filters) is unchanged. A regression guard asserts no reachable path can build a panelplugin
   submit again.
 
+- **Upscale and the Generate-tab boosters, on the generation path that actually works.**
+  PixAI's "Confirm Upscale" dialog offers two methods as radio buttons, and each radio's
+  `value` is the parameter name the submit carries — so *Upscale* sends `enlarge` + an
+  `enlargeModel` (one of `ESRGAN_4x`, `R-ESRGAN 4x+`, `R-ESRGAN 4x+ Anime6B`, `SwinIR_4x`,
+  `Lollypop`), while *Hires* sends `upscale` + `upscaleDenoisingStrength` /
+  `upscaleDenoisingSteps` / `upscaleSampler`. Both are ordinary parameters on the same
+  text-to-image / image-to-image submit every generation already uses, not a separate
+  surface. The two are **mutually exclusive** and the builder refuses to send both. Also
+  wired: `enableADetailer` (PixAI's **Face Fix**) and `qualityTag` (their **Quality Tag**).
+  Every one of these keys is emitted **only when asked for** — a generation that does not
+  opt in submits exactly what it did before, since an always-present default would silently
+  change what existing call sites produce and cost.
+  - **The maximum ratio is computed, not hardcoded.** It falls out of a per-method
+    output-pixel ceiling, so the same method allows a different maximum on a different
+    source size — a 1400×784 image tops out at 1.9× on *Upscale* but 1.4× on *Hires*, while
+    a 768×1280 image reaches 1.5× on *Hires*. Asking for more clamps down to what the size
+    allows, and a source already at the ceiling drops the upscale entirely instead of
+    submitting a pointless 1×.
+  - **New CLI flags:** `--enlarge RATIO`, `--enlarge-model NAME`, `--upscale RATIO`,
+    `--upscale-denoise`, `--upscale-denoise-steps`, `--face-fix`, `--quality-tag [PREFIX]`.
+    Named after the parameters rather than PixAI's button labels, because their *Upscale*
+    button sends `enlarge` and naming the flags after the labels would have made
+    `--upscale` mean the other method.
+  - **New Generate-drawer controls:** an Off / Upscale / Hires segmented control, a ratio
+    slider whose maximum is re-derived from the current output size as you change
+    Aspect/Size/custom W×H, the resulting size shown their way (`1400×784 → 1952×1096`),
+    the upscaler dropdown (Upscale only) and the denoising strength/steps controls (Hires
+    only) — that asymmetry is PixAI's — plus Face Fix and Quality Tag chips. The live cost
+    badge reflects all of it, which matters: the two methods differ by roughly 3× at their
+    maximum ratio.
+
 ## [2.4.0] - 2026-07-24 — Concurrent generations, real trash recovery, and a nasty video-corruption bug fixed
 
 A trash/quarantine restore panel, field-operator search (`model:`, `rating:>=3`, …),
