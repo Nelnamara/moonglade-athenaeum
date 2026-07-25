@@ -178,14 +178,30 @@ def test_watch_pings_reset_the_staleness_clock(monkeypatch):
     """Companion/negative case: a steady trickle of frames -- even bare keepalive
     pings, no real taskUpdated events -- must NOT trip the watchdog, since a quiet
     account (no generations running) is a normal, healthy state, not a stale one."""
-    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", 0.05)
+    # THE NUMBERS ARE THE TEST -- do not "simplify" them.
+    #
+    # The watchdog is a per-frame `asyncio.wait_for(ws.recv(), timeout=_WS_STALE_TIMEOUT)`, so
+    # what proves the clock RESETS per frame is: every individual gap stays under the timeout
+    # while the TOTAL run comfortably exceeds it. A cumulative clock would lapse partway
+    # through. Raising the timeout without also lengthening the script would make this pass
+    # even with the reset logic deleted -- vacuous, not robust.
+    #
+    # Ratios chosen for that meaning AND against CI flake. This previously ran a 0.05s timeout
+    # against a 0.01s pace: only a 5x per-frame margin, which a loaded runner (three suites in
+    # parallel) overshoots, failing a test about staleness for reasons that have nothing to do
+    # with staleness. Now 0.02s per frame against a 0.5s timeout -- a 25x margin, so a single
+    # frame would have to stall 25x its sleep to trip it -- while 40 frames total ~0.8s, still
+    # well past the 0.5s timeout a cumulative clock would have hit around frame 25.
+    PACE, TIMEOUT, PINGS = 0.02, 0.5, 40
+    assert PACE * PINGS > TIMEOUT, "script must outlast the timeout or this proves nothing"
+    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", TIMEOUT)
     script = [json.dumps({"type": "connection_ack"})]
-    script += [json.dumps({"type": "ping"})] * 5   # each one comfortably under 0.05s apart
+    script += [json.dumps({"type": "ping"})] * PINGS
     script += [json.dumps({"type": "complete"})]
 
     class _PacedWS(_FakeWS):
         async def recv(self):
-            await asyncio.sleep(0.01)   # well inside the timeout -- never lets it lapse
+            await asyncio.sleep(PACE)   # well inside the timeout -- never lets it lapse
             return await super().recv()
 
     ws = _PacedWS(script)
