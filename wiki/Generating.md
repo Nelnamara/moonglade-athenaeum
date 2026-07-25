@@ -184,29 +184,29 @@ The four are clamped to what the chosen model really supports before submit — 
 Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values are
 corrected (and shown in the preview) rather than rejected.
 
-## Enhance an image (`--enhance`) — one-click PixAI workflows
+## Enhance an image (`--enhance`) — art filters
 
-Run one of PixAI's own preset enhance tools on an image: a **panelplugin workflow**
-(`--workflow-id` — face fix, upscale, background removal, and similar one-click tools) or an
-**art filter** (`--filter-id`). Source is a catalog `media_id` or a local file (auto-uploaded on
-`--confirm`). Preview-only until `--confirm`, same as every other spend-capable command here.
-
-**Web:** the Generate drawer's **Edit ▸ Enhance** sub-tab lists PixAI's own curated workflow
-shelf and a search box over the rest of its ComfyUI catalog — that's the easiest way to find a
-real `--workflow-id`/`--filter-id` without guessing. `--dump-params` off a real enhance task
-(recovered via `--task-id`) also prints the exact ids and shape it used.
+Apply one of PixAI's **art filters** to an image (`--filter-id`). Source is a catalog
+`media_id` or a local file (auto-uploaded on `--confirm`). Preview-only until `--confirm`, same
+as every other spend-capable command here. `--dump-params` off a real filter task (recovered
+via `--task-id`) prints the exact ids and shape it used.
 
 ```bash
-# preview a panelplugin workflow (e.g. an upscale) on a catalog image:
-python pixai_gallery_backup.py --enhance --src <media_id> --workflow-id <id>
 # apply an art filter, with strength, spending credits:
 python pixai_gallery_backup.py --enhance --src <media_id> --filter-id filter-v1-m2 --strength 0.77 --confirm
 ```
 
+> **PixAI's one-click *workflow* tools are not available here.** Their tiled upscale,
+> background removal, line-art and relight presets run only on pixai.art itself: a task
+> submitted with an API key is accepted and queued, then cancelled about an hour later without
+> ever being started. There is no `--workflow-id`, and the web drawer's **Enhance** sub-tab
+> says the same thing. For hands and faces, use the **Fixer** instead — it goes through a
+> different endpoint and works.
+
 > **No cost preview.** Unlike every other spend-capable command in this file, `--enhance` has
 > no `--price`-style estimate before `--confirm` — PixAI's own cost-preview endpoint doesn't
 > cover this task family. Preview mode (no `--confirm`) still shows you exactly what would be
-> submitted, so you can sanity-check the workflow/filter id and source image first.
+> submitted, so you can sanity-check the filter id and source image first.
 
 ## Multi-reference video (`--reference-video`)
 
@@ -320,8 +320,9 @@ what *is* restricted to the server's own machine.
 - **Generate** — pick a base model in the pop-out browser (hover any card for a full preview),
   attach up to 6 **LoRAs with weights**, aspect/mode/count, live credit cost with the free-card
   check up front.
-- **Edit** — instruct edits ("make it night"), the one-click **Enhance** workflow catalog, and
-  the drag-a-box hand/face **Fixer**, in sub-tabs over one source image.
+- **Edit** — instruct edits ("make it night") and the drag-a-box hand/face **Fixer**, in
+  sub-tabs over one source image. (The third sub-tab, **Enhance**, explains why PixAI's
+  one-click workflow tools can only be run on their own site — see `--enhance` above.)
 - **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
   the prompt turns into a chip; model + duration + audio; live cost shows **FREE + how many

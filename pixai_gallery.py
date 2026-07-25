@@ -5810,15 +5810,12 @@ document.addEventListener('DOMContentLoaded', function(){
      when only one submission is ever in flight. */
   .gen-result-line{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
   .gen-result-line:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none;}
-  #enh-list{max-height:230px;overflow-y:auto;margin-top:2px;}
-  .enh-item{display:block;width:100%;text-align:left;padding:6px 9px;margin-bottom:4px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.3;}
-  .enh-item:hover{border-color:var(--overlay0);}
-  .enh-item .ty{color:var(--overlay0);font-size:10px;}
-  .enh-shelf{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 12px;}
-  .enh-sec{flex:0 0 100%;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--overlay0);margin:7px 0 1px;}
-  .enh-sec:first-child{margin-top:0;}
-  .enh-card{padding:6px 11px;border-radius:7px;background:var(--surface1);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.2;}
-  .enh-card:hover{border-color:var(--accent);background:var(--surface0);}
+  /* The Enhance sub-tab's shelf/list/card rules (#enh-list, .enh-item, .enh-shelf, .enh-sec,
+     .enh-card) went with the panelplugin controls they styled -- see the sub-tab's own comment
+     for why that surface cannot work. .enh-note is the pane's explanatory copy, shaped like
+     .lora-trig below (the drawer's other inline explanation) minus its accent tint. */
+  .enh-note{font-size:11.5px;line-height:1.5;padding:9px 11px;border-radius:7px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);}
+  .enh-note b{color:var(--text);}
   .fix-tags{display:flex;gap:5px;margin-bottom:6px;}
   .fix-tags button{padding:4px 10px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
   .fix-tags button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
@@ -6061,31 +6058,28 @@ document.addEventListener('DOMContentLoaded', function(){
         <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
         <div id="edit-result" class="gen-result" style="display:none;"></div>
       </div>
+      {# The ten one-click cards, the ComfyUI catalog search and the Run button that used to
+         live here are gone. PixAI never assigns a worker to a panelplugin task submitted with
+         an API key: it accepts it, queues it, charges for it, then cancels it at roughly
+         60 minutes with outputs.reason "waiting timeout" and refunds. Measured
+         2026-07-24 against their live API and proven by elimination -- the same payload built
+         with PixAI's own official preset workflow id also never dispatches, while their web
+         client runs that workflow in 1-3 seconds, and a taskKind=chat Fix from this app
+         dispatched in one second minutes earlier. No workflow id, input key or payload shape
+         changes that, so there was nothing to repair. The tab stays (it is where image
+         refinement belongs) and says so honestly instead of offering buttons that queue an
+         hour-long no-op. Guarded by tests/test_enhance.py. #}
       <div id="edit-sub-enhance" style="display:none;">
-        <div class="gen-lbl">One-click tools <span style="text-transform:none;color:var(--subtext);">&middot; official PixAI workflows &middot; runs on the source</span></div>
-        <div class="enh-shelf">
-          <div class="enh-sec">Upscale</div>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1794855217667308480','Upscale')" title="Upscale the image">Upscale</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1804744873525448983','Upscale 2×2')" title="Upscale in 2x2 tiles (higher detail)">Upscale 2&times;2</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1803967880822088690','Upscale + Enhance')" title="Upscale and re-detail">Upscale + Enhance</button>
-          <div class="enh-sec">Cleanup</div>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793505053210462325','Remove BG')" title="Remove the background">Remove BG</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793473388466817128','Precise inpaint')" title="Precise masked inpaint / edit">Precise inpaint</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793713293591365899','Outpaint')" title="Extend the frame outward (outpaint)">Outpaint</button>
-          <div class="enh-sec">Convert</div>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1796053397111789217','To line art')" title="Convert to line art">To line art</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793447160259872021','Sketch colorizer')" title="Colorize a sketch / line art">Sketch colorizer</button>
-          <div class="enh-sec">Light</div>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1801729774701480692','Relight: sun')" title="Relight: warm sunshine">Relight: sun</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1801752508134768728','Relight: backlight')" title="Relight: backlighting">Relight: backlight</button>
+        <div class="gen-lbl" style="margin-top:0;">One-click tools</div>
+        <div class="enh-note">
+          PixAI's one-click refinement workflows &mdash; tiled upscale, background removal,
+          line art, relight &mdash; only run on <b>pixai.art</b> itself. Submitted with an API
+          key they queue and are cancelled unstarted about an hour later, so this app can't
+          offer them.
+          <br><br>
+          For hands and faces, use <b>Fix</b> above: it goes through a different PixAI
+          endpoint and works here.
         </div>
-        <div class="gen-lbl">Browse all workflows <span style="text-transform:none;color:var(--subtext);">&middot; 140+ community ComfyUI</span></div>
-        <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
-        <div id="enh-list"></div>
-        <div class="gen-lbl" id="enh-selected" style="display:none;"></div>
-        <mg-cost-badge id="enhance-cost" hint="Pick a tool to see the cost." card-label="an Edit card"></mg-cost-badge>
-        <button type="button" class="gen-go" id="enh-go" disabled onclick="Gen.runEnhance()">Run</button>
-        <div id="enh-result" class="gen-result" style="display:none;"></div>
       </div>
       <div id="edit-sub-fix" style="display:none;">
         <div class="gen-lbl">Fix hands / faces <span style="text-transform:none;color:var(--subtext);">&middot; drag a box</span></div>
@@ -6558,7 +6552,6 @@ var Snips = (function(){
 })();
 var Gen = (function(){
   var kind='base', selected=null, costSeq=0, costTimer=null;
-  var workflows=null, enhTimer=null;
   var fixTag_='face', fixBoxes=[], fixStart=null;
   function el(id){return document.getElementById(id);}
   function open(){
@@ -7023,7 +7016,7 @@ var Gen = (function(){
       var pane=el('gen-mode-'+x); if(pane) pane.style.display=(x===m)?'':'none';
       var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
     el('gen-drawer').classList.toggle('wide', m==='video'||m==='edit');
-    if(m==='edit'){ setEditModel(editModel); loadWorkflows().then(renderWorkflows); if(!presetsLoaded) loadPresets(); }
+    if(m==='edit'){ setEditModel(editModel); if(!presetsLoaded) loadPresets(); }
     // Video is the <mg-generate-drawer> web component now -- it self-renders on connect and
     // owns its own state; nothing to (re)build here (the old renderVideoSlots is gone).
   }
@@ -7031,7 +7024,6 @@ var Gen = (function(){
     ['edit','enhance','fix'].forEach(function(x){
       var pane=el('edit-sub-'+x); if(pane) pane.style.display=(x===s)?'':'none';
       var b=el('es-'+x); if(b) b.classList.toggle('on', x===s); });
-    if(s==='enhance') loadWorkflows().then(renderWorkflows);
     if(s==='fix') fixResize();
   }
   function editSrc(){ return el('edit-src').value.trim(); }
@@ -7042,7 +7034,6 @@ var Gen = (function(){
     else { img.style.display='none'; }
     renderEditRefs();   // primary changed -> @image1 slot + cap count update
     debEditCost();
-    debEnhanceCost();   // Enhance's price also depends on the shared edit-src (D-12)
   }
   var EDIT_CAPS={
     'edit-pro':{max_refs:4,resolutions:['1K','2K'],qualities:['low','medium','high'],
@@ -7201,56 +7192,9 @@ var Gen = (function(){
             {past:'Fixed', btn:el('fix-go'), busy:'Fixing\\u2026', idle:'Fix marked regions'});
   }
   function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
-  function loadWorkflows(){
-    if(workflows) return Promise.resolve(workflows);
-    return fetch('/api/workflows').then(function(r){return r.json();})
-      .then(function(d){ workflows=d.workflows||[]; return workflows; })
-      .catch(function(){ workflows=[]; return workflows; });
-  }
-  function renderWorkflows(){
-    var list=el('enh-list'); if(!list) return;
-    var qq=(el('enh-q').value||'').toLowerCase().trim();
-    list.innerHTML='';
-    (workflows||[]).filter(function(w){ return !qq || w.name.toLowerCase().indexOf(qq)>=0; })
-      .slice(0,50).forEach(function(w){
-        var b=document.createElement('button'); b.type='button'; b.className='enh-item';
-        var nm=w.name.split('|')[0].split('/')[0].trim();
-        b.innerHTML=esc(nm)+' <span class="ty">'+esc((w.type||'').toLowerCase())+'</span>';
-        b.onclick=function(){ selectEnhance(w.id, nm); }; list.appendChild(b);
-      });
-  }
-  // D-12: was click-runs-immediately (price -> window.confirm -> fire), the one Enhance
-  // path never converted to the persistent <mg-cost-badge> pattern every other price
-  // surface already uses. Now select-then-run, mirroring the Edit sub-tab's own shape:
-  // clicking a tool only SELECTS it (updates the badge), a separate Run button fires it,
-  // and the badge alone is the warning -- no window.confirm left, same as everywhere else.
-  var enhWid='', enhName='';
-  function selectEnhance(wid, name){
-    enhWid=wid; enhName=name||'';
-    var sel=el('enh-selected');
-    if(sel){ sel.style.display=''; sel.innerHTML='Selected: <b style="color:var(--text);">'+esc(enhName)+'</b>'; }
-    el('enh-go').disabled=false;
-    debEnhanceCost();
-  }
-  function enhanceCost(){
-    var cost=el('enhance-cost');
-    if(!enhWid || !editSrc()){ cost.clear(); return; }
-    cost.setChecking();
-    var mine=++costSeq;
-    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({mode:'enhance', source:editSrc(), workflow_id:enhWid})})
-      .then(function(r){return r.json();})
-      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
-      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
-  }
-  function debEnhanceCost(){ clearTimeout(costTimer); costTimer=setTimeout(enhanceCost,250); }
-  function runEnhance(){
-    var src=editSrc();
-    if(!src){ el('edit-src').focus(); return; }
-    if(!enhWid){ return; }
-    runTask('/api/enhance', {source:src, workflow_id:enhWid}, el('enh-result'),
-            {past:'Enhanced', btn:el('enh-go'), busy:'Running\\u2026', idle:'Run'});
-  }
+  // The Enhance sub-tab's client half (loadWorkflows / renderWorkflows / selectEnhance /
+  // enhanceCost / runEnhance) is gone with the controls it drove -- see the sub-tab's markup
+  // for why a panelplugin submit can never complete from an API key. The tab is static copy now.
   function genDrawerEl(){ var w=el('gen-mode-video'); return w?w.querySelector('mg-generate-drawer'):null; }
   function addVideoRefs(refs){
     // Gallery bulk-send ("make a video from these"): feed the picked images straight into
@@ -7265,8 +7209,7 @@ var Gen = (function(){
   return {open:open, close:close, setKind:setKind,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
-          selectEnhance:selectEnhance, runEnhance:runEnhance,
-          renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
+          fixTag:fixTag, fixClear:fixClear, fix:fix,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
@@ -7472,7 +7415,6 @@ document.addEventListener('DOMContentLoaded', function(){
   if(document.getElementById('em-edit-pro') && window.Gen) Gen.setEditModel('edit-pro');  // populate the option lists
   var es=document.getElementById('edit-src');
   if(es) es.addEventListener('input', function(){ Gen.setEditSource(es.value.trim()); });
-  var eq=document.getElementById('enh-q'); if(eq) eq.addEventListener('input', Gen.renderWorkflows);
   var em=new URLSearchParams(location.search).get('edit');
   if(em) Gen.openEdit(em);
 });
@@ -10763,10 +10705,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         spends nothing. Cached per media_id for the process lifetime.
 
         This lives at create_app scope, called by EVERY path that feeds a user-chosen
-        image to PixAI -- /api/loom/generate, /api/enhance, /api/edit, /api/fix. The
-        first fix for this bug only patched the video route, which left enhance/edit/fix
-        silently broken in exactly the same way; a shared helper is what stops the next
-        input path from reintroducing it.
+        image to PixAI -- /api/loom/generate, /api/edit, /api/fix. The first fix for this
+        bug only patched the video route, which left the other input routes silently broken
+        in exactly the same way; a shared helper is what stops the next input path from
+        reintroducing it.
 
         Falls back to the value unchanged on ANY failure (no local copy, upload error)
         so PixAI's own error surfaces rather than a mystery 'no reference'.
@@ -12016,15 +11958,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             except core.PixAIError as e:
                 return None, bool(p.get("no_card")), _redact_host_paths(str(e))[:140]
             return params, bool(p.get("no_card")), None
-        if p.get("mode") == "enhance":
-            src = str(p.get("source") or "").strip()
-            wid = str(p.get("workflow_id") or "").strip()
-            if not (src and wid):
-                return None, bool(p.get("no_card")), "pick an image + a tool"
-            try:
-                return core.build_panelplugin_parameters(src, wid), bool(p.get("no_card")), None
-            except Exception:                        # noqa: BLE001
-                return None, bool(p.get("no_card")), "could not build that workflow"
         args = _gen_args_from_payload(p)
         if not args.model:
             return None, args.no_card, "pick a model"
@@ -12148,31 +12081,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
-    @app.route("/api/enhance", methods=["POST"])
-    def api_enhance():
-        """One-click enhance (panelplugin) on the Edit tab's source image. Login required;
-        auto-applies a card if one matches. A rejected/unknown workflow just errors (no
-        credits spent). Returns {task_id, media_ids, paid_credit}."""
-        try:
-            from types import SimpleNamespace
-            core, session = _gen_session()
-            p = request.get_json(silent=True) or {}
-            src = _input_media_id(core, session, str(p.get("source") or "").strip())
-            wid = str(p.get("workflow_id") or "").strip()
-            if not src:
-                return jsonify({"error": "pick an image first"}), 400
-            if not wid:
-                return jsonify({"error": "pick an enhance workflow"}), 400
-            params = core.build_panelplugin_parameters(src, wid)
-            core._apply_kaisuuken(session, params,
-                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            task_id = core.submit_generation(session, params)
-            telem_bump("enhances", out_dir=out_dir)       # first-enhance milestone
-            telem_set_add("tools", "enhance", out_dir=out_dir)
-            telem_set_add("enhance_workflows", wid, out_dir=out_dir)  # Enhance Adept: distinct rituals
-            return jsonify({"task_id": task_id})
-        except Exception as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
+    # /api/enhance is gone. It submitted a panelplugin task, which PixAI accepts, queues,
+    # charges for and then cancels unstarted at roughly 60 minutes ("waiting timeout") whenever
+    # the client authenticated with an API key -- their own official preset workflow ids
+    # included. Nothing about the payload changes that, so the route could only ever bill an
+    # hour of waiting for no output. See the Enhance sub-tab's markup for the full measurement;
+    # tests/test_enhance.py guards against it coming back.
 
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
@@ -13005,15 +12919,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _log_job(jid, dismissed=True)
         return jsonify({"ok": True})
 
-    @app.route("/api/workflows")
-    def api_workflows():
-        """Live enhance-workflow catalog (id + name + type) for the Edit tab picker.
-        Read-only; login required (uses the owner's key)."""
-        try:
-            core, session = _gen_session()
-            return jsonify({"workflows": core.workflow_catalog(session)})
-        except Exception as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:200], "workflows": []}), 200
+    # /api/workflows is gone too: its only consumer was the Enhance sub-tab's ComfyUI catalog
+    # search, and every id it returned addressed a panelplugin task PixAI will not run for an
+    # API-key client (see /api/enhance's note above).
 
     @app.after_request
     def _gzip_html(resp):
