@@ -3762,7 +3762,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
   function SequencePlayer({ clips, onClose }) {
     const vRef = useRef(null);
     const [i, setI] = useState(0);
+    const [muted, setMuted] = useState(true);
     const clip = clips[i];
+    useEffect(() => {
+      const v = vRef.current;
+      if (v) v.muted = muted;
+    }, [muted, i]);
     useEffect(() => {
       const v = vRef.current;
       if (!v || !clip) return;
@@ -3816,7 +3821,16 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           v.paused ? v.play() : v.pause();
         }
       }
-    ), /* @__PURE__ */ React.createElement("div", { className: "sb-seq-bar" }, /* @__PURE__ */ React.createElement("span", null, "Shot ", i + 1, "/", clips.length, clip.code ? " \xB7 " + clip.code : "", clip.title ? " \u2014 " + clip.title : ""), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => setI(Math.max(0, i - 1)), disabled: i === 0 }, "\u25C0 prev"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => {
+    ), /* @__PURE__ */ React.createElement("div", { className: "sb-seq-bar" }, /* @__PURE__ */ React.createElement("span", null, "Shot ", i + 1, "/", clips.length, clip.code ? " \xB7 " + clip.code : "", clip.title ? " \u2014 " + clip.title : ""), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "sb-btn ghost sm",
+        onClick: () => setMuted(!muted),
+        title: muted ? "Unmute \u2014 the rendered mp4 has audio" : "Mute",
+        "aria-pressed": !muted
+      },
+      muted ? "\u{1F507} muted" : "\u{1F50A} sound"
+    ), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => setI(Math.max(0, i - 1)), disabled: i === 0 }, "\u25C0 prev"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => {
       if (i < clips.length - 1) setI(i + 1);
       else onClose();
     } }, "next \u25B6"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: onClose }, "\u2715 close"))));

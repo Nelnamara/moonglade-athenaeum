@@ -142,6 +142,22 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Loom's "Play sequence" was hard-muted while the rendered mp4 carries real audio.**
+  `<video autoPlay muted>` with nothing able to turn sound on, so a storyboard could be
+  reviewed end to end without ever hearing what the render will actually sound like, and
+  nothing in the UI hinted the silence was a player choice rather than silent footage. The
+  reel now owns a mute state with a toggle in its player bar. It still *starts* muted, on
+  purpose: browsers refuse autoplay with sound absent a user gesture, and a reel that
+  silently fails to start is worse than one that starts quiet. Two details are load-bearing
+  and each has its own guard, because both are the kind of thing that silently reverts —
+  the state is applied **imperatively through the ref**, since React does not reliably
+  reflect a `muted` JSX prop onto a `<video>` (a source-only fix can look correct and do
+  nothing live); and the effect **re-runs on shot change**, because the element is keyed by
+  `clip.mid`, so advancing a shot destroys it and a fresh one returns with the initial muted
+  attribute — without that, unmuting would quietly undo itself at every shot boundary, which
+  is the same bug one step along. First test coverage of `SequencePlayer` at all.
+
+
 - **Generations that PixAI accepts but never starts no longer die silently.** Five of the
   owner's jobs vanished this way between 2026-07-21 and 07-24 — three Enhance runs plus two
   more found during diagnosis — and nobody noticed, because nothing ever said anything. A

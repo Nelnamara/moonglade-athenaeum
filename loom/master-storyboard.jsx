@@ -3520,7 +3520,23 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
 function SequencePlayer({ clips, onClose }) {
   const vRef = useRef(null);
   const [i, setI] = useState(0);
+  // Starts muted so autoplay is never blocked (browsers refuse autoplay WITH sound without
+  // a user gesture, and a reel that silently fails to start is worse than one that starts
+  // quiet), but the reel is no longer HARD-muted: the exported mp4 carries real audio, so a
+  // storyboard used to be reviewable end to end without ever hearing what the render will
+  // sound like.
+  const [muted, setMuted] = useState(true);
   const clip = clips[i];
+  // Applied imperatively, and re-applied on shot change. Both halves are load-bearing:
+  // React does not reliably reflect a `muted` JSX prop onto a <video>, so the attribute
+  // alone can look right in source and do nothing live; and the element carries
+  // key={clip.mid}, so advancing a shot destroys it and a fresh one returns with the
+  // initial muted attribute -- without `i` in the deps, unmuting would quietly undo itself
+  // at every shot boundary.
+  useEffect(() => {
+    const v = vRef.current;
+    if (v) v.muted = muted;
+  }, [muted, i]);
   useEffect(() => {
     const v = vRef.current; if (!v || !clip) return;
     const seekPlay = () => { try { v.currentTime = clip.in || 0; } catch (e) {} v.play().catch(() => {}); };
@@ -3555,6 +3571,9 @@ function SequencePlayer({ clips, onClose }) {
           onClick={(e) => { const v = e.currentTarget; v.paused ? v.play() : v.pause(); }} />
         <div className="sb-seq-bar">
           <span>Shot {i + 1}/{clips.length}{clip.code ? " · " + clip.code : ""}{clip.title ? " — " + clip.title : ""}</span>
+          <button className="sb-btn ghost sm" onClick={() => setMuted(!muted)}
+            title={muted ? "Unmute — the rendered mp4 has audio" : "Mute"}
+            aria-pressed={!muted}>{muted ? "\u{1F507} muted" : "\u{1F50A} sound"}</button>
           <button className="sb-btn ghost sm" onClick={() => setI(Math.max(0, i - 1))} disabled={i === 0}>&#9664; prev</button>
           <button className="sb-btn ghost sm" onClick={() => { if (i < clips.length - 1) setI(i + 1); else onClose(); }}>next &#9654;</button>
           <button className="sb-btn sm" onClick={onClose}>&#10005; close</button>
