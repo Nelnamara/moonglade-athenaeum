@@ -1936,8 +1936,26 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
 # 2026-07-04). NOTE 'concept' is NOT a real server value (returns empty) -- excluded.
 MARKET_CATEGORIES = ("character", "style", "pose", "clothing", "background", "detail", "other")
 
+# GenerationModelType enum members this app is willing to put INTO a query document, for
+# generationModels(loraBaseModelTypes:[...]) -- see model_search_market_gql's lora_base_type
+# argument. Only these five: the architectures confirmed to exist as a LoRA's BASE family.
+# (MULTI_LORA is a LoRA's OWN type and VIDEO_MODEL is not an image base, so neither is ever a
+# legitimate value here and both are deliberately absent.)
+#
+# This MUST stay a fixed whitelist. A GraphQL enum is a bare token, not a string -- it cannot
+# be bound as a $variable, so the value is interpolated into the query text, exactly like
+# MARKET_CATEGORIES above and for exactly the same reason: caller-supplied text must never
+# reach a query document. Anything not listed here is silently ignored and the search runs
+# UNFILTERED -- fail-open, the same way a non-whitelisted `category` is dropped. An unknown or
+# newly-added architecture must degrade to "no server-side filter" (the per-row
+# annotate_lora_compat badge still tells the truth), never to a rejected query that would
+# break LoRA browsing outright.
+LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL",
+                         "DIT9_MODEL")
 
-def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24, after=None):
+
+def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24,
+                            after=None, lora_base_type=""):
     """Market-style model browse via the GraphQL `generationModels` connection, which -- unlike
     the REST /search -- actually HONORS `category` and a date `orderBy`. Use this for category
     chips + a Newest sort; the REST path (model_search_rest) stays the default for keyword/Popular
@@ -1968,7 +1986,28 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     absent -- a present-but-empty $a may not mean the same thing to PixAI's resolver as no
     $a at all, and this is the first page of a fresh search either way. next_cursor in the
     return is '' whenever has_more is false, even if the server's own endCursor is
-    non-empty -- never hand a caller a cursor that would page forever on an exhausted list."""
+    non-empty -- never hand a caller a cursor that would page forever on an exhausted list.
+
+    lora_base_type=<GenerationModelType> (2026-07-24): SERVER-SIDE architecture filtering for
+    LoRA search, via an argument this connection has accepted all along and this app never
+    used -- generationModels(loraBaseModelTypes:[MMDIT26A_MODEL], ...). Ignored unless
+    usage=LORA (nothing to filter a base-model list by) and unless the value is in
+    LORA_BASE_MODEL_TYPES; see that tuple for why the whitelist is mandatory rather than
+    defensive. Measured live: [MMDIT26A_MODEL] returned 23 of 24 rows compatible with a
+    DiT.2 base, against 24-of-24 SD_V1 with no filter at all -- which is the wall that made
+    LoRA browsing useless for anything but SD 1.5.
+
+    GOTCHA, and it cost real time once already: the values are UNQUOTED GraphQL ENUM tokens.
+    An earlier probe sent them as JSON strings (["MMDIT26A_MODEL"]), got a type error back,
+    and the error was misread as "this argument doesn't exist" -- so the whole capability sat
+    unused for weeks. Enums also cannot be bound as $variables, which is why this one value
+    is interpolated while `keyword` stays a bound variable.
+
+    The filter is APPROXIMATE, not strict: [DIT7B_MODEL] measured back 12 DiT7B rows, 10
+    MMDIT26A and 2 SDXL. A search row's `loraBaseModelTypes` is a coarse browse hint (a union
+    over the model's releases), not the resolved version's singular `loraBaseModelType`. So
+    this narrows the candidate pool cheaply and annotate_lora_compat() remains the precise
+    per-row layer on top -- do not treat the filter as a substitute for the badge."""
     cat = (category or "").strip().lower()
     # category/orderBy come from a fixed whitelist -> safe to interpolate; keyword stays a
     # bound $variable (never interpolate user text into a query).
@@ -1977,6 +2016,16 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         args.append('category:"%s"' % cat)
     if (sort or "").strip().lower() == "newest":
         args.append('orderBy:"-createdAt"')
+    # Server-side architecture filter -- LoRA searches only (there is nothing to filter a
+    # base-model list by). The value is a BARE ENUM TOKEN, unquoted: [MMDIT26A_MODEL], never
+    # ["MMDIT26A_MODEL"]. Passing them as strings is a type error the server rejects, and
+    # since an enum cannot be a $variable either, this is interpolated -- hence the
+    # LORA_BASE_MODEL_TYPES whitelist gate, which also makes an unrecognized architecture
+    # fall through to an unfiltered search rather than a rejected query.
+    want_lora = (usage or "MODEL").upper() == "LORA"
+    lbt = (lora_base_type or "").strip().upper()
+    if want_lora and lbt in LORA_BASE_MODEL_TYPES:
+        args.append("loraBaseModelTypes:[%s]" % lbt)
     after = (after or "").strip()
     var_decl = "$k:String,$n:Int"
     variables = {"k": keyword or "", "n": int(limit)}
@@ -1989,7 +2038,6 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
          "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
          "tags { name } author { displayName } createdAt } } } }")
     data = (gql_adhoc(session, q, variables) or {}).get("generationModels") or {}
-    want_lora = (usage or "MODEL").upper() == "LORA"
     out = []
     for e in data.get("edges") or []:
         n = e.get("node") or {}

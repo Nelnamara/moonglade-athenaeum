@@ -64,6 +64,36 @@ git tags. Full prose notes for tagged versions live on
   the next scroll simply retries instead of wedging closed. Live-verified end to end with
   two mocked pages: the grid held both, in order, not replaced.
 
+### Added
+
+- **LoRA search is filtered by base-model architecture server-side, by PixAI, before results
+  ever come back.** This is the one that mattered: with a DiT.2 base selected, the LoRA
+  picker's first page was 24-of-24 SD 1.5 rows — every one of them unusable — and the
+  standing workaround was to go keyword-search "sdxl" on PixAI's own site instead. The
+  `generationModels` connection has accepted a `loraBaseModelTypes` argument the whole time;
+  this app never used it. Measured live: `[MMDIT26A_MODEL]` returns 23 of 24 rows compatible
+  with a DiT.2 base. The already-resolved `base_type=` the picker was sending for the compat
+  badge now drives the filter too — one caller-supplied value, three layers (server-side
+  filter → per-page soft sort → per-row badge), no new client plumbing.
+
+  **The gotcha, recorded because it cost real time once already:** the values are *unquoted
+  GraphQL enum tokens* — `loraBaseModelTypes:[MMDIT26A_MODEL]`, never
+  `["MMDIT26A_MODEL"]`. An earlier probe sent them as JSON strings, got a type error back,
+  and the error was misread as "this argument doesn't exist," which is why the capability sat
+  unused. Enums also cannot be bound as `$variables`, so this one value is interpolated into
+  the query document while `keyword` stays a bound variable — which is exactly why it is
+  gated on a fixed whitelist of known architectures (`LORA_BASE_MODEL_TYPES`), the same rule
+  and the same reason as the existing `category` whitelist. An unrecognized architecture
+  falls through to an *unfiltered* search rather than a rejected query, so a newly-added
+  PixAI architecture can never break LoRA browsing outright.
+
+  The filter is **approximate, not strict** — a search row's `loraBaseModelTypes` is a coarse
+  union over the model's releases, not the resolved version's singular `loraBaseModelType`
+  (measured: `[DIT7B_MODEL]` came back 12 DiT7B, 10 MMDIT26A, 2 SDXL). So
+  `annotate_lora_compat()`'s per-row badge is deliberately **kept** as the precise layer on
+  top, and so is the per-page soft sort — it is the only compat affordance left in the
+  fail-open case, and it was verified working live (18 compatible cards, then 6 incompatible).
+
 ### Fixed
 
 - **A real Loom-only bug in the base-model version-resolve guard**, found by the owner
