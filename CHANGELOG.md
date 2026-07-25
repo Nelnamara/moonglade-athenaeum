@@ -89,6 +89,26 @@ git tags. Full prose notes for tagged versions live on
   visible "loading more…" indicator; a transient error leaves pagination state untouched so
   the next scroll simply retries instead of wedging closed. Live-verified end to end with
   two mocked pages: the grid held both, in order, not replaced.
+- **Model/LoRA search rows now carry the account's own `bookmarked` / `liked` state.**
+  `GenerationModel` exposes both as viewer-scoped booleans on every connection that returns
+  one — probed live against the owner's real account: `bookmarked: true` on 50/50 rows of his
+  own bookmark connection, `false` on 3/3 plain market rows. They are genuinely free: two
+  more leaf fields on a request `model_search_market_gql()` already makes, no extra round
+  trip, no spend. The oRPC `/v2` REST search has no equivalent, so `model_search_rest()`
+  defaults both to `False` — the mirror of the convention already running the other way
+  ("REST-only rich fields absent here → empty so the card hides them"), so a consumer can
+  read the key off a row from either path. On a REST row `False` therefore means "this path
+  can't tell you", **not** "confirmed not bookmarked", exactly as `official: False` on a
+  GraphQL row only means that connection doesn't carry curations. **Data plumbing only — no
+  UI renders it yet;** the picker tab that consumes it is separate, later work.
+- **The account payload now reports the account's PixAI roles.** `me.roles` rides along on the
+  account query the header chip, `--account` and `/api/account` already run — one extra leaf
+  field, no extra call, no spend — and nothing had ever read it. The owner's account carries
+  `BETA_TO_INVITE`, the flag behind PixAI's early-access programs (directly relevant to the
+  Tsubaki.3 / DiT.3 invite). `/api/account` exposes it as `roles`, normalized to a list of
+  non-empty strings: only the field's *name* was probed, not its exact shape, so a bare single
+  value is wrapped rather than dropped and an account with none gets `[]` rather than `null`.
+  **Payload only — nothing reads it yet.**
 
 ### Added
 

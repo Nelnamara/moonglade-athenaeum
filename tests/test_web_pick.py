@@ -1924,6 +1924,27 @@ def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     assert d["sub"]["end"] == "2026-07-27" and d["sub"]["cancel"] is True
 
 
+def test_account_surfaces_the_accounts_roles(tmp_path, monkeypatch):
+    """`me.roles` rides along on the account query the header chip already runs (free). The
+    owner's real account carries BETA_TO_INVITE -- the flag behind PixAI's early-access
+    programs -- and nothing had ever read it. Exposed as a normalized list of strings so a
+    consumer can just test membership; a bare (non-list) value the server might send is
+    wrapped rather than dropped, and an account with no roles gets [] rather than null, since
+    the field's shape was never probed, only its name. Payload only -- no UI reads it yet."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {
+        "quotaAmount": 1850640, "roles": ["BETA_TO_INVITE", "", None]})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    assert cli.get("/api/account").get_json()["roles"] == ["BETA_TO_INVITE"]
+
+    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1, "roles": "BETA_TO_INVITE"})
+    assert cli.get("/api/account").get_json()["roles"] == ["BETA_TO_INVITE"]   # bare value wrapped
+
+    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1})
+    assert cli.get("/api/account").get_json()["roles"] == []                   # absent -> [], not null
+
+
 def test_account_surfaces_the_real_membership_lora_cap(tmp_path, monkeypatch):
     """PixAI's own account API already returns the account's real per-generation LoRA
     entitlement (membership.privilege.{lora,freeUserLora}) -- account_info() already fetches
