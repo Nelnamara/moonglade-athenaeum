@@ -2,7 +2,7 @@
 own docstring didn't know it had.
 
 That file's docstring said "all four choke points... are covered -- both the CLI and the
-web app's generate/edit/enhance/fix/delete/claim routes funnel through these same four
+web app's generate/edit/fix/delete/claim routes funnel through these same four
 functions." That was true for the web app and false for the CLI: run_generate,
 run_generate_video, run_reference_video, run_enhance and run_edit_image each build their
 OWN gql_adhoc call instead of calling through submit_generation()/submit_fixer(), so none
@@ -123,7 +123,8 @@ class TestRunEnhanceReadOnly:
         local_file.write_bytes(b"\x89PNG\r\n")
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
             core.run_enhance(_args(tmp_path, params_json="", src=str(local_file),
-                                    workflow_id="wf1"))
+                                    filter_id="filter-v1-m2", strength=None,
+                                    kaisuuken_id=""))
         mock_session.post.assert_not_called()
 
 

@@ -920,11 +920,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   }, [pickerMounted, pickerKind]);
   // D-12 increments 2-4: read-only cost badges for the Image/Edit/Reference tabs -- refs to
   // the <mg-cost-badge> custom elements (imperative setChecking/setPrice/clear API, the same
-  // component the Gallery's Enhance sub-tab uses). Kept ALONGSIDE -- not instead of --
-  // confirmSpend's window.confirm at submit time below, unlike the Gallery's Enhance tab:
-  // these three tabs' confirm dialog IS the fail-closed guardrail that got built after they
-  // used to lie about cost (see confirmSpend's own comment), so the badge is an added
-  // preview, not a replacement for the submit-time gate.
+  // component the Gallery's Generate and Edit tabs use). Kept ALONGSIDE -- not instead of --
+  // confirmSpend's window.confirm at submit time below: these three tabs' confirm dialog IS
+  // the fail-closed guardrail that got built after they used to lie about cost (see
+  // confirmSpend's own comment), so the badge is an added preview, not a replacement for the
+  // submit-time gate.
   const imgCostRef = useRef(null);
   const editCostRef = useRef(null);
   const refCostRef = useRef(null);

@@ -7,10 +7,10 @@ tests/test_web_auth.py hand-maintains four lists of paths
 (_PREVIOUSLY_UNGATED_JSON_GET / _JSON_POST / _HTML_GET / _HTML_POST). A
 hand-maintained list is precisely what the front-door refactor
 (pixai_gallery.py's _enforce_front_door()) was undertaken to eliminate, and those
-lists had ALREADY drifted: five credit-spending routes -- /api/generate,
-/api/edit, /api/enhance, /api/fix, /api/loom/generate -- appear in none of them.
-They are gated today, but nothing in the suite said so, and nothing would have
-noticed if they stopped being.
+lists had ALREADY drifted: every credit-spending route -- /api/generate,
+/api/edit, /api/fix, /api/loom/generate -- appears in none of them. They are
+gated today, but nothing in the suite said so, and nothing would have noticed
+if they stopped being.
 
 This file does not enumerate paths. It enumerates `app.url_map` -- the single
 source of truth for what is actually routable -- and asserts that EVERY
@@ -155,11 +155,10 @@ ROUTE_TIERS = {
     ("api_trash_list", "GET"): LOGIN,
     ("api_trash_restore", "POST"): LOGIN,
 
-    # credit-spending generation surface -- the five routes the hand-maintained
+    # credit-spending generation surface -- the routes the hand-maintained
     # lists in test_web_auth.py never covered.
     ("api_generate", "POST"): LOGIN,
     ("api_edit", "POST"): LOGIN,
-    ("api_enhance", "POST"): LOGIN,
     ("api_fix", "POST"): LOGIN,
     ("loom_generate", "POST"): LOGIN,
     ("api_upload", "POST"): LOGIN,
@@ -182,7 +181,6 @@ ROUTE_TIERS = {
     ("api_tag_suggest", "GET"): LOGIN,
     ("api_task_status", "GET"): LOGIN,
     ("api_watch_status", "GET"): LOGIN,
-    ("api_workflows", "GET"): LOGIN,
     ("api_your_art", "GET"): LOGIN,
 
     # jobs -- ONE rule string, TWO endpoints (the case a rule-keyed dict drops)
@@ -461,9 +459,9 @@ def test_every_registered_route_declares_a_tier(app):
             "                      return jsonify({{\"error\": \"localhost-only\"}}), 403\n"
             "  PUBLIC    - the login surface only; also requires an entry in\n"
             "              PUBLIC_EXPECTED_STATUS.\n"
-            "This failure is not bureaucracy: five credit-spending routes\n"
-            "(/api/generate, /api/edit, /api/enhance, /api/fix, /api/loom/generate)\n"
-            "were missing from the hand-maintained lists in tests/test_web_auth.py\n"
+            "This failure is not bureaucracy: every credit-spending route\n"
+            "(/api/generate, /api/edit, /api/fix, /api/loom/generate) was\n"
+            "missing from the hand-maintained lists in tests/test_web_auth.py\n"
             "for exactly this reason, and nothing noticed."
             .format(len(undeclared),
                     "\n".join("    (\"{}\", \"{}\")".format(e, m) for e, m in undeclared)))
