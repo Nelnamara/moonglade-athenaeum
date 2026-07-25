@@ -2863,9 +2863,23 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const startedAt = Date.now();
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
-      if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-      else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-      else again(4000);
+      // The two JobsCard.refresh() nudges below mirror pollShot's (and mg-notify.js's own
+      // Jobs.poll()): the /api/task-status response that reports done/failed is the very call
+      // that made the server write the authoritative terminal job event, so refreshing right
+      // here cannot race it. Without them a row registered by genImage/genEdit/genRef would sit
+      // on stale "running" until the tray's own independent ~2.5-7s cycle happened to catch up --
+      // the same "tracker looks frozen / the two surfaces disagree about one task" symptom
+      // already fixed for shots. Deliberately NOT done on the ceiling path in again() below:
+      // hitting the ceiling only means THIS TAB stopped asking, no job event was written, so a
+      // refresh would just re-read the same running row (the server's own orphan-reconciliation
+      // sweep, which /api/jobs runs on every read, owns that case).
+      if (cls.phase === "done") {
+        setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+        if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
+      } else if (cls.phase === "failed") {
+        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+        if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
+      } else again(4000);
     }).catch(() => again(5000));
     const again = (ms) => {
       if (Date.now() - startedAt > POLL_CEILING_MS) {
@@ -2896,6 +2910,28 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         body: JSON.stringify(body) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
+      // Register this submission in the shared Job Tracker (static/mg-notify.js -> /api/jobs)
+      // the moment the server accepts it. This path -- and genEdit/genRef, via runGen below --
+      // never did, so a generation launched from the Loom's Image/Edit/Reference tabs was
+      // invisible in BOTH Activity trays (the Loom's and the gallery's): they render from the
+      // shared job log, and nothing had ever told it the task existed. Found in the owner's field
+      // test 2026-07-24 -- two Image-tab generations, no rows in either tray and not one entry in
+      // jobs.jsonl for the task id, while the generation itself succeeded and the live-mirror
+      // watcher collected all four of its images. The trays were not broken; they were never told.
+      //
+      // register(), not track() -- exactly like generateShot above and for the same reason:
+      // pollImg below already owns real completion handling, so Jobs.track()'s own polling would
+      // be a redundant second poll of the same task id. Terminal state still resolves, because
+      // pollImg -> pollTaskWithCeiling polls /api/task-status, and THAT route's done/failed
+      // branches are what write the authoritative terminal job event -- the poll already running
+      // here is what closes the row out.
+      //
+      // Label order is deliberate: the TAB the owner clicked first, then the shot code + title
+      // (the tail of generateShot's own label, so the two read as one family). .jt-lab is
+      // nowrap + ellipsis in a 366px tray, so a long shot title truncates the END -- whatever
+      // must survive goes first. A bare "Generated" on all three paths would only restate the
+      // standing complaint that this tracker isn't informative.
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, "Image · " + entry.code + " · " + (c.title || "untitled"));
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating…" } }));
       pollImg(c.id, d.task_id);
     } catch { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
@@ -2914,7 +2950,10 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   };
   // Generic gen runner for the Edit/Reference tabs — submit -> poll -> stash -> route.
   // Parameterized on the state setter so the proven Image path above stays untouched.
-  const runGen = async (setState, cardId, endpoint, body, priceBody, label) => {
+  // `label` is the confirmSpend() QUESTION ("Edit the open frame of X?"); `jobLabel` is the
+  // separate, much shorter Job Tracker row text each caller supplies -- two different strings
+  // for two different surfaces, so neither has to be bent to fit the other.
+  const runGen = async (setState, cardId, endpoint, body, priceBody, label, jobLabel) => {
     if (priceBody && !(await confirmSpend(priceBody, label))) return;
     setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
     // Same unbounded-loop fix as pollImg -- see pollTaskWithCeiling's comment.
@@ -2923,6 +2962,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d = await r.json();
       if (d.error || !d.task_id) { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
+      // Same register-ONLY call, same reasoning, as genImage above -- this helper is the whole
+      // Edit + Reference submit path, and it had the identical never-registered gap.
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, jobLabel);
       setState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Generating…" } }));
       poll(d.task_id);
     } catch { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: "network error" } })); }
@@ -2943,7 +2985,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     if (!instruction) { setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "describe the edit" } })); return; }
     const editBody = { source: src, instruction, edit_model: "edit-pro" };
     runGen(setGenEditState, c.id, "/api/edit", editBody, { mode: "edit", ...editBody },
-      `Edit the open frame of ${c.title || "this shot"}?`);
+      `Edit the open frame of ${c.title || "this shot"}?`,
+      "Edit · " + entry.code + " · " + (c.title || "untitled"));
   };
   const genRef = (entry) => {
     const c = entry.c;
@@ -2953,7 +2996,10 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     if (!prompt) { setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter a prompt" } })); return; }
     const refBody = { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" };
     runGen(setGenRefState, c.id, "/api/edit", refBody, { mode: "edit", ...refBody },
-      `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`);
+      `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`,
+      // The reference COUNT is the one fact this path is about (and the one its own confirm
+      // already surfaces), so it rides in the row rather than being lost to "Reference".
+      "Reference ×" + refs.length + " · " + entry.code + " · " + (c.title || "untitled"));
   };
   // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
   // the submits don't collide. Each shot manages its own status/poll via generateShot.

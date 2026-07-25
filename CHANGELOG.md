@@ -96,6 +96,43 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Loom's Image / Edit / Reference tabs never registered their generations in the
+  Activity tracker at all — a second, separately-discovered cause of "lost" generations,
+  found in the owner's 2026-07-24 Loom field test.** He generated from the Image tab and got
+  nothing in either tray, the Loom's or the gallery's. Confirmed against his real
+  `jobs.jsonl`: **zero** entries for the task id he had to retrieve from PixAI's own site —
+  while the generation itself succeeded and all four of its images were collected into the
+  catalog by the live-mirror watcher. **This was not a tracker defect.** Both trays render
+  from the shared job log and both were correctly empty, because nothing had ever told the
+  log the generation existed: `genImage()` POSTed `/api/generate`, took `d.task_id`, and
+  handed it straight to its own private `pollImg()`. `genEdit()`/`genRef()` had the identical
+  gap through their shared `runGen()` helper. Only the per-shot VIDEO path (`generateShot`)
+  and the shared drawer's `mg-submit` listener had ever called `Jobs.register()`. All three
+  image paths now register on their success path — `Jobs.register()`, the register-ONLY
+  entry point, **not** `Jobs.track()`, for the same reason `generateShot` gives: these paths
+  already own a hardened private poller, and `track()` would start a redundant second poll
+  of the same task id. Verified end to end before shipping, because registering a job that
+  nothing ever resolves would be worse than the silent miss it replaces: both private
+  pollers route through `pollTaskWithCeiling`, which polls `/api/task-status` — the exact
+  route whose done/failed branches write the authoritative terminal event — so the poll that
+  was already running is what closes the row out, with the same server-side
+  orphan-reconciliation sweep as a closed-tab backstop (it only considers `type='generate'`
+  jobs with a numeric id, which is precisely what `Jobs.register` posts).
+  Tray labels lead with the tab the owner clicked, then the shot code + title (`Image · A·01
+  · Establishing shot`, `Edit · …`, `Reference ×3 · …`) — `.jt-lab` is nowrap + ellipsis in a
+  366px tray, so a long shot title truncates the tail and anything that must survive has to
+  come first; a bare "Generated" on all three would have restated the standing complaint that
+  this tracker isn't informative. `pollTaskWithCeiling` also nudges `JobsCard.refresh()` on
+  its done/failed branches, the same treatment `pollShot` already got — the `/api/task-status`
+  response reporting done is the very call that made the server write the terminal event, so
+  the refresh cannot race it; deliberately NOT done on the 6h-ceiling path, where nothing
+  server-side changed. Live-verified in a real browser against the real bundle and the real
+  `static/mg-notify.js` with every PixAI call stubbed (no credentials, no spend, nothing
+  written to the owner's backup): all three submits POST `/api/jobs` with the intended label,
+  all three rows render un-truncated, and each resolves to `done` with `media_ids` off its own
+  poll. Fail-first tested (`loom/test/loom-image-job-register.test.js`, 16 assertions, 10
+  confirmed failing on the pre-fix source).
+
 - **The Activity tracker's "lost" generations: FIRST CONFIRMED ROOT CAUSE, diagnosed from the
   owner's own production `jobs.jsonl` + catalog.** No data was ever lost, and no job was ever
   stuck — the tracker was permanently **under-reporting**. Two writers can mark a generation
