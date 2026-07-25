@@ -326,6 +326,28 @@ users.
   and unknown must not brand every in-flight job stale. The reaper's caller passes the whole
   status dict, not `["phase"]` — sending the bare string makes the detection dead code in
   production, guarded end-to-end through `/api/jobs`.
+- **The Activity tray shows that phase immediately, not only after the 30-minute sweep.**
+  `/api/task-status` writes `started` into `out_dir/jobs.jsonl`, so the tray — which renders
+  from `/api/jobs`, never from a poll response — draws a distinct **QUEUED** row: the same
+  mascot icon with both animations stopped (`.jt-spin.jt-queued`) plus an uppercase `queued`
+  pill, flipping to the ordinary spinner when a worker takes the job. `started` absent still
+  means *unknown* and keeps the plain spinner, so Control Panel / CLI / delete / import rows
+  and any job logged before this are untouched. Written once per phase change (four pollers ask
+  every 3s; a per-poll write would bloat the log and keep refreshing the `ts` the orphan
+  sweep's age check reads), and the in-process de-dupe entry is dropped at a terminal phase so
+  it stays bounded by in-flight tasks. Because every submit surface's poller — the gallery's,
+  both of the Loom's, and `mg-generate-drawer.js`'s — calls that one route, the signal reaches
+  both trays with no per-host wiring; `tests/test_render_harness.py` measures the rendered
+  result on `/` and `/loom` and asserts they are identical.
+  Alongside it, `queue_wait_estimate()` reads PixAI's own pre-submit queue estimate
+  (`GET /v2/task/wait-time`, params `priority` + `modelVersionId` — a submit's `modelId` is a
+  model *version* id to that route; `priority` is a validated enum, 500/1000) and the tray
+  records it once, when a job is first seen queued, showing `est. Ns wait` and
+  `Est. wait · Ns (PixAI, when queued)` in the detail popover beneath the live Time Spent.
+  There is deliberately **no** percentage, progress bar or countdown for a PixAI generation:
+  PixAI exposes no progress on a task (probed with a control — no `progress`/`percent`/`step`/
+  `eta`/`queuePosition` fields exist), the estimate is never recomputed as the wait grows, and
+  it disappears once the job starts rather than becoming an implied render ETA.
 - The Generate drawer's Edit ▸ Enhance sub-tab is explanatory copy only. PixAI never assigns
   a worker to a panelplugin task submitted with an API key — it accepts it, queues it, charges
   it, then cancels it at ~60 minutes with `outputs.reason` "waiting timeout" and refunds (their

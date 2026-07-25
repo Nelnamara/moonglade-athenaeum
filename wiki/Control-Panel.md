@@ -172,6 +172,18 @@ runs from the panel, the CLI, and your generations in one newest-first list. It 
 50 most recent, ages finished entries out after a day, and lets you dismiss a finished or
 failed row.
 
+A generation's row says which phase it is in rather than just spinning. **Queued** means
+PixAI has accepted the job and no worker has picked it up yet — nothing is rendering — and
+the icon holds still to say so; it starts spinning once a worker takes it. While queued, the
+row also shows the queue wait PixAI itself predicted for that model, and clicking the row
+gives you the full version (`Est. wait — 27s (PixAI, when queued)`) right under a live
+**Time Spent**, so a job that is genuinely stuck is obvious: a 27-second estimate beside six
+minutes elapsed is your answer. That estimate is a prediction of the *wait*, taken once when
+the job went into the queue — it is not a countdown, and there is no percentage or progress
+bar, because PixAI does not report progress on a running task at all. A job that stays
+unstarted long enough is marked **stale** with an explanation; PixAI cancels and refunds
+tasks it never starts at about 60 minutes.
+
 ## This build
 
 The last card shows the build you're running and the path to your library folder — when
