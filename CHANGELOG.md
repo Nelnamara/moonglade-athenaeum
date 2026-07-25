@@ -148,6 +148,23 @@ git tags. Full prose notes for tagged versions live on
   those are independent of the version count, and submit still reads `selected.version_id`
   rather than the control's value, so hiding it cannot change what gets generated.
 
+- **The committed esbuild Loom bundle crashed on load — a missing import.**
+  `master-storyboard.jsx` calls `resolveGenDims` (the Advanced panel's "→ W × H" readout)
+  but never imported it from `./src/loom-mutations.js`. The two delivery paths disagree about
+  whether that matters: `/loom` inlines every module into one global scope for in-browser
+  Babel, so it resolved there and the omission was invisible; `/loom?bundle=1` builds a real
+  module graph, so esbuild renamed the module's own function and left the call site as a free
+  global — `ReferenceError: resolveGenDims is not defined`, and the whole tab body failed to
+  render. CI rebuilds and staleness-checks that committed bundle on every push, so this was
+  broken code the project actively maintains. Import added, `loom/dist/` rebuilt. Verified
+  live on the bundled path (`window.Babel` absent, `loom/dist/master-storyboard.bundle.js`
+  loaded): the Video and Image tabs render, the picker opens, the readout that used to throw
+  now prints `→ 1024 × 1024 px`, zero console errors. A new test generalizes the guard rather
+  than pinning the one identifier — it diffs every export of both pure modules against every
+  identifier the JSX actually calls, so the next silent omission of this kind fails in CI
+  instead of only in the bundle. The gallery's nav link still points at `/loom` (the Babel
+  path); switching it was deliberately left alone.
+
 ## [2.4.0] - 2026-07-24 — Concurrent generations, real trash recovery, and a nasty video-corruption bug fixed
 
 A trash/quarantine restore panel, field-operator search (`model:`, `rating:>=3`, …),

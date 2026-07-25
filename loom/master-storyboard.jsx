@@ -26,7 +26,15 @@ import {
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
   landInFirstAct, importedFootagePatch,
-  buildImgGenBody,
+  // resolveGenDims was USED below (the Advanced panel's "→ W × H" readout) without ever
+  // being imported. The in-browser Babel path inlines every module into one global scope,
+  // so it happened to resolve there and the omission was invisible; esbuild builds a real
+  // module graph, so `/loom?bundle=1` threw `ReferenceError: resolveGenDims is not defined`
+  // and the whole tab body failed to render. Nothing else in this file is missing from
+  // these two import lists -- checked by diffing every export against every identifier
+  // called here (shotPayload/moveCardToAct look missing but are deliberate local wrappers
+  // over the aliased buildShotPayload/mvCardToAct imports).
+  buildImgGenBody, resolveGenDims,
 } from "./src/loom-mutations.js";
 
 /* =========================================================================
