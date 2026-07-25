@@ -11375,7 +11375,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             local_tasks = distinct_task_count(db_path)
             coverage = (round(min(100.0, local_tasks / server_tasks * 100), 1)
                         if server_tasks else None)
-            return jsonify({"credits": credits, "cards": cards,
+            # Account roles, straight off the same account query (free -- see _ACCOUNT_QUERY).
+            # The owner's carries BETA_TO_INVITE, the flag behind PixAI's early-access
+            # programs. Normalized to a list of non-empty strings: only the field's NAME was
+            # probed, so a bare single value is wrapped rather than dropped, and an account
+            # with none gets [] rather than null -- a consumer should be able to test
+            # membership without first re-deriving the shape.
+            roles = me.get("roles") or []
+            if not isinstance(roles, (list, tuple)):
+                roles = [roles]
+            roles = [str(r) for r in roles if r]
+            return jsonify({"credits": credits, "cards": cards, "roles": roles,
                             "cards_by": cards_by, "card_expiry": card_expiry,
                             "claim_credits": claim_credits, "claim_ids": claim_ids,
                             "sub": {"end": (sub.get("endAt") or "")[:10],
