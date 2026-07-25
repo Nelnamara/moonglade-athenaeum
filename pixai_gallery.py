@@ -6010,9 +6010,11 @@ document.addEventListener('DOMContentLoaded', function(){
 
      Keeping them HERE, immediately after the rules they override, is the actual fix
      rather than a specificity trick: the override can no longer be separated from its
-     base by an edit elsewhere in the file, and when this stylesheet is extracted to a
-     real .css file the base rules and their responsive overrides travel together as one
-     unit. Do not move these back up into the shared mobile block. */
+     base by an edit elsewhere in the file, and IF this CSS is ever moved as a unit the
+     base rules and their responsive overrides travel together. (Extraction to a real
+     .css file was tried and DISCARDED -- docs/AUDIT_2026-07-21.md T5-CSS -- so that is
+     a property worth having, not a plan.) Do not move these back up into the shared
+     mobile block. */
   @media (max-width: 480px) {
     #gen-drawer,#gen-drawer.wide,#gen-drawer.dock-left{width:100%;max-width:100vw;}
     #model-flyout,#gen-drawer.dock-left #model-flyout,

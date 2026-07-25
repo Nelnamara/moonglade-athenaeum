@@ -142,6 +142,43 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Generate drawer's entire portrait-phone layout was dead CSS — it lost the cascade.**
+  At `<=480px` the drawer rendered 352.5px wide with a 22.5px dead gutter beside a sheet meant
+  to be full-width, and the model flyout landed at `y = -332.9px` — half the panel above the
+  top of the viewport, unreachable. The cause is document order, not a typo: every rule in that
+  pass leans on a bare `#gen-drawer` / `#model-flyout` / `.dock-ctl button` / `.gen-head .x`
+  selector, and the shared mobile block sits ~1,500 lines *above* the drawer's own `<style>`
+  block, so at equal specificity the base rules simply won. A media query adds no specificity.
+  The measured scope was wider than the two symptoms the audit recorded: `.dock-ctl button` and
+  `.gen-head .x` were also stuck at their 22px desktop sizes, so the touch targets the whole
+  block exists to enlarge never grew, and the `dock-left` flyout sat off-screen right at
+  `x=572.8`. Fixed by **co-locating rather than out-specifying** — the overrides now live at the
+  end of the drawer's own stylesheet, immediately after the rules they override. Raising
+  specificity (`#gen-drawer#gen-drawer`) would have fixed the symptom and kept the trap: the
+  override would still sit 1,500 lines from its base, so the next base rule added re-breaks it
+  silently, and two of the four selectors are class selectors that would each have needed a
+  different trick. Scoping the base rules instead would have changed desktop. Verified in a real
+  browser at 375x812 — drawer 375px at `x=0`, flyout fixed/centered and fully inside the
+  viewport in **every** dock, 34px dock buttons, 28px close X — with 1280x900 measured
+  byte-identical before and after. Why it survived so long: `.wide` and `.dock-left` rendered
+  *correctly* throughout, because their compound selectors out-specify the bare base rule, so
+  only the plain default dock was visibly broken. `docs/AUDIT_2026-07-21.md` **T5-CSS**.
+
+- **`test_portrait_mobile_pass` asserted the rule's TEXT, so it could not fail** — it stayed
+  green for as long as the layout above was broken, which is the defect that made the whole
+  T5-CSS row worth writing. Replaced by `test_portrait_mobile_drawer_rules_actually_win`, which
+  resolves the *winning* declaration the way a browser does (`!important`, specificity, document
+  order) and asserts on that, plus that desktop still resolves to the base values. Confirmed
+  non-vacuous: with the fix reverted it fails `assert '420px' == '100%'`. The resolver behind it
+  is the new `tests/csshelp.py` — pure stdlib, no browser — and it exists for one specific
+  reason: `tests/test_render_harness.py` is the stronger guard but skips without playwright,
+  which is **every CI run today**, so this axis would otherwise have been unguarded on `push`.
+  `test_css_cascade_resolver_can_actually_fail` guards the resolver itself by feeding it the same
+  two rules in both orders and requiring the answers to differ. The render harness's
+  `xfail(strict=False)` on the `<=480px` flyout went XPASS on this fix and **the marker was
+  removed**, so it is a plain passing guard again rather than one that would report a future
+  regression as "expected failure".
+
 - **A local `--ref-video` file was uploaded to PixAI as an `IMAGE`, and a local `--ref-audio`
   file was silently mislabelled the same way.** `_resolve_refs()` resolved all three
   reference kinds through one call that let `upload_media`'s `media_type` default to

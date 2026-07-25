@@ -19,6 +19,20 @@ A substring assertion structurally cannot catch this. What has to be asserted is
 winner. This module computes it the way a browser does: (!important, specificity,
 document order).
 
+Relationship to tests/test_render_harness.py
+--------------------------------------------
+The rendering harness is the stronger instrument and the primary guard: a real chromium
+measuring real layout, which catches this bug class and others (stacking, dead space)
+that no static analysis can see. This module does NOT replace it and must never be used
+to argue a rendering test is unnecessary.
+
+It exists because of one gap. The harness is gated on `pytest.importorskip("playwright")`
+plus a chromium binary, and `.github/workflows/tests.yml` installs neither -- so it SKIPS
+in CI, by design. A cascade regression on a `push` would therefore reach master unseen.
+This module is pure stdlib, needs no browser, and runs everywhere the suite runs, so the
+specific "an override lost the cascade" failure stays guarded in CI too. Two layers,
+different reach: the harness proves the pixels, this proves the winner.
+
 Scope
 -----
 It understands the CSS this app actually writes: flat rules, one level of @media,
