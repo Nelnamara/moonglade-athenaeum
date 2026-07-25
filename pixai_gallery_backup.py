@@ -1080,13 +1080,15 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
     existed, still exactly what every pre-existing test pins:
 
     - A `status_fn` call that comes back genuinely still 'running' for an aged-in job
-      writes a lightweight 'running' heartbeat, refreshing that job's `ts`. Nothing else
-      does this for a web-submitted generate job (api_task_status()'s own 'running' branch
-      never writes to the log at all), so without it, once a job crosses min_age it would
-      get re-asked on literally every subsequent /api/jobs poll for as long as it keeps
-      genuinely running -- a real video generation easily outlives 30 minutes. The
-      heartbeat resets the min_age clock, so a still-genuinely-running job is only
-      re-checked once per min_age, not once per poll.
+      writes a lightweight 'running' heartbeat, refreshing that job's `ts`. This is the
+      only RECURRING writer for a web-submitted generate job: api_task_status()'s own
+      'running' branch writes at most twice per job (once when it first sees it queued,
+      once when a worker starts it -- the queue/render phase the Activity tray renders),
+      deliberately de-duped so it can never become a per-poll heartbeat. So without this,
+      once a job crosses min_age it would get re-asked on literally every subsequent
+      /api/jobs poll for as long as it keeps genuinely running -- a real video generation
+      easily outlives 30 minutes. The heartbeat resets the min_age clock, so a
+      still-genuinely-running job is only re-checked once per min_age, not once per poll.
     - A `status_fn` call that RAISES for an aged-in job is recorded as 'stale' -- a
       distinct, visible, non-terminal status meaning "still stuck, and we couldn't reach
       PixAI to find out why" -- instead of silently left untouched. Un-gated (min_age=0),
@@ -6268,6 +6270,52 @@ def price_task(session, params):
         return None
     ap = data.get("actualPrice")
     return int(ap) if ap is not None else None
+
+
+def queue_wait_estimate(session, priority, model_version_id):
+    """PixAI's own queue-wait estimate for a (priority, model) pair, in whole seconds, or
+    None. GET /v2/task/wait-time -- the number their site puts beside Generate ("Est. wait
+    ~9 seconds"). READ-ONLY: creates nothing, prices nothing, spends nothing.
+
+    The parameter shape was probed, not guessed, because the route gives up nothing on its
+    own: with no parameters it 400s `expected number, received NaN` on path ["priority"];
+    with a priority alone it 400s "modelVersionId or generationModelId must be provided";
+    `generationModelId` then 404s "Generation model not found" for the very id our submits
+    carry in their `modelId` field, while `modelVersionId` with that same id answers 200. So
+    as far as this route is concerned, a submit's `modelId` IS a model version id. `priority`
+    is a validated enum rather than a free number -- 1 comes back "invalid priority" -- and
+    the two values this app ever submits (500 normal, 1000 --high-priority) both answer.
+
+    Response: {waitDurationSeconds, displayBucket, displaySeconds, displayMinutes}.
+    Measured 2026-07-25: Tsubaki.2 v1 at priority 500 -> 25.4s and at 1000 -> 4.4s;
+    Reference Pro at 500 -> 50.1s; the same pair re-asked minutes later -> 26.7s. So it is
+    per-model AND per-priority, and it tracks real queue depth.
+
+    This is a QUEUE-DEPTH estimate for a submission -- NOT a per-task ETA, and emphatically
+    not progress. PixAI exposes no progress on a task at all (probed against a live control:
+    none of progress/percent/percentage/step/steps/currentStep/eta/estimatedTime/
+    queuePosition/position/waitTime exist on the task object). A caller must present this as
+    the estimate it is, never as a countdown that ticks down.
+    """
+    if not model_version_id:
+        return None                      # the route 400s without one; don't spend the call
+    try:
+        pri = int(priority)
+    except (TypeError, ValueError):
+        pri = 500                        # this app's own submit default (see build params)
+    try:
+        data = _rest_get(session, "/task/wait-time",
+                         params={"priority": pri,
+                                 "modelVersionId": str(model_version_id)}) or {}
+    except (PixAIError, ValueError):
+        return None                      # an estimate is a nicety; never raise for it
+    secs = data.get("waitDurationSeconds")
+    if secs is None:
+        secs = data.get("displaySeconds")
+    try:
+        return max(0, int(round(float(secs))))
+    except (TypeError, ValueError):
+        return None
 
 
 def suggest_prompt(session, media_id):

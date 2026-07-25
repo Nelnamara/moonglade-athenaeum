@@ -999,3 +999,175 @@ def test_a_reason_from_pixai_is_never_buried_under_our_own_words(tmp_path, monke
     cli.get("/api/task-status?task_id=9103")
     msg = str({j["job_id"]: j for j in core.read_jobs(tmp_path)}["9103"].get("error") or "")
     assert "content policy" in msg
+
+
+# ---- "it goes right to generated and spins until done": say WHICH phase it's in ----
+# The Activity tray renders from /api/jobs (the server-side log), never from
+# /api/task-status's response, so `started` only reaches the tray if this route writes it
+# down. Writing it server-side is also what makes the signal identical on both hosts:
+# the gallery's Jobs.poll(), the Loom's pollShot/pollTaskWithCeiling and
+# mg-generate-drawer.js's own poll ALL hit this one route.
+
+def _queued(tid_status="waiting", started=False):
+    return lambda s, tid: {"status": tid_status, "phase": "running", "paid_credit": None,
+                           "started": started, "reason": ""}
+
+
+def _no_estimate(monkeypatch):
+    """Silence the queue-estimate side trip for the phase-only tests below."""
+    monkeypatch.setattr(core, "_task_detail_query", lambda s, tid: {"parameters": {}})
+    monkeypatch.setattr(core, "queue_wait_estimate", lambda *a, **k: None)
+
+
+def _raw_lines(tmp_path):
+    return core._reconstruct_jobs(tmp_path)[2]
+
+
+def test_a_queued_job_is_recorded_as_not_yet_started(tmp_path, monkeypatch):
+    """The whole point: a task PixAI accepted but has not dispatched must reach the tray as
+    QUEUED, not as an indefinite rendering spinner. `started` was already in this route's
+    JSON response and nothing wrote it to the log, so the tray -- which reads the log --
+    could not tell the two apart."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "7001", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", _queued())
+    _no_estimate(monkeypatch)
+
+    cli.get("/api/task-status?task_id=7001")
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7001"]
+    assert job.get("started") is False, \
+        "the job log has no queued/rendering distinction: {!r}".format(job)
+    assert job["status"] == "running", "queued is a phase of running, not a new status"
+
+
+def test_the_phase_is_written_once_per_change_not_once_per_poll(tmp_path, monkeypatch):
+    """Four different pollers hit this route every 3s per job. A write per poll would add
+    1,200+ lines for one task PixAI sits on for its full ~60-minute reap window, and would
+    refresh `ts` so often the ongoing orphan-reconciliation sweep could never see the job
+    cross JOBS_ORPHAN_SWEEP_AGE."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "7002", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", _queued())
+    _no_estimate(monkeypatch)
+
+    before = _raw_lines(tmp_path)
+    for _ in range(6):
+        cli.get("/api/task-status?task_id=7002")
+    assert _raw_lines(tmp_path) - before == 1, \
+        "six identical polls wrote {} log lines instead of one".format(
+            _raw_lines(tmp_path) - before)
+
+
+def test_a_worker_picking_the_job_up_flips_the_recorded_phase(tmp_path, monkeypatch):
+    """The other half of "once per change": when PixAI finally assigns a worker, the tray
+    has to stop saying queued. One more line, and only one."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "7003", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", _queued())
+    _no_estimate(monkeypatch)
+    cli.get("/api/task-status?task_id=7003")
+
+    monkeypatch.setattr(core, "generation_status", _queued("processing", started=True))
+    before = _raw_lines(tmp_path)
+    cli.get("/api/task-status?task_id=7003")
+    cli.get("/api/task-status?task_id=7003")
+    assert _raw_lines(tmp_path) - before == 1
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7003"]
+    assert job.get("started") is True, "still reads as queued while a worker renders it"
+
+
+def test_a_terminal_poll_writes_no_running_phase_and_forgets_the_task(tmp_path, monkeypatch):
+    """Two things at once. The done branch must not also emit a `running` phase line (the
+    terminal-stickiness in _reconstruct_jobs would ignore it, but it is still noise), and
+    the in-process de-dupe map must DROP the finished task -- otherwise it grows for the
+    whole life of the server, one entry per generation ever polled. The observable proof of
+    the drop is that a later queued sighting of the same id writes again."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "7004", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", _queued())
+    _no_estimate(monkeypatch)
+    cli.get("/api/task-status?task_id=7004")
+
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "completed", "phase": "done",
+                                        "paid_credit": 0, "started": True, "reason": ""})
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda *a, **k: {"media_ids": ["m1"], "saved": 1, "is_video": False})
+    before = _raw_lines(tmp_path)
+    cli.get("/api/task-status?task_id=7004")
+    assert _raw_lines(tmp_path) - before == 1, "the done poll wrote more than its done event"
+
+    monkeypatch.setattr(core, "generation_status", _queued())
+    before = _raw_lines(tmp_path)
+    cli.get("/api/task-status?task_id=7004")
+    assert _raw_lines(tmp_path) - before == 1, \
+        "the finished task was never dropped from the de-dupe map -- it leaks one entry " \
+        "per generation for the life of the process"
+    assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7004"]["status"] == "done", \
+        "a late running event must not revert a finished job (terminal stickiness)"
+
+
+def test_pixais_own_queue_estimate_is_recorded_when_a_job_is_seen_queued(tmp_path, monkeypatch):
+    """PixAI publishes no progress on a task at all, but it does publish the queue wait it
+    shows beside its own Generate button. Recorded once, off the task's real submit
+    parameters, so the tray can put "PixAI estimated ~27s" next to an elapsed time the
+    owner can compare it against."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "7005", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", _queued())
+    asked = []
+    monkeypatch.setattr(core, "_task_detail_query",
+                        lambda s, tid: {"parameters": {"modelId": "1983308862240288769",
+                                                       "priority": 1000}})
+    monkeypatch.setattr(core, "queue_wait_estimate",
+                        lambda s, pri, mid: asked.append((pri, mid)) or 27)
+
+    for _ in range(3):
+        cli.get("/api/task-status?task_id=7005")
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7005"]
+    assert job.get("eta_seconds") == 27, "no queue estimate recorded: {!r}".format(job)
+    assert asked == [(1000, "1983308862240288769")], \
+        "the estimate must be fetched ONCE, with the task's own priority + model: " \
+        "{!r}".format(asked)
+
+
+def test_a_job_that_starts_before_its_first_poll_costs_no_extra_calls(tmp_path, monkeypatch):
+    """The common case. A generation a worker takes immediately was never queued from this
+    route's point of view, so it must not trigger the two read-only calls the estimate
+    needs -- politeness to their servers is the whole reason this is once-per-job and not
+    per-poll."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "7006", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", _queued("processing", started=True))
+    monkeypatch.setattr(core, "_task_detail_query",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ask")))
+    monkeypatch.setattr(core, "queue_wait_estimate",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ask")))
+
+    cli.get("/api/task-status?task_id=7006")
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7006"]
+    assert job.get("started") is True and "eta_seconds" not in job
+
+
+def test_an_unavailable_estimate_still_ships_the_phase(tmp_path, monkeypatch):
+    """The ETA is optional and the phase is not. If wait-time (or the parameter lookup it
+    needs) fails, the queued signal must still be written -- degrading to "no number" is
+    fine, degrading to "no phase" puts the spinner back."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "7007", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", _queued())
+    monkeypatch.setattr(core, "_task_detail_query",
+                        lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("boom")))
+
+    cli.get("/api/task-status?task_id=7007")
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["7007"]
+    assert job.get("started") is False, \
+        "a failed estimate lookup swallowed the phase signal too: {!r}".format(job)
+    assert "eta_seconds" not in job
