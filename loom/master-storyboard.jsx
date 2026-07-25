@@ -3384,11 +3384,25 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
   const [dur, setDur] = useState(0);
   const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
   const [playing, setPlaying] = useState(false);
+  // Sound defaults OFF, and that is not timidity: this preview scrubs on hover and a board
+  // holds many cards, so audio tied to the element alone would fire from every card the
+  // pointer crossed. See the mute effect below for the other half of the rule.
+  const [soundOn, setSoundOn] = useState(false);
   const [cropping, setCropping] = useState(false);   // crop-draw mode active
   const rangeRef = useRef(range); rangeRef.current = range;
   const durRef = useRef(0); durRef.current = dur;
   const dragRef = useRef(null);
   useEffect(() => { setRange({ in: trimIn || 0, out: trimOut }); }, [trimIn, trimOut]);
+  // Audio only while ACTUALLY PLAYING -- never while scrubbing. Two reasons, and both are the
+  // reason this is not simply `v.muted = !soundOn`: this preview seeks on hover
+  // (onMouseMove={scrub}), so a hover-scrub is the playhead being thrown around and sounds
+  // like noise rather than like the shot; and a board holds many cards, so a pointer crossing
+  // it would fire audio from every card it passed over. Applied imperatively because React
+  // does not reliably reflect a `muted` prop onto a <video>.
+  useEffect(() => {
+    const v = vidRef.current;
+    if (v) v.muted = !(soundOn && playing);
+  }, [soundOn, playing]);
   const effOut = (range.out == null ? dur : range.out) || dur;
   const pct = (s) => (dur ? Math.max(0, Math.min(100, (s / dur) * 100)) : 0);
   const fT = (s) => (s || 0).toFixed(1) + "s";
@@ -3493,6 +3507,10 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
       <div className="sb-shotprev-ctrls">
         <button onClick={() => seek(-0.25)} title="Rewind (step back)">⏪</button>
         <button onClick={() => seek(0.25)} title="Fast-forward (step ahead)">⏩</button>
+        <button className={soundOn ? "on" : ""} onClick={() => setSoundOn((v) => !v)}
+          aria-pressed={soundOn}
+          title={soundOn ? "Sound on while playing (scrubbing stays silent)" : "Play this shot with sound"}>
+          {soundOn ? "\u{1F50A}" : "\u{1F507}"}</button>
         {onSplit && <button onClick={doSplit} title="Split this shot in two at the playhead">✂ Split</button>}
         {onCrop && <button className={cropping ? "on" : ""} onClick={() => { setCropping((v) => !v); setCropDraft(null); }}
           title="Crop the frame — drag a rectangle; applied on export">⛶ Crop</button>}

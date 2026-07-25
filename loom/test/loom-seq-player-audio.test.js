@@ -77,3 +77,56 @@ describe("reel playback audio", () => {
       "the mute state must initialise to true so autoplay is never blocked");
   });
 });
+
+// ---------------------------------------------------------------------------
+// ShotPreview -- the per-shot scrub player on each card. Owner 2026-07-25: "preview pane only
+// has the play/pause no sound - By design? Seems we want audio in the scrub too - especially
+// when we add the audio track at some point."
+//
+// It needs a DIFFERENT rule from the reel, because this player scrubs on hover
+// (onMouseMove={scrub}) and a board holds many cards. Sound tied to the element alone would
+// mean dragging the mouse across the board machine-guns audio from every card it crosses, and
+// even on one card a hover-scrub is the playhead being thrown around, which sounds like
+// garbage rather than like the shot.
+//
+// So the gate is sound AND actually-playing: audio during a real play, silence while
+// scrubbing. The `playing` state already exists for the play/pause button, so the effect
+// depends on both.
+// ---------------------------------------------------------------------------
+describe("per-shot preview audio", () => {
+  function shotPreviewSource() {
+    const start = src.indexOf("function ShotPreview(");
+    assert.ok(start !== -1, "ShotPreview no longer exists in master-storyboard.jsx");
+    const rest = src.slice(start + 10);
+    const nextFn = rest.indexOf("\nfunction ");
+    return nextFn === -1 ? src.slice(start) : src.slice(start, start + 10 + nextFn);
+  }
+  const body = shotPreviewSource();
+
+  test("the preview owns a sound state", () => {
+    assert.match(body, /\[\s*soundOn\s*,\s*setSoundOn\s*\]/,
+      "no soundOn/setSoundOn state -- the per-shot preview is still hard-muted");
+  });
+
+  test("it defaults to silent", () => {
+    assert.match(body, /useState\(false\)[^\n]*\/\/[^\n]*sound|soundOn[\s\S]{0,80}useState\(false\)/,
+      "sound must default OFF: a board of cards that scrub on hover would otherwise play " +
+      "audio at every card the pointer crosses");
+  });
+
+  test("audio is gated on ACTUALLY PLAYING, not merely on the toggle", () => {
+    const effects = body.match(/useEffect\([\s\S]*?\}\s*,\s*\[[^\]]*\]\s*\)/g) || [];
+    const muteEffect = effects.find((e) => /\.muted\s*=/.test(e));
+    assert.ok(muteEffect, "no useEffect applies the sound state to the element");
+    assert.match(muteEffect, /playing/,
+      "the mute effect ignores `playing`, so a hover-scrub would make noise: " + muteEffect);
+    const deps = muteEffect.slice(muteEffect.lastIndexOf("["));
+    assert.match(deps, /soundOn/, "effect does not react to the toggle: " + deps);
+    assert.match(deps, /playing/, "effect does not re-run when playback starts/stops: " + deps);
+  });
+
+  test("there is a toggle in the preview's control row", () => {
+    assert.match(body, /setSoundOn\(/, "nothing toggles the sound state");
+    assert.match(body, /sb-shotprev-ctrls/, "the control row is gone -- where did the toggle go?");
+  });
+});
