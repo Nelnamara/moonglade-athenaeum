@@ -571,6 +571,14 @@ def test_skins_retint_real_components(logged_in_page):
 # `document` (not `document.documentElement`, which is still null at init-script time) with
 # subtree:true is what makes this observable at all.
 _SKIN_TRACE_INIT_JS = """
+// Seed the saved skin HERE, in the same document that will read it, rather than in the
+// previous one. Setting it before the reload leaves a window in which the outgoing page's
+// own scripts can write `skin` again and clobber it -- the reloaded page then applies the
+// server default and this fails looking exactly like a broken pre-paint script. Waiting for
+// the page's first write (below) narrows that window but cannot close it: under load a
+// later write lands after the wait returns. An init script runs before ANY page script in
+// the new document, so there is no window left at all.
+localStorage.setItem('skin', 'ember');
 window.__skinTrace = [];
 new MutationObserver(function (records) {
   records.forEach(function () {
@@ -606,8 +614,11 @@ def test_saved_skin_is_applied_before_the_body_exists(logged_in_page):
     # server's default, the reloaded page then has nothing to apply, and this test fails
     # looking exactly like a broken pre-paint script. Wait for that write, THEN seed.
     page.wait_for_function("() => localStorage.getItem('skin') !== null")
-    page.evaluate("() => localStorage.setItem('skin', 'ember')")
 
+    # The seed itself now lives INSIDE the init script (see _SKIN_TRACE_INIT_JS) so nothing
+    # in the outgoing document can clobber it between here and the reload. The wait above is
+    # kept only to prove the app really does persist a skin -- if that ever stops being true
+    # this test should fail loudly rather than silently testing our own seed.
     page.add_init_script(_SKIN_TRACE_INIT_JS)      # runs before any page script
     page.reload(wait_until="domcontentloaded")
     try:

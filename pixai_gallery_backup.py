@@ -4665,6 +4665,42 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
         "(or it arrives in your next --update).".format(timeout, task_id, task_id))
 
 
+def describe_failure(status, reason="", started=True):
+    """A failure message a person can act on, from what PixAI actually tells us.
+
+    Their status string for a failed generation is genuinely just "failed", and `outputs`
+    frequently comes back empty, so faithfully forwarding their words leaves the user with
+    one useless word -- which is exactly what the owner saw on three consecutive hand-fix
+    attempts (2026-07-25): status `failed`, error `failed`, nothing else. Forwarding is
+    still right when they DO explain themselves; this only fills the silence.
+
+    Three distinct cases, because they send you to three different places:
+      - reason given      -> lead with THEIR words; ours must never bury them.
+      - never dispatched  -> it did not "fail to render", no worker ever took it. Saying
+                             otherwise sends someone off debugging a prompt that was never
+                             read. These are reaped and refunded at ~60 minutes.
+      - ran, then failed  -> their model errored. Nothing to fix in the request, and the
+                             credits come back on their own (observed: charged and refunded
+                             within 2-3 seconds), which is the first thing anyone wants to
+                             know.
+
+    Their reason and our explanation are ADDITIVE, not either/or. "waiting timeout" is
+    their jargon: accurate, and meaningless to anyone who does not already know it means
+    no worker ever picked the task up. Lead with their words, then say what happened."""
+    status = str(status or "failed").strip() or "failed"
+    reason = str(reason or "").strip()
+    parts = [status]
+    if reason:
+        parts.append("PixAI's reason: {}".format(reason))
+    if not started:
+        parts.append("It was queued but never started, so nothing rendered — unstarted "
+                     "tasks are cancelled and refunded after about an hour.")
+    elif not reason:
+        parts.append("PixAI ran this and it failed without giving a reason. Failed "
+                     "generations are refunded automatically, so the credits come back.")
+    return " — ".join(parts)
+
+
 def _pixai_reason_suffix(task):
     """PixAI's own explanation for a terminal status, from `outputs.reason` (e.g.
     "waiting timeout"). Surfaced because a bare "cancelled" reads as though the USER
