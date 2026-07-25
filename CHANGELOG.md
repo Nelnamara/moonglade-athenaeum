@@ -17,6 +17,29 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Five art filters of our own, derived from the skins — and the filters panel is a
+  comparison now.** The Enhance sub-tab shipped with PixAI's seven filters and one image: to
+  judge a filter you toggled **No filter** on and off and held the difference in your head. It
+  is three columns now — the untouched **original**, the **filtered preview** beside it, and
+  the swatch rail — at roughly double the size, with each picture rendering ~430px against the
+  old panel's single 373px rather than shrinking to make room for the pair. The rail is two
+  headed sets: **Moonglade · Nightfallen · Moonlit Silver · Embercourt · Verdant Grove**
+  first, then PixAI's **M1–M7**. Ours are derived from the app's five skin palettes — each
+  filter built from its skin's own accent and lead colours, so a filtered image reads as this
+  app rather than as a generic wash — and a test pins every stop colour to a real token of the
+  skin it claims to come from, so retinting a skin and leaving its filter behind fails by name
+  instead of drifting quietly. They deliberately use **only** the six blend modes that map
+  exactly to CSS and canvas, so unlike four of PixAI's seven the saved PNG *is* the preview;
+  and they carry no `image_parameters`, so what shipped is the recipe that was reviewed as
+  swatches. PixAI's seven stay in their own array, untouched, because refreshing them is
+  supposed to remain a paste of their public config endpoint. The action group is four: **No
+  filter**, **Save to library**, the new **Send to image gen** — which uploads the filtered
+  image free (the same S3 handshake as **↑ Import**) and loads it as the Edit source, so you
+  can generate *from* a filtered version — and **Publish**, shown disabled with its reason
+  until publishing is built. Pinned in a real browser: all three columns share one row, both
+  pictures clear 200px, and the original stays genuinely unfiltered (computed `filter: none`,
+  zero overlay layers) — sharing one `<img>` between the columns would have left two filtered
+  pictures and nothing to compare, while every markup assertion still passed.
 - **The gallery header says when you're browsing it from another device.** Several controls
   are deliberately restricted to the machine running the server — **↑ Import**, **Delete from
   PixAI**, **Set launcher icon**, the destructive Panel jobs — and since 2026-07-24 they are

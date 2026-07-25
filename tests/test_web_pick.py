@@ -1493,13 +1493,20 @@ def test_enhance_subtab_is_the_local_art_filters_surface(tmp_path):
         assert dead not in html, dead + " is still in the page"
 
 
-def test_art_filters_flyout_is_side_by_side_and_placed_like_the_model_flyout(tmp_path):
-    """Two properties of the filters panel that a plain "the ids are present" check misses.
+def test_art_filters_flyout_is_a_comparison_and_placed_like_the_model_flyout(tmp_path):
+    """Three properties of the filters panel that a plain "the ids are present" check misses.
 
-    1. SIDE BY SIDE, image left. The whole point of a flyout instead of more drawer column is
-       that the image gets judged at size: the stage and the controls are a two-column flex
-       row with the stage first and given the growing share, not a stack.
-    2. Positioned by the in-repo overlay idiom, not a new one. #filters-flyout is a top-level
+    1. THREE COLUMNS, in order: the untouched original, the filtered preview, then the palette
+       rail. Judging a filter is a COMPARISON -- with one image you had to toggle No filter
+       back and forth and hold the difference in your head. The two pictures also have to be
+       two distinct <img> elements: MgArtFilters mutates the preview's element (a CSS `filter`
+       for image_parameters, overlay divs at inset:0), so anything sharing it would be filtered
+       too and there would be nothing left to compare against.
+    2. The image columns take an EXPLICIT flex-basis, never `auto`. From an `auto` basis a
+       column's base size is the image's INTRINSIC width, which overflows the panel and makes
+       flex-wrap drop the rail under the pictures at every width -- measured on the old
+       two-column build, and the whole point of the panel is lost.
+    3. Positioned by the in-repo overlay idiom, not a new one. #filters-flyout is a top-level
        fixed panel placed by JS (the same shape as #model-preview, which mg-model-picker's
        _place() drives) -- it must NOT be a child of #gen-drawer, because the drawer carries
        `transform: translateX(...)` and a transform makes its box the containing block for
@@ -1511,14 +1518,18 @@ def test_art_filters_flyout_is_side_by_side_and_placed_like_the_model_flyout(tmp
     html = cli.get("/").get_data(as_text=True)
     # (1) the layout rule, not just the markup
     assert "#filters-flyout .af-wrap{display:flex;" in html
-    # `flex:1 1 0`, not `1 1 auto`: from an `auto` basis the left column's base size is the
-    # image's INTRINSIC width, which overflows the panel and makes flex-wrap stack the controls
-    # under the image at every width -- measured, and the whole point of the panel is lost.
-    assert "#filters-flyout .af-left{flex:1 1 0;" in html
+    orig_at = html.index('id="af-orig"')
     stage_at = html.index('id="af-stage"')
-    ctrl_at = html.index('id="af-swatches"')
-    assert stage_at < ctrl_at, "the image must come before the controls (image left)"
-    # (2) fixed + JS-placed, and OUTSIDE the transformed drawer
+    rail_at = html.index('id="af-swatches"')
+    assert orig_at < stage_at < rail_at, (
+        "column order must read original -> preview -> palette rail")
+    assert html.count('id="af-orig"') == 1 and html.count('id="af-img"') == 1
+    assert orig_at < html.index('id="af-img"'), (
+        "the original must not live inside #af-stage -- the filter would be applied to it too")
+    # (2) explicit basis on the growing columns, fixed width on the rail
+    assert "#filters-flyout .af-col{flex:1 1 250px;" in html
+    assert "#filters-flyout .af-rail{flex:0 0 236px;" in html
+    # (3) fixed + JS-placed, and OUTSIDE the transformed drawer
     assert "#filters-flyout{position:fixed;" in html
     drawer_at = html.index('<aside id="gen-drawer"')
     drawer_end = html.index("</aside>", drawer_at)
@@ -1527,6 +1538,52 @@ def test_art_filters_flyout_is_side_by_side_and_placed_like_the_model_flyout(tmp
         "#filters-flyout is inside #gen-drawer, whose transform would capture its "
         "position:fixed coordinates")
     assert "function placeFilters(" in html
+
+
+def test_art_filters_rail_groups_both_sets_and_offers_four_actions(tmp_path):
+    """The rail is two headed sets, and the action row is the agreed four buttons.
+
+    Ours lead because they are the house set; PixAI's follow. The grouping is not decoration --
+    the sets do not behave alike (four of PixAI's seven use Photoshop whole-colour blend modes
+    that CSS can only approximate, so their saved file differs from their preview; the
+    Moonglade five are exact-only), and a tile's tooltip is where that is said.
+
+    Publish is present but DISABLED: publishing to PixAI is Epic C and its mutation is
+    deliberately not wired. Shown-with-a-reason rather than hidden, so the group matches the
+    agreed layout instead of silently growing a fourth button later.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "AF.groups().forEach(" in html, "the rail must be built from the grouped API"
+    assert ".af-grp{" in html and ".af-tiles{" in html
+    for bid in ("af-none", "af-save", "af-send", "af-publish"):
+        assert 'id="%s"' % bid in html, "missing action button: " + bid
+    pub = html.index('id="af-publish"')
+    assert "disabled" in html[pub:pub + 260], "Publish must ship disabled until Epic C lands"
+    assert "Gen.filterSend()" in html and "filterSend:filterSend" in html
+
+
+def test_art_filters_send_uploads_for_free_and_never_touches_the_local_import(tmp_path):
+    """"Send to image gen" goes through /api/upload -- the free 3-step S3 handshake -- and
+    hands the returned media_id to the Edit source.
+
+    Two things this pins. It must NOT reuse /api/import-local: that route writes into the
+    owner's library and returns no media_id, so an i2i path keyed on a media_id would get
+    nothing. And it must not submit anything: the upload spends no credits, and the generation
+    the drawer then runs is the priced step. A regression that made this button generate would
+    charge for a button whose label says it only sends.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    body = html[html.index("function filterSend("):]
+    body = body[:body.index("window.addEventListener('resize', placeFilters)")]
+    assert "'/api/upload'" in body
+    assert "import-local" not in body, "Send must not go through the library-import route"
+    assert "/api/generate" not in body and "/api/edit" not in body, (
+        "Send uploads only -- it must not submit a generation")
+    assert "setEditSource(String(d.media_id))" in body
 
 
 def test_edit_model_id_and_quality_omit():

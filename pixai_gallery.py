@@ -6126,20 +6126,49 @@ document.addEventListener('DOMContentLoaded', function(){
   #filters-flyout .gen-head{padding:11px 13px 0;}
   #filters-flyout .gen-head .x{margin-left:auto;}
   #filters-flyout .gen-body{padding:11px 13px 13px;overflow:auto;min-height:0;}
-  /* The side-by-side layout: image LEFT and given the growing share so it can be judged at
-     size, swatches + controls RIGHT at a fixed comfortable column. `flex-wrap` is what makes
-     the narrow case degrade into a stack instead of squeezing both halves to unusable.
+  /* Three columns: ORIGINAL, PREVIEW, then the palette rail. Judging a filter is a
+     comparison, and the panel could not host one while it showed a single image -- you had to
+     toggle No filter back and forth and hold the difference in your head. `flex-wrap` still
+     carries the narrow case, degrading to a stack rather than squeezing all three to unusable.
 
-     `flex:1 1 0` on the left column, not `1 1 auto`: with `auto` the column's base size is the
-     image's max-content width -- its INTRINSIC width, 900px for a typical generation, because
-     `max-width:100%` on the img can't resolve against a container the img is itself sizing. The
-     two columns' hypothetical sizes then exceed the panel and flex-wrap breaks the line, which
-     stacked the controls under the image at every panel width. Measured: a 604px-wide image in
-     a 647px panel wrapped; from a 0 basis the same image renders 375px wide, beside the
-     controls. min-width is what still allows the deliberate stack on a phone. */
-  #filters-flyout .af-wrap{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;}
-  #filters-flyout .af-left{flex:1 1 0;min-width:200px;}
-  #filters-flyout .af-right{flex:0 0 232px;}
+     The two image columns take an EXPLICIT flex-basis, never `auto`: with `auto` a column's
+     base size is the image's max-content width -- its INTRINSIC width, 900px for a typical
+     generation, because `max-width:100%` on the img can't resolve against a container the img
+     is itself sizing. The hypothetical sizes then exceed the panel, flex-wrap breaks the line,
+     and the rail ends up under the pictures at every panel width. (Measured on the old
+     two-column build: a 604px image in a 647px panel wrapped; from a 0 basis the same image
+     rendered 375px wide, beside the controls.) A 250px basis keeps that fix and additionally
+     decides the wrap POINT -- 250+250+236+gaps, so the columns drop only when there is
+     genuinely no room for three. min-width:0 lets them shrink below the basis before wrapping,
+     which a flex item does not do by default. */
+  #filters-flyout .af-wrap{display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;}
+  #filters-flyout .af-col{flex:1 1 250px;min-width:0;display:flex;flex-direction:column;}
+  #filters-flyout .af-rail{flex:0 0 236px;}
+  /* `align-items:stretch` + `flex:1` on the frame is what fills the panel. The rail is the
+     tall column -- twelve swatches, two sliders and the action group -- while a landscape
+     source is wide and short, so with `flex-start` the pictures sat in the top corner above
+     several hundred px of nothing. Stretching makes the frames two equal boxes that own the
+     height, with the picture centred inside; the leftover room reads as matting rather than
+     as a layout that failed to fill. It also lines the captions up with each other when the
+     two pictures differ in height, and a comparison that jitters is worse than none.
+
+     The picture is centred by the frame, NOT letterboxed by the image: #af-img keeps
+     width/height:auto so #af-stage stays exactly its box (see below) -- `object-fit:contain`
+     here would keep the element at full frame size and the overlay gradients, which know
+     nothing about object-fit, would paint across the matting too. */
+  #filters-flyout .af-frame{flex:1;display:flex;align-items:center;justify-content:center;
+    background:var(--crust);border:1px solid var(--surface0);border-radius:10px;
+    padding:6px;min-height:120px;}
+  #filters-flyout .af-cap{font-size:11px;color:var(--subtext);text-align:center;margin-top:6px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #filters-flyout .af-cap b{color:var(--text);font-weight:600;}
+  #filters-flyout .af-grp{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--overlay0);margin:11px 0 5px;display:flex;align-items:center;gap:6px;}
+  #filters-flyout .af-grp:first-child{margin-top:0;}
+  #filters-flyout .af-grp::after{content:"";flex:1;height:1px;background:var(--surface0);}
+  #filters-flyout .af-acts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:11px;}
+  #filters-flyout .af-acts .gen-go{width:100%;padding:7px 4px;font-size:11.5px;}
+  #filters-flyout .af-acts .gen-go[disabled]{opacity:.45;cursor:not-allowed;}
   /* The stage is MgArtFilters' preview host: it stacks overlay divs at `inset:0` over the
      <img>, so its box has to be the image's box EXACTLY -- inline-block + line-height:0 + a
      block img, the same pairing #fix-wrap needs to keep its canvas registered with the photo.
@@ -6148,12 +6177,13 @@ document.addEventListener('DOMContentLoaded', function(){
      nothing about object-fit -- would then paint the filter's gradient across the bars too. */
   #af-stage{position:relative;display:inline-block;line-height:0;border-radius:9px;
     overflow:hidden;}
-  #af-img{display:block;max-width:100%;max-height:58vh;width:auto;height:auto;}
-  #af-swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  #af-img,#af-orig{display:block;max-width:100%;max-height:52vh;width:auto;height:auto;}
+  .af-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
   .af-tile{cursor:pointer;background:none;border:none;padding:0;display:block;}
   .af-tile .sw{width:100%;aspect-ratio:1;border-radius:7px;border:2px solid var(--surface1);}
   .af-tile.on .sw{border-color:var(--lavender);box-shadow:0 0 9px rgba(182,146,230,.6);}
-  .af-tile .cap{font-size:9.5px;color:var(--subtext);text-align:center;margin-top:2px;}
+  .af-tile .cap{font-size:9.5px;color:var(--subtext);text-align:center;margin-top:2px;
+    line-height:1.25;overflow-wrap:anywhere;}
   .af-tile.on .cap{color:var(--text);}
   #af-msg{font-size:11px;color:var(--subtext);margin-top:7px;min-height:14px;}
   #af-msg.bad{color:var(--red);}
@@ -6507,11 +6537,21 @@ document.addEventListener('DOMContentLoaded', function(){
     <button class="x" onclick="Gen.toggleFilters()" aria-label="Close">&times;</button></div>
   <div class="gen-body">
     <div class="af-wrap">
-      <div class="af-left">
-        <div id="af-stage"><img id="af-img" alt="filter preview source"></div>
+      <!-- The comparison pair. #af-orig is deliberately a SECOND <img> of the same /full/ url
+           rather than a clone of the preview: the preview's <img> is inside #af-stage, which
+           MgArtFilters mutates (a CSS `filter` for image_parameters, overlay divs at inset:0),
+           and anything sharing that element would be filtered too -- leaving nothing to
+           compare against. Same-origin and already cached, so the second one costs a cache
+           hit, not a download. -->
+      <div class="af-col">
+        <div class="af-frame"><img id="af-orig" alt="the unfiltered original"></div>
+        <div class="af-cap">Original</div>
       </div>
-      <div class="af-right">
-        <div class="gen-lbl" style="margin-top:0;">Filter</div>
+      <div class="af-col">
+        <div class="af-frame"><div id="af-stage"><img id="af-img" alt="filtered preview"></div></div>
+        <div class="af-cap" id="af-cap">Preview &middot; <b>no filter</b></div>
+      </div>
+      <div class="af-rail">
         <div id="af-swatches"></div>
         <div class="gen-lbl">Strength <span id="af-sval" style="color:var(--lavender);">1.00</span></div>
         <input type="range" id="af-strength" min="0" max="1" step="0.01" value="1" style="width:100%;"
@@ -6519,11 +6559,21 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="gen-lbl">Angle <span id="af-aval" style="color:var(--lavender);">180&deg;</span></div>
         <input type="range" id="af-angle" min="0" max="345" step="15" value="180" style="width:100%;"
                oninput="Gen.filterAngle(this.value)">
-        <div style="display:flex;gap:6px;margin-top:10px;">
+        <div class="af-acts">
           <button type="button" id="af-none" class="gen-go" onclick="Gen.filterClear()"
                   style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);">
             No filter</button>
           <button type="button" id="af-save" class="gen-go" onclick="Gen.filterSave()">Save to library</button>
+          <button type="button" id="af-send" class="gen-go" onclick="Gen.filterSend()"
+                  style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);"
+                  title="Upload the filtered image to PixAI (free) and load it as the Edit source">
+            Send to image gen</button>
+          <!-- Parked, not forgotten: publishing to PixAI is Epic C, and the mutation it needs
+               (createArtwork) is deliberately not wired up yet. Shown disabled with the reason
+               rather than hidden, so the button group matches the agreed layout and the
+               capability is discoverable. -->
+          <button type="button" id="af-publish" class="gen-go" disabled
+                  title="Publishing to PixAI is not built yet">Publish</button>
         </div>
         <div id="af-msg"></div>
       </div>
@@ -7899,18 +7949,41 @@ var Gen = (function(){
   function afBuildSwatches(){
     var AF=window.MgArtFilters, host=el('af-swatches');
     if(!AF || !host || host.children.length) return;   // built once, like ensurePickers()
-    AF.list().forEach(function(id){
-      var t=document.createElement('button');
-      t.type='button'; t.className='af-tile'; t.setAttribute('data-af', id);
-      t.title=AF.get(id).name+' \\u00b7 free, applied in your browser';
-      var sw=document.createElement('div'); sw.className='sw';
-      var cap=document.createElement('div'); cap.className='cap';
-      cap.textContent=(AF.get(id).name||id).replace('Filter ','');
-      t.appendChild(sw); t.appendChild(cap);
-      t.onclick=function(){ afPick(id); };
-      host.appendChild(t);
-      AF.renderSwatch(sw, id);      // the tile IS that filter's own gradients, no art needed
+    // Two headed sections, ours first -- AF.groups() owns that order. Grouping matters
+    // because the sets do not behave alike: the Moonglade five use exact-mapping blend modes
+    // only, so their export is their preview, while four of PixAI's seven lean on Photoshop
+    // whole-colour modes CSS can only approximate. Each tile's tooltip says which it is.
+    AF.groups().forEach(function(g){
+      var h=document.createElement('div'); h.className='af-grp'; h.textContent=g.label;
+      host.appendChild(h);
+      var grid=document.createElement('div'); grid.className='af-tiles';
+      host.appendChild(grid);
+      g.ids.forEach(function(id){
+        var f=AF.get(id), approx=f.filters.some(function(L){
+          var e=AF.BLEND_MODE_MAP[L.blendMode]; return e && e.exact===false;
+        });
+        var t=document.createElement('button');
+        t.type='button'; t.className='af-tile'; t.setAttribute('data-af', id);
+        t.title=f.name+' \\u00b7 free, applied in your browser'
+               +(f.note ? ' \\u2014 '+f.note : '')
+               +(approx ? ' \\u00b7 uses a blend mode CSS can only approximate, so the saved '
+                          +'file differs slightly from this preview' : '');
+        var sw=document.createElement('div'); sw.className='sw';
+        var cap=document.createElement('div'); cap.className='cap';
+        cap.textContent=(f.name||id).replace('Filter ','');
+        t.appendChild(sw); t.appendChild(cap);
+        t.onclick=function(){ afPick(id); };
+        grid.appendChild(t);
+        AF.renderSwatch(sw, id);    // the tile IS that filter's own gradients, no art needed
+      });
     });
+  }
+  // Built from nodes, not innerHTML: the name is baked data today, but a caption is exactly
+  // the kind of thing a later "custom filters" pass starts feeding user-typed names into.
+  function afCap(t){
+    var c=el('af-cap'); if(!c) return;
+    c.textContent='Preview \\u00b7 ';
+    var b=document.createElement('b'); b.textContent=t; c.appendChild(b);
   }
   function afPaintTiles(){
     var tiles=el('af-swatches').querySelectorAll('.af-tile');
@@ -7927,10 +8000,12 @@ var Gen = (function(){
     afMsg(n.warnings.length ? n.warnings[0]
                             : (AF.get(id).name+' \\u00b7 nothing sent, nothing spent'),
           n.warnings.length > 0);
+    afCap(AF.get(id).name||id);
   }
   function filterClear(){
     var AF=window.MgArtFilters; if(!AF) return;
     afId=null; afPaintTiles(); AF.clearPreview(el('af-stage')); afMsg('');
+    afCap('no filter');
   }
   function filterStrength(v){
     el('af-sval').textContent=(parseFloat(v)||0).toFixed(2);
@@ -7941,13 +8016,17 @@ var Gen = (function(){
     if(afId) afPick(afId);
   }
   function afLoadSource(){
-    var mid=editSrc(), img=el('af-img');
-    if(!mid){ img.removeAttribute('src'); afMsg('Pick a source image above first.', true); return false; }
+    var mid=editSrc(), img=el('af-img'), og=el('af-orig');
+    if(!mid){
+      img.removeAttribute('src'); if(og) og.removeAttribute('src');
+      afMsg('Pick a source image above first.', true); return false;
+    }
     // /full/ is this app's OWN route, which is what makes Save work: composite() draws the
     // source into a canvas, and a cross-origin image without CORS taints that canvas so
     // toBlob() throws SecurityError. A PixAI CDN url dropped in here would do exactly that.
     var want='/full/'+encodeURIComponent(mid);
     if(img.getAttribute('src')!==want) img.src=want;
+    if(og && og.getAttribute('src')!==want) og.src=want;   // same url -> served from cache
     return true;
   }
   // Placement follows mg-model-picker's _place(): open toward whichever side has room, then clamp
@@ -7963,7 +8042,19 @@ var Gen = (function(){
   // so it centres over the drawer instead -- which is #model-flyout's own documented behaviour
   // for the top and bottom docks, where the drawer is a full-width bar and nothing can sit beside
   // it: "an edge-popped flyout gets clipped ... render it as a centered overlay instead".
-  var AF_W=780, AF_MIN_SIDE=560;
+  // Three columns now, so both numbers went up -- and AF_MIN_SIDE is set by what the panel
+  // is FOR, not by what technically fits. Two pictures fit beside the rail from about 790px
+  // (250+250+236 + two 14px gaps + 26px padding), but at that width they render ~250px each,
+  // which is smaller than the single 373px picture the old two-column panel gave you: the
+  // comparison would arrive as a downgrade. The floor is therefore the width at which each
+  // picture is worth judging -- ~380px, so 380*2 + 236 + 28 + 26 = 1050. Below it there is no
+  // honest side-by-side left and the panel centres over the drawer instead, which is
+  // #model-flyout's documented behaviour for the top and bottom docks.
+  //
+  // Measured at 1600x1000 with a 600px right-docked Edit drawer: 982px of side room is under
+  // the floor, so it centres at AF_W and each picture renders ~430px -- comfortably past the
+  // old single-image size rather than under it.
+  var AF_W=1180, AF_MIN_SIDE=1050;
   function placeFilters(){
     var f=el('filters-flyout');
     if(!f || !f.classList.contains('open')) return;
@@ -8020,6 +8111,38 @@ var Gen = (function(){
       done('Could not save: '+((e && e.message) || e), true);
     });
   }
+  // "Send to image gen": bake the filter in, hand the PNG to /api/upload -- the same free
+  // 3-step S3 handshake the Picker's file import uses -- and drop the returned media_id into
+  // the Edit source. A filtered composite exists only in this browser until something gives
+  // it an id, and every i2i path (edit, reference, video) is keyed on a media_id, so the
+  // upload is what makes the result usable as an input at all. It spends no credits; the
+  // generation you then run from the drawer is the thing that costs, priced as usual.
+  function filterSend(){
+    var AF=window.MgArtFilters, img=el('af-img');
+    if(!AF) return;
+    if(!afId){ afMsg('Pick a filter first.', true); return; }
+    if(!img.naturalWidth){ afMsg('The source image has not finished loading.', true); return; }
+    var btn=el('af-send'), idle=btn.textContent;
+    btn.disabled=true; btn.textContent='Uploading\\u2026';
+    function done(t, bad){ btn.disabled=false; btn.textContent=idle; afMsg(t, bad); }
+    AF.toBlob(img, afId, afOpts()).then(function(b){
+      var fd=new FormData();
+      fd.append('file', b, 'filtered_'+afId+'.png');
+      return fetch('/api/upload', {method:'POST', body:fd}).then(function(r){ return r.json(); });
+    }).then(function(d){
+      if(!d || d.error || !d.media_id){ done((d && d.error) || 'Upload failed.', true); return; }
+      done('');
+      // Close the panel before switching the drawer's source: leaving it open would keep
+      // showing the OLD source beside a preview of an image that is now the input, which
+      // reads as though nothing happened.
+      toggleFilters();
+      setMode('edit'); setEditSource(String(d.media_id));
+      if(window.Toast) Toast.show({kind:'ok', title:'Filtered image is your edit source',
+                                   msg:AF.get(afId).name+' \\u00b7 uploaded free, nothing generated yet'});
+    }, function(e){
+      done('Could not send: '+((e && e.message) || e), true);
+    });
+  }
   window.addEventListener('resize', placeFilters);
 
   function genDrawerEl(){ var w=el('gen-mode-video'); return w?w.querySelector('mg-generate-drawer'):null; }
@@ -8038,7 +8161,7 @@ var Gen = (function(){
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
           fixTag:fixTag, fixClear:fixClear, fix:fix,
           toggleFilters:toggleFilters, filterStrength:filterStrength, filterAngle:filterAngle,
-          filterClear:filterClear, filterSave:filterSave,
+          filterClear:filterClear, filterSave:filterSave, filterSend:filterSend,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,

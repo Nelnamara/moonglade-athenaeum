@@ -64,14 +64,32 @@
       multipliers: filter-v1-m6 ships brightness 0 and contrast 0, and a multiplier reading
       would render it as brightness(0) -- solid black.
 
+   ---- TWO SETS: PIXAI'S AND OURS -----------------------------------------------------
+   FILTERS is PixAI's seven, verbatim. MOONGLADE_FILTERS is our own five, authored here and
+   derived from this app's five skin palettes. They are separate arrays and stay that way:
+   FILTERS' whole contract is that refreshing it is a paste of the endpoint's `filters`
+   array, which stops working the moment anything hand-written lives in it.
+
+   Ours use ONLY the six blend modes that map exactly, so for that set the on-screen preview
+   and the exported PNG are the same pixels rather than merely similar -- the two approximate
+   whole-colour modes are deliberately unused. They also carry no `image_parameters`: the
+   recipes are exactly the gradients that were reviewed as swatches and approved, and a
+   brightness/contrast trim added after the fact would ship something other than what was
+   signed off.
+
+   `get()`, `list()` and every renderer treat both sets identically -- an id is an id. Use
+   `groups()` when the UI needs to say which set a filter came from.
+
    Public API (all pure unless noted):
-     FILTERS            -- the 7 recipes, verbatim.
-     SOURCE_URL         -- the public endpoint the recipes came from.
+     FILTERS            -- PixAI's 7 recipes, verbatim.
+     MOONGLADE_FILTERS  -- our 5, derived from the skins.
+     groups()           -- [{source, label, ids}] in rail order, ours first.
+     SOURCE_URL         -- the public endpoint PixAI's recipes came from.
      CAPTURED           -- the date the baked copy was last verified against SOURCE_URL.
      DEFAULT_ANGLE_DEG  -- 180 (top-to-bottom), shared by both renderers.
      BLEND_MODE_MAP     -- {mode: {css, canvas, exact, note}} -- the table above, as data.
-     list()             -- the 7 ids in order.
-     get(id)            -- a recipe, or null.
+     list()             -- every id in rail order (ours, then PixAI's).
+     get(id)            -- a recipe from either set, or null.
      blendModeFor(mode, 'css'|'canvas')
                         -- the mapped value, or NULL for an unmapped mode. Throws on an
                            unknown target rather than guessing one.
@@ -202,6 +220,88 @@
     }
   ];
 
+  // ---- the Moonglade set: ours, derived from this app's own skins ---------------------
+  // Authored here, not fetched: each one takes its skin's accent and lead colours out of
+  // SKINS in pixai_gallery.py, so a filtered image reads as this app rather than as a
+  // generic wash. Same key shape as PixAI's payload, so normalizeLayers() and both renderers
+  // treat them identically and neither array needs a special case anywhere.
+  //
+  // Kept OUT of FILTERS deliberately -- see this file's header. Every blend mode below is one
+  // of the six exact ones; no image_parameters, so what shipped is what was approved as
+  // swatches. The skin each palette came from is named on the recipe so a skin retint can be
+  // traced back to the filter that has to move with it.
+  var MOONGLADE_FILTERS = [
+    {
+      id: 'mg-moonglade', version: 1, name: 'Moonglade', skin: 'moonglade',
+      note: 'The default skin. Lavender leads, emerald in the shadows.',
+      filters: [
+        { name: 'f1', enabled: true, blendMode: 'soft-light', blendOpacity: 0.6,
+          stops: [{ color: '#b692e6', position: 0 },
+                  { color: '#4fc99a', position: 1 }] },
+        { name: 'f2', enabled: true, blendMode: 'screen', blendOpacity: 0.2,
+          stops: [{ color: '#0c0a1c', position: 0 },
+                  { color: '#3a3460', position: 1 }] }
+      ]
+    },
+    {
+      id: 'mg-nightfallen', version: 1, name: 'Nightfallen', skin: 'nightfallen',
+      note: 'Void-touched. Crushes the darks, keeps a violet bloom up top.',
+      filters: [
+        { name: 'f1', enabled: true, blendMode: 'color-burn', blendOpacity: 0.42,
+          stops: [{ color: '#241a3f', position: 0 },
+                  { color: '#a678f0', position: 1 }] },
+        { name: 'f2', enabled: true, blendMode: 'soft-light', blendOpacity: 0.55,
+          stops: [{ color: '#c9a6ff', position: 0 },
+                  { color: '#080610', position: 1 }] }
+      ]
+    },
+    {
+      id: 'mg-moonlit', version: 1, name: 'Moonlit Silver', skin: 'moonlit',
+      note: 'Cold silver and glacier blue. The gentlest of the five -- good on portraits.',
+      filters: [
+        { name: 'f1', enabled: true, blendMode: 'soft-light', blendOpacity: 0.6,
+          stops: [{ color: '#bcd6f5', position: 0 },
+                  { color: '#8fb8e8', position: 1 }] },
+        { name: 'f2', enabled: true, blendMode: 'screen', blendOpacity: 0.18,
+          stops: [{ color: '#0b1018', position: 0 },
+                  { color: '#334358', position: 1 }] }
+      ]
+    },
+    {
+      id: 'mg-ember', version: 1, name: 'Embercourt', skin: 'ember',
+      note: 'Warm venthyr gold. The only one of the five that pushes contrast up.',
+      filters: [
+        { name: 'f1', enabled: true, blendMode: 'overlay', blendOpacity: 0.48,
+          stops: [{ color: '#e8935f', position: 0 },
+                  { color: '#f0b48f', position: 1 }] },
+        { name: 'f2', enabled: true, blendMode: 'color-burn', blendOpacity: 0.32,
+          stops: [{ color: '#5a352c', position: 0 },
+                  { color: '#160c0c', position: 1 }] }
+      ]
+    },
+    {
+      id: 'mg-verdant', version: 1, name: 'Verdant Grove', skin: 'verdant',
+      note: 'Deep moss. The strongest colour shift of the set.',
+      filters: [
+        { name: 'f1', enabled: true, blendMode: 'soft-light', blendOpacity: 0.6,
+          stops: [{ color: '#8fe8bf', position: 0 },
+                  { color: '#5fd39a', position: 1 }] },
+        { name: 'f2', enabled: true, blendMode: 'color-burn', blendOpacity: 0.38,
+          stops: [{ color: '#173026', position: 0 },
+                  { color: '#2a5140', position: 1 }] }
+      ]
+    }
+  ];
+
+  // Rail order: ours first -- they are the house set, and the panel groups them under their
+  // own heading. ALL_FILTERS is what get()/list() walk, so nothing downstream has to know
+  // there are two arrays.
+  var GROUPS = [
+    { source: 'moonglade', label: 'Moonglade', filters: MOONGLADE_FILTERS },
+    { source: 'pixai', label: 'PixAI', filters: FILTERS }
+  ];
+  var ALL_FILTERS = GROUPS.reduce(function (acc, g) { return acc.concat(g.filters); }, []);
+
   // ---- blend-mode mapping (the table in this file's header, as data) -------------------
   var BLEND_MODE_MAP = {
     'darker-color': {
@@ -253,10 +353,19 @@
   function num(n) { return String(round4(n)); }
 
   function get(id) {
-    for (var i = 0; i < FILTERS.length; i++) if (FILTERS[i].id === id) return FILTERS[i];
+    for (var i = 0; i < ALL_FILTERS.length; i++)
+      if (ALL_FILTERS[i].id === id) return ALL_FILTERS[i];
     return null;
   }
-  function list() { return FILTERS.map(function (f) { return f.id; }); }
+  function list() { return ALL_FILTERS.map(function (f) { return f.id; }); }
+  // For a UI that wants headed sections rather than one undifferentiated strip. Returns ids,
+  // not recipes, so a caller can't mutate the baked data through it.
+  function groups() {
+    return GROUPS.map(function (g) {
+      return { source: g.source, label: g.label,
+               ids: g.filters.map(function (f) { return f.id; }) };
+    });
+  }
 
   function resolve(idOrRecipe) {
     if (idOrRecipe && typeof idOrRecipe === 'object') return idOrRecipe;
@@ -501,9 +610,11 @@
     CAPTURED: CAPTURED,
     DEFAULT_ANGLE_DEG: DEFAULT_ANGLE_DEG,
     FILTERS: FILTERS,
+    MOONGLADE_FILTERS: MOONGLADE_FILTERS,
     BLEND_MODE_MAP: BLEND_MODE_MAP,
     list: list,
     get: get,
+    groups: groups,
     blendModeFor: blendModeFor,
     normalizeLayers: normalizeLayers,
     gradientCss: gradientCss,
