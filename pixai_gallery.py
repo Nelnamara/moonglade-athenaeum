@@ -7763,9 +7763,12 @@ var Gen = (function(){
   }
   function editCost(){
     var cost=el('edit-cost');
+    // Bump BEFORE the early return -- see fixCost's note. Same contract, same defect: a
+    // response for the previous source stayed valid across a source change and repainted
+    // its price over the new one.
+    var mine=++costSeq;
     if(!editSrc()){ cost.clear(); return; }
     cost.setChecking();
-    var mine=++costSeq;
     fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(editPayload())})
       .then(function(r){return r.json();})
       // <mg-cost-badge> owns the whole classification now (idle / checking / free / paid /
@@ -7832,9 +7835,14 @@ var Gen = (function(){
   function fixCost(){
     var cost=el('fix-cost'); if(!cost) return;
     fixCostVal=null;
+    // Bump BEFORE any return. This sequence number is what makes a late response
+    // discardable, so bailing out has to count as an invalidation too: without it, a
+    // request fired for a real selection is still "current" after the user hits Clear or
+    // swaps the source, and its response repaints a confident price for boxes that no
+    // longer exist.
+    var mine=++fixSeq;
     if(!editSrc() || !fixBoxes.length){ cost.clear(); return; }
     cost.setChecking();
-    var mine=++fixSeq;
     fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({mode:'fix', source:editSrc(), boxes:fixBoxesScaled()})})
       .then(function(r){return r.json();})
@@ -13899,6 +13907,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             eta = _queue_estimate(core, session, tid)
             if eta is not None:
                 fields["eta_seconds"] = eta
+            # RE-CHECK before writing. The estimate above is two network calls long, and a
+            # worker can pick the job up while we are inside it -- in which case a later poll
+            # has already claimed and written the newer 'rendering' phase. Writing our
+            # pre-fetch 'queued' on top of that would be permanent: the seen-map already
+            # holds the newer value, so every subsequent poll returns early at the dedupe
+            # check above and nothing ever corrects it. The job would render to completion
+            # still displaying QUEUED. Dropping a stale write costs nothing; the newer phase
+            # is already in the log.
+            with _gen_phase_lock:
+                if _gen_phase_seen.get(tid) != started:
+                    return
         _log_job(tid, **fields)
 
     def _forget_gen_phase(tid):

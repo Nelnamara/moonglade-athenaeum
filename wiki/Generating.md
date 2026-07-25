@@ -349,15 +349,13 @@ what *is* restricted to the server's own machine.
   rather than letting you submit over it), aspect/mode/count, live credit cost with the
   free-card check up front.
 - **Edit** — instruct edits ("make it night") and the drag-a-box hand/face **Fixer**, in
-  sub-tabs over one source image. (The third sub-tab, **Enhance**, explains why PixAI's
-  one-click workflow tools can only be run on their own site — see `--enhance` above.)
+  sub-tabs over one source image. The third sub-tab, **Enhance**, is where PixAI's seven
+  **art filters** live: gradient overlays applied right in your browser, so they cost nothing,
+  make no request, and work offline.
   The Fixer shows its live credit cost as soon as you mark a region, and always asks before
   it submits: unlike everything else in the drawer, a fix can't be covered by a free card, so
   it always spends. Fixed images are filed under the name of the image they repaired plus a
   `fix-face` / `fix-hand` marker, so a repair sits next to its original in the folder.
-
-  sub-tabs over one source image. The third sub-tab, **Enhance**, is the free local **art
-  filters** panel (see above), and says which PixAI tools still only run on their own site.
 - **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
   the prompt turns into a chip; model + duration + audio; live cost shows **FREE + how many

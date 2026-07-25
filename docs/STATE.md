@@ -348,14 +348,6 @@ users.
   PixAI exposes no progress on a task (probed with a control — no `progress`/`percent`/`step`/
   `eta`/`queuePosition` fields exist), the estimate is never recomputed as the wait grows, and
   it disappears once the job starts rather than becoming an implied render ETA.
-- The Generate drawer's Edit ▸ Enhance sub-tab is explanatory copy only. PixAI never assigns
-  a worker to a panelplugin task submitted with an API key — it accepts it, queues it, charges
-  it, then cancels it at ~60 minutes with `outputs.reason` "waiting timeout" and refunds (their
-  own official preset ids included, while their web client runs the same workflow in 1-3s), so
-  the ten one-click cards, the ComfyUI catalog search, `/api/enhance`, `/api/workflows`,
-  `build_panelplugin_parameters`, `workflow_catalog` and `--workflow-id` were all deleted
-  2026-07-24. The pane now says where those tools do run and points at Fix. The Fix sub-tab is
-  a separate box-coordinate hand/face fixer (`/api/fix` → `submit_fixer`) and works.
 - **The Fix sub-tab is priced, named and labelled like the rest of the suite** (2026-07-25).
   A Fix submits as `{mediaId, boxes}` over `POST /v2/task/fixer`, but PixAI turns that into a
   `taskKind=chat` generation carrying a `chat.fixer` block — which `/v2/task-price` prices
