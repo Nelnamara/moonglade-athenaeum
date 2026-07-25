@@ -6,6 +6,19 @@ import pytest
 import pixai_gallery_backup as core
 
 
+def _one_poll_then_timeout(monkeypatch, task):
+    """Let _poll_task_status observe `task` exactly once, then hit its deadline.
+
+    A bare timeout=0 never enters the loop at all, so the poller observes NOTHING -- which
+    is a different case from 'observed it queued and unstarted' and must not be conflated
+    (see _never_dispatched). The fake clock yields start, one in-loop check, then a value
+    past the deadline. Nothing sleeps."""
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": task})
+    monkeypatch.setattr(core.time, "sleep", lambda *_a, **_k: None)
+    ticks = iter([0, 0])
+    monkeypatch.setattr(core.time, "time", lambda: next(ticks, 10_000))
+
+
 def test_poll_returns_paid_credit_and_prints_cost(monkeypatch, capsys):
     monkeypatch.setattr(core, "gql_adhoc",
                         lambda *a, **k: {"task": {"status": "completed", "paidCredit": 27500}})
@@ -36,3 +49,63 @@ def test_poll_raises_on_timeout(monkeypatch):
         core._poll_task_status(object(), "t4", 0, label="generate", fail_noun="generation")
     msg = str(e.value)
     assert "STILL RUNNING" in msg and "--task-id t4" in msg
+
+
+# ---- the silent-death bug: a task PixAI accepts, never starts, and reaps at ~60 min ----
+
+def test_status_query_asks_for_startedAt_and_outputs():
+    """The two fields that tell a never-dispatched task apart from a running one, and
+    carry PixAI's own cancellation reason. Without them in the query, every guard below
+    is dead code that can only ever see status."""
+    assert "startedAt" in core._GEN_STATUS, "_GEN_STATUS must select startedAt"
+    assert "outputs" in core._GEN_STATUS, "_GEN_STATUS must select outputs"
+
+
+def test_poll_cancelled_surfaces_pixai_own_reason(monkeypatch):
+    """PixAI reaps an undispatched task with outputs={"reason": "waiting timeout"}. The
+    owner hit this five times across four days and never once saw that string -- the
+    error said only 'cancelled', which reads like HE cancelled something."""
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
+        "status": "cancelled", "startedAt": None, "outputs": {"reason": "waiting timeout"}}})
+    with pytest.raises(core.PixAIError) as e:
+        core._poll_task_status(object(), "t5", 300, label="enhance", fail_noun="enhance")
+    msg = str(e.value)
+    assert "waiting timeout" in msg, "PixAI's own reason must reach the user: " + msg
+
+
+def test_poll_timeout_on_never_started_task_does_not_claim_it_is_running(monkeypatch):
+    """THE bug. A task sitting in `waiting` with startedAt=None was never dispatched, so
+    'the task is STILL RUNNING on PixAI' is false, and '--task-id' recovery will never
+    produce anything. Telling the owner to wait for a task no worker ever picked up is
+    what let five failures pass unnoticed across four days."""
+    _one_poll_then_timeout(monkeypatch, {"status": "waiting", "startedAt": None})
+    with pytest.raises(core.PixAIError) as e:
+        core._poll_task_status(object(), "t6", 60, label="enhance", fail_noun="enhance")
+    msg = str(e.value)
+    assert "STILL RUNNING" not in msg, "claimed a never-started task is running: " + msg
+    assert "never started" in msg.lower(), "must say it was never dispatched: " + msg
+    assert "refund" in msg.lower(), "must mention the ~60min reap+refund: " + msg
+
+
+def test_poll_timeout_on_a_genuinely_running_task_still_says_running(monkeypatch):
+    """The honest-timeout path must survive the fix: a task that really is running keeps
+    the reassuring 'nothing is lost, recover it free' message."""
+    _one_poll_then_timeout(monkeypatch, {"status": "running",
+                                        "startedAt": "2026-07-25T05:00:00.000Z"})
+    with pytest.raises(core.PixAIError) as e:
+        core._poll_task_status(object(), "t7", 60, label="generate", fail_noun="generation")
+    msg = str(e.value)
+    assert "STILL RUNNING" in msg and "--task-id t7" in msg
+
+
+def test_poll_timeout_without_ever_observing_the_task_stays_reassuring(monkeypatch):
+    """'Never observed' is NOT 'never dispatched'. With a zero timeout the loop never
+    runs, so the poller has no evidence either way -- it must fall back to the reassuring
+    recover-it-free message rather than confidently declaring a task dead it never looked
+    at. This is the same class of error as the message the fix above removes, so it gets
+    its own guard."""
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {"status": "running"}})
+    with pytest.raises(core.PixAIError) as e:
+        core._poll_task_status(object(), "t8", 0, label="generate", fail_noun="generation")
+    msg = str(e.value)
+    assert "STILL RUNNING" in msg and "never started" not in msg.lower()

@@ -142,6 +142,38 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Generations that PixAI accepts but never starts no longer die silently.** Five of the
+  owner's jobs vanished this way between 2026-07-21 and 07-24 — three Enhance runs plus two
+  more found during diagnosis — and nobody noticed, because nothing ever said anything. A
+  task PixAI queues without assigning a worker stays at a **non-terminal** status for about
+  sixty minutes before being reaped, so on status alone it is indistinguishable from real
+  work: the tracker showed a spinner, the CLI eventually said *"the task is STILL RUNNING on
+  PixAI"* — which was **false**, it had never run — and the only other signal was a vague
+  "no mediaId" error. Fixed at the shared choke point rather than per-surface: `_GEN_STATUS`
+  now also selects **`startedAt`** (the only field separating "no worker ever took it" from
+  "genuinely working") and **`outputs`** (which carries PixAI's own explanation, e.g.
+  `reason: "waiting timeout"`), and `generation_status()` returns both as `started` and
+  `reason` alongside its existing three keys. On that foundation: the CLI poller now
+  distinguishes a never-dispatched task from a running one and says so honestly, including
+  that PixAI refunds an unstarted task at ~60 minutes; a terminal `cancelled` now carries
+  PixAI's reason instead of reading as though the *user* cancelled something; and the orphan
+  reaper marks a never-started job **`stale`** with a plain-language explanation. `stale` was
+  reused deliberately rather than inventing a state — it already renders a warning glyph and
+  message in the tracker, and it is deliberately **not** terminal, so if PixAI does eventually
+  start the task a later done/failed still wins. Two deliberate abstentions, each with its own
+  guard: the check is `started is False`, never `not started`, so a caller that omits the field
+  reports *unknown* and does not get every in-flight job branded stale; and a poll that never
+  observed the task at all (an expired timeout that never entered the loop) keeps the
+  reassuring recover-it-free message, because "not observed" is not "not dispatched" — that
+  would be the same class of confident lie the fix removes. Also caught during the work: the
+  reaper's real caller passed `generation_status(...)["phase"]`, a bare string, so the new
+  branch would have been **dead code in production** while every unit test around it passed —
+  the mirror image of a mismatch that once made this same reaper resolve nothing at all. Now
+  guarded end-to-end through the real `/api/jobs` endpoint, not just the library function.
+  Verified against the owner's live account: two genuinely-unstarted tasks report
+  `started: false`, the completed website Enhance reports `started: true`, and the reaped one
+  yields `reason: "waiting timeout"`.
+
 - **A local `--ref-video` file was uploaded to PixAI as an `IMAGE`, and a local `--ref-audio`
   file was silently mislabelled the same way.** `_resolve_refs()` resolved all three
   reference kinds through one call that let `upload_media`'s `media_type` default to
