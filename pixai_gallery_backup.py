@@ -1902,11 +1902,18 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
             "model_id": str(m.get("id") or ""),
             "liked_count": int(m.get("likedCount") or 0),
             "should_blur": bool(flag.get("shouldBlur")),
-            # publicUrl preferred (matches cover_url below): PixAI's own thumbnailUrl is a
-            # small, often blurry auto-thumb -- fine as a last-resort fallback, poor as the
-            # grid card's main image. loading="lazy" on the <img> bounds the cost to what's
-            # actually on screen.
-            "preview_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
+            # thumbnailUrl preferred, publicUrl only as a fallback -- the two URLs serve
+            # two DIFFERENT jobs and must not both resolve to the full-size cover:
+            #   preview_url -> the ~175px grid card, 24 of them per page.
+            #   cover_url   -> the hover preview card (below), one at a time, on intent.
+            # A full-size cover is ~100KB+; 24 of those is ~24MB of cross-origin CDN
+            # traffic per browse session, in flight against the very next search request.
+            # loading="lazy" bounds it to what's on screen, which in a 2-column grid is
+            # most of the page anyway. This was briefly flipped to publicUrl-first
+            # (3bf155a) for card sharpness; the sharpness is preserved where it actually
+            # gets looked at -- cover_url still prefers publicUrl, so hover-intent shows
+            # the full-size image. This is a bandwidth/fidelity split, not a downgrade.
+            "preview_url": med.get("thumbnailUrl") or med.get("publicUrl") or "",
             "has_version": bool(m.get("hasLatestAvailableVersion")),
             # Rich surface for the preview pop-out card.
             "description": (m.get("modelDescription") or "")[:600],
@@ -1916,6 +1923,10 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
             "comment_count": int(m.get("commentCount") or 0),
             "ref_count": int(m.get("refCount") or 0),
             "author_id": str(m.get("authorId") or ""),
+            # The big, crisp image -- read ONLY by the hover preview card (mg-model-picker's
+            # _showPreview / the gallery's showModelPreview), so it is fetched on
+            # hover-intent for one model, never 24-at-once for the grid. publicUrl-first
+            # deliberately, unlike preview_url above.
             "cover_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
         })
     return {"results": out, "has_more": bool(data.get("hasMore"))}

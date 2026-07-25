@@ -29,8 +29,39 @@ def test_model_search_rest_shapes_rows(monkeypatch):
     assert out["has_more"] is True and len(out["results"]) == 2
     a, b = out["results"]
     assert a["title"] == "Tsubaki.2" and a["model_id"] == "1982880136609467518"
-    assert a["liked_count"] == 10151 and a["preview_url"] == "https://cdn/pub/x"   # full-res preferred (poor thumbnailUrl quality)
+    assert a["liked_count"] == 10151 and a["preview_url"] == "https://cdn/thumb/x"   # small thumb for the grid card
     assert b["should_blur"] is True and b["preview_url"] == "https://cdn/pub/y"   # falls back to publicUrl
+
+
+def test_model_search_rest_grid_thumb_and_hover_cover_are_different_sizes(monkeypatch):
+    """AUDIT_2026-07-21 (grid bandwidth): preview_url and cover_url must NOT both resolve to
+    the full-size publicUrl. preview_url feeds 24 ~175px grid cards on every search (24
+    full-size covers is ~24MB of cross-origin CDN traffic racing the next search request);
+    cover_url feeds the ONE hover preview card, on intent, so it keeps full resolution.
+    Both fall back to whichever URL exists when the other is missing -- a row with only one
+    of the two must never come back with an empty image."""
+    both = {"data": [{"id": "1", "title": "Both", "type": "SDXL_MODEL", "flag": {},
+                      "media": {"thumbnailUrl": "https://cdn/thumb/z", "publicUrl": "https://cdn/pub/z"}}],
+            "hasMore": False}
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: both)
+    m = core.model_search_rest(object())["results"][0]
+    assert m["preview_url"] == "https://cdn/thumb/z"     # grid card -> small
+    assert m["cover_url"] == "https://cdn/pub/z"         # hover preview -> full size
+    assert m["preview_url"] != m["cover_url"]
+
+    # thumb missing -> the grid card falls back to the full-size one rather than nothing
+    thumbless = {"data": [{"id": "2", "title": "No thumb", "type": "SDXL_MODEL", "flag": {},
+                           "media": {"publicUrl": "https://cdn/pub/q"}}], "hasMore": False}
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: thumbless)
+    m2 = core.model_search_rest(object())["results"][0]
+    assert m2["preview_url"] == m2["cover_url"] == "https://cdn/pub/q"
+
+    # public missing -> the hover card falls back to the thumb rather than nothing
+    publicless = {"data": [{"id": "3", "title": "No public", "type": "SDXL_MODEL", "flag": {},
+                            "media": {"thumbnailUrl": "https://cdn/thumb/r"}}], "hasMore": False}
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: publicless)
+    m3 = core.model_search_rest(object())["results"][0]
+    assert m3["preview_url"] == m3["cover_url"] == "https://cdn/thumb/r"
 
 
 def test_model_search_rest_preview_card_fields(monkeypatch):
