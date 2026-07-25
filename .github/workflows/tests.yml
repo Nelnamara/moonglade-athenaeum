@@ -20,7 +20,29 @@ jobs:
       # (see its own pytest.importorskip). Pulling it in just to sit unused is exactly
       # the kind of CI flakiness worth avoiding.
       - name: Install dependencies
-        run: pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov
+        run: pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov playwright
+
+      # THE RENDERING HARNESS NEEDS A REAL BROWSER.
+      #
+      # tests/test_render_harness.py drives a real chromium against the real Flask app on a
+      # real port and measures the resulting layout, stacking and computed style. It exists
+      # because the rest of the suite asserts that CSS *text* is present, never that it
+      # *works* -- a green suite could not see a layout defect, because nothing in it
+      # rendered. Without this step the harness skips itself cleanly (pytest.importorskip)
+      # and every guard in it is decoration: CI would report success on exactly the class of
+      # bug it was written to catch.
+      #
+      # Cached because the download is ~150MB. `--with-deps` also installs chromium's apt
+      # libraries, which the cache does not cover, so that part re-runs -- unavoidable and
+      # still cheaper than a browser download every time.
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}
+
+      - name: Install the Playwright browser
+        run: python -m playwright install --with-deps chromium
 
       - name: Run test suite
         run: python -m pytest -q --ignore=tests/test_similar.py
