@@ -12,6 +12,7 @@ import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
 
 from tests.conftest import login_client, login_existing_client
+from tests.csshelp import css_rules, element, winning
 
 
 def _row(**kw):
@@ -1543,14 +1544,112 @@ def test_portrait_mobile_pass(tmp_path):
     html = cli.get("/").get_data(as_text=True)
     assert "@media (max-width: 480px)" in html
     assert "repeat(2, minmax(0, 1fr)) !important" in html           # 2-up grid, ignores saved --thumb
-    assert "#model-flyout" in html and "translate(-50%, -50%)" in html  # flyout centered (was clipped)
-    # Isolate the mobile breakpoint itself -- a bare substring check let this pass off
-    # the DESKTOP #gen-drawer.wide{width:600px;} rule (a different breakpoint entirely),
-    # so a broken/missing mobile override could ship invisibly. The tablet media query
-    # right after this one is a stable end marker for the slice.
-    mobile_block = html.split("@media (max-width: 480px)")[1].split("@media (min-width: 681px)")[0]
-    assert "#gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left { width: 100%" in mobile_block, \
-        "the mobile full-width drawer rule is missing from inside the 480px breakpoint"  # full-width sheet
+    # The drawer/flyout half of this pass is asserted by CASCADE, not by substring --
+    # see test_portrait_mobile_drawer_rules_actually_win below for why.
+
+
+PHONE, DESKTOP = 375, 1280
+
+
+def test_portrait_mobile_drawer_rules_actually_win(tmp_path):
+    """The Generate drawer's <=480px overrides must WIN the cascade, not merely exist.
+
+    This test replaces a presence check that could not fail. The old version asserted
+    the mobile rule's TEXT was inside the 480px block -- and it was, correct and
+    completely dead, for as long as the rule had shipped. Every declaration below
+    leans on a bare `#gen-drawer` / `#model-flyout` / `.dock-ctl button` /
+    `.gen-head .x` selector, and the 480px block sat ~1,500 lines ABOVE the drawer's
+    own <style> block. Equal specificity + earlier position = the base rules won; a
+    media query adds no specificity. Measured in a real browser at 375x812 while the
+    old test was green: the open dock-right drawer was 352.5px wide (a 22.5px dead
+    gutter beside a "full-width" sheet) and the flyout sat at rect y=-332.9px, half
+    of it above the top of the viewport. `.wide` and `.dock-left` looked right the
+    whole time -- their compound selectors out-specify the bare base rule -- which is
+    why eyeballing the phone layout never caught it either.
+
+    So: resolve the winner the way a browser does (!important, specificity, document
+    order) and assert on that. Moving these rules back above the drawer's stylesheet
+    now fails here instead of shipping silently.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    rules = css_rules(cli.get("/").get_data(as_text=True))
+
+    def win(levels, prop, width):
+        w = winning(rules, levels, prop, width)
+        assert w is not None, "nothing declares {!r} for this element".format(prop)
+        return w
+
+    # --- the drawer is a full-width sheet on a phone, in every dock/width variant ---
+    for extra in ({}, {"wide"}, {"dock-left"}, {"dock-top"}, {"dock-bottom"}):
+        drawer = element(id="gen-drawer", classes={"open"} | set(extra))
+        label = "+".join(sorted(extra)) or "default dock"
+        assert win(drawer, "width", PHONE).value == "100%", \
+            "phone drawer width lost the cascade ({})".format(label)
+        assert win(drawer, "max-width", PHONE).value == "100vw", \
+            "phone drawer max-width lost the cascade ({})".format(label)
+
+    # --- the model flyout is a centered, reachable overlay in every dock ---
+    for dock in ({}, {"dock-left"}, {"dock-top"}, {"dock-bottom"}):
+        flyout = element(id="model-flyout", classes={"open"},
+                         ancestors=[dict(id="gen-drawer", classes={"open"} | set(dock))])
+        label = "+".join(sorted(dock)) or "default dock"
+        # position/top/left are the three the base rule actually contested and won.
+        assert win(flyout, "position", PHONE).value == "fixed", \
+            "phone flyout position lost the cascade ({})".format(label)
+        assert win(flyout, "top", PHONE).value == "50%", \
+            "phone flyout top lost the cascade ({})".format(label)
+        assert win(flyout, "left", PHONE).value == "50%", \
+            "phone flyout left lost the cascade ({})".format(label)
+        # transform was the one declaration that DID survive -- the base rule sets no
+        # transform, so nothing contested it. That is exactly what stranded the panel
+        # off-screen: a centering transform applied to un-centered coordinates.
+        assert win(flyout, "transform", PHONE).value == "translate(-50%,-50%)", \
+            "phone flyout transform lost the cascade ({})".format(label)
+        assert win(flyout, "width", PHONE).value == "94vw", \
+            "phone flyout width lost the cascade ({})".format(label)
+
+    # --- the touch targets this pass exists to enlarge ---
+    dock_btn = element(tag="button", ancestors=[dict(classes={"dock-ctl"})])
+    assert win(dock_btn, "width", PHONE).value == "34px"     # was stuck at the 22px base
+    assert win(dock_btn, "height", PHONE).value == "34px"
+    close_x = element(classes={"x"}, ancestors=[dict(classes={"gen-head"})])
+    assert win(close_x, "font-size", PHONE).value == "28px"  # was stuck at the 22px base
+    assert win(close_x, "min-width", PHONE).value == "40px"
+
+    # --- and none of it leaks onto desktop: the base rules still win at 1280px ---
+    desktop_drawer = element(id="gen-drawer", classes={"open"})
+    assert win(desktop_drawer, "width", DESKTOP).value == "420px"
+    assert win(desktop_drawer, "max-width", DESKTOP).value == "94vw"
+    assert win(element(id="gen-drawer", classes={"open", "wide"}), "width", DESKTOP).value == "600px"
+    desktop_flyout = element(id="model-flyout", classes={"open"},
+                             ancestors=[dict(id="gen-drawer", classes={"open"})])
+    assert win(desktop_flyout, "position", DESKTOP).value == "absolute"
+    assert win(desktop_flyout, "top", DESKTOP).value == "0"
+    assert win(desktop_flyout, "width", DESKTOP).value == "372px"
+    assert winning(rules, desktop_flyout, "transform", DESKTOP) is None
+    assert win(dock_btn, "width", DESKTOP).value == "22px"
+    assert win(close_x, "font-size", DESKTOP).value == "22px"
+
+
+def test_css_cascade_resolver_can_actually_fail(tmp_path):
+    """Guard the guard. tests/csshelp.py is the only reason the test above can bite,
+    so prove its verdict tracks document order rather than just reporting whatever it
+    finds last: feed it the SAME two rules in both orders and require the answers to
+    differ. Without this, a resolver bug that always returned the base rule would make
+    every assertion above vacuously green -- which is precisely the failure mode
+    (a test that cannot fail) this whole pass exists to remove.
+    """
+    base = "<style>#d{width:420px;}</style>"
+    mobile = "<style>@media (max-width: 480px){#d{width:100%;}}</style>"
+    target = element(id="d")
+
+    assert winning(css_rules(base + mobile), target, "width", PHONE).value == "100%"
+    assert winning(css_rules(mobile + base), target, "width", PHONE).value == "420px"
+    # ...and the media query is genuinely evaluated, not ignored.
+    assert winning(css_rules(base + mobile), target, "width", DESKTOP).value == "420px"
+    # A higher-specificity earlier rule still beats a later bare one.
+    assert winning(css_rules("<style>#d.x{width:1px;}#d{width:2px;}</style>"),
+                   element(id="d", classes={"x"}), "width", PHONE).value == "1px"
 
 
 def test_dead_css_selectors_removed_in_broader_sweep():
@@ -1569,8 +1668,13 @@ def test_dead_css_selectors_removed_in_broader_sweep():
         element; nothing else in the repo references it either.
     Removing them is a no-op for real rendering: the bare #gen-drawer / #model-flyout selectors
     already at the front of those same comma-lists match unconditionally, so the mobile
-    full-width-drawer / centered-flyout behavior (checked by test_portrait_mobile_pass above)
-    is unaffected. Their LIVE siblings (dock-left/top/bottom, the rest of .mp-*) must survive."""
+    full-width-drawer / centered-flyout behavior (checked by
+    test_portrait_mobile_drawer_rules_actually_win above) is unaffected. Their LIVE siblings
+    (dock-left/top/bottom, the rest of .mp-*) must survive.
+
+    NOTE the assertion below is a blunt substring check over the whole module, so it also
+    trips on the WORD in ordinary prose, not just on a live selector. If a comment needs to
+    describe that dock, spell it "the right-hand dock" rather than hyphenating it."""
     src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
     assert "dock-right" not in src
     assert "mp-tags" not in src
