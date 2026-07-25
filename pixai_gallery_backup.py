@@ -1756,6 +1756,43 @@ def task_detail_gql(session, task_id):
         return None
 
 
+_DELETE_BATCH_MEDIA_MUT = """
+mutation($id: ID!, $input: UpdateGenerationTaskInput!) {
+  updateGenerationTask(id: $id, input: $input) { id }
+}
+"""
+
+
+def delete_batch_media_gql(session, task_id, media_id):
+    """Delete ONE image out of a task's batch, leaving the task and its siblings alone.
+
+    The finer-grained counterpart to `delete_task_gql`, which is task-level: deleting any
+    one image there takes the whole batch with it. DELETES from your PixAI account and is
+    irreversible on their side.
+
+    Signature discovered by validation-error probing (nothing executed): the mutation is
+    `updateGenerationTask(id: ID!, input: UpdateGenerationTaskInput!)` and the delete rides
+    in as `{deleteBatchMedia: {mediaId}}`. It goes over `gql_adhoc`, so unlike
+    `delete_task_gql` it needs NO persisted hash and cannot break when one rotates.
+
+    Two properties copied deliberately from `delete_task_gql`, because both are safety
+    rather than style:
+      - `_check_read_only` fires BEFORE the network call. READ_ONLY is a promise the Trust
+        & Safety page makes about every account-mutating path; a new destructive path that
+        skipped it would be a silent hole in that promise.
+      - SINGLE ATTEMPT, no retry/backoff. A flaky network must never be able to fire a
+        destructive delete twice."""
+    task_id, media_id = str(task_id or "").strip(), str(media_id or "").strip()
+    if not task_id or not media_id:
+        raise PixAIError(
+            "per-image delete needs BOTH a task id and a media id (got task={!r}, media={!r}) "
+            "-- a blank media id would be an update with nothing to delete, and a blank task "
+            "id has no batch to delete from.".format(task_id, media_id))
+    _check_read_only("delete one image from a task on your PixAI account")
+    return gql_adhoc(session, _DELETE_BATCH_MEDIA_MUT,
+                     {"id": task_id, "input": {"deleteBatchMedia": {"mediaId": media_id}}})
+
+
 def delete_task_gql(session, task_id):
     """Replay the deleteGenerationTask persisted mutation for ONE task id.
 

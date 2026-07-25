@@ -191,3 +191,59 @@ def test_account_query_selects_no_bare_connection_field():
             "whole query for it, taking credits, membership, the LoRA cap and the setup "
             "wizard's key validation down together. Query it separately with subfields, or "
             "not at all.")
+
+
+# ---- per-image cloud delete: deleteBatchMedia via updateGenerationTask ----
+
+def test_delete_one_image_sends_the_right_mutation(monkeypatch):
+    """Deletes ONE image from a task's batch, instead of the whole task. Signature was
+    discovered by validation-error probing with nothing executed:
+    `updateGenerationTask(id: ID!, input: UpdateGenerationTaskInput!)` carrying
+    `{deleteBatchMedia: {mediaId}}`."""
+    seen = {}
+    monkeypatch.setattr(core, "gql_adhoc",
+                        lambda s, q, v=None: seen.update(q=q, v=v or {}) or
+                        {"updateGenerationTask": {"id": "T1"}})
+    core.delete_batch_media_gql(object(), "T1", "M9")
+    assert "updateGenerationTask" in seen["q"]
+    assert seen["v"]["id"] == "T1"
+    assert seen["v"]["input"] == {"deleteBatchMedia": {"mediaId": "M9"}}, \
+        "wrong input shape: {!r}".format(seen["v"])
+    assert "UpdateGenerationTaskInput" in seen["q"], \
+        "the variable must be typed, or the server rejects the document"
+
+
+def test_delete_one_image_honors_read_only(monkeypatch):
+    """READ_ONLY is a contract the Trust & Safety page makes to users: every path that
+    mutates the account checks it BEFORE the network call. A new destructive path that
+    forgot this would be a silent hole in that promise, which is exactly why the existing
+    delete/generate paths each call it."""
+    monkeypatch.setattr(core, "_check_read_only",
+                        lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("read-only")))
+    called = []
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: called.append(1))
+    with pytest.raises(core.PixAIError):
+        core.delete_batch_media_gql(object(), "T1", "M9")
+    assert not called, "the network call fired despite READ_ONLY"
+
+
+def test_delete_one_image_is_single_attempt(monkeypatch):
+    """Deliberately NO retry loop, mirroring delete_task_gql: a flaky network must never be
+    able to fire a destructive delete twice."""
+    calls = []
+    def boom(*a, **k):
+        calls.append(1)
+        raise core.PixAIError("network blip")
+    monkeypatch.setattr(core, "gql_adhoc", boom)
+    with pytest.raises(core.PixAIError):
+        core.delete_batch_media_gql(object(), "T1", "M9")
+    assert len(calls) == 1, "retried a destructive delete {} times".format(len(calls))
+
+
+def test_delete_one_image_requires_both_ids(monkeypatch):
+    """A blank media id would be an update with nothing to delete; a blank task id has no
+    batch to delete from. Refuse both rather than sending a malformed destructive call."""
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {})
+    for tid, mid in (("", "M9"), ("T1", ""), ("", "")):
+        with pytest.raises(core.PixAIError):
+            core.delete_batch_media_gql(object(), tid, mid)
