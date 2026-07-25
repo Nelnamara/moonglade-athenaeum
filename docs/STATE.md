@@ -289,6 +289,18 @@ users.
   gets a `cli-<uuid>` job id (mirroring `panel-`/`bulkdel-`), logged fail-soft so a logging hiccup
   can never break the actual command. A panel-spawned subprocess still logs exactly once (no
   duplicate entry) via the existing `MOONGLADE_PROGRESS=1` path.
+- **Upscale and the Generate-tab boosters are ordinary generation parameters**, built by
+  `_gen_parameters` on the same t2i/i2i submit every image gen already uses. PixAI's two
+  upscale methods are mutually exclusive and their radio values are the parameter names:
+  *Upscale* = `enlarge` + `enlargeModel` (one of five upscaler networks), *Hires* = `upscale`
+  + `upscaleDenoisingStrength`/`Steps`/`Sampler`. Boosters are `enableADetailer` (Face Fix)
+  and `qualityTag` (Quality Tag). Every key is emitted **only when asked for**, so a submit
+  that does not opt in is byte-identical to before. The ratio ceiling is **computed**
+  (`max_upscale_ratio`, from a per-method output-pixel ceiling) because the same method
+  allows a different maximum on a different source size; the drawer carries a hand port of it
+  so the slider shows the live max plus `1400×784 → 1952×1096` while dragging, pinned to the
+  Python by a Node parity test. CLI: `--enlarge`/`--enlarge-model`/`--upscale`/
+  `--upscale-denoise`/`--upscale-denoise-steps`/`--face-fix`/`--quality-tag`.
 - The Generate drawer's Edit ▸ Enhance sub-tab promotes ten one-click PixAI workflows
   (upscale / upscale 2×2 / upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art
   / sketch-colorize / relight-sun / relight-backlight), each firing `Gen.enhance(<workflow_id>)`

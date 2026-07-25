@@ -3136,6 +3136,20 @@ DESIGN_TOKENS_CSS = r"""
   }
 """
 
+
+def _enlarge_model_options():
+    """<option> markup for the Generate drawer's upscaler dropdown, substituted into
+    INDEX_HTML through the __ENLARGE_MODELS__ marker (same idiom as __DESIGN_TOKENS__).
+    Built from core's ENLARGE_MODELS so the five names -- which PixAI matches literally,
+    mixed underscores, spaces and plus signs and all ("R-ESRGAN 4x+ Anime6B") -- exist in
+    exactly one place instead of being retyped into a template."""
+    import pixai_gallery_backup as core
+    return "".join(
+        '<option value="{0}"{1}>{0}</option>'.format(
+            m, " selected" if m == core.DEFAULT_ENLARGE_MODEL else "")
+        for m in core.ENLARGE_MODELS)
+
+
 # ---------------------------------------------------------------------------
 # Global 401 guard, injected into EVERY page head (BASE_HTML and _LOOM_SHELL).
 #
@@ -6013,6 +6027,41 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <div style="margin-top:8px;"><div class="gen-lbl">Seed <span style="text-transform:none;color:var(--subtext);">&middot; blank = random</span></div>
         <input id="gen-seed" class="gen-sel" type="number" placeholder="random" autocomplete="off" style="width:100%;"></div>
+      <div class="gen-lbl">Boosters</div>
+      <div class="gen-aspects">
+        <button type="button" id="gen-facefix" onclick="Gen.toggleBooster('facefix')"
+                title="PixAI's Face Fix: re-renders faces at higher detail after the main pass (enableADetailer)">Face Fix</button>
+        <button type="button" id="gen-qtag" data-prefix="Masterpiece" onclick="Gen.toggleBooster('qtag')"
+                title="PixAI's Quality Tag: prepends &lsquo;Masterpiece&rsquo; to the prompt">Quality Tag</button>
+      </div>
+      <div class="gen-lbl">Upscale <span style="text-transform:none;color:var(--subtext);">&middot; optional &middot; costs extra credits</span></div>
+      <div class="gen-seg" id="gen-up-seg" style="margin-bottom:0;">
+        <button type="button" id="gu-off" class="on" onclick="Gen.setUpscale('off')">Off</button>
+        <button type="button" id="gu-enlarge" onclick="Gen.setUpscale('enlarge')"
+                title="Runs an upscaler network over the finished image. Cheaper, allows a bigger ratio, keeps the picture as generated">Upscale</button>
+        <button type="button" id="gu-upscale" onclick="Gen.setUpscale('upscale')"
+                title="Re-renders the image at the larger size (hi-res fix). Adds detail rather than just resolution, allows a smaller ratio, costs roughly 3x">Hires</button>
+      </div>
+      <div id="gen-up-ctl" style="display:none;">
+        <div class="gen-lbl">Ratio <span id="gen-up-rval" style="color:var(--lavender);">1.2&times;</span>
+          <span id="gen-up-max" style="text-transform:none;color:var(--overlay0);"></span></div>
+        <input type="range" id="gen-up-ratio" min="1.1" max="1.9" step="0.1" value="1.2" style="width:100%;"
+               oninput="Gen.upRatio()">
+        <div id="gen-up-dims" style="font-size:11px;color:var(--subtext);margin-top:3px;"></div>
+        <div id="gen-up-model-wrap" style="display:none;">
+          <div class="gen-lbl">Upscaler</div>
+          <select id="gen-up-model" class="gen-sel" onchange="Gen.refreshCost()">__ENLARGE_MODELS__</select>
+        </div>
+        <div id="gen-up-denoise" style="display:none;">
+          <div class="gen-lbl">Denoising strength <span id="gen-up-dval" style="color:var(--lavender);">0.60</span>
+            <span style="text-transform:none;color:var(--overlay0);">&middot; PixAI: works better 0.4&ndash;0.6</span></div>
+          <input type="range" id="gen-up-denoise-str" min="0.01" max="0.99" step="0.01" value="0.6" style="width:100%;"
+                 oninput="Gen.upDenoise(this.value)">
+          <div class="gen-lbl">Denoising steps</div>
+          <input id="gen-up-denoise-steps" class="gen-sel" type="number" min="1" max="50" step="1" value="26"
+                 onchange="Gen.refreshCost()" style="width:100%;">
+        </div>
+      </div>
       <label class="gen-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it (paidCredit 0) — verified against a real Turbo gen."><input type="checkbox" id="gen-hp"> High priority &middot; Turbo (faster)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
       <mg-cost-badge id="gen-cost" hint="Pick a model to see the cost." card-label="a card"></mg-cost-badge>
@@ -6918,14 +6967,81 @@ var Gen = (function(){
     return {w:d8(w), h:d8(h), custom:false};
   }
   function updateDimNote(){ var n=el('gen-dim-note'); if(!n) return; var d=dims();
-    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px'); }
+    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px');
+    syncUpscale(); }
+  // --- Upscale + boosters ---------------------------------------------------
+  // PixAI's two upscale methods, one at a time (their own dialog makes them radio
+  // buttons): 'enlarge' runs an upscaler network over the finished image, 'upscale' is
+  // their Hires method and re-diffuses at the larger size.
+  //
+  // upCeil/upDims/upMax are a HAND PORT of core.UPSCALE_PIXEL_CEILING /
+  // upscale_output_dims / max_upscale_ratio (pixai_gallery_backup.py) -- the server
+  // re-derives and clamps the ratio on every price check AND submit, so this copy exists
+  // only so the slider can't offer a ratio the server would silently pull back, and so
+  // the output size can be shown while dragging with no round-trip. Same hand-maintained
+  // duplication risk as friendlyGenErr below: if those ceilings change, change these too.
+  // Both languages use IEEE-754 doubles, so the floor-to-multiple-of-8 below reproduces
+  // the Python side (and PixAI's own dialog) exactly, 1952 and not 1960 at 1400x1.4.
+  var upCeil={enlarge:2048*2048, upscale:2048*1152}, upMode='off';
+  var boosters={facefix:false, qtag:false};
+  function upDims(w,h,r){ return [Math.max(64,Math.floor(w*r/8)*8), Math.max(64,Math.floor(h*r/8)*8)]; }
+  function upMax(w,h,mode){
+    for(var i=30;i>0;i--){ var r=Math.round((1+i*0.1)*10)/10, o=upDims(w,h,r);
+      if(o[0]*o[1]<=upCeil[mode]) return r; }
+    return 1;
+  }
+  function setUpscale(mode){
+    upMode=mode;
+    ['off','enlarge','upscale'].forEach(function(m){
+      var b=el('gu-'+m); if(b) b.classList.toggle('on', m===mode); });
+    el('gen-up-ctl').style.display = (mode==='off') ? 'none' : '';
+    // The upscaler dropdown exists ONLY in enlarge mode and the denoising controls ONLY
+    // in Hires -- that asymmetry is PixAI's, not a layout shortcut.
+    el('gen-up-model-wrap').style.display = (mode==='enlarge') ? '' : 'none';
+    el('gen-up-denoise').style.display = (mode==='upscale') ? '' : 'none';
+    syncUpscale(); debouncedCost();
+  }
+  function syncUpscale(){
+    if(upMode==='off') return;
+    var d=dims(), s=el('gen-up-ratio'); if(!s) return;
+    // Re-derived from the CURRENT output size every time: the same dialog offers 1.9 on
+    // one source and 1.4 on another, so this moves with Aspect / Size / custom W&H.
+    var mx=upMax(d.w,d.h,upMode);
+    s.max=mx; s.disabled=(mx<=1);
+    if(+s.value>mx) s.value=mx;
+    var r=+s.value, o=upDims(d.w,d.h,r);
+    el('gen-up-rval').textContent=r.toFixed(1)+'\\u00d7';
+    el('gen-up-max').textContent = (mx<=1) ? '' : ('\\u00b7 max '+mx.toFixed(1)+'\\u00d7 at this size');
+    el('gen-up-dims').textContent = (mx<=1)
+      ? ('This size is already at PixAI\\'s ceiling for '+(upMode==='enlarge'?'Upscale':'Hires')+' \\u2014 generate smaller to upscale.')
+      : (d.w+'\\u00d7'+d.h+' \\u2192 '+o[0]+'\\u00d7'+o[1]);
+  }
+  function upRatio(){ syncUpscale(); debouncedCost(); }
+  function upDenoise(v){ el('gen-up-dval').textContent=(+v).toFixed(2); debouncedCost(); }
+  function toggleBooster(k){
+    boosters[k]=!boosters[k];
+    var b=el(k==='facefix'?'gen-facefix':'gen-qtag');
+    if(b) b.classList.toggle('on', boosters[k]);
+    debouncedCost();
+  }
   function payload(){ var a=dims();
+    var upR=(upMode==='off'||el('gen-up-ratio').disabled)?null:+el('gen-up-ratio').value;
+    var qt=el('gen-qtag');
     return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
       steps:+el('gen-steps').value||25, cfg:+el('gen-cfg').value||7,
       count:+el('gen-count').value, seed:(el('gen-seed')?el('gen-seed').value.trim():''),
       high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
       ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
+      // null (not 0/1) when the Upscale control is Off -- the server omits every upscale
+      // key unless a real ratio above 1 arrives, so an untouched drawer submits exactly
+      // what it submitted before these controls existed.
+      enlarge:(upMode==='enlarge'?upR:null), enlarge_model:el('gen-up-model').value,
+      upscale:(upMode==='upscale'?upR:null),
+      upscale_denoise:+el('gen-up-denoise-str').value,
+      upscale_denoise_steps:+el('gen-up-denoise-steps').value,
+      face_fix:boosters.facefix,
+      quality_tag:(boosters.qtag?(qt&&qt.getAttribute('data-prefix')||''):''),
       loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
   function refreshCost(){
     updateDimNote();
@@ -7270,6 +7386,8 @@ var Gen = (function(){
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
+          setUpscale:setUpscale, upRatio:upRatio, upDenoise:upDenoise,
+          toggleBooster:toggleBooster,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           insertTriggers:insertTriggers,
           // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
@@ -7477,7 +7595,7 @@ document.addEventListener('DOMContentLoaded', function(){
   if(em) Gen.openEdit(em);
 });
 </script>
-""")
+""").replace("__ENLARGE_MODELS__", _enlarge_model_options())
 
     DETAIL_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <script>
@@ -11731,6 +11849,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
             ref_media_id=str(p.get("ref_media_id") or "").strip(),
             ref_strength=num("ref_strength", 0.55, float),
+            # Upscale + boosters. num() returns its default for a missing/blank value, so
+            # None here means "the drawer's Upscale control is Off" and the builder omits
+            # every one of these keys -- an absent control must not change the submit.
+            enlarge=num("enlarge", None, float),
+            enlarge_model=str(p.get("enlarge_model") or "").strip(),
+            upscale=num("upscale", None, float),
+            upscale_denoising_strength=num("upscale_denoise", None, float),
+            upscale_denoising_steps=num("upscale_denoise_steps", None, int),
+            face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
+            quality_tag=str(p.get("quality_tag") or "").strip(),
             kaisuuken_id="", no_card=bool(p.get("no_card")))
 
     _presets_lock = threading.Lock()
@@ -12028,7 +12156,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         args = _gen_args_from_payload(p)
         if not args.model:
             return None, args.no_card, "pick a model"
-        return core._gen_parameters(args), args.no_card, None
+        try:
+            return core._gen_parameters(args), args.no_card, None
+        except core.PixAIError as e:
+            # Same shape as the I2V branch above: a builder refusal (asking for both
+            # upscale methods at once) becomes the badge's own note, not a 500.
+            return None, args.no_card, _redact_host_paths(str(e))[:140]
 
     @app.route("/api/price", methods=["POST"])
     def api_price():
