@@ -344,3 +344,65 @@ def test_badge_and_submit_send_the_same_boxes(tmp_path):
     assert "naturalWidth" in html[i:html.index("function ", i + 10)]
     assert "runTask('/api/fix', {source:src, boxes:fixBoxesScaled()}" in fix_fn
     assert "boxes:fixBoxesScaled()" in html[html.index("function fixCost()"):]
+
+
+def _fn_body(html, name):
+    """A named helper's whole body, INCLUDING its .then() handlers.
+
+    Slicing to the next `function ` is wrong here and quietly truncates: these helpers
+    contain `function(r){...}` / `function(d){...}` callbacks inside their fetch chain, so
+    that cuts the body off before the stale-response guard this file asserts on. Cut at the
+    next TOP-LEVEL declaration instead -- two-space indent, which is what this template uses."""
+    i = html.index("function %s()" % name)
+    j = html.index("\n  function ", i + 10)
+    return html[i:j]
+
+
+def test_cost_helpers_invalidate_in_flight_requests_before_bailing_out(tmp_path):
+    """Found in code review 2026-07-25, and it affects BOTH cost helpers.
+
+    Each guards against a stale response with a sequence number: `var mine=++seq`, then the
+    handler drops its result if `mine !== seq`. But the early-return path -- no source, or no
+    boxes -- sat BEFORE that bump:
+
+        if(!editSrc() || !fixBoxes.length){ cost.clear(); return; }   // no bump
+        cost.setChecking();
+        var mine=++fixSeq;                                            // too late
+
+    So: request goes out for a real selection; the user hits Clear (or changes the source);
+    the helper re-runs, takes the early return, and leaves the sequence untouched; the
+    in-flight response then arrives, still matches, passes the guard, and paints a price for
+    boxes that no longer exist. The badge shows a confident number for a request nobody made.
+
+    The bump has to happen BEFORE any return, so bailing out is itself an invalidation. The
+    review flagged this in fixCost only -- editCost is older code and outside that diff -- but
+    they were written to share a contract and they shared the defect, so both are pinned here.
+
+    Bite: move either `++seq` back below its early return and this fails by name."""
+    html, _ = _fix_fn(tmp_path)
+    for name, seq in (("fixCost", "fixSeq"), ("editCost", "costSeq")):
+        body = _fn_body(html, name)
+        bump = body.index("++" + seq)
+        # The BAIL-OUT return specifically -- the one that clears the badge because there is
+        # nothing to price. (The `if(!cost) return;` element guard above it is a different
+        # thing: no fetch was ever made, so there is nothing to invalidate.)
+        bail = body.index("cost.clear()")
+        assert bump < bail, (
+            "{}() bails out at char {} before bumping {} at char {} -- an in-flight response "
+            "stays valid and repaints a stale price after the user has cleared or changed "
+            "the selection".format(name, bail, seq, bump))
+
+
+def test_cost_helpers_still_drop_a_superseded_response(tmp_path):
+    """The other half of the contract, so the fix above can't be 'achieved' by deleting the
+    guard: a response whose sequence no longer matches must still be discarded."""
+    html, _ = _fix_fn(tmp_path)
+    for name, seq in (("fixCost", "fixSeq"), ("editCost", "costSeq")):
+        body = _fn_body(html, name)
+        # Two equivalent phrasings are in use and both are correct -- fixCost writes
+        # `if(mine!==fixSeq) return;` and editCost writes `if(mine===costSeq) act();`. Accept
+        # either; what matters is that the settled sequence is consulted before painting.
+        flat = body.replace(" ", "")
+        assert ("mine!==" + seq) in flat or ("mine===" + seq) in flat, (
+            "{}() no longer consults {} before painting, so a superseded response would "
+            "repaint over a newer one".format(name, seq))

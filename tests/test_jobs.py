@@ -7,6 +7,7 @@ This is the paper trail that survives a reload -- so these tests pin the collaps
 stickiness, dismissal, ageing, cap, and compaction behavior, plus the register /
 list / dismiss endpoints and their localhost gate.
 """
+import threading
 import time
 
 import pixai_gallery_backup as core
@@ -1171,3 +1172,57 @@ def test_an_unavailable_estimate_still_ships_the_phase(tmp_path, monkeypatch):
     assert job.get("started") is False, \
         "a failed estimate lookup swallowed the phase signal too: {!r}".format(job)
     assert "eta_seconds" not in job
+
+
+def test_a_slow_eta_fetch_cannot_overwrite_a_newer_rendering_phase(tmp_path, monkeypatch):
+    """RACE, found in code review 2026-07-25. _note_gen_phase claimed the phase under a lock
+    but then released it before doing the SLOW part (two network calls for the queue ETA) and
+    the write. So:
+
+      poll A  sees queued -> claims it -> stalls in the ETA fetch
+      worker  starts the job
+      poll B  sees rendering -> claims it -> writes {started: True} immediately
+      poll A  wakes -> writes its stale {started: False, eta_seconds: N} ON TOP
+
+    and because the seen-map now records True, every later poll returns early at the dedupe
+    check, so nothing ever corrects it: a job that is really rendering shows QUEUED for its
+    entire life. The window is exactly two network calls wide and real jobs start in a few
+    seconds, so this is the common case, not a corner.
+
+    Drives the real route twice concurrently with the ETA fetch held open, which is the only
+    way to actually order the interleaving."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "race1", "type": "generate", "label": "Generated"})
+
+    phases = iter([False, True])          # first poll: queued. second: rendering.
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", lambda s, tid: {
+        "status": "running", "phase": "running", "paid_credit": None,
+        "started": next(phases, True), "reason": ""})
+
+    held, b_done = threading.Event(), threading.Event()
+
+    def _slow_estimate(*a, **k):
+        """Stand in for the two real calls: block until poll B has finished writing."""
+        b_done.wait(timeout=5)
+        return 42
+    monkeypatch.setattr(core, "_task_detail_query", lambda *a, **k: {"parameters": {}})
+    monkeypatch.setattr(core, "queue_wait_estimate", _slow_estimate)
+
+    a_err = []
+    def _poll_a():
+        try: cli.get("/api/task-status?task_id=race1")
+        except Exception as e: a_err.append(e)
+        finally: held.set()
+
+    ta = threading.Thread(target=_poll_a); ta.start()
+    time.sleep(0.15)                       # let A claim the phase and enter the ETA fetch
+    cli.get("/api/task-status?task_id=race1")   # poll B: sees rendering, writes it
+    b_done.set()
+    ta.join(timeout=6)
+    held.wait(timeout=6)
+    assert not a_err, a_err
+
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["race1"]
+    assert job.get("started") is True, (
+        "a rendering job was left showing queued by the slow poll's stale write: {!r}".format(job))
