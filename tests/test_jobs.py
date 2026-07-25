@@ -599,3 +599,161 @@ def test_collect_is_single_flight_across_watcher_and_poll(tmp_path, monkeypatch)
     assert body.get("is_video") is True             # catalog re-read keeps the video flag
     assert stats["calls"] == 1, "the same task was collected twice"
     assert stats["max"] == 1, "two collects for one task ran concurrently"
+
+
+# ------------------------------------------------- the live-mirror watcher's own logging
+# Two things can mark a generation job terminal, and before 2026-07-24 only ONE of them
+# recorded which media the task produced:
+#
+#   * /api/task-status's done branch    -> done WITH media_ids  (the tray gets a thumbnail)
+#   * the watcher's _reconcile_job      -> a bare done, no media_ids
+#
+# _watch_mirror DID download + catalog the media (it calls _collect_single_flight and gets
+# {media_ids, saved, is_video} back) and then threw that return value away. Whichever
+# writer won the race decided whether the Activity tray card had a thumbnail forever
+# after: the orphan sweep only re-checks jobs stuck at 'running', so a job already sitting
+# at a bare 'done' was never revisited by anything. These tests drive the mirror through
+# the app.extensions["mg_watch_mirror"] seam create_app exposes for exactly this
+# (conftest's _no_live_watch keeps the real watcher thread from ever starting).
+
+
+def _mirror_app(tmp_path):
+    """A create_app instance with a seeded catalog, for the mg_watch_mirror seam."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    return create_app(tmp_path)
+
+
+def _stub_collect(monkeypatch, result, calls=None):
+    """Offline stand-in for core.collect_generation returning its real shape."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def _collect(session, tid, out, **kw):
+        if calls is not None:
+            calls.append(str(tid))
+        return dict(result)
+    monkeypatch.setattr(core, "collect_generation", _collect)
+
+
+def test_watcher_mirror_records_the_media_it_collected_after_a_bare_done(tmp_path, monkeypatch):
+    """The owner's real production sequence, two back-to-back generations (jobs.jsonl,
+    2026-07-24). Gen #2's log read, verbatim in shape:
+
+        running                              (its Generate card registered it)
+        done                                 (bare -- the watcher's _reconcile_job)
+        ...and nothing further, ever.
+
+    Its four images WERE downloaded and catalogued (verified against catalog.db) -- the
+    watcher's mirror collected them fine while the browser was still busy collecting gen
+    #1. But no media_ids ever reached the job log, and static/mg-notify.js's row() builds
+    its thumbnail from `(j.media_ids||[])[0]`, so that card rendered permanently blank.
+    Not a stuck job, not lost data: a finished job that can never show what it made.
+
+    Bite: throw away _collect_single_flight's return value again and media_ids is absent."""
+    tid = "2037566630884963619"
+    app = _mirror_app(tmp_path)
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    core.append_job_event(tmp_path, tid, status="done")   # exactly what _reconcile_job writes
+    _stub_collect(monkeypatch, {"media_ids": ["A", "B", "C", "D"], "saved": 4,
+                               "is_video": False})
+
+    app.extensions["mg_watch_mirror"](tid)
+
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}[tid]
+    assert job["status"] == "done"
+    assert job.get("media_ids") == ["A", "B", "C", "D"], (
+        "the watcher collected the media but never recorded it -- permanently blank card")
+    assert job.get("is_video") is False
+
+
+def test_a_later_bare_done_cannot_clobber_the_mirrors_media_ids(tmp_path, monkeypatch):
+    """The same race the other way round, which is a real interleaving and not a
+    hypothetical: _reconcile_job's read ("is this job still non-terminal?") and its write
+    are not atomic, so the mirror thread can land its media_ids event BETWEEN them and the
+    bare `done` gets appended afterwards. _reconstruct_jobs merges a later event over the
+    current one (`cur.update(rec)`) rather than replacing it, and the bare event carries no
+    media_ids key at all, so the media survives -- pinned here so a future change to that
+    merge (e.g. replace-instead-of-update) cannot silently reintroduce the blank card from
+    the other direction."""
+    tid = "2037566243599720339"
+    app = _mirror_app(tmp_path)
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    _stub_collect(monkeypatch, {"media_ids": ["A", "B"], "saved": 2, "is_video": False})
+
+    app.extensions["mg_watch_mirror"](tid)
+    core.append_job_event(tmp_path, tid, status="done")   # _reconcile_job's write, arriving late
+
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}[tid]
+    assert job["status"] == "done"
+    assert job.get("media_ids") == ["A", "B"], "a bare terminal event blanked a good entry"
+
+
+def test_mirror_matches_task_status_event_shape_for_a_video(tmp_path, monkeypatch):
+    """Same event shape /api/task-status's done branch writes -- including is_video, and
+    deliberately EXCLUDING duration. collect_generation returns a duration for videos and
+    task-status only puts it in its JSON response, never in the job log; the two writers
+    must stay indistinguishable in jobs.jsonl."""
+    tid = "4242"
+    app = _mirror_app(tmp_path)
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Rendered")
+    core.append_job_event(tmp_path, tid, status="done")
+    _stub_collect(monkeypatch, {"media_ids": ["V1"], "saved": 1, "is_video": True,
+                               "duration": 3.0})
+
+    app.extensions["mg_watch_mirror"](tid)
+
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}[tid]
+    assert job.get("media_ids") == ["V1"] and job.get("is_video") is True
+    assert "duration" not in job, "logged a field /api/task-status's done branch never logs"
+
+
+def test_mirror_writes_no_event_when_the_collect_produced_nothing(tmp_path, monkeypatch):
+    """A collect that genuinely yielded no media must NOT get a media_ids event: an empty
+    list would be indistinguishable from a real result to the tray and would blank an
+    entry that another writer had already filled in correctly. Prefer writing nothing."""
+    tid = "7777"
+    app = _mirror_app(tmp_path)
+    core.append_job_event(tmp_path, tid, status="running", type="generate", label="Generated")
+    _stub_collect(monkeypatch, {"media_ids": [], "saved": 0, "is_video": False})
+
+    app.extensions["mg_watch_mirror"](tid)
+
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}[tid]
+    assert job["status"] == "running", "wrote a terminal event for a collect that made nothing"
+    assert not job.get("media_ids")
+
+
+def test_mirror_never_invents_a_job_for_a_task_we_do_not_track(tmp_path, monkeypatch):
+    """The watcher mirrors EVERY completed task on the account, including ones generated
+    on pixai.art itself. Same contract _reconcile_job already keeps: only touch a job we
+    already track, never invent one -- otherwise every website generation would appear as
+    a new row in the owner's Activity tray."""
+    app = _mirror_app(tmp_path)
+    _stub_collect(monkeypatch, {"media_ids": ["Z"], "saved": 1, "is_video": False})
+
+    app.extensions["mg_watch_mirror"]("8888")
+
+    assert core.read_jobs(tmp_path) == [], "invented an Activity row for a website generation"
+
+
+def test_mirror_logging_failure_cannot_break_mirroring(tmp_path, monkeypatch):
+    """The whole watcher chain is deliberately fail-soft and _watch_mirror runs on a
+    daemon thread nobody joins. A problem READING the job log must not abort the mirror,
+    lose its 'mirrored' count, or masquerade as a mirror error in the Panel's watch-status
+    line."""
+    app = _mirror_app(tmp_path)
+    cli = login_test_client(app)
+    core.append_job_event(tmp_path, "99", status="running", type="generate", label="Generated")
+    calls = []
+    _stub_collect(monkeypatch, {"media_ids": ["Z"], "saved": 1, "is_video": False}, calls)
+
+    def _boom(*a, **k):
+        raise RuntimeError("job log read exploded")
+    monkeypatch.setattr(core, "_reconstruct_jobs", _boom)
+
+    app.extensions["mg_watch_mirror"]("99")      # must not raise
+
+    assert calls == ["99"], "the mirror itself was aborted by a logging problem"
+    st = cli.get("/api/watch/status").get_json()
+    assert st["mirrored"] == 1
+    assert not st["last_error"], "a logging problem was reported as a mirror failure"
