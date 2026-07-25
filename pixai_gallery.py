@@ -13166,8 +13166,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 got = _collect_single_flight(core, session, tid)
                 # authoritative done event -- written server-side so the Jobs card gets the
                 # outcome even if the browser tab that submitted it has since closed.
+                # paid_credit is PixAI's server-authoritative actual cost. Logged, not just
+                # returned to the browser: it is the one number that cannot be
+                # reconstructed later without re-querying PixAI per task, and it is what
+                # makes an unexpected spend visible in the Activity tray afterwards. Passed
+                # through even when 0 -- a card-covered generation really is free, and
+                # "free" must stay distinguishable from "unknown".
                 _log_job(tid, status="done", media_ids=got["media_ids"],
-                         is_video=got.get("is_video", False))
+                         is_video=got.get("is_video", False),
+                         paid_credit=st.get("paid_credit"))
                 return jsonify({"phase": "done", "media_ids": got["media_ids"],
                                 "is_video": got.get("is_video", False),
                                 "duration": got.get("duration"),
