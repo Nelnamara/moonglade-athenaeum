@@ -3477,8 +3477,31 @@ def create_app(out_dir: Path):
             if not path or len(path) < 4 or path in seen:
                 continue
             seen.add(path)
-            if path in out:
-                out = out.replace(path, "<host-path>")
+            # Case-INSENSITIVE, and separator-agnostic on Windows. The obvious
+            # `path in out` / `out.replace(path, ...)` is case-SENSITIVE, while the paths
+            # being redacted live on a case-insensitive filesystem: a third-party library or
+            # a normalized OS string can hand back the same directory in a different case,
+            # or with forward slashes instead of backslashes, and an exact-substring match
+            # silently misses it -- shipping the real host path and the OS username to a LAN
+            # caller while this function reports success. Both variants are real; neither is
+            # exotic.
+            #
+            # Split the RAW path on separators FIRST, then escape each segment, then rejoin
+            # with a separator class. Order matters and the obvious way round is broken:
+            # escaping first and then substituting separators inside the escaped string also
+            # rewrites the backslash that re.escape added in front of other characters -- a
+            # directory named "John Smith" escapes to "John\ Smith", whose backslash then
+            # gets swallowed into a separator class, producing "John[\\/]+ Smith" and a
+            # pattern that matches NOTHING, not even the plain case it used to handle.
+            #
+            # Every segment stays re.escape'd, so the pattern can still only ever match this
+            # exact path -- the separator class is the ONLY looseness introduced, which
+            # matters because a looser matcher here is precisely how the
+            # eats-ordinary-messages bug (see the resolve() note above) comes back. The
+            # length floor above remains the second, independent guard.
+            segments = re.split(r'[\\/]+', path)
+            pattern = r'[\\/]+'.join(re.escape(s) for s in segments)
+            out = re.sub(pattern, "<host-path>", out, flags=re.IGNORECASE)
         return out
 
     @app.context_processor
