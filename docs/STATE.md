@@ -270,6 +270,25 @@ users.
   media id" (c999ae6).
 - The Health page's disk walk excludes `gallery/`, `_duplicates/`, `_deleted/` and
   `branding/`, so it agrees with the Panel's catalog-row count.
+- **A remote session says so in the header.** When `_is_local_request()` is false, the
+  head-nav renders `#lan-chip` ("LAN session · local-only tools hidden"), whose tooltip names
+  every LOCALHOST-tier control the page is withholding — Import, Delete from PixAI, Set
+  launcher icon, the destructive Panel jobs — and says to open the gallery on the serving
+  machine's own localhost address to get them. It branches on `is_true_local`, the same value
+  the Import button and `can_delete_cloud` already read, so it is a label on a decision the
+  tier helpers have already made and gates nothing. It replaced an unreachable "read-only LAN
+  view" note hung off `is_local`, which is hardcoded `True` at index()'s render call (and was
+  wrong on the facts as well: a signed-in LAN session browses, generates and drives the Loom
+  and Panel exactly like the owner at the keyboard).
+- **"Delete from PixAI" shows its blast radius before the typed gate.** Cloud deletion is
+  task-level — one selected image takes its whole batch — so `POST /api/delete-preview`
+  (LOCALHOST, read-only, no network) resolves the selection through the same helper
+  `/delete-tasks-bulk` itself uses and `#cloud-del-modal` renders every file that will go,
+  thumbnailed and grouped by task, with the ones the user actually picked outlined and imports
+  called out as local-only removals. Counts always describe the whole selection even when the
+  thumbnail strip is capped (`DELETE_PREVIEW_TASK_CAP`); an unreachable preview falls back to
+  the prose-only confirm rather than a dead click. The typed `DELETE` prompt and the localhost
+  gate are unchanged — this makes the consequence visible, it does not replace a guard.
 - Thumbnails serve stale-while-revalidate under the `pixai-img-v3` service-worker cache;
   write-once originals are cache-first. Bumping the cache key is how a stale-thumbnail sweep is
   forced.
@@ -431,12 +450,6 @@ users.
   so the slider shows the live max plus `1400×784 → 1952×1096` while dragging, pinned to the
   Python by a Node parity test. CLI: `--enlarge`/`--enlarge-model`/`--upscale`/
   `--upscale-denoise`/`--upscale-denoise-steps`/`--face-fix`/`--quality-tag`.
-- The Generate drawer's Edit ▸ Enhance sub-tab promotes ten one-click PixAI workflows
-  (upscale / upscale 2×2 / upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art
-  / sketch-colorize / relight-sun / relight-backlight), each firing `Gen.enhance(<workflow_id>)`
-  → `/api/enhance`, priced-and-confirmed before it spends. A search box below browses the rest
-  of PixAI's ComfyUI catalog into `#enh-list`. The Fix sub-tab is a separate box-coordinate
-  hand/face fixer (`/api/fix` → `submit_fixer`).
 
 ## Achievements / The Folio of Honors
 
@@ -589,13 +602,17 @@ is the authority.
 
 **Three tiers.** PUBLIC (the four above) · LOGIN (everything else — any signed-in session,
 local or LAN; this is what makes tablet generation work) · LOCALHOST (a signed-in session
-*and* a loopback address). Eight routes are LOCALHOST — `tests/test_route_tiers.py`'s
-`ROUTE_TIERS` is the authority, not this count; re-derive it from there rather than trust
-this prose if the two ever disagree. Each acts on the server's own files, mints a new
-account, or deletes irreversibly from PixAI: `api_panel_run` (destructive actions only),
-`api_panel_cancel`, `api_panel_schedule` POST, `api_setup_save_key`,
-`api_branding_shortcut`, `delete_tasks_bulk`, `api_import_local`, `api_users_add`.
-`/api/server/stop` and `/restart` are deliberately LOGIN, by owner decision.
+*and* a loopback address). `tests/test_route_tiers.py`'s `ROUTE_TIERS` is the authority for
+which routes are LOCALHOST — read it from there rather than trust this prose if the two ever
+disagree (a hardcoded count here has drifted twice already, so there is deliberately no
+number). Each one acts on the server's own files, mints a new account, or deletes
+irreversibly from PixAI: `api_panel_run` (destructive actions only), `api_panel_cancel`,
+`api_panel_schedule` POST, `api_setup_save_key`, `api_branding_shortcut`,
+`delete_tasks_bulk`, `api_delete_preview`, `api_import_local`, `api_users_add`,
+`api_trash_delete_forever`, `api_trash_empty`. `api_delete_preview` is the one that reads
+rather than writes: it is declared at the tier of the action it previews (step one of
+`delete_tasks_bulk`'s own flow, called from nowhere else), not of the catalog rows it
+returns. `/api/server/stop` and `/restart` are deliberately LOGIN, by owner decision.
 
 `api_users_remove` doesn't fit either bucket cleanly and is declared LOGIN with a nuance
 the tier table can't express structurally: removing your OWN account is allowed from any

@@ -103,6 +103,10 @@ ROUTE_TIERS = {
     ("api_panel_schedule", "POST"): LOCALHOST,      # writes the schedule + global workers count
     ("api_setup_save_key", "POST"): LOCALHOST,      # rewrites config.json
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
+    # Read-only (one catalog query, no network) but declared at the tier of the action
+    # it previews, not the data it reads: it is step one of delete_tasks_bulk's flow and
+    # nothing else calls it. See its docstring.
+    ("api_delete_preview", "POST"): LOCALHOST,
     ("api_import_local", "POST"): LOCALHOST,         # writes files into the backup + shells thumbnails
     ("api_users_add", "POST"): LOCALHOST,           # mints a new persistent login (2026-07-22)
     ("api_trash_delete_forever", "POST"): LOCALHOST,  # irreversible local file deletion (2026-07-24)
@@ -779,6 +783,44 @@ def test_panel_withholds_set_launcher_icon_and_destructive_buttons_from_lan(app)
     # dropdown for everyone, local or LAN, so there was never anything to hide there.
     all_actions_json = html.split("var ALL_ACTIONS = ", 1)[1].split(";", 1)[0]
     assert '"action": "organize"' in all_actions_json
+
+
+def test_index_tells_a_lan_session_it_is_being_served_as_one(app):
+    """The other half of hiding LOCALHOST-tier controls: SAY SO. Hiding Import and
+    "Delete from PixAI" from a LAN session (the two tests above) fixes a dead-end
+    click but creates a silent one -- the same owner, same account, same browser, sees
+    a different set of buttons depending only on whether the address bar says
+    `localhost` or the machine's LAN IP, with nothing on the page naming the
+    difference. A whole day was spent browsing via the LAN IP without noticing, with
+    the app looking simply broken.
+
+    The chip keys off `is_true_local` -- the real `_is_local_request()` result index()
+    already computes for the Import button and `can_delete_cloud` -- NOT a second
+    notion of trust, and it gates nothing: it is a label for a decision the tier
+    helpers have already made."""
+    cli = _login(app)
+    html = cli.get("/", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    assert 'id="lan-chip"' in html, (
+        "a LAN session's index page has no indicator that it is being served as a "
+        "remote caller -- the LOCALHOST-tier controls just silently vanish")
+    chip = html.split('id="lan-chip"', 1)[1].split("</span>", 1)[0]
+    # The chip must name the controls it explains, or it is decoration: "why is this
+    # button missing" has to answer itself without a trip to the docs.
+    assert "Import" in chip and "Delete from PixAI" in chip, (
+        "the LAN chip does not name the controls that are hidden, so it does not "
+        "actually answer 'why is this button missing'")
+
+
+def test_index_does_not_flag_the_owners_own_local_session(app):
+    """The companion: at the keyboard on the server, every LOCALHOST control is
+    present, so there is nothing to explain and the header stays clean. Without this
+    test an unconditional chip would pass the LAN test above while nagging the one
+    caller it has no news for."""
+    cli = _login(app)
+    html = cli.get("/").get_data(as_text=True)   # loopback REMOTE_ADDR by default
+    assert 'id="lan-chip"' not in html, (
+        "the owner's own local index page shows the LAN-session chip, which has "
+        "nothing to tell them -- every local-only control is right there")
 
 
 def test_panel_shows_set_launcher_icon_and_destructive_buttons_to_localhost(app):
