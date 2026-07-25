@@ -2060,25 +2060,24 @@ def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     assert d["sub"]["end"] == "2026-07-27" and d["sub"]["cancel"] is True
 
 
-def test_account_surfaces_the_accounts_roles(tmp_path, monkeypatch):
-    """`me.roles` rides along on the account query the header chip already runs (free). The
-    owner's real account carries BETA_TO_INVITE -- the flag behind PixAI's early-access
-    programs -- and nothing had ever read it. Exposed as a normalized list of strings so a
-    consumer can just test membership; a bare (non-list) value the server might send is
-    wrapped rather than dropped, and an account with no roles gets [] rather than null, since
-    the field's shape was never probed, only its name. Payload only -- no UI reads it yet."""
+def test_account_endpoint_still_serves_credits_after_the_roles_removal(tmp_path, monkeypatch):
+    """This test used to assert /api/account returned a normalized `roles` list. That whole
+    feature is gone, because fetching it was breaking everything else: `me.roles` is a
+    RoleConnection, and selecting it bare failed GraphQL validation for the ENTIRE account
+    query -- so the credits chip read 0/0, the membership-derived LoRA cap emptied, and the
+    first-run setup wizard would have rejected a valid API key.
+
+    It was never read by any UI. Nothing that no consumer wants should be able to take the
+    account read down with it. What this now guards is the thing that actually matters and
+    that the roles work silently broke: the endpoint still serves real credits.
+    """
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "account_info", lambda s: {
-        "quotaAmount": 1850640, "roles": ["BETA_TO_INVITE", "", None]})
+    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1850640})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
-    assert cli.get("/api/account").get_json()["roles"] == ["BETA_TO_INVITE"]
-
-    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1, "roles": "BETA_TO_INVITE"})
-    assert cli.get("/api/account").get_json()["roles"] == ["BETA_TO_INVITE"]   # bare value wrapped
-
-    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1})
-    assert cli.get("/api/account").get_json()["roles"] == []                   # absent -> [], not null
+    body = cli.get("/api/account").get_json()
+    assert body["credits"] == 1850640, "the credits chip lost its number again: {!r}".format(body)
+    assert "roles" not in body, "roles is back in the payload; see _ACCOUNT_QUERY's guard"
 
 
 def test_account_surfaces_the_real_membership_lora_cap(tmp_path, monkeypatch):
