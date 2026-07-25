@@ -263,6 +263,31 @@ def test_model_flyout_surfaces_version_picker_and_capabilities(tmp_path):
     assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
 
 
+def test_base_model_version_dropdown_is_hidden_when_there_is_only_one_version(tmp_path):
+    """AUDIT_2026-07-21 follow-up: renderVersions() rendered the base-model version <select>
+    even for a single-option list -- a control that cannot do anything, on the majority of
+    picks (most models publish exactly one release). The gate already existed in TWO other
+    places in this codebase and is reused verbatim rather than reinvented: the Gallery's own
+    per-LoRA chips (renderLoras -> `l.versions&&l.versions.length>1`) and the Loom's
+    .lv-versel (`imgModel.versions.length > 1`).
+
+    #gen-selmeta itself must still open for the capability badges alone -- those are
+    independent of how many versions exist -- so the gate hides the <select>, not the row."""
+    cli = _authed_client(tmp_path, [])
+    html = cli.get("/").get_data(as_text=True)
+    assert "var multi=versions.length>1;" in html
+    assert "sel.style.display=multi?'':'none';" in html
+    # the <option> list is only built when there's a real choice...
+    assert "sel.innerHTML=multi?versions.map(function(v){" in html
+    # ...and the containing row still shows for capabilities-only models
+    assert "wrap.classList.toggle('show', multi||caps>0);" in html
+    # the established gate this copies, still present on the per-LoRA chips
+    assert "var verSel=(l.versions&&l.versions.length>1)" in html
+    # submit still reads selected.version_id, never the <select>'s value -- hiding the
+    # control must not be able to change what gets generated
+    assert "return { version_id:(selected&&selected.version_id)||''," in html
+
+
 def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_path, monkeypatch):
     """picker-parity-round2 (problem 3): LoRA search needs real per-row architecture data
     (modelType/loraBaseModelType) on EVERY search, not just category/Newest browsing -- REST

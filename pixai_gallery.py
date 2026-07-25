@@ -6951,12 +6951,21 @@ var Gen = (function(){
     var wrap=el('gen-selmeta'), sel=el('gen-version');
     if(!wrap||!sel) return;
     if(!versions.length){ wrap.classList.remove('show'); sel.innerHTML=''; renderCaps([]); return; }
-    sel.innerHTML=versions.map(function(v){
+    // Only offer the <select> when there's actually more than one release to choose from --
+    // the same versions.length>1 gate the per-LoRA chips above (renderLoras) and the Loom's
+    // own .lv-versel already use. A one-option dropdown is a control that cannot do
+    // anything; most models have exactly one release, so this row was showing on almost
+    // every pick. #gen-selmeta still opens for the capability badges alone, which are
+    // independent of how many versions exist.
+    var multi=versions.length>1;
+    sel.innerHTML=multi?versions.map(function(v){
       return '<option value="'+esc(v.version_id)+'"'+(v.version_id===currentId?' selected':'')+'>'+esc(v.label||v.version_id)+'</option>';
-    }).join('');
+    }).join(''):'';
+    sel.style.display=multi?'':'none';
     var cur=versions.filter(function(v){ return v.version_id===currentId; })[0]||versions[0];
     renderCaps(cur.capabilities);
-    wrap.classList.add('show');
+    var caps=(cur.capabilities||[]).length;
+    wrap.classList.toggle('show', multi||caps>0);
   }
   // problem 5: `extra.capabilities` (PixAI's own descriptive tags -- "high-resolution",
   // "pose-accuracy", ...) was resolved by resolve_version_meta and never shown anywhere.
