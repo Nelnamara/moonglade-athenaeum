@@ -903,3 +903,42 @@ def test_api_jobs_endpoint_marks_a_never_started_orphan_stale(tmp_path, monkeypa
     assert job["status"] == "stale", \
         "never-started orphan still spinning through the real endpoint: {!r}".format(job)
     assert "not started" in str(job.get("error") or "").lower()
+
+
+def test_done_event_records_what_the_generation_actually_cost(tmp_path, monkeypatch):
+    """/api/task-status already receives PixAI's server-authoritative `paidCredit` and
+    returns it to the browser, but dropped it from the job log -- so the Activity tray's
+    detail popover could show a task id, a send time and an elapsed time, and never what
+    the job cost. Cost is the one number the owner cannot reconstruct later without
+    re-querying PixAI per task, and it is exactly what makes an unexpected spend visible."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "4242", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "completed", "phase": "done",
+                                        "paid_credit": 3700, "started": True, "reason": ""})
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda *a, **k: {"media_ids": ["m1"], "saved": 1, "is_video": False})
+
+    assert cli.get("/api/task-status?task_id=4242").get_json()["phase"] == "done"
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["4242"]
+    assert job.get("paid_credit") == 3700, \
+        "the job log did not record the actual cost: {!r}".format(job)
+
+
+def test_a_free_card_generation_records_zero_not_missing(tmp_path, monkeypatch):
+    """A card-covered generation genuinely costs 0. That must round-trip as the number 0,
+    not vanish -- otherwise "free" and "unknown" are indistinguishable in the log, and the
+    tray would hide the cost row on exactly the generations worth confirming were free."""
+    cli = _authed_client(tmp_path)
+    cli.post("/api/jobs", json={"job_id": "4243", "type": "generate", "label": "Generated"})
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"status": "completed", "phase": "done",
+                                        "paid_credit": 0, "started": True, "reason": ""})
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda *a, **k: {"media_ids": ["m1"], "saved": 1, "is_video": False})
+
+    cli.get("/api/task-status?task_id=4243")
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["4243"]
+    assert job.get("paid_credit") == 0, "free generation lost its explicit 0: {!r}".format(job)

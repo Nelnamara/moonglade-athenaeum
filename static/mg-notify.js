@@ -1203,11 +1203,26 @@
       var startedAt=j.started_at||j.ts||0;
       var running=(j.status||'running')==='running';
       var spentSecs=(running?(Date.now()/1000):(j.ts||startedAt))-startedAt;
+      // Actual cost, from PixAI's server-authoritative paidCredit recorded on the done
+      // event. Shown ONLY when a real number was recorded: `typeof`/isFinite rather than a
+      // truthiness check, because a card-covered generation genuinely costs 0 and must
+      // render as "0 credits", while an unknown cost must show no row at all -- collapsing
+      // those two would advertise every in-flight job as free. Grouped by hand (no
+      // toLocaleString) to match fmtClock/fmtDuration right above: identical output
+      // regardless of the browser's ICU/locale data, and trivially unit-testable.
+      var cost='';
+      if(typeof j.paid_credit==='number' && isFinite(j.paid_credit)){
+        var s=String(Math.round(Math.abs(j.paid_credit))), grp='', i=0;
+        for(var k=s.length-1;k>=0;k--){ grp=s.charAt(k)+grp; if(++i%3===0 && k>0) grp=','+grp; }
+        cost='<div class="jd-row"><span class="jd-k">Cost</span><span class="jd-v">'
+            +esc(grp)+' credits</span></div>';
+      }
       return '<div class="jd-row"><span class="jd-k">Task ID</span>'
            +'<span class="jd-v jd-id">'+esc(tid)+'</span>'
            +'<button class="jd-copy" data-copy="'+esc(tid)+'" title="Copy task ID">copy</button></div>'
            +'<div class="jd-row"><span class="jd-k">Time Sent</span><span class="jd-v">'+esc(fmtClock(startedAt))+'</span></div>'
-           +'<div class="jd-row"><span class="jd-k">Time Spent</span><span class="jd-v" data-spent="1">'+esc(fmtDuration(spentSecs))+(running?' so far':'')+'</span></div>';
+           +'<div class="jd-row"><span class="jd-k">Time Spent</span><span class="jd-v" data-spent="1">'+esc(fmtDuration(spentSecs))+(running?' so far':'')+'</span></div>'
+           +cost;
     }
     function renderDetail(j){
       var d=detailEl();
