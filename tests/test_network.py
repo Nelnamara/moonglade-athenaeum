@@ -891,17 +891,27 @@ def test_account_info_parses_me(mocker):
     assert me["followerCount"] == 30
 
 
-def test_account_query_asks_for_roles(mocker):
-    """`me.roles` is the account's own role list -- the owner's carries BETA_TO_INVITE, the
-    flag that gates PixAI's early-access programs (the Tsubaki.3 / DiT.3 invite he's waiting
-    on). One extra leaf field on the query the header chip, --account and /api/account already
-    run, so it costs nothing: no extra call, no spend. Tolerates either shape the server may
-    send (a list, or one bare value) since only the field name itself was probed."""
-    assert "roles" in core._ACCOUNT_QUERY
-    mocker.patch.object(core, "gql_adhoc", return_value={"me": {
-        "id": "42", "quotaAmount": 1850640, "roles": ["BETA_TO_INVITE"]}})
-    assert core.account_info(mocker.MagicMock())["roles"] == ["BETA_TO_INVITE"]
+def test_account_query_does_not_ask_for_roles(mocker):
+    """This test used to assert the OPPOSITE, and that is why the account query shipped broken.
 
+    It checked `"roles" in _ACCOUNT_QUERY` and then mocked a response containing roles -- so it
+    passed while the real query was rejected outright by PixAI. `me.roles` is a
+    `RoleConnection`; selected bare it fails GraphQL VALIDATION, which fails the whole
+    document, so account_info() returned nothing and the credits chip read 0/0 while the
+    membership-derived LoRA cap, the --account dashboard and the first-run setup wizard's key
+    validation all silently lost their data too.
+
+    A mocked response can never catch that class of bug: the failure is server-side schema
+    validation, and the mock replaces exactly the thing that would have failed. If roles are
+    ever genuinely wanted, query them SEPARATELY with a subfield selection so a mistake there
+    cannot take the account read down with it.
+    """
+    assert "roles" not in core._ACCOUNT_QUERY, (
+        "roles is back in the account query -- bare, it fails validation and takes credits, "
+        "membership, the LoRA cap and the setup wizard with it")
+    mocker.patch.object(core, "gql_adhoc", return_value={"me": {
+        "id": "42", "quotaAmount": 1850640}})
+    assert core.account_info(mocker.MagicMock())["quotaAmount"] == 1850640
 
 def test_account_info_empty_on_error(mocker):
     mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("boom"))

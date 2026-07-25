@@ -109,3 +109,85 @@ def test_poll_timeout_without_ever_observing_the_task_stays_reassuring(monkeypat
         core._poll_task_status(object(), "t8", 0, label="generate", fail_noun="generation")
     msg = str(e.value)
     assert "STILL RUNNING" in msg and "never started" not in msg.lower()
+
+
+# ---- PixAI states a failure under several different keys, not just `reason` ----
+
+def test_failure_reason_is_read_from_every_key_pixai_actually_uses(monkeypatch):
+    """Owner's three hand-fix failures 2026-07-25 reported "failed" with no explanation, and
+    the diagnosis was written up as model flakiness. Both were wrong: PixAI HAD explained
+    itself, under keys we never read. The real GraphQL outputs were
+    {"finish_reason": "ERROR", "modelResponse": [], "failureMessage": "Provider refused to
+    answer", "failure_reason": "PROVIDER_REFUSE_ANSWER"} -- a CONTENT REFUSAL, which is
+    fixable by rewording, and completely different advice from "their model errored."
+
+    We looked only for `outputs.reason`, which a *cancelled* task uses ("waiting timeout"),
+    so a genuinely explained failure read as unexplained. Prefer the human-readable message,
+    fall back to the enum, and keep `reason` working."""
+    outs = {"finish_reason": "ERROR", "modelResponse": [],
+            "failureMessage": "Provider refused to answer",
+            "failure_reason": "PROVIDER_REFUSE_ANSWER"}
+    got = core._task_failure_reason(outs)
+    assert got, "no reason extracted from a payload that plainly contains one"
+    assert "refused" in got.lower(), "did not surface the human message: {!r}".format(got)
+
+    # the cancelled-task shape must keep working
+    assert core._task_failure_reason({"reason": "waiting timeout"}) == "waiting timeout"
+    # and a genuinely empty payload stays empty rather than inventing something
+    assert core._task_failure_reason({"mediaIds": [], "mediaUrls": []}) == ""
+    assert core._task_failure_reason(None) == ""
+
+
+def test_a_content_refusal_tells_the_user_what_to_do_about_it(monkeypatch):
+    """PROVIDER_REFUSE_ANSWER is the moderator declining the content. That is not a bug to
+    debug, it is a prompt to reword -- and saying so turns a dead end into a next step."""
+    msg = core.describe_failure("failed", "Provider refused to answer", started=True)
+    assert "refused" in msg.lower()
+    low = msg.lower()
+    assert "word" in low or "prompt" in low, \
+        "a refusal should point at rewording rather than looking like a system fault: " + msg
+
+
+def test_generation_status_surfaces_a_provider_refusal(monkeypatch):
+    """End of the chain: the status dict every caller reads must carry it."""
+    monkeypatch.setattr(core, "gql_adhoc", lambda *a, **k: {"task": {
+        "status": "failed", "startedAt": "2026-07-25T15:44:53Z",
+        "outputs": {"failureMessage": "Provider refused to answer",
+                    "failure_reason": "PROVIDER_REFUSE_ANSWER"}}})
+    st = core.generation_status(object(), "t9")
+    assert st["phase"] == "failed"
+    assert "refused" in (st.get("reason") or "").lower(), \
+        "generation_status dropped the refusal: {!r}".format(st)
+
+
+def test_account_query_selects_no_bare_connection_field():
+    """SHIPPED BROKEN 2026-07-25 and caught only when the owner noticed his credits chip
+    reading 0/0. `roles` was added to _ACCOUNT_QUERY as a bare field, but it is a
+    `RoleConnection`, so PixAI rejects the whole document at validation:
+
+        Field "roles" of type "RoleConnection" must have a selection of subfields
+
+    A GraphQL validation error fails the ENTIRE query, so account_info() returned nothing and
+    every consumer silently lost its data at once: the credits chip, the membership-derived
+    LoRA cap, the --account dashboard, and -- worst -- the first-run setup wizard, which calls
+    it with raise_on_error=True and would therefore reject a perfectly valid API key on a
+    fresh install.
+
+    Only a live call can prove this query valid, which is exactly how it shipped: it was
+    written in a worktree with no credentials, so it was never run once. This guard is the
+    cheap standing substitute -- it pins the fields the app actually depends on, and refuses
+    a bare `roles` by name.
+
+    Bite: re-add `roles` on its own line and this fails."""
+    q = core._ACCOUNT_QUERY
+    for needed in ("quotaAmount", "membership", "privilege", "subscription"):
+        assert needed in q, "account query no longer requests {!r}".format(needed)
+    import re
+    # a bare selection = the token alone on its line, with no { ... } subfields
+    for line in q.split("\n"):
+        bare = line.strip()
+        assert bare != "roles", (
+            "`roles` is selected bare again. It is a RoleConnection and PixAI rejects the "
+            "whole query for it, taking credits, membership, the LoRA cap and the setup "
+            "wizard's key validation down together. Query it separately with subfields, or "
+            "not at all.")

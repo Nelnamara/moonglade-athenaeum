@@ -4665,6 +4665,32 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
         "(or it arrives in your next --update).".format(timeout, task_id, task_id))
 
 
+def _task_failure_reason(outputs):
+    """PixAI's own explanation for a failure, from whichever key it used this time.
+
+    It does NOT use one key. A task it cancelled says `{"reason": "waiting timeout"}`, while a
+    task its model refused says `{"finish_reason": "ERROR", "modelResponse": [],
+    "failureMessage": "Provider refused to answer", "failure_reason":
+    "PROVIDER_REFUSE_ANSWER"}`. Reading only `reason` made three real, fully-explained
+    content refusals look unexplained, and they were written up as model flakiness -- the
+    opposite advice from what the payload actually said.
+
+    Preference order is deliberate: the human sentence first, then the enum (still far better
+    than nothing), then the cancelled-task key. `finish_reason` is skipped -- "ERROR" is a
+    category, not information.
+
+    NOTE the projection trap: this is the GRAPHQL `outputs`. REST `/v2/task/{id}` returns a
+    DIFFERENT `outputs` ({mediaIds, mediaUrls}) with no failure detail at all, so a probe
+    against REST will report no reason exists when one does."""
+    if not isinstance(outputs, dict):
+        return ""
+    for key in ("failureMessage", "failure_reason", "reason"):
+        val = outputs.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
 def describe_failure(status, reason="", started=True):
     """A failure message a person can act on, from what PixAI actually tells us.
 
@@ -4692,6 +4718,13 @@ def describe_failure(status, reason="", started=True):
     parts = [status]
     if reason:
         parts.append("PixAI's reason: {}".format(reason))
+        # A provider/content refusal is the moderator declining the content, not a system
+        # fault. Saying so turns a dead end into a next step -- the fix is rewording, and
+        # without this the message reads like something is broken and needs debugging.
+        if "refus" in reason.lower() or "policy" in reason.lower():
+            parts.append("That is a content refusal, not a fault: rewording the prompt "
+                         "usually clears it. Nothing was charged — refused generations "
+                         "are refunded.")
     if not started:
         parts.append("It was queued but never started, so nothing rendered — unstarted "
                      "tasks are cancelled and refunded after about an hour.")
@@ -4706,8 +4739,7 @@ def _pixai_reason_suffix(task):
     "waiting timeout"). Surfaced because a bare "cancelled" reads as though the USER
     cancelled something -- the owner saw exactly that five times and had no way to know
     PixAI had timed the task out of its own queue."""
-    outs = task.get("outputs") if isinstance(task, dict) else None
-    reason = outs.get("reason") if isinstance(outs, dict) else None
+    reason = _task_failure_reason((task or {}).get("outputs"))
     return " (PixAI's reason: {})".format(reason) if reason else ""
 
 
@@ -5169,9 +5201,9 @@ def generation_status(session, task_id):
     raw = (t.get("status") or "").lower()
     phase = ("done" if raw in _GEN_DONE else
              "failed" if raw in _GEN_FAIL else "running")
-    outs = t.get("outputs") if isinstance(t.get("outputs"), dict) else {}
     return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit"),
-            "started": bool(t.get("startedAt")), "reason": (outs or {}).get("reason") or ""}
+            "started": bool(t.get("startedAt")),
+            "reason": _task_failure_reason(t.get("outputs"))}
 
 
 def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_"):
@@ -5679,7 +5711,6 @@ query {
   me {
     id
     quotaAmount
-    roles
     tasks { totalCount }
     followerCount
     followingCount
