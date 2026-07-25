@@ -494,6 +494,11 @@ on record so far, from a read-only code check (no changes made):
 - **CI** (`.github/workflows/tests.yml`) runs both suites on every push and pull request: the
   Python suite (`--ignore=tests/test_similar.py`, no `pixeltable` installed — no test imports
   it) and the Loom's `node --test` after an esbuild rebuild.
+- **`tests/test_render_harness.py` asserts that the CSS renders, not that it exists** — a real
+  chromium (playwright) against the real app on a real ephemeral port, guarding the picker
+  grid's panel fill, `#model-flyout`'s viewport containment, Deep Focus's veil-over-FAB
+  stacking outcome, and per-skin re-tint plus pre-paint application; it skips cleanly without
+  playwright or a browser binary, which is why it currently skips in CI and runs locally.
 - **`CONTRIBUTING.md`** covers setup, running tests, the invariants that matter most to an
   outside contributor (`media_id` resolution, catalog-schema three-place changes, never
   committing `config.json`), PR expectations, and a private channel for security reports.
