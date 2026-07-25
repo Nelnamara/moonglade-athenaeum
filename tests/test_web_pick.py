@@ -263,6 +263,31 @@ def test_model_flyout_surfaces_version_picker_and_capabilities(tmp_path):
     assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
 
 
+def test_base_model_version_dropdown_is_hidden_when_there_is_only_one_version(tmp_path):
+    """AUDIT_2026-07-21 follow-up: renderVersions() rendered the base-model version <select>
+    even for a single-option list -- a control that cannot do anything, on the majority of
+    picks (most models publish exactly one release). The gate already existed in TWO other
+    places in this codebase and is reused verbatim rather than reinvented: the Gallery's own
+    per-LoRA chips (renderLoras -> `l.versions&&l.versions.length>1`) and the Loom's
+    .lv-versel (`imgModel.versions.length > 1`).
+
+    #gen-selmeta itself must still open for the capability badges alone -- those are
+    independent of how many versions exist -- so the gate hides the <select>, not the row."""
+    cli = _authed_client(tmp_path, [])
+    html = cli.get("/").get_data(as_text=True)
+    assert "var multi=versions.length>1;" in html
+    assert "sel.style.display=multi?'':'none';" in html
+    # the <option> list is only built when there's a real choice...
+    assert "sel.innerHTML=multi?versions.map(function(v){" in html
+    # ...and the containing row still shows for capabilities-only models
+    assert "wrap.classList.toggle('show', multi||caps>0);" in html
+    # the established gate this copies, still present on the per-LoRA chips
+    assert "var verSel=(l.versions&&l.versions.length>1)" in html
+    # submit still reads selected.version_id, never the <select>'s value -- hiding the
+    # control must not be able to change what gets generated
+    assert "return { version_id:(selected&&selected.version_id)||''," in html
+
+
 def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_path, monkeypatch):
     """picker-parity-round2 (problem 3): LoRA search needs real per-row architecture data
     (modelType/loraBaseModelType) on EVERY search, not just category/Newest browsing -- REST
@@ -305,6 +330,34 @@ def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatc
     # base kind ignores base_type entirely (nothing to compat-sort a base model against)
     d3 = cli.get("/api/model-search?kind=base&base_type=SDXL_MODEL").get_json()
     assert "compat" not in d3["results"][0]
+
+
+def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, monkeypatch):
+    """AUDIT_2026-07-21: `base_type=` already reached this route for the compat sort/badge;
+    it now ALSO drives PixAI's own generationModels(loraBaseModelTypes:) filter, which this
+    app had never used -- the reason a DiT.2 user's LoRA browse came back 24-of-24 SD 1.5.
+    One caller-supplied value, reused at every layer rather than a second parameter."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    gql = []
+    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+        gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "MMDIT26A_MODEL"}],
+                          "has_more": False, "next_cursor": ""}))
+    monkeypatch.setattr(core, "model_search_rest",
+                        lambda *a, **k: {"results": [{"model_id": "9"}], "has_more": False})
+    cli = _authed_client(tmp_path, [])
+
+    d = cli.get("/api/model-search?kind=lora&base_type=MMDIT26A_MODEL").get_json()
+    assert gql[-1]["lora_base_type"] == "MMDIT26A_MODEL"
+    # the PRECISE per-row layer is still applied on top of the coarse server-side filter
+    assert d["results"][0]["compat"] == "yes"
+
+    # no base picked yet -> no filter (browsing before a pick must be untouched)
+    cli.get("/api/model-search?kind=lora")
+    assert gql[-1]["lora_base_type"] == ""
+
+    # a base-model search never sends it, even if a client passes one
+    cli.get("/api/model-search?kind=base&sort=newest&base_type=MMDIT26A_MODEL")
+    assert gql[-1]["lora_base_type"] == ""
 
 
 def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monkeypatch):
@@ -1592,11 +1645,39 @@ def test_flyout_open_does_not_search_the_hidden_tab(tmp_path):
     picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
     assert "this._searched = false;" in picker_js
     assert "if (this.style.display !== 'none') { this._searched = true; this._search(); }" in picker_js
-    assert "ensureSearched() {" in picker_js and "if (this._searched) return;" in picker_js
+    assert "ensureSearched() {" in picker_js
+    assert "if (this._searched && !this._stale) return;" in picker_js
 
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert "if(vis && vis.ensureSearched) vis.ensureSearched();" in html
+
+
+def test_picking_a_base_model_does_not_double_search_the_hidden_lora_picker(tmp_path):
+    """AUDIT_2026-07-21 follow-up: the deferred-search fix closed only one of two redundant
+    requests. Picking a base model sets `base-type` on the LoRA picker -- which is normally
+    still HIDDEN, since both hosts mount base+LoRA together and reveal one -- and
+    attributeChangedCallback searched unconditionally, without ever setting `_searched`. So
+    the hidden instance fetched and built ~24 cards nobody had asked to see, and then the
+    first reveal's ensureSearched() fired the IDENTICAL request all over again.
+
+    Two halves, both required: `_search()` must own the `_searched` flag (so ANY search
+    counts), and a base-type change on a hidden instance must defer rather than search."""
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
+    # 1) _search() owns the flag -- not just the two call sites that knew about it
+    body = picker_js.split("    _search() {", 1)[1][:900]
+    assert "this._searched = true;" in body and "this._stale = false;" in body
+
+    # 2) a hidden instance defers; a visible one still re-searches on the spot
+    assert ("if (this.style.display === 'none') { if (this._searched) this._stale = true; return; }"
+            in picker_js)
+    assert "this._stale = false;" in picker_js   # initialized, never undefined on first reveal
+
+    # The Gallery still feeds the resolved architecture straight into the LoRA picker -- the
+    # deferral changes WHEN the search happens, never whether base_type reaches the server.
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
 
 
 def test_generate_card_has_seed_field(tmp_path):

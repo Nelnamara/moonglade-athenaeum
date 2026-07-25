@@ -388,7 +388,7 @@ ${"=".repeat(48)}
   function snap8(n) {
     return Math.max(64, Math.min(4096, Math.round((Number(n) || 0) / 8) * 8));
   }
-  function resolveGenDims2({ aspectW, aspectH, size, customW, customH } = {}) {
+  function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}) {
     const cw = Number(customW) || 0, ch = Number(customH) || 0;
     if (cw > 0 && ch > 0) return { w: snap8(cw), h: snap8(ch), custom: true };
     const rw = Number(aspectW) || 1, rh = Number(aspectH) || 1;
@@ -399,7 +399,7 @@ ${"=".repeat(48)}
   }
   function buildImgGenBody(imgModel, imgLoras, imgAdv, prompt) {
     const a = imgAdv || {};
-    const dims = resolveGenDims2({
+    const dims = resolveGenDims({
       aspectW: a.aspectW,
       aspectH: a.aspectH,
       size: a.size,

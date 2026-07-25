@@ -80,9 +80,16 @@ describe("Problem 3: base-type attribute drives architecture-aware LoRA sort/bad
     assert.match(src, /static get observedAttributes\(\) \{ return \['kind', 'base-type'\]; \}/,
       "base-type must be an observed attribute so a host setting it via setAttribute (the " +
       "Gallery) or a JSX prop (the Loom) triggers attributeChangedCallback");
-    assert.match(src, /if \(name === 'base-type' && this\._built && \(val \|\| ''\) !== this\._baseType\) \{\s*\n\s*this\._baseType = val \|\| ''; this\._search\(\);/,
-      "changing base-type after results are already on screen must re-search so the sort/" +
-      "badges reflect the NEW base immediately");
+    // AUDIT_2026-07-21 follow-up: the re-search is now conditional on this instance being
+    // VISIBLE -- a hidden one defers to the next ensureSearched() instead of fetching and
+    // building ~24 cards into a display:none element (see mg-model-picker-pagination.test.js
+    // for that half). The behavior THIS test protects is unchanged and still asserted: an
+    // instance with results on screen re-searches immediately on a base-type change.
+    assert.match(src, /if \(name === 'base-type' && this\._built && \(val \|\| ''\) !== this\._baseType\) \{\s*\n\s*this\._baseType = val \|\| '';/,
+      "changing base-type must record the new base type");
+    assert.match(src, /if \(this\.style\.display === 'none'\) \{ if \(this\._searched\) this\._stale = true; return; \}\s*\n\s*this\._search\(\);/,
+      "changing base-type while results are already on screen must re-search so the sort/" +
+      "badges reflect the NEW base immediately -- only a HIDDEN instance defers");
   });
 
   test("base_type= is only sent for kind=lora, and only once a base is actually selected", () => {

@@ -64,6 +64,36 @@ git tags. Full prose notes for tagged versions live on
   the next scroll simply retries instead of wedging closed. Live-verified end to end with
   two mocked pages: the grid held both, in order, not replaced.
 
+### Added
+
+- **LoRA search is filtered by base-model architecture server-side, by PixAI, before results
+  ever come back.** This is the one that mattered: with a DiT.2 base selected, the LoRA
+  picker's first page was 24-of-24 SD 1.5 rows — every one of them unusable — and the
+  standing workaround was to go keyword-search "sdxl" on PixAI's own site instead. The
+  `generationModels` connection has accepted a `loraBaseModelTypes` argument the whole time;
+  this app never used it. Measured live: `[MMDIT26A_MODEL]` returns 23 of 24 rows compatible
+  with a DiT.2 base. The already-resolved `base_type=` the picker was sending for the compat
+  badge now drives the filter too — one caller-supplied value, three layers (server-side
+  filter → per-page soft sort → per-row badge), no new client plumbing.
+
+  **The gotcha, recorded because it cost real time once already:** the values are *unquoted
+  GraphQL enum tokens* — `loraBaseModelTypes:[MMDIT26A_MODEL]`, never
+  `["MMDIT26A_MODEL"]`. An earlier probe sent them as JSON strings, got a type error back,
+  and the error was misread as "this argument doesn't exist," which is why the capability sat
+  unused. Enums also cannot be bound as `$variables`, so this one value is interpolated into
+  the query document while `keyword` stays a bound variable — which is exactly why it is
+  gated on a fixed whitelist of known architectures (`LORA_BASE_MODEL_TYPES`), the same rule
+  and the same reason as the existing `category` whitelist. An unrecognized architecture
+  falls through to an *unfiltered* search rather than a rejected query, so a newly-added
+  PixAI architecture can never break LoRA browsing outright.
+
+  The filter is **approximate, not strict** — a search row's `loraBaseModelTypes` is a coarse
+  union over the model's releases, not the resolved version's singular `loraBaseModelType`
+  (measured: `[DIT7B_MODEL]` came back 12 DiT7B, 10 MMDIT26A, 2 SDXL). So
+  `annotate_lora_compat()`'s per-row badge is deliberately **kept** as the precise layer on
+  top, and so is the per-page soft sort — it is the only compat affordance left in the
+  fail-open case, and it was verified working live (18 compatible cards, then 6 incompatible).
+
 ### Fixed
 
 - **A real Loom-only bug in the base-model version-resolve guard**, found by the owner
@@ -109,6 +139,61 @@ git tags. Full prose notes for tagged versions live on
   either already-working-as-designed (LoRA tab search chips) or genuinely never built or
   documented anywhere (per-LoRA version selection, subscription-tier LoRA caps,
   capability-gating on the Image/Edit tabs), in `docs/AUDIT_2026-07-21.md`'s O12 entry.
+
+- **The picker's grid cards download small thumbnails again instead of full-size cover art.**
+  `model_search_rest()` resolved BOTH `preview_url` (the ~175px grid card, 24 per page) and
+  `cover_url` (the one hover preview card) to PixAI's full-size `publicUrl` — roughly 24MB of
+  cross-origin CDN traffic per browse session, in flight against the very next search request.
+  Invisible on localhost, real on an actual connection, and a plausible share of the "picker
+  feels slow" the owner has now reported three separate times. `preview_url` is back to
+  `thumbnailUrl`-first (each still falls back to the other, so a row with only one URL never
+  renders blank); `cover_url` deliberately stays `publicUrl`-first, so the full-resolution
+  image still appears on hover-intent, where it is actually looked at. This reverts the
+  bandwidth half of `3bf155a` (which flipped the grid to full-size for card sharpness) while
+  keeping the sharpness where it matters. The GraphQL search path was already thumbnail-first
+  and is unchanged.
+
+- **Two more redundant LoRA searches per flyout session, both gone.** The earlier
+  deferred-search fix closed one of three. Picking a base model sets `base-type` on the LoRA
+  picker — which is normally still *hidden*, since both hosts mount the base and LoRA
+  instances together and reveal one — and `attributeChangedCallback` searched
+  unconditionally, without ever setting `_searched`. So the hidden instance fetched a full
+  page and built ~24 cards into a `display:none` element nobody had asked to see, and then
+  the first reveal fired the *identical* request all over again. Two halves: `_search()` now
+  owns the `_searched` flag itself, so **any** search counts as searched no matter what
+  triggered it (the flag previously lived only on the two call sites that knew about it,
+  which is exactly how it drifted); and a `base-type` change on a hidden instance defers
+  instead of searching — either to the first `ensureSearched()`, or, if that instance had
+  already searched, via a new `_stale` bit that makes the next reveal re-search exactly once.
+  A **visible** instance still re-searches immediately on a base-type change, unchanged.
+  Net: opening the flyout and picking a base model costs one search instead of two, and
+  browsing LoRAs afterwards costs one instead of two.
+
+- **The base-model version dropdown no longer appears when there is only one version to
+  pick.** `renderVersions()` rendered the `<select>` unconditionally, so the majority of
+  picks (most models publish exactly one release) got a dropdown that could not do anything.
+  The gate already existed in two other places in this codebase and is reused rather than
+  reinvented — the Gallery's own per-LoRA chips and the Loom's `.lv-versel` both condition on
+  `versions.length > 1`. The row itself still opens for the capability badges alone, since
+  those are independent of the version count, and submit still reads `selected.version_id`
+  rather than the control's value, so hiding it cannot change what gets generated.
+
+- **The committed esbuild Loom bundle crashed on load — a missing import.**
+  `master-storyboard.jsx` calls `resolveGenDims` (the Advanced panel's "→ W × H" readout)
+  but never imported it from `./src/loom-mutations.js`. The two delivery paths disagree about
+  whether that matters: `/loom` inlines every module into one global scope for in-browser
+  Babel, so it resolved there and the omission was invisible; `/loom?bundle=1` builds a real
+  module graph, so esbuild renamed the module's own function and left the call site as a free
+  global — `ReferenceError: resolveGenDims is not defined`, and the whole tab body failed to
+  render. CI rebuilds and staleness-checks that committed bundle on every push, so this was
+  broken code the project actively maintains. Import added, `loom/dist/` rebuilt. Verified
+  live on the bundled path (`window.Babel` absent, `loom/dist/master-storyboard.bundle.js`
+  loaded): the Video and Image tabs render, the picker opens, the readout that used to throw
+  now prints `→ 1024 × 1024 px`, zero console errors. A new test generalizes the guard rather
+  than pinning the one identifier — it diffs every export of both pure modules against every
+  identifier the JSX actually calls, so the next silent omission of this kind fails in CI
+  instead of only in the bundle. The gallery's nav link still points at `/loom` (the Babel
+  path); switching it was deliberately left alone.
 
 ## [2.4.0] - 2026-07-24 — Concurrent generations, real trash recovery, and a nasty video-corruption bug fixed
 

@@ -324,17 +324,26 @@
       // to see. Defer: skip the automatic browse-on-open here if the element starts
       // hidden, and let the host call ensureSearched() (below) the moment it actually
       // reveals this instance -- see setKind()/the pickerKind effect on each host.
+      //
+      // _stale (AUDIT_2026-07-21 follow-up) is the same idea one step further: this
+      // instance HAS searched, but a filter changed while it was hidden, so its grid no
+      // longer matches its own filters. Only base-type can do that today (see
+      // attributeChangedCallback) -- every other filter lives on a control inside this
+      // element, which nobody can touch without looking at it.
       this._searched = false;
+      this._stale = false;
       if (this.style.display !== 'none') { this._searched = true; this._search(); } // browse-on-open: empty query -> the API's popular list
     }
 
-    // Called by the host right after it makes a previously-hidden instance visible for
-    // the first time (see the file header comment above). A no-op on every call after the
-    // first -- once searched, switching tabs back and forth must never re-fetch, matching
-    // the existing "each keeps its OWN last-searched results independently" contract.
+    // Called by the host right after it makes a previously-hidden instance visible (see
+    // the file header comment above). Normally a no-op after the first real call -- once
+    // searched, switching tabs back and forth must never re-fetch, matching the existing
+    // "each keeps its OWN last-searched results independently" contract. The one exception
+    // is _stale: a base-type change that arrived while this instance was hidden deferred
+    // its re-search to right here, so the newly-revealed grid isn't showing compat
+    // sort/badges for a base model that is no longer selected.
     ensureSearched() {
-      if (this._searched) return;
-      this._searched = true;
+      if (this._searched && !this._stale) return;
       this._search();
     }
 
@@ -364,8 +373,21 @@
       // compat sort/badges reflect the NEW base immediately, not just on the next
       // keystroke/category click. '' is a legitimate value (base cleared), so this fires
       // even when val is falsy -- unlike 'kind' above, which never goes empty in practice.
+      //
+      // AUDIT_2026-07-21 follow-up: "already on screen" is the whole point, and this used
+      // to search unconditionally. Picking a base model sets base-type on a LoRA picker
+      // that is normally still HIDDEN (both hosts mount base+LoRA together and reveal one),
+      // so the common flow fired a full request and built ~24 cards into a display:none
+      // element nobody had asked to see -- and then the reveal fired the IDENTICAL request
+      // a second time. Defer instead, in both hidden cases:
+      //   never searched -> nothing to refresh; the reveal's ensureSearched() will run the
+      //                     first search with the new _baseType already in place.
+      //   searched but hidden -> mark _stale so the next reveal re-searches once, rather
+      //                     than re-rendering a grid nobody is looking at right now.
       if (name === 'base-type' && this._built && (val || '') !== this._baseType) {
-        this._baseType = val || ''; this._search();
+        this._baseType = val || '';
+        if (this.style.display === 'none') { if (this._searched) this._stale = true; return; }
+        this._search();
       }
     }
 
@@ -395,6 +417,15 @@
     }
 
     _search() {
+      // A search is a search, whoever asked for it -- browse-on-open, a keystroke, a
+      // category chip, a base-type change, or ensureSearched(). Marking the flag HERE
+      // rather than at each call site is what stops the flag from drifting out of step
+      // with reality: it previously lived only on the two call sites that knew about it,
+      // so a base-type-triggered search left _searched false and the very next
+      // ensureSearched() re-ran the identical request. _stale clears for the same reason
+      // -- whatever filters this search is carrying, the grid now matches them.
+      this._searched = true;
+      this._stale = false;
       var mine = ++this._seq, self = this;
       if (this._grid) this._grid.style.opacity = '.45';
       this._cursor = ''; this._hasMore = false;   // a fresh search is a new list, not a continuation

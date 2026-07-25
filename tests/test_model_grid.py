@@ -29,8 +29,39 @@ def test_model_search_rest_shapes_rows(monkeypatch):
     assert out["has_more"] is True and len(out["results"]) == 2
     a, b = out["results"]
     assert a["title"] == "Tsubaki.2" and a["model_id"] == "1982880136609467518"
-    assert a["liked_count"] == 10151 and a["preview_url"] == "https://cdn/pub/x"   # full-res preferred (poor thumbnailUrl quality)
+    assert a["liked_count"] == 10151 and a["preview_url"] == "https://cdn/thumb/x"   # small thumb for the grid card
     assert b["should_blur"] is True and b["preview_url"] == "https://cdn/pub/y"   # falls back to publicUrl
+
+
+def test_model_search_rest_grid_thumb_and_hover_cover_are_different_sizes(monkeypatch):
+    """AUDIT_2026-07-21 (grid bandwidth): preview_url and cover_url must NOT both resolve to
+    the full-size publicUrl. preview_url feeds 24 ~175px grid cards on every search (24
+    full-size covers is ~24MB of cross-origin CDN traffic racing the next search request);
+    cover_url feeds the ONE hover preview card, on intent, so it keeps full resolution.
+    Both fall back to whichever URL exists when the other is missing -- a row with only one
+    of the two must never come back with an empty image."""
+    both = {"data": [{"id": "1", "title": "Both", "type": "SDXL_MODEL", "flag": {},
+                      "media": {"thumbnailUrl": "https://cdn/thumb/z", "publicUrl": "https://cdn/pub/z"}}],
+            "hasMore": False}
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: both)
+    m = core.model_search_rest(object())["results"][0]
+    assert m["preview_url"] == "https://cdn/thumb/z"     # grid card -> small
+    assert m["cover_url"] == "https://cdn/pub/z"         # hover preview -> full size
+    assert m["preview_url"] != m["cover_url"]
+
+    # thumb missing -> the grid card falls back to the full-size one rather than nothing
+    thumbless = {"data": [{"id": "2", "title": "No thumb", "type": "SDXL_MODEL", "flag": {},
+                           "media": {"publicUrl": "https://cdn/pub/q"}}], "hasMore": False}
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: thumbless)
+    m2 = core.model_search_rest(object())["results"][0]
+    assert m2["preview_url"] == m2["cover_url"] == "https://cdn/pub/q"
+
+    # public missing -> the hover card falls back to the thumb rather than nothing
+    publicless = {"data": [{"id": "3", "title": "No public", "type": "SDXL_MODEL", "flag": {},
+                            "media": {"thumbnailUrl": "https://cdn/thumb/r"}}], "hasMore": False}
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: publicless)
+    m3 = core.model_search_rest(object())["results"][0]
+    assert m3["preview_url"] == m3["cover_url"] == "https://cdn/thumb/r"
 
 
 def test_model_search_rest_preview_card_fields(monkeypatch):
@@ -370,6 +401,114 @@ def test_model_search_market_gql_requests_and_surfaces_architecture_fields(monke
     assert r["results"][0]["model_type"] == "MULTI_LORA"
     assert r["results"][0]["lora_base_model_type"] == "SD_V1_MODEL"
     assert r["results"][1]["model_type"] == "" and r["results"][1]["lora_base_model_type"] == ""
+
+
+def _gql_capture(monkeypatch, rows=None):
+    """Stub gql_adhoc and hand back the captured query text. Node shape matches the confirmed
+    live one (latestVersion carries modelType + loraBaseModelType)."""
+    captured = {}
+    rows = rows if rows is not None else [
+        {"id": "1", "title": "A LoRA", "type": "MULTI_LORA", "isNsfw": False, "likedCount": 2,
+         "latestVersion": {"id": "v1", "modelType": "MULTI_LORA",
+                            "loraBaseModelType": "MMDIT26A_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""},
+    ]
+
+    def fake_gql(session, query, vars=None):
+        captured["query"] = query
+        captured["vars"] = vars
+        return {"generationModels": {"pageInfo": {"hasNextPage": True, "endCursor": "C1"},
+                                      "edges": [{"node": r} for r in rows]}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    return captured
+
+
+# ---- lora_base_type: SERVER-SIDE architecture filtering (AUDIT_2026-07-21) ----------------
+# The `generationModels` connection has always accepted loraBaseModelTypes:[...]; this app
+# never used it, so a DiT.2 user's LoRA browse came back 24-of-24 SD 1.5 rows. Measured live:
+# [MMDIT26A_MODEL] -> 23 of 24 compatible. THE gotcha: the values are UNQUOTED GraphQL ENUM
+# tokens. An earlier probe sent them as JSON strings, got a type error, and the error was
+# misread as "the argument doesn't exist".
+
+def test_lora_base_type_emits_an_unquoted_enum_token(monkeypatch):
+    captured = _gql_capture(monkeypatch)
+    core.model_search_market_gql(object(), usage="LORA", lora_base_type="MMDIT26A_MODEL")
+    assert "loraBaseModelTypes:[MMDIT26A_MODEL]" in captured["query"]
+    # the failure mode that cost real time: quoted strings are a server-side TYPE error
+    assert 'loraBaseModelTypes:["MMDIT26A_MODEL"]' not in captured["query"]
+    assert "'MMDIT26A_MODEL'" not in captured["query"]
+    # a GraphQL enum cannot be a bound $variable, so it must NOT appear in variables at all
+    assert "MMDIT26A_MODEL" not in str(captured["vars"])
+
+
+def test_lora_base_type_is_whitelisted_never_interpolated_raw(monkeypatch):
+    """The value lands in the query DOCUMENT (an enum can't be a $variable), so it must come
+    from a fixed whitelist -- the same rule, and the same reason, as `category` above.
+    Anything unrecognized falls through to an UNFILTERED search (fail-open): a stale or
+    newly-added architecture must degrade to 'no filter', never to a rejected query that
+    breaks LoRA browsing outright."""
+    for bad in ["MMDIT26A_MODEL] evil", "SDXL_MODEL, SD_V1_MODEL", '"] {__typename} #',
+                "MULTI_LORA", "VIDEO_MODEL", "SD3_MODEL", "", "   ", None]:
+        captured = _gql_capture(monkeypatch)
+        core.model_search_market_gql(object(), usage="LORA", lora_base_type=bad)
+        assert "loraBaseModelTypes" not in captured["query"], bad
+        assert "__typename" not in captured["query"]
+    # every whitelisted value, on the other hand, does get through
+    for good in core.LORA_BASE_MODEL_TYPES:
+        captured = _gql_capture(monkeypatch)
+        core.model_search_market_gql(object(), usage="LORA", lora_base_type=good.lower())
+        assert "loraBaseModelTypes:[%s]" % good in captured["query"]
+
+
+def test_lora_base_type_is_ignored_for_a_base_model_search(monkeypatch):
+    """There is nothing to filter a base-model list by -- a base model has no LoRA base
+    family. kind=base must produce the exact same query it always did."""
+    captured = _gql_capture(monkeypatch)
+    core.model_search_market_gql(object(), usage="MODEL", lora_base_type="SDXL_MODEL")
+    assert "loraBaseModelTypes" not in captured["query"]
+
+
+def test_lora_base_type_filter_survives_category_sort_and_pagination(monkeypatch):
+    """Verified across more than one page and more than one architecture: the filter must
+    ride along with EVERY other argument, on page 2 as well as page 1 -- a continuation that
+    silently dropped it would append unfiltered rows onto filtered ones."""
+    for arch in ("SDXL_MODEL", "DIT9_MODEL"):
+        captured = _gql_capture(monkeypatch)
+        r = core.model_search_market_gql(object(), keyword="eris", category="style",
+                                         sort="newest", usage="LORA", limit=24,
+                                         lora_base_type=arch)
+        q = captured["query"]
+        assert "loraBaseModelTypes:[%s]" % arch in q
+        assert 'category:"style"' in q and 'orderBy:"-createdAt"' in q and "keyword:$k" in q
+        assert r["next_cursor"] == "C1"
+
+        captured2 = _gql_capture(monkeypatch)
+        core.model_search_market_gql(object(), keyword="eris", category="style", sort="newest",
+                                     usage="LORA", limit=24, after=r["next_cursor"],
+                                     lora_base_type=arch)
+        assert "loraBaseModelTypes:[%s]" % arch in captured2["query"]
+        assert "after:$a" in captured2["query"] and captured2["vars"]["a"] == "C1"
+
+
+def test_lora_base_type_filter_does_not_replace_the_per_row_compat_badge(monkeypatch):
+    """The filter is APPROXIMATE (measured live: [DIT7B_MODEL] returned 12 DiT7B, 10
+    MMDIT26A, 2 SDXL -- a search row's loraBaseModelTypes is a coarse union over releases,
+    not the resolved version's singular loraBaseModelType). So a filtered page can still
+    contain a genuinely incompatible row, and annotate_lora_compat must still be the layer
+    that judges each one."""
+    mixed = [
+        {"id": "1", "title": "Real DiT7B", "type": "MULTI_LORA", "latestVersion":
+            {"id": "v1", "modelType": "MULTI_LORA", "loraBaseModelType": "DIT7B_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}},
+        {"id": "2", "title": "Actually MMDiT", "type": "MULTI_LORA", "latestVersion":
+            {"id": "v2", "modelType": "MULTI_LORA", "loraBaseModelType": "MMDIT26A_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}},
+    ]
+    _gql_capture(monkeypatch, rows=mixed)
+    res = core.model_search_market_gql(object(), usage="LORA",
+                                       lora_base_type="DIT7B_MODEL")["results"]
+    tagged = core.annotate_lora_compat(res, "DIT7B_MODEL")
+    assert {t["model_id"]: t["compat"] for t in tagged} == {"1": "yes", "2": "no"}
 
 
 def test_task_image_media_prefers_batch_over_grid():
