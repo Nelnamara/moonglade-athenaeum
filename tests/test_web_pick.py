@@ -332,6 +332,34 @@ def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatc
     assert "compat" not in d3["results"][0]
 
 
+def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, monkeypatch):
+    """AUDIT_2026-07-21: `base_type=` already reached this route for the compat sort/badge;
+    it now ALSO drives PixAI's own generationModels(loraBaseModelTypes:) filter, which this
+    app had never used -- the reason a DiT.2 user's LoRA browse came back 24-of-24 SD 1.5.
+    One caller-supplied value, reused at every layer rather than a second parameter."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    gql = []
+    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+        gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "MMDIT26A_MODEL"}],
+                          "has_more": False, "next_cursor": ""}))
+    monkeypatch.setattr(core, "model_search_rest",
+                        lambda *a, **k: {"results": [{"model_id": "9"}], "has_more": False})
+    cli = _authed_client(tmp_path, [])
+
+    d = cli.get("/api/model-search?kind=lora&base_type=MMDIT26A_MODEL").get_json()
+    assert gql[-1]["lora_base_type"] == "MMDIT26A_MODEL"
+    # the PRECISE per-row layer is still applied on top of the coarse server-side filter
+    assert d["results"][0]["compat"] == "yes"
+
+    # no base picked yet -> no filter (browsing before a pick must be untouched)
+    cli.get("/api/model-search?kind=lora")
+    assert gql[-1]["lora_base_type"] == ""
+
+    # a base-model search never sends it, even if a client passes one
+    cli.get("/api/model-search?kind=base&sort=newest&base_type=MMDIT26A_MODEL")
+    assert gql[-1]["lora_base_type"] == ""
+
+
 def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monkeypatch):
     """Owner report 2026-07-24: the picker never loads more than its first page. The
     unused `offset=` param is replaced by a unified `cursor=` the client just echoes back

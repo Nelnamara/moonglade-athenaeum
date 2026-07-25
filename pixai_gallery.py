@@ -10936,10 +10936,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
         base_type=<model_type>: the CALLER's already-resolved selected base model's own
         model_type (the Gallery/Loom already resolve this today for the post-selection
-        is_lora_compatible() gate -- this just reuses it). When present on a kind=lora
-        request, results are soft-sorted (compatible-or-unknown first, confirmed-mismatch
-        last) and each row gets a `compat` tag -- see annotate_lora_compat(). Absent/kind=base
-        -> results pass through unmodified, exactly as before this param existed."""
+        is_lora_compatible() gate -- this just reuses it). ONE caller-supplied value, three
+        layers, coarsest first:
+          1. SERVER-SIDE FILTER (added 2026-07-24, the real fix): threaded into
+             model_search_market_gql as lora_base_type, which asks PixAI for LoRAs whose
+             base family matches -- generationModels(loraBaseModelTypes:[<enum>]). This is
+             what stops a DiT.2 user's LoRA browse from being 24-of-24 SD 1.5 rows, which
+             was the actual complaint (the standing workaround was keyword-searching "sdxl"
+             on PixAI's own site). Approximate, not strict, and only applied for architecture
+             values on core's whitelist -- anything else falls through unfiltered.
+          2. per-page soft SORT (compatible-or-unknown first, confirmed-mismatch last).
+          3. per-row `compat` tag -- the PRECISE layer, see annotate_lora_compat(). Kept
+             deliberately: layer 1 is a coarse browse hint, so only this one can be trusted
+             to badge an individual row.
+        Absent/kind=base -> results pass through unmodified, exactly as before."""
         q = (request.args.get("q") or "").strip()
         usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
         category = (request.args.get("category") or "").strip().lower()
@@ -10956,7 +10966,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             if use_market:
                 payload = core.model_search_market_gql(
                     session, keyword=q, category=category, sort=sort, usage=usage,
-                    limit=size, after=(cursor or None))
+                    limit=size, after=(cursor or None),
+                    # Same caller-supplied value that feeds the compat sort/badge below --
+                    # resolved once by the client, used at every layer. core ignores it for
+                    # a base-model search and for any architecture off its whitelist.
+                    lora_base_type=(base_type if usage == "LORA" else ""))
             else:
                 offset = int(cursor) if cursor.isdigit() else 0
                 payload = core.model_search_rest(session, keyword=q, usage=usage,
