@@ -393,6 +393,14 @@
     '.jt-spin{position:relative;width:48px;height:48px;}',
     '.jt-spin .jt-nel{inset:6px;width:36px;height:36px;border-radius:50%;object-fit:cover;object-position:60% 32%;animation:gen-spin 1.6s linear infinite;}',
     '.jt-spin .gen-ring{position:absolute;inset:2px;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}',
+    // OWN the keyframes both rules above animate. They used to live ONLY in the gallery's own
+    // page CSS (inside create_app, beside .header-stats), so this file silently depended on
+    // its host to supply them: on the gallery the spinner animated by accident, and on the
+    // Loom -- whose _LOOM_SHELL does not carry that CSS -- `animation: gen-spin` named a
+    // keyframe that did not exist and did nothing at all. A running job sat frozen, visually
+    // identical to a stalled one, on the surface where that distinction matters most.
+    // This file is host-neutral by design; it must define every animation it references.
+    '@keyframes gen-spin{to{transform:rotate(360deg);}}',
     '.jt-empty-nel{width:104px;height:104px;object-fit:contain;margin:0 auto 8px;display:block;opacity:.92;}',
     '.jt-main{flex:1;min-width:0;}',
     '.jt-lab{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
