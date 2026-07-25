@@ -34,6 +34,11 @@ Nothing phones home.
 Yes — launch the gallery with `--host 0.0.0.0 --https` and open it on your device
 (installable as a PWA). [Select mode](Collections) is touch-friendly.
 
+On a portrait phone the Generate drawer opens as a full-width sheet and the model browser
+appears as a centred panel, with finger-sized dock and close buttons. (Before 2026-07-24 the
+drawer left a dead strip down one side and the model browser opened half off the top of the
+screen — if that is what you remember seeing, update.)
+
 **As of v2.0.0 this needs a login, and a signed-in device can do real work.** The gallery
 requires an account on every path — including on the machine running it. Sign in from your
 phone and you can browse *and* generate, which is the point: the login exists so tablet
