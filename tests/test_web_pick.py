@@ -2397,13 +2397,13 @@ def test_import_collection_choice_does_not_persist_between_imports(tmp_path):
         "reset() leaves the collection selection or the typed new-collection name behind")
 
 
-def test_fix_tab_has_a_spend_confirm_since_it_cannot_be_priced(tmp_path):
-    """Audit 2026-07-21, unfiled-workflow-findings: the Fix sub-tab (hand/face box-fixer)
-    fires /api/fix with zero warning of any kind -- no price badge (POST /v2/task/fixer
-    is a different endpoint from the createGenerationTask family /v2/task-price mirrors,
-    confirmed in private/GENERATOR_SURFACE.md's parameter schema, so it genuinely cannot
-    be priced the way every other spend surface here is) and, before this fix, no
-    window.confirm() either -- the only credit-spending action in the app with neither."""
+def test_fix_tab_warns_before_it_spends(tmp_path):
+    """The Fix sub-tab (hand/face box-fixer) used to fire /api/fix with zero warning of any
+    kind -- the only credit-spending action in the app with neither a price nor a confirm.
+    It carries both now: an <mg-cost-badge> priced through /api/price and a confirm that
+    quotes the badge's number. The confirm is not redundant, because a Fix can never be
+    covered by a free card -- every press spends. Cost-badge and pricing detail live in
+    tests/test_fix.py; this stays the guard that the SUBMIT is gated."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)

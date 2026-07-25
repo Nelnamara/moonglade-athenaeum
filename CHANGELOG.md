@@ -139,8 +139,50 @@ git tags. Full prose notes for tagged versions live on
   `annotate_lora_compat()`'s per-row badge is deliberately **kept** as the precise layer on
   top, and so is the per-page soft sort — it is the only compat affordance left in the
   fail-open case, and it was verified working live (18 compatible cards, then 6 incompatible).
+- **The Fix sub-tab has a real cost badge — the hand/face fixer can be priced after all.**
+  It was the last spend surface in the app with no price of any kind, on the belief that
+  `POST /v2/task/fixer` sits outside the `createGenerationTask` family `/v2/task-price`
+  mirrors. It does — but the task PixAI *builds* from that submit is an ordinary
+  `taskKind=chat` generation carrying a `chat.fixer` block, and `/v2/task-price` prices that
+  happily. Measured 2026-07-25: a flat 8,000 credits, invariant to box count (1 / 3 / 10),
+  canvas size and priority; strip the `chat` block from the same call and it falls back to
+  the 1,200 base floor, so the block is what carries the cost. `Gen.fixCost()` now
+  synthesizes that shape (`build_fixer_price_parameters`) and pushes the live figure into the
+  same `<mg-cost-badge>` every sibling sub-tab uses — the number is **fetched, never
+  hardcoded**, so it stays right if PixAI reprices a Fix. The badge and the submit share one
+  canvas-to-original-pixel box scaler, so the price always describes the exact request the
+  button sends. The price check runs with `no_card` forced on: `/v2/task/fixer` has no
+  `kaisuukenId` field anywhere on it, so a free card can never cover a Fix and the badge must
+  never claim one does. The `window.confirm()` guardrail stays for that same reason (every
+  press really spends) and now quotes the badge's number instead of stating that no cost
+  preview exists.
 
 ### Fixed
+
+- **Fix outputs were all named from the same boilerplate, and a folder of them was
+  unbrowsable.** A fixer task's `prompts` is a fixed template PixAI writes itself, so every
+  hand/face repair landed as
+  `images/Image_2_shows_the_areas_in_Image_1_that_need_fixing_Please_r_<task>_<media>.jpg` —
+  a different file each time, with the same 60 characters of meaningless name. A Fix is now
+  named from information it actually carries: the **source image's** own prompt (looked up in
+  the catalog by media id, falling back to that media id for a source this backup has never
+  seen) plus a `fix-face` / `fix-hand` / `fix-face-hand` marker read off the boxes that were
+  drawn. Two ordering rules are load-bearing — the source slug leads, so a repair sorts
+  directly beside the image it repaired, and the media id stays last, so invariant 7's shared
+  `_<media_id>` matcher (resume, `already_downloaded`, `--organize`) still finds it. Scoped
+  to this task family only; ordinary generations keep `build_stem_name` unchanged. **New
+  output only — nothing already on disk is renamed.**
+- **A Fix output's metadata was entirely blank: Model, Seed, Steps, Sampler and CFG all
+  rendered as em-dashes.** Two causes, both closed. The meta extractor did not understand a
+  `chat` task, whose model lives in `parameters.chat.modelId` — `build_chat_edit_parameters`
+  sets no top-level `modelId` at all — and the shared collect path never wrote `model_id` or
+  `model_name` onto the row it catalogs, on any task. Model now resolves, and reads
+  **"Reference Pro"** rather than a 19-digit id: PixAI's two CHAT models are the ones this app
+  already names in `EDIT_MODELS`, so the label comes from the local table with no extra
+  network round trip. Seed, Steps, Sampler and CFG are **deliberately left empty** — a fixer
+  task has no `outputs.detailParameters` and no seed, so those numbers were never recorded,
+  and an honest em-dash beats a plausible-looking figure borrowed from a sibling generation.
+  Dimensions already survived and still do.
 
 - **The Loom's "Play sequence" was hard-muted while the rendered mp4 carries real audio.**
   `<video autoPlay muted>` with nothing able to turn sound on, so a storyboard could be

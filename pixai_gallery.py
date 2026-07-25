@@ -6290,7 +6290,11 @@ document.addEventListener('DOMContentLoaded', function(){
           <button type="button" onclick="Gen.fixClear()">Clear</button>
         </div>
         <div id="fix-wrap"><img id="fix-img" alt="fix source"><canvas id="fix-canvas"></canvas></div>
-        <button id="fix-go" class="gen-go" onclick="Gen.fix()" style="margin-top:8px;">Fix marked regions</button>
+        {# No card-label: a Fix can never be covered by a free card (POST /v2/task/fixer has
+           no kaisuukenId field), so /api/price forces no_card for this mode and the badge's
+           `free` branch is unreachable here by construction. #}
+        <mg-cost-badge id="fix-cost" hint="Drag a box over a hand or face to see the cost."></mg-cost-badge>
+        <button id="fix-go" class="gen-go" onclick="Gen.fix()">Fix marked regions</button>
         <div id="fix-result" class="gen-result" style="display:none;"></div>
       </div>
     </div>
@@ -6760,7 +6764,12 @@ var Snips = (function(){
 })();
 var Gen = (function(){
   var kind='base', selected=null, costSeq=0, costTimer=null;
-  var fixTag_='face', fixBoxes=[], fixStart=null;
+  // The Fix sub-tab's price check gets its OWN debounce timer and stale-response counter
+  // rather than sharing costSeq/costTimer with Generate and Edit. It has to: setEditSource
+  // refreshes the Edit badge AND the Fix badge for the same source, so on one shared timer
+  // each would cancel the other's debounce, and on one shared counter whichever response
+  // landed second would silently invalidate the first badge's own answer.
+  var fixTag_='face', fixBoxes=[], fixStart=null, fixSeq=0, fixTimer=null, fixCostVal=null;
   function el(id){return document.getElementById(id);}
   function open(){
     el('gen-drawer').classList.add('open'); el('gen-scrim').classList.add('open');
@@ -7402,7 +7411,7 @@ var Gen = (function(){
     ['edit','enhance','fix'].forEach(function(x){
       var pane=el('edit-sub-'+x); if(pane) pane.style.display=(x===s)?'':'none';
       var b=el('es-'+x); if(b) b.classList.toggle('on', x===s); });
-    if(s==='fix') fixResize();
+    if(s==='fix'){ fixResize(); fixCost(); }   // arriving on the tab re-prices whatever is marked
   }
   function editSrc(){ return el('edit-src').value.trim(); }
   function setEditSource(mid){
@@ -7412,6 +7421,7 @@ var Gen = (function(){
     else { img.style.display='none'; }
     renderEditRefs();   // primary changed -> @image1 slot + cap count update
     debEditCost();
+    fixCost();          // fixLoad() dropped the boxes with the old source; clear its badge too
   }
   var EDIT_CAPS={
     'edit-pro':{max_refs:4,resolutions:['1K','2K'],qualities:['low','medium','high'],
@@ -7519,7 +7529,7 @@ var Gen = (function(){
             {past:'Edited', btn:el('edit-go'), busy:'Editing\\u2026', idle:'Apply edit'});
   }
   function fixTag(t){ fixTag_=t; el('fix-tag-face').classList.toggle('on',t==='face'); el('fix-tag-hand').classList.toggle('on',t==='hand'); }
-  function fixClear(){ fixBoxes=[]; fixRedraw(); }
+  function fixClear(){ fixBoxes=[]; fixRedraw(); fixCost(); }
   function fixColor(tag){ return tag==='face' ? '#b692e6' : '#4fc99a'; }
   function fixRedraw(){
     var cv=el('fix-canvas'); if(!cv || !cv.getContext) return;
@@ -7544,10 +7554,38 @@ var Gen = (function(){
     function pos(e){ var r=cv.getBoundingClientRect(); var t=e.touches&&e.touches[0]?e.touches[0]:e; return {x:t.clientX-r.left,y:t.clientY-r.top}; }
     function down(e){ fixStart=pos(e); e.preventDefault(); }
     function move(e){ if(!fixStart)return; var p=pos(e); fixRedraw(); var ctx=cv.getContext('2d'); ctx.strokeStyle=fixColor(fixTag_); ctx.lineWidth=2; ctx.strokeRect(fixStart.x,fixStart.y,p.x-fixStart.x,p.y-fixStart.y); e.preventDefault(); }
-    function up(e){ if(!fixStart)return; var p=e.changedTouches&&e.changedTouches[0]?{x:e.changedTouches[0].clientX-cv.getBoundingClientRect().left,y:e.changedTouches[0].clientY-cv.getBoundingClientRect().top}:pos(e); var x=Math.min(fixStart.x,p.x),y=Math.min(fixStart.y,p.y),w=Math.abs(p.x-fixStart.x),h=Math.abs(p.y-fixStart.y); fixStart=null; if(w>6&&h>6) fixBoxes.push({x:x,y:y,w:w,h:h,tag:fixTag_}); fixRedraw(); }
+    function up(e){ if(!fixStart)return; var p=e.changedTouches&&e.changedTouches[0]?{x:e.changedTouches[0].clientX-cv.getBoundingClientRect().left,y:e.changedTouches[0].clientY-cv.getBoundingClientRect().top}:pos(e); var x=Math.min(fixStart.x,p.x),y=Math.min(fixStart.y,p.y),w=Math.abs(p.x-fixStart.x),h=Math.abs(p.y-fixStart.y); fixStart=null; if(w>6&&h>6){ fixBoxes.push({x:x,y:y,w:w,h:h,tag:fixTag_}); debFixCost(); } fixRedraw(); }
     cv.addEventListener('mousedown',down); cv.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
     cv.addEventListener('touchstart',down,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); cv.addEventListener('touchend',up);
   }
+  // The boxes as PixAI sees them: the canvas renders the source at whatever width the drawer
+  // gives it, so every box has to be scaled back to ORIGINAL-image pixels first. One helper
+  // for both callers on purpose -- the badge has to quote the exact request the button sends,
+  // and two copies of this arithmetic is how that stops being true.
+  function fixBoxesScaled(){
+    var img=el('fix-img');
+    var scale=(img && img.naturalWidth && img.clientWidth) ? (img.naturalWidth/img.clientWidth) : 1;
+    return fixBoxes.map(function(b){ return {x:Math.round(b.x*scale),y:Math.round(b.y*scale),
+      width:Math.round(b.w*scale),height:Math.round(b.h*scale),tag:b.tag}; });
+  }
+  function fixCost(){
+    var cost=el('fix-cost'); if(!cost) return;
+    fixCostVal=null;
+    if(!editSrc() || !fixBoxes.length){ cost.clear(); return; }
+    cost.setChecking();
+    var mine=++fixSeq;
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mode:'fix', source:editSrc(), boxes:fixBoxesScaled()})})
+      .then(function(r){return r.json();})
+      // Same host contract as editCost: the badge owns every bit of the idle / checking /
+      // paid / could-not-verify classification, this function owns only the request, the
+      // debounce and the stale-response guard. fixCostVal caches the settled number for the
+      // submit confirm below so the dialog and the badge can never disagree.
+      .then(function(d){ if(mine!==fixSeq) return; cost.setPrice(d); fixCostVal=cost.settled?cost.cost:null; })
+      // setPrice(null), not clear(): a failed fetch is could-not-verify, never "not priced yet".
+      .catch(function(){ if(mine===fixSeq){ cost.setPrice(null); fixCostVal=null; } });
+  }
+  function debFixCost(){ clearTimeout(fixTimer); fixTimer=setTimeout(fixCost,250); }
   function fix(){
     var src=editSrc(); if(!src){ el('edit-src').focus(); return; }
     if(!fixBoxes.length){
@@ -7557,16 +7595,17 @@ var Gen = (function(){
       fr.appendChild(w);   // append, not overwrite -- a fix task already in flight keeps its own line
       return;
     }
-    // No price check exists for this action (audit 2026-07-21, unfiled-workflow-findings):
-    // /v2/task/fixer is a separate endpoint from the createGenerationTask family /v2/task-price
-    // mirrors, so it cannot be priced the way every other spend surface in this app is -- a
-    // client-side badge would just always show nothing. Until PixAI's own API can price a fixer
-    // task, a plain confirm is this app's established fail-closed guardrail for exactly that
-    // situation (the same shape the Loom's Deep Focus tabs already use for their own confirmSpend).
-    if(!window.confirm('Fix hand/face regions? This spends PixAI credits -- no cost preview is available for this action yet.')) return;
-    var img=el('fix-img'); var scale = (img.naturalWidth && img.clientWidth) ? (img.naturalWidth/img.clientWidth) : 1;
-    var boxes=fixBoxes.map(function(b){ return {x:Math.round(b.x*scale),y:Math.round(b.y*scale),width:Math.round(b.w*scale),height:Math.round(b.h*scale),tag:b.tag}; });
-    runTask('/api/fix', {source:src, boxes:boxes}, el('fix-result'),
+    // The confirm stays, but it can name the number now. /v2/task-price DOES price a Fix,
+    // given the chat.fixer-shaped params PixAI's server builds out of a /v2/task/fixer submit
+    // (see build_fixer_price_parameters) -- so the <mg-cost-badge> above this button carries
+    // the live figure and this dialog quotes it. It is not redundant with the badge: a Fix can
+    // never be covered by a free card, so every press of this button spends real credits, and
+    // an unverified price has to read as a warning rather than as silence.
+    var n=fixBoxes.length, what='Fix '+n+' marked region'+(n===1?'':'s')+'?';
+    if(!window.confirm(fixCostVal!=null
+        ? what+' This spends about '+fixCostVal.toLocaleString()+' PixAI credits.'
+        : what+" The cost check didn't come back, so this may spend PixAI credits.")) return;
+    runTask('/api/fix', {source:src, boxes:fixBoxesScaled()}, el('fix-result'),
             {past:'Fixed', btn:el('fix-go'), busy:'Fixing\\u2026', idle:'Fix marked regions'});
   }
   function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
@@ -12368,7 +12407,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"presets": presets})
 
     def _params_and_nocard(core, p, user):
-        """Route a drawer payload to generate, edit, or video params. Returns (params,
+        """Route a drawer payload to generate, edit, fix, or video params. Returns (params,
         no_card, note). note is set (params None) when something's missing. `user` is
         only consulted on the edit path (a preset lookup is per-account)."""
         p = p or {}
@@ -12376,6 +12415,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             params = _edit_params_from_payload(core, p, user)
             return (params, bool(p.get("no_card")),
                     None if params else "pick an image to edit")
+        if p.get("mode") == "fix":
+            # A hand/face Fix is submitted over POST /v2/task/fixer, whose {mediaId, boxes}
+            # body /v2/task-price cannot read -- but the taskKind=chat task PixAI builds from
+            # it IS priceable, so build_fixer_price_parameters synthesizes that chat.fixer
+            # shape (see its docstring for the measurement).
+            src = str(p.get("source") or "").strip()
+            if not src:
+                return None, True, "pick an image to fix"
+            try:
+                params = core.build_fixer_price_parameters(src, p.get("boxes") or [])
+            except core.PixAIError:
+                return None, True, "drag a box over a hand or face"
+            # no_card is forced True here and is NOT read off the payload: /v2/task/fixer
+            # takes only mediaId + boxes, with no kaisuukenId field anywhere on it, so a free
+            # card can never be spent on a Fix however well /v2/kaisuuken/check matches the
+            # synthesized params. Letting the card check run would paint the badge emerald
+            # "FREE -- a card covers this" over an action about to charge full credits.
+            return params, True, None
         if p.get("mode") in ("I2V", "FLF", "R2V"):
             imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
             vids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip()]
