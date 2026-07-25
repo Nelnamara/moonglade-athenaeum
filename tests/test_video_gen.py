@@ -518,9 +518,9 @@ def _seed_one(tmp_path, mid="733917871331404290"):
 
 def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
     """The first fix for the invalid_media_id bug patched ONLY the video route, leaving
-    /api/enhance, /api/edit and /api/fix silently broken the same way -- the owner's next
-    enhance died on it. PixAI refuses a generation-OUTPUT id as an INPUT on every one of
-    these paths, so all four must resolve through _input_media_id.
+    /api/edit and /api/fix silently broken the same way. PixAI refuses a generation-OUTPUT
+    id as an INPUT on every one of these paths, so all three must resolve through
+    _input_media_id.
 
     Parametrised deliberately: a new input endpoint that forgets to resolve is the exact
     way this returns, and this fails by name when it does."""
@@ -536,8 +536,6 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
                         lambda s, params: seen.update(params=params) or "t1")
     monkeypatch.setattr(core, "submit_fixer",
                         lambda s, src, boxes: seen.update(fix_src=src) or "t2")
-    monkeypatch.setattr(core, "build_panelplugin_parameters",
-                        lambda src, wid: seen.update(enh_src=src) or {"p": 1})
 
     cli = login_test_client(create_app(tmp_path))
 
@@ -546,15 +544,11 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
                     "images": [mid], "duration": 5}).status_code == 200
     assert seen["params"]["i2vPro"]["mediaId"] == "999000111222"
 
-    # 2. enhance -- the path the owner's stuck job died on
-    cli.post("/api/enhance", json={"source": mid, "workflow_id": "wf1"})
-    assert seen.get("enh_src") == "999000111222", "enhance passed the raw catalog id"
-
-    # 3. fix
+    # 2. fix
     cli.post("/api/fix", json={"source": mid, "boxes": [{"x": 1, "y": 1, "w": 2, "h": 2}]})
     assert seen.get("fix_src") == "999000111222", "fix passed the raw catalog id"
 
-    # 4. edit
+    # 3. edit
     seen.pop("params", None)
     cli.post("/api/edit", json={"source": mid, "instruction": "make it night"})
     chat = (seen.get("params") or {}).get("chat") or {}

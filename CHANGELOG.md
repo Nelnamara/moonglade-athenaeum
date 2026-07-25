@@ -401,6 +401,27 @@ git tags. Full prose notes for tagged versions live on
   instead of only in the bundle. The gallery's nav link still points at `/loom` (the Babel
   path); switching it was deliberately left alone.
 
+### Removed
+
+- **The Enhance sub-tab's one-click PixAI workflow tools are gone — they never could have
+  worked.** PixAI does not assign a worker to a `pixai-panelplugin` task when the client
+  authenticated with an API key: it accepts the submit, queues it, charges for it, then cancels
+  it at roughly 60 minutes with `outputs.reason` "waiting timeout" and refunds. Measured against
+  the live API on 2026-07-24 and isolated by elimination — the same payload built with PixAI's
+  *own* official preset workflow id behaves identically, while their web client runs that
+  workflow in 1-3 seconds, and a hand/face Fix submitted from this app minutes earlier
+  dispatched in one second. No workflow id, input key or payload shape reaches a runner, so
+  there was nothing to repair. Removed: the ten one-click cards (upscale / upscale 2×2 /
+  upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art / sketch-colorize /
+  relight-sun / relight-backlight), the "browse all workflows" ComfyUI catalog search, the
+  cost badge and Run button, the `/api/enhance` and `/api/workflows` routes, `/api/price`'s
+  `mode=enhance` branch, `build_panelplugin_parameters()`, `workflow_catalog()`, and the
+  `--workflow-id` CLI flag. **The Enhance sub-tab itself stays**, now holding a short
+  explanation that those tools only run on pixai.art and a pointer to the **Fix** sub-tab,
+  which goes through a different endpoint and does work here. `--enhance --filter-id` (art
+  filters) is unchanged. A regression guard asserts no reachable path can build a panelplugin
+  submit again.
+
 ## [2.4.0] - 2026-07-24 — Concurrent generations, real trash recovery, and a nasty video-corruption bug fixed
 
 A trash/quarantine restore panel, field-operator search (`model:`, `rating:>=3`, …),

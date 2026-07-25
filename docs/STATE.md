@@ -307,18 +307,14 @@ users.
   and unknown must not brand every in-flight job stale. The reaper's caller passes the whole
   status dict, not `["phase"]` — sending the bare string makes the detection dead code in
   production, guarded end-to-end through `/api/jobs`.
-- **The Generate drawer's Edit ▸ Enhance sub-tab does not work and cannot be made to work as
-  built.** Its ten one-click cards and the ComfyUI catalog search below them all submit
-  `model: pixai-panelplugin` via `/api/enhance`, and **PixAI never assigns a worker to a
-  panelplugin task submitted with an API key** — it accepts it, queues it, charges 1200, then
-  cancels it at ~60 minutes with `outputs.reason: "waiting timeout"` and refunds. Every
-  Enhance run in the app's history has died this way; none has ever produced an image. Not a
-  payload problem: the same shape, with PixAI's own official preset id, still never dispatches,
-  while their web client runs it in 1–3s. Awaiting the trim; the replacement plan, the measured
-  parameter spec for what genuinely does work instead (upscale/boosters as plain generation
-  params, art filters locally for free), and the full evidence are in
-  `docs/AUDIT_2026-07-21.md`. The Fix sub-tab beside it is unaffected and works — it is a
-  box-coordinate hand/face fixer (`/api/fix` → `submit_fixer`, `taskKind=chat`).
+- The Generate drawer's Edit ▸ Enhance sub-tab is explanatory copy only. PixAI never assigns
+  a worker to a panelplugin task submitted with an API key — it accepts it, queues it, charges
+  it, then cancels it at ~60 minutes with `outputs.reason` "waiting timeout" and refunds (their
+  own official preset ids included, while their web client runs the same workflow in 1-3s), so
+  the ten one-click cards, the ComfyUI catalog search, `/api/enhance`, `/api/workflows`,
+  `build_panelplugin_parameters`, `workflow_catalog` and `--workflow-id` were all deleted
+  2026-07-24. The pane now says where those tools do run and points at Fix. The Fix sub-tab is
+  a separate box-coordinate hand/face fixer (`/api/fix` → `submit_fixer`) and works.
 - **The LoRA picker now shows and enforces the account's real per-generation LoRA cap, on
   both the gallery and the Loom** (2026-07-24). `membership.privilege.{lora,freeUserLora}` —
   real data PixAI's own account API already returns — is fetched by `account_info()`
@@ -566,9 +562,9 @@ gates every route; the public surface is exactly four things — `/login`, `/log
 (a compile-time constant the browser fetches unprompted from the login page). There is **no
 localhost bypass**: login is required from `127.0.0.1` exactly as from a LAN address.
 
-Spend-capable routes are **LOGIN**, not localhost — `/api/generate`, `/api/edit`,
-`/api/enhance`, `/api/fix` and `/api/loom/generate` are all reachable by any signed-in
-session, which is deliberate (the tablet generates). LOCALHOST is reserved for writes to the
+Spend-capable routes are **LOGIN**, not localhost — `/api/generate`, `/api/edit`, `/api/fix`
+and `/api/loom/generate` are all reachable by any signed-in session, which is deliberate (the
+tablet generates). LOCALHOST is reserved for writes to the
 server's own disk, credential writes, and irreversible cloud deletion. `tests/test_route_tiers.py`
 is the authority.
 
@@ -661,10 +657,9 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   by that feature's own explicit design).
 - `<mg-cost-badge>` now covers the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`,
   shared by the gallery Video tab and the Loom's Video tab), `pixai_gallery.py`'s Generate
-  and Edit tabs, the Gallery's Enhance sub-tab (`enhance-cost`, reshaped select-then-run —
-  its old `window.confirm()` is gone, the badge is the only warning), and the Loom's Image/
-  Edit/Reference Deep Focus tabs (D-12, 2026-07-22) — each of those three kept its existing
-  `confirmSpend`/`window.confirm()` gate alongside the new badge, deliberately: that dialog
+  and Edit tabs, and the Loom's Image/Edit/Reference Deep Focus tabs (D-12, 2026-07-22) —
+  each of those three Loom tabs kept its existing `confirmSpend`/`window.confirm()` gate
+  alongside the new badge, deliberately: that dialog
   is this project's original fail-closed guardrail, built after those exact tabs used to lie
   about cost, so the badge there is an added preview, not a replacement. Still no badge:
   `generateShot`'s own `priceShot` + `window.confirm` gate for shot-level/batch video
