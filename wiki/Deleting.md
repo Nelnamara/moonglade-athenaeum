@@ -10,10 +10,15 @@ in the gallery:
   for a signed-in account on another device: this one is irreversible on PixAI's side, so it
   stays stricter than "signed in".
 
-> 🛟 **Local files are recoverable.** Both buttons *move* your files to a `_deleted/`
-> folder inside your backup rather than destroying them, and clear the catalog row. If
-> you delete something by accident, the file is still in `_deleted/` — drag it back and
-> re-run `--import-local`. (Thumbnails are regenerated, so they're not kept.)
+> 🛟 **Local files are recoverable, from inside the app.** Both buttons *move* your files
+> to a `_deleted/` folder inside your backup rather than destroying them, and clear the
+> catalog row. To get something back, open the **Control Panel → Trash** panel: it lists
+> everything in `_deleted/` with thumbnails, and **Restore selected** puts the files back
+> and re-catalogs them for you. Restoring works from any signed-in device; *Delete forever*
+> and *Empty trash* are localhost-only and ask you to type `DELETE` first.
+>
+> (Hand-copying files out of `_deleted/` and re-running `--import-local` still works as a
+> fallback, but you shouldn't need it.)
 
 > ⚠️ **The cloud side of "Delete from PixAI" is irreversible.** It's **task-level**:
 > selecting one image deletes its whole batch on PixAI. Gated behind a confirm dialog +
