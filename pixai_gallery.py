@@ -4286,17 +4286,12 @@ __DESIGN_TOKENS__
     .bulk-bar .actions-menu { left: 8px; right: 8px; min-width: 0; }
     .bulk-tip { display: none; }
 
-    /* DRAWER + LIGHTBOX: full-width sheet, reachable centered model flyout, stacked selects,
-       lightbox arrows off the image, touch-sized controls. */
-    #gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left { width: 100%; max-width: 100vw; }
-    #model-flyout, #gen-drawer.dock-left #model-flyout,
-    #gen-drawer.dock-top #model-flyout, #gen-drawer.dock-bottom #model-flyout {
-      position: fixed; top: 50%; left: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%);
-      width: 94vw; max-width: 94vw; max-height: 82vh;
-      border: 1px solid var(--surface1); border-radius: 12px; box-shadow: 0 22px 60px rgba(0,0,0,.6); }
-    .gen-row { flex-wrap: wrap; } .gen-row > * { flex: 1 1 100%; }
-    .dock-ctl button { width: 34px; height: 34px; }
-    .gen-head .x { font-size: 28px; min-width: 40px; }
+    /* LIGHTBOX: arrows off the image, touch-sized controls.
+       The Generate DRAWER's own portrait rules used to sit here too, and were DEAD --
+       they lost the cascade to the drawer's base rules, which live in a LATER <style>
+       block. They now live at the end of that same stylesheet, immediately after the
+       rules they override; search for "the drawer's own mobile pass" for the full
+       writeup. Do not move drawer/flyout overrides back up into this block. */
     #lb-img, #lb-video { max-width: 100vw; max-height: 74vh; }
     .lb-nav { top: auto; bottom: 12px; transform: none; min-width: 48px; min-height: 48px; padding: 0;
       display: flex; align-items: center; justify-content: center; font-size: 24px; }
@@ -5990,6 +5985,45 @@ document.addEventListener('DOMContentLoaded', function(){
   #model-preview .mp-badges .bdg{font-size:10px;font-weight:600;letter-spacing:.02em;border-radius:5px;padding:1px 7px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);text-transform:uppercase;}
   #model-preview .mp-badges .bdg.base{color:#c9b8ff;border-color:#4a3f78;}
   #model-preview .mp-badges .bdg.official{color:#0f1017;background:linear-gradient(180deg,#ffd27a,#e6a94b);border-color:#e6a94b;}
+
+  /* ---- Portrait phones (<=480px): the drawer's own mobile pass. ----
+     These rules USED to live up in the gallery's main <style> block, inside the shared
+     @media (max-width: 480px). They were entirely DEAD there. Every one of them leans on
+     the bare #gen-drawer / #model-flyout / .dock-ctl button / .gen-head .x selector, and
+     that media block sits EARLIER in the document than THIS stylesheet -- so at equal
+     specificity the base rules just above won on document order. A media query adds no
+     specificity; being inside one buys an override nothing.
+
+     Measured in a real browser at 375x812 before the move:
+       - the open drawer in its DEFAULT dock (the right-hand one) was 352.5px wide
+         (94vw from the base rule, not the 100%/100vw asked for here) -- a 22.5px dead
+         gutter down the side of what is supposed to be a full-width sheet
+       - the model flyout kept `transform: translate(-50%,-50%)` from here (the base rule
+         sets no transform, so nothing contested it) while `position`/`top`/`right` lost
+         to the base rule -- landing it at rect y = -332.9px, i.e. half the panel above
+         the top of the viewport and unreachable
+       - .dock-ctl button stayed 22px and .gen-head .x stayed 22px, so the touch targets
+         this block exists to enlarge never grew
+     The `.wide` and `.dock-left` drawer variants LOOKED correct throughout, which is why
+     this survived: their compound selectors out-specify the bare base rule, so only the
+     plain default dock was visibly broken.
+
+     Keeping them HERE, immediately after the rules they override, is the actual fix
+     rather than a specificity trick: the override can no longer be separated from its
+     base by an edit elsewhere in the file, and when this stylesheet is extracted to a
+     real .css file the base rules and their responsive overrides travel together as one
+     unit. Do not move these back up into the shared mobile block. */
+  @media (max-width: 480px) {
+    #gen-drawer,#gen-drawer.wide,#gen-drawer.dock-left{width:100%;max-width:100vw;}
+    #model-flyout,#gen-drawer.dock-left #model-flyout,
+    #gen-drawer.dock-top #model-flyout,#gen-drawer.dock-bottom #model-flyout{
+      position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);
+      width:94vw;max-width:94vw;max-height:82vh;
+      border:1px solid var(--surface1);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);}
+    .gen-row{flex-wrap:wrap;} .gen-row > *{flex:1 1 100%;}
+    .dock-ctl button{width:34px;height:34px;}
+    .gen-head .x{font-size:28px;min-width:40px;}
+  }
 </style>
 <div id="gen-scrim" onclick="Gen.close()"></div>
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
