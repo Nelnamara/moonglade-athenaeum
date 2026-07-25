@@ -318,8 +318,10 @@ so a tablet or second device can generate too; see [Trust & Safety](Trust-and-Sa
 what *is* restricted to the server's own machine.
 
 - **Generate** — pick a base model in the pop-out browser (hover any card for a full preview),
-  attach up to 6 **LoRAs with weights**, aspect/mode/count, live credit cost with the free-card
-  check up front.
+  attach **LoRAs with weights** up to your account's own limit (read live from your PixAI
+  membership and shown as `LORAS · n/max` — it is not a fixed number, and Generate blocks
+  rather than letting you submit over it), aspect/mode/count, live credit cost with the
+  free-card check up front.
 - **Edit** — instruct edits ("make it night"), the one-click **Enhance** workflow catalog, and
   the drag-a-box hand/face **Fixer**, in sub-tabs over one source image.
 - **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
