@@ -1460,28 +1460,73 @@ def test_branding_absent_is_404(tmp_path):
     assert cli.get("/branding/../catalog.db").status_code == 404    # traversal rejected
 
 
-def test_enhance_subtab_survives_with_no_dead_controls(tmp_path):
-    """The Enhance sub-tab stays a tab, but every control that submitted a
-    `pixai-panelplugin` task is gone -- PixAI never dispatches one from an API key (see
-    tests/test_enhance.py's test_no_panelplugin_submit_path_survives for the measurement),
-    so the ten one-click cards, the ComfyUI catalog search and the Run button below them
-    could not work and were removed rather than left to queue an hour-long no-op.
+def test_enhance_subtab_is_the_local_art_filters_surface(tmp_path):
+    """The Enhance sub-tab is where art filters live, and they run entirely in the browser.
 
-    What must remain: the sub-tab button, a pane that explains where those tools do work,
-    and a pointer to the Fix sub-tab, which submits through a different endpoint and does
-    run here. What must NOT: any element the deleted JS used to address."""
+    Every control that submitted a `pixai-panelplugin` task is gone -- PixAI never dispatches
+    one from an API key (see tests/test_enhance.py's test_no_panelplugin_submit_path_survives
+    for the measurement) -- and so is the paid `pixai-image-filter` submit that used to be the
+    other half of the same command. PixAI's seven art filters are gradient composites served
+    from a public config endpoint, so the tab now applies them locally: no credits, no request.
+
+    What must remain: the sub-tab button, the filters entry point, the flyout it opens, and a
+    line saying which PixAI tools still only run on their own site. What must NOT: any element
+    the deleted panelplugin JS addressed, and no route that would send a filter to a worker."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert "Gen.setEditSub('enhance')" in html            # the tab itself survives
     assert 'id="edit-sub-enhance"' in html
-    assert "pixai.art" in html                            # the pane says where they DO run
+    assert "pixai.art" in html                            # the pane says what does NOT run here
+    # the local filters surface: the module, the entry point, and the side-by-side flyout
+    assert '/static/mg-art-filters.js' in html
+    assert 'Gen.toggleFilters()' in html
+    assert 'id="filters-flyout"' in html
+    for part in ('id="af-stage"', 'id="af-img"', 'id="af-swatches"', 'id="af-strength"',
+                 'id="af-save"'):
+        assert part in html, part + " is missing from the filters flyout"
     for dead in ('class="enh-shelf"', 'class="enh-card"', 'id="enh-q"', 'id="enh-list"',
                  'id="enh-go"', 'id="enh-result"', 'id="enh-selected"',
                  'id="enhance-cost"', "Gen.selectEnhance(", "Gen.runEnhance(",
                  "function selectEnhance", "function runEnhance", "function renderWorkflows",
-                 "/api/workflows", "/api/enhance"):
+                 "/api/workflows", "/api/enhance", "pixai-image-filter"):
         assert dead not in html, dead + " is still in the page"
+
+
+def test_art_filters_flyout_is_side_by_side_and_placed_like_the_model_flyout(tmp_path):
+    """Two properties of the filters panel that a plain "the ids are present" check misses.
+
+    1. SIDE BY SIDE, image left. The whole point of a flyout instead of more drawer column is
+       that the image gets judged at size: the stage and the controls are a two-column flex
+       row with the stage first and given the growing share, not a stack.
+    2. Positioned by the in-repo overlay idiom, not a new one. #filters-flyout is a top-level
+       fixed panel placed by JS (the same shape as #model-preview, which mg-model-picker's
+       _place() drives) -- it must NOT be a child of #gen-drawer, because the drawer carries
+       `transform: translateX(...)` and a transform makes its box the containing block for
+       position:fixed descendants, so viewport coordinates computed from
+       getBoundingClientRect() would land relative to the drawer instead.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    # (1) the layout rule, not just the markup
+    assert "#filters-flyout .af-wrap{display:flex;" in html
+    # `flex:1 1 0`, not `1 1 auto`: from an `auto` basis the left column's base size is the
+    # image's INTRINSIC width, which overflows the panel and makes flex-wrap stack the controls
+    # under the image at every width -- measured, and the whole point of the panel is lost.
+    assert "#filters-flyout .af-left{flex:1 1 0;" in html
+    stage_at = html.index('id="af-stage"')
+    ctrl_at = html.index('id="af-swatches"')
+    assert stage_at < ctrl_at, "the image must come before the controls (image left)"
+    # (2) fixed + JS-placed, and OUTSIDE the transformed drawer
+    assert "#filters-flyout{position:fixed;" in html
+    drawer_at = html.index('<aside id="gen-drawer"')
+    drawer_end = html.index("</aside>", drawer_at)
+    flyout_at = html.index('id="filters-flyout"')
+    assert flyout_at > drawer_end, (
+        "#filters-flyout is inside #gen-drawer, whose transform would capture its "
+        "position:fixed coordinates")
+    assert "function placeFilters(" in html
 
 
 def test_edit_model_id_and_quality_omit():

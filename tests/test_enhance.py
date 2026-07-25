@@ -1,57 +1,77 @@
-"""Enhance: PixAI art filters, and the guards that keep the dead panelplugin-workflow
-surface deleted. Builders pinned to REAL captured submits (2026-07-02). Pure/mocked -- no
-network, no spend."""
-from types import SimpleNamespace
+"""Enhance: the guards that keep two deleted PixAI submit families deleted -- the panelplugin
+workflows PixAI never dispatches for an API-key client, and the art-filter generation that
+charged credits for something the browser composites itself. Pure/mocked -- no network,
+no spend."""
+from pathlib import Path
+
+import pytest
 
 import pixai_gallery_backup as core
 import pixai_gallery
 
-
-# ---- art filter (pixai-image-filter) ----
-
-def test_filter_matches_real_submit():
-    p = core.build_filter_parameters("739361299672561699", "filter-v1-m2", strength=0.77)
-    assert p["model"] == "pixai-image-filter"
-    assert p["mediaId"] == "739361299672561699"
-    assert p["inputs"] == {"filterId": "filter-v1-m2", "strength": 0.77}
-    assert p["enablePreview"] is False
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_enhance_kaisuuken_inject():
-    assert core.build_filter_parameters("1", "f", kaisuuken_id="c")["kaisuukenId"] == "c"
+# ---- art filters are not a generation, and can no longer be submitted as one ----
+
+def test_no_art_filter_submit_path_survives():
+    """PixAI's 7 art filters are gradient-overlay composites, not inference. Their whole
+    definition -- two or three linear gradients with a blend mode, an opacity and an optional
+    brightness/contrast/saturation trim -- comes from a PUBLIC unauthenticated config endpoint
+    (GET https://api.pixai.art/config/imageArtFilters, 200 with no key), and PixAI's own web
+    client applies them in the browser: their Filters tab shows source and result side by side,
+    with no Generate button and no price anywhere on it.
+
+    build_filter_parameters and --filter-id sent that to createGenerationTask as a
+    `pixai-image-filter` task, which charged credits and waited on a worker queue to perform a
+    handful of gradient fills -- strictly worse than static/mg-art-filters.js, which does the
+    same composite locally, offline and free. So the paid path is removed rather than left as a
+    second, worse option a user could pick by accident.
+
+    Asserted against the SOURCE as well as the module namespace: a builder that survives under
+    another name, or a stray `pixai-image-filter` model literal, is the same defect back."""
+    assert not hasattr(core, "build_filter_parameters")
+    for mod in ("pixai_gallery.py", "pixai_gallery_backup.py"):
+        src = (ROOT / mod).read_text(encoding="utf-8")
+        assert "pixai-image-filter" not in src, mod + " still names the paid filter model"
+        assert "filterId" not in src, mod + " still builds a filter task's inputs"
 
 
-# ---- run_enhance guards ----
+def test_the_enhance_command_is_gone_from_the_cli(monkeypatch, capsys):
+    """--enhance had exactly two halves and both are now gone: panelplugin workflows (which
+    PixAI never runs for an API-key client) and art filters (which cost nothing locally). A
+    command with no builder left is not a command, so the flag, its three companions and
+    run_enhance itself were removed rather than kept as an entry point to nothing.
 
-def _enh_args(tmp_path, **kw):
-    base = dict(out=str(tmp_path), token=None, enhance=True, src="100",
-                filter_id="filter-v1-m2", params_json="", strength=0.5, kaisuuken_id="",
-                confirm=False, task_id="", poll_timeout=300, name_length=60, name_sep="_",
-                dump_params=False)
-    base.update(kw)
-    return SimpleNamespace(**base)
-
-
-def test_enhance_previews_without_confirm(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "gql_adhoc",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no network in preview")))
-    monkeypatch.setattr(core, "upload_media",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no upload in preview")))
-    assert core.run_enhance(_enh_args(tmp_path)) == {"submitted": False}
-
-
-def test_enhance_requires_src_and_id(tmp_path):
-    import pytest
-    with pytest.raises(core.PixAIError):
-        core.run_enhance(_enh_args(tmp_path, src=""))
-    with pytest.raises(core.PixAIError):
-        core.run_enhance(_enh_args(tmp_path, filter_id=""))
+    Driven through main()'s real parser rather than asserted against the source, because the
+    property that matters is that the CLI does not ACCEPT these -- a leftover add_argument keeps
+    a flag accepted no matter what the source around run_enhance looks like. main() is pure
+    argparse up to parse_args(), so no command runs and no network is touched."""
+    assert not hasattr(core, "run_enhance")
+    monkeypatch.setattr("sys.argv", ["pixai_gallery_backup.py", "--enhance", "--src", "1",
+                                     "--filter-id", "filter-v1-m2", "--strength", "0.77"])
+    with pytest.raises(SystemExit) as ex:
+        core.main()
+    assert ex.value.code != 0
+    err = capsys.readouterr().err
+    assert "unrecognized arguments" in err
+    # argparse lists every argument it did not recognise, so checking all four means one
+    # surviving flag cannot hide behind its neighbours failing.
+    for flag in ("--enhance", "--src", "--filter-id", "--strength"):
+        assert flag in err, flag + " is still accepted by the parser"
 
 
-def test_enhance_filter_preview_uses_filter(tmp_path, capsys):
-    core.run_enhance(_enh_args(tmp_path, filter_id="filter-v1-m2"))
-    out = capsys.readouterr().out
-    assert "pixai-image-filter" in out and "filter-v1-m2" in out
+def test_the_local_filter_module_ships_with_the_recipes_baked_in():
+    """The replacement has to work with no connection -- offline is a property of the whole
+    app, not a nicety -- so the 7 recipes are baked into the module rather than fetched, and it
+    makes no request of any kind. static/mg-art-filters.js's own behaviour is exercised for
+    real in loom/test/mg-art-filters.test.js; this pins the Python-side fact that the file the
+    page loads exists and is self-contained."""
+    js = (ROOT / "static" / "mg-art-filters.js").read_text(encoding="utf-8")
+    assert "api.pixai.art/config/imageArtFilters" in js      # names where the data came from
+    for fid in ("filter-v1-m1", "filter-v1-m4", "filter-v1-m7"):
+        assert fid in js, fid + " is not baked in"
+    assert "fetch(" not in js, "applying a filter must cost nothing and reach no network"
 
 
 # ---- the panelplugin surface is gone and must stay gone ----
@@ -71,29 +91,30 @@ def test_no_panelplugin_submit_path_survives():
     --workflow-id) was therefore deleted rather than fixed. This guard exists because that
     surface LOOKS correct from the client side -- it accepts, queues and reports a price -- and
     costs an hour of wall-clock per attempt to disprove."""
-    from pathlib import Path
-    root = Path(__file__).resolve().parents[1]
     # The two literals a submit path cannot do without: the model id and the parameter that
     # names the workflow. Both are absent from the modules -- the word "panelplugin" on its own
     # still appears in the comments that explain WHY, which is the point of leaving them.
     for mod in ("pixai_gallery.py", "pixai_gallery_backup.py"):
-        src = (root / mod).read_text(encoding="utf-8")
+        src = (ROOT / mod).read_text(encoding="utf-8")
         assert "pixai-panelplugin" not in src, mod + " still names the panelplugin model"
         assert "workflowId" not in src, mod + " still addresses a panelplugin workflow"
-    core_src = (root / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    core_src = (ROOT / "pixai_gallery_backup.py").read_text(encoding="utf-8")
     assert '"--workflow-id"' not in core_src        # the CLI flag that fed it
     assert not hasattr(core, "build_panelplugin_parameters")
     assert not hasattr(core, "workflow_catalog")
 
 
-def test_no_route_reaches_a_panelplugin_submit(tmp_path):
-    """The route-level half of the guard above: neither the submit route nor the catalog
-    route that populated its picker may exist, so no reachable request can queue a task
-    PixAI will never run."""
+def test_no_route_reaches_a_panelplugin_or_filter_submit(tmp_path):
+    """The route-level half of the guards above: neither the submit route nor the catalog route
+    that populated its picker may exist, so no reachable request can queue a task PixAI will
+    never run -- or pay for a composite the browser does for free."""
     app = pixai_gallery.create_app(tmp_path)
     rules = {str(r.rule) for r in app.url_map.iter_rules()}
     assert "/api/enhance" not in rules
     assert "/api/workflows" not in rules
+    # The filters panel saves its result through the existing local-import path rather than a
+    # route of its own, so that one DOES have to be reachable for "Save to library" to work.
+    assert "/api/import-local" in rules
 
 
 def test_enhance_plugins_dict_and_dead_plugin_branch_are_gone():
@@ -104,8 +125,7 @@ def test_enhance_plugins_dict_and_dead_plugin_branch_are_gone():
     still guards the plugin-name shortcut specifically, so a future refinement surface cannot
     resurrect it as a way back into a panelplugin submit. hand-fix and face-fix are superseded
     by the real, working box-based /api/fix (submit_fixer)."""
-    from pathlib import Path
     assert not hasattr(pixai_gallery, "ENHANCE_PLUGINS")
-    src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
+    src = (ROOT / "pixai_gallery.py").read_text(encoding="utf-8")
     assert "ENHANCE_PLUGINS" not in src
     assert 'p.get("plugin")' not in src
