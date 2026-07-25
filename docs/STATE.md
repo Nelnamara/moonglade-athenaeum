@@ -499,6 +499,13 @@ on record so far, from a read-only code check (no changes made):
   grid's panel fill, `#model-flyout`'s viewport containment, Deep Focus's veil-over-FAB
   stacking outcome, and per-skin re-tint plus pre-paint application; it skips cleanly without
   playwright or a browser binary, which is why it currently skips in CI and runs locally.
+- **`tests/csshelp.py` covers the one axis the harness can't reach in CI.** Because the harness
+  skips where no playwright is installed — which is every CI run today — a cascade regression
+  could land on `loom-v2` unseen. This resolves which declaration actually *wins* (`!important`,
+  specificity, document order) from the served HTML in pure stdlib, no browser, so it runs
+  everywhere; `test_portrait_mobile_drawer_rules_actually_win` asserts on it. Strictly weaker
+  than the harness (it proves the winner, not the pixels) and explicitly not a reason to skip
+  writing a rendering test.
 - **`CONTRIBUTING.md`** covers setup, running tests, the invariants that matter most to an
   outside contributor (`media_id` resolution, catalog-schema three-place changes, never
   committing `config.json`), PR expectations, and a private channel for security reports.

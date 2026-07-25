@@ -62,6 +62,18 @@ the shipped, fixed behaviour, then apply the pre-fix state as an in-page overrid
 `<style>` tag or a class removal -- NEVER a committed revert) and assert the same metric
 flips. That makes every threshold here demonstrably non-vacuous on every run, not just on
 the day it was written.
+
+The CI gap, and what covers it
+------------------------------
+This module SKIPS without playwright + chromium, and `.github/workflows/tests.yml`
+installs neither -- so on CI these guards do not run at all. That is a deliberate
+trade (see the marker note in `pytest.ini`), but it means defect 3 above would have
+regressed on a `push` unseen. `tests/csshelp.py` covers exactly that one axis in pure
+stdlib: it resolves which declaration WINS the cascade (!important, specificity,
+document order) with no browser, and
+`tests/test_web_pick.py::test_portrait_mobile_drawer_rules_actually_win` asserts on
+that. It is a strictly weaker instrument -- it proves the winner, not the pixels -- and
+is not a reason to skip adding a rendering test here.
 """
 import json
 import threading
@@ -401,15 +413,20 @@ def test_model_flyout_is_fully_inside_the_viewport_at_desktop(logged_in_page):
     _assert_flyout_within_viewport(page.evaluate(_FLYOUT_RECT_JS))
 
 
-@pytest.mark.xfail(strict=False, reason=(
-    "KNOWN, being fixed in another worktree right now (docs/AUDIT_2026-07-21.md T5-CSS): "
-    "at <=480px both mobile @media rules use bare id selectors and lose to later base "
-    "rules at equal specificity, so #model-flyout keeps its desktop right:100%/height:100% "
-    "geometry and lands at y = -332.9px -- half above the viewport. strict=False on "
-    "purpose: this flips to XPASS on its own the moment that fix lands, and starts failing "
-    "again if it ever regresses. Do not delete or weaken it to get green."))
 def test_model_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logged_in_page):
-    """Same assertion, 375x812. Measured as shipped: top -332.9, bottom 332.9."""
+    """Same assertion, 375x812.
+
+    This carried an xfail(strict=False) while the defect it describes was open: at <=480px
+    both mobile @media rules used bare id selectors and lost to later base rules at equal
+    specificity, so #model-flyout kept its desktop right:100%/height:100% geometry and
+    landed at y = -332.9px, half above the viewport. That fix has LANDED -- the drawer's
+    portrait overrides now sit at the end of the drawer's own stylesheet, after the rules
+    they override -- and this test went XPASS on the strength of it. The marker is gone
+    rather than left to report XPASS forever, because an xfail'd guard is a dead guard: a
+    regression would come back as "expected failure" and read as green, which is the exact
+    class of blind spot this whole module exists to remove. Measured after the fix: the
+    flyout is fixed/centered and fully inside the viewport in every dock.
+    """
     page = logged_in_page(**MOBILE_PORTRAIT)
     _stub_model_search(page)
     _visit(page, "/")
