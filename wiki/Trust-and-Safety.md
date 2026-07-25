@@ -4,10 +4,12 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
 
 ## What it can do
 
-- **Spend credits** — generating an image, video, edit, or reference-video, or running an
-  enhance/hand-face-fix workflow. Every one of these is gated: on the CLI you must pass
-  `--confirm`; in the web app, the button click you press *is* the confirmation (there's no
-  extra network step hiding behind it). Nothing spends silently in the background.
+- **Spend credits** — generating an image, video, edit, or reference-video, or running a
+  hand/face fix. Every one of these is gated: on the CLI you must pass `--confirm`; in the web
+  app, the button click you press *is* the confirmation (there's no extra network step hiding
+  behind it). Nothing spends silently in the background. (The **art filters** on the Edit tab are
+  not in this list: they are gradient composites applied in your own browser, and they make no
+  network request and cost nothing.)
 - **Delete a task from your PixAI account** — irreversible on PixAI's side. Gated behind
   `--apply` plus typing the word `delete` on the CLI (skippable with `--yes` only if you pass
   it explicitly), or typing `DELETE` in the gallery's confirm dialog.
@@ -67,8 +69,8 @@ for handing the tool to someone else — add this to your `config.json`:
 ```
 
 With it set, every path that can actually mutate your account — submitting a generation
-(image, video, reference video, an edit, or an enhance), submitting a hand/face fix, deleting
-a task, or claiming a reward — refuses itself with a clear error, **regardless of `--confirm`,
+(image, video, reference video, or an edit), submitting a hand/face fix, deleting a task, or
+claiming a reward — refuses itself with a clear error, **regardless of `--confirm`,
 `--apply`, or `--yes`**, whether you triggered it from the CLI or the web app. Those flags
 exist to skip prompts on a run you already trust; `READ_ONLY` is for a run you don't want to
 trust yet, so it overrides them rather than just changing their default. Browsing, backing up,

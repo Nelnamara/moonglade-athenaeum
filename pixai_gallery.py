@@ -6106,6 +6106,57 @@ document.addEventListener('DOMContentLoaded', function(){
   #model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;min-height:0;}
   #model-flyout #gen-picker-host{flex:1;min-height:0;display:flex;flex-direction:column;}
   #model-flyout mg-model-picker{flex:1;min-height:0;}
+  /* ---- Art filters flyout (Edit > Enhance) --------------------------------------------
+     Same chrome as #model-flyout above (--mantle box, .gen-head/.gen-body, one heavy shadow)
+     but placed the way #model-preview is: position:fixed with left/top written by JS, the
+     rule mg-model-picker's _place() uses -- prefer the side with room, then clamp to the
+     viewport. #model-flyout's pure-CSS `right:100%` edge pop cannot carry this panel: it is
+     side-by-side, so it is far wider than the 372px flyout that rule was written for, and at
+     that width running off the left edge stops being hypothetical on a laptop.
+
+     It is a TOP-LEVEL element, deliberately not a child of #gen-drawer. The drawer carries
+     `transform: translateX(...)`, and a transform makes its box the containing block for
+     position:fixed descendants -- so viewport coordinates from getBoundingClientRect() would
+     be re-interpreted relative to the drawer and the panel would land off-screen. That is also
+     why #model-flyout, which IS inside the drawer, has to use position:absolute. */
+  #filters-flyout{position:fixed;z-index:222;display:none;flex-direction:column;
+    background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;
+    box-shadow:0 22px 60px rgba(0,0,0,.6);overflow:hidden;}
+  #filters-flyout.open{display:flex;}
+  #filters-flyout .gen-head{padding:11px 13px 0;}
+  #filters-flyout .gen-head .x{margin-left:auto;}
+  #filters-flyout .gen-body{padding:11px 13px 13px;overflow:auto;min-height:0;}
+  /* The side-by-side layout: image LEFT and given the growing share so it can be judged at
+     size, swatches + controls RIGHT at a fixed comfortable column. `flex-wrap` is what makes
+     the narrow case degrade into a stack instead of squeezing both halves to unusable.
+
+     `flex:1 1 0` on the left column, not `1 1 auto`: with `auto` the column's base size is the
+     image's max-content width -- its INTRINSIC width, 900px for a typical generation, because
+     `max-width:100%` on the img can't resolve against a container the img is itself sizing. The
+     two columns' hypothetical sizes then exceed the panel and flex-wrap breaks the line, which
+     stacked the controls under the image at every panel width. Measured: a 604px-wide image in
+     a 647px panel wrapped; from a 0 basis the same image renders 375px wide, beside the
+     controls. min-width is what still allows the deliberate stack on a phone. */
+  #filters-flyout .af-wrap{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;}
+  #filters-flyout .af-left{flex:1 1 0;min-width:200px;}
+  #filters-flyout .af-right{flex:0 0 232px;}
+  /* The stage is MgArtFilters' preview host: it stacks overlay divs at `inset:0` over the
+     <img>, so its box has to be the image's box EXACTLY -- inline-block + line-height:0 + a
+     block img, the same pairing #fix-wrap needs to keep its canvas registered with the photo.
+     Deliberately NOT `width:100%` + `object-fit:contain`: that keeps the element's box at the
+     full column width and letterboxes the picture inside it, and the overlays -- which know
+     nothing about object-fit -- would then paint the filter's gradient across the bars too. */
+  #af-stage{position:relative;display:inline-block;line-height:0;border-radius:9px;
+    overflow:hidden;}
+  #af-img{display:block;max-width:100%;max-height:58vh;width:auto;height:auto;}
+  #af-swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .af-tile{cursor:pointer;background:none;border:none;padding:0;display:block;}
+  .af-tile .sw{width:100%;aspect-ratio:1;border-radius:7px;border:2px solid var(--surface1);}
+  .af-tile.on .sw{border-color:var(--lavender);box-shadow:0 0 9px rgba(182,146,230,.6);}
+  .af-tile .cap{font-size:9.5px;color:var(--subtext);text-align:center;margin-top:2px;}
+  .af-tile.on .cap{color:var(--text);}
+  #af-msg{font-size:11px;color:var(--subtext);margin-top:7px;min-height:14px;}
+  #af-msg.bad{color:var(--red);}
   /* O13: #pick-scrim/#pick-modal/.pick-filters and their CSS are gone -- <mg-gallery-picker>
      (static/mg-gallery-picker.js) brings its own complete self-contained overlay/box/filter
      chrome, injected client-side. #similar-modal below is UNRELATED (Similar.js, not Picker)
@@ -6368,29 +6419,39 @@ document.addEventListener('DOMContentLoaded', function(){
         <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
         <div id="edit-result" class="gen-result" style="display:none;"></div>
       </div>
-      {# The ten one-click cards, the ComfyUI catalog search and the Run button that used to
-         live here are gone. PixAI never assigns a worker to a panelplugin task submitted with
-         an API key: it accepts it, queues it, charges for it, then cancels it at roughly
-         60 minutes with outputs.reason "waiting timeout" and refunds. Measured
-         2026-07-24 against their live API and proven by elimination -- the same payload built
-         with PixAI's own official preset workflow id also never dispatches, while their web
-         client runs that workflow in 1-3 seconds, and a taskKind=chat Fix from this app
-         dispatched in one second minutes earlier. No workflow id, input key or payload shape
-         changes that, so there was nothing to repair. The tab stays (it is where image
-         refinement belongs) and says so honestly instead of offering buttons that queue an
-         hour-long no-op. Guarded by tests/test_enhance.py. #}
+      {# This pane is the art-filters entry point. The ten one-click panelplugin cards, the
+         ComfyUI catalog search and the Run button that used to live here are gone: PixAI never
+         assigns a worker to a panelplugin task submitted with an API key -- it accepts it,
+         queues it, charges for it, then cancels it at roughly 60 minutes with outputs.reason
+         "waiting timeout" and refunds. Measured 2026-07-24 against their live API and proven by
+         elimination -- the same payload built with PixAI's own official preset workflow id also
+         never dispatches, while their web client runs that workflow in 1-3 seconds, and a
+         taskKind=chat Fix from this app dispatched in one second minutes earlier. No workflow
+         id, input key or payload shape changes that, so there was nothing to repair.
+
+         Art filters are the opposite story: they were never inference to begin with, so they
+         run here in full, locally and free (static/mg-art-filters.js). The working surface is
+         #filters-flyout below, because judging a filter needs the image at size and this drawer
+         column is 420px (600px in Edit). Guarded by tests/test_enhance.py, test_web_pick.py and
+         the rendering harness, which measures the panel's layout in a real browser. #}
       <div id="edit-sub-enhance" style="display:none;">
-        <div class="gen-lbl" style="margin-top:0;">One-click tools</div>
-        <div class="enh-note">
-          PixAI's one-click ComfyUI workflows &mdash; background removal, line art, sketch
-          colouring, relight &mdash; only run on <b>pixai.art</b> itself. Submitted with an API
-          key they queue and are cancelled unstarted about an hour later, so this app can't
-          offer them.
+        <div class="gen-lbl" style="margin-top:0;">Art filters
+          <span style="text-transform:none;color:var(--emerald);">&middot; free, no generation</span></div>
+        <button type="button" id="af-open" class="gen-go" onclick="Gen.toggleFilters()"
+                style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);">
+          &#9673; Open filters</button>
+        <div class="enh-note" style="margin-top:9px;">
+          PixAI's seven art filters are gradient overlays, not AI &mdash; so they are applied
+          right here in the browser: <b>no credits, no request, works offline</b>. Pick a source
+          image above, then open the panel to compare and save.
           <br><br>
-          What <i>does</i> work here: <b>Upscale</b> and <b>Hires</b> live on the
-          <b>Generate</b> tab's Upscale row (they are ordinary generation settings, not
-          workflows), and for hands or faces use <b>Fix</b> above &mdash; it goes through a
-          different PixAI endpoint and works.
+          Still <b>pixai.art</b> only: their one-click ComfyUI workflows (background removal,
+          line art, sketch colouring, relight). Submitted with an API key those queue and are
+          cancelled unstarted about an hour later, so this app can't offer them. But run one
+          <i>on their site</i> and the result still lands in your library automatically &mdash;
+          only the submit button is missing, never the collecting. What also works here:
+          <b>Upscale</b> and <b>Hires</b> on the <b>Generate</b> tab's Upscale row (plain
+          generation settings, not workflows), and <b>Fix</b> above for hands and faces.
         </div>
       </div>
       <div id="edit-sub-fix" style="display:none;">
@@ -6437,6 +6498,38 @@ document.addEventListener('DOMContentLoaded', function(){
     </div>
   </div>
 </aside>
+<!-- The art-filters panel. OUTSIDE </aside> on purpose: #gen-drawer carries a transform, which
+     makes its box the containing block for position:fixed descendants, so a fixed panel placed
+     from getBoundingClientRect() coordinates has to be a sibling of the drawer, not a child.
+     Same reason #model-preview sits out here. Gen.placeFilters() does the placement. -->
+<div id="filters-flyout" aria-hidden="true" aria-label="Art filters">
+  <div class="gen-head"><span class="t">&#9673; Art filters</span>
+    <button class="x" onclick="Gen.toggleFilters()" aria-label="Close">&times;</button></div>
+  <div class="gen-body">
+    <div class="af-wrap">
+      <div class="af-left">
+        <div id="af-stage"><img id="af-img" alt="filter preview source"></div>
+      </div>
+      <div class="af-right">
+        <div class="gen-lbl" style="margin-top:0;">Filter</div>
+        <div id="af-swatches"></div>
+        <div class="gen-lbl">Strength <span id="af-sval" style="color:var(--lavender);">1.00</span></div>
+        <input type="range" id="af-strength" min="0" max="1" step="0.01" value="1" style="width:100%;"
+               oninput="Gen.filterStrength(this.value)">
+        <div class="gen-lbl">Angle <span id="af-aval" style="color:var(--lavender);">180&deg;</span></div>
+        <input type="range" id="af-angle" min="0" max="345" step="15" value="180" style="width:100%;"
+               oninput="Gen.filterAngle(this.value)">
+        <div style="display:flex;gap:6px;margin-top:10px;">
+          <button type="button" id="af-none" class="gen-go" onclick="Gen.filterClear()"
+                  style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);">
+            No filter</button>
+          <button type="button" id="af-save" class="gen-go" onclick="Gen.filterSave()">Save to library</button>
+        </div>
+        <div id="af-msg"></div>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- O13: the gallery's picker is <mg-gallery-picker> now (mounted/unmounted by the
      Picker IIFE below on open()/close()) -- no static markup needed here anymore. -->
 <div id="similar-scrim" onclick="Similar.close()"></div>
@@ -6614,6 +6707,10 @@ document.addEventListener('DOMContentLoaded', function(){
      tab's model-flyout and Picker, unrelated to the drawer; the drawer's own mg-pick-request
      is wired to the gallery Picker in the inline JS below, same as always. -->
 <script src="/static/mg-generate-drawer.js"></script>
+<!-- PixAI's 7 art filters, baked in as data and composited locally (Edit > Enhance). Loaded
+     unconditionally rather than lazily: ~26KB of pure data + pure functions, with no network
+     access of its own, and the pane it drives has to work with the connection down. -->
+<script src="/static/mg-art-filters.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
 var Contests = (function(){
@@ -6930,6 +7027,11 @@ var Gen = (function(){
     el('gen-drawer').classList.remove('open'); el('gen-scrim').classList.remove('open');
     el('gen-drawer').setAttribute('aria-hidden','true');
     var f=el('model-flyout'); if(f){ f.classList.remove('open'); f.setAttribute('aria-hidden','true'); }
+    // The filters panel is a SIBLING of the drawer (it has to be -- see its CSS), so closing
+    // the drawer does not hide it the way a child would be hidden. Close it explicitly or it
+    // is left floating over the gallery, anchored to a drawer that has slid away.
+    var af=el('filters-flyout');
+    if(af && af.classList.contains('open')) toggleFilters();
     hidePreview();
   }
   // O12 (Phase 2): the flyout's own grid/search/market UI is the shared <mg-model-picker>
@@ -6976,6 +7078,12 @@ var Gen = (function(){
     ['left','top','bottom'].forEach(function(x){ dr.classList.toggle('dock-'+x, d===x); });
     document.querySelectorAll('.dock-ctl button').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-dock')===d); });
     try{ localStorage.setItem('gen-dock', d); }catch(e){}
+    // #model-flyout re-anchors on a dock change through CSS alone (its position is written in
+    // `#gen-drawer.dock-* #model-flyout` rules). The filters panel is placed by JS, so it has to
+    // be told: without this it keeps the coordinates of the dock it was opened against. Deferred
+    // past the drawer's own .2s width/transform transition, or it measures the OLD box.
+    if(el('filters-flyout') && el('filters-flyout').classList.contains('open'))
+      setTimeout(placeFilters, 220);
   }
   function setKind(k){
     if(k===kind) return; kind=k;
@@ -7569,6 +7677,9 @@ var Gen = (function(){
     var img=el('edit-src-img');
     if(mid){ img.onerror=function(){img.style.display='none';}; img.src='/thumbs/'+mid+'.jpg'; img.style.display='block'; fixInit(); fixLoad(mid); }
     else { img.style.display='none'; }
+    // An open filters panel is showing the OLD image until it is told otherwise -- reloading it
+    // here is what stops a preview from being judged against the wrong source.
+    if(el('filters-flyout') && el('filters-flyout').classList.contains('open')) afLoadSource();
     renderEditRefs();   // primary changed -> @image1 slot + cap count update
     debEditCost();
     fixCost();          // fixLoad() dropped the boxes with the old source; clear its badge too
@@ -7759,9 +7870,150 @@ var Gen = (function(){
             {past:'Fixed', btn:el('fix-go'), busy:'Fixing\\u2026', idle:'Fix marked regions'});
   }
   function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
-  // The Enhance sub-tab's client half (loadWorkflows / renderWorkflows / selectEnhance /
+
+  // ---- Art filters (Edit > Enhance) --------------------------------------------------
+  // The panelplugin client half (loadWorkflows / renderWorkflows / selectEnhance /
   // enhanceCost / runEnhance) is gone with the controls it drove -- see the sub-tab's markup
-  // for why a panelplugin submit can never complete from an API key. The tab is static copy now.
+  // for why a panelplugin submit can never complete from an API key. What lives here instead
+  // spends nothing and, until you press Save, makes no request at all: window.MgArtFilters
+  // (static/mg-art-filters.js) carries PixAI's own 7 filter recipes as baked data and does the
+  // whole composite on the client -- CSS mix-blend-mode for the preview, one canvas fill per
+  // layer for the export, both pinned to the same gradient geometry so they agree.
+  var afId=null;
+  function afOpts(){
+    return {strength:parseFloat(el('af-strength').value),
+            angle:parseFloat(el('af-angle').value)};
+  }
+  function afMsg(t, bad){
+    var m=el('af-msg'); if(!m) return;
+    m.textContent=t||''; m.classList.toggle('bad', !!bad);
+  }
+  function afBuildSwatches(){
+    var AF=window.MgArtFilters, host=el('af-swatches');
+    if(!AF || !host || host.children.length) return;   // built once, like ensurePickers()
+    AF.list().forEach(function(id){
+      var t=document.createElement('button');
+      t.type='button'; t.className='af-tile'; t.setAttribute('data-af', id);
+      t.title=AF.get(id).name+' \\u00b7 free, applied in your browser';
+      var sw=document.createElement('div'); sw.className='sw';
+      var cap=document.createElement('div'); cap.className='cap';
+      cap.textContent=(AF.get(id).name||id).replace('Filter ','');
+      t.appendChild(sw); t.appendChild(cap);
+      t.onclick=function(){ afPick(id); };
+      host.appendChild(t);
+      AF.renderSwatch(sw, id);      // the tile IS that filter's own gradients, no art needed
+    });
+  }
+  function afPaintTiles(){
+    var tiles=el('af-swatches').querySelectorAll('.af-tile');
+    for(var i=0;i<tiles.length;i++)
+      tiles[i].classList.toggle('on', tiles[i].getAttribute('data-af')===afId);
+  }
+  function afPick(id){
+    var AF=window.MgArtFilters; if(!AF) return;
+    afId=id; afPaintTiles();
+    var n=AF.applyPreview(el('af-stage'), id, afOpts());
+    // normalizeLayers reports any layer it had to drop -- an unmapped blend mode, a stop colour
+    // that isn't a plain literal. The preview still renders, just without that layer, so saying
+    // so is the difference between "this filter looks off" and a silent wrong result.
+    afMsg(n.warnings.length ? n.warnings[0]
+                            : (AF.get(id).name+' \\u00b7 nothing sent, nothing spent'),
+          n.warnings.length > 0);
+  }
+  function filterClear(){
+    var AF=window.MgArtFilters; if(!AF) return;
+    afId=null; afPaintTiles(); AF.clearPreview(el('af-stage')); afMsg('');
+  }
+  function filterStrength(v){
+    el('af-sval').textContent=(parseFloat(v)||0).toFixed(2);
+    if(afId) afPick(afId);
+  }
+  function filterAngle(v){
+    el('af-aval').textContent=v+'\\u00b0';
+    if(afId) afPick(afId);
+  }
+  function afLoadSource(){
+    var mid=editSrc(), img=el('af-img');
+    if(!mid){ img.removeAttribute('src'); afMsg('Pick a source image above first.', true); return false; }
+    // /full/ is this app's OWN route, which is what makes Save work: composite() draws the
+    // source into a canvas, and a cross-origin image without CORS taints that canvas so
+    // toBlob() throws SecurityError. A PixAI CDN url dropped in here would do exactly that.
+    var want='/full/'+encodeURIComponent(mid);
+    if(img.getAttribute('src')!==want) img.src=want;
+    return true;
+  }
+  // Placement follows mg-model-picker's _place(): open toward whichever side has room, then clamp
+  // to the viewport. #model-flyout's pure-CSS `right:100%` pop is not enough for this one -- it is
+  // a side-by-side panel, so it is far wider than the drawer, and the drawer can be docked to any
+  // of four edges at either 420px or (in Edit/Video) 600px. Called on open, on the source image's
+  // load (its height decides the panel's), on a dock change and on resize.
+  //
+  // The width ADAPTS to the room rather than being fixed, because a fixed one doesn't fit: at
+  // 1280x720 -- an ordinary laptop -- a 600px-wide Edit drawer leaves 647px beside it, so
+  // demanding AF_W would center the panel on top of the drawer it is supposed to sit next to.
+  // Below AF_MIN_SIDE there is no honest side-by-side left (the controls column alone is 232px),
+  // so it centres over the drawer instead -- which is #model-flyout's own documented behaviour
+  // for the top and bottom docks, where the drawer is a full-width bar and nothing can sit beside
+  // it: "an edge-popped flyout gets clipped ... render it as a centered overlay instead".
+  var AF_W=780, AF_MIN_SIDE=560;
+  function placeFilters(){
+    var f=el('filters-flyout');
+    if(!f || !f.classList.contains('open')) return;
+    var r=el('gen-drawer').getBoundingClientRect();
+    var vw=window.innerWidth, vh=window.innerHeight, pad=8, gap=10;
+    var leftRoom=r.left-gap-pad, rightRoom=vw-r.right-gap-pad;
+    var w, x;
+    if(Math.max(leftRoom, rightRoom) >= AF_MIN_SIDE){
+      if(leftRoom>=rightRoom){ w=Math.min(AF_W, leftRoom); x=r.left-gap-w; }
+      else { w=Math.min(AF_W, rightRoom); x=r.right+gap; }
+    } else {
+      w=Math.min(AF_W, vw-pad*2); x=(vw-w)/2;
+    }
+    f.style.width=Math.round(w)+'px';
+    f.style.maxHeight=(vh-pad*2)+'px';
+    var h=f.offsetHeight;                    // the real height: needs .open and the width set
+    f.style.left=Math.round(Math.max(pad, x))+'px';
+    f.style.top=Math.round(Math.max(pad, Math.min(r.top+8, vh-h-pad)))+'px';
+  }
+  function toggleFilters(){
+    var f=el('filters-flyout'), on=!f.classList.contains('open');
+    f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
+    if(!on) return;
+    afBuildSwatches();
+    var ok=afLoadSource();
+    if(ok && !afId) afMsg('Free \\u2014 applied in your browser, nothing leaves this machine.');
+    placeFilters();
+    var img=el('af-img');
+    img.onload=function(){ placeFilters(); if(afId) afPick(afId); };
+  }
+  function filterSave(){
+    var AF=window.MgArtFilters, mid=editSrc(), img=el('af-img');
+    if(!AF) return;
+    if(!afId){ afMsg('Pick a filter first.', true); return; }
+    if(!mid || !img.naturalWidth){ afMsg('The source image has not finished loading.', true); return; }
+    var btn=el('af-save'), idle=btn.textContent;
+    btn.disabled=true; btn.textContent='Saving\\u2026';
+    function done(t, bad){ btn.disabled=false; btn.textContent=idle; afMsg(t, bad); }
+    AF.toBlob(img, afId, afOpts()).then(function(b){
+      // Saved through /api/import-local -- the SAME route the Picker's file import uses -- so
+      // the composite lands in imported/ with a thumbnail and a source='local' catalog row like
+      // any other local file. Nothing is uploaded to PixAI; no generation is created.
+      var fd=new FormData();
+      fd.append('files', b, mid+'_'+afId+'.png');
+      return fetch('/api/import-local', {method:'POST', body:fd}).then(function(r){ return r.json(); });
+    }).then(function(d){
+      if(d && d.error){ done(d.error, true); return; }
+      var n=(d && d.imported) || 0;
+      done(n ? ('Saved to your library \\u00b7 reload the gallery to see it')
+             : 'Already in your library \\u2014 nothing to add.', !n);
+      if(n && window.Toast) Toast.show({kind:'ok', title:'Filtered image saved',
+                                        msg:AF.get(afId).name+' \\u00b7 no credits spent'});
+    }, function(e){
+      done('Could not save: '+((e && e.message) || e), true);
+    });
+  }
+  window.addEventListener('resize', placeFilters);
+
   function genDrawerEl(){ var w=el('gen-mode-video'); return w?w.querySelector('mg-generate-drawer'):null; }
   function addVideoRefs(refs){
     // Gallery bulk-send ("make a video from these"): feed the picked images straight into
@@ -7777,6 +8029,8 @@ var Gen = (function(){
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
           fixTag:fixTag, fixClear:fixClear, fix:fix,
+          toggleFilters:toggleFilters, filterStrength:filterStrength, filterAngle:filterAngle,
+          filterClear:filterClear, filterSave:filterSave,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,

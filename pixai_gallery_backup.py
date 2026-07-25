@@ -656,14 +656,14 @@ def _check_read_only(action):
     network call. Raising here, unconditionally, is what makes READ_ONLY override
     --confirm/--apply/--yes rather than just changing their default.
 
-    Nine call sites, not four: submit_generation, submit_fixer, delete_task_gql and
+    Eight call sites, not four: submit_generation, submit_fixer, delete_task_gql and
     claim_reward are the choke points the WEB app's generate/edit/fix/delete/claim
     routes all funnel through -- but the CLI's run_generate, run_generate_video,
-    run_reference_video, run_enhance and run_edit_image each build their OWN gql_adhoc
-    call instead of calling through a choke point, and until 2026-07-21 none of them
-    called this. Found by audit: with READ_ONLY=True and --confirm, all five reached
-    the mutation, and the free-card check fired first -- a live network call before the
-    guard even ran. Each of those five now calls this as the FIRST statement of its
+    run_reference_video and run_edit_image each build their OWN gql_adhoc call instead
+    of calling through a choke point, and until 2026-07-21 none of them called this.
+    Found by audit: with READ_ONLY=True and --confirm, every one of them reached the
+    mutation, and the free-card check fired first -- a live network call before the
+    guard even ran. Each of those runners now calls this as the FIRST statement of its
     actual-submit branch, before any upload or card-check, not just before the mutation
     itself.
 
@@ -4453,33 +4453,33 @@ def extract_last_frame(video_path, out_png, at_seconds=None):
         return None
 
 
-# build_panelplugin_parameters() is gone. The submit shape was right -- it was captured from a
-# real task -- but PixAI never assigns a worker to a panelplugin task when the client
+# The whole --enhance command is gone, both halves of it, and neither is coming back.
+#
+# The panelplugin half (--workflow-id: upscale / remove-background / line-art / relight, plus
+# workflow_catalog and the web routes that drove them): the submit shape was right -- captured
+# from a real task -- but PixAI never assigns a worker to a panelplugin task when the client
 # authenticated with an API key. It accepts the submit, queues it, charges for it, then cancels
 # it at roughly 60 minutes with outputs.reason "waiting timeout" and refunds. Measured
 # 2026-07-24 and isolated by elimination: their own official preset workflow ids behave
 # identically while their web client runs the same workflow in 1-3 seconds, and a taskKind=chat
 # fixer submit from this app dispatched in one second minutes earlier. No workflow id, input key
-# or payload change reaches a runner, so the builder, the workflow catalog, --workflow-id and the
-# web routes that used them were removed rather than kept as a way to spend an hour queuing
-# nothing. Guarded by tests/test_enhance.py.
-
-
-def build_filter_parameters(media_id, filter_id, *, strength=0.77, is_private=False,
-                            kaisuuken_id=""):
-    """Apply a PixAI Art Filter. VERIFIED shape (2026-07-02): model 'pixai-image-filter',
-    top-level `mediaId`, `inputs = {filterId, strength}`. Produces an image. Free builder."""
-    params = {
-        "mediaId": str(media_id),
-        "model": "pixai-image-filter",
-        "inputs": {"filterId": str(filter_id), "strength": float(strength)},
-        "isPrivate": bool(is_private),
-        "enablePreview": False,
-        "hidePrompts": False,
-    }
-    if kaisuuken_id:
-        params["kaisuukenId"] = str(kaisuuken_id)
-    return params
+# or payload change reaches a runner.
+#
+# The art-filter half (build_filter_parameters, --filter-id): that one worked, and was still
+# the wrong thing to do. PixAI's 7 "art filters" are not inference at all -- each is two or
+# three linear gradients with a blend mode, an opacity and an optional
+# brightness/contrast/saturation trim, served from a PUBLIC unauthenticated config endpoint
+# (GET https://api.pixai.art/config/imageArtFilters) that their own web client reads and
+# composites in the browser, with no Generate button and no price on the panel. Submitting that
+# as an image-filter generation charged credits and waited on a worker queue to perform a
+# handful of gradient fills. static/mg-art-filters.js does the identical composite locally,
+# offline, for nothing, so the paid path is deleted rather than left as a strictly worse
+# second option.
+#
+# Guarded by tests/test_enhance.py, which drives the parser to prove the flags are unaccepted
+# and greps for the two literals a submit could not do without -- the filter model's id and the
+# `inputs` key that named a filter. Neither appears above on purpose: as with "panelplugin",
+# the CONCEPT is named in prose so the exact strings stay a reliable tripwire.
 
 
 def _gen_video_parameters(args):
@@ -5554,85 +5554,6 @@ def run_reference_video(args):
     for s in saved:
         print("  " + s)
     return {"submitted": True, "task_id": task_id, "videos": len(saved)}
-
-
-def run_enhance(args):
-    """Apply a PixAI art filter to an image. --src is a catalog media_id OR a local file
-    (auto-uploaded on --confirm). Provide --filter-id; get ids via --dump-params off a real
-    filter task. Preview-only unless --confirm. Image output.
-
-    The panelplugin-workflow half of this command (--workflow-id: upscale / bg-remove /
-    line-art / relight) is gone -- see build_filter_parameters' neighbouring note for the
-    measurement that showed PixAI never runs one for an API-key client."""
-    out = Path(args.out)
-    existing = (getattr(args, "task_id", "") or "").strip()
-    src = (getattr(args, "src", "") or "").strip()
-    filter_id = (getattr(args, "filter_id", "") or "").strip()
-    override = getattr(args, "params_json", "") or ""
-    strength = getattr(args, "strength", None)
-    kaisuuken = getattr(args, "kaisuuken_id", "") or ""
-
-    if not existing and not override and not src:
-        raise PixAIError("--enhance needs --src <media_id|file>, plus --filter-id.")
-    if not existing and not override and not filter_id:
-        raise PixAIError("--enhance needs --filter-id <id> (an art filter, e.g. filter-v1-m2). "
-                         "Get ids via --dump-params.")
-
-    def _build(media_id):
-        return build_filter_parameters(
-            media_id, filter_id,
-            strength=(strength if strength is not None else 0.77), kaisuuken_id=kaisuuken)
-
-    if not existing and not getattr(args, "confirm", False):
-        print("=== PixAI createGenerationTask -- ENHANCE (PREVIEW, no credits spent) ===")
-        if override:
-            print(json.dumps({"parameters": json.loads(override)}, indent=2))
-        else:
-            ph = "<upload:{}>".format(src) if _is_local_source(src) else src
-            print(json.dumps({"parameters": _build(ph)}, indent=2))
-            _preview_card_note(args, _build(ph))
-        print("\nThis would SPEND credits (unless free above). "
-              "Re-run with --confirm to submit.")
-        return {"submitted": False}
-
-    out.mkdir(parents=True, exist_ok=True)
-    db_path = out / "catalog.db"
-    init_db(db_path)
-    session = _make_session(getattr(args, "token", None))
-
-    if existing:
-        task_id = existing
-        print("Fetching existing enhance task (no credits):", task_id)
-    else:
-        # Checked before the upload, not just before the mutation -- see run_reference_video.
-        _check_read_only("submit an enhance task (spends credits unless a card applies)")
-        if override:
-            params = json.loads(override)
-        else:
-            if _is_local_source(src):
-                print("Uploading source image:", src)
-                media_id = upload_media(session, src)
-            else:
-                media_id = src
-            params = _build(media_id)
-        print("Submitting ENHANCE task (spends credits unless a card applies)...")
-        _apply_kaisuuken(session, params, args)
-        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
-        print("  task id:", task_id)
-        _bump_card_use(params)
-        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300), interval=3,
-                          label="enhance", fail_noun="enhance")
-
-    result = task_detail_gql(session, task_id) or {}
-    _maybe_dump_params(args, result)
-    saved = _download_image_task(session, result, task_id, out, args, model_name="Enhance")
-    print("Enhanced + cataloged {} image(s):".format(len(saved)))
-    for s in saved:
-        print("  " + s)
-    return {"submitted": True, "task_id": task_id, "images": len(saved)}
 
 
 def run_upload(args):
@@ -7865,16 +7786,9 @@ def main():
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
     gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
                      help="reference audio (repeatable; cite as @audio1, ...)")
-    # --- enhance (art filter) ---
-    gen.add_argument("--enhance", dest="enhance", action="store_true",
-                     help="enhance an image: --filter-id (art filter) on --src. "
-                          "Preview until --confirm")
-    gen.add_argument("--src", dest="src", default="", metavar="MEDIA_ID|FILE",
-                     help="source image for --enhance (catalog media_id or local file, auto-uploaded)")
-    gen.add_argument("--filter-id", dest="filter_id", default="", metavar="ID",
-                     help="art-filter id for --enhance (pixai-image-filter, e.g. filter-v1-m2)")
-    gen.add_argument("--strength", dest="strength", type=float, default=None,
-                     help="filter strength (e.g. 0.77)")
+    # --enhance / --src / --filter-id / --strength are gone -- see build_filter_parameters'
+    # former neighbourhood above for both measurements. Art filters run in the browser now
+    # (static/mg-art-filters.js, the gallery's Edit > Enhance tab): free, offline, no submit.
     # --- instruct editing + media upload (the "Edit this image" surface) ---
     gen.add_argument("--edit-image", dest="edit_image", action="store_true",
                      help="instruct-edit an image via PixAI: describe the change in --prompt "
@@ -8064,9 +7978,6 @@ def main():
             return
         if getattr(args, "reference_video", False):
             run_reference_video(args)
-            return
-        if getattr(args, "enhance", False):
-            run_enhance(args)
             return
         if getattr(args, "upload_file", ""):
             run_upload(args)

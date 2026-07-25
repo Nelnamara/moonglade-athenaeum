@@ -205,6 +205,14 @@ def render_server(tmp_path_factory):
             "created_at": "2025-01-%02dT00:00:00" % (i + 1)}
         for i in range(6)
     ])
+    # A REAL bitmap on disk for the first row, so /full/100 serves a decodable image through
+    # its real route (find_image_file -> send_from_directory). It cannot be a page.route stub:
+    # the app registers a service worker whose fetch handler already answers `/full/`, and a
+    # service worker's own fetch bypasses Playwright's request interception. It has to be a
+    # realistic SHAPE too -- every layout assertion about the filters panel is downstream of
+    # the image's intrinsic aspect, which a 1x1 placeholder would not have.
+    from PIL import Image
+    Image.new("RGB", (900, 600), (120, 90, 180)).save(root / "harness_0.png")
     core.add_or_update_web_user(_USERNAME, _PASSWORD)
 
     server = make_server("127.0.0.1", 0, create_app(root), threaded=True)
@@ -379,8 +387,12 @@ def test_model_picker_grid_fills_the_flyout_panel(logged_in_page):
 # ---------------------------------------------------------------------------
 # 2. The model flyout is fully inside the viewport when open
 # ---------------------------------------------------------------------------
-_FLYOUT_RECT_JS = """() => {
-  const f = document.getElementById('model-flyout');
+# Parameterised by element id: the same containment property is asserted for #model-flyout
+# below and for #filters-flyout in section 3, and the two panels are positioned by different
+# mechanisms (CSS dock rules vs Gen.placeFilters()), so one shared measurement keeps them
+# honest against each other rather than drifting into two near-identical checks.
+_RECT_JS = """(id) => {
+  const f = document.getElementById(id);
   const r = f.getBoundingClientRect().toJSON();
   r.innerWidth = window.innerWidth;
   r.innerHeight = window.innerHeight;
@@ -388,20 +400,18 @@ _FLYOUT_RECT_JS = """() => {
 }"""
 
 
-def _assert_flyout_within_viewport(rect):
-    assert rect["width"] > 0 and rect["height"] > 0, "flyout has no box -- did it open?"
+def _assert_within_viewport(rect, label):
+    assert rect["width"] > 0 and rect["height"] > 0, label + " has no box -- did it open?"
     assert rect["top"] >= 0, (
-        "#model-flyout's top is {:.1f}px -- it is hanging above the viewport".format(
-            rect["top"]))
+        "{}'s top is {:.1f}px -- it is hanging above the viewport".format(label, rect["top"]))
     assert rect["bottom"] <= rect["innerHeight"], (
-        "#model-flyout's bottom is {:.1f}px past the {:.0f}px viewport".format(
-            rect["bottom"] - rect["innerHeight"], rect["innerHeight"]))
+        "{}'s bottom is {:.1f}px past the {:.0f}px viewport".format(
+            label, rect["bottom"] - rect["innerHeight"], rect["innerHeight"]))
     assert rect["left"] >= 0, (
-        "#model-flyout's left is {:.1f}px -- it is hanging off the left edge".format(
-            rect["left"]))
+        "{}'s left is {:.1f}px -- it is hanging off the left edge".format(label, rect["left"]))
     assert rect["right"] <= rect["innerWidth"], (
-        "#model-flyout's right is {:.1f}px past the {:.0f}px viewport".format(
-            rect["right"] - rect["innerWidth"], rect["innerWidth"]))
+        "{}'s right is {:.1f}px past the {:.0f}px viewport".format(
+            label, rect["right"] - rect["innerWidth"], rect["innerWidth"]))
 
 
 def test_model_flyout_is_fully_inside_the_viewport_at_desktop(logged_in_page):
@@ -411,7 +421,7 @@ def test_model_flyout_is_fully_inside_the_viewport_at_desktop(logged_in_page):
     _stub_model_search(page)
     _visit(page, "/")
     _open_drawer_and_model_flyout(page)
-    _assert_flyout_within_viewport(page.evaluate(_FLYOUT_RECT_JS))
+    _assert_within_viewport(page.evaluate(_RECT_JS, "model-flyout"), "#model-flyout")
 
 
 def test_model_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logged_in_page):
@@ -432,11 +442,142 @@ def test_model_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logged_in_
     _stub_model_search(page)
     _visit(page, "/")
     _open_drawer_and_model_flyout(page)
-    _assert_flyout_within_viewport(page.evaluate(_FLYOUT_RECT_JS))
+    _assert_within_viewport(page.evaluate(_RECT_JS, "model-flyout"), "#model-flyout")
 
 
 # ---------------------------------------------------------------------------
-# 3. Deep Focus's veil vs the corner FABs  (stacking OUTCOME, not a z-index number)
+# 3. The art-filters flyout is genuinely SIDE BY SIDE  (the flex-basis wrap bug)
+# ---------------------------------------------------------------------------
+def _open_filters_flyout(page):
+    """Click the real controls, then wait on each post-condition -- including the image's own
+    decode, because the panel's height and the left column's width both depend on it."""
+    page.click("button.btn-primary:has-text('Generate')")       # header -> Gen.open()
+    page.wait_for_selector("#gen-drawer.open", state="attached")
+    page.click("#gm-edit")                                      # -> Gen.setMode('edit')
+    page.click("#es-enhance")                                   # -> Gen.setEditSub('enhance')
+    page.fill("#edit-src", "100")
+    page.dispatch_event("#edit-src", "input")                   # -> Gen.setEditSource('100')
+    page.click("#af-open")                                      # -> Gen.toggleFilters()
+    page.wait_for_selector("#filters-flyout.open", state="attached")
+    page.wait_for_function("() => document.querySelectorAll('#af-swatches .af-tile').length === 7")
+    page.wait_for_function("() => { const i = document.getElementById('af-img');"
+                           " return i.complete && i.naturalWidth > 0; }")
+    _settle(page)
+    page.click('.af-tile[data-af="filter-v1-m4"]')              # a filter with image_parameters
+    page.wait_for_function("() => document.querySelectorAll("
+                           "'#af-stage > [data-mgaf-layer]').length === 2")
+    _settle(page)
+
+
+_FILTERS_LAYOUT_JS = """() => {
+  const f = document.getElementById('filters-flyout');
+  const img = document.getElementById('af-img');
+  const stage = document.getElementById('af-stage');
+  const sw = document.getElementById('af-swatches');
+  const r = el => el.getBoundingClientRect().toJSON();
+  const fr = r(f), ir = r(img), sr = r(stage), wr = r(sw);
+  return {
+    flyout: fr, image: ir, stage: sr, swatches: wr,
+    innerWidth: window.innerWidth, innerHeight: window.innerHeight,
+    // side by side == the controls start to the RIGHT of the image and share its top band.
+    // A wrapped layout fails the first half; a swapped one would fail it too.
+    controlsRightOfImage: wr.left >= ir.right,
+    controlsShareTopBand: Math.abs(wr.top - ir.top) < 80,
+    // the stage is MgArtFilters' overlay host: its box must be the image's box exactly, or
+    // the gradient layers (inset:0) paint over letterbox bars the image is not using.
+    stageMatchesImage: Math.abs(sr.width - ir.width) < 1 && Math.abs(sr.height - ir.height) < 1,
+    layers: stage.querySelectorAll(':scope > [data-mgaf-layer]').length,
+    blendModes: [...stage.querySelectorAll(':scope > [data-mgaf-layer]')]
+                  .map(d => getComputedStyle(d).mixBlendMode),
+    imageFilter: img.style.filter || '',
+  };
+}"""
+
+# The pre-fix CSS, restored as a later-in-cascade !important override. `flex: 1 1 auto` was
+# what shipped first: from an `auto` basis the left column's base size is the IMAGE's
+# max-content width (900px for a normal generation, since `max-width:100%` cannot resolve
+# against a container the image is itself sizing), the two columns' hypothetical sizes exceed
+# the panel, and flex-wrap breaks the line -- stacking the controls under the image at every
+# panel width. NEVER committed to any CSS.
+_REVERT_FILTERS_FLEX_CSS = """
+#filters-flyout .af-left { flex: 1 1 auto !important; min-width: 260px !important; }
+"""
+
+
+def test_art_filters_flyout_is_side_by_side_with_the_image_left(logged_in_page):
+    """The filters panel exists so a filter can be JUDGED, which needs the image at size next
+    to the swatches -- not above them. That is a layout fact no HTML-string assertion can see.
+
+    Measured as shipped at 1280x900, right dock, Edit tab (a 600px `.wide` drawer):
+      panel        647px wide beside the drawer, image 373x249, swatches at x=+391
+      pre-fix      the same 647px panel, image 604x403, swatches WRAPPED below it
+    The pre-fix number is why `flex: 1 1 0` is load-bearing rather than a style preference:
+    the image was wider than the space the controls needed, at every panel width.
+
+    Also asserts the two things that would make a side-by-side panel useless anyway: that the
+    overlay stage is exactly the image's box (so the gradients don't spill onto letterbox
+    bars), and that the browser really ACCEPTED the mapped blend modes instead of silently
+    falling back to `normal`, which would render a flat gradient and look like a working
+    filter.
+    """
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _open_filters_flyout(page)
+
+    m = page.evaluate(_FILTERS_LAYOUT_JS)
+    assert m["image"]["width"] > 200, (
+        "the preview image is only {:.1f}px wide -- too small to judge a filter on, and the "
+        "metrics below would be measuring a collapsed column".format(m["image"]["width"]))
+    assert m["controlsRightOfImage"], (
+        "the swatches start at x={:.1f} but the image ends at x={:.1f} -- the controls have "
+        "WRAPPED under the image instead of sitting beside it".format(
+            m["swatches"]["left"], m["image"]["right"]))
+    assert m["controlsShareTopBand"], (
+        "the swatches' top is {:.1f}px from the image's -- they are not on the same row".format(
+            abs(m["swatches"]["top"] - m["image"]["top"])))
+    assert m["stageMatchesImage"], (
+        "the overlay stage is {:.1f}x{:.1f} but the image is {:.1f}x{:.1f} -- the gradient "
+        "layers (inset:0) would paint outside the picture".format(
+            m["stage"]["width"], m["stage"]["height"],
+            m["image"]["width"], m["image"]["height"]))
+    # filter-v1-m4 is soft-light + color-burn, and carries image_parameters.
+    assert m["layers"] == 2
+    assert m["blendModes"] == ["soft-light", "color-burn"], (
+        "the browser resolved the overlay blend modes to {} -- a mode it does not accept "
+        "computes as `normal`, which paints a flat gradient and is not the filter".format(
+            m["blendModes"]))
+    assert m["imageFilter"] == "brightness(1.04) contrast(1.05) saturate(1.1)", (
+        "filter-v1-m4's image_parameters (+0.04/+0.05/+0.1 as signed OFFSETS from 1) did not "
+        "reach the <img>: got {!r}".format(m["imageFilter"]))
+    _assert_within_viewport(page.evaluate(_RECT_JS, "filters-flyout"), "#filters-flyout")
+
+    # --- phase 2: prove the guard bites. Restore the pre-fix flex basis in-page only. ---
+    page.add_style_tag(content=_REVERT_FILTERS_FLEX_CSS)
+    _settle(page)
+    reverted = page.evaluate(_FILTERS_LAYOUT_JS)
+    assert not reverted["controlsRightOfImage"], (
+        "`flex: 1 1 auto` was re-applied and the controls did NOT wrap (swatches x={:.1f}, "
+        "image right={:.1f}) -- the side-by-side assertion above is vacuous".format(
+            reverted["swatches"]["left"], reverted["image"]["right"]))
+
+
+def test_art_filters_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logged_in_page):
+    """375x812: the panel is far wider than the phone, so placeFilters() must fall through to
+    its centred branch and clamp. The layout is expected to STACK here (that is what the
+    `flex-wrap` + `min-width` pair is for), so this asserts containment only -- and that the
+    page itself never gains a horizontal scroll, which is how an unclamped fixed panel shows
+    up to a user rather than as an off-screen rect."""
+    page = logged_in_page(**MOBILE_PORTRAIT)
+    _visit(page, "/")
+    _open_filters_flyout(page)
+    _assert_within_viewport(page.evaluate(_RECT_JS, "filters-flyout"), "#filters-flyout")
+    assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth + 1"), (
+        "the document scrolls horizontally with the filters panel open -- it is overflowing "
+        "the viewport rather than being clamped into it")
+
+
+# ---------------------------------------------------------------------------
+# 4. Deep Focus's veil vs the corner FABs  (stacking OUTCOME, not a z-index number)
 # ---------------------------------------------------------------------------
 _DF_STACKING_JS = """() => {
   const overlay = document.querySelector('.lv-overlay');
