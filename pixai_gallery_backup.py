@@ -5069,14 +5069,27 @@ def run_generate_video(args):
     return {"submitted": True, "task_id": task_id, "videos": len(saved)}
 
 
-def _resolve_refs(session, items):
+def _resolve_refs(session, items, media_type="IMAGE"):
     """Resolve reference sources (media_id or local file) to media_ids, uploading any
-    local files. Used by reference-video on --confirm."""
+    local files. Used by reference-video on --confirm.
+
+    `media_type` is the PixAI MediaType to register an uploaded local file under.
+    Live-probed 2026-07-24: MediaType is a real GraphQL enum with exactly two members,
+    IMAGE and VIDEO. Pass media_type=None for a ref kind that has no valid upload type
+    (audio) -- a local file is then refused rather than mislabelled as an image.
+    Existing media_ids pass through untouched regardless."""
     ids = []
     for s in items:
         if _is_local_source(s):
+            if media_type is None:
+                raise PixAIError(
+                    "--ref-audio only takes a media id that already exists on PixAI, not a "
+                    "local file ({}). PixAI's uploader accepts images and videos only, so "
+                    "there is no way to upload a bare audio file. Workaround: put the audio "
+                    "into a video (even a still image with the audio track) and pass that "
+                    "with --ref-video instead.".format(s))
             print("Uploading local reference:", s)
-            ids.append(upload_media(session, s))
+            ids.append(upload_media(session, s, media_type))
         else:
             ids.append(str(s))
     return ids
@@ -5146,8 +5159,9 @@ def run_reference_video(args):
         if override:
             params = json.loads(override)
         else:
-            params = _build(_resolve_refs(session, imgs), _resolve_refs(session, vids),
-                            _resolve_refs(session, auds))
+            params = _build(_resolve_refs(session, imgs, "IMAGE"),
+                            _resolve_refs(session, vids, "VIDEO"),
+                            _resolve_refs(session, auds, None))
         print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
         _apply_kaisuuken(session, params, args)
         created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
