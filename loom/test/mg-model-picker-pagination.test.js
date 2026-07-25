@@ -95,13 +95,57 @@ describe("Continuous scroll / load-more (owner report 2026-07-24)", () => {
     // kind="base" AND a kind="lora" picker TOGETHER on first flyout open, with only one
     // actually visible -- searching the hidden one anyway meant every open fired two full
     // searches competing for the same connection, for a tab nobody had asked to see.
-    assert.match(src, /this\._searched = false;\s*\n\s*if \(this\.style\.display !== 'none'\) \{ this\._searched = true; this\._search\(\); \}/);
+    // NOTE (AUDIT_2026-07-21 follow-up): this used to assert the two lines were ADJACENT.
+    // They no longer are -- `this._stale = false;` now initializes between them -- and the
+    // adjacency was never the behavior worth pinning. Split into the two facts that are:
+    // the flag defaults to false, and the browse-on-open search is gated on visibility.
+    assert.match(src, /this\._searched = false;/);
+    assert.match(src, /if \(this\.style\.display !== 'none'\) \{ this\._searched = true; this\._search\(\); \}/);
   });
 
   test("ensureSearched() is exposed for a host to call once it reveals a previously-hidden instance, and is a no-op after the first real call", () => {
-    assert.match(src, /ensureSearched\(\) \{\s*\n\s*if \(this\._searched\) return;\s*\n\s*this\._searched = true;\s*\n\s*this\._search\(\);\s*\n\s*\}/,
+    assert.match(src, /ensureSearched\(\) \{\s*\n\s*if \(this\._searched && !this\._stale\) return;\s*\n\s*this\._search\(\);\s*\n\s*\}/,
       "must be idempotent -- a host calling this on every tab switch must never re-fetch " +
       "once the picker has already searched, matching the existing 'each keeps its own " +
-      "last-searched results independently' contract");
+      "last-searched results independently' contract. The _stale escape hatch is the ONE " +
+      "exception: a base-type change that arrived while hidden deferred its re-search to here");
+  });
+});
+
+// AUDIT_2026-07-21 follow-up: the deferred-search work above closed ONE of two redundant
+// requests. Picking a base model sets base-type on the (still hidden) LoRA picker, which
+// searched unconditionally without ever setting _searched -- so opening the LoRA tab for the
+// first time afterwards fired the IDENTICAL request a second time, and the first of the two
+// had built ~24 cards into a display:none element nobody had asked to see.
+describe("No redundant LoRA search when a base model is picked (AUDIT_2026-07-21)", () => {
+  test("_search() itself owns the _searched flag, so ANY search counts as searched", () => {
+    assert.match(src, /_search\(\) \{[\s\S]{0,700}?\n\s*this\._searched = true;\s*\n\s*this\._stale = false;/,
+      "_searched must be set inside _search(), not only at the call sites that happen to " +
+      "know about it -- a base-type-triggered search left the flag false, which is exactly " +
+      "what made the next ensureSearched() re-run the same request");
+  });
+
+  test("a base-type change on a HIDDEN instance defers instead of searching", () => {
+    assert.match(src, /this\._baseType = val \|\| '';\s*\n\s*if \(this\.style\.display === 'none'\) \{ if \(this\._searched\) this\._stale = true; return; \}\s*\n\s*this\._search\(\);/,
+      "hidden + never searched -> nothing to refresh (the reveal's ensureSearched() runs " +
+      "the first search with the new base-type already in place); hidden + already " +
+      "searched -> mark _stale so the next reveal re-searches once, instead of rebuilding " +
+      "a grid nobody is looking at");
+  });
+
+  test("a base-type change on a VISIBLE instance still re-searches immediately", () => {
+    // The original picker-parity-round2 behavior must survive: switching the selected base
+    // while actually looking at the LoRA grid re-sorts/re-badges it on the spot, it does
+    // not wait for the next keystroke or category click.
+    assert.match(src, /if \(name === 'base-type' && this\._built && \(val \|\| ''\) !== this\._baseType\) \{/);
+    assert.match(src, /\{ if \(this\._searched\) this\._stale = true; return; \}\s*\n\s*this\._search\(\);/,
+      "the deferral must be an early return guarded on display:none only -- a visible " +
+      "instance falls through to the same immediate _search() it always did");
+  });
+
+  test("_stale is initialized alongside _searched so it is never undefined on a first reveal", () => {
+    assert.match(src, /this\._searched = false;\s*\n\s*this\._stale = false;/,
+      "both flags must be initialized in _build(), or a first ensureSearched() would read " +
+      "undefined and the deferral logic would depend on a falsy accident");
   });
 });

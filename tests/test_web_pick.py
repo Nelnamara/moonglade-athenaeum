@@ -1592,11 +1592,39 @@ def test_flyout_open_does_not_search_the_hidden_tab(tmp_path):
     picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
     assert "this._searched = false;" in picker_js
     assert "if (this.style.display !== 'none') { this._searched = true; this._search(); }" in picker_js
-    assert "ensureSearched() {" in picker_js and "if (this._searched) return;" in picker_js
+    assert "ensureSearched() {" in picker_js
+    assert "if (this._searched && !this._stale) return;" in picker_js
 
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert "if(vis && vis.ensureSearched) vis.ensureSearched();" in html
+
+
+def test_picking_a_base_model_does_not_double_search_the_hidden_lora_picker(tmp_path):
+    """AUDIT_2026-07-21 follow-up: the deferred-search fix closed only one of two redundant
+    requests. Picking a base model sets `base-type` on the LoRA picker -- which is normally
+    still HIDDEN, since both hosts mount base+LoRA together and reveal one -- and
+    attributeChangedCallback searched unconditionally, without ever setting `_searched`. So
+    the hidden instance fetched and built ~24 cards nobody had asked to see, and then the
+    first reveal's ensureSearched() fired the IDENTICAL request all over again.
+
+    Two halves, both required: `_search()` must own the `_searched` flag (so ANY search
+    counts), and a base-type change on a hidden instance must defer rather than search."""
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
+    # 1) _search() owns the flag -- not just the two call sites that knew about it
+    body = picker_js.split("    _search() {", 1)[1][:900]
+    assert "this._searched = true;" in body and "this._stale = false;" in body
+
+    # 2) a hidden instance defers; a visible one still re-searches on the spot
+    assert ("if (this.style.display === 'none') { if (this._searched) this._stale = true; return; }"
+            in picker_js)
+    assert "this._stale = false;" in picker_js   # initialized, never undefined on first reveal
+
+    # The Gallery still feeds the resolved architecture straight into the LoRA picker -- the
+    # deferral changes WHEN the search happens, never whether base_type reaches the server.
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
 
 
 def test_generate_card_has_seed_field(tmp_path):

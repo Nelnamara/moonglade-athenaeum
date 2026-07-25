@@ -123,6 +123,22 @@ git tags. Full prose notes for tagged versions live on
   keeping the sharpness where it matters. The GraphQL search path was already thumbnail-first
   and is unchanged.
 
+- **Two more redundant LoRA searches per flyout session, both gone.** The earlier
+  deferred-search fix closed one of three. Picking a base model sets `base-type` on the LoRA
+  picker — which is normally still *hidden*, since both hosts mount the base and LoRA
+  instances together and reveal one — and `attributeChangedCallback` searched
+  unconditionally, without ever setting `_searched`. So the hidden instance fetched a full
+  page and built ~24 cards into a `display:none` element nobody had asked to see, and then
+  the first reveal fired the *identical* request all over again. Two halves: `_search()` now
+  owns the `_searched` flag itself, so **any** search counts as searched no matter what
+  triggered it (the flag previously lived only on the two call sites that knew about it,
+  which is exactly how it drifted); and a `base-type` change on a hidden instance defers
+  instead of searching — either to the first `ensureSearched()`, or, if that instance had
+  already searched, via a new `_stale` bit that makes the next reveal re-search exactly once.
+  A **visible** instance still re-searches immediately on a base-type change, unchanged.
+  Net: opening the flyout and picking a base model costs one search instead of two, and
+  browsing LoRAs afterwards costs one instead of two.
+
 ## [2.4.0] - 2026-07-24 — Concurrent generations, real trash recovery, and a nasty video-corruption bug fixed
 
 A trash/quarantine restore panel, field-operator search (`model:`, `rating:>=3`, …),
