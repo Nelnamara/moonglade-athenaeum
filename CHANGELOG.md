@@ -140,19 +140,6 @@ git tags. Full prose notes for tagged versions live on
   documented anywhere (per-LoRA version selection, subscription-tier LoRA caps,
   capability-gating on the Image/Edit tabs), in `docs/AUDIT_2026-07-21.md`'s O12 entry.
 
-- **The picker's grid cards download small thumbnails again instead of full-size cover art.**
-  `model_search_rest()` resolved BOTH `preview_url` (the ~175px grid card, 24 per page) and
-  `cover_url` (the one hover preview card) to PixAI's full-size `publicUrl` — roughly 24MB of
-  cross-origin CDN traffic per browse session, in flight against the very next search request.
-  Invisible on localhost, real on an actual connection, and a plausible share of the "picker
-  feels slow" the owner has now reported three separate times. `preview_url` is back to
-  `thumbnailUrl`-first (each still falls back to the other, so a row with only one URL never
-  renders blank); `cover_url` deliberately stays `publicUrl`-first, so the full-resolution
-  image still appears on hover-intent, where it is actually looked at. This reverts the
-  bandwidth half of `3bf155a` (which flipped the grid to full-size for card sharpness) while
-  keeping the sharpness where it matters. The GraphQL search path was already thumbnail-first
-  and is unchanged.
-
 - **Two more redundant LoRA searches per flyout session, both gone.** The earlier
   deferred-search fix closed one of three. Picking a base model sets `base-type` on the LoRA
   picker — which is normally still *hidden*, since both hosts mount the base and LoRA
