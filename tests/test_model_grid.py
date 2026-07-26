@@ -266,7 +266,7 @@ def test_annotate_lora_compat_all_incompatible_still_returns_everything():
 def test_web_generate_pipeline(monkeypatch, tmp_path):
     # web_generate = submit -> poll -> task detail -> download/catalog; all reused parts
     # mocked so no network / no spend. Verifies it threads the pieces + returns media_ids.
-    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {"id": "T1"}})
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T1"}})
     monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: 0)
     monkeypatch.setattr(core, "task_detail_gql",
                         lambda s, t: {"outputs": {"mediaId": "M1", "batchMediaIds": ["M2"]}})
@@ -278,7 +278,7 @@ def test_web_generate_pipeline(monkeypatch, tmp_path):
 
 def test_web_generate_raises_without_task_id(monkeypatch, tmp_path):
     import pytest
-    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {}})
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None, retries=None: {"createGenerationTask": {}})
     with pytest.raises(core.PixAIError):
         core.web_generate(object(), {"prompts": "x", "modelId": "v"}, str(tmp_path))
 
@@ -553,7 +553,7 @@ def test_task_image_media_single_and_legacy():
 def _stub_generate_network(monkeypatch, outputs):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: "")
-    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {"id": "T1"}})
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T1"}})
     monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: None)
     monkeypatch.setattr(core, "task_detail_gql",
                         lambda s, t: {"createdAt": "2026-07-22T00:00:00Z", "outputs": outputs})
@@ -596,7 +596,7 @@ def test_run_generate_still_self_heals_after_delegating_to_submit_generation(mon
     seen_mids = _stub_generate_network(monkeypatch, _BATCH_OUTPUTS)
     calls = []
 
-    def fake_gql(s, q, v=None):
+    def fake_gql(s, q, v=None, retries=None):
         params = v["parameters"]
         calls.append(dict(params))
         if "inferenceProfile" in params:
@@ -643,13 +643,13 @@ def test_task_detail_query_adhoc_fallback(monkeypatch):
 
 
 def test_submit_generation(monkeypatch):
-    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {"id": "T9"}})
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T9"}})
     assert core.submit_generation(object(), {"x": 1}) == "T9"
 
 
 def test_submit_generation_raises(monkeypatch):
     import pytest
-    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"createGenerationTask": {}})
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None, retries=None: {"createGenerationTask": {}})
     with pytest.raises(core.PixAIError):
         core.submit_generation(object(), {})
 
@@ -666,7 +666,7 @@ def test_submit_generation_retries_on_inferenceprofile_rejection(monkeypatch):
     behavior: drop inferenceProfile, resubmit on the model's default."""
     calls = []
 
-    def fake_gql(s, q, v=None):
+    def fake_gql(s, q, v=None, retries=None):
         calls.append(dict(v["parameters"]))
         if "inferenceProfile" in v["parameters"]:
             raise core.PixAIError(
@@ -689,7 +689,7 @@ def test_submit_generation_does_not_retry_unrelated_errors(monkeypatch):
     try, not silently eat inferenceProfile and retry for an unrelated reason."""
     import pytest
 
-    def fake_gql(s, q, v=None):
+    def fake_gql(s, q, v=None, retries=None):
         raise core.PixAIError("GraphQL error: something else entirely")
 
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
@@ -704,7 +704,7 @@ def test_submit_generation_no_retry_when_param_absent(monkeypatch):
     import pytest
     calls = []
 
-    def fake_gql(s, q, v=None):
+    def fake_gql(s, q, v=None, retries=None):
         calls.append(1)
         raise core.PixAIError("GraphQL error: inferenceProfile is unsupported here")
 

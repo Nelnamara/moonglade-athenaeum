@@ -4,9 +4,9 @@ docstring didn't know it had.
 That file's docstring said "all four choke points... are covered -- both the CLI and the
 web app's generate/edit/fix/delete/claim routes funnel through these same four
 functions." That was true for the web app and false for the CLI: run_generate,
-run_generate_video, run_reference_video and run_edit_image each build their OWN gql_adhoc
-call instead of calling through submit_generation()/submit_fixer(), so none of them ever
-called _check_read_only.
+run_generate_video, run_reference_video and run_edit_image each build their OWN
+createGenerationTask call instead of calling through submit_generation()/submit_fixer(),
+so none of them ever called _check_read_only.
 
 Found 2026-07-21 by a 33-agent post-release audit, proved dynamically here rather than
 asserted: with READ_ONLY=True and the CLI's own --confirm passed, every one of them used to
@@ -16,7 +16,7 @@ way tests/test_read_only.py's own delete-task test does, and the property that m
 "does it raise" but that mock_session.post is NEVER CALLED -- no network call fires, from
 _apply_kaisuuken, an upload, or the mutation itself.
 
-Update 2026-07-24: run_generate's OWN reason for building a separate gql_adhoc call (a
+Update 2026-07-24: run_generate's OWN reason for building a separate submit call (a
 one-off inferenceProfile retry submit_generation() didn't have) is gone -- that retry now
 lives in submit_generation() itself, and run_generate calls through it for the mutation.
 It still needs the direct _check_read_only call below it though, ahead of

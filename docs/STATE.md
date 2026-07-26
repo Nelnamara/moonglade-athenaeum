@@ -407,12 +407,21 @@ users.
   WAIT, not a countdown; the earlier "both gens said 3 seconds" was a genuinely short queue,
   not a constant. The one real defect the run exposed — an in-flight card reading
   "Generated" — is fixed. Wave 2's last item is closed.
+- **No mutation that spends or changes the account can be retried** (2026-07-26).
+  `gql_mutate()` is the one way a mutation goes out: it hard-codes `retries=0` and takes no
+  retries argument, so the unsafe value cannot be asked for. `submit_generation` (and with
+  it every web generate/edit route), the CLI's `run_generate_video` /
+  `run_reference_video` / `run_edit_image`, `upload_media` and `delete_batch_media_gql` all
+  ride it. Before this, only the delete passed `retries=0` by hand and every spending path
+  inherited `gql_adhoc`'s three retries — so a lost RESPONSE (read timeout, dropped
+  connection, a proxy's 502 *after* PixAI already created and charged for the task) made the
+  retry submit and pay for a second generation. `gql_adhoc`'s own default is now
+  document-aware as a backstop (0 for a mutation, 3 for a query). The REST spend paths
+  (`submit_fixer`, `claim_reward` over `_rest_post`) were already single-attempt and are now
+  pinned as such. Guarded by `tests/test_spend_no_retry.py`.
 - **Per-image cloud delete shipped** (2026-07-25). `POST /api/delete-image` (LOCALHOST)
   drives `core.delete_batch_media_gql` — `updateGenerationTask(id, input:{deleteBatchMedia:
-  {mediaId}})` over `gql_adhoc` with **`retries=0`**; the primitive's docstring had promised
-  SINGLE ATTEMPT since it was written, but the call inherited `gql_adhoc`'s `retries=3` until
-  this pass, so a read timeout arriving after PixAI processed the delete could re-fire it.
-  The detail page carries both paths, worded apart: **Delete locally** (quarantine to
+  {mediaId}})`, single attempt. The detail page carries both paths, worded apart: **Delete locally** (quarantine to
   `_deleted/`, recoverable, a later sync restores it) and **Delete from PixAI** (irreversible,
   names the surviving sibling count from `_batch_sibling_count`, typed `DELETE`). Cloud call
   first, local purge only on a clean return — the reverse would leave a catalog hole for an
@@ -950,7 +959,7 @@ A **credential switch**, not a new feature:
 Both still download locally, so the redundancy the owner asked for is real either way. The
 plumbing largely exists: `_make_session` already builds `Authorization: Bearer` from whatever
 token it is handed and its own error text still offers the legacy `U3T + token.txt` path, and
-`submit_generation` submits through `gql_adhoc(session, ...)` — so handing it a JWT-authenticated
+`submit_generation` submits through `gql_mutate(session, ...)` — so handing it a JWT-authenticated
 session is most of the work.
 
 ### The credential facts, measured not assumed (2026-07-26)
