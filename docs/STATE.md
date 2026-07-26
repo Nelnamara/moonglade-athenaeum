@@ -1144,10 +1144,11 @@ simpler, because then everything moving into `/moonglade/` is code with no excep
 - **A gitignore entry, added in the same commit as the move.** Otherwise the first person to drop a
   mascot in and run `git status` sees their own art as untracked repo content, and `git add -A` is
   already banned here for exactly that class of accident.
-- **A migration for the owner's existing marks on the D: install.** Moving the default does not move
-  files, and that install is read-only to this project. Recommended: read BOTH locations for a
-  while, preferring the new one — a few lines, and he never has a broken banner while he gets round
-  to copying them. NOT yet decided by the owner.
+- **No migration code.** Owner, 2026-07-26: *"I can move my own branding folder after the update."*
+  So the move is a plain default change with no dual-read, no copy step and no fallback path — he
+  relocates his own files by hand on the production install once the change ships. Worth stating
+  because the obvious instinct is to write a compatibility shim, and he explicitly does not want one
+  for a single install he controls. Do not add one.
 
 ### Do not
 - Do not make the panel available ungated — that deletes the feature.
