@@ -2125,14 +2125,31 @@ LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "SD3_MEDIUM_MODEL",
 #   * "All" sends types:["ANY_MODEL"] -- it does not omit the argument.
 #   * It is MULTI-SELECT. Choosing DiT.3 then DiT.1 sent types:["MMDIT26B_MODEL","DIT7_MODEL"].
 #     A single-value control here would silently be the wrong shape.
+# ALL SEVEN MEASURED off live requests (2026-07-26) -- none is inferred from its name.
 MODEL_TYPE_FILTERS = (
-    ("All", "ANY_MODEL"),                    # measured
-    ("DiT.3", "MMDIT26B_MODEL"),             # measured
-    ("DiT.2", "MMDIT26A_MODEL"),             # measured
-    ("DiT.1", "DIT7_MODEL"),                 # measured
-    ("SDXL", "SDXL_MODEL"),                  # inferred from the naming, not captured
-    ("SD 1.5", "SD_V1_MODEL"),               # inferred from the naming, not captured
+    ("All", "ANY_MODEL"),
+    ("DiT.3", "MMDIT26B_MODEL"),
+    ("DiT.2", "MMDIT26A_MODEL"),
+    ("DiT.1", "DIT7_MODEL"),
+    ("Community DiT", "USER_DIT26A_MODEL"),
+    ("SDXL", "SDXL_MODEL"),
+    ("SD 1.5", "SD_V1_MODEL"),
 )
+# HOW THESE WERE CAPTURED, because the technique is reusable and three attempts failed first.
+# Apollo's cache is IN-MEMORY, so a full page reload empties it; selecting a filter as the very
+# FIRST action on a fresh load therefore has to hit the network. Earlier tries kept selecting
+# other options first, and the cache could always answer.
+#
+# "Community DiT" was the last unknown and the one worth not guessing: USER_DIT26A_MODEL turned
+# out to be right, but DIT9_MODEL was equally plausible, and a wrong enum member here fails
+# SILENTLY -- the wrong rows, or none, reading as an empty result rather than an error.
+#
+# The filter is MULTI-SELECT: successive clicks sent ["USER_DIT26A_MODEL"], then
+# [..., "SDXL_MODEL"], then [..., "SD_V1_MODEL"], which is also what settled the last two.
+#
+# The full 46-member GenerationModelType enum is not copied here on purpose. It is
+# recoverable at any time, and stays current, via tools/harvest_api_surface.py -- their
+# own contract chunk carries it verbatim. A hand-copied list would just rot.
 
 # Their "Source" filter (All / PixAI / External) is NOT a separate argument -- it is expressed
 # through `types`. Read straight out of their ModelFilter chunk, which maps the UI value to an
@@ -2237,7 +2254,8 @@ def _market_row(n):
 
 def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24,
                             after=None, lora_base_type="", author_id="",
-                            source="", permitted_use="", time_range=None):
+                            source="", permitted_use="", time_range=None,
+                            model_types=()):
     """Market-style model browse via the GraphQL `generationModels` connection, which -- unlike
     the REST /search -- actually HONORS `category` and a date `orderBy`. Use this for category
     chips + a Newest sort; the REST path (model_search_rest) stays the default for keyword/Popular
@@ -2349,9 +2367,19 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     # own MY LORA request pairs ANY_LORA with authorId exactly as this does.
     src = str(source or "").strip().lower()
     src_enum = LORA_SOURCE_TYPES.get(src, "") if want_lora else ""
+
+    # A base search can also narrow to specific ARCHITECTURES -- their Model Type filter, which is
+    # MULTI-SELECT (choosing DiT.3 then DiT.1 sends both tokens, observed on a live request). Only
+    # whitelisted members survive, so an unknown value is dropped and the search stays unfiltered
+    # rather than being refused: the same fail-open contract as every other filter here.
+    chosen = [t for t in (str(x).strip().upper() for x in (model_types or []))
+              if t in LORA_BASE_MODEL_TYPES]
     args.append("types:$ty")
     var_decl += ",$ty:[GenerationModelType]"
-    variables["ty"] = [src_enum or ("ANY_LORA" if want_lora else "ANY_MODEL")]
+    if chosen and not want_lora:
+        variables["ty"] = chosen
+    else:
+        variables["ty"] = [src_enum or ("ANY_LORA" if want_lora else "ANY_MODEL")]
 
     pu = str(permitted_use or "").strip().upper()
     if pu in PERMITTED_USES:

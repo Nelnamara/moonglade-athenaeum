@@ -271,6 +271,10 @@
       this._source = '';
       this._posted = '';
       this._license = '';
+      // Base-model architecture filter. An ARRAY because their Model Type control is
+      // multi-select -- successive clicks accumulate, measured off live requests. Empty means
+      // "All", which the server turns into ANY_MODEL.
+      this._modelTypes = [];
       // picker-parity-round2: the currently-selected base model's resolved model_type, set
       // (and kept updated) by the host -- see the file header comment. Only meaningful for
       // kind="lora"; a base-kind mount reads it but never sends it (nothing to compat-sort
@@ -329,6 +333,26 @@
               x.classList.toggle('on', x === b);
             });
             self._syncFilterVisibility();
+            self._search();
+          });
+        });
+        // Model Type chips (base only). Multi-select: All clears, anything else toggles.
+        this.querySelectorAll('.mg-mkttypes button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var v = b.getAttribute('data-mt');
+            if (!v) {
+              if (!self._modelTypes.length) return;
+              self._modelTypes = [];
+            } else {
+              var at = self._modelTypes.indexOf(v);
+              if (at >= 0) self._modelTypes.splice(at, 1);
+              else self._modelTypes.push(v);
+            }
+            self.querySelectorAll('.mg-mkttypes button').forEach(function (x) {
+              var xv = x.getAttribute('data-mt');
+              x.classList.toggle('on', xv ? self._modelTypes.indexOf(xv) >= 0
+                                          : !self._modelTypes.length);
+            });
             self._search();
           });
         });
@@ -407,18 +431,32 @@
         '<div class="mg-mktfilters">' +
         '<div class="mg-mktsort"><button type="button" class="on" data-sort="popular">Popular</button>' +
         '<button type="button" data-sort="newest">Newest</button></div>' +
-        // Nine categories, matching PixAI exactly. Animal and Realistic were missing; their own
-        // training page leaked the canonical list by rendering raw i18n keys.
-        '<div class="mg-mktcats"><button type="button" class="on" data-cat="">All</button>' +
-        '<button type="button" data-cat="character">Character</button>' +
-        '<button type="button" data-cat="animal">Animal</button>' +
-        '<button type="button" data-cat="style">Style</button>' +
-        '<button type="button" data-cat="realistic">Realistic</button>' +
-        '<button type="button" data-cat="pose">Pose</button>' +
-        '<button type="button" data-cat="clothing">Clothing</button>' +
-        '<button type="button" data-cat="background">Background</button>' +
-        '<button type="button" data-cat="detail">Detail</button>' +
-        '<button type="button" data-cat="other">Other</button></div>' +
+        // LoRAs filter by CATEGORY; base models filter by ARCHITECTURE. Two different controls,
+        // matching PixAI, rather than one shared row that half-applies.
+        (this._kind === 'lora'
+          // Nine categories, matching PixAI exactly. Animal and Realistic were missing; their
+          // own training page leaked the canonical list by rendering raw i18n keys.
+          ? '<div class="mg-mktcats"><button type="button" class="on" data-cat="">All</button>' +
+            '<button type="button" data-cat="character">Character</button>' +
+            '<button type="button" data-cat="animal">Animal</button>' +
+            '<button type="button" data-cat="style">Style</button>' +
+            '<button type="button" data-cat="realistic">Realistic</button>' +
+            '<button type="button" data-cat="pose">Pose</button>' +
+            '<button type="button" data-cat="clothing">Clothing</button>' +
+            '<button type="button" data-cat="background">Background</button>' +
+            '<button type="button" data-cat="detail">Detail</button>' +
+            '<button type="button" data-cat="other">Other</button></div>'
+          // Model Type. Every token measured off a live request -- a wrong enum here returns
+          // the wrong rows rather than erroring, so none of these is a guess. MULTI-SELECT:
+          // "All" clears the set, any other chip toggles.
+          : '<div class="mg-mktcats mg-mkttypes">' +
+            '<button type="button" class="on" data-mt="">All</button>' +
+            '<button type="button" data-mt="MMDIT26B_MODEL">DiT.3</button>' +
+            '<button type="button" data-mt="MMDIT26A_MODEL">DiT.2</button>' +
+            '<button type="button" data-mt="DIT7_MODEL">DiT.1</button>' +
+            '<button type="button" data-mt="USER_DIT26A_MODEL">Community DiT</button>' +
+            '<button type="button" data-mt="SDXL_MODEL">SDXL</button>' +
+            '<button type="button" data-mt="SD_V1_MODEL">SD 1.5</button></div>') +
         '<div class="mg-mktsel">' +
           '<select class="mg-posted" aria-label="Posted at">' +
             '<option value="">Any time</option>' +
@@ -496,6 +534,10 @@
                '&posted=' + encodeURIComponent(this._posted) +
                '&source=' + encodeURIComponent(this._source) +
                '&license=' + encodeURIComponent(this._license);
+          // Repeated param, because the filter is multi-select server-side too.
+          this._modelTypes.forEach(function (t) {
+            u += '&model_type=' + encodeURIComponent(t);
+          });
         }
       }
       // picker-parity-round2: architecture-aware compat sort/badge -- LoRA only (nothing

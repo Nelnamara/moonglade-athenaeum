@@ -46,6 +46,40 @@ test("the source row offers Market / Bookmarked / Mine, and Mine is LoRA-only", 
     "the Mine button must be gated on kind === 'lora'");
 });
 
+test("base models get Model Type chips, LoRAs get categories -- not the same control", () => {
+  // PixAI gives base models a different filter set: Model Type, Posted at, License. No LoRA
+  // category, no Source, no My-LoRA tab. Rendering one shared row would half-apply.
+  assert.match(src, /this\._kind === .lora./,
+    "the category-vs-architecture choice must branch on kind");
+  assert.match(src, /mg-mkttypes/, "base models need their own architecture chip row");
+
+  // Every token measured off a live request 2026-07-26. A wrong enum here does not error -- it
+  // returns the wrong rows, or none, and reads as an empty result, so none of these may drift.
+  [["MMDIT26B_MODEL", "DiT.3"], ["MMDIT26A_MODEL", "DiT.2"], ["DIT7_MODEL", "DiT.1"],
+   ["USER_DIT26A_MODEL", "Community DiT"], ["SDXL_MODEL", "SDXL"],
+   ["SD_V1_MODEL", "SD 1.5"]].forEach(([token, label]) => {
+    assert.match(src, new RegExp('data-mt="' + token + '">' + label.replace(".", "\.")),
+      label + ' must map to ' + token + ' (measured, not inferred)');
+  });
+
+  // Community DiT is USER_DIT26A_MODEL, NOT DIT9_MODEL. Both were plausible and the wrong one
+  // fails silently, which is why it was captured rather than guessed.
+  assert.ok(!/data-mt="DIT9_MODEL"/.test(src),
+    "DIT9_MODEL is not what Community DiT sends");
+});
+
+test("Model Type is multi-select, and All means clear", () => {
+  // Measured: successive clicks sent [USER_DIT26A_MODEL], then [.., SDXL_MODEL], then
+  // [.., SD_V1_MODEL]. A single-value control would have been quietly wrong.
+  assert.match(src, /this\._modelTypes = \[\]/, "must start as an array");
+  assert.match(src, /self\._modelTypes\.splice\(at, 1\)/, "clicking a chosen chip must REMOVE it");
+  assert.match(src, /self\._modelTypes\.push\(v\)/, "clicking a new chip must ADD it");
+  assert.match(src, /if \(!v\) \{[\s\S]{0,120}self\._modelTypes = \[\]/,
+    "the All chip must clear the set rather than select a token");
+  // Sent as a REPEATED param, matching the server reading request.args.getlist.
+  assert.match(src, /model_type=. \+ encodeURIComponent\(t\)/);
+});
+
 test("filters are hidden on the bookmark list, where the server cannot honour them", () => {
   // The bookmark connection accepts a keyword and the architecture filter and nothing else.
   // Leaving sort/category/dropdowns on screen there would be controls that silently do
