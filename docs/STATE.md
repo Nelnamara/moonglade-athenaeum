@@ -1142,6 +1142,59 @@ verified 2026-07-26:
 | the slot list | only `branding/marks` and `branding/favicon` appear in code. The panel needs the full set. |
 | the achievement + roast | **the roast already exists** (`:1353`). The metric and trigger do not. |
 
+### Similarity index: COMPLETE at 35,106 — and what the 2026-07-26 hard lock taught us
+
+**State: complete.** 35,106 rows, which is exactly the unique-media_id count of the library.
+Verified queryable with a real vector search (top hits 0.8979 / 0.8796 / 0.8460). A crashed rebuild
+was resumed rather than restarted: 26,400 survived the reset, `sync()` added the missing 8,706 in
+11.7 min at 12.4 img/s with **zero** errors, and post-resume scores were byte-identical to
+pre-resume ones — proof the surviving rows were untouched.
+
+**The machine lock was commit-charge exhaustion, not Pixeltable and not disk.** The postgres log
+carries Windows error **1455** and exception **0xC000012D** repeatedly — both mean the commit limit
+(RAM + pagefile) was hit — alongside `out of memory`, `could not fork autovacuum worker`,
+`could not reattach to shared memory`, and `could not create signal handler thread`. Owner
+identified the other party: a forgotten **Pinokio** process (Forge/WAI-Illustrious) holding GPU and
+several GB while the rebuild ran. The embed job's own footprint is ~**18.5 GB** working set, so the
+two together exceeded what the box could commit. Not a code defect — but it means this job should
+never be run alongside anything heavy, and that is worth saying wherever the job is launched.
+
+**Postgres survived cleanly.** WAL replay succeeded; nothing was corrupt. Do not reach for a
+store wipe on the next hard reset without checking first — the recovery path works.
+
+## THREE REAL DEFECTS found in the wreckage (owner is filing these on GitHub from 2026-07-26)
+
+**1. `--rebuild-similar` has no resume counterpart, and the only button is the destructive one.**
+`sync()` was written to be incremental — it skips already-indexed media_ids — but the sole entry
+point (`--rebuild-similar`, and the Panel's "Rebuild the Similar index" job) calls `rebuild()`, which
+DROPS the table and starts from zero. So after the crash, the obvious action would have destroyed
+26,400 good rows and cost ~38 min instead of ~12. The resume had to be run by hand. A
+`--sync-similar` flag is a thin wrapper over an already-tested function. **This also reprioritises
+the parked thumbnail-embedding work**: that idea existed to make a full REBUILD faster, but the real
+lesson is that a full rebuild is almost never the right operation. Incremental top-up beats a faster
+rebuild, so ship the flag first and treat thumbnails as a genuine optional optimisation afterwards.
+
+**2. Pixeltable's postgres start times out at 10s; a cold start here needs ~36s.** Reproducible —
+it failed the first probe outright. Startup spends ~35s on `syncing data directory (fsync)` after
+hitting `could not open file "./log": sharing violation`, and postgres's own HINT blames
+antivirus/backup software. So a cold "More like this" or rebuild can fail at the starting line with a
+confusing `TimeoutExpired` from `pg_ctl` that says nothing about the real cause. A Defender exclusion
+for `~/.pixeltable` is the likely permanent fix — owner's call, a security setting is not ours to
+change. Worth catching the timeout and reporting it in plain language either way.
+
+**3. A `panel-*` job left "running" is never resolved after a server restart.** Live example:
+`panel-3d49d9bffea2`, still showing running in the tracker after the reboot. `resolve_orphan_jobs()`
+only checks **PixAI-task-keyed** generate jobs — its docstring says panel/delete jobs "are local and
+self-report", which is true right up until the process is killed, and then nothing ever writes the
+terminal event. The silent-death detection shipped 2026-07-25 does not cover this class at all. The
+clean rule needs no timeout heuristic: **a local job's owning process IS the server, so any
+non-terminal local job whose last event predates this server process's start is dead by definition.**
+Sweep those at startup and mark them interrupted.
+
+**No app restart was needed to pick up the finished index** — confirmed by evidence, not assumption:
+the running gallery had zero TCP connections to Pixeltable's postgres and a 33 MB working set (torch
+alone is ~2 GB), so it had never opened the index and connects fresh on first use.
+
 ### ✅ SHIPPED 2026-07-26: branding lives in the APP ROOT (`branding/`)
 
 Currently `Path(out_dir) / "branding"`, and `out_dir` now comes from `resolve_library_dir()` — the
