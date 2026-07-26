@@ -871,13 +871,28 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
 What's still CLI-only, tracked so the web surface stays complete:
 
+> **Read this list before filing a "no Panel button" item.** The board has twice raised
+> "maintenance commands have no Panel button", and both times the answer was already here. The
+> commands below are CLI-only by DECISION, not by omission, and a recurring correction is worth
+> stating once: a modifier (`--embed-metadata`, `--convert`) does not want a button, an already
+> integrated step (`--faststart-videos`) does not want a second trigger, and a repair tool
+> (`--backfill-meta`) actively should not have one, because a button implies you ought to press it.
+
+
 - **Password reset.** The only way to reset a forgotten password today is
   `python moonglade_backup.py --add-web-user` on the server machine (it *adds or
   updates*, so re-running it for an existing username doubles as a reset — `wiki/Setup.md`
   documents this). Owner request, 2026-07-22: give this a home in the Panel's Users tab
-  too, so a forgotten password doesn't require CLI access. Would need its own trust call
-  (self-only, like `api_users_remove`'s self-removal carve-out? or LOCALHOST like adding a
-  new account?) rather than inheriting one by default — not decided yet, not started.
+  too, so a forgotten password doesn't require CLI access.
+  **DECIDED 2026-07-26 (owner): a user may reset THEIR OWN password from anywhere; resetting
+  anyone else's is an owner-machine action only.** So it splits into two paths rather than one
+  trust call: self-service reset inherits the self-only carve-out `api_users_remove` already
+  uses, and admin reset-for-another-user is LOCALHOST, like adding an account. That was the
+  blocker on this item; it is now a build, not a question.
+
+  Worth stating the boundary plainly because it is the kind of thing that drifts: "reset my own"
+  must not accept a username parameter at all — it acts on the session's own account, so a LAN
+  visitor cannot aim it at the owner's login by editing a request.
 - (`--restore-orphans` and `--undo-organize` now render Panel buttons. `reconcile-deleted`
   runs via `/api/panel/run` and the scheduler but renders no button by design,
   `panel_visible: False`. `PANEL_ACTIONS` in `moonglade_gallery.py`. Still genuinely CLI-only,
@@ -1046,23 +1061,6 @@ Enhance Adept became unearnable. Move it there later if the creator ships.
 - **The other two should stay unspent.** The two most obvious candidates — first LoRA trained (the
   owner has two) and first generation mirrored to the PixAI library — only become meaningful once
   training and the JWT toggle are real. Minting them early repeats the Enhance Adept mistake.
-
-## CORRECTED: the Panel is missing FIVE maintenance commands, not three
-
-The board says three. Measured against the CLI's own flag list, five standalone maintenance
-operations have no Panel path at all:
-
-| command | what it does | note |
-|---|---|---|
-| `--embed-metadata` | writes prompt/seed/model INTO the image files | highest value here — makes the archive self-describing outside this app |
-| `--faststart-videos` | remuxes videos so they play instantly | pure library hygiene, exactly what the Panel is for |
-| `--convert-existing` | bulk-converts files already on disk | the per-image convert exists; the bulk one has no home |
-| `--backfill-meta` | the lighter sibling of `--backfill-full-meta` | the heavy one has a button, this does not |
-| `--probe` | connection sanity check | belongs beside the API key as "test connection" |
-
-`--accurate-count` and `--collect-only` are also absent but are MODIFIERS, not standalone jobs, so
-they want no button. Start with `--embed-metadata` and `--faststart-videos`: both useful, both safe,
-neither needs a decision.
 
 ## DECIDED: which of PixAI's community features Moonglade gets (owner, 2026-07-26)
 
