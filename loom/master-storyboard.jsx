@@ -795,6 +795,29 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // selectCard() guards its identical fetch with a local selSeq/mySeq pair: a fast second
   // pick must not let the FIRST pick's now-stale response land after it.
   const imgModelSeqRef = useRef(0);
+  // LoRA weight bounds for the CURRENT base model's architecture. DiT takes 0..1.2, the SD
+  // family -2..+2; an unknown or not-yet-picked base falls back to the widest range rather
+  // than the narrowest, so an unrecognised architecture never silently removes a capability
+  // the account has. Served from core (window.MG_LORA) -- one table, three consumers.
+  const loraRange = useMemo(() => {
+    const L = window.MG_LORA;
+    const t = String((imgModel && imgModel.model_type) || "").toUpperCase();
+    if (!L) return [-2, 2];
+    return (L.ranges && L.ranges[t]) || L.fallback || [-2, 2];
+  }, [imgModel]);
+  // Switching base architecture with LoRAs already attached must bring their weights into
+  // the new range -- a -0.8 left over from SDXL is a weight a DiT model rejects.
+  useEffect(() => {
+    setImgLoras((cur) => {
+      let changed = false;
+      const next = cur.map((l) => {
+        const w = Math.max(loraRange[0], Math.min(loraRange[1], +l.weight));
+        if (w !== l.weight) changed = true;
+        return w === l.weight ? l : { ...l, weight: w };
+      });
+      return changed ? next : cur;
+    });
+  }, [loraRange, setImgLoras]);
   // Persist the two <mg-model-picker> DOM elements outside the ref-callback closures
   // (bindPicker/bindLoraPicker below only run on mount/unmount) so the ensureSearched()
   // effect further down can reach whichever one just became visible on a tab switch.
@@ -1624,14 +1647,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     title={incompat ? l.title + " — needs a different base architecture than the one selected; remove it or switch the base" : l.title}>
                     {l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : (incompat ? " ⚠" : "")}
                   </span>
-                  {/* Slider, and -2..2 -- PixAI's own Advanced panel allows negative
-                      weights (a LoRA at a negative weight subtracts its influence) and the
-                      old min=0 made half their range unreachable. Matches the gallery
-                      drawer's control exactly; the two surfaces share this model. */}
+                  {/* Bounds follow the BASE MODEL's architecture: DiT takes 0..1.2, the SD
+                      family -2..+2 (negative subtracts that LoRA's influence). Served from
+                      core in window.MG_LORA, the same table the gallery drawer reads, so the
+                      two surfaces and the builder's own clamp cannot drift apart. */}
                   <span className="lv-lw">
-                    <input type="range" step="0.1" min="-2" max="2" value={l.weight}
-                      title="Weight — PixAI allows -2 to 2; negative subtracts this LoRA's influence"
-                      onChange={(ev) => { const w = Math.max(-2, Math.min(2, +ev.target.value || 0));
+                    <input type="range" step="0.1" min={loraRange[0]} max={loraRange[1]}
+                      value={l.weight}
+                      title={"Weight — " + loraRange[0] + " to " + loraRange[1] +
+                             " for this base model" +
+                             (loraRange[0] < 0 ? "; negative subtracts this LoRA's influence" : "")}
+                      onChange={(ev) => { const w = Math.max(loraRange[0],
+                                                             Math.min(loraRange[1], +ev.target.value || 0));
                         setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
                     <b>{(+l.weight).toFixed(1)}</b>
                   </span>

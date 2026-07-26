@@ -26,6 +26,16 @@ git tags. Full prose notes for tagged versions live on
   lands at the top, and focuses its search box. The Details page never showed this because
   that panel is wide, and therefore short enough not to scroll.
 
+- **A generation captured as it happened lost most of its metadata.** The shared downloader
+  (which the web app and the Job Tracker both go through) wrote the model id and little else,
+  so a new image landed with an em-dash for **Steps, Sampler, CFG, negative prompt, natural
+  prompt, clip skip and LoRAs** — not because PixAI never recorded them, but because they
+  were never written down, and only a later `--backfill-full-meta` filled them in. That
+  backfill is the manual step capturing-as-it-happens exists to remove. All of them are
+  written now, asserted against `extract_full_meta`'s own output so a field added there later
+  fails the test rather than silently going unwritten. An em-dash remains the honest answer
+  where the task genuinely recorded nothing — an Edit or Fix has no such parameters at all.
+
 - **A freshly generated image showed a raw model id instead of the model's name.**
   `extract_full_meta` only fills `model_name` for a chat task (Edit/Fix, resolved from the
   local table); for an ordinary generation it is blank and the caller has to look it up —
@@ -42,13 +52,23 @@ git tags. Full prose notes for tagged versions live on
 
 ### Changed
 
-- **LoRA weight is a slider, and it spans PixAI's real range.** It was a number spinner
-  clamped to 0–2; PixAI's own Advanced panel allows **−2 to +2** in steps of 0.1, and a
-  negative weight subtracts that LoRA's influence. Half their range was unreachable — a
-  capability gap hiding behind a widget choice. Both surfaces got the same control (the
-  Generate drawer and the Loom's Image tab), and the value is clamped to those bounds in the
-  builder too, since a value outside them is a rejected generation rather than a stronger
-  effect.
+- **LoRA weight is a slider, and its range follows the base model's architecture.** It was a
+  number spinner clamped to 0–2. There is no single correct range — owner-verified against
+  the live site:
+
+  | Base architecture | LoRA weight |
+  |---|---|
+  | DiT (dit1, Tsubaki.2 / DiT.2, community DiT) | 0 to 1.2 |
+  | SD1.5, SDXL | −2.0 to +2.0 |
+
+  So the old spinner blocked the legal negatives SD allows, and a flat −2..+2 would offer
+  DiT weights PixAI rejects. The slider's bounds now come from the selected base model's
+  architecture, served from one table in core so the two surfaces (the Generate drawer and
+  the Loom's Image tab) and the builder's own clamp cannot drift apart. Switching base model
+  with LoRAs already attached re-clamps them, since a −0.8 left over from SDXL is a weight
+  a DiT model refuses. An unknown or not-yet-picked base falls back to the **widest** range
+  rather than the narrowest — an unrecognised architecture must not silently remove a
+  capability the account has, and a refused weight costs nothing.
 
 - **You can now delete a single image from PixAI, instead of its whole batch.** The
   gallery's existing **Delete from PixAI** is task-level: deleting any one image takes every

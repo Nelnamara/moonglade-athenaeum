@@ -303,7 +303,9 @@ def test_upscale_constants_reach_the_client_from_core(tmp_path):
         assert "__UPSCALE_CONST__" not in html, path + " left the raw marker on the page"
         blob = html.split("window.MG_UPSCALE=", 1)
         assert len(blob) == 2, path + " never received window.MG_UPSCALE"
-        payload = json.loads(blob[1].split(";</script>", 1)[0])
+        # Two globals ship in one tag now (MG_UPSCALE then MG_LORA), so this splits on the
+        # next assignment rather than the tag's end.
+        payload = json.loads(blob[1].split(";window.MG_LORA=", 1)[0])
         assert payload["enlargeModels"] == list(core.ENLARGE_MODELS)
         assert payload["defaultEnlargeModel"] == core.DEFAULT_ENLARGE_MODEL
         assert payload["ceiling"] == core.UPSCALE_PIXEL_CEILING
@@ -451,19 +453,52 @@ def test_lora_weight_spans_pixais_real_range_on_every_surface(tmp_path):
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = login_client(tmp_path).get("/").get_data(as_text=True)
-    assert 'type="range" step="0.1" min="-2" max="2"' in html
+    assert 'type="range" step="0.1"' in html
     assert 'step="0.05" min="0" max="2"' not in html, "the old 0..2 spinner survives"
-    assert "Math.max(-2,Math.min(2,v))" in html, "the handler still clamps negatives away"
+    # The bounds are per ARCHITECTURE, not baked into the markup -- see the range test below.
+    assert "function loraRange(" in html and "window.MG_LORA" in html
+    assert "reclampLoras" in html, "switching base model must re-clamp attached LoRAs"
 
     # The Loom's Image tab shares the model, so it must share the control.
     jsx = (root / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
-    assert 'type="range" step="0.1" min="-2" max="2"' in jsx
+    assert 'type="range" step="0.1"' in jsx
     # ...and the SHIPPED bundle must actually carry it. A source-only assertion passes
     # happily against a stale dist/ that no rebuild ever touched.
     bundle = (root / "loom" / "dist" / "master-storyboard.bundle.js").read_text(
         encoding="utf-8", errors="replace")
-    assert 'min: "-2"' in bundle and 'type: "range"' in bundle, (
+    # NOT a hardcoded "-2" any more: the bound is per-architecture and read from the served
+    # table, so what the shipped bundle must prove is that it uses that mechanism. A
+    # source-only check would pass against a stale dist/ that no rebuild ever touched.
+    assert 'type: "range"' in bundle and "MG_LORA" in bundle and "loraRange" in bundle, (
         "the Loom bundle is stale -- run `npm run build --prefix loom`")
+
+
+def test_lora_weight_bounds_follow_the_base_architecture(tmp_path):
+    """Owner-reported from the live site: DiT models take 0..1.2, the SD family -2..+2.
+
+    There is no single correct range, which is why both earlier attempts were wrong in
+    opposite directions -- a 0..2 spinner blocked the legal negatives SD allows, and a flat
+    -2..2 slider offered DiT weights PixAI rejects. The table is served from core so the
+    slider and the builder cannot drift apart.
+    """
+    assert core.lora_weight_range("DIT7B_MODEL") == (0.0, 1.2)
+    assert core.lora_weight_range("MMDIT26A_MODEL") == (0.0, 1.2)
+    assert core.lora_weight_range("DIT9_MODEL") == (0.0, 1.2)
+    assert core.lora_weight_range("SDXL_MODEL") == (-2.0, 2.0)
+    assert core.lora_weight_range("SD_V1_MODEL") == (-2.0, 2.0)
+    # Unknown or not-yet-picked falls back to the WIDER range, not the narrower: an unknown
+    # architecture must not silently remove a capability the account has, and a weight the
+    # architecture refuses comes back as a refused submit, which costs nothing.
+    assert core.lora_weight_range("") == (-2.0, 2.0)
+    assert core.lora_weight_range("SOMETHING_NEW") == (-2.0, 2.0)
+
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    served = json.loads(html.split("window.MG_LORA=", 1)[1].split(";</script>", 1)[0])
+    assert served["ranges"]["DIT7B_MODEL"] == [0.0, 1.2]
+    assert served["ranges"]["SDXL_MODEL"] == [-2.0, 2.0]
+    assert served["fallback"] == [-2.0, 2.0] and served["step"] == 0.1
 
 
 def test_core_clamps_the_lora_weight_to_pixais_bounds():

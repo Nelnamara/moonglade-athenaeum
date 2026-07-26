@@ -982,6 +982,47 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
     assert rows["m2"]["prompt_full"] == "kept" and rows["m2"]["seed"] == "77"
 
 
+def test_live_capture_writes_every_field_the_backfill_would(monkeypatch, tmp_path):
+    """The point of capturing a generation as it happens is not having to go back for it.
+
+    extract_full_meta hands over twelve fields; the live row wrote eight of them and dropped
+    sampler, natural_prompt, clip_skip and loras, so those arrived blank and only appeared
+    once a --backfill-full-meta came past -- the exact manual step this path exists to
+    remove. `loras` is the clearest case: extract_full_meta returns "" for it BY DESIGN and
+    documents that the caller resolves it. The backfill did. This did not.
+
+    Asserted against extract_full_meta's own output rather than a hardcoded list, so a field
+    added there later shows up here as a failure instead of silently going unwritten.
+    """
+    import pathlib
+    from pixai_gallery import CATALOG_FIELDS
+
+    task = {
+        "id": "T1", "createdAt": "2026-07-26T00:00:00Z", "status": "completed",
+        "parameters": {"prompts": "night elf druid", "modelId": "42",
+                       "extra": {"naturalPrompts": "a druid, at night"},
+                       "lora": {"L1": 0.8}},
+        "outputs": {"seed": 5, "batch": [{"mediaId": "m1", "seed": 5}],
+                    "detailParameters": {"steps": 25, "sampler": "Euler a",
+                                         "cfg_scale": 7, "clipSkip": 2}},
+    }
+    fm = core.extract_full_meta(task)
+    # Every field extract_full_meta resolves for an ordinary generation must reach the row.
+    expected = {k for k, v in fm.items()
+                if k in CATALOG_FIELDS and str(v or "").strip()}
+    expected |= {"loras"}          # "" by design out of extract_full_meta; caller resolves it
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    # _download_image_task is the SHARED downloader: collect_generation (the web
+    # app + job tracker) goes through it, so it is the path that matters most.
+    body = src[src.index("def _download_image_task("):]
+    body = body[:body.index(chr(10) + "        rows.append(full)")]
+    missing = sorted(f for f in expected if '"{}"'.format(f) not in body)
+    assert not missing, (
+        "the live capture never writes {} -- they stay blank until a backfill comes past"
+        .format(missing))
+
+
 def test_a_freshly_captured_generation_gets_its_model_NAME_not_just_its_id(monkeypatch, tmp_path):
     """extract_full_meta fills model_name only for a CHAT task (Edit/Fix, resolved locally
     from EDIT_MODELS). For an ordinary generation it is blank and the caller must fill it --
