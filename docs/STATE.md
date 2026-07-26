@@ -1017,6 +1017,53 @@ disliked it when it was first raised. Bookmarking puts things in the FAVOURITES 
 generations library — the wrong shelf. An earlier note recorded it as an agreed plan; that was
 wrong and has been corrected at the source.
 
+## BANKED for the design pass: the three free achievement slots, and Enhance Adept's replacement
+
+**"Enhance Adept" is dead and must be retooled or retired.** Its metric computes from a counter
+nothing increments any more — Enhance was deleted — so it can never be earned. It is the only
+achievement in that state; all 36 metrics were checked. Its shape is *"five different X"*, epic
+tier, mastery bucket, and the cleanest fix keeps the shape and changes the X.
+
+**Recommended: "generate on five different base architectures"** (DiT.1 / DiT.2 / DiT.3 / SDXL /
+SD 1.5). The enum work of 2026-07-26 is exactly what makes this measurable — the tokens are now
+known and `model_id` is already stored per image, so the metric is one `COUNT(DISTINCT)`. It also
+survives the rename thematically: "refinement in every register" becomes fluency in every dialect,
+and it rewards breadth of craft rather than clicking something five times.
+
+**Alternative the owner raised: five distinct art filters applied.** A direct like-for-like swap,
+and filters are local and free so it is earnable without spend. Weaker for an EPIC, because it is
+a clicking achievement.
+
+**Alternative to resist for now: gate it behind the filter creator.** The best fit of the three,
+but the creator is not built — and gating an epic behind an unbuilt feature is precisely how
+Enhance Adept became unearnable. Move it there later if the creator ships.
+
+### The three free slots (57 of 60 used)
+- **One is earmarked for a Dungeon Crawler Carl reference.** The native hook is DESCENT — something
+  that fires on reaching the true bottom (the oldest image, or the literal end of 35,000). Carl art
+  already exists in the chibi library. The other DCC-native option is an achievement whose ROAST is
+  written as a sponsor announcement, letting the voice do the work instead of the metric.
+- **The other two should stay unspent.** The two most obvious candidates — first LoRA trained (the
+  owner has two) and first generation mirrored to the PixAI library — only become meaningful once
+  training and the JWT toggle are real. Minting them early repeats the Enhance Adept mistake.
+
+## CORRECTED: the Panel is missing FIVE maintenance commands, not three
+
+The board says three. Measured against the CLI's own flag list, five standalone maintenance
+operations have no Panel path at all:
+
+| command | what it does | note |
+|---|---|---|
+| `--embed-metadata` | writes prompt/seed/model INTO the image files | highest value here — makes the archive self-describing outside this app |
+| `--faststart-videos` | remuxes videos so they play instantly | pure library hygiene, exactly what the Panel is for |
+| `--convert-existing` | bulk-converts files already on disk | the per-image convert exists; the bulk one has no home |
+| `--backfill-meta` | the lighter sibling of `--backfill-full-meta` | the heavy one has a button, this does not |
+| `--probe` | connection sanity check | belongs beside the API key as "test connection" |
+
+`--accurate-count` and `--collect-only` are also absent but are MODIFIERS, not standalone jobs, so
+they want no button. Start with `--embed-metadata` and `--faststart-videos`: both useful, both safe,
+neither needs a decision.
+
 ## DECIDED: which of PixAI's community features Moonglade gets (owner, 2026-07-26)
 
 The whole surface is mapped -- 39 operations with hashes, from
