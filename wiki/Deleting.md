@@ -20,9 +20,37 @@ in the gallery:
 > (Hand-copying files out of `_deleted/` and re-running `--import-local` still works as a
 > fallback, but you shouldn't need it.)
 
-> ⚠️ **The cloud side of "Delete from PixAI" is irreversible.** It's **task-level**:
-> selecting one image deletes its whole batch on PixAI. Gated behind a confirm dialog +
-> typing `DELETE`. Only the *local* part is recoverable via `_deleted/`.
+> ⚠️ **The cloud side of "Delete from PixAI" is irreversible.** From the gallery's
+> Actions dropdown it is **task-level**: selecting one image deletes its whole batch on
+> PixAI. Gated behind a confirm dialog + typing `DELETE`. Only the *local* part is
+> recoverable via `_deleted/`.
+
+## Deleting just one image from a batch
+
+The gallery's bulk action takes whole tasks. When you want to remove **one** picture from a
+batch and keep its siblings, open that image and use the buttons on its own page:
+
+- **Delete locally** — moves the file to `_deleted/` and clears the catalog row. PixAI
+  still has the image, so a later sync brings it back. This is the recoverable one.
+- **Delete from PixAI** — removes *that image only* from your account. The rest of its
+  batch stays. Irreversible on their side, and it removes the local copy too, so the two
+  never drift.
+
+The confirm dialog tells you which case you are in before you commit — how many images of
+the batch will survive, or that this is the only image its task made — and then asks you to
+type `DELETE`, the same gate the bulk action uses.
+
+Two cases where the button is simply not there:
+
+- **A file you imported from your own computer.** PixAI has no copy of it, so there is
+  nothing on their side to delete. Use **Delete locally**.
+- **A session on another device.** Irreversible cloud deletion needs a request from the
+  machine running the server, even for your own signed-in account — the same rule the
+  bulk action follows.
+
+The cloud call happens first and the local copy is only removed once it succeeds. If PixAI
+refuses or the network drops, the image is left exactly where it was on both sides, and you
+can try again.
 
 **The confirm dialog shows you the batch.** Because one selected image takes its whole task
 with it, the dialog leads with the real total — *"7 files across 2 tasks will be deleted from
