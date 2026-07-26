@@ -1074,6 +1074,32 @@ Enhance Adept became unearnable. Move it there later if the creator ships.
   owner has two) and first generation mirrored to the PixAI library — only become meaningful once
   training and the JWT toggle are real. Minting them early repeats the Enhance Adept mistake.
 
+## ⚠️ DO NOT "FIX": the Feats section is cloaked on purpose (owner-confirmed 2026-07-26)
+
+The board carries this as a defect — *"with no feats earned yet, the whole Feats section
+disappears instead of showing mystery tiles."* It is **correct behaviour**, and the owner confirmed
+the intent in his own words:
+
+> "The feats are a true mystery until the first lands, then the unearned ones have the mystery
+> card. That way unlocking them really feels like opening a new tier."
+
+So there are **two** states, not one, and the distinction is the whole point:
+
+| state | what shows |
+|---|---|
+| no feat earned yet | the section does not exist at all — a true unknown |
+| first feat lands | the section appears, and unearned feats become **mystery cards** |
+
+Enforced at four call sites in `static/mg-notify.js` (`:684`, `:737`, `:765`, `:803`), all gated on
+`d.feats_revealed`, which `moonglade_gallery.py:13004` computes from whether any feat is earned.
+The comment at `:737` already said "deliberately".
+
+**Why this is recorded rather than left to the code comment.** The failure mode here is a HELPFUL
+fix. A sweep reads "section disappears", finds the mystery-tile machinery sitting right there
+unused (`/branding/mystery/secret_feat.png`, the `.hall-card.hidden-feat` style), concludes someone
+forgot to wire it up, and wires it up — destroying the reveal in the name of consistency. The
+mystery tile is not unused; it is waiting for the second state.
+
 ## DECIDED: which of PixAI's community features Moonglade gets (owner, 2026-07-26)
 
 The whole surface is mapped -- 39 operations with hashes, from
