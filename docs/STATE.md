@@ -398,6 +398,24 @@ users.
   can differ slightly from their own render and none of ours can. The paid path
   (`build_filter_parameters`, `--filter-id`, `--enhance`, `run_enhance`) is gone: it charged
   credits and waited on a worker queue for a handful of gradient fills.
+- **Upscale lives on the image view; the drawer keeps only the Enhance Details booster**
+  (2026-07-25). PixAI invokes Upscale on a picture that already exists, so the drawer's old
+  three-way Off/Upscale/Hires segment is gone — it was not where PixAI offers it, and a drawer
+  has no source, so the ratio cap and predicted output size were derived from the size the
+  generation was about to be. `static/mg-upscale-panel.js` (`<mg-upscale-panel>`) is the
+  surface: a full inline panel on the detail page, and a flyout in the lightbox (z-index 320,
+  above `.lb`'s 300, and the overlay stays open behind it) closed by `closeLightbox`/`lbStep`
+  so it can never outlive the picture it was opened for. Both methods with PixAI's own control
+  asymmetry — `enlarge` + `enlargeModel` (5-option picker) vs `upscale` +
+  `upscaleDenoisingStrength/Steps` — and a ratio cap derived from the SOURCE's real dimensions
+  against `UPSCALE_PIXEL_CEILING`, served to the client via the `__UPSCALE_CONST__` marker
+  (index + detail pages only; four other templates share `BASE_HTML`) so no second hand port
+  exists. Submits through the existing `/api/price` + `/api/generate` as plain i2i
+  (`ref_media_id` + `ref_strength`); there is deliberately **no** `/api/upscale`. Model is
+  prefilled from the row when known, and otherwise falls back to the shared
+  `<mg-model-picker>` — it never guesses, since a different model restyles the picture. New
+  read-only `/api/image-meta/<media_id>` (LOGIN tier) serves the one row the lightbox needs;
+  it withholds `filename` (a host-path fragment).
 - PixAI's one-click **panelplugin workflows** cannot run here at all, and the surface for them is
   deleted. PixAI never assigns a worker to a panelplugin task submitted with an API key — it
   accepts it, queues it, charges it, then cancels it at ~60 minutes with `outputs.reason`
