@@ -3407,6 +3407,30 @@ def _build_stamp():
     return "v{}".format(ver) + (" · {}".format(sha) if sha else "")
 
 
+LIBRARY_DIR_KEY = "LIBRARY_DIR"
+DEFAULT_LIBRARY_DIR = "pixai_backup"
+
+
+def resolve_library_dir(explicit=None):
+    """Where the library lives: an explicit --out, then config.json's LIBRARY_DIR, then the
+    default. Explicit beats stored on purpose -- a one-off `--out somewhere`, a scheduled
+    job, or a second install pointed elsewhere must not be overridden by a shared setting,
+    and must not quietly rewrite it either.
+
+    Read fresh from disk rather than through core's module-level _cfg cache: the Panel
+    writes this and then restarts, and a cache populated at the OLD process's start is
+    exactly the value the restart exists to get away from.
+    """
+    if explicit:
+        return str(explicit)
+    try:
+        import pixai_gallery_backup as _core
+        stored = str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or "").strip()
+    except Exception:                                   # noqa: BLE001
+        stored = ""
+    return stored or DEFAULT_LIBRARY_DIR
+
+
 def _supervised():
     """True when the server was started by the managed launcher (Serve Gallery), which sets
     MOONGLADE_SUPERVISED=1 and relaunches on exit code 42. Restart is only offered when True."""
@@ -9204,6 +9228,20 @@ function savePrompt() {
       <a class="btn" href="{{ url_for('export_csv_download') }}" download>&#11015; Download catalog (CSV)</a>
       <span style="font-size:11.5px;color:var(--overlay0);margin-left:8px;">saves to your Downloads &mdash; doesn&rsquo;t touch the backup folder</span>
     </div>
+    <div id="libwrap" style="margin-top:16px;display:none;">
+      <div class="p-note" style="margin-top:0;">Where this library lives. Changing it points
+        Moonglade at a different folder next time it starts &mdash; <b>nothing is moved,
+        copied or deleted</b>, and the folder you leave behind stays exactly as it is.</div>
+      <div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap;">
+        <input id="libpath" type="text" spellcheck="false" autocomplete="off"
+               style="flex:1 1 320px;min-width:0;background:var(--surface0);color:var(--text);
+                      border:1px solid var(--surface1);border-radius:7px;padding:7px 9px;
+                      font-size:12.5px;font-family:var(--font-mono,monospace);">
+        <button type="button" class="jobbtn" style="flex:0 0 auto;min-width:0;"
+                onclick="saveLib(false)"><span class="t">Save folder</span></button>
+      </div>
+      <div id="libmsg" style="font-size:11.5px;color:var(--overlay0);margin-top:7px;"></div>
+    </div>
   </div>
 
   <div class="p-sec">
@@ -9964,7 +10002,47 @@ function _watchServer(comeBack){
     if(tries>50){ clearInterval(iv); el('srv-msg').textContent=comeBack?'Still restarting\\u2026 give it a moment, then refresh.':'Server stopped.'; el('srv-spin').style.display='none'; }
   }, 800);
 }
-renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadSkins(); loadWatchStatus();
+function loadLib(){
+  fetch('/api/library-path').then(function(r){return r.json();}).then(function(d){
+    // Hidden entirely for a LAN session: the field would be empty (the host path is
+    // withheld, exactly as /panel already withholds it) and the save is localhost-only, so
+    // showing it would be a control that cannot work -- the dead-end click the LAN chip
+    // exists to prevent.
+    if(!d || !d.local) return;
+    el('libwrap').style.display='';
+    el('libpath').value = d.path || '';
+    el('libmsg').textContent = d.stored ? '' :
+      'Currently the default folder. Set one to move the library somewhere else.';
+  }).catch(function(){});
+}
+function saveLib(create){
+  var path=el('libpath').value.trim(), m=el('libmsg');
+  if(!path){ m.textContent='Enter a folder path.'; return; }
+  m.textContent='Saving\u2026';
+  fetch('/api/library-path',{method:'POST',headers:{'Content-Type':'application/json'},
+                             body:JSON.stringify({path:path, create:!!create})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d && d.needs_create){
+        m.textContent='';
+        if(confirm('That folder does not exist yet.\\n\\n'+d.path+'\\n\\nCreate it?')) saveLib(true);
+        else m.textContent='Not saved.';
+        return;
+      }
+      if(!d || d.error){ m.textContent=(d&&d.error)||'Could not save.'; return; }
+      if(!d.restart_needed){ m.textContent='Saved \u2014 that is already the folder in use.'; return; }
+      // The setting is read at STARTUP, so it does nothing until the server restarts. Saying
+      // "saved" and stopping would leave the owner looking at an unchanged library.
+      var warn = d.has_catalog ? '' :
+        ' There is no catalog there yet, so it will start empty until you sync.';
+      if(d.supervised){
+        m.textContent='Saved.'+warn+' Restarting to pick it up\u2026';
+        restartServer();
+      } else {
+        m.textContent='Saved.'+warn+' Restart Moonglade to start using it.';
+      }
+    }).catch(function(){ m.textContent='Could not save.'; });
+}
+renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadSkins(); loadWatchStatus(); loadLib();
 setInterval(loadWatchStatus, 8000);
 // if a job was already running when the page loaded, resume polling
 fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });
@@ -10558,6 +10636,68 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         Manager. Login required (any session, local or LAN). Under the managed launcher this ends the whole app."""
         _schedule_server_exit(0)
         return jsonify({"ok": True, "action": "stop"})
+
+    @app.route("/api/library-path", methods=["GET", "POST"])
+    def api_library_path():
+        """Read or set the library folder (config.json's LIBRARY_DIR).
+
+        LOCALHOST-ONLY on write: it rewrites config.json, the file that also holds
+        AUTH_SECRET_KEY and AUTH_USERS, so it sits in the same trust class as
+        /api/setup/save-key and /api/branding/shortcut. GET is LOGIN -- the Panel shows the
+        current folder to whoever can already see the Panel, and it is the same host path
+        /panel already withholds from non-local callers, so it is withheld here too.
+
+        Setting this NEVER MOVES ANYTHING. It points the app at a different folder on the
+        next start; the old folder is left exactly as it is. That is the whole contract, and
+        it is why there is no "migrate" option here to get wrong.
+        """
+        import pixai_gallery_backup as _core
+        if request.method == "GET":
+            cur = str(out_dir)
+            return jsonify({
+                "path": cur if _is_local_request() else "",
+                "stored": str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or ""),
+                "default": DEFAULT_LIBRARY_DIR,
+                "local": _is_local_request(),
+                "supervised": _supervised(),
+            })
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        want = str(body.get("path") or "").strip().strip('"')
+        if not want:
+            return jsonify({"error": "Enter a folder path."}), 200
+        try:
+            target = Path(want).expanduser()
+            # Stored absolute: the server's working directory is the launcher's folder, and
+            # a relative path stored here would silently mean somewhere else the moment
+            # anything started it from elsewhere (a scheduled task, a terminal, a shortcut).
+            target = target.resolve() if target.is_absolute() else (Path.cwd() / target).resolve()
+        except (OSError, ValueError) as e:
+            return jsonify({"error": "That path isn't usable: {}".format(e)[:160]}), 200
+        if target.exists() and not target.is_dir():
+            return jsonify({"error": "That path is a file, not a folder."}), 200
+        if not target.exists():
+            if not body.get("create"):
+                return jsonify({"needs_create": True, "path": str(target),
+                                "error": "That folder doesn't exist yet."}), 200
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                return jsonify({"error": "Couldn't create it: {}".format(
+                    _redact_host_paths(str(e)))[:160]}), 200
+        # Written only AFTER the folder is known good -- never write first and hope, the
+        # same order /api/setup/save-key follows for the API key.
+        cfg = _core._load_config() or {}
+        cfg[LIBRARY_DIR_KEY] = str(target)
+        try:
+            _core._save_config(cfg)
+        except OSError as e:
+            return jsonify({"error": "Couldn't save the setting: {}".format(
+                _redact_host_paths(str(e)))[:160]}), 200
+        has_catalog = (target / "catalog.db").exists()
+        return jsonify({"ok": True, "path": str(target), "has_catalog": has_catalog,
+                        "supervised": _supervised(), "restart_needed": str(target) != str(out_dir)})
 
     @app.route("/api/server/restart", methods=["POST"])
     def api_server_restart():
@@ -14411,8 +14551,14 @@ def port_owner(host, port, timeout=0.4):
 
 def main():
     ap = argparse.ArgumentParser(description="Local PixAI gallery server.")
-    ap.add_argument("--out", default="pixai_backup",
-                    help="backup folder containing catalog.csv (default: pixai_backup)")
+    # default=None, not "pixai_backup": argparse cannot tell "the user typed the default"
+    # from "the user typed nothing", and the managed launcher used to always pass the
+    # literal default -- which made config.json's LIBRARY_DIR permanently unreachable no
+    # matter what was stored in it. None is the only value that means "not specified".
+    ap.add_argument("--out", default=None,
+                    help="backup folder containing the catalog. Defaults to LIBRARY_DIR in "
+                         "config.json (set it in the Control Panel), or pixai_backup if that "
+                         "is unset. An explicit --out here always wins.")
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (default 127.0.0.1; use 0.0.0.0 for LAN)")
@@ -14440,7 +14586,7 @@ def main():
                          "regardless of this flag")
     args = ap.parse_args()
 
-    out_dir = Path(args.out)
+    out_dir = Path(resolve_library_dir(args.out))
     import pixai_logging
     pixai_logging.setup_logging(out_dir, verbose=args.verbose)
     # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing

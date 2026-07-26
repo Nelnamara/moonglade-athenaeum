@@ -398,6 +398,18 @@ users.
   can differ slightly from their own render and none of ours can. The paid path
   (`build_filter_parameters`, `--filter-id`, `--enhance`, `run_enhance`) is gone: it charged
   credits and waited on a worker queue for a handful of gradient fills.
+- **The library folder is settable again, from the Control Panel** (2026-07-25). It stopped
+  being settable when the PySide6 GUI was removed in v2.1.0 and nothing replaced its folder
+  picker. `resolve_library_dir()` in `pixai_gallery.py` is the order of precedence: an
+  explicit `--out`, then `config.json`'s `LIBRARY_DIR`, then `pixai_backup`. `--out`'s argparse
+  default is now `None` — argparse cannot distinguish "typed the default" from "typed
+  nothing" — and **`Serve Gallery.pyw` no longer hardcodes `--out pixai_backup`**, which it
+  always passed and which made any stored setting permanently unreachable; `serve.txt` still
+  appends, so an explicit `--out` there deliberately pins that launcher. `/api/library-path`
+  is GET=LOGIN (host path withheld from non-local, as `/panel` already does) / POST=LOCALHOST
+  (it rewrites config.json). It validates before writing, asks before creating a missing
+  folder, refuses a path that is a file, and **never moves, copies or deletes anything** —
+  pinned by a test that greps the handler for `shutil.move`/`copytree`/`rename`/`unlink`.
 - **Upscale lives on the image view; the drawer keeps only the Enhance Details booster**
   (2026-07-25). PixAI invokes Upscale on a picture that already exists, so the drawer's old
   three-way Off/Upscale/Hires segment is gone — it was not where PixAI offers it, and a drawer

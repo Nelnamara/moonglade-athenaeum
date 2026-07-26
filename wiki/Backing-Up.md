@@ -10,6 +10,26 @@ python pixai_gallery_backup.py                # download everything (parallel)
 python pixai_gallery_backup.py               # full metadata is captured by default
 ```
 
+### Where the library lives
+
+By default everything goes in `pixai_backup/` next to the app. To keep it somewhere else — a
+big drive, an external disk — set the folder in **Control Panel ▸ Library at a glance**. It
+takes effect when the server next starts, and it offers to restart for you.
+
+**Changing it never moves anything.** It points Moonglade at a different folder; whatever is
+in the old one stays exactly where it is. If you want to bring an existing library along, move
+the folder yourself first, then point the setting at its new home.
+
+The order of precedence, if you use more than one of these:
+
+1. `--out <folder>` on the command line — always wins, so a one-off run or a scheduled job
+   can point anywhere without disturbing the setting.
+2. `LIBRARY_DIR` in `config.json` — what the Control Panel writes.
+3. `pixai_backup` — the default.
+
+```bash
+```
+
 Everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
 `raw_tasks.jsonl`, and — once organized — `YYYY-MM/` month folders.
 
