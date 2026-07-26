@@ -1162,6 +1162,23 @@
     var KIND_LABEL = { cli: 'Terminal', panel: 'Control Panel', generate: 'Generate',
                        'delete': 'Delete', 'import': 'Import' };
     function kindLabel(t){ return KIND_LABEL[t] || t || 'Job'; }
+    // The stored `label` is the COMPLETION wording: runTask passes opts.past ('Generated',
+    // 'Edited', ...) and it is written to the job log at SUBMIT time, so an in-flight card
+    // read "Generated" while the thing was still sitting in PixAI's queue -- owner report,
+    // 2026-07-25, alongside a 21s queue wait that was itself correct. Terminal rows keep the
+    // stored wording (it is right by then, and the completion toast reads off the same
+    // field); an in-progress row gets the present tense from this table. Anything not in it
+    // falls through to the stored label UNCHANGED rather than being guessed at -- a label
+    // this table has never heard of is better shown as-is than mangled by a rule.
+    var LABEL_ING = {
+      'Generated': 'Generating', 'Edited': 'Editing', 'Rendered': 'Rendering',
+      'Fixed': 'Fixing', 'Upscaled': 'Upscaling', 'Imported': 'Importing',
+      'Uploaded': 'Uploading'
+    };
+    function labelFor(j, terminal){
+      var l = j.label || 'Generation';
+      return terminal ? l : (LABEL_ING[l] || l);
+    }
     function row(j){
       // done_with_errors (D-4): the job itself completed (exit 0 by design), but some
       // files failed after retries -- distinct from both a clean 'done' and a hard
@@ -1225,7 +1242,7 @@
       // below. Guarded there so clicking the thumbnail link or the dismiss button still does
       // ONLY that, not both.
       return '<div class="jt-item'+cls+'" data-job="'+esc(j.job_id)+'" tabindex="0" role="button" aria-haspopup="true"><div class="jt-ic">'+ic+'</div>'
-           +'<div class="jt-main"><div class="jt-lab">'+esc(j.label||'Generation')+'</div>'+sub+bar+errmsg+'</div>'
+           +'<div class="jt-main"><div class="jt-lab">'+esc(labelFor(j, fin))+'</div>'+sub+bar+errmsg+'</div>'
            +thumb+x+'</div>';
     }
     // ================================================================================

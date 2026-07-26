@@ -40,6 +40,11 @@ const row = new Function(
   "var kindLabel=function(t){return t||'Job';};" +
   "var ago=function(ts){return 'just now';};" +
   "var fmtDuration=function(s){return s+'s';};" +
+  // row() closes over labelFor now: the card shows the PRESENT tense while a job is in
+  // flight, because the stored label is the completion wording written at submit time.
+  // Echoed here so this file's assertions stay about STATE -- the tense rule itself is
+  // covered in mg-notify-label-tense.test.js.
+  "var labelFor=function(j,t){return j.label||'Generation';};" +
   extract(/function row\(j\)\{[\s\S]*?\n {4}\}/, "row(j)") + "\nreturn row;"
 )();
 
