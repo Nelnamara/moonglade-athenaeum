@@ -10730,6 +10730,77 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                      "someone signs in locally to bootstrap a new one."}), 400
         return jsonify({"ok": True, "username": username})
 
+    @app.route("/api/users/password", methods=["POST"])
+    def api_users_password():
+        """Change an account's password from the Panel's Users tab.
+
+        Closes the last CLI-only account operation: until now a forgotten gallery password could
+        only be reset with `--add-web-user` on the server machine (its add-or-update semantics
+        doubling as a reset). Owner decision 2026-07-26: a user may change THEIR OWN password from
+        anywhere, and changing anyone else's is an owner-machine action.
+
+        Reading the code turned that into a single rule rather than two code paths, because the
+        cases differ in exactly one respect -- whether the CURRENT password must be proved:
+
+            LOCALHOST     may set ANY account's password without the current one.
+            non-local     may set only its OWN, and must prove the current one.
+
+        Both halves are load-bearing. Without the first, the forgotten-password case is not fixed
+        at all, which is the entire point of the item -- and requiring the old password at the
+        machine protects nothing, since anyone sitting there can edit config.json directly. Without
+        the second, an already-authenticated LAN session -- a tablet left unlocked on the
+        network -- could silently change the owner's password and lock him out of his own account,
+        needing nothing but an open browser tab.
+
+        The username check mirrors `api_users_remove` deliberately rather than inventing a stricter
+        shape: an omitted username means "me", and a supplied one that is not yours demands
+        LOCALHOST. That route's trust model has already survived an adversarial review, and
+        consistency with it is worth more here than a second convention.
+
+        The write bumps `sess_epoch`, so every session cookie issued under the old password stops
+        working immediately -- which is the point on other devices and merely rude on this one. So
+        when the caller changed their OWN password, this re-issues the current session's epoch: the
+        browser you are standing in front of stays signed in, every other device drops. A local
+        reset of SOMEONE ELSE's password deliberately does not do that, because the whole intent
+        there is to evict whoever was using it.
+        """
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        me = session.get("user")
+        local = _is_local_request()
+        target = str(body.get("username") or "").strip() or me
+        new_pw = str(body.get("new_password") or "")
+
+        if target != me and not local:
+            return jsonify({"error": "localhost-only to change another account's password"}), 403
+        # Same policy the Users tab already enforces when ADDING an account -- one rule, one
+        # place, so a password that could not be registered cannot be set here either.
+        problem = core.password_problem(new_pw)
+        if problem:
+            return jsonify({"error": problem}), 400
+
+        # None means "do not check" and is reserved for a caller already proven local.
+        current = None if local else str(body.get("current_password") or "")
+        if current is not None and not current:
+            return jsonify({"error": "Enter your current password."}), 400
+
+        result = core.set_web_user_password_guarded(target, new_pw, current_password=current)
+        if result == "not_found":
+            return jsonify({"error": "No such account."}), 404
+        if result == "bad_current":
+            # Deliberately the same wording whether the account exists or not by this point --
+            # the caller has already been established as the owner of `target` or as local, so
+            # there is nothing left to leak, but keeping it vague costs nothing.
+            return jsonify({"error": "That current password isn't right."}), 403
+
+        if target == me:
+            session["sess_epoch"] = core.get_web_user_session_epoch(me)
+        return jsonify({"ok": True, "username": target,
+                        "signed_out_elsewhere": True,
+                        "still_signed_in_here": target == me})
+
     @app.route("/api/ping")
     def api_ping():
         """Cheap liveness probe — the Stop/Restart reconnect overlay polls this. Login required
