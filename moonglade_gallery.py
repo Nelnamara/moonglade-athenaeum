@@ -7166,6 +7166,7 @@ var Gen = (function(){
     var host=el('gen-picker-host'); if(!host) return;
     basePickerEl=document.createElement('mg-model-picker');
     basePickerEl.setAttribute('kind','base');
+    basePickerEl.setAttribute('market','');
     basePickerEl.addEventListener('mg-pick', function(e){ onBasePick(e.detail); });
     host.appendChild(basePickerEl);
     loraPickerEl=document.createElement('mg-model-picker');
@@ -12302,6 +12303,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # {"gt": "<ISO instant>"}, start of day N days back in local time -- so core
         # builds it from a whitelisted token and an unknown token yields None (no filter).
         posted = (request.args.get("posted") or "").strip().lower()
+        # Their Model Type filter is multi-select, so this is a repeated param rather
+        # than one value. Base-model searches only; a LoRA search narrows by
+        # architecture through base_type instead.
+        model_types = [t for t in request.args.getlist("model_type") if t.strip()]
         try:
             size = max(1, min(int(request.args.get("size") or 24), 50))
         except ValueError:
@@ -12331,7 +12336,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     # a base-model search and for any architecture off its whitelist.
                     lora_base_type=(base_type if usage == "LORA" else ""),
                     source=source, permitted_use=license_,
-                    time_range=core.posted_at_range(posted))
+                    time_range=core.posted_at_range(posted),
+                    model_types=model_types)
             else:
                 offset = int(cursor) if cursor.isdigit() else 0
                 payload = core.model_search_rest(session, keyword=q, usage=usage,
