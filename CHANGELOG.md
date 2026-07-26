@@ -15,6 +15,10 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.5.0] - 2026-07-25 — Upscale where PixAI puts it, five filters of our own, metadata that captures itself, and a settable library folder
+
 ### Fixed
 
 - **The art-filters panel could reopen itself over a closed drawer, and could swallow its own
