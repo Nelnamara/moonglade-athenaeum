@@ -974,6 +974,59 @@ REAL name produced none. Driving the browser answered in three clicks what the p
 actively misled us about. For a surface the website itself uses, capture the request — do not
 probe the schema.
 
+### GO/NO-GO: both operations WORK with our own API key (measured 2026-07-25)
+Called with the captured hashes over the persisted-GET path using the owner's API key rather
+than a browser `u3t` session. **HTTP 200, real data, both of them.** This was the one thing
+that could have killed the feature: `listMyBookmarkedGenerationModels` is absent from the
+ad-hoc Query root, so the persisted path is the only door, and panelplugin had already taught
+us that a door the website walks through can be shut to an API key. It is not shut here.
+`totalCount: 3` came back for MY LORA, matching the three LoRAs in his picker.
+
+**Do not re-litigate this.** It is measured, not inferred.
+
+### Response projection (what a picker can render)
+`generationModels { edges { node {...} cursor } pageInfo {...} totalCount }` — a standard Relay
+connection. On each `node`:
+
+    id  authorId  title  mediaId  createdAt  updatedAt
+    type                 e.g. USER_MULTI_LORA for the owner's own LoRAs
+    category             e.g. "character" (mirrors the LoRA-category filter)
+    loraBaseModelTypes   [..]  the architecture list we already gate on
+    isNsfw  isDownloadable  isPrivate  visibilityType  permittedUse  userPermission
+    likedCount  liked  refCount  commentCount
+    flag { shouldBlur }
+    media { id type width height imageType urls[{variant,url}] flag{shouldBlur} ... }
+    extra { baseModelId description triggerWords category isRealistic isSensitive
+            isEarlyAccess accessRoleList archived archivedByPicture
+            permissions { personalUses commercialUses shareImagesOnline shouldCreditAuthor }
+            nsfwPredict { porn sexy hentai neutral drawings }
+            censorSensitiveFlag  recognizedNsfw  sensitiveKeywords[..]  ... }
+
+`pageInfo { hasNextPage hasPreviousPage startCursor endCursor }` plus `totalCount`, and a
+`cursor` on every edge.
+
+**Four things this answers that were open:**
+- **`refCount` is the number printed on each card.** The picker's "184" is refCount (uses), not
+  likes — `likedCount` was 0 on the same row. Our own grid labels that figure; check it matches.
+- **`extra.permissions` is the data behind their License Type filter.**
+  `commercialUses` is what "Allows Commercial Use" filters on. We have no such filter and now
+  know exactly what it would read.
+- **`type: USER_MULTI_LORA`** is the token for a user's own LoRA. `LORA_BASE_MODEL_TYPES`'s
+  comment already notes MULTI_LORA is "a LoRA's OWN type"; USER_MULTI_LORA is the variant the
+  owner's trained models carry.
+- **`extra.censorSensitiveFlag` / `archivedByPicture` most likely explain the grey "No Cover"
+  tiles** in the picker screenshots — a model whose cover art was moderation-rejected still
+  lists, with no usable thumbnail. Worth confirming before our grid renders a broken image
+  where PixAI renders a placeholder.
+
+### Still uncaptured after this pass
+- The `feed` tokens for the other three sorts (only `"trending"` seen; Most Liked / Most Used /
+  Latest unknown).
+- The cursor ARGUMENT names for paging (`pageInfo` gives cursors back; whether the request
+  takes `after`/`before` alongside `first`/`last` was not exercised).
+- **DiT.3's enum token** — see the hole in the LoRA weight-range table below. Same technique
+  fixes it: select a DiT.3 base in the picker and read the `loraBaseModelTypes` it sends.
+
 ### Architecture mapping, one confirmed
 **`MMDIT26A_MODEL` = DiT.2** (the picker sent it while Tsubaki.2 was the selected base). Their
 Model Type filter offers **All / DiT.3 / DiT.2 / DiT.1 / SDXL / Community DiT / SD 1.5**, so
