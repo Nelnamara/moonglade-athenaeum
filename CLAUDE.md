@@ -23,8 +23,11 @@ mass commit. Follow this protocol:
    If `git status` shows *every* file modified, STOP — that's line-ending drift. Re-check
    `.gitattributes` is present and run `git add --renormalize .`; never `git checkout -- .`
    away someone's real work to make it "clean."
-2. **Default working branch is `loom-v2`** (until merged to master). `git checkout loom-v2`
-   before doing anything. Do not start committing on `master`.
+2. **`master` is the trunk.** Work on a short-lived feature branch and merge back with
+   `--no-ff`. Do not commit directly to `master` for anything beyond a doc typo.
+   (Historical note so an old transcript does not mislead: `loom-v2` was the long-running
+   default branch through v2.5.0 and `naming-pass` after it. Both are merged and deleted --
+   `git checkout loom-v2` will fail, and any instruction to do so is out of date.)
 3. **Pull before you start, push when you stop:** `git pull --rebase --no-edit` at session
    start, `git push` at session end. This is what prevents "updates were rejected" /
    divergence. If push is rejected, it's the remote moving — pull --rebase, then push.
