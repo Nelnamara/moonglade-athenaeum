@@ -6882,19 +6882,38 @@ def _print_meta_coverage(rows, total):
         print("  Cost history      : add --with-credit to recover spend on older tasks")
 
 
-def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0):
+def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0, on_error=None):
     """Run work_fn(item) over items, yielding (item, result) as each finishes.
 
-    workers<=1 runs serially (in order, sleeping `delay` between items to stay
-    polite); higher uses a bounded thread pool for latency-bound network calls
-    (no delay -- concurrency itself paces). progress(done, total, 0) is called on
-    THIS thread, so the caller may safely mutate shared state in the yield body.
-    Exceptions in a worker yield a None result rather than crashing the run."""
+    workers<=1 runs serially, sleeping `delay` between items. Higher uses a bounded thread
+    pool for latency-bound network calls -- and STILL honours `delay`, as a global floor on
+    the interval between request starts, not a per-thread one. It used to be dropped
+    entirely on the parallel path ("concurrency itself paces"), which meant `--workers 8`
+    turned a deliberately paced request stream into eight threads firing as fast as they
+    completed. Being polite to PixAI's servers is a standing rule of this project, and it
+    should not switch itself off because a flag was passed. The pace is global, so raising
+    --workers now buys latency hiding up to that ceiling rather than a bigger burst; lower
+    --delay if you genuinely want more throughput, and know that you are choosing it.
+
+    A worker's exception yields a None result rather than crashing the run -- but it is
+    NEVER swallowed silently: `on_error(item, exc)` is called with it first. It used to be
+    discarded, and a real 17,289-task backfill consequently reported "16,044 failed" with no
+    reason attached to any of them, which is a number you cannot act on.
+
+    progress(done, total, 0) is called on THIS thread, so the caller may safely mutate
+    shared state in the yield body.
+    """
     items = list(items)
     total = len(items)
     if workers <= 1:
         for i, it in enumerate(items):
-            yield it, work_fn(it)
+            try:
+                res = work_fn(it)
+            except Exception as e:                       # noqa: BLE001 -- reported, not hidden
+                res = None
+                if on_error:
+                    on_error(it, e)
+            yield it, res
             if progress:
                 progress(i + 1, total, 0)
             if delay:
@@ -6902,15 +6921,33 @@ def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0):
         return
     from concurrent.futures import ThreadPoolExecutor, as_completed
     done = 0
+    gate = threading.Lock()
+    next_start = [0.0]
+
+    def _paced(it):
+        if delay:
+            # One global slot at a time: each worker waits for the next free slot and books
+            # the one after it, so the whole pool starts at most one request per `delay`
+            # seconds no matter how many threads are in it.
+            with gate:
+                now = time.monotonic()
+                wait = max(0.0, next_start[0] - now)
+                next_start[0] = max(now, next_start[0]) + delay
+            if wait:
+                time.sleep(wait)
+        return work_fn(it)
+
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(work_fn, it): it for it in items}
+        futs = {ex.submit(_paced, it): it for it in items}
         for fut in as_completed(futs):
             it = futs[fut]
             done += 1
             try:
                 res = fut.result()
-            except Exception:
+            except Exception as e:                       # noqa: BLE001 -- reported, not hidden
                 res = None
+                if on_error:
+                    on_error(it, e)
             yield it, res
             if progress:
                 progress(done, total, 0)
@@ -7051,7 +7088,18 @@ def run_backfill_full_meta(args):
     task_cache = {}  # task_id -> full meta dict
     fetched = failed = 0
     _prog = getattr(args, "progress", None)
-    for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay):
+    # Failures are counted BY REASON. A bare total is unactionable: the same "16,044 failed"
+    # covers a rotated hash, an expired key, a rate limit and a genuinely deleted task, and
+    # those have four different answers.
+    err_kinds = {}
+
+    def _note_error(tid, exc):
+        key = "{}: {}".format(type(exc).__name__, str(exc).strip().splitlines()[0][:120]
+                              if str(exc).strip() else "(no message)")
+        err_kinds[key] = err_kinds.get(key, 0) + 1
+
+    for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay,
+                                 on_error=_note_error):
         fm = fm or {}
         task_cache[tid] = fm
         if fm.get("prompt_full"):
@@ -7081,6 +7129,21 @@ def run_backfill_full_meta(args):
 
     save_catalog(db_path, rows)
     print("Done. Fetched {:,} tasks, {:,} failed, catalog updated.".format(fetched, failed))
+    if err_kinds:
+        print("Why they failed:")
+        for kind, n in sorted(err_kinds.items(), key=lambda kv: -kv[1])[:5]:
+            print("  {:>7,}  {}".format(n, kind))
+        worst = max(err_kinds.values())
+        if worst >= 20 and failed > fetched:
+            # A majority-failure run is not a partial success, and re-running it unchanged
+            # just repeats it. Say so, and say the two things that are actually true: it is
+            # resumable, so nothing already fetched is refetched, and a slower pace is the
+            # first thing to try when a server is pushing back.
+            print("  Most of this run failed. Nothing fetched was lost -- the backfill is "
+                  "resumable and skips what it already filled -- but re-running it exactly "
+                  "as it was will fail the same way.")
+            print("  If that reason looks like the server pushing back, try a gentler pace: "
+                  "--workers 2 --delay 1")
 
 
 def _check_time_capsule(created_at, out_dir):
