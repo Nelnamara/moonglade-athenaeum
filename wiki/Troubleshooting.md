@@ -31,6 +31,15 @@ anymore; if you do, it's a friendlier "That quality setting isn't available for 
 model — try Auto instead" banner in most places, or (rarer) a case the retry itself
 didn't catch. Leave Mode on **Auto** if you'd rather not think about it.
 
+## A generate/edit/video failed with a connection or timeout error
+
+Submitting is deliberately **single-attempt** (since 2026-07-26) — it is not retried for
+you, on purpose. A retry can't tell "PixAI never got it" from "PixAI got it, made it,
+charged you, and the reply was lost", so retrying could buy you a second generation. Reads
+still retry normally; only the spending calls stop. **Check the gallery (or `--account`)
+before re-submitting** — if the task did land, it will show up there, and you can recover
+it for free with `--task-id <id>` instead of paying again.
+
 ## HTTPS / SSL certificate errors
 Behind antivirus or a corporate proxy: `pip install truststore` (Python 3.10+). The
 tool uses it automatically when present.

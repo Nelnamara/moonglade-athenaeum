@@ -120,6 +120,12 @@ shipped bug.
 - No real credentials or user-specific values should appear in any committed file.
 - All traffic is HTTPS with verification on; do not add `verify=False` anywhere.
 - **Server page-size cap:** `last` above ~8,000–10,000 triggers a Prisma `Internal server error`. Keep download `--page-size` ≤ ~8,000.
+- **A mutation that spends or changes the account goes through `gql_mutate()`, never
+  `gql_adhoc()`.** `gql_mutate` hard-codes `retries=0` and offers no retries argument; a
+  re-POST after a lost response (read timeout, dropped connection, proxy 502 *after* the
+  backend succeeded) submits and pays for a SECOND generation. `gql_adhoc`'s default is
+  document-aware as a backstop (0 for a mutation, 3 for a query), but new spend paths call
+  `gql_mutate` so the intent is reviewable. Guarded by `tests/test_spend_no_retry.py`.
 - **`READ_ONLY` in config.json overrides `--confirm`/`--apply`/`--yes`.** Any new code path that
   submits a generation, submits a fix, deletes a task, or claims a reward must call
   `_check_read_only(...)` before the network call fires — it is not optional per-path opt-in,
@@ -163,7 +169,7 @@ recapture is in `private/RE_NOTES.md`.
 ## Creating, the web suite, and feature history
 
 All creation (generate/video/reference-video/edit/upload/cards) rides one
-`createGenerationTask` mutation over `gql_adhoc`, and every credit-spending path is
+`createGenerationTask` mutation over `gql_mutate`, and every credit-spending path is
 preview-only until `--confirm` — see `docs/architecture.md`'s function reference for the
 per-command shapes and the **Quick command reference** below for usage. The Flask gallery
 is a full web creation suite (Generate drawer, Picker, The Loom, live-events push, Control

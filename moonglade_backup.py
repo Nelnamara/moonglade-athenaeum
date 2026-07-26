@@ -659,8 +659,9 @@ def _check_read_only(action):
     Eight call sites, not four: submit_generation, submit_fixer, delete_task_gql and
     claim_reward are the choke points the WEB app's generate/edit/fix/delete/claim
     routes all funnel through -- but the CLI's run_generate, run_generate_video,
-    run_reference_video and run_edit_image each build their OWN gql_adhoc call instead
-    of calling through a choke point, and until 2026-07-21 none of them called this.
+    run_reference_video and run_edit_image each build their OWN createGenerationTask
+    call instead of calling through a choke point, and until 2026-07-21 none of them
+    called this.
     Found by audit: with READ_ONLY=True and --confirm, every one of them reached the
     mutation, and the free-card check fired first -- a live network call before the
     guard even ran. Each of those runners now calls this as the FIRST statement of its
@@ -668,7 +669,7 @@ def _check_read_only(action):
     itself.
 
     run_generate is a partial exception since 2026-07-24: the inferenceProfile retry
-    that used to be its own reason for building a separate gql_adhoc call now lives in
+    that used to be its own reason for building a separate submit call now lives in
     submit_generation() instead (shared with every other caller), so run_generate calls
     THROUGH that choke point for the mutation itself -- but it still keeps this direct
     call too, because _apply_kaisuuken's free-card check is a real network call that
@@ -1772,8 +1773,8 @@ def delete_batch_media_gql(session, task_id, media_id):
 
     Signature discovered by validation-error probing (nothing executed): the mutation is
     `updateGenerationTask(id: ID!, input: UpdateGenerationTaskInput!)` and the delete rides
-    in as `{deleteBatchMedia: {mediaId}}`. It goes over `gql_adhoc`, so unlike
-    `delete_task_gql` it needs NO persisted hash and cannot break when one rotates.
+    in as `{deleteBatchMedia: {mediaId}}`. It goes over the ad-hoc POST path (`gql_mutate`),
+    so unlike `delete_task_gql` it needs NO persisted hash and cannot break when one rotates.
 
     Two properties copied deliberately from `delete_task_gql`, because both are safety
     rather than style:
@@ -1789,15 +1790,13 @@ def delete_batch_media_gql(session, task_id, media_id):
             "-- a blank media id would be an update with nothing to delete, and a blank task "
             "id has no batch to delete from.".format(task_id, media_id))
     _check_read_only("delete one image from a task on your PixAI account")
-    # retries=0 is the SINGLE-ATTEMPT promise above, made real. gql_adhoc defaults to
-    # retries=3 and re-POSTs on a RequestException or a 429/5xx -- and a read timeout can
-    # arrive AFTER PixAI has already processed the delete, so the default would re-fire a
-    # destructive mutation against a batch that has already changed underneath it.
-    # delete_task_gql avoids this by hand-rolling its own single session.post; this is the
-    # same guarantee expressed through the shared helper.
-    return gql_adhoc(session, _DELETE_BATCH_MEDIA_MUT,
-                     {"id": task_id, "input": {"deleteBatchMedia": {"mediaId": media_id}}},
-                     retries=0)
+    # gql_mutate is the SINGLE-ATTEMPT promise above, made real: it hard-codes retries=0,
+    # where a re-POST on a RequestException or a 429/5xx could re-fire a destructive
+    # mutation against a batch that has already changed underneath it (a read timeout can
+    # arrive AFTER PixAI processed the delete). delete_task_gql avoids this by hand-rolling
+    # its own single session.post; this is the same guarantee through the shared helper.
+    return gql_mutate(session, _DELETE_BATCH_MEDIA_MUT,
+                      {"id": task_id, "input": {"deleteBatchMedia": {"mediaId": media_id}}})
 
 
 def delete_task_gql(session, task_id):
@@ -1858,7 +1857,16 @@ def delete_task_gql(session, task_id):
     return result
 
 
-def gql_adhoc(session, query, variables=None, retries=3):
+def _is_mutation_document(query):
+    """True when `query` is a GraphQL MUTATION document rather than a query.
+
+    Deliberately a dumb leading-keyword check: every document in this module is a plain
+    string literal that starts with its operation type. Anything it cannot classify falls
+    back to False (treated as a query), which is the behaviour that existed before it."""
+    return str(query or "").lstrip().lower().startswith("mutation")
+
+
+def gql_adhoc(session, query, variables=None, retries=None):
     """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full query
     document. PixAI's endpoint accepts these under Bearer auth (the API key has
     read+write scope), so NO persisted sha256Hash capture is needed -- this is the
@@ -1866,7 +1874,20 @@ def gql_adhoc(session, query, variables=None, retries=3):
     listing path. Returns the `data` dict; raises PixAIError on GraphQL/HTTP error.
 
     Mutations must be POST (Apollo blocks them over GET); this always POSTs, so it
-    works for queries and mutations alike."""
+    works for queries and mutations alike.
+
+    RETRIES. `retries=None` (the default) means "the safe default for THIS document":
+    **3 for a query, 0 for a mutation**. A retry re-POSTs on a RequestException or a
+    429/5xx, and that is only free when the operation is idempotent. It is not free for a
+    mutation, because a lost RESPONSE is indistinguishable from a lost REQUEST -- a read
+    timeout, a dropped connection, or a 502 from a proxy can all arrive AFTER PixAI has
+    already created the task and charged for it, and the retry then submits (and pays for)
+    a second one. Spending and account-mutating callers should still go through
+    `gql_mutate()`, which cannot be handed a retry count at all; this default is the
+    backstop for a future call site that reaches for `gql_adhoc` and forgets. An explicit
+    integer always wins, so a caller can still ask for anything on purpose."""
+    if retries is None:
+        retries = 0 if _is_mutation_document(query) else 3
     body = {"query": query, "variables": variables or {}}
     delay = 2.0
     for attempt in range(retries + 1):
@@ -1892,6 +1913,34 @@ def gql_adhoc(session, query, variables=None, retries=3):
             raise PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
         return data.get("data") or {}
     raise RuntimeError("unreachable")
+
+
+def gql_mutate(session, query, variables=None):
+    """`gql_adhoc` for a mutation that MUST NOT fire twice: SINGLE ATTEMPT, always.
+
+    Every credit-spending or account-mutating GraphQL call goes through here instead of
+    calling `gql_adhoc` directly -- createGenerationTask (image, edit, video, reference
+    video), uploadMedia, and the per-image delete. It takes **no `retries` argument on
+    purpose**: there is no correct value above 0 for a spending path, so the knob simply
+    is not offered rather than being offered with a safe default that a call site can
+    override by accident. That is the whole design -- a new spend path written against
+    this helper inherits the safe behaviour, and one written against `gql_adhoc` gets it
+    anyway from that function's mutation-aware default.
+
+    Why a retry is not free here: `gql_adhoc`'s retry loop re-POSTs on a RequestException
+    or a 429/5xx, and a lost RESPONSE looks exactly like a lost REQUEST. A read timeout, a
+    dropped connection, or a proxy's 502 after the backend already succeeded all leave
+    PixAI holding a created, CHARGED task while the client believes nothing happened -- so
+    the retry submits a second generation and pays for it twice. The same reasoning made
+    `delete_batch_media_gql` single-attempt (there the damage is a second irreversible
+    delete against a batch that already changed underneath it) and keeps `delete_task_gql`
+    hand-rolling its own lone `session.post`.
+
+    A 429 alone WOULD be safe to re-send (rate-limited means the request was refused, not
+    processed), but 429 and 5xx share one branch in `gql_adhoc` and a 5xx is genuinely
+    ambiguous. The trade is deliberate: not retrying costs an error the caller can see and
+    act on; retrying wrongly costs credits they cannot get back."""
+    return gql_adhoc(session, query, variables, retries=0)
 
 
 def resolve_user_id(session):
@@ -4594,7 +4643,8 @@ def _gen_video_parameters(args):
 # --- media upload + instruct-editing (the "Edit this image" surface) --------------
 # uploadMedia is a 3-step S3 handshake (verified 2026-07-01): request a presigned
 # target, PUT the bytes, then register -> media_id. It's a plain GraphQL mutation, so
-# gql_adhoc drives it with no persisted hash. Uploading is FREE.
+# gql_mutate drives it with no persisted hash (single attempt -- see upload_media).
+# Uploading is FREE.
 _UPLOAD_MEDIA_MUT = (
     "mutation uploadMedia($input: UploadMediaInput!) {"
     " uploadMedia(input: $input) { uploadUrl externalId mediaId"
@@ -4683,8 +4733,12 @@ def upload_media(session, path, media_type="IMAGE"):
         raise PixAIError("upload: file not found: {}".format(p))
     data = p.read_bytes()
 
-    r1 = gql_adhoc(session, _UPLOAD_MEDIA_MUT,
-                   {"input": {"type": media_type, "provider": "S3"}})
+    # Both uploadMedia legs go through gql_mutate (single attempt). Step 3 is the one that
+    # must never double-apply -- re-registering the same externalId after a lost response
+    # can leave a second media object on the account -- and step 1 takes the same treatment
+    # so the whole handshake reads one way; a failed upload costs nothing to re-run.
+    r1 = gql_mutate(session, _UPLOAD_MEDIA_MUT,
+                    {"input": {"type": media_type, "provider": "S3"}})
     u = (r1 or {}).get("uploadMedia") or {}
     upload_url, external_id = u.get("uploadUrl"), u.get("externalId")
     if not upload_url or not external_id:
@@ -4700,9 +4754,9 @@ def upload_media(session, path, media_type="IMAGE"):
         raise PixAIError("upload: S3 PUT failed (HTTP {}): {}".format(
             put.status_code, (put.text or "")[:200]))
 
-    r3 = gql_adhoc(session, _UPLOAD_MEDIA_MUT,
-                   {"input": {"type": media_type, "provider": "S3",
-                              "externalId": external_id}})
+    r3 = gql_mutate(session, _UPLOAD_MEDIA_MUT,
+                    {"input": {"type": media_type, "provider": "S3",
+                               "externalId": external_id}})
     reg = (r3 or {}).get("uploadMedia") or {}
     mid = reg.get("mediaId") or (reg.get("media") or {}).get("id")
     if not mid:
@@ -4958,8 +5012,9 @@ def _outputs_or_raise(result, found, empty_message):
 def run_generate(args):
     """Create images via PixAI (createGenerationTask), poll to completion, download
     the results into the backup, and catalog them as source='api'. GUARDED: without
-    --confirm it only prints a preview (spends no credits). Reuses gql_adhoc + the
-    shared session/download/catalog plumbing."""
+    --confirm it only prints a preview (spends no credits). Submits through
+    submit_generation() (and so through gql_mutate) + the shared session/download/
+    catalog plumbing."""
     out = Path(args.out)
     params = _gen_parameters(args)
     existing_task = (getattr(args, "task_id", "") or "").strip()
@@ -5351,16 +5406,22 @@ def submit_generation(session, params):
     caller gets it for free -- the web /api/generate, /api/edit and /api/loom/generate
     routes, and run_generate itself, which now just calls through here (see its own
     comment). Only params built by _gen_parameters ever carry inferenceProfile, so this
-    is a silent no-op for every other caller (edit/enhance/video params never set it)."""
+    is a silent no-op for every other caller (edit/enhance/video params never set it).
+
+    The submit goes through `gql_mutate`, NOT `gql_adhoc`: a createGenerationTask that is
+    transparently re-POSTed after a lost response is a second generation and a second
+    charge. The inferenceProfile re-submit below is a different thing and is safe -- it
+    only fires on a PixAIError, which means PixAI answered with a GraphQL error and
+    REJECTED the task, so there is nothing created and nothing charged to duplicate."""
     _check_read_only("submit a generation (spends credits)")
     try:
-        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
     except PixAIError as e:
         if "inferenceProfile" in str(e) and "inferenceProfile" in params:
             dropped = params.pop("inferenceProfile")
             print("  mode '{}' not supported by this model; retrying on the "
                   "model's default...".format(dropped))
-            created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+            created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
         else:
             raise
     task_id = (created.get("createGenerationTask") or {}).get("id")
@@ -5571,7 +5632,9 @@ def run_generate_video(args):
         _check_read_only("submit a video generation (spends credits)")
         print("Submitting VIDEO generation task (this spends credits)...")
         _apply_kaisuuken(session, params, args)
-        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        # gql_mutate, never gql_adhoc: a re-POSTed createGenerationTask is a second
+        # (expensive) video and a second charge -- see gql_mutate's docstring.
+        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -5685,7 +5748,8 @@ def run_reference_video(args):
                             _resolve_refs(session, auds, None))
         print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
         _apply_kaisuuken(session, params, args)
-        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
+        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -5779,7 +5843,8 @@ def run_edit_image(args):
                 quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
         print("Submitting EDIT task (spends credits unless a free card applies)...")
         _apply_kaisuuken(session, params, args)
-        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
+        # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
+        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
