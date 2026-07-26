@@ -476,6 +476,59 @@ def add_or_update_web_user(username, password):
         return replaced
 
 
+def set_web_user_password_guarded(username, new_password, current_password=None):
+    """Change an existing account's password. Returns "ok", "not_found" or "bad_current".
+
+    ONE `_accounts_lock` acquisition covers the existence check, the current-password
+    verification and the write. That is not stylistic: `remove_web_user_guarded`'s docstring
+    records a TOCTOU race reproduced live against a real route when a read and a write were
+    split across two acquisitions, and "verify the old password, then write the new one" is
+    the same shape. Between a separate verify and write, a concurrent change could land and
+    this call would happily overwrite it having validated against a password that no longer
+    existed.
+
+    `current_password=None` means DO NOT CHECK -- reserved for the caller that has already
+    established the request came from the server machine. Passing a string means the check is
+    mandatory and a mismatch returns "bad_current" without writing. There is deliberately no
+    third mode: a caller either proves the old password or proves it is local, and the route
+    (`/api/users/password`) is the only place that distinction is made.
+
+    Unlike `add_or_update_web_user`, this REFUSES an unknown username instead of creating the
+    account. A password reset for someone who does not exist is a mistake to report, not an
+    invitation to mint them -- that update-or-add behaviour stays reserved for the CLI's
+    deliberate recovery path.
+
+    Bumps `sess_epoch` through the same install-wide counter every other writer uses, so a
+    changed password invalidates session cookies issued under the old one immediately. Callers
+    that want the CURRENT session to survive must re-issue its cookie afterwards; see
+    /api/users/password, which does exactly that so a user changing their own password is not
+    logged out of the browser they are standing in front of."""
+    from werkzeug.security import generate_password_hash, check_password_hash
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("username must not be empty")
+    if not new_password:
+        raise ValueError("new password must not be empty")
+    with _accounts_lock:
+        cfg = _load_config()
+        existing = _find_web_user(cfg, username)
+        if existing is None:
+            return "not_found"
+        if current_password is not None:
+            if not check_password_hash(existing.get("password_hash", ""), current_password or ""):
+                return "bad_current"
+        users = cfg.get("AUTH_USERS") or []
+        next_epoch = _next_sess_epoch(cfg)
+        new_users = [u for u in users
+                     if not (isinstance(u, dict) and u.get("username") == username)]
+        new_users.append({"username": username,
+                          "password_hash": generate_password_hash(new_password),
+                          "sess_epoch": next_epoch})
+        cfg["AUTH_USERS"] = new_users
+        _save_config(cfg)
+        return "ok"
+
+
 def add_web_user_if_new(username, password):
     """Atomic check-and-add: like add_or_update_web_user(), but refuses outright
     (returns False, writes nothing) if `username` already exists, instead of
