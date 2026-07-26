@@ -875,7 +875,11 @@ ${"=".repeat(48)}
 .lv-crow{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;}
 .lv-actsel{font-size:8px;background:var(--base);border:1px solid var(--surface1);color:var(--subtext);
   border-radius:4px;padding:1px 3px;cursor:pointer;max-width:100%;}
-.lv-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(122px,1fr));gap:8px;}
+/* Owner 2026-07-26: the compact shot cards on the main screen are too small; the Deep
+   Focus cards were already right. 122px was tight. Because the grid is auto-fill,
+   raising the minimum reflows on its own -- fewer, larger cards per row -- so this is a
+   single value rather than a layout change. */
+.lv-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:8px;}
 .lv-card{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:7px;cursor:pointer;}
 .lv-card:hover{border-color:var(--accent);}
 .lv-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
@@ -1032,8 +1036,15 @@ ${"=".repeat(48)}
 .lv-df-row{display:flex;gap:16px;margin-bottom:6px;}
 .lv-field{flex:1;min-width:0;}
 .lv-field.narrow{flex:0 0 120px;}
-.lv-df-frames{display:flex;gap:12px;align-items:flex-start;margin-top:14px;}
-.lv-df-frames .sb-frame{flex:1 1 0;min-width:0;}
+.lv-df-frames{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;margin-top:14px;}
+/* Owner, repeatedly: a shot's attached images are too small to tell apart in Deep Focus. They
+   were flex:1 1 0 with min-width:0 and no wrapping, so N frames divided the 640px panel between
+   them -- six refs landed at roughly 95x84px, too small to distinguish two similar characters,
+   which is the entire job of this view. Now they WRAP at a real basis instead of squeezing, and
+   the preview is taller here specifically. Scoped to .lv-df-frames on purpose: the compact
+   drawer's .lv-framehandoff rule stays as it is, because shrinking is correct in a narrow rail. */
+.lv-df-frames .sb-frame{flex:1 1 150px;min-width:150px;max-width:100%;}
+.lv-df-frames .sb-frameprev{height:150px;}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (moonglade_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
