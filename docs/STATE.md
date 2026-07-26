@@ -898,7 +898,19 @@ What's still CLI-only, tracked so the web surface stays complete:
   `panel_visible: False`. `PANEL_ACTIONS` in `moonglade_gallery.py`. Still genuinely CLI-only,
   with no web route at all: `--convert-existing` (bulk-converts already-downloaded `.webp`
   files to the `--convert` format) and `--backfill-meta`/`--backfill-full-meta` (fill in
-  missing catalog fields for existing rows). `--faststart-videos` is deliberately CLI-only
+  missing catalog fields for existing rows).
+  **Why `--backfill-meta` still exists, asked and answered 2026-07-26** — nobody could
+  remember, and the reason is that its purpose was absorbed by another command as a side
+  effect. `--backfill-full-meta`'s own docstring says it *"also fills url/width/height from
+  the task's media object as a free side effect"* — the exact three columns the light one
+  fills — and `--full-meta` is `default=True` on a normal pull, so new rows arrive complete.
+  The light version is therefore SUPERSEDED, not obsolete, and retains exactly ONE unique
+  capability: the two take different routes to the data. Light resolves via
+  `resolve_media(media_id)`; full goes via `getTaskById`. So light alone can repair a row
+  whose MEDIA still resolves but whose TASK is gone — a generation deleted from the PixAI
+  account, where the local image survives but the record describing it does not. Rare, and
+  it recovers dimensions only, not prompt or seed. **Keep it, never surface it:** a button
+  would imply pressing it achieves something the sync has not already done. `--faststart-videos` is deliberately CLI-only
   for a different reason: it's a one-time remux for videos downloaded before the
   auto-faststart path shipped — every current video-acquisition path (`run_sync_videos`,
   `_download_video_task`, `run_import_local`) already calls `video_faststart()` at collect
