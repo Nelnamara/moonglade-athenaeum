@@ -1045,6 +1045,9 @@ ${"=".repeat(48)}
 .lv-loratoggle{display:inline-block;margin:7px 0 5px;}
 .lv-loracap{margin-left:8px;font-size:10.5px;color:var(--subtext);}
 .lv-loracap.over{color:var(--coral);font-weight:600;}
+.lv-lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.lv-lw input[type=range]{width:92px;padding:0;background:none;border:none;}
+.lv-lw b{min-width:32px;text-align:right;font-size:11px;font-weight:600;color:var(--amber);font-variant-numeric:tabular-nums;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
@@ -1819,21 +1822,21 @@ ${"=".repeat(48)}
             },
             l.title,
             !l.version_id ? l.failed ? " \u26A0" : " \u23F3" : incompat ? " \u26A0" : ""
-          ), /* @__PURE__ */ React.createElement(
+          ), /* @__PURE__ */ React.createElement("span", { className: "lv-lw" }, /* @__PURE__ */ React.createElement(
             "input",
             {
-              type: "number",
-              step: "0.05",
-              min: "0",
+              type: "range",
+              step: "0.1",
+              min: "-2",
               max: "2",
               value: l.weight,
-              title: "Weight",
+              title: "Weight \u2014 PixAI allows -2 to 2; negative subtracts this LoRA's influence",
               onChange: (ev) => {
-                const w = +ev.target.value || 0;
+                const w = Math.max(-2, Math.min(2, +ev.target.value || 0));
                 setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
               }
             }
-          ), /* @__PURE__ */ React.createElement(
+          ), /* @__PURE__ */ React.createElement("b", null, (+l.weight).toFixed(1))), /* @__PURE__ */ React.createElement(
             "button",
             {
               type: "button",

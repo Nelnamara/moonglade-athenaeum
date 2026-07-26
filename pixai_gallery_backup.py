@@ -4042,6 +4042,11 @@ _GEN_STATUS = ("query($id: ID!) { task(id: $id) "
 DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
 
 
+# Read off PixAI's own Advanced panel, 2026-07-24. NEGATIVE weights are legal there -- a
+# LoRA at a negative weight subtracts its influence -- which is why the floor is -2 and not 0.
+LORA_WEIGHT_MIN, LORA_WEIGHT_MAX, LORA_WEIGHT_STEP = -2.0, 2.0, 0.1
+
+
 def _lora_params(raw):
     """Turn LoRA specs into createGenerationTask's two fields. `raw` is a list of
     'versionId:weight' strings or (versionId, weight) tuples. Returns
@@ -4060,6 +4065,11 @@ def _lora_params(raw):
             w = float(w)
         except (TypeError, ValueError):
             w = 0.7
+        # PixAI's own Advanced panel bounds the weight at -2..2 (step 0.1), negatives
+        # included -- read off the live control. Clamped here for the same reason the
+        # upscale params are: this is the last place before the submit, and a value outside
+        # their range is a rejected generation rather than a stronger effect.
+        w = max(LORA_WEIGHT_MIN, min(LORA_WEIGHT_MAX, w))
         lora_map[vid] = w
         lora_list.append({"weight": w, "versionId": vid})
     return lora_map, lora_list
@@ -5025,7 +5035,13 @@ def run_generate(args):
             "steps": _pick("steps", "samplingSteps"),
             "cfg_scale": _pick("cfg_scale", "cfgScale"),
             "model_id": _pick("model_id", "modelId"),
-            "model_name": fm.get("model_name", ""),
+            # Resolved here, not just in the backfill. extract_full_meta only fills
+            # model_name for a CHAT task (from the local EDIT_MODELS table); every ordinary
+            # generation left it blank, so every freshly captured image showed a raw
+            # 19-digit model id on its detail page until a later --backfill-full-meta
+            # happened to come past. model_name_gql is process-cached, so this is one call
+            # per distinct model for the whole run, not one per image.
+            "model_name": _resolved_model_name(session, fm, _pick("model_id", "modelId")),
             "loras": fm.get("loras", ""),
             "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or params.get("width") or ""),
@@ -5391,6 +5407,27 @@ def generation_status(session, task_id):
     return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit"),
             "started": bool(t.get("startedAt")),
             "reason": _task_failure_reason(t.get("outputs"))}
+
+
+def _resolved_model_name(session, fm, model_id):
+    """The model's human-readable name for a row being catalogued live.
+
+    extract_full_meta sets model_name only for a chat task (Edit/Fix, resolved locally from
+    EDIT_MODELS); for an ordinary generation it is blank and the caller is expected to fill
+    it -- which the backfill does and the live capture did not. Falls back to whatever
+    extract_full_meta had, then to blank, so a lookup failure costs the label and never the
+    row.
+    """
+    have = str((fm or {}).get("model_name") or "").strip()
+    if have:
+        return have
+    mid = str(model_id or "").strip()
+    if not mid:
+        return ""
+    try:
+        return model_name_gql(session, mid) or ""
+    except Exception:                                  # noqa: BLE001
+        return ""
 
 
 def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_"):
@@ -7105,6 +7142,8 @@ def run_backfill_full_meta(args):
                               if str(exc).strip() else "(no message)")
         err_kinds[key] = err_kinds.get(key, 0) + 1
 
+    errored = 0
+
     for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay,
                                  on_error=_note_error):
         fm = fm or {}
@@ -7135,7 +7174,16 @@ def run_backfill_full_meta(args):
             row["height"] = fm["_media_height"]
 
     save_catalog(db_path, rows)
+    # "failed" used to mean two unrelated things at once: the fetch threw, or it returned
+    # fine and simply carried no prompt (a deleted task, or a kind that records none). Those
+    # have completely different answers, and reporting one number for both had us guessing
+    # at a 16,044 and then at a 157. Counted apart now.
+    errored = sum(err_kinds.values())
+    empty = failed - errored
     print("Done. Fetched {:,} tasks, {:,} failed, catalog updated.".format(fetched, failed))
+    if empty > 0:
+        print("  {:,} of those returned fine but carried no prompt -- a deleted task, or a "
+              "kind that records none. Nothing is wrong with them.".format(empty))
     if err_kinds:
         print("Why they failed:")
         for kind, n in sorted(err_kinds.items(), key=lambda kv: -kv[1])[:5]:
